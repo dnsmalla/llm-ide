@@ -80,3 +80,19 @@ test('the hook receives its event payload on stdin', async () => {
   const seen = JSON.parse(fs.readFileSync(out, 'utf8'));
   assert.equal(seen.tool_name, 'Bash');
 });
+
+test('a hook that ignores SIGTERM is killed outright, not left running', async () => {
+  // The runner returns as soon as the timeout fires, but the CHILD must not
+  // survive it: a hook trapping TERM would otherwise keep running as an
+  // orphan long after the turn moved on.
+  const marker = path.join(tmp, `survivor-${Date.now()}.txt`);
+  const result = await runHookCommand(
+    { command: `trap '' TERM; sleep 3; echo alive > ${marker}`, timeoutMs: 150 },
+    { input: {} });
+  assert.equal(result.continue, true);
+  assert.match(result.systemMessage || '', /timed out/);
+  // Past the kill grace period and past the child's own sleep.
+  await new Promise((r) => setTimeout(r, 3_600));
+  assert.equal(fs.existsSync(marker), false,
+    'the hook outlived SIGTERM and kept running — the SIGKILL escalation never fired');
+});

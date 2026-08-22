@@ -171,13 +171,25 @@ export function addMcpPluginFromCatalog(catalogId, { arg, name } = {}) {
  */
 export function syncPluginMcpServers(groups) {
   const declared = new Map();
+  const skipped = [];
   for (const group of Array.isArray(groups) ? groups : []) {
     const pluginName = group?.pluginName;
     if (typeof pluginName !== 'string' || !pluginName) continue;
     for (const server of Array.isArray(group.servers) ? group.servers : []) {
       if (!server || typeof server.name !== 'string') continue;
       const id = pluginMcpId(pluginName, server.name);
-      if (!id) continue;
+      if (!id) {
+        skipped.push(`${pluginName}/${server.name}: no usable id`);
+        continue;
+      }
+      // Slugging joins plugin and server name, and truncates: `a-b`+`c` and
+      // `a`+`b-c` both land on "a-b-c". First declaration wins and the loser is
+      // REPORTED — quietly overwriting would give two servers one registry row,
+      // and therefore one shared consent decision.
+      if (declared.has(id)) {
+        skipped.push(`${pluginName}/${server.name}: id '${id}' already taken by another declaration`);
+        continue;
+      }
       declared.set(id, { pluginName, server });
     }
   }
@@ -208,7 +220,7 @@ export function syncPluginMcpServers(groups) {
     writeMcpRegistry(kept);
     if (removed) pruneMcpState(new Set(kept.map((p) => p.id)));
   }
-  return { added, removed, updated };
+  return { added, removed, updated, skipped };
 }
 
 /** Stable slug for a plugin's server. Null when it cannot be expressed. */

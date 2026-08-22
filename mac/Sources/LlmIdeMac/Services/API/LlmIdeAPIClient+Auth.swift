@@ -296,8 +296,12 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     /// do not apply. Follows both hook trust and the `nativePlugins` pref.
     let nativeDelivery: Bool
     var id: String { name }
+    // Identity plus the fields a row/detail actually renders differently:
+    // toggling the native-plugins pref changes `nativeDelivery` alone, and
+    // without it here the view would keep describing the old delivery route.
     static func == (lhs: PluginInfo, rhs: PluginInfo) -> Bool {
-        lhs.name == rhs.name && lhs.enabled == rhs.enabled && lhs.hooksTrusted == rhs.hooksTrusted
+        lhs.name == rhs.name && lhs.enabled == rhs.enabled
+            && lhs.hooksTrusted == rhs.hooksTrusted && lhs.nativeDelivery == rhs.nativeDelivery
     }
 
     enum CodingKeys: String, CodingKey {

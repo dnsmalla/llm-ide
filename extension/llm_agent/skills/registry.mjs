@@ -92,7 +92,8 @@ if (pluginRegistry.warnings.length > 0) {
 // an earlier build that predated MCP support) still gets its declared servers
 // registered — unconsented, as always.
 try {
-  syncPluginMcpServers(mcpDeclarationGroups());
+  const synced = syncPluginMcpServers(mcpDeclarationGroups());
+  if (synced.skipped?.length) console.warn('[plugins] mcp declarations skipped:', synced.skipped);
 } catch (err) {
   console.warn('[plugins] mcp sync failed at boot:', err?.message || err);
 }
@@ -126,7 +127,8 @@ export function reloadPlugins() {
   // activation: every entry lands unconsented, and an uninstalled plugin's
   // entries go away with it.
   try {
-    syncPluginMcpServers(mcpDeclarationGroups());
+    const synced = syncPluginMcpServers(mcpDeclarationGroups());
+    if (synced.skipped?.length) console.warn('[plugins] mcp declarations skipped:', synced.skipped);
   } catch (err) {
     console.warn('[plugins] mcp sync failed:', err?.message || err);
   }

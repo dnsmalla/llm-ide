@@ -99,3 +99,36 @@ test('without a pluginEnabled predicate, plugin servers stay out of the config',
   // server: silently including it would ignore the plugin toggle entirely.
   assert.deepEqual(effectiveMcpServers('u'), {});
 });
+
+test('two declarations that slug to the same id do not silently replace each other', () => {
+  writeMcpRegistry([]);
+  // `a-b` + server `c` and `a` + server `b-c` both slug to "a-b-c"; so do two
+  // long names truncated at the id cap. One must win and the other must be
+  // reported, not vanish into the same registry row.
+  const result = syncPluginMcpServers([
+    { pluginName: 'a-b', servers: [decl('c')] },
+    { pluginName: 'a', servers: [decl('b-c')] },
+  ]);
+  assert.equal(readMcpRegistry().length, 1);
+  assert.equal(result.skipped.length, 1, `expected a reported collision, got ${JSON.stringify(result)}`);
+  assert.match(result.skipped[0], /a-b-c/);
+});
+
+test('a declaration with no expressible id is reported, not dropped in silence', () => {
+  writeMcpRegistry([]);
+  // 'p' + '...' slugs down to just "p", one character short of the registry's
+  // id rule. Nothing can be registered, so the user is told which declaration
+  // was lost rather than wondering why the server never appears.
+  const result = syncPluginMcpServers([{ pluginName: 'p', servers: [decl('...')] }]);
+  assert.deepEqual(readMcpRegistry(), []);
+  assert.equal(result.skipped.length, 1);
+  assert.match(result.skipped[0], /no usable id/);
+});
+
+test('a normal plugin and server name always yields an id', () => {
+  writeMcpRegistry([]);
+  const result = syncPluginMcpServers([{ pluginName: 'reviewer', servers: [decl('Linear MCP')] }]);
+  assert.deepEqual(result.skipped, []);
+  assert.equal(readMcpRegistry().length, 1);
+  assert.match(readMcpRegistry()[0].id, /^reviewer-linear-mcp$/);
+});

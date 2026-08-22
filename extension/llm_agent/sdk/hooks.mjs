@@ -69,18 +69,22 @@ export function runHookCommand({ command, timeoutMs }, { input, cwd, env } = {})
     child.stdout.on('data', (b) => capture(b, 'out'));
     child.stderr.on('data', (b) => capture(b, 'err'));
 
+    // NOTE: `finish` deliberately does NOT clear `killTimer`. The turn stops
+    // waiting on a timed-out hook immediately, but the escalation that actually
+    // kills a TERM-trapping child has to outlive that decision — clearing it
+    // here left the child running as an orphan. Only the child's own exit
+    // cancels it (see the close handler).
     const finish = (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      clearTimeout(killTimer);
       resolve(result);
     };
 
     let killTimer;
     const timer = setTimeout(() => {
       // SIGTERM first, SIGKILL if it ignores that — a hook that traps TERM
-      // must not hold the turn open.
+      // must not hold the turn open, nor keep running once we stop caring.
       try { child.kill('SIGTERM'); } catch { /* already gone */ }
       killTimer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } }, KILL_GRACE_MS);
       finish({ continue: true, systemMessage: `hook timed out after ${timeoutMs}ms and was stopped` });
@@ -89,6 +93,8 @@ export function runHookCommand({ command, timeoutMs }, { input, cwd, env } = {})
     child.on('error', (err) => finish({ continue: true, systemMessage: `hook failed to run: ${err.message}` }));
 
     child.on('close', (code) => {
+      // The child is gone — the escalation timer has nothing left to kill.
+      if (killTimer) clearTimeout(killTimer);
       if (code === 0) return finish({ continue: true });
       if (code === 2) {
         // The blocking case: stderr is the reason handed back to the model.
