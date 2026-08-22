@@ -92,7 +92,12 @@ const HOST = config.host;
 //     refresh fail decoding after rotation had already committed — the stale
 //     token replay then tripped reuse detection and silently logged the user
 //     out of every session. /auth/* path — not tracked in ENDPOINTS.
-const SERVER_API_VERSION = 37;
+// 37→38: MCP-backed connectors, phase 2a. New POST /kb/mcp-connector/test
+//     ({ id } -> { ok, server, tools }) proves an authenticated round trip
+//     against a remote MCP server. The /auth/mcp-connector/{start,callback,
+//     status} routes land in the same change but are /auth/* paths — not
+//     tracked in ENDPOINTS by convention.
+const SERVER_API_VERSION = 38;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -130,6 +135,7 @@ const ENDPOINTS = [
   '/kb/slack/conversations',
   '/kb/box/test',
   '/kb/connect-box',
+  '/kb/mcp-connector/test',
   '/kb/activity',
   '/kb/activity/seen',
   '/kb/usage/limits',
@@ -263,6 +269,10 @@ function rateLimitProfile(url, method) {
   // cost profile as slack/email test — dispatch bucket. (/kb/connect-box is
   // special-cased onto dispatch above, before the '/kb/connect-' rule.)
   if (url === '/kb/box/test') return 'dispatch';
+  // MCP connector test opens a real session to a remote MCP server (discovery
+  // + token refresh + initialize + tools/list) — same externally-directed cost
+  // profile as slack/box/email test, so the same dispatch bucket.
+  if (url === '/kb/mcp-connector/test') return 'dispatch';
   if (url === '/kb/activity' || url === '/kb/activity/seen') return 'kbWrite';
   // Local filesystem symlink install of the skills kit into a project path.
   if (url === '/kb/project/install-skills') return 'kbWrite';

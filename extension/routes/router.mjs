@@ -35,6 +35,8 @@ import { iterateUserMeetings } from '../kb/exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../connectors/email-source.mjs';
 import { testConnection as slackTest, fetchChannelHistory, listUserConversations } from '../connectors/slack-source.mjs';
+import { testMcpConnection } from '../connectors/mcp-client.mjs';
+import { mcpConnectorDef } from '../connectors/mcp-connector-defs.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
@@ -718,6 +720,36 @@ export async function handleKB(req, res) {
         const safe = redactWithKey(e.message, clientSecret);
         logger.error('box_index_failed', { userId, folderId, reason: safe });
         sendJSON(res, 502, { error: { code: 'BOX_INDEX_FAILED', message: safe } });
+      }
+      return true;
+    }
+
+    // MCP-backed connectors (Miro today; gdrive/gcal in phase 3) ---
+    //
+    // One route block serves every MCP connector — the descriptor in
+    // connectors/mcp-connector-defs.mjs carries everything provider-specific.
+    // This is the `test` endpoint of the Mac manifest's four; fetch/seen/
+    // classify join it in phase 2b.
+    if (req.method === 'POST' && url === '/kb/mcp-connector/test') {
+      const body = parseJSON(await readBody(req)) || {};
+      const def = mcpConnectorDef(typeof body.id === 'string' ? body.id : '');
+      if (!def) {
+        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Unknown MCP connector id' } });
+        return true;
+      }
+      try {
+        const r = await testMcpConnection(kb.getDb(), userId, def);
+        logger.info('mcp_connector_test', { userId, connector: def.id, tools: r.tools.length });
+        sendJSON(res, 200, { ok: true, ...r });
+      } catch (e) {
+        // "Connect it first" is a user action, not a server fault — 400, so
+        // the Mac card offers Connect instead of a retry.
+        if (e?.code === 'MCP_UNAUTHORIZED') {
+          sendJSON(res, 400, { error: { code: 'MCP_UNAUTHORIZED', message: e.message } });
+          return true;
+        }
+        logger.error('mcp_connector_test_failed', { userId, connector: def.id, reason: redactSecrets(e.message) });
+        sendJSON(res, 502, { error: { code: 'MCP_CONNECT_FAILED', message: redactSecrets(e.message) } });
       }
       return true;
     }

@@ -503,6 +503,32 @@ paths:
         '400': { description: No Slack bot token saved, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: Slack connection failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /kb/mcp-connector/test:
+    post:
+      summary: Verify a remote MCP connector's saved OAuth tokens (connect + tools/list)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string, enum: [miro] }
+      responses:
+        '200':
+          description: Connected — server identity and available tools
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:     { type: boolean }
+                  server: { type: object, properties: { name: { type: string }, version: { type: string } } }
+                  tools:  { type: array, items: { type: string } }
+        '400': { description: Unknown connector id, or not connected (MCP_UNAUTHORIZED), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: MCP connection failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /kb/slack/fetch:
     post:
       summary: Fetch new messages from a Slack channel (incremental, past the per-channel high-water mark)
