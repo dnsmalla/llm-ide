@@ -1,6 +1,6 @@
 # Claude-Format Plugins — Phase 1 (Loader Parity) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** The plugin loader natively accepts Claude Code / Codex plugin packages (`.claude-plugin/plugin.json`, nested `skills/<name>/SKILL.md`, `agents/`, Claude command conventions), and the import adapters stop being lossy for manifest-bearing sources.
 
@@ -35,7 +35,7 @@
 - Consumes: nothing new.
 - Produces: plugin objects gain `format: 'llmide' | 'claude'` (Tasks 6, 7 read it). `loadOnePlugin` accepts vendor manifests. Component-path overrides flow to Task 3 as `{ skills?, commands?, agents? }` (directory names, `./` stripped).
 
-- [ ] **Step 1: Write failing tests** — append to `extension/tests/plugins-loader.test.mjs`:
+- [x] **Step 1: Write failing tests** — append to `extension/tests/plugins-loader.test.mjs`:
 
 ```js
 // --- Vendor (Claude Code / Codex) format detection ---
@@ -111,12 +111,12 @@ test('own format wins when both manifests exist', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests — verify they fail**
+- [x] **Step 2: Run tests — verify they fail**
 
 Run: `cd extension && node --test tests/plugins-loader.test.mjs`
 Expected: FAIL — `format` is undefined / vendor plugins skipped with "no plugin.json".
 
-- [ ] **Step 3: Implement.** In `extension/plugins/loader.mjs`:
+- [x] **Step 3: Implement.** In `extension/plugins/loader.mjs`:
 
 Update the header comment block (lines 1–21) to describe both layouts (add: "A vendor plugin (Claude Code / Codex) carries `.claude-plugin/plugin.json` or `.codex-plugin/plugin.json` instead; components live in `skills/<name>/SKILL.md`, `commands/*.md`, `agents/*.md`").
 
@@ -225,12 +225,12 @@ function loadOnePlugin(dir) {
   };
 ```
 
-- [ ] **Step 4: Run tests — verify pass**
+- [x] **Step 4: Run tests — verify pass**
 
 Run: `cd extension && node --test tests/plugins-loader.test.mjs`
 Expected: PASS (all, including pre-existing).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add extension/plugins/loader.mjs extension/tests/plugins-loader.test.mjs
@@ -249,7 +249,7 @@ git commit -m "feat(plugins): detect Claude/Codex vendor manifests in the loader
 - Consumes: nothing new.
 - Produces: `loadSkills(dir)` additionally returns skills from one-level-deep `<name>/SKILL.md` directories. Skill entry shape unchanged (`{ name, kind, confirmation, description, schema, body }`). Both existing consumers (`listAllSkills`, `buildPerUserSkillSet` in `extension/llm_agent/skills/registry.mjs`) pick this up with zero changes because they call `loadSkills(join(p.dir, 'skills'))`.
 
-- [ ] **Step 1: Write failing tests** (new file `extension/tests/skills-loader.test.mjs`, or append to the existing skills-loader test file if one exists):
+- [x] **Step 1: Write failing tests** (new file `extension/tests/skills-loader.test.mjs`, or append to the existing skills-loader test file if one exists):
 
 ```js
 // Nested vendor skill layout: skills/<name>/SKILL.md (Claude Code / Codex).
@@ -328,12 +328,12 @@ test('symlinked skill directory is rejected', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests — verify they fail**
+- [x] **Step 2: Run tests — verify they fail**
 
 Run: `cd extension && node --test tests/skills-loader.test.mjs`
 Expected: FAIL — nested skills not discovered ("nested skill missing").
 
-- [ ] **Step 3: Implement.** In `loadSkills` (`extension/llm_agent/skills/loader.mjs`), restructure the entry scan. Add to imports: `lstatSync`. Replace lines 102–104 and extend the per-entry loop:
+- [x] **Step 3: Implement.** In `loadSkills` (`extension/llm_agent/skills/loader.mjs`), restructure the entry scan. Add to imports: `lstatSync`. Replace lines 102–104 and extend the per-entry loop:
 
 ```js
   const dirents = readdirSync(dir, { withFileTypes: true });
@@ -406,12 +406,12 @@ Expected: FAIL — nested skills not discovered ("nested skill missing").
   }
 ```
 
-- [ ] **Step 4: Run tests — verify pass**
+- [x] **Step 4: Run tests — verify pass**
 
 Run: `cd extension && node --test tests/skills-loader.test.mjs tests/plugins-loader.test.mjs`
 Expected: PASS both files (no regression in flat handling).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add extension/llm_agent/skills/loader.mjs extension/tests/skills-loader.test.mjs
@@ -430,7 +430,7 @@ git commit -m "feat(skills): load nested skills/<name>/SKILL.md vendor layout"
 - Consumes: Task 1's `components` map (`{ skills?, commands?, agents? }` directory names).
 - Produces: `plugin.skillFiles` may now point at `…/skills/<name>/SKILL.md` paths. `skillCount` in `/auth/me/plugins` derives from `skillFiles.length` — automatically correct.
 
-- [ ] **Step 1: Write failing tests** — append:
+- [x] **Step 1: Write failing tests** — append:
 
 ```js
 test('vendor: nested skill directory counted and stashed with SKILL.md path', () => {
@@ -477,12 +477,12 @@ test('vendor: nested skill exceeding the byte cap is skipped with a warning', ()
 });
 ```
 
-- [ ] **Step 2: Run tests — verify fail**
+- [x] **Step 2: Run tests — verify fail**
 
 Run: `cd extension && node --test tests/plugins-loader.test.mjs`
 Expected: FAIL — nested dirs invisible (`skillFiles.length` 0), override ignored.
 
-- [ ] **Step 3: Implement.** In `loadOnePlugin`, first apply the override to the three component dirs (replace the three `const skillsDir/cmdDir/agentsDir` lines):
+- [x] **Step 3: Implement.** In `loadOnePlugin`, first apply the override to the three component dirs (replace the three `const skillsDir/cmdDir/agentsDir` lines):
 
 ```js
   // Vendor manifests may relocate component dirs (./skills etc.); the
@@ -538,12 +538,12 @@ Then extend the skills scan loop to handle directories. Replace the `for (const 
 
 (Delete the old `rejectSymlink(skillsDir, entry)` usage in the skills loop only — the helper stays for commands/agents. The warning strings change slightly for skills; update any test asserting the exact old string.)
 
-- [ ] **Step 4: Run tests — verify pass**
+- [x] **Step 4: Run tests — verify pass**
 
 Run: `cd extension && node --test tests/plugins-loader.test.mjs`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add extension/plugins/loader.mjs extension/tests/plugins-loader.test.mjs
@@ -562,7 +562,7 @@ git commit -m "feat(plugins): scan nested skills and manifest path overrides"
 - Consumes: nothing new.
 - Produces: unchanged `subagent` shape `{ description, allowedTools, maxIterations, model, systemPrompt }`; `allowedTools` entries may now contain underscores (e.g. `mcp__server__tool`) and up to 64 chars.
 
-- [ ] **Step 1: Write failing tests** — append:
+- [x] **Step 1: Write failing tests** — append:
 
 ```js
 test('vendor agent: Claude tools CSV + maxTurns map onto the subagent model', () => {
@@ -615,12 +615,12 @@ Body.`,
 });
 ```
 
-- [ ] **Step 2: Run tests — verify fail**
+- [x] **Step 2: Run tests — verify fail**
 
 Run: `cd extension && node --test tests/plugins-loader.test.mjs`
 Expected: FAIL — `tools`/`maxTurns` ignored (allowedTools `[]`, maxIterations 3-with-clamp mismatch on the 8 case).
 
-- [ ] **Step 3: Implement.** In `parseSubagentFile`, replace the `allowedTools` and `maxIters` computations:
+- [x] **Step 3: Implement.** In `parseSubagentFile`, replace the `allowedTools` and `maxIters` computations:
 
 ```js
   // Tool list: own format uses `allowed_tools` (YAML list of lowercase
@@ -647,12 +647,12 @@ Expected: FAIL — `tools`/`maxTurns` ignored (allowedTools `[]`, maxIterations 
     : 3;
 ```
 
-- [ ] **Step 4: Run tests — verify pass**
+- [x] **Step 4: Run tests — verify pass**
 
 Run: `cd extension && node --test tests/plugins-loader.test.mjs`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add extension/plugins/loader.mjs extension/tests/plugins-loader.test.mjs
@@ -671,7 +671,7 @@ git commit -m "feat(plugins): map vendor agent frontmatter (tools, maxTurns)"
 - Consumes: `expandSlashCommand`'s existing `{{_rest}}` semantics (unchanged).
 - Produces: `command.template` may contain `{{_rest}}` where the source had `$ARGUMENTS`. `command.description` may carry an `(args: …)` suffix.
 
-- [ ] **Step 1: Write failing tests** — append:
+- [x] **Step 1: Write failing tests** — append:
 
 ```js
 test('vendor command: $ARGUMENTS maps to {{_rest}} expansion', () => {
@@ -700,12 +700,12 @@ test('own-format {{arg}} substitution is untouched', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests — verify fail**
+- [x] **Step 2: Run tests — verify fail**
 
 Run: `cd extension && node --test tests/plugins-loader.test.mjs`
 Expected: FAIL — `$ARGUMENTS` survives verbatim; no `(args: …)` suffix.
 
-- [ ] **Step 3: Implement.** In `parseCommandFile`, after `const fm = parsed.frontmatter || {};` apply vendor translation before building the result:
+- [x] **Step 3: Implement.** In `parseCommandFile`, after `const fm = parsed.frontmatter || {};` apply vendor translation before building the result:
 
 ```js
   // Vendor command bodies (Claude Code / Codex) use `$ARGUMENTS` for
@@ -721,12 +721,12 @@ Expected: FAIL — `$ARGUMENTS` survives verbatim; no `(args: …)` suffix.
 
 Then use `template` and `description` in the returned `command` object (replace `parsed.body.trim()` / the old description expression).
 
-- [ ] **Step 4: Run tests — verify pass**
+- [x] **Step 4: Run tests — verify pass**
 
 Run: `cd extension && node --test tests/plugins-loader.test.mjs`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add extension/plugins/loader.mjs extension/tests/plugins-loader.test.mjs
@@ -746,7 +746,7 @@ git commit -m "feat(plugins): translate vendor command conventions ($ARGUMENTS, 
 - Consumes: Task 1's `format`.
 - Produces: plugin objects gain `unsupportedComponents: string[]` (themes, output-styles, monitors, workflows, bin, `.lsp.json`, root `settings.json`) and `pendingComponents: string[]` (`'hooks'`, `'mcp'` — present but inactive until Phase 2/3). `/auth/me/plugins` serializes both fields (Task 7's Swift model decodes them).
 
-- [ ] **Step 1: Write failing tests** — append:
+- [x] **Step 1: Write failing tests** — append:
 
 ```js
 test('vendor: unsupported and pending components are catalogued, never executed', () => {
@@ -783,12 +783,12 @@ test('own format: no unsupported/pending fields leak into old plugins', () => {
 });
 ```
 
-- [ ] **Step 2: Run tests — verify fail**
+- [x] **Step 2: Run tests — verify fail**
 
 Run: `cd extension && node --test tests/plugins-loader.test.mjs`
 Expected: FAIL — fields undefined.
 
-- [ ] **Step 3: Implement.** In `loadOnePlugin`, after the subagents block (own-format plugins skip it — `components` is `{}` and the catalogue runs only for `format === 'claude'`):
+- [x] **Step 3: Implement.** In `loadOnePlugin`, after the subagents block (own-format plugins skip it — `components` is `{}` and the catalogue runs only for `format === 'claude'`):
 
 ```js
   // Vendor components LLM-IDE does not run. Catalogued for display only —
@@ -815,12 +815,12 @@ Add both arrays to the returned plugin object. Then in `extension/llm_agent/skil
       pendingComponents: p.pendingComponents || [],
 ```
 
-- [ ] **Step 4: Run tests — verify pass**
+- [x] **Step 4: Run tests — verify pass**
 
 Run: `cd extension && node --test tests/plugins-loader.test.mjs tests/route-modes.test.mjs`
 Expected: PASS. (Also run the full suite once here: `npm test` — this touches the API payload.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add extension/plugins/loader.mjs extension/llm_agent/skills/registry.mjs extension/tests/plugins-loader.test.mjs
@@ -840,7 +840,7 @@ git commit -m "feat(plugins): catalogue unsupported and pending vendor component
 - Consumes: Task 6's `/auth/me/plugins` fields (`format`, `unsupportedComponents`, `pendingComponents`).
 - Produces: `PluginInfo.format: String`, `PluginInfo.unsupportedComponents: [String]`, `PluginInfo.pendingComponents: [String]` — decode with defaults so older servers still decode (house pattern, see the `subagents` field comment).
 
-- [ ] **Step 1: Write the failing test** — create `mac/Tests/LlmIdeMacTests/PluginInfoDecodingTests.swift`:
+- [x] **Step 1: Write the failing test** — create `mac/Tests/LlmIdeMacTests/PluginInfoDecodingTests.swift`:
 
 ```swift
 import XCTest
@@ -875,12 +875,12 @@ final class PluginInfoDecodingTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run — verify fail**
+- [x] **Step 2: Run — verify fail**
 
 Run: `cd mac && swift test --filter PluginInfoDecodingTests`
 Expected: FAIL — no such members. (Build first: `swift build`.)
 
-- [ ] **Step 3: Implement.** In `PluginInfo` add three stored properties, their `CodingKeys`, and in `init(from:)`:
+- [x] **Step 3: Implement.** In `PluginInfo` add three stored properties, their `CodingKeys`, and in `init(from:)`:
 
 ```swift
     /// "llmide" (own format) or "claude" (vendor package). Older servers
@@ -927,12 +927,12 @@ Then in `PluginDetailView`, after `subagentsBlock(plugin)` add a `componentsBloc
     }
 ```
 
-- [ ] **Step 4: Run — verify pass**
+- [x] **Step 4: Run — verify pass**
 
 Run: `cd mac && swift build && swift test --filter PluginInfoDecodingTests`
 Expected: PASS. Then full gate: `swift test` (all green).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add mac/Sources/LlmIdeMac/Services/API/LlmIdeAPIClient+Auth.swift mac/Sources/LlmIdeMac/Views/Library/PluginDetailView.swift mac/Tests/LlmIdeMacTests/PluginInfoDecodingTests.swift
@@ -951,7 +951,7 @@ git commit -m "feat(mac): surface vendor plugin component status in the detail v
 - Consumes: Task 1's loader support (post-install re-validation via `loadPlugins()` already covers vendor manifests once Task 1 lands).
 - Produces: `installFromZip` accepts zips whose manifest is `.claude-plugin/plugin.json` or `.codex-plugin/plugin.json` (root or single top-level dir). Response shape unchanged.
 
-- [ ] **Step 1: Write failing test** — append to `extension/tests/plugins-installer.test.mjs` (reuses the file's existing `newTempRoot`/`zipDirectory` helpers and `skipReason` guard; add `loadPlugins` to the import from `'../plugins/loader.mjs'` — a new import line):
+- [x] **Step 1: Write failing test** — append to `extension/tests/plugins-installer.test.mjs` (reuses the file's existing `newTempRoot`/`zipDirectory` helpers and `skipReason` guard; add `loadPlugins` to the import from `'../plugins/loader.mjs'` — a new import line):
 
 ```js
 test('installs a vendor zip whose .claude-plugin/plugin.json sits in a top-level dir', { skip: skipReason || false }, async () => {
@@ -983,12 +983,12 @@ test('installs a vendor zip whose .claude-plugin/plugin.json sits in a top-level
 });
 ```
 
-- [ ] **Step 2: Run — verify fail**
+- [x] **Step 2: Run — verify fail**
 
 Run: `cd extension && node --test tests/plugins-installer.test.mjs`
 Expected: FAIL — "plugin.json not found at zip root or in a single top-level directory".
 
-- [ ] **Step 3: Implement.** In `findManifest`:
+- [x] **Step 3: Implement.** In `findManifest`:
 
 ```js
 // Manifest candidates, own format first (a plugin carrying BOTH is an
@@ -1018,12 +1018,12 @@ async function findManifest(stagingDir) {
 
 (The existing return shape `{ manifestDir }` is preserved — the caller at line ~192 uses it as the plugin ROOT for re-validation and rename; a vendor manifest's plugin root is still the staging root / single top-level dir, NOT `.claude-plugin/`. No caller changes needed.)
 
-- [ ] **Step 4: Run — verify pass**
+- [x] **Step 4: Run — verify pass**
 
 Run: `cd extension && node --test tests/plugins-installer.test.mjs tests/plugins-loader.test.mjs`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add extension/plugins/installer.mjs extension/tests/plugins-installer.test.mjs
@@ -1044,7 +1044,7 @@ git commit -m "feat(plugins): install vendor-format (Claude/Codex) plugin zips"
 - Consumes: Task 1's native loader (the copied tree needs NO generated manifest — the loader reads the vendor manifest in place).
 - Produces: `copyPluginTree(src, dst)` → `{ files: number, skipped: string[] }`; throws on tree limits. Import result shape unchanged.
 
-- [ ] **Step 1: Write failing tests** — append to `extension/tests/claude-adapter.test.mjs` (extends the existing `makeFakeMarketplace` fixture pattern):
+- [x] **Step 1: Write failing tests** — append to `extension/tests/claude-adapter.test.mjs` (extends the existing `makeFakeMarketplace` fixture pattern):
 
 ```js
 test('manifest-bearing marketplace plugin imports whole with layout preserved', () => {
@@ -1089,12 +1089,12 @@ test('manifest-bearing marketplace plugin imports whole with layout preserved', 
 
 Write the analogous test in `extension/tests/codex-adapter.test.mjs` against its `.codex-plugin/plugin.json` fixture conventions (read its fixture helpers first; same assertions with the codex name prefix and origin).
 
-- [ ] **Step 2: Run — verify fail**
+- [x] **Step 2: Run — verify fail**
 
 Run: `cd extension && node --test tests/claude-adapter.test.mjs`
 Expected: FAIL — no `.claude-plugin/` in the import output; `agents/` absent.
 
-- [ ] **Step 3: Implement.** In `vendor-import-shared.mjs` add:
+- [x] **Step 3: Implement.** In `vendor-import-shared.mjs` add:
 
 ```js
 // Tree-copy limits for whole-plugin imports. Deliberately more generous
@@ -1244,12 +1244,12 @@ Then in the existing per-source version read, prefer the vendor manifest before 
 
 Mirror both changes in `codex-adapter.mjs` (its `importPlugin`/`checkForUpdates` share the shape — read it first; the vendor branch's origin string is `'codex'` and the name prefix follows its existing convention).
 
-- [ ] **Step 4: Run — verify pass**
+- [x] **Step 4: Run — verify pass**
 
 Run: `cd extension && node --test tests/claude-adapter.test.mjs tests/codex-adapter.test.mjs`
 Expected: PASS (old lossy-path tests too — they use manifest-less fixtures).
 
-- [ ] **Step 5: Full gate + commit**
+- [x] **Step 5: Full gate + commit**
 
 Run: `cd extension && npm run lint && npm test`
 Expected: lint clean (max-warnings 0), full suite green.
@@ -1263,8 +1263,8 @@ git commit -m "feat(plugins): import manifest-bearing vendor plugins whole"
 
 ## Final verification (after all tasks)
 
-- [ ] `cd extension && npm run lint && npm test` — full suite green.
-- [ ] `cd mac && swift build && swift test` — full suite green (needs sandbox disabled on this machine).
+- [x] `cd extension && npm run lint && npm test` — full suite green.
+- [x] `cd mac && swift build && swift test` — full suite green (needs sandbox disabled on this machine).
 - [ ] Manual smoke: install a real Claude Code plugin zip through the Mac Library UI ("Install from .zip…"), verify it lists with `format: claude`, its nested skills appear in the "/" menu when enabled, and unsupported components show in the detail view.
 - [ ] Regression Loop stage (`Loop` → Regression) green — the spec's hard constraint #1, enforced mechanically.
 
