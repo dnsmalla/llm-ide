@@ -95,6 +95,8 @@ const MAX_SKILL_BYTES    = 32_768;   // 32 KB per skill file
 const MAX_COMMAND_BYTES  = 16_384;   // 16 KB per command template
 const MAX_SUBAGENT_BYTES = 32_768;   // 32 KB per subagent system prompt
 const MAX_FILES_PER_DIR  = 50;       // max skills/commands/subagents per plugin
+const MAX_MCP_JSON_BYTES = 65_536;   // 64 KB per .mcp.json
+const MAX_MCP_SERVERS    = 20;       // max servers one plugin may declare
 
 // Strip known prompt-injection delimiters that the server itself uses
 // as content fences.  A plugin author could accidentally (or
@@ -300,6 +302,83 @@ function parseCommandFile(path) {
 }
 
 /**
+ * Parse a vendor plugin's `.mcp.json` into transport-normalized declarations.
+ *
+ * Declarations only — NOTHING here connects, registers, or runs. The servers
+ * become registry entries the user consents to individually (mcp/state.mjs),
+ * so a plugin cannot bring a live MCP connection along with it.
+ *
+ * `env`/`headers` values are kept verbatim, placeholders included
+ * (`${TOKEN}`): resolving them to real secrets is the vault's job at
+ * config-build time, never this layer's.
+ */
+function parseMcpDeclarations(path) {
+  let raw;
+  try { raw = readFileSync(path, 'utf8'); }
+  catch (err) { return { error: `read failed: ${err.message}` }; }
+  if (Buffer.byteLength(raw, 'utf8') > MAX_MCP_JSON_BYTES) {
+    return { error: `exceeds ${MAX_MCP_JSON_BYTES} byte limit` };
+  }
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (err) { return { error: `parse: ${err.message}` }; }
+  const servers = parsed?.mcpServers;
+  // A `.mcp.json` with no `mcpServers` map declares nothing — benign, not an
+  // error. Warnings from here reach the installer, which fails a bundle on
+  // any warning, so only genuinely unparseable JSON may warn.
+  if (!servers || typeof servers !== 'object' || Array.isArray(servers)) {
+    return { declarations: [], warnings: [] };
+  }
+  const declarations = [];
+  const warnings = [];
+  for (const [name, cfg] of Object.entries(servers)) {
+    if (declarations.length >= MAX_MCP_SERVERS) {
+      warnings.push(`declares more than ${MAX_MCP_SERVERS} servers — extras ignored`);
+      break;
+    }
+    if (!/^[A-Za-z][A-Za-z0-9._-]{0,60}$/.test(name)) {
+      warnings.push(`server name '${name}' is not a plain identifier`);
+      continue;
+    }
+    if (!cfg || typeof cfg !== 'object') {
+      warnings.push(`server '${name}': not an object`);
+      continue;
+    }
+    const wantsHttp = cfg.type === 'http' || cfg.type === 'sse' || (!cfg.command && cfg.url);
+    if (wantsHttp) {
+      // http(s) only. A file:/ws: URL is not a transport llm-ide can express,
+      // and passing it downstream would only fail deeper in, or reach for a
+      // local path a plugin has no business naming.
+      let url;
+      try { url = new URL(String(cfg.url)); } catch { url = null; }
+      if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
+        warnings.push(`server '${name}': a http(s) url is required`);
+        continue;
+      }
+      declarations.push({
+        name,
+        transport: cfg.type === 'sse' ? 'sse' : 'http',
+        url: url.toString(),
+        ...(cfg.headers && typeof cfg.headers === 'object' ? { headers: { ...cfg.headers } } : {}),
+      });
+      continue;
+    }
+    if (typeof cfg.command !== 'string' || !cfg.command.trim()) {
+      warnings.push(`server '${name}': needs a command or a http(s) url`);
+      continue;
+    }
+    declarations.push({
+      name,
+      transport: 'stdio',
+      command: cfg.command,
+      args: Array.isArray(cfg.args) ? cfg.args.filter((a) => typeof a === 'string') : [],
+      ...(cfg.env && typeof cfg.env === 'object' ? { env: { ...cfg.env } } : {}),
+    });
+  }
+  return { declarations, warnings };
+}
+
+/**
  * Walk one plugin directory. Returns { plugin, warnings } or { error }.
  */
 function loadOnePlugin(dir) {
@@ -480,12 +559,22 @@ function loadOnePlugin(dir) {
   // detail view renders instead.
   const unsupportedComponents = [];
   const pendingComponents = [];
+  const mcpServers = [];
   if (format === 'claude') {
     for (const rel of ['themes', 'output-styles', 'monitors', 'workflows', 'bin', '.lsp.json', 'settings.json']) {
       if (existsSync(join(dir, rel))) unsupportedComponents.push(rel);
     }
     if (existsSync(join(dir, 'hooks', 'hooks.json'))) pendingComponents.push('hooks');
-    if (existsSync(join(dir, '.mcp.json'))) pendingComponents.push('mcp');
+    if (existsSync(join(dir, '.mcp.json'))) {
+      pendingComponents.push('mcp');
+      const parsed = parseMcpDeclarations(join(dir, '.mcp.json'));
+      if (parsed.error) {
+        warnings.push(`.mcp.json: ${parsed.error}`);
+      } else {
+        mcpServers.push(...parsed.declarations);
+        for (const w of parsed.warnings) warnings.push(`.mcp.json: ${w}`);
+      }
+    }
   }
 
   return {
@@ -499,6 +588,7 @@ function loadOnePlugin(dir) {
       subagents,
       unsupportedComponents,
       pendingComponents,
+      mcpServers,
     },
     warnings,
   };
