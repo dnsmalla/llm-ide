@@ -14,6 +14,7 @@ struct PluginDetailView: View {
     @State private var loaded = false
     @State private var loadError: String?
     @State private var togglePending = false
+    @State private var trustPending = false
 
     var body: some View {
         ScrollView {
@@ -28,6 +29,7 @@ struct PluginDetailView: View {
                     descriptionBlock(plugin)
                     commandsBlock(plugin)
                     subagentsBlock(plugin)
+                    hooksBlock(plugin)
                     componentsBlock(plugin)
                 } else {
                     Text("Plugin not found — it may have been uninstalled.")
@@ -156,12 +158,8 @@ struct PluginDetailView: View {
         if !plugin.pendingComponents.isEmpty || !plugin.unsupportedComponents.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Components").font(.headline)
-                if plugin.pendingComponents.contains("hooks") {
-                    Label("Hooks — detected, not run yet (requires plugin hook trust)", systemImage: "clock")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
                 if plugin.pendingComponents.contains("mcp") {
-                    Label("MCP servers — detected, not active yet", systemImage: "clock")
+                    Label(mcpSummary(plugin), systemImage: "bolt.horizontal.circle")
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 ForEach(plugin.unsupportedComponents, id: \.self) { component in
@@ -172,7 +170,61 @@ struct PluginDetailView: View {
         }
     }
 
+    /// Hook trust. A plugin's hooks are shell commands its author wrote, so
+    /// this is a deliberate, revocable grant that enabling the plugin does not
+    /// give — the warning says exactly what turning it on means.
+    @ViewBuilder
+    private func hooksBlock(_ plugin: PluginInfo) -> some View {
+        if plugin.hookCount > 0 || !plugin.hookNotes.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Hooks").font(.headline)
+                if plugin.hookCount > 0 {
+                    Toggle(isOn: Binding(
+                        get: { plugin.hooksTrusted },
+                        set: { newValue in Task { await setHookTrust(newValue) } }
+                    )) {
+                        Text("Trust hooks (\(plugin.hookCount) handler\(plugin.hookCount == 1 ? "" : "s"))")
+                    }
+                    .toggleStyle(.switch)
+                    .disabled(trustPending || !plugin.enabled)
+                    Text(plugin.hooksTrusted
+                         ? "This plugin's hook commands run during a turn, with the same access as the app."
+                         : "Turning this on lets this plugin run shell commands from its hooks file during a turn. Leave it off unless you trust the author.")
+                        .font(.caption)
+                        .foregroundStyle(plugin.hooksTrusted ? .orange : .secondary)
+                    if !plugin.enabled {
+                        Text("Enable the plugin first — hooks only run for an enabled plugin.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(plugin.hookNotes, id: \.self) { note in
+                    Label(note, systemImage: "minus.circle")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// MCP servers a plugin declares are registered but inert until consented
+    /// in the MCP Plugins section — say where to go rather than just "pending".
+    private func mcpSummary(_ plugin: PluginInfo) -> String {
+        let n = plugin.mcpServerCount
+        guard n > 0 else { return "MCP servers — declared, none registered" }
+        return "\(n) MCP server\(n == 1 ? "" : "s") declared — consent to each under MCP Plugins to activate"
+    }
+
     // MARK: - Data + actions
+
+    private func setHookTrust(_ trusted: Bool) async {
+        trustPending = true
+        defer { trustPending = false }
+        do {
+            _ = try await api.setPluginHookTrust(name: pluginName, trusted: trusted)
+            await load()
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
 
     private func load() async {
         loaded = false

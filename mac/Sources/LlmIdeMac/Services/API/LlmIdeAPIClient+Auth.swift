@@ -78,6 +78,17 @@ extension LlmIdeAPIClient {
         try await get("/auth/me/plugins", authenticated: true)
     }
 
+    /// Authorize (or revoke) shell execution for one plugin's hooks. Separate
+    /// from `togglePlugin` on purpose — the server audits it as its own grant.
+    func setPluginHookTrust(name: String, trusted: Bool) async throws -> Bool {
+        struct Req: Encodable { let name: String; let trusted: Bool }
+        struct Ack: Decodable { let ok: Bool; let hooksTrusted: Bool }
+        let ack: Ack = try await post("/auth/me/plugins/hook-trust",
+                                      body: Req(name: name, trusted: trusted),
+                                      authenticated: true)
+        return ack.hooksTrusted
+    }
+
     func togglePlugin(name: String, enabled: Bool) async throws {
         struct Req: Encodable { let name: String; let enabled: Bool }
         struct Ack: Decodable { let ok: Bool }
@@ -207,13 +218,28 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     let unsupportedComponents: [String]
     /// Vendor components present but inactive until a later phase (hooks, MCP).
     let pendingComponents: [String]
+    /// Runnable hook handlers the plugin declares. Zero means there is nothing
+    /// to trust, and the trust toggle stays hidden.
+    let hookCount: Int
+    /// What llm-ide will NOT run from this plugin's hooks file (non-command
+    /// handler types, unsupported events, refused commands).
+    let hookNotes: [String]
+    /// Whether THIS user has authorized this plugin's hooks to run shell
+    /// commands. Never implied by enabling the plugin.
+    let hooksTrusted: Bool
+    /// MCP servers the plugin declares; each needs its own consent in the MCP
+    /// Plugins section before it connects.
+    let mcpServerCount: Int
     var id: String { name }
-    static func == (lhs: PluginInfo, rhs: PluginInfo) -> Bool { lhs.name == rhs.name && lhs.enabled == rhs.enabled }
+    static func == (lhs: PluginInfo, rhs: PluginInfo) -> Bool {
+        lhs.name == rhs.name && lhs.enabled == rhs.enabled && lhs.hooksTrusted == rhs.hooksTrusted
+    }
 
     enum CodingKeys: String, CodingKey {
         case name, version, displayName, description, author
         case enabled, skillCount, commands, subagents
         case format, unsupportedComponents, pendingComponents
+        case hookCount, hookNotes, hooksTrusted, mcpServerCount
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -229,6 +255,10 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         self.format      = try c.decodeIfPresent(String.self, forKey: .format) ?? "llmide"
         self.unsupportedComponents = try c.decodeIfPresent([String].self, forKey: .unsupportedComponents) ?? []
         self.pendingComponents     = try c.decodeIfPresent([String].self, forKey: .pendingComponents) ?? []
+        self.hookCount      = try c.decodeIfPresent(Int.self, forKey: .hookCount) ?? 0
+        self.hookNotes      = try c.decodeIfPresent([String].self, forKey: .hookNotes) ?? []
+        self.hooksTrusted   = try c.decodeIfPresent(Bool.self, forKey: .hooksTrusted) ?? false
+        self.mcpServerCount = try c.decodeIfPresent(Int.self, forKey: .mcpServerCount) ?? 0
     }
 }
 
