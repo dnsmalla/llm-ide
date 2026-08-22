@@ -274,6 +274,15 @@ enum LoopStageDetector {
     /// below are relative to the PROJECT root (the folder holding
     /// `system/project.json`), which in the clone-into-code layout is two
     /// levels above the git root — the prompt tells the agent how to find it.
+    /// Stage keys of detector defaults that exist on EVERY tree with a
+    /// resolvable git root — the Plan loop's two skill stages. Like the bare
+    /// Regression sweep, their presence proves nothing about the tree's
+    /// contents, so `LoopEngineConfig.shouldPersist` must not read them as
+    /// "real tooling was detected" (an all-unconditional detection can still
+    /// mean "the tree has not finished populating"). Keep in sync with
+    /// `planStages()` below.
+    static let unconditionalStageKeys: Set<String> = ["plan-structure-index", "plan-director"]
+
     private static func planStages() -> [LoopStage] {
         [
             LoopStage(name: "Structure Index", kind: .skill, order: 0,
@@ -282,13 +291,14 @@ enum LoopStageDetector {
                       outputPath: "llm-doc/plans/INDEX.md",
                       prompt: "Refresh the plan structure index: read every plan in the Input directory and "
                           + "rewrite only the drifted sections of the Output index file, creating it if missing. "
-                          + "Paths are relative to the project root — the directory containing system/project.json: "
-                          + "the repo root itself, or two levels up when the repo is checked out under code/. The "
-                          + "index holds: a folder-structure index of the codebase, a file index and a function "
-                          + "index for the areas the collected plans touch, and a registry of every plan file in "
-                          + "the Input directory. With no plans yet, build the index from the code itself: entry "
-                          + "points, each area's key modules and public functions, and every refactor candidate "
-                          + "(files over 500 lines), marked status proposed.",
+                          + "Resolve relative paths against the repo root first, then the project root (the "
+                          + "directory containing system/project.json — the repo root itself, or two levels up "
+                          + "when the repo is checked out under code/). The index holds: a folder-structure index "
+                          + "of the codebase, a file index and a function index for the areas the collected plans "
+                          + "touch, and a registry of every plan file in the Input directory. With no plans yet, "
+                          + "build the index from the code itself: entry points, each area's key modules and "
+                          + "public functions, and the largest refactor candidates (files over 500 lines), rows "
+                          + "marked status proposed.",
                       isDefault: true, defaultKey: "plan-structure-index"),
             LoopStage(name: "Plan Director", kind: .skill, order: 1,
                       skillId: "skills/plan-director",
@@ -299,8 +309,8 @@ enum LoopStageDetector {
                           + "task ID, a status, and links back to its source plan and its structure-index rows. "
                           + "With no plans yet, derive the first master plan from the code itself via the "
                           + "structure index: propose areas from real signals (oversized files, missing tests, "
-                          + "TODO/FIXME markers, layering violations), with concrete function tasks marked "
-                          + "proposed — future plans build on these indexes. Keep every generated plan file "
+                          + "TODO/FIXME markers, layering violations), each area marked status proposed — future "
+                          + "plans build on these indexes. Keep every generated plan file "
                           + "within the 250-line limit, splitting oversized areas into an areas/ folder beside "
                           + "the Output file. Preserve existing task IDs and completed ticks; never delete or "
                           + "rewrite the source plans.",

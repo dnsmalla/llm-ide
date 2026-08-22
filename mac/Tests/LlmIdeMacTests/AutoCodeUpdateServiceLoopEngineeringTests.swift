@@ -139,8 +139,9 @@ final class AutoCodeUpdateServiceLoopEngineeringTests: XCTestCase {
 
         let store = LoopEngineConfigStore.loops(projectRoot: tempDir, projectId: "parked",
                                                 gitRoot: tempDir, defaults: suite)
-        XCTAssertEqual(store.scheduledLoops.compactMap(\.defaultKey), [LoopDefaultLoopKey.regression],
-                       "only the Regression loop has a stage to run in a bare tree")
+        XCTAssertEqual(store.scheduledLoops.compactMap(\.defaultKey),
+                       [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.plan],
+                       "only the unconditional loops (Regression, Plan) have stages to run in a bare tree")
         XCTAssertTrue(store.loops.contains { !$0.isDefault && $0.config.stages.isEmpty },
                       "the editable loop exists, it is just not a target yet")
     }

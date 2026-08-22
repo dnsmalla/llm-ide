@@ -134,7 +134,13 @@ struct LoopEngineConfig: Codable, Equatable {
     /// persists a detection at all: `LoopEngineHomeView` is the only creator
     /// of loops, so a detection there is for display only.
     static func shouldPersist(_ stages: [LoopStage]) -> Bool {
-        stages.contains { $0.kind != .regressionSweep }
+        // The Plan loop's skill stages are as unconditional as the Regression
+        // sweep — the detector emits them for any resolvable git root — so
+        // they carry no evidence the tree has finished populating either.
+        stages.contains { stage in
+            stage.kind != .regressionSweep
+                && !LoopStageDetector.unconditionalStageKeys.contains(stage.defaultKey ?? "")
+        }
     }
 
     /// - Parameter projectId: Must be the stable `Project.id`

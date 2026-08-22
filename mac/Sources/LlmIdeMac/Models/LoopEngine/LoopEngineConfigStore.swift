@@ -117,9 +117,10 @@ enum LoopEngineConfigStore {
     ///
     /// **When it writes.** Only when the ensure actually changed something AND
     /// the result is worth committing: either the project already had a saved
-    /// file, or the ensured list contains a stage beyond the bare Regression
-    /// sweep (`LoopEngineConfig.shouldPersist`, applied across all loops). That
-    /// is the same rule as before — an all-Regression detection can mean "the
+    /// file, or the ensured list contains a stage beyond the unconditional
+    /// defaults — the bare Regression sweep and the Plan loop's skill stages
+    /// (`LoopEngineConfig.shouldPersist`, applied across all loops). That is
+    /// the same rule as before — an all-unconditional detection can mean "the
     /// tree has not finished populating", and persisting it would silently
     /// disable a Test loop for good. `projectRoot == nil` never writes.
     static func loops(projectRoot: URL?, projectId: String, gitRoot: URL?,

@@ -269,14 +269,14 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           outputPath: "llm-doc/plans/INDEX.md",
                           prompt: "Refresh the plan structure index: read every plan in the Input directory and "
                               + "rewrite only the drifted sections of the Output index file, creating it if "
-                              + "missing. Paths are relative to the project root — the directory containing "
-                              + "system/project.json: the repo root itself, or two levels up when the repo is "
-                              + "checked out under code/. The index holds: a folder-structure index of the "
-                              + "codebase, a file index and a function index for the areas the collected plans "
-                              + "touch, and a registry of every plan file in the Input directory. With no plans "
-                              + "yet, build the index from the code itself: entry points, each area's key modules "
-                              + "and public functions, and every refactor candidate (files over 500 lines), "
-                              + "marked status proposed."),
+                              + "missing. Resolve relative paths against the repo root first, then the project "
+                              + "root (the directory containing system/project.json — the repo root itself, or "
+                              + "two levels up when the repo is checked out under code/). The index holds: a "
+                              + "folder-structure index of the codebase, a file index and a function index for "
+                              + "the areas the collected plans touch, and a registry of every plan file in the "
+                              + "Input directory. With no plans yet, build the index from the code itself: entry "
+                              + "points, each area's key modules and public functions, and the largest refactor "
+                              + "candidates (files over 500 lines), rows marked status proposed."),
                 LoopStage(name: "Plan Director", kind: .skill, order: 1,
                           skillId: "skills/plan-director",
                           targetPath: "llm-doc/plans",
@@ -286,8 +286,8 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                               + "a stable task ID, a status, and links back to its source plan and its "
                               + "structure-index rows. With no plans yet, derive the first master plan from the "
                               + "code itself via the structure index: propose areas from real signals (oversized "
-                              + "files, missing tests, TODO/FIXME markers, layering violations), with concrete "
-                              + "function tasks marked proposed — future plans build on these indexes. Keep every "
+                              + "files, missing tests, TODO/FIXME markers, layering violations), each area marked "
+                              + "status proposed — future plans build on these indexes. Keep every "
                               + "generated plan file within the 250-line limit, splitting oversized areas into an "
                               + "areas/ folder beside the Output file. Preserve existing task IDs and completed "
                               + "ticks; never delete or rewrite the source plans.")
