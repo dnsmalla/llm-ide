@@ -11,8 +11,13 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSkills } from './loader.mjs';
 import { loadPlugins } from '../../plugins/loader.mjs';
-import { listEnabled as listEnabledPlugins, pruneOrphans as prunePluginOrphans } from '../../plugins/state.mjs';
+import {
+  listEnabled as listEnabledPlugins,
+  listHooksTrusted as listHooksTrustedPlugins,
+  pruneOrphans as prunePluginOrphans,
+} from '../../plugins/state.mjs';
 import { syncPluginMcpServers } from '../../mcp/state.mjs';
+import { buildPluginHooks } from '../sdk/hooks.mjs';
 import { INTERNAL_HANDLERS } from '../runtime/handlers/ask-internal.mjs';
 import { GLOBAL_HANDLER_NAMES } from '../runtime/global-handlers.mjs';
 
@@ -129,6 +134,27 @@ export function reloadPlugins() {
     count: pluginRegistry.plugins.size,
     warnings: pluginRegistry.warnings,
   };
+}
+
+/**
+ * The SDK `hooks` option for this user: the hook declarations of every plugin
+ * that is BOTH enabled and hook-trusted. Both switches are required — enabling
+ * a plugin adds prompt text, trusting its hooks lets it run shell commands,
+ * and conflating the two would turn a routine toggle into a much larger grant.
+ *
+ * Only the v2 SDK engine consumes this; the legacy CLI path has no hook
+ * surface, so a plugin's hooks stay catalogued-only there.
+ */
+export function buildUserPluginHooks(userId, { cwd, env, onNote } = {}) {
+  const enabled = listEnabledPlugins(userId);
+  const trusted = listHooksTrustedPlugins(userId);
+  const candidates = [];
+  for (const p of pluginRegistry.plugins.values()) {
+    if (!enabled.has(p.name)) continue;
+    if (!Array.isArray(p.hooks) || p.hooks.length === 0) continue;
+    candidates.push({ name: p.name, hooks: p.hooks });
+  }
+  return buildPluginHooks(candidates, { trusted, cwd, env, onNote });
 }
 
 /** What every installed plugin declares in its `.mcp.json`, grouped by plugin. */

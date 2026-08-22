@@ -6,7 +6,12 @@
 // authenticated users with different enable sets.
 //
 // File: <pluginDir>/../plugin-state.json
-// Shape: { [userId]: { enabled: string[] } }
+// Shape: { [userId]: { enabled: string[], hooksTrusted?: string[] } }
+//
+// `hooksTrusted` is additive: a state file written before hooks existed has
+// only `enabled` and keeps working (absent means "trusted nothing"). Every
+// writer below MERGES into the existing user entry rather than replacing it,
+// or toggling one list would silently erase the other.
 //
 // Writes are atomic (tmp file + rename) so a crash mid-save can't
 // corrupt the file.
@@ -60,7 +65,31 @@ export function setEnabled(userId, pluginName, enabled) {
   const cur = new Set(all[userId]?.enabled || []);
   if (enabled) cur.add(pluginName);
   else cur.delete(pluginName);
-  all[userId] = { enabled: [...cur].sort() };
+  all[userId] = { ...all[userId], enabled: [...cur].sort() };
+  writeAll(all);
+  return cur;
+}
+
+/**
+ * Plugins whose HOOKS this user has trusted. Hooks run shell commands the
+ * plugin author wrote, in the server's own process environment — far more
+ * capability than a skill or a command template — so trust is separate from
+ * enabling, explicit, and default-off. An empty Set is the norm.
+ */
+export function listHooksTrusted(userId) {
+  if (!userId) return new Set();
+  const arr = readAll()[userId]?.hooksTrusted;
+  return new Set(Array.isArray(arr) ? arr.filter((s) => typeof s === 'string') : []);
+}
+
+/** Grant or revoke hook trust for one plugin. Returns the new full Set. */
+export function setHooksTrusted(userId, pluginName, trusted) {
+  if (!userId || typeof pluginName !== 'string') return new Set();
+  const all = readAll();
+  const cur = new Set(all[userId]?.hooksTrusted || []);
+  if (trusted) cur.add(pluginName);
+  else cur.delete(pluginName);
+  all[userId] = { ...all[userId], hooksTrusted: [...cur].sort() };
   writeAll(all);
   return cur;
 }
@@ -78,15 +107,25 @@ export function pruneOrphans(installedNames) {
   const all = readAll();
   let touched = false;
   for (const [userId, entry] of Object.entries(all)) {
-    if (!entry || !Array.isArray(entry.enabled)) continue;
-    const before = entry.enabled.length;
-    const filtered = entry.enabled.filter((n) => installedNames.has(n));
-    if (filtered.length !== before) {
-      all[userId] = { enabled: filtered };
+    if (!entry || typeof entry !== 'object') continue;
+    const enabled = Array.isArray(entry.enabled) ? entry.enabled : [];
+    const trusted = Array.isArray(entry.hooksTrusted) ? entry.hooksTrusted : [];
+    const keptEnabled = enabled.filter((n) => installedNames.has(n));
+    // Hook trust is pruned with the same rule: an uninstalled plugin must not
+    // keep a standing grant to run shell commands, or reinstalling something
+    // by the same name would silently inherit it.
+    const keptTrusted = trusted.filter((n) => installedNames.has(n));
+    if (keptEnabled.length !== enabled.length || keptTrusted.length !== trusted.length) {
+      all[userId] = {
+        ...entry,
+        enabled: keptEnabled,
+        ...(keptTrusted.length ? { hooksTrusted: keptTrusted } : {}),
+      };
+      if (!keptTrusted.length) delete all[userId].hooksTrusted;
       touched = true;
     }
-    // Drop the user entry entirely if their enable list went to empty.
-    if (filtered.length === 0) {
+    // Drop the user entry entirely once nothing is left to remember.
+    if (keptEnabled.length === 0 && keptTrusted.length === 0) {
       delete all[userId];
       touched = true;
     }

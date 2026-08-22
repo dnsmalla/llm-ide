@@ -37,7 +37,9 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import {
   personaForMode, PLAN_LIKE_MODES, restrictsTools, allowedToolNames,
 } from '../runtime/mode-personas.mjs';
-import { readSkillInstructions, buildPerUserSkillSet, internalSkills, pluginEnabledFor } from '../skills/index.mjs';
+import {
+  readSkillInstructions, buildPerUserSkillSet, internalSkills, pluginEnabledFor, buildUserPluginHooks,
+} from '../skills/index.mjs';
 import { composeSystemContext } from '../internal/context/compose.mjs';
 import { buildReadableRoots, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
 import { expandTilde } from '../../graphkit/memory.mjs';
@@ -762,11 +764,21 @@ export async function runAgentV2Turn(
   // server, with their server-level specs appended to the allowlist composed
   // by buildEngineOptions.
   const userMcp = buildUserMcpServers(userId, mode);
+  // Hooks from plugins this user both enabled AND hook-trusted. Absent that
+  // trust this is `{}` and the SDK gets no hooks option at all — a plugin
+  // cannot arrange to run a shell command by being merely installed. Hook
+  // commands run in the turn's workspace so a plugin script sees the repo the
+  // user is actually working in.
+  const pluginHooks = buildUserPluginHooks(userId, {
+    cwd: queryOptions.cwd,
+    onNote: (note) => console.warn(note),
+  });
   const q = queryFactory(prompt, {
     ...queryOptions,
     ...(userMcp.allowedTools.length
       ? { allowedTools: [...(queryOptions.allowedTools || []), ...userMcp.allowedTools] }
       : {}),
+    ...(Object.keys(pluginHooks).length ? { hooks: pluginHooks } : {}),
     mcpServers: {
       llmide: buildLlmIdeServer(userId, agentContext, message, {
         runClaude,
