@@ -35,8 +35,9 @@ import { iterateUserMeetings } from '../kb/exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../connectors/email-source.mjs';
 import { testConnection as slackTest, fetchChannelHistory, listUserConversations } from '../connectors/slack-source.mjs';
-import { testMcpConnection } from '../connectors/mcp-client.mjs';
+import { testMcpConnection, fetchMcpItems, markMcpSeen } from '../connectors/mcp-client.mjs';
 import { mcpConnectorDef } from '../connectors/mcp-connector-defs.mjs';
+import { classifyConnectorItem } from '../agents/connector-classify.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
@@ -724,34 +725,120 @@ export async function handleKB(req, res) {
       return true;
     }
 
-    // MCP-backed connectors (Miro today; gdrive/gcal in phase 3) ---
+    // MCP-backed connectors — ONE block, every connector, all four endpoints.
     //
-    // One route block serves every MCP connector — the descriptor in
-    // connectors/mcp-connector-defs.mjs carries everything provider-specific.
-    // This is the `test` endpoint of the Mac manifest's four; fetch/seen/
-    // classify join it in phase 2b.
-    if (req.method === 'POST' && url === '/kb/mcp-connector/test') {
+    // The manifest engine declares test/fetch/seen/classify per connector; the
+    // connector id travels in the request body, so one block serves Miro today
+    // and gdrive/gcal in phase 3 with no route change. Everything
+    // provider-specific lives in connectors/mcp-connector-defs.mjs.
+    //
+    // classify is handled first because it is the only action whose payload is
+    // NOT { id, … }: the Mac's postClassification helper sends the manifest
+    // engine's fixed { body: { …fields } } envelope, so the connector id rides
+    // inside the field map.
+    if (req.method === 'POST' && url.startsWith('/kb/mcp-connector/')) {
+      const action = url.slice('/kb/mcp-connector/'.length);
       const body = parseJSON(await readBody(req)) || {};
+
+      if (action === 'classify') {
+        const fields = body.body;
+        const text = typeof fields?.text === 'string' ? fields.text.trim() : '';
+        if (!fields || typeof fields !== 'object' || !text) {
+          sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'body.text is required' } });
+          return true;
+        }
+        try {
+          const out = await classifyConnectorItem({
+            userId,
+            source: mcpConnectorDef(fields.connectorId)?.name || fields.connectorId || 'a connector',
+            title: fields.title || '',
+            date: fields.date || '',
+            text,
+          });
+          sendJSON(res, 200, out);
+        } catch (e) {
+          logger.error('mcp_connector_classify_failed', {
+            userId,
+            connector: fields.connectorId,
+            code: e.code || 'UPSTREAM_ERROR',
+            reason: redactSecrets(e.message || 'classify failed'),
+          });
+          if (e.code === 'CONNECTOR_CLASSIFY_FAILED') {
+            sendJSON(res, 502, { error: { code: 'CONNECTOR_CLASSIFY_FAILED', message: e.message } });
+          } else {
+            sendJSON(res, 500, { error: { code: 'UPSTREAM_ERROR', message: e.message || 'classify failed' } });
+          }
+        }
+        return true;
+      }
+
       const def = mcpConnectorDef(typeof body.id === 'string' ? body.id : '');
       if (!def) {
         sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Unknown MCP connector id' } });
         return true;
       }
+
       try {
-        const r = await testMcpConnection(kb.getDb(), userId, def);
-        logger.info('mcp_connector_test', { userId, connector: def.id, tools: r.tools.length });
-        sendJSON(res, 200, { ok: true, ...r });
-      } catch (e) {
-        // "Connect it first" is a user action, not a server fault — 400, so
-        // the Mac card offers Connect instead of a retry.
-        if (e?.code === 'MCP_UNAUTHORIZED') {
-          sendJSON(res, 400, { error: { code: 'MCP_UNAUTHORIZED', message: e.message } });
+        if (action === 'test') {
+          const r = await testMcpConnection(kb.getDb(), userId, def);
+          logger.info('mcp_connector_test', { userId, connector: def.id, tools: r.tools.length });
+          sendJSON(res, 200, { ok: true, ...r });
           return true;
         }
-        logger.error('mcp_connector_test_failed', { userId, connector: def.id, reason: redactSecrets(e.message) });
-        sendJSON(res, 502, { error: { code: 'MCP_CONNECT_FAILED', message: redactSecrets(e.message) } });
+
+        if (action === 'fetch') {
+          const limit = Number.isFinite(body.limit) ? Math.min(Math.max(body.limit, 1), 200) : undefined;
+          const started = Date.now();
+          const r = await fetchMcpItems(kb.getDb(), userId, def, { limit });
+          logger.info('mcp_connector_fetch', {
+            userId,
+            connector: def.id,
+            count: r.items.length,
+            overCap: r.overCap,
+            failures: r.failures.length,
+            durationMs: Date.now() - started,
+          });
+          // Partial success stays a 200: turning one unreadable board into an
+          // error would discard every item the healthy boards produced.
+          sendJSON(res, 200, {
+            items: r.items,
+            drained: r.drained,
+            skipped: { overCap: r.overCap },
+            failures: r.failures.map((f) => redactSecrets(f)),
+          });
+          // No activity-feed entry here on purpose: 'connector_fetched' is not
+          // in ACTIVITY_KINDS, and adding a kind means editing that Set AND
+          // Swift's ActivityKind enum in sync (an unknown kind decodes to nil
+          // on the Mac side rather than failing loudly). The feed entry is a
+          // nicety and must not block the endpoint — it lands in a later
+          // change that can touch both enums.
+          return true;
+        }
+
+        if (action === 'seen') {
+          const ids = Array.isArray(body.itemIds) ? body.itemIds : [];
+          const { marked } = markMcpSeen(kb.getDb(), userId, def, ids);
+          sendJSON(res, 200, { ok: true, marked });
+          return true;
+        }
+
+        sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: `Unknown MCP connector action '${action}'` } });
+        return true;
+      } catch (e) {
+        // "Connect it first" and "this connector has no fetch mapping yet" are
+        // both client-actionable, so 400 — the Mac card offers Connect rather
+        // than an endless retry.
+        if (e?.code === 'MCP_UNAUTHORIZED' || e?.code === 'MCP_NOT_FETCHABLE') {
+          sendJSON(res, 400, { error: { code: e.code, message: e.message } });
+          return true;
+        }
+        const code = action === 'fetch' ? 'MCP_FETCH_FAILED' : 'MCP_CONNECT_FAILED';
+        logger.error('mcp_connector_failed', {
+          userId, connector: def.id, action, reason: redactSecrets(e.message),
+        });
+        sendJSON(res, 502, { error: { code, message: redactSecrets(e.message) } });
+        return true;
       }
-      return true;
     }
 
     // Activity feed ---------------------------------------------------

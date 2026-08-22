@@ -97,7 +97,15 @@ const HOST = config.host;
 //     against a remote MCP server. The /auth/mcp-connector/{start,callback,
 //     status} routes land in the same change but are /auth/* paths — not
 //     tracked in ENDPOINTS by convention.
-const SERVER_API_VERSION = 38;
+// 38→39: MCP-backed connectors, phase 2b. Three new endpoints beside the
+//     phase-2a test route, all served from one route block for every MCP
+//     connector: POST /kb/mcp-connector/fetch ({ id, limit? } -> { items,
+//     drained, skipped, failures }), /seen ({ id, itemIds } -> { ok, marked })
+//     and /classify (the manifest engine's { body: {…} } envelope -> a
+//     SourceConnectorClassification). /kb/mcp-connector/test additionally
+//     returns `toolSchemas` — additive, and the only offline-safe way to read
+//     a remote server's real tool argument names.
+const SERVER_API_VERSION = 39;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -136,6 +144,9 @@ const ENDPOINTS = [
   '/kb/box/test',
   '/kb/connect-box',
   '/kb/mcp-connector/test',
+  '/kb/mcp-connector/fetch',
+  '/kb/mcp-connector/seen',
+  '/kb/mcp-connector/classify',
   '/kb/activity',
   '/kb/activity/seen',
   '/kb/usage/limits',
@@ -269,10 +280,15 @@ function rateLimitProfile(url, method) {
   // cost profile as slack/email test — dispatch bucket. (/kb/connect-box is
   // special-cased onto dispatch above, before the '/kb/connect-' rule.)
   if (url === '/kb/box/test') return 'dispatch';
-  // MCP connector test opens a real session to a remote MCP server (discovery
-  // + token refresh + initialize + tools/list) — same externally-directed cost
-  // profile as slack/box/email test, so the same dispatch bucket.
-  if (url === '/kb/mcp-connector/test') return 'dispatch';
+  // MCP connector test + fetch open a real session to a remote MCP server
+  // (discovery + token refresh + initialize + tools/call) — same
+  // externally-directed cost profile as slack/box/email test, so the same
+  // dispatch bucket. seen is a cheap LOCAL ledger write (kbWrite, exactly like
+  // /kb/slack/seen), and classify is one Claude call (llm, exactly like
+  // /kb/email/classify).
+  if (url === '/kb/mcp-connector/test' || url === '/kb/mcp-connector/fetch') return 'dispatch';
+  if (url === '/kb/mcp-connector/seen') return 'kbWrite';
+  if (url === '/kb/mcp-connector/classify') return 'llm';
   if (url === '/kb/activity' || url === '/kb/activity/seen') return 'kbWrite';
   // Local filesystem symlink install of the skills kit into a project path.
   if (url === '/kb/project/install-skills') return 'kbWrite';

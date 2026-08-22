@@ -526,8 +526,116 @@ paths:
                   ok:     { type: boolean }
                   server: { type: object, properties: { name: { type: string }, version: { type: string } } }
                   tools:  { type: array, items: { type: string } }
+                  toolSchemas:
+                    type: array
+                    description: Per-tool JSON Schema for the tool's arguments — the only offline-safe way to read a remote server's real argument names.
+                    items:
+                      type: object
+                      properties:
+                        name:        { type: string }
+                        inputSchema: { type: object, nullable: true }
         '400': { description: Unknown connector id, or not connected (MCP_UNAUTHORIZED), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: MCP connection failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/mcp-connector/fetch:
+    post:
+      summary: Fetch new items from a remote MCP connector (server-side dedup against the seen ledger)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id:    { type: string, enum: [miro] }
+                limit: { type: integer, minimum: 1, maximum: 200 }
+      responses:
+        '200':
+          description: Items not yet imported. Partial success — one unreadable parent is reported in `failures`, not as an error.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:     { type: string, description: 'Stable dedup key, `<connector>:<parent>:<item>`' }
+                        fields: { type: object, additionalProperties: { type: string } }
+                        body:   { type: string }
+                  drained:  { type: boolean }
+                  skipped:  { type: object, properties: { overCap: { type: integer } } }
+                  failures: { type: array, items: { type: string } }
+        '400': { description: 'Unknown connector id, not connected (MCP_UNAUTHORIZED), or no fetch mapping (MCP_NOT_FETCHABLE)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: MCP fetch failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/mcp-connector/seen:
+    post:
+      summary: Mark MCP connector item ids as imported (per user, per connector)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, itemIds]
+              properties:
+                id:      { type: string, enum: [miro] }
+                itemIds: { type: array, items: { type: string }, maxItems: 500 }
+      responses:
+        '200':
+          description: Marked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:     { type: boolean }
+                  marked: { type: integer, description: 'Rows actually inserted; re-marking is a no-op' }
+        '400': { description: Unknown connector id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /kb/mcp-connector/classify:
+    post:
+      summary: Classify one ingested connector item and extract to-dos
+      description: >-
+        Accepts the Source Connector manifest engine's fixed `{ body: { …fields } }`
+        envelope; the connector id rides inside the field map as `connectorId`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: object
+                  additionalProperties: { type: string }
+      responses:
+        '200':
+          description: Classification
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  category:   { type: string, enum: [work, decision, action_request, meeting, reference, design, chatter, noise, other] }
+                  noteWorthy: { type: boolean }
+                  summary:    { type: string }
+                  todos:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        title:    { type: string }
+                        detail:   { type: string }
+                        due:      { type: string, nullable: true }
+                        priority: { type: string, enum: [low, med, high] }
+        '400': { description: Missing body.text, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: The model did not return valid JSON, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/slack/fetch:
     post:
