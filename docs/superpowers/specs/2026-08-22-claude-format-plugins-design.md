@@ -1,9 +1,26 @@
 # Claude-Format Plugins for LLM-IDE — Design
 
 **Date:** 2026-08-22
-**Status:** Approved design, pending implementation plan
+**Status:** Implemented — phase 1 merged 2026-08-22 (047cbc4); phases 2-4
+implemented 2026-08-23 on `feat/claude-format-plugins-phase2`.
+
 **Approach:** C — Hybrid (native Claude-format loader + per-engine component routing)
 **Hook trust model:** Per-plugin consent gate (stronger than Claude Code's default, consistent with LLM-IDE's MCP consent model)
+
+**Deviations from this design, and why:**
+
+- Phase 2's plugin-scoped MCP entries are ordinary registry records carrying
+  `source: 'plugin'` + `pluginName` (id `<plugin>-<server>`), not a
+  `plugin:<name>` id — the registry's slug rule has no room for a colon, and a
+  stable slug is what per-user consent keys off.
+- Phase 4's marketplace browse clones with the existing client-side git
+  installer and only offers plugins whose `source` is a path INSIDE that repo;
+  entries pointing at another repository are listed as not-installable rather
+  than followed.
+- The unsupported-component catalogue is structured output, never a loader
+  warning: the installer treats any warning as fatal, so warning about a
+  `themes/` directory rejected exactly the packages this design says must
+  install.
 
 ## Context
 
