@@ -28,7 +28,7 @@
 // only loads the enabled ones.
 
 import { readdirSync, readFileSync, lstatSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import os from 'node:os';
 import * as yaml from 'js-yaml';
 
@@ -97,6 +97,9 @@ const MAX_SUBAGENT_BYTES = 32_768;   // 32 KB per subagent system prompt
 const MAX_FILES_PER_DIR  = 50;       // max skills/commands/subagents per plugin
 const MAX_MCP_JSON_BYTES = 65_536;   // 64 KB per .mcp.json
 const MAX_MCP_SERVERS    = 20;       // max servers one plugin may declare
+const MAX_HOOKS_JSON_BYTES = 65_536; // 64 KB per hooks.json
+const MAX_HOOKS          = 40;       // max hook handlers one plugin may declare
+const HOOK_TIMEOUT_MS    = 30_000;   // per-handler ceiling AND default
 
 // Strip known prompt-injection delimiters that the server itself uses
 // as content fences.  A plugin author could accidentally (or
@@ -378,6 +381,103 @@ function parseMcpDeclarations(path) {
   return { declarations, warnings };
 }
 
+
+// The hook events llm-ide can actually deliver on the v2 (Agent SDK) engine.
+// Claude Code defines many more; a plugin naming one of those gets it
+// catalogued, never silently treated as wired up.
+const SUPPORTED_HOOK_EVENTS = new Set([
+  'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart', 'SessionEnd',
+  'Stop', 'SubagentStop', 'PreCompact', 'Notification',
+]);
+
+/**
+ * Parse a vendor plugin's `hooks/hooks.json`.
+ *
+ * Returns `{ hooks, notes }`: `hooks` are `command`-type handlers on events
+ * this engine delivers — the only kind that can ever run, and only once the
+ * user trusts the plugin's hooks explicitly. `notes` describe everything that
+ * was recognized but will NOT run (http/mcp_tool/prompt/agent handlers,
+ * unsupported events, refused commands) so the UI can say so plainly.
+ *
+ * Nothing here executes anything, and problems are notes rather than
+ * warnings: the installer fails a bundle on any loader warning, and a plugin
+ * whose hooks llm-ide won't run must still install.
+ */
+function parseHookDeclarations(path, pluginDir) {
+  const notes = [];
+  let raw;
+  try { raw = readFileSync(path, 'utf8'); }
+  catch (err) { return { hooks: [], notes: [`hooks.json: read failed: ${err.message}`] }; }
+  if (Buffer.byteLength(raw, 'utf8') > MAX_HOOKS_JSON_BYTES) {
+    return { hooks: [], notes: [`hooks.json: exceeds ${MAX_HOOKS_JSON_BYTES} byte limit`] };
+  }
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (err) { return { hooks: [], notes: [`hooks.json: parse: ${err.message}`] }; }
+  const events = parsed?.hooks;
+  if (!events || typeof events !== 'object' || Array.isArray(events)) return { hooks: [], notes };
+
+  const hooks = [];
+  for (const [event, matchers] of Object.entries(events)) {
+    if (!SUPPORTED_HOOK_EVENTS.has(event)) {
+      notes.push(`${event}: event not supported here — declared hooks will not run`);
+      continue;
+    }
+    for (const entry of Array.isArray(matchers) ? matchers : []) {
+      const matcher = typeof entry?.matcher === 'string' && entry.matcher ? entry.matcher : null;
+      for (const handler of Array.isArray(entry?.hooks) ? entry.hooks : []) {
+        if (hooks.length >= MAX_HOOKS) {
+          notes.push(`more than ${MAX_HOOKS} hooks declared — extras ignored`);
+          return { hooks, notes };
+        }
+        if (handler?.type !== 'command') {
+          notes.push(`${event}: '${handler?.type || 'unknown'}' handlers are shown but not run`);
+          continue;
+        }
+        const expanded = expandPluginRoot(handler.command, pluginDir);
+        if (expanded.error) {
+          notes.push(`${event}: ${expanded.error}`);
+          continue;
+        }
+        const declared = Number(handler.timeout);
+        hooks.push({
+          event,
+          matcher,
+          command: expanded.command,
+          timeoutMs: Number.isFinite(declared) && declared > 0
+            ? Math.min(declared * 1000, HOOK_TIMEOUT_MS)
+            : HOOK_TIMEOUT_MS,
+        });
+      }
+    }
+  }
+  return { hooks, notes };
+}
+
+/**
+ * Substitute the `${CLAUDE_PLUGIN_ROOT}` / `${CODEX_PLUGIN_ROOT}` variables
+ * both vendors use, and refuse a command whose resolved script escapes the
+ * plugin directory — a plugin may only run its OWN files.
+ */
+function expandPluginRoot(command, pluginDir) {
+  if (typeof command !== 'string' || !command.trim()) return { error: 'hook command is empty' };
+  const expanded = command
+    .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, pluginDir)
+    .replace(/\$\{CODEX_PLUGIN_ROOT\}/g, pluginDir)
+    .trim();
+  // Only paths pointing INTO the plugin are checked for containment; a bare
+  // shell word (`echo hi`, `git status`) is not a plugin file reference.
+  const first = expanded.split(/\s+/)[0];
+  if (first.startsWith('/') || first.startsWith('.')) {
+    const target = resolve(first);
+    const root = resolve(pluginDir);
+    if (target !== root && !target.startsWith(root + sep)) {
+      return { error: `hook command resolves outside the plugin directory (${first})` };
+    }
+  }
+  return { command: expanded };
+}
+
 /**
  * Walk one plugin directory. Returns { plugin, warnings } or { error }.
  */
@@ -560,11 +660,18 @@ function loadOnePlugin(dir) {
   const unsupportedComponents = [];
   const pendingComponents = [];
   const mcpServers = [];
+  const hooks = [];
+  const hookNotes = [];
   if (format === 'claude') {
     for (const rel of ['themes', 'output-styles', 'monitors', 'workflows', 'bin', '.lsp.json', 'settings.json']) {
       if (existsSync(join(dir, rel))) unsupportedComponents.push(rel);
     }
-    if (existsSync(join(dir, 'hooks', 'hooks.json'))) pendingComponents.push('hooks');
+    if (existsSync(join(dir, 'hooks', 'hooks.json'))) {
+      pendingComponents.push('hooks');
+      const parsed = parseHookDeclarations(join(dir, 'hooks', 'hooks.json'), dir);
+      hooks.push(...parsed.hooks);
+      hookNotes.push(...parsed.notes);
+    }
     if (existsSync(join(dir, '.mcp.json'))) {
       pendingComponents.push('mcp');
       const parsed = parseMcpDeclarations(join(dir, '.mcp.json'));
@@ -589,6 +696,8 @@ function loadOnePlugin(dir) {
       unsupportedComponents,
       pendingComponents,
       mcpServers,
+      hooks,
+      hookNotes,
     },
     warnings,
   };

@@ -610,3 +610,87 @@ test('own format: no mcp declarations are read even if a .mcp.json exists', () =
   assert.deepEqual(plugins.get('example').mcpServers, []);
   rmSync(root, { recursive: true, force: true });
 });
+
+// --- Plugin hooks (hooks/hooks.json) ---
+
+const HOOKS_JSON = JSON.stringify({
+  hooks: {
+    PreToolUse: [{
+      matcher: 'Bash',
+      hooks: [
+        { type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/scripts/guard.sh', timeout: 12 },
+        { type: 'http', url: 'https://example.com/hook' },
+      ],
+    }],
+    SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }] }],
+    NotAnEvent: [{ hooks: [{ type: 'command', command: 'echo nope' }] }],
+  },
+});
+
+test('hooks: command handlers are parsed, plugin root expanded, others catalogued', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'hooks'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'hooks', 'hooks.json'), HOOKS_JSON, 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(warnings.length, 0, `catalogue must not warn: ${warnings.join(', ')}`);
+  const p = plugins.get('example');
+  assert.deepEqual(p.pendingComponents, ['hooks']);
+
+  assert.equal(p.hooks.length, 2, 'two runnable command handlers');
+  const pre = p.hooks.find((h) => h.event === 'PreToolUse');
+  assert.equal(pre.matcher, 'Bash');
+  assert.equal(pre.command, join(dir, 'scripts', 'guard.sh'),
+    '${CLAUDE_PLUGIN_ROOT} resolves to the plugin directory');
+  assert.equal(pre.timeoutMs, 12_000);
+  const start = p.hooks.find((h) => h.event === 'SessionStart');
+  assert.equal(start.matcher, null);
+  assert.equal(start.command, 'echo hi');
+
+  // Non-command handlers and unknown events are shown, never run.
+  assert.ok(p.hookNotes.some((n) => n.includes('http')), p.hookNotes.join(', '));
+  assert.ok(p.hookNotes.some((n) => n.includes('NotAnEvent')), p.hookNotes.join(', '));
+});
+
+test('hooks: a command escaping the plugin directory is refused', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'hooks'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'hooks', 'hooks.json'), JSON.stringify({
+    hooks: { SessionStart: [{ hooks: [{ type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/../../evil.sh' }] }] },
+  }), 'utf8');
+  const { plugins } = loadPlugins({ pluginDir: root });
+  assert.deepEqual(plugins.get('example').hooks, []);
+  assert.ok(plugins.get('example').hookNotes.some((n) => n.includes('outside the plugin')),
+    plugins.get('example').hookNotes.join(', '));
+});
+
+test('hooks: an unparseable hooks.json is catalogued, not fatal', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'hooks'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'hooks', 'hooks.json'), '{ nope', 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.deepEqual(plugins.get('example').hooks, []);
+  assert.equal(warnings.length, 0, 'a bad hooks file must not block install');
+  assert.ok(plugins.get('example').hookNotes.some((n) => n.includes('parse')),
+    plugins.get('example').hookNotes.join(', '));
+});
+
+test('own format: hooks are never read', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, { 'hooks/hooks.json': HOOKS_JSON });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  assert.deepEqual(plugins.get('example').hooks, []);
+  assert.deepEqual(plugins.get('example').hookNotes, []);
+  rmSync(root, { recursive: true, force: true });
+});
