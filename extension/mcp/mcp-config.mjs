@@ -29,8 +29,24 @@ export function credentialMissing(plugin, readSecret) {
   return credentialValue(plugin, readSecret) === '';
 }
 
-export function effectiveMcpServers(userId, { readSecret } = {}) {
-  const active = listMcpPluginsWithState(userId).plugins.filter((p) => p.enabled && p.consented);
+/**
+ * A plugin-declared server answers to TWO switches: its own enable+consent,
+ * and the plugin's per-user enable state. `pluginEnabled` is injected because
+ * plugins/ and mcp/ are peers in the layer table and may not import each other
+ * — llm_agent (which may import both) supplies it. A caller that cannot answer
+ * excludes plugin servers rather than ignoring the plugin toggle.
+ */
+function pluginGate(pluginEnabled) {
+  return (p) => (p.source !== 'plugin'
+    ? true
+    : typeof pluginEnabled === 'function' && !!pluginEnabled(p.pluginName));
+}
+
+export function effectiveMcpServers(userId, { readSecret, pluginEnabled } = {}) {
+  const allowedByPlugin = pluginGate(pluginEnabled);
+  const active = listMcpPluginsWithState(userId).plugins
+    .filter((p) => p.enabled && p.consented)
+    .filter(allowedByPlugin);
   const mcpServers = {};
   for (const p of active) {
     const transport = transportOf(p);
@@ -68,9 +84,9 @@ export function effectiveMcpServers(userId, { readSecret } = {}) {
   return mcpServers;
 }
 
-export function buildMcpConfigForUser(userId, { mode, restrictsToolsFn, readSecret }) {
+export function buildMcpConfigForUser(userId, { mode, restrictsToolsFn, readSecret, pluginEnabled }) {
   if (typeof restrictsToolsFn === 'function' && restrictsToolsFn(mode)) return null;
-  const mcpServers = effectiveMcpServers(userId, { readSecret });
+  const mcpServers = effectiveMcpServers(userId, { readSecret, pluginEnabled });
   if (Object.keys(mcpServers).length === 0) return null;
   return { mcpConfigJson: JSON.stringify({ mcpServers }), allowed: true };
 }

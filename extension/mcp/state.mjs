@@ -151,6 +151,99 @@ export function addMcpPluginFromCatalog(catalogId, { arg, name } = {}) {
   });
 }
 
+/**
+ * Reconcile the registry against what the installed plugins declare.
+ *
+ * `groups` is `[{ pluginName, servers }]` — the declarations the plugin loader
+ * read from each vendor plugin's `.mcp.json`. Every declaration becomes an
+ * ordinary registry entry the user consents to individually: registration is
+ * NOT activation, and a plugin can never bring consent along with it (the
+ * per-user state file is the only place consent lives, and this never writes
+ * it).
+ *
+ * The id is derived from plugin + server name and therefore STABLE across
+ * reloads — per-user consent/enable state keys off it, so a regenerated id
+ * would silently revoke what the user already approved.
+ *
+ * Entries whose plugin is gone (uninstalled) are removed, and their per-user
+ * state pruned. Entries from any other source (manual, catalog, imported) are
+ * never touched.
+ */
+export function syncPluginMcpServers(groups) {
+  const declared = new Map();
+  for (const group of Array.isArray(groups) ? groups : []) {
+    const pluginName = group?.pluginName;
+    if (typeof pluginName !== 'string' || !pluginName) continue;
+    for (const server of Array.isArray(group.servers) ? group.servers : []) {
+      if (!server || typeof server.name !== 'string') continue;
+      const id = pluginMcpId(pluginName, server.name);
+      if (!id) continue;
+      declared.set(id, { pluginName, server });
+    }
+  }
+
+  const list = readMcpRegistry();
+  const kept = [];
+  let added = 0;
+  let removed = 0;
+  let updated = 0;
+  const seen = new Set();
+
+  for (const entry of list) {
+    if (entry.source !== 'plugin') { kept.push(entry); continue; }
+    const match = declared.get(entry.id);
+    if (!match) { removed += 1; continue; }
+    seen.add(entry.id);
+    const next = pluginMcpEntry(entry.id, match.pluginName, match.server);
+    if (JSON.stringify(next) !== JSON.stringify(entry)) updated += 1;
+    kept.push(next);
+  }
+  for (const [id, { pluginName, server }] of declared) {
+    if (seen.has(id)) continue;
+    kept.push(pluginMcpEntry(id, pluginName, server));
+    added += 1;
+  }
+
+  if (added || removed || updated) {
+    writeMcpRegistry(kept);
+    if (removed) pruneMcpState(new Set(kept.map((p) => p.id)));
+  }
+  return { added, removed, updated };
+}
+
+/** Stable slug for a plugin's server. Null when it cannot be expressed. */
+function pluginMcpId(pluginName, serverName) {
+  const raw = `${pluginName}-${serverName}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+  const id = raw.slice(0, 40).replace(/-+$/, '');
+  return SLUG_RE.test(id) ? id : null;
+}
+
+/** The registry record for one plugin-declared server. */
+function pluginMcpEntry(id, pluginName, server) {
+  const base = {
+    id,
+    name: `${pluginName} · ${server.name}`,
+    source: 'plugin',
+    pluginName,
+    builtin: false,
+  };
+  if (server.transport === 'http' || server.transport === 'sse') {
+    return {
+      ...base,
+      transport: server.transport,
+      url: server.url,
+      ...(server.headers && Object.keys(server.headers).length ? { headers: { ...server.headers } } : {}),
+    };
+  }
+  return {
+    ...base,
+    transport: 'stdio',
+    command: server.command,
+    args: Array.isArray(server.args) ? [...server.args] : [],
+    ...(server.env && Object.keys(server.env).length ? { env: { ...server.env } } : {}),
+  };
+}
+
 export function removeMcpPlugin(id) {
   if (!SLUG_RE.test(id)) return { error: 'invalid id', status: 400 };
   const list = readMcpRegistry();
