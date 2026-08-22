@@ -43,6 +43,7 @@ struct LibraryView: View {
     @State private var plugins: [PluginInfo] = []
     @State private var showingGitInstallSheet = false
     @State private var showingClaudeImportSheet = false
+    @State private var showingMarketplaceSheet = false
     @State private var showingCodexImportSheet = false
     @State private var pluginInstallMessage: String?
     /// Updates available for imported vendor plugins. The server has reported
@@ -776,6 +777,9 @@ struct LibraryView: View {
                     showingGitInstallSheet = true
                 } label: { Label("Install from Git URL…", systemImage: "link") }
                 Button {
+                    showingMarketplaceSheet = true
+                } label: { Label("Add marketplace…", systemImage: "bag") }
+                Button {
                     showingClaudeImportSheet = true
                 } label: { Label("Import from Claude Code…", systemImage: "arrow.down.circle") }
                 Button {
@@ -832,6 +836,11 @@ struct LibraryView: View {
             } onCancel: {
                 showingGitInstallSheet = false
             }
+        }
+        .sheet(isPresented: $showingMarketplaceSheet) {
+            PluginMarketplaceSheet(api: api,
+                onDismiss: { showingMarketplaceSheet = false },
+                onInstalled: { Task { await refreshPlugins() } })
         }
         .sheet(isPresented: $showingClaudeImportSheet) {
             ClaudePluginImportSheet(api: api,
