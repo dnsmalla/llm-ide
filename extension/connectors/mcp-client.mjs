@@ -430,18 +430,23 @@ export async function fetchMcpItems(db, userId, def, { limit = DEFAULT_ITEM_LIMI
         failures.push(`item ${index}: ${e.message}`);
         continue;
       }
-      if (seen.has(mapped.id)) continue;
-
       const chunks = chunkText(mapped.body);
       if (chunks.length === 0) continue;              // nothing to write a note about
+      const single = chunks.length === 1;
       for (const [k, body] of chunks.entries()) {
+        // Each chunk is its own note AND its own dedup key, so dedup has to
+        // test the id we are ABOUT to emit — never the base id, which a
+        // multi-chunk item never emits and therefore never enters the ledger.
+        // Checking the base id here would re-import every chunk of every
+        // oversized item on every sweep, forever, and a cap-truncated item
+        // would never get past its first `limit` chunks. Per-chunk instead:
+        // an interrupted or capped fetch resumes at the right chunk, and a
+        // fully-imported item drops out entirely.
+        const id = single ? mapped.id : `${mapped.id}#${k + 1}`;
+        if (seen.has(id)) continue;
         if (items.length >= limit) { overCap += 1; continue; }
-        const single = chunks.length === 1;
         items.push({
-          // Each chunk is its own note AND its own dedup key, so a fetch
-          // interrupted mid-item resumes at the right chunk rather than
-          // re-importing the whole thing or skipping the remainder.
-          id: single ? mapped.id : `${mapped.id}#${k + 1}`,
+          id,
           fields: single
             ? mapped.fields
             : { ...mapped.fields,

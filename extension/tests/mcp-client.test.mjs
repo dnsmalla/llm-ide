@@ -403,6 +403,76 @@ test('an oversized item is chunked into several notes with stable ids', async (t
   assert.equal(r.items.map((i) => i.body).join('\n\n').length >= big.length - 10, true);
 });
 
+// Four paragraphs, each just under the 12k cap, so chunkText yields exactly
+// four chunks — a fixed chunk count the cap tests below can reason about.
+const FOUR_CHUNK_BODY = Array.from(
+  { length: 4 }, (_, i) => `paragraph ${i} ` + 'y'.repeat(11_000),
+).join('\n\n');
+
+const hugeItemTools = (body) => [
+  { name: 'list_boards', handler: () => ({ data: [{ id: 'b1', name: 'Alpha' }] }) },
+  {
+    name: 'get_board_items',
+    handler: () => ({ data: [{ id: 'huge', type: 'document', text: body,
+      modifiedAt: '2026-08-01T00:00:00.000Z' }] }),
+  },
+];
+
+test('an oversized item whose chunks are marked is NOT re-imported next sweep', async (t) => {
+  // Regression: dedup used to test the BASE id, which a multi-chunk item never
+  // emits — so it was never in the ledger and the whole item was re-mapped and
+  // re-emitted on every single sweep, forever. With a mis-guessed dateField
+  // that is a duplicate note (and a paid classify call) per chunk per sweep.
+  const fake = await startFakeMcpServer({ tools: hugeItemTools(FOUR_CHUNK_BODY) });
+  t.after(() => fake.close());
+  const db = kb.getDb();
+  const user = newUser();
+  const def = fetchDef(fake);
+  await connectFully(db, user, def, fake);
+
+  const first = await fetchMcpItems(db, user.id, def, { limit: 100 });
+  assert.deepEqual(first.items.map((i) => i.id),
+    ['miro:b1:huge#1', 'miro:b1:huge#2', 'miro:b1:huge#3', 'miro:b1:huge#4']);
+  markMcpSeen(db, user.id, def, first.items.map((i) => i.id));
+
+  const second = await fetchMcpItems(db, user.id, def, { limit: 100 });
+  assert.deepEqual(second.items, [], 'every chunk id is already in the ledger');
+  assert.equal(second.drained, true);
+
+  // A third sweep with nothing newly marked must stay empty too — the bug
+  // reproduced identically on every repeat, not just the second.
+  const third = await fetchMcpItems(db, user.id, def, { limit: 100 });
+  assert.deepEqual(third.items, []);
+});
+
+test('a cap-truncated chunked item resumes at the next chunk, not the first', async (t) => {
+  // Same root cause seen from the other side: with the base-id check, a
+  // 4-chunk item under limit:2 re-emitted #1,#2 forever and #3,#4 never
+  // arrived — the item could never finish importing.
+  const fake = await startFakeMcpServer({ tools: hugeItemTools(FOUR_CHUNK_BODY) });
+  t.after(() => fake.close());
+  const db = kb.getDb();
+  const user = newUser();
+  const def = fetchDef(fake);
+  await connectFully(db, user, def, fake);
+
+  const first = await fetchMcpItems(db, user.id, def, { limit: 2 });
+  assert.deepEqual(first.items.map((i) => i.id), ['miro:b1:huge#1', 'miro:b1:huge#2']);
+  assert.equal(first.overCap, 2);
+  assert.equal(first.drained, false);
+  markMcpSeen(db, user.id, def, first.items.map((i) => i.id));
+
+  const second = await fetchMcpItems(db, user.id, def, { limit: 2 });
+  assert.deepEqual(second.items.map((i) => i.id), ['miro:b1:huge#3', 'miro:b1:huge#4'],
+    'the sweep picks up where the cap cut it off');
+  assert.equal(second.overCap, 0);
+  assert.equal(second.drained, true);
+  markMcpSeen(db, user.id, def, second.items.map((i) => i.id));
+
+  const third = await fetchMcpItems(db, user.id, def, { limit: 2 });
+  assert.deepEqual(third.items, [], 'now fully imported');
+});
+
 test('a list-only descriptor (no readTool) treats list results as the items', async (t) => {
   // gcal in phase 3 is single-level: list_events IS the content. Proving it
   // now keeps the fetch generic rather than Miro-shaped.
