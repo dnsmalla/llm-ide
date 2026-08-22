@@ -473,6 +473,11 @@ function loadOnePlugin(dir) {
   // parsing them must never lead to execution (spec: parse-and-ignore).
   // `pending` are the ones a later phase will activate behind their own
   // consent gate (hooks) or MCP consent flow.
+  //
+  // Deliberately NOT pushed into `warnings`: the installer treats any loader
+  // warning as a fatal validation failure, and a real Claude package shipping
+  // a themes/ dir must still install. The catalogue is structured output the
+  // detail view renders instead.
   const unsupportedComponents = [];
   const pendingComponents = [];
   if (format === 'claude') {
@@ -481,9 +486,6 @@ function loadOnePlugin(dir) {
     }
     if (existsSync(join(dir, 'hooks', 'hooks.json'))) pendingComponents.push('hooks');
     if (existsSync(join(dir, '.mcp.json'))) pendingComponents.push('mcp');
-    if (unsupportedComponents.length) {
-      warnings.push(`unsupported components ignored: ${unsupportedComponents.join(', ')}`);
-    }
   }
 
   return {

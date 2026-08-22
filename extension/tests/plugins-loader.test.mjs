@@ -510,8 +510,9 @@ test('vendor: unsupported and pending components are catalogued, never executed'
   assert.ok(p);
   assert.deepEqual([...p.unsupportedComponents].sort(), ['.lsp.json', 'output-styles', 'themes']);
   assert.deepEqual([...p.pendingComponents].sort(), ['hooks', 'mcp']);
-  assert.ok(warnings.some((w) => w.includes('unsupported components')),
-    `expected an info warning, got: ${warnings.join(', ')}`);
+  // The catalogue must NOT be a warning: the installer fails a bundle on any
+  // loader warning, and a real vendor package shipping themes/ must install.
+  assert.equal(warnings.length, 0, `catalogue must not warn, got: ${warnings.join(', ')}`);
   rmSync(root, { recursive: true, force: true });
 });
 

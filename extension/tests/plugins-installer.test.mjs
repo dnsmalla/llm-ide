@@ -335,3 +335,33 @@ test('installs a vendor zip whose manifest sits at the archive root', { skip: sk
     rmSync(installDir, { recursive: true, force: true });
   }
 });
+
+// Spec: unsupported vendor components must NOT block installation — they are
+// catalogued for display and never executed. The installer treats any loader
+// warning as fatal, so the catalogue must not travel as a warning.
+test('a vendor zip carrying unsupported components still installs', { skip: skipReason || false }, async () => {
+  const stage = newTempRoot();
+  const installDir = newTempRoot();
+  try {
+    const srcPlugin = join(stage, 'themed-plug');
+    mkdirSync(join(srcPlugin, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(srcPlugin, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'themed-plug', version: '1.0.0' }), 'utf8');
+    mkdirSync(join(srcPlugin, 'themes'), { recursive: true });
+    writeFileSync(join(srcPlugin, 'themes', 'dark.json'), '{}', 'utf8');
+    mkdirSync(join(srcPlugin, 'hooks'), { recursive: true });
+    writeFileSync(join(srcPlugin, 'hooks', 'hooks.json'), '{}', 'utf8');
+    const zipPath = join(stage, 'pkg.zip');
+    zipDirectory(srcPlugin, zipPath, { includeParent: true });
+
+    const result = await installFromZip(readFileSync(zipPath), { pluginDir: installDir });
+    assert.equal(result.ok, true, `install failed: ${result.error || ''}`);
+    const { plugins } = loadPlugins({ pluginDir: installDir });
+    const p = plugins.get('themed-plug');
+    assert.deepEqual(p?.unsupportedComponents, ['themes']);
+    assert.deepEqual(p?.pendingComponents, ['hooks']);
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+    rmSync(installDir, { recursive: true, force: true });
+  }
+});
