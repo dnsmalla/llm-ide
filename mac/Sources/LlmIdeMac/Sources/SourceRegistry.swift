@@ -4,7 +4,33 @@ import Foundation
 /// source-related uses (classification, Library SOURCES display, ingestion).
 /// Adding a source is one entry here plus its `InputSource` struct.
 enum SourceRegistry {
-    static let all: [InputSource] = [MeetingSource(), EmailSource(), SlackSource()]
+    /// Connector ids that have a matching server descriptor in
+    /// `extension/connectors/mcp-connector-defs.mjs`. Three manifests ship
+    /// (`Resources/source_connectors/`), but registering one whose server side
+    /// does not exist yet would put a permanently-empty group in the Library
+    /// and add a doomed round trip to every ingestion tick. Phase 3 adds
+    /// "gdrive" and "gcal" here — one line, once their descriptors land.
+    private static let shippedConnectorIds: Set<String> = ["miro"]
+
+    /// Manifest-driven Source Connectors. The engine shipped in July 2026 with
+    /// no manifests; these are its first. Every MCP-backed connector shares one
+    /// generic adapter — the descriptor on the server holds everything
+    /// provider-specific, so there is nothing per connector left to write here.
+    private static let mcpConnectors: [SourceConnector] = SourceConnectorManifest
+        .loadBundled()
+        .filter { shippedConnectorIds.contains($0.id) }
+        .map { manifest in
+            SourceConnector(manifest: manifest,
+                            adapterFactory: {
+                                // Fresh per fetch — SourceConnector calls this
+                                // on every sweep so no state leaks between runs.
+                                McpConnectorAdapter(connectorId: manifest.id,
+                                                    endpoints: manifest.endpoints)
+                            })
+        }
+
+    static let all: [InputSource] =
+        [MeetingSource(), EmailSource(), SlackSource()] + mcpConnectors
 
     /// Match a frontmatter `platform` value to its source. Unknown/empty →
     /// the meeting source (preserves the historical default-to-meeting).

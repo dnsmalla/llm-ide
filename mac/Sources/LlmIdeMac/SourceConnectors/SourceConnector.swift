@@ -20,10 +20,16 @@ final class SourceConnector: InputSource {
     // cross into main-actor-isolated code and fail under Swift 6's strict
     // concurrency checking.
     nonisolated let manifest: SourceConnectorManifest
-    private let adapterFactory: @MainActor () -> any SourceConnectorAdapter
+    // `nonisolated` + `@Sendable` so SourceRegistry.all — a nonisolated static
+    // let, reached from nonisolated code such as
+    // LibraryItemStore.sourceId(for:) — can construct connectors without a
+    // main-actor-isolation warning (an error under the Swift 6 language mode).
+    // Verified: `nonisolated init` alone is not enough; the property and the
+    // closure type both have to say so.
+    nonisolated private let adapterFactory: @Sendable @MainActor () -> any SourceConnectorAdapter
 
-    init(manifest: SourceConnectorManifest,
-         adapterFactory: @MainActor @escaping () -> any SourceConnectorAdapter) {
+    nonisolated init(manifest: SourceConnectorManifest,
+                     adapterFactory: @Sendable @MainActor @escaping () -> any SourceConnectorAdapter) {
         self.manifest = manifest
         self.adapterFactory = adapterFactory
     }
