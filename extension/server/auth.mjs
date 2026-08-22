@@ -16,6 +16,9 @@
 //                                ownership is enforced via the state token)
 //   GET  /auth/slack/callback  — Slack's OAuth redirect (no bearer token;
 //                                ownership is enforced via the state token)
+//   GET  /auth/mcp-connector/callback — a remote MCP server's OAuth redirect
+//                                (no bearer token; ownership is enforced via
+//                                the state token)
 //
 // Anything else returns 401 with a stable `AUTH_REQUIRED` error code.
 
@@ -34,6 +37,7 @@ const PUBLIC_PATHS = new Set([
   '/auth/reset-confirm',               // Password-reset confirm (rate-limited per IP)
   '/auth/google/callback',             // Google's OAuth redirect carries no bearer token
   '/auth/slack/callback',              // Slack's OAuth redirect carries no bearer token
+  '/auth/mcp-connector/callback',      // MCP connector OAuth redirect carries no bearer token
   '/launch-app',                       // Cross-client deep link → llmide://
 ]);
 

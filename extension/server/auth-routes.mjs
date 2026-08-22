@@ -23,6 +23,11 @@ import {
   putState as putSlackState, getState as getSlackState,
   completeState as completeSlackState, takeStatus as takeSlackStatus,
 } from '../connectors/slack-oauth.mjs';
+import {
+  startMcpAuthorization, finishMcpAuthorization, isMcpConnected,
+  putMcpState, getMcpState, completeMcpState, takeMcpStatus,
+} from '../connectors/mcp-client.mjs';
+import { mcpConnectorDef } from '../connectors/mcp-connector-defs.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 
 // Map any error (including VaultError) to a client-safe message.
@@ -197,6 +202,9 @@ export function isAuthRoute(url) {
       || path === '/auth/me/connectors/catalog'
       || path === '/auth/me/connectors/add'
       || path.startsWith('/auth/me/connectors/')
+      || path === '/auth/mcp-connector/start'
+      || path === '/auth/mcp-connector/callback'
+      || path === '/auth/mcp-connector/status'
       || path === '/auth/google/start'
       || path === '/auth/google/callback'
       || path === '/auth/google/status'
@@ -463,6 +471,52 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     return;
   }
 
+  // ---- MCP connector callback (public) --------------------------------
+  //
+  // GET /auth/mcp-connector/callback?code=...&state=...
+  //   The authorization server redirects the user's browser here — no bearer
+  //   token, so it stays public (allow-listed in server/auth.mjs
+  //   PUBLIC_PATHS). `state` is the only link back to the user: it was minted
+  //   by the start route below and handed to the SDK through the provider's
+  //   state() hook. The credentials themselves live in the vault, so we
+  //   rebuild the provider from (userId, connectorId) rather than holding a
+  //   live object across the browser round trip.
+  if (method === 'GET' && url.split('?')[0] === '/auth/mcp-connector/callback') {
+    const q = new URL(url, 'http://127.0.0.1').searchParams;
+    const state = q.get('state') || '';
+    const st = getMcpState(state);
+    if (q.get('error')) {
+      if (st) completeMcpState(state, { status: 'error', message: 'Sign-in cancelled.' });
+      oauthCallbackHtml(res, 'Sign-in cancelled.');
+      return;
+    }
+    if (!st) { oauthCallbackHtml(res, 'This sign-in link has expired — start again from the app.'); return; }
+    if (st.status !== 'pending') { oauthCallbackHtml(res, 'This sign-in link has already been used — start again from the app.'); return; }
+    const def = mcpConnectorDef(st.connectorId);
+    if (!def) {
+      completeMcpState(state, { status: 'error', message: 'Unknown connector.' });
+      oauthCallbackHtml(res, 'Connection failed: unknown connector.');
+      return;
+    }
+    try {
+      const { account } = await finishMcpAuthorization({
+        db, userId: st.userId, def, code: q.get('code') || '',
+      });
+      safeAudit(db, {
+        userId: st.userId, requestId, ip, userAgent: ua,
+        action: 'auth.secret_set', resource: `mcp.${def.id}.tokens`,
+        outcome: 'success', detail: {},
+      });
+      completeMcpState(state, { status: 'complete', account });
+      oauthCallbackHtml(res, `Connected to ${def.name}.`);
+    } catch (e) {
+      const msg = publicMessageFor(e);
+      completeMcpState(state, { status: 'error', message: msg });
+      oauthCallbackHtml(res, 'Connection failed: ' + msg);
+    }
+    return;
+  }
+
   // ---- Authenticated -------------------------------------------------
   // Guard placed here — immediately after the last public route block —
   // so every route below this point is guaranteed to have req.user set.
@@ -595,6 +649,63 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     const s = getSlackState(state);
     if (s && s.userId !== req.user.id) { send(res, 403, { error: { code: 'FORBIDDEN', message: 'not your sign-in' } }); return; }
     send(res, 200, takeSlackStatus(state));
+    return;
+  }
+
+  // ---- MCP connectors: start + status (authed) -------------------------
+  //
+  // POST /auth/mcp-connector/start { id } -> { authUrl, state }
+  //   There is no way to redirect from here — no user agent is on this
+  //   request — so the SDK's redirectToAuthorization hook captures the URL
+  //   and we hand it back for the Mac app to open. Miro uses dynamic client
+  //   registration, so nothing is configured: the first call registers a
+  //   client and stores it in the vault.
+  if (method === 'POST' && url === '/auth/mcp-connector/start') {
+    let body;
+    try { body = await readJson(req, bodyLimit); }
+    catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
+    const def = mcpConnectorDef(typeof body?.id === 'string' ? body.id : '');
+    if (!def) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: `Unknown MCP connector '${body?.id ?? ''}'` } });
+      return;
+    }
+    const state = crypto.randomBytes(24).toString('base64url');
+    putMcpState(state, { userId: req.user.id, connectorId: def.id });
+    try {
+      const r = await startMcpAuthorization({ db, userId: req.user.id, def, stateToken: state });
+      if (r.alreadyConnected) {
+        completeMcpState(state, { status: 'complete', account: def.name });
+        send(res, 200, { state, alreadyConnected: true });
+        return;
+      }
+      send(res, 200, { authUrl: r.authorizationUrl, state });
+    } catch (e) {
+      const msg = publicMessageFor(e);
+      completeMcpState(state, { status: 'error', message: msg });
+      send(res, 502, { error: { code: 'MCP_AUTH_START_FAILED', message: msg } });
+    }
+    return;
+  }
+
+  // GET /auth/mcp-connector/status?id=<connector>[&state=<flow>]
+  //   `connected` reads the vault, so the Mac can ask at any time with just
+  //   an id. Adding `state` also returns the single-use flow status while
+  //   the browser tab is open (same contract as /auth/slack/status), with
+  //   the same ownership check: only the initiator may read their flow.
+  if (method === 'GET' && url.split('?')[0] === '/auth/mcp-connector/status') {
+    const q = new URL(url, 'http://127.0.0.1').searchParams;
+    const def = mcpConnectorDef(q.get('id') || '');
+    if (!def) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Unknown MCP connector' } });
+      return;
+    }
+    const state = q.get('state') || '';
+    if (state) {
+      const s = getMcpState(state);
+      if (s && s.userId !== req.user.id) { send(res, 403, { error: { code: 'FORBIDDEN', message: 'not your sign-in' } }); return; }
+    }
+    const flow = state ? takeMcpStatus(state) : { status: 'unknown' };
+    send(res, 200, { id: def.id, connected: isMcpConnected(db, req.user.id, def), ...flow });
     return;
   }
 
