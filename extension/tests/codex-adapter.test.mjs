@@ -147,6 +147,8 @@ test('importPlugin copies a manifest-bearing Codex plugin whole', () => {
     const manifest = JSON.parse(readFileSync(join(target, '.codex-plugin', 'plugin.json'), 'utf8'));
     assert.equal(manifest.name, 'codex-documents', 'name namespaced to the directory');
     assert.equal(manifest.description, 'Create and edit document artifacts.', 'rest preserved verbatim');
+    assert.equal(manifest.llmideOrigin, 'codex', 'import provenance is stamped');
+    assert.equal(manifest.llmideSourcePlugin, 'documents');
     const { plugins } = loadPlugins({ pluginDir: mnRoot });
     const p = plugins.get('codex-documents');
     assert.ok(p, 'plugin not loaded by llm-ide loader');
@@ -301,6 +303,28 @@ test('whole-tree Codex import preserves agents/ and catalogues inert components'
     assert.deepEqual(p.unsupportedComponents, ['themes']);
     const loaded = loadSkills(join(mnRoot, 'codex-treeplug', 'skills'));
     assert.ok(loaded.skills.has('nested'), 'nested skill not loadable at runtime');
+  } finally {
+    rmSync(codexRoot, { recursive: true, force: true });
+    rmSync(mnRoot, { recursive: true, force: true });
+  }
+});
+
+// Mirror of the claude-adapter guard: a vendor-format plugin the user placed
+// himself has no llm-ide provenance and must never be offered a Codex update.
+test('checkForUpdates ignores a self-installed vendor plugin that was never imported', () => {
+  const codexRoot = mkdtempSync(join(tmpdir(), 'codex-own-'));
+  const mpSrc = join(codexRoot, 'marketplace-src');
+  writeFileSync(join(codexRoot, 'config.toml'), `[marketplaces.mp]\nsource = "${mpSrc}"\n`, 'utf8');
+  const pDir = join(mpSrc, 'plugins', 'reviewer');
+  mkdirSync(pDir, { recursive: true });
+  writeCodexManifest(pDir, { name: 'reviewer', version: '9.0.0', description: 'newer' });
+  const mnRoot = mkdtempSync(join(tmpdir(), 'mn-codex-own-'));
+  const own = join(mnRoot, 'reviewer');
+  mkdirSync(own, { recursive: true });
+  writeCodexManifest(own, { name: 'reviewer', version: '1.0.0', description: 'mine' });
+  try {
+    assert.deepEqual(checkForUpdates({ codexRoot, llmidePluginDir: mnRoot }), [],
+      'a self-installed plugin must not be offered a Codex update');
   } finally {
     rmSync(codexRoot, { recursive: true, force: true });
     rmSync(mnRoot, { recursive: true, force: true });

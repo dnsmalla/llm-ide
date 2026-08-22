@@ -363,6 +363,8 @@ test('manifest-bearing marketplace plugin imports whole with layout preserved', 
     const copied = JSON.parse(readFileSync(join(target, '.claude-plugin', 'plugin.json'), 'utf8'));
     assert.equal(copied.name, 'claude-treeplug');
     assert.equal(copied.description, 'tree plugin', 'the rest of the manifest is preserved verbatim');
+    assert.equal(copied.llmideOrigin, 'claude', 'import provenance is stamped');
+    assert.equal(copied.llmideSourcePlugin, 'treeplug');
     const { plugins } = loadPlugins({ pluginDir: llmideDir });
     const p = plugins.get('claude-treeplug');
     assert.equal(p?.format, 'claude');
@@ -427,6 +429,31 @@ test('whole-tree import skips symlinks and oversized files', () => {
     assert.ok(!existsSync(join(target, 'huge.bin')), 'oversized file must not be copied');
     assert.ok(existsSync(join(target, 'skills', 'ok', 'SKILL.md')));
     assert.ok(result.warnings?.some((w) => w.includes('leak.md')), `warnings: ${JSON.stringify(result.warnings)}`);
+  } finally {
+    rmSync(claudeRoot, { recursive: true, force: true });
+    rmSync(llmideDir, { recursive: true, force: true });
+  }
+});
+
+// A vendor-format plugin the user installed themselves (zip, hand-placed) is
+// NOT claude-origin. Offering it a Claude "update" would overwrite the user's
+// own plugin with an unrelated same-named marketplace package.
+test('checkForUpdates ignores a self-installed vendor plugin that was never imported', () => {
+  const claudeRoot = mkdtempSync(join(tmpdir(), 'claude-mp-own-'));
+  const llmideDir = mkdtempSync(join(tmpdir(), 'llmide-plugins-own-'));
+  // A newer plugin of the same name sits in the Claude marketplace cache.
+  const mpDir = join(claudeRoot, 'marketplaces', 'official', 'plugins', 'reviewer');
+  mkdirSync(join(mpDir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(mpDir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'reviewer', version: '9.0.0' }), 'utf8');
+  // The user's own install: vendor format, no import provenance.
+  const own = join(llmideDir, 'reviewer');
+  mkdirSync(join(own, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(own, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'reviewer', version: '1.0.0' }), 'utf8');
+  try {
+    const updates = checkForUpdates({ claudeRoot, llmidePluginDir: llmideDir });
+    assert.deepEqual(updates, [], 'a self-installed plugin must not be offered a Claude update');
   } finally {
     rmSync(claudeRoot, { recursive: true, force: true });
     rmSync(llmideDir, { recursive: true, force: true });

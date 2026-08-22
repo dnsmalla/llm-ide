@@ -172,12 +172,20 @@ export function importPlugin(opts) {
       rmSync(targetDir, { recursive: true, force: true });
       return { ok: false, error: `plugin tree not copied: ${err.message}` };
     }
-    // Namespace the copy: rewrite ONLY the name field so the imported plugin's
-    // identity matches its directory (claude-<name>) — enable state and
-    // update-checking key off that identity. Everything else is preserved
-    // verbatim; this is not a lossy regeneration.
-    writeFileSync(join(targetDir, vendorRel),
-      JSON.stringify({ ...vendorManifest, name: mnName, version: vendorVersion }, null, 2), 'utf8');
+    // The name is rewritten to match the namespaced directory — the identity
+    // enable state keys off — and llm-ide provenance is stamped alongside it.
+    // Provenance is what makes update-checking safe: without it, a
+    // vendor-format plugin the USER installed by zip would be mistaken for an
+    // import and silently overwritten by a same-named marketplace package.
+    // Everything else in the manifest is preserved verbatim (the loader
+    // ignores fields it does not know), so this is not a lossy regeneration.
+    writeFileSync(join(targetDir, vendorRel), JSON.stringify({
+      ...vendorManifest,
+      name: mnName,
+      version: vendorVersion,
+      llmideOrigin: 'claude',
+      llmideSourcePlugin: name,
+    }, null, 2), 'utf8');
     return {
       ok: true,
       warnings: copied.skipped.length > 0 ? copied.skipped : undefined,
@@ -321,19 +329,20 @@ export function checkForUpdates(opts = {}) {
 
   for (const mnName of imported) {
     // Own-format imports carry `origin` in their generated manifest; a
-    // whole-tree vendor copy has no root manifest at all and IS claude-origin
-    // by construction (only the import path creates one).
+    // whole-tree vendor copy carries `llmideOrigin` in the vendor manifest the
+    // import stamped. Either way an update is only ever offered for a plugin
+    // THIS import created — a vendor-format plugin the user installed himself
+    // is left alone even when the cache holds a same-named package.
     const vendorRel = findVendorManifestRel(join(mnDir, mnName));
     let importedVersion;
-    // A vendor copy keeps no `sourcePlugin` field, so the source name comes
-    // from the directory — as-is first, then with the namespace prefix
-    // stripped, since a plugin already called `claude-*` is never re-prefixed.
     let sourceNames;
     if (vendorRel) {
-      try {
-        importedVersion = JSON.parse(readFileSync(join(mnDir, mnName, vendorRel), 'utf8')).version || '0.0.0';
-      } catch { continue; }
-      sourceNames = [mnName, mnName.replace(/^claude-/, '')];
+      let vendorManifest;
+      try { vendorManifest = JSON.parse(readFileSync(join(mnDir, mnName, vendorRel), 'utf8')); }
+      catch { continue; }
+      if (vendorManifest.llmideOrigin !== 'claude') continue;
+      importedVersion = vendorManifest.version || '0.0.0';
+      sourceNames = [vendorManifest.llmideSourcePlugin || mnName.replace(/^claude-/, '')];
     } else {
       const manifestPath = join(mnDir, mnName, 'plugin.json');
       if (!existsSync(manifestPath)) continue;
