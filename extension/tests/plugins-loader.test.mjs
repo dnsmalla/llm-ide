@@ -256,3 +256,274 @@ test('slash: quoted values support spaces', () => {
   assert.equal(out.args.reason, 'multi word value');
   assert.equal(out.prompt, 'multi word value');
 });
+
+// --- Vendor (Claude Code / Codex) format detection ---
+
+test('vendor: minimal .claude-plugin manifest loads with defaults', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example' }), 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(warnings.length, 0, `unexpected warnings: ${warnings.join(', ')}`);
+  const p = plugins.get('example');
+  assert.ok(p, 'plugin missing');
+  assert.equal(p.format, 'claude');
+  assert.equal(p.version, '0.0.0', 'version defaults when manifest lacks one');
+  assert.equal(p.displayName, 'example');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: .codex-plugin manifest uses the same path', () => {
+  const root = newRoot();
+  const dir = join(root, 'codexplug');
+  mkdirSync(join(dir, '.codex-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.codex-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'codexplug', version: '1.2.3', description: 'd' }), 'utf8');
+  const { plugins } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.get('codexplug')?.format, 'claude');
+  assert.equal(plugins.get('codexplug')?.version, '1.2.3');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: author object maps to a name string', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0',
+      author: { name: 'Ada', email: 'a@x.io', url: 'https://x.io' } }), 'utf8');
+  const { plugins } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.get('example')?.author, 'Ada');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: reserved name is rejected', () => {
+  const root = newRoot();
+  const dir = join(root, 'p1');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'core' }), 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.size, 0);
+  assert.ok(warnings.some((w) => w.includes('reserved')), warnings.join(', '));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: traversal component path is rejected', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', skills: '../outside' }), 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.size, 0);
+  assert.ok(warnings.some((w) => w.includes('component path')), warnings.join(', '));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('own format wins when both manifests exist', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest);
+  mkdirSync(join(root, 'example', '.claude-plugin'), { recursive: true });
+  writeFileSync(join(root, 'example', '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', description: 'vendor copy' }), 'utf8');
+  const { plugins } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.get('example')?.format, 'llmide');
+  assert.equal(plugins.get('example')?.description, 'test');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: nested skill directory counted and stashed with SKILL.md path', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'skills', 'code-helper'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'skills', 'code-helper', 'SKILL.md'),
+    `---\nname: code-helper\ndescription: helps\n---\nBody.`, 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(warnings.length, 0, `unexpected warnings: ${warnings.join(', ')}`);
+  const p = plugins.get('example');
+  assert.equal(p.skillFiles.length, 1);
+  assert.ok(p.skillFiles[0].endsWith(join('skills', 'code-helper', 'SKILL.md')));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: component path override relocates the skills dir', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'custom-skills'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0', skills: './custom-skills' }), 'utf8');
+  writeFileSync(join(dir, 'custom-skills', 'x.md'),
+    `---\nname: x\nkind: read\ndescription: d\n---\nBody.`, 'utf8');
+  const { plugins } = loadPlugins({ pluginDir: root });
+  const p = plugins.get('example');
+  assert.equal(p?.skillFiles.length, 1);
+  assert.ok(p.skillsDir.endsWith('custom-skills'),
+    'the resolved skills dir travels with the plugin so the runtime reloads the same files');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: nested skill exceeding the byte cap is skipped with a warning', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'skills', 'big'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'skills', 'big', 'SKILL.md'), 'x'.repeat(33_000), 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.get('example')?.skillFiles.length, 0);
+  assert.ok(warnings.some((w) => w.includes('big/SKILL.md') && w.includes('byte limit')),
+    warnings.join(', '));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: a skills subdirectory without SKILL.md is not a skill', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'skills', 'references'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'skills', 'references', 'notes.md'), 'not a skill', 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.get('example')?.skillFiles.length, 0);
+  assert.equal(warnings.length, 0, `unexpected warnings: ${warnings.join(', ')}`);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor agent: Claude tools CSV + maxTurns map onto the subagent model', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'agents/researcher.md': `---
+description: Researches things
+tools: Read, Grep, mcp__web__fetch
+maxTurns: 8
+---
+You research.`,
+  });
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(warnings.length, 0, `unexpected warnings: ${warnings.join(', ')}`);
+  const sub = plugins.get('example')?.subagents.researcher;
+  assert.ok(sub);
+  assert.deepEqual(sub.allowedTools, ['read', 'grep', 'mcp__web__fetch']);
+  assert.equal(sub.maxIterations, 5, 'maxTurns clamps to the existing cap of 5');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor agent: tools as a YAML list also works; maxTurns absent defaults to 3', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'agents/researcher.md': `---
+description: Researches things
+tools: [Bash, WebSearch]
+---
+You research.`,
+  });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  const sub = plugins.get('example')?.subagents.researcher;
+  assert.deepEqual(sub.allowedTools, ['bash', 'websearch']);
+  assert.equal(sub.maxIterations, 3);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor agent: own-format allowed_tools keeps working unchanged', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'agents/s.md': `---
+description: x
+allowed_tools: [search-kb]
+maxIterations: 2
+---
+Body.`,
+  });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  const sub = plugins.get('example')?.subagents.s;
+  assert.deepEqual(sub.allowedTools, ['search-kb']);
+  assert.equal(sub.maxIterations, 2);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor agent: allowed_tools wins over tools when both are present', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'agents/s.md': `---
+description: x
+allowed_tools: [search-kb]
+tools: Read, Bash
+---
+Body.`,
+  });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  assert.deepEqual(plugins.get('example')?.subagents.s.allowedTools, ['search-kb']);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor command: $ARGUMENTS maps to {{_rest}} expansion', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'commands/review.md': `---\ndescription: Review a PR\nargument-hint: <pr-number>\n---\nReview $ARGUMENTS carefully.`,
+  });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  const cmd = plugins.get('example')?.commands.review;
+  assert.ok(cmd);
+  assert.match(cmd.description, /\(args: <pr-number>\)/);
+  const expanded = expandSlashCommand('/review 1234', new Map([['review', cmd]]));
+  assert.match(expanded.prompt, /Review 1234 carefully\.$/);
+  assert.doesNotMatch(expanded.prompt, /\$ARGUMENTS|\{\{_rest\}\}/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('own-format {{arg}} substitution is untouched', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'commands/summary.md': `---\ndescription: Summarize\nargs:\n  repo:\n    type: string\n    required: true\n---\nSummarize {{repo}}.`,
+  });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  const expanded = expandSlashCommand('/summary repo=foo',
+    new Map([['summary', plugins.get('example').commands.summary]]));
+  assert.match(expanded.prompt, /Summarize foo\./);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: unsupported and pending components are catalogued, never executed', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'themes'), { recursive: true });
+  mkdirSync(join(dir, 'output-styles'), { recursive: true });
+  mkdirSync(join(dir, 'hooks'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'themes', 'dark.json'), '{}', 'utf8');
+  writeFileSync(join(dir, 'hooks', 'hooks.json'), '{}', 'utf8');
+  writeFileSync(join(dir, '.mcp.json'), '{}', 'utf8');
+  writeFileSync(join(dir, '.lsp.json'), '{}', 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  const p = plugins.get('example');
+  assert.ok(p);
+  assert.deepEqual([...p.unsupportedComponents].sort(), ['.lsp.json', 'output-styles', 'themes']);
+  assert.deepEqual([...p.pendingComponents].sort(), ['hooks', 'mcp']);
+  // The catalogue must NOT be a warning: the installer fails a bundle on any
+  // loader warning, and a real vendor package shipping themes/ must install.
+  assert.equal(warnings.length, 0, `catalogue must not warn, got: ${warnings.join(', ')}`);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('own format: no unsupported/pending fields leak into old plugins', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'skills/x.md': `---\nname: x\nkind: read\ndescription: d\n---\nBody.`,
+  });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  const p = plugins.get('example');
+  assert.deepEqual(p.unsupportedComponents, []);
+  assert.deepEqual(p.pendingComponents, []);
+  rmSync(root, { recursive: true, force: true });
+});

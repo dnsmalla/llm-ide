@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { codexHome, scanInstalled, scanMarketplace, importPlugin, listImportedNames, getImportedVersion, checkForUpdates } from '../plugins/codex-adapter.mjs';
@@ -128,7 +128,10 @@ source = "${mpSrc}"
   return root;
 }
 
-test('importPlugin converts Codex plugin into llm-ide format', () => {
+// Every real Codex plugin carries `.codex-plugin/plugin.json`, so import
+// copies the tree whole and llm-ide's loader reads that manifest in place —
+// no generated root manifest, no flattened skills.
+test('importPlugin copies a manifest-bearing Codex plugin whole', () => {
   const codexRoot = makeFakeCodexWithSkills();
   const mnRoot = mkdtempSync(join(tmpdir(), 'mn-codex-'));
   try {
@@ -137,13 +140,20 @@ test('importPlugin converts Codex plugin into llm-ide format', () => {
     assert.equal(result.plugin.name, 'codex-documents');
     assert.equal(result.plugin.version, '1.5.0');
     assert.ok(result.plugin.skillCount >= 1);
-    const manifest = JSON.parse(readFileSync(join(mnRoot, 'codex-documents', 'plugin.json'), 'utf8'));
-    assert.equal(manifest.name, 'codex-documents');
-    assert.equal(manifest.origin, 'codex');
-    assert.equal(manifest.sourcePlugin, 'documents');
-    assert.equal(manifest.sourceMarketplace, 'openai-bundled');
+    assert.equal(result.plugin.origin, 'codex');
+    const target = join(mnRoot, 'codex-documents');
+    assert.ok(!existsSync(join(target, 'plugin.json')), 'no generated root manifest');
+    assert.ok(existsSync(join(target, 'skills', 'documents', 'SKILL.md')), 'nested layout preserved');
+    const manifest = JSON.parse(readFileSync(join(target, '.codex-plugin', 'plugin.json'), 'utf8'));
+    assert.equal(manifest.name, 'codex-documents', 'name namespaced to the directory');
+    assert.equal(manifest.description, 'Create and edit document artifacts.', 'rest preserved verbatim');
+    assert.equal(manifest.llmideOrigin, 'codex', 'import provenance is stamped');
+    assert.equal(manifest.llmideSourcePlugin, 'documents');
     const { plugins } = loadPlugins({ pluginDir: mnRoot });
-    assert.ok(plugins.has('codex-documents'), 'plugin not loaded by llm-ide loader');
+    const p = plugins.get('codex-documents');
+    assert.ok(p, 'plugin not loaded by llm-ide loader');
+    assert.equal(p.format, 'claude');
+    assert.equal(p.skillFiles.length, 1);
   } finally {
     rmSync(codexRoot, { recursive: true, force: true });
     rmSync(mnRoot, { recursive: true, force: true });
@@ -220,7 +230,8 @@ test('checkForUpdates detects version mismatch against Codex source', () => {
   const mnRoot = mkdtempSync(join(tmpdir(), 'mn-codex-updates-'));
   const result = importPlugin({ codexRoot, llmidePluginDir: mnRoot, source: 'marketplace', name: 'documents' });
   assert.equal(result.ok, true);
-  const manifestPath = join(mnRoot, 'codex-documents', 'plugin.json');
+  // A whole-tree import keeps its version in the vendor manifest.
+  const manifestPath = join(mnRoot, 'codex-documents', '.codex-plugin', 'plugin.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   manifest.version = '1.0.0'; // simulate a stale import vs the 1.5.0 source
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
@@ -259,6 +270,61 @@ test('imported Codex skills pass skill-loader validation (kind + name injected)'
     assert.ok(loaded.skills.has('helper'), 'helper skill not loaded');
     assert.equal(loaded.skills.get('helper').kind, 'read');
     assert.ok(loaded.skills.get('helper').body.includes('Do helpful things'));
+  } finally {
+    rmSync(codexRoot, { recursive: true, force: true });
+    rmSync(mnRoot, { recursive: true, force: true });
+  }
+});
+
+test('whole-tree Codex import preserves agents/ and catalogues inert components', () => {
+  const codexRoot = mkdtempSync(join(tmpdir(), 'codex-tree-'));
+  const mpSrc = join(codexRoot, 'marketplace-src');
+  writeFileSync(join(codexRoot, 'config.toml'), `[marketplaces.mp]\nsource = "${mpSrc}"\n`, 'utf8');
+  const pDir = join(mpSrc, 'plugins', 'treeplug');
+  mkdirSync(join(pDir, 'skills', 'nested'), { recursive: true });
+  writeFileSync(join(pDir, 'skills', 'nested', 'SKILL.md'),
+    '---\nname: nested\ndescription: nested skill\n---\nBody.', 'utf8');
+  mkdirSync(join(pDir, 'agents'), { recursive: true });
+  writeFileSync(join(pDir, 'agents', 'researcher.md'),
+    '---\ndescription: researches\ntools: Read\nmaxTurns: 9\n---\nYou research.', 'utf8');
+  mkdirSync(join(pDir, 'hooks'), { recursive: true });
+  writeFileSync(join(pDir, 'hooks', 'hooks.json'), '{}', 'utf8');
+  mkdirSync(join(pDir, 'themes'), { recursive: true });
+  writeCodexManifest(pDir, { name: 'treeplug', version: '1.0.0', description: 'A tree.' });
+  const mnRoot = mkdtempSync(join(tmpdir(), 'mn-codex-tree-'));
+  try {
+    assert.equal(importPlugin({ codexRoot, llmidePluginDir: mnRoot, source: 'marketplace', name: 'treeplug' }).ok, true);
+    const { plugins } = loadPlugins({ pluginDir: mnRoot });
+    const p = plugins.get('codex-treeplug');
+    assert.ok(p, 'plugin not loaded');
+    assert.ok(p.subagents.researcher, 'agents/ must no longer be dropped');
+    assert.equal(p.subagents.researcher.maxIterations, 5, 'maxTurns clamped');
+    assert.deepEqual(p.pendingComponents, ['hooks'], 'hooks are catalogued, never run');
+    assert.deepEqual(p.unsupportedComponents, ['themes']);
+    const loaded = loadSkills(join(mnRoot, 'codex-treeplug', 'skills'));
+    assert.ok(loaded.skills.has('nested'), 'nested skill not loadable at runtime');
+  } finally {
+    rmSync(codexRoot, { recursive: true, force: true });
+    rmSync(mnRoot, { recursive: true, force: true });
+  }
+});
+
+// Mirror of the claude-adapter guard: a vendor-format plugin the user placed
+// himself has no llm-ide provenance and must never be offered a Codex update.
+test('checkForUpdates ignores a self-installed vendor plugin that was never imported', () => {
+  const codexRoot = mkdtempSync(join(tmpdir(), 'codex-own-'));
+  const mpSrc = join(codexRoot, 'marketplace-src');
+  writeFileSync(join(codexRoot, 'config.toml'), `[marketplaces.mp]\nsource = "${mpSrc}"\n`, 'utf8');
+  const pDir = join(mpSrc, 'plugins', 'reviewer');
+  mkdirSync(pDir, { recursive: true });
+  writeCodexManifest(pDir, { name: 'reviewer', version: '9.0.0', description: 'newer' });
+  const mnRoot = mkdtempSync(join(tmpdir(), 'mn-codex-own-'));
+  const own = join(mnRoot, 'reviewer');
+  mkdirSync(own, { recursive: true });
+  writeCodexManifest(own, { name: 'reviewer', version: '1.0.0', description: 'mine' });
+  try {
+    assert.deepEqual(checkForUpdates({ codexRoot, llmidePluginDir: mnRoot }), [],
+      'a self-installed plugin must not be offered a Codex update');
   } finally {
     rmSync(codexRoot, { recursive: true, force: true });
     rmSync(mnRoot, { recursive: true, force: true });

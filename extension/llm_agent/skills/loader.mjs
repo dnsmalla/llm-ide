@@ -4,7 +4,7 @@
 // warning instead of crashing the server, so a typo in one file doesn't
 // take down /code-assist.
 
-import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { readdirSync, readFileSync, existsSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 
@@ -99,11 +99,40 @@ export function loadSkills(dir, { requireBase = true, ignore = [] } = {}) {
     return { skills, base, warnings: [`skills directory not found: ${dir}`] };
   }
 
-  const entries = readdirSync(dir)
-    .filter((f) => f.endsWith('.md'))
+  const dirents = readdirSync(dir, { withFileTypes: true });
+  // A symlinked .md would let a plugin's skills/ dir read arbitrary files the
+  // server can reach, so reject the link itself rather than following it.
+  // (`isFile()` is already false for a symlink dirent — the explicit check
+  // exists to say so out loud instead of dropping the file silently.)
+  for (const e of dirents) {
+    if (e.isSymbolicLink() && e.name.endsWith('.md') && !ignoreSet.has(e.name)) {
+      warnings.push(`${e.name}: symbolic link rejected`);
+    }
+  }
+  const entries = dirents
+    .filter((e) => e.isFile() && e.name.endsWith('.md'))
+    .map((e) => e.name)
     .filter((f) => !ignoreSet.has(f));
   if (requireBase && !entries.includes('_base.md')) {
     warnings.push("_base.md is missing from skills directory; system prompt will lack base instructions");
+  }
+
+  // Vendor layout (Claude Code / Codex): one-level-deep `<name>/SKILL.md`
+  // directories alongside the flat files. Adapted in memory — the tree on
+  // disk is never rewritten. A subdirectory with no SKILL.md is a plain
+  // asset folder (references/, scripts/) and is skipped without warning.
+  const nested = [];
+  for (const e of dirents) {
+    if (!e.isDirectory()) continue;
+    const skillPath = join(dir, e.name, 'SKILL.md');
+    if (!existsSync(skillPath)) continue;
+    let st;
+    try { st = lstatSync(skillPath); } catch { continue; }
+    if (st.isSymbolicLink()) {
+      warnings.push(`${e.name}/SKILL.md: symbolic link rejected`);
+      continue;
+    }
+    nested.push({ label: `${e.name}/SKILL.md`, path: skillPath, dirname: e.name });
   }
 
   for (const entry of entries) {
@@ -167,6 +196,49 @@ export function loadSkills(dir, { requireBase = true, ignore = [] } = {}) {
     skills.set(fm.name, {
       name: fm.name,
       kind: fm.kind,
+      confirmation: fm.confirmation || null,
+      description,
+      schema: schemaResult.schema,
+      body: parsed.body.trim(),
+    });
+  }
+
+  for (const { label, path, dirname } of nested) {
+    const parsed = parseSkillFile(path);
+    if (parsed.error) {
+      warnings.push(`${label}: ${parsed.error}`);
+      continue;
+    }
+    const fm = parsed.frontmatter;
+    // A vendor SKILL.md carries `name` + `description` but never `kind`.
+    // The name falls back to the directory; an explicit name is honoured
+    // only when it matches the directory — the same rule flat files follow,
+    // so a plugin cannot smuggle in a name that shadows a core skill.
+    const name = (typeof fm.name === 'string' && fm.name) ? fm.name : dirname;
+    if (name !== dirname) {
+      warnings.push(`${label}: name '${name}' does not match directory name`);
+      continue;
+    }
+    const kind = (typeof fm.kind === 'string' && fm.kind) ? fm.kind : 'read';
+    if (!VALID_KINDS.has(kind)) {
+      warnings.push(`${label}: kind '${kind}' is not 'read' or 'write'`);
+      continue;
+    }
+    if (kind === 'write' && !VALID_CONFIRMATIONS.has(fm.confirmation)) {
+      warnings.push(`${label}: write skills must have confirmation: editable-sheet or gitop-sheet`);
+      continue;
+    }
+    const schemaResult = validateSchema(fm.schema);
+    if (schemaResult.error) {
+      warnings.push(`${label}: ${schemaResult.error}`);
+      continue;
+    }
+    const description = typeof fm.description === 'string' && fm.description.trim()
+      ? fm.description.trim()
+      : extractBodyDescription(parsed.body);
+    skills.set(name, {
+      name,
+      kind,
       confirmation: fm.confirmation || null,
       description,
       schema: schemaResult.schema,

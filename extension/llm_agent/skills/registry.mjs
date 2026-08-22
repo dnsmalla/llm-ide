@@ -148,7 +148,7 @@ export function listAllSkills() {
   const plugins = [];
   for (const p of pluginRegistry.plugins.values()) {
     if (p.skillFiles.length === 0) continue;
-    const loaded = loadPluginSkillsCached(join(p.dir, 'skills'));
+    const loaded = loadPluginSkillsCached(pluginSkillsDir(p));
     const skills = [];
     for (const [name, skill] of loaded.skills) {
       skills.push(toEntry(name, skill));
@@ -191,12 +191,26 @@ export function listInstalledPlugins(userId) {
         description: p.subagents[name].description,
         allowedTools: p.subagents[name].allowedTools,
       })),
+      // Vendor-package provenance + the components that came along but stay
+      // inert here, so the Library detail view can say so instead of the user
+      // wondering why a Claude plugin's hooks do nothing.
+      format: p.format || 'llmide',
+      unsupportedComponents: p.unsupportedComponents || [],
+      pendingComponents: p.pendingComponents || [],
     });
   }
   return {
     pluginDir: pluginRegistry.pluginDir,
     plugins: items,
   };
+}
+
+// A vendor manifest can relocate its skills dir (`skills: './x'`), so the
+// loader resolves it once and hands it over as `skillsDir`. Older plugin
+// objects (own format) always used the conventional name — keep that as the
+// fallback so nothing depends on the field's presence.
+function pluginSkillsDir(p) {
+  return p.skillsDir || join(p.dir, 'skills');
 }
 
 // Parsed plugin skills cached by plugin skills-dir. Plugin skill files only
@@ -234,7 +248,7 @@ export function buildPerUserSkillSet(userId) {
     // core skills get. Bad plugin skills are dropped with a warning
     // server-side.
     if (p.skillFiles.length > 0) {
-      const pluginSkills = loadPluginSkillsCached(join(p.dir, 'skills'));
+      const pluginSkills = loadPluginSkillsCached(pluginSkillsDir(p));
       if (pluginSkills.warnings.length > 0) {
         console.warn(`[plugin:${p.name}] skill warnings:`, pluginSkills.warnings);
       }

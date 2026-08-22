@@ -1,10 +1,10 @@
 import { join } from 'node:path';
 import os from 'node:os';
-import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { defaultPluginDir } from './loader.mjs';
 import {
   PLUGIN_NAME_RE, semverNewer, copySkills, copyCmds, countSkills, countCommands,
-  listImportedNames, getImportedVersion,
+  listImportedNames, getImportedVersion, copyPluginTree, findVendorManifestRel,
 } from './vendor-import-shared.mjs';
 
 export { listImportedNames, getImportedVersion };
@@ -144,6 +144,65 @@ export function importPlugin(opts) {
 
   const mnName = name.startsWith('claude-') ? name : `claude-${name}`;
   const targetDir = join(mnDir, mnName);
+  if (!PLUGIN_NAME_RE.test(mnName)) {
+    return { ok: false, error: `namespaced name '${mnName}' is too long to install` };
+  }
+
+  // Manifest-bearing source: copy the tree whole — llm-ide's loader reads the
+  // vendor manifest natively, so there is no generated plugin.json and no
+  // lossy flattening. agents/, hooks/ (catalogued only), and nested skill
+  // directories all survive. Manifest-less sources keep the legacy adapted
+  // path below.
+  const vendorRel = findVendorManifestRel(sourceDir);
+  if (vendorRel) {
+    let vendorManifest;
+    try { vendorManifest = JSON.parse(readFileSync(join(sourceDir, vendorRel), 'utf8')); }
+    catch { return { ok: false, error: 'vendor plugin.json is not valid JSON' }; }
+    if (typeof vendorManifest.name !== 'string' || !PLUGIN_NAME_RE.test(vendorManifest.name)) {
+      return { ok: false, error: `vendor manifest name invalid (got ${JSON.stringify(vendorManifest.name)})` };
+    }
+    const vendorVersion = (typeof vendorManifest.version === 'string' && /^\d+\.\d+\.\d+/.test(vendorManifest.version))
+      ? vendorManifest.version : '0.0.0';
+    // Clean start — a stale file from an earlier lossy import must not linger
+    // beside the whole-tree copy.
+    rmSync(targetDir, { recursive: true, force: true });
+    let copied;
+    try { copied = copyPluginTree(sourceDir, targetDir); }
+    catch (err) {
+      rmSync(targetDir, { recursive: true, force: true });
+      return { ok: false, error: `plugin tree not copied: ${err.message}` };
+    }
+    // The name is rewritten to match the namespaced directory — the identity
+    // enable state keys off — and llm-ide provenance is stamped alongside it.
+    // Provenance is what makes update-checking safe: without it, a
+    // vendor-format plugin the USER installed by zip would be mistaken for an
+    // import and silently overwritten by a same-named marketplace package.
+    // Everything else in the manifest is preserved verbatim (the loader
+    // ignores fields it does not know), so this is not a lossy regeneration.
+    writeFileSync(join(targetDir, vendorRel), JSON.stringify({
+      ...vendorManifest,
+      name: mnName,
+      version: vendorVersion,
+      llmideOrigin: 'claude',
+      llmideSourcePlugin: name,
+    }, null, 2), 'utf8');
+    return {
+      ok: true,
+      warnings: copied.skipped.length > 0 ? copied.skipped : undefined,
+      plugin: {
+        name: mnName,
+        version: vendorVersion,
+        displayName: vendorManifest.displayName || name,
+        description: vendorManifest.description || `Imported from Claude Code (${source})`,
+        author: typeof vendorManifest.author === 'string'
+          ? vendorManifest.author
+          : vendorManifest.author?.name || 'Claude Code',
+        skillCount: countSkills(join(targetDir, 'skills')),
+        commandCount: countCommands(join(targetDir, 'commands')),
+        origin: 'claude',
+      },
+    };
+  }
 
   let version = '0.0.0';
   const pkgPath = join(sourceDir, 'package.json');
@@ -269,39 +328,64 @@ export function checkForUpdates(opts = {}) {
   const updates = [];
 
   for (const mnName of imported) {
-    // Only check claude-originated plugins
-    const manifestPath = join(mnDir, mnName, 'plugin.json');
-    if (!existsSync(manifestPath)) continue;
-    let manifest;
-    try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')); } catch { continue; }
-    if (manifest.origin !== 'claude') continue;
-
-    const sourceName = manifest.sourcePlugin || mnName.replace(/^claude-/, '');
-    const importedVersion = manifest.version || '0.0.0';
+    // Own-format imports carry `origin` in their generated manifest; a
+    // whole-tree vendor copy carries `llmideOrigin` in the vendor manifest the
+    // import stamped. Either way an update is only ever offered for a plugin
+    // THIS import created — a vendor-format plugin the user installed himself
+    // is left alone even when the cache holds a same-named package.
+    const vendorRel = findVendorManifestRel(join(mnDir, mnName));
+    let importedVersion;
+    let sourceNames;
+    if (vendorRel) {
+      let vendorManifest;
+      try { vendorManifest = JSON.parse(readFileSync(join(mnDir, mnName, vendorRel), 'utf8')); }
+      catch { continue; }
+      if (vendorManifest.llmideOrigin !== 'claude') continue;
+      importedVersion = vendorManifest.version || '0.0.0';
+      sourceNames = [vendorManifest.llmideSourcePlugin || mnName.replace(/^claude-/, '')];
+    } else {
+      const manifestPath = join(mnDir, mnName, 'plugin.json');
+      if (!existsSync(manifestPath)) continue;
+      let manifest;
+      try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')); } catch { continue; }
+      if (manifest.origin !== 'claude') continue;
+      importedVersion = manifest.version || '0.0.0';
+      sourceNames = [manifest.sourcePlugin || mnName.replace(/^claude-/, '')];
+    }
 
     // Check installed first, then marketplace
+    let found = false;
     for (const source of ['installed', 'marketplace']) {
-      const sourceDir = findClaudePlugin(claudeRoot, source, sourceName);
-      if (!sourceDir) continue;
+      for (const sourceName of sourceNames) {
+        const sourceDir = findClaudePlugin(claudeRoot, source, sourceName);
+        if (!sourceDir) continue;
+        found = true;
 
-      let sourceVersion = '0.0.0';
-      const pkgPath = join(sourceDir, 'package.json');
-      if (existsSync(pkgPath)) {
-        try {
-          const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
-          if (typeof pkg.version === 'string') sourceVersion = pkg.version;
-        } catch { /* use default */ }
-      }
+        // A vendor manifest outranks package.json for the source version;
+        // first present file wins.
+        let sourceVersion = '0.0.0';
+        for (const rel of [findVendorManifestRel(sourceDir), 'package.json']) {
+          if (!rel) continue;
+          const p = join(sourceDir, rel);
+          if (!existsSync(p)) continue;
+          try {
+            const parsed = JSON.parse(readFileSync(p, 'utf8'));
+            if (typeof parsed.version === 'string') sourceVersion = parsed.version;
+          } catch { /* use default */ }
+          break;
+        }
 
-      if (semverNewer(sourceVersion, importedVersion)) {
-        updates.push({
-          name: mnName,
-          importedVersion,
-          sourceVersion,
-          source,
-        });
+        if (semverNewer(sourceVersion, importedVersion)) {
+          updates.push({
+            name: mnName,
+            importedVersion,
+            sourceVersion,
+            source,
+          });
+        }
+        break;
       }
-      break; // Found source, stop checking
+      if (found) break; // Found source, stop checking
     }
   }
   return updates;

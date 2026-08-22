@@ -10,6 +10,13 @@
 //                        frontmatter declaring an arg schema; body is
 //                        a prompt template with {{argName}} slots.
 //
+// A vendor plugin (Claude Code / Codex) carries
+// `.claude-plugin/plugin.json` or `.codex-plugin/plugin.json` instead;
+// components live in `skills/<name>/SKILL.md`, `commands/*.md`, and
+// `agents/*.md`. Both layouts normalize into the same internal plugin
+// model, so nothing downstream has to know which vendor a plugin came
+// from.
+//
 // Plugins live under the OS-standard per-user data directory:
 //   ~/Library/Application Support/llm-ide/plugins/   (macOS; legacy: LLM IDE)
 //   $XDG_DATA_HOME/llmide/plugins/                  (Linux)
@@ -28,6 +35,59 @@ import * as yaml from 'js-yaml';
 // Reserved slug — never let a plugin pretend to be a core skill.
 const RESERVED_NAMES = new Set(['global', 'internal', 'core', 'kb', 'system']);
 const NAME_RE = /^[a-z][a-z0-9-]{1,40}$/;
+
+// Vendor plugin manifests (Claude Code `.claude-plugin/plugin.json`, Codex
+// `.codex-plugin/plugin.json`). Codex's format is a near-subset of Claude's,
+// so one code path serves both. `plugin.json` at the root always wins — an
+// own-format plugin is never reinterpreted.
+const VENDOR_MANIFEST_DIRS = ['.claude-plugin', '.codex-plugin'];
+
+function detectPluginFormat(dir) {
+  if (existsSync(join(dir, 'plugin.json'))) return 'llmide';
+  for (const sub of VENDOR_MANIFEST_DIRS) {
+    if (existsSync(join(dir, sub, 'plugin.json'))) return 'claude';
+  }
+  return null;
+}
+
+/**
+ * Validate a vendor manifest into the same normalized shape the own-format
+ * path produces, plus component-path overrides (./skills etc.). Only `name`
+ * is required by the vendor spec; version defaults. `defaultEnabled` is
+ * parsed nowhere on purpose — LLM-IDE stays opt-in regardless of manifest.
+ */
+function validateClaudeManifest(raw) {
+  if (!raw || typeof raw !== 'object') return { error: 'manifest is not an object' };
+  const { name, version } = raw;
+  if (typeof name !== 'string' || !NAME_RE.test(name)) {
+    return { error: `name must match ${NAME_RE} (got ${JSON.stringify(name)})` };
+  }
+  if (RESERVED_NAMES.has(name)) return { error: `name '${name}' is reserved` };
+  const author = typeof raw.author === 'string'
+    ? raw.author.slice(0, 120)
+    : (raw.author && typeof raw.author === 'object' && typeof raw.author.name === 'string')
+      ? raw.author.name.slice(0, 120)
+      : '';
+  const components = {};
+  for (const key of ['skills', 'commands', 'agents']) {
+    const rel = raw[key];
+    if (rel === undefined) continue;
+    if (typeof rel !== 'string' || !/^\.\/[A-Za-z0-9._-]+$/.test(rel) || rel.includes('..')) {
+      return { error: `component path '${key}' must be a './'-prefixed relative path without traversal` };
+    }
+    components[key] = rel.slice(2);
+  }
+  return {
+    manifest: {
+      name,
+      version: (typeof version === 'string' && /^\d+\.\d+\.\d+/.test(version)) ? version : '0.0.0',
+      displayName: typeof raw.displayName === 'string' ? raw.displayName.slice(0, 80) : name,
+      description: typeof raw.description === 'string' ? raw.description.slice(0, 400) : '',
+      author,
+    },
+    components,
+  };
+}
 
 // Hard caps on plugin content so a malicious or oversized plugin
 // can't exhaust the Claude context window or the server's heap.
@@ -151,12 +211,28 @@ function parseSubagentFile(path) {
 
   const suspicious = scanForSuspiciousContent(body);
 
-  const allowedTools = Array.isArray(fm.allowed_tools)
-    ? fm.allowed_tools.filter((s) => typeof s === 'string' && /^[a-z][a-z0-9-]{0,40}$/.test(s))
+  // Tool list: the own format uses `allowed_tools` (a YAML list of lowercase
+  // ids). Vendor frontmatter (Claude Code / Codex) uses `tools` — a CSV string
+  // or a list of Capitalized names — normalized here: lowercased, and the
+  // charset widened to allow underscores (mcp__server__tool) up to 64 chars.
+  // `allowed_tools` wins when a plugin carries both.
+  let toolList = fm.allowed_tools;
+  if (toolList === undefined && fm.tools !== undefined) {
+    toolList = typeof fm.tools === 'string'
+      ? fm.tools.split(',').map((t) => t.trim()).filter(Boolean)
+      : fm.tools;
+  }
+  const allowedTools = Array.isArray(toolList)
+    ? toolList
+      .filter((t) => typeof t === 'string')
+      .map((t) => t.trim().toLowerCase())
+      .filter((t) => /^[a-z][a-z0-9_-]{0,63}$/.test(t))
     : [];
 
-  const maxIters = Number.isFinite(fm.maxIterations) && fm.maxIterations > 0
-    ? Math.min(fm.maxIterations, 5)
+  // Vendor `maxTurns` maps onto our maxIterations, same clamp.
+  const rawIters = fm.maxIterations ?? fm.maxTurns;
+  const maxIters = Number.isFinite(rawIters) && rawIters > 0
+    ? Math.min(rawIters, 5)
     : 3;
 
   // Optional sub-model override, e.g. `model: claude-haiku-4-5` to run
@@ -205,11 +281,19 @@ function parseCommandFile(path) {
 
   const suspicious = scanForSuspiciousContent(parsed.body);
 
+  // Vendor command bodies (Claude Code / Codex) use `$ARGUMENTS` for
+  // "everything the user typed after the trigger" — exactly our `{{_rest}}`
+  // semantics, so translate at parse time and let expandSlashCommand do the
+  // rest. `argument-hint` is display-only; fold it into the description.
+  const template = parsed.body.trim().replace(/\$ARGUMENTS\b/g, '{{_rest}}');
+  const hint = typeof fm['argument-hint'] === 'string' ? fm['argument-hint'].slice(0, 80) : '';
+  const baseDescription = typeof fm.description === 'string' ? fm.description.slice(0, 200) : '';
+
   return {
     command: {
-      description: typeof fm.description === 'string' ? fm.description.slice(0, 200) : '',
+      description: hint ? `${baseDescription} (args: ${hint})`.slice(0, 240) : baseDescription,
       args: cleanArgs,
-      template: parsed.body.trim(),
+      template,
     },
     suspicious,
   };
@@ -219,14 +303,31 @@ function parseCommandFile(path) {
  * Walk one plugin directory. Returns { plugin, warnings } or { error }.
  */
 function loadOnePlugin(dir) {
-  const manifestPath = join(dir, 'plugin.json');
-  if (!existsSync(manifestPath)) return { error: 'no plugin.json' };
-  let raw;
-  try { raw = JSON.parse(readFileSync(manifestPath, 'utf8')); }
-  catch (err) { return { error: `plugin.json parse: ${err.message}` }; }
-  const v = validateManifest(raw);
-  if (v.error) return { error: v.error };
-  const manifest = v.manifest;
+  const format = detectPluginFormat(dir);
+  if (format === null) {
+    return { error: 'no plugin manifest (plugin.json or .claude-plugin/plugin.json)' };
+  }
+  let manifest;
+  let components = {};
+  if (format === 'llmide') {
+    let raw;
+    try { raw = JSON.parse(readFileSync(join(dir, 'plugin.json'), 'utf8')); }
+    catch (err) { return { error: `plugin.json parse: ${err.message}` }; }
+    const v = validateManifest(raw);
+    if (v.error) return { error: v.error };
+    manifest = v.manifest;
+  } else {
+    const manifestPath = VENDOR_MANIFEST_DIRS
+      .map((sub) => join(dir, sub, 'plugin.json'))
+      .find((candidate) => existsSync(candidate));
+    let raw;
+    try { raw = JSON.parse(readFileSync(manifestPath, 'utf8')); }
+    catch (err) { return { error: `vendor plugin.json parse: ${err.message}` }; }
+    const v = validateClaudeManifest(raw);
+    if (v.error) return { error: v.error };
+    manifest = v.manifest;
+    components = v.components;
+  }
   const warnings = [];
 
   // Skills: read every .md file under skills/ if the dir exists. We
@@ -237,38 +338,55 @@ function loadOnePlugin(dir) {
   // directory is already checked via lstatSync in loadPlugins(); this
   // extends that check to every .md file so a plugin author cannot add a
   // skill/command/agent that is a symlink pointing outside the plugin.
-  function rejectSymlink(subdir, entry) {
+  function rejectSymlink(subdir, entry, label = entry) {
     try {
       if (lstatSync(join(subdir, entry)).isSymbolicLink()) {
-        warnings.push(`${entry}: symbolic link rejected in plugin content`);
+        warnings.push(`${label}: symbolic link rejected in plugin content`);
         return true;
       }
     } catch { /* stat failure — treat as skip, readFileSync will also fail */ }
     return false;
   }
 
-  const skillsDir = join(dir, 'skills');
+  // A vendor manifest may relocate its component dirs (`skills: './x'`);
+  // the own format always uses the conventional names.
+  const skillsDir = join(dir, components.skills ?? 'skills');
   const skillFiles = [];
   if (existsSync(skillsDir)) {
     try {
       let count = 0;
-      for (const entry of readdirSync(skillsDir)) {
-        if (!entry.endsWith('.md')) continue;
+      for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+        // Two layouts: a flat `<name>.md` (own format) or a vendor
+        // `<name>/SKILL.md` directory. A subdirectory without SKILL.md is a
+        // plain asset folder (references/, scripts/) — not a skill.
+        let skillPath;
+        let label;
+        if (entry.isDirectory()) {
+          skillPath = join(skillsDir, entry.name, 'SKILL.md');
+          if (!existsSync(skillPath)) continue;
+          label = `${entry.name}/SKILL.md`;
+        } else {
+          if (!entry.name.endsWith('.md')) continue;
+          skillPath = join(skillsDir, entry.name);
+          label = entry.name;
+        }
         if (count >= MAX_FILES_PER_DIR) {
           warnings.push(`skills/ has more than ${MAX_FILES_PER_DIR} files — extras ignored`);
           break;
         }
-        if (rejectSymlink(skillsDir, entry)) continue;
-        const skillPath = join(skillsDir, entry);
+        // Reject a symlink at whichever level it appears — the entry itself
+        // or the SKILL.md inside a directory entry.
+        if (rejectSymlink(skillsDir, entry.name, label)) continue;
+        if (entry.isDirectory() && rejectSymlink(join(skillsDir, entry.name), 'SKILL.md', label)) continue;
         try {
           const content = readFileSync(skillPath, 'utf8');
           if (Buffer.byteLength(content, 'utf8') > MAX_SKILL_BYTES) {
-            warnings.push(`skills/${entry}: exceeds ${MAX_SKILL_BYTES} byte limit`);
+            warnings.push(`skills/${label}: exceeds ${MAX_SKILL_BYTES} byte limit`);
             continue;
           }
           const suspicious = scanForSuspiciousContent(content);
           if (suspicious.length) {
-            warnings.push(`skills/${entry}: suspicious content detected — ${suspicious.join(', ')}`);
+            warnings.push(`skills/${label}: suspicious content detected — ${suspicious.join(', ')}`);
           }
         } catch { /* read error — runtime loader will also fail and skip */ }
         skillFiles.push(skillPath);
@@ -280,7 +398,7 @@ function loadOnePlugin(dir) {
   }
 
   // Commands: file name == trigger. summary.md → /summary.
-  const cmdDir = join(dir, 'commands');
+  const cmdDir = join(dir, components.commands ?? 'commands');
   const commands = {};
   if (existsSync(cmdDir)) {
     try {
@@ -318,7 +436,7 @@ function loadOnePlugin(dir) {
   // global runtime exposes a single generic `ask-subagent` tool;
   // routing to the right body happens in the handler by looking up
   // the union of subagent maps across the user's enabled plugins.
-  const agentsDir = join(dir, 'agents');
+  const agentsDir = join(dir, components.agents ?? 'agents');
   const subagents = {};
   if (existsSync(agentsDir)) {
     try {
@@ -351,13 +469,36 @@ function loadOnePlugin(dir) {
     }
   }
 
+  // Vendor components LLM-IDE does not run. Catalogued for display only —
+  // parsing them must never lead to execution (spec: parse-and-ignore).
+  // `pending` are the ones a later phase will activate behind their own
+  // consent gate (hooks) or MCP consent flow.
+  //
+  // Deliberately NOT pushed into `warnings`: the installer treats any loader
+  // warning as a fatal validation failure, and a real Claude package shipping
+  // a themes/ dir must still install. The catalogue is structured output the
+  // detail view renders instead.
+  const unsupportedComponents = [];
+  const pendingComponents = [];
+  if (format === 'claude') {
+    for (const rel of ['themes', 'output-styles', 'monitors', 'workflows', 'bin', '.lsp.json', 'settings.json']) {
+      if (existsSync(join(dir, rel))) unsupportedComponents.push(rel);
+    }
+    if (existsSync(join(dir, 'hooks', 'hooks.json'))) pendingComponents.push('hooks');
+    if (existsSync(join(dir, '.mcp.json'))) pendingComponents.push('mcp');
+  }
+
   return {
     plugin: {
       ...manifest,
       dir,
+      format,
+      skillsDir,
       skillFiles,
       commands,
       subagents,
+      unsupportedComponents,
+      pendingComponents,
     },
     warnings,
   };

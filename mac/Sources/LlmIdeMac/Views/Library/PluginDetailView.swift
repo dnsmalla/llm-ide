@@ -28,6 +28,7 @@ struct PluginDetailView: View {
                     descriptionBlock(plugin)
                     commandsBlock(plugin)
                     subagentsBlock(plugin)
+                    componentsBlock(plugin)
                 } else {
                     Text("Plugin not found — it may have been uninstalled.")
                         .foregroundStyle(.secondary)
@@ -143,6 +144,30 @@ struct PluginDetailView: View {
                 Text("\(p.skillCount) skill\(p.skillCount == 1 ? "" : "s") loaded.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Vendor-package components LLM-IDE does not run — shown so the user knows
+    /// what a Claude Code / Codex plugin brought along that stays inert here,
+    /// rather than wondering why its hooks never fire.
+    @ViewBuilder
+    private func componentsBlock(_ plugin: PluginInfo) -> some View {
+        if !plugin.pendingComponents.isEmpty || !plugin.unsupportedComponents.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Components").font(.headline)
+                if plugin.pendingComponents.contains("hooks") {
+                    Label("Hooks — detected, not run yet (requires plugin hook trust)", systemImage: "clock")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                if plugin.pendingComponents.contains("mcp") {
+                    Label("MCP servers — detected, not active yet", systemImage: "clock")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                ForEach(plugin.unsupportedComponents, id: \.self) { component in
+                    Label("\(component) — unsupported, ignored", systemImage: "minus.circle")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
             }
         }
     }

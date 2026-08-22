@@ -200,12 +200,20 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     /// Subagents declared by the plugin under `agents/`. Default empty
     /// so older server responses without this field still decode.
     let subagents: [PluginSubagentInfo]
+    /// "llmide" (own format) or "claude" (a Claude Code / Codex package).
+    /// Older servers predate the field — default to the own format.
+    let format: String
+    /// Vendor components present but never executed (themes, .lsp.json, …).
+    let unsupportedComponents: [String]
+    /// Vendor components present but inactive until a later phase (hooks, MCP).
+    let pendingComponents: [String]
     var id: String { name }
     static func == (lhs: PluginInfo, rhs: PluginInfo) -> Bool { lhs.name == rhs.name && lhs.enabled == rhs.enabled }
 
     enum CodingKeys: String, CodingKey {
         case name, version, displayName, description, author
         case enabled, skillCount, commands, subagents
+        case format, unsupportedComponents, pendingComponents
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -218,6 +226,9 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         self.skillCount  = try c.decode(Int.self,    forKey: .skillCount)
         self.commands    = try c.decode([PluginCommandInfo].self, forKey: .commands)
         self.subagents   = try c.decodeIfPresent([PluginSubagentInfo].self, forKey: .subagents) ?? []
+        self.format      = try c.decodeIfPresent(String.self, forKey: .format) ?? "llmide"
+        self.unsupportedComponents = try c.decodeIfPresent([String].self, forKey: .unsupportedComponents) ?? []
+        self.pendingComponents     = try c.decodeIfPresent([String].self, forKey: .pendingComponents) ?? []
     }
 }
 
