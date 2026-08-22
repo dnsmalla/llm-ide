@@ -39,6 +39,22 @@ function memoryProvider() {
   };
 }
 
+/** Full connect dance against `fake`, returning a live authenticated Client. */
+async function connectedClient(fake, t) {
+  const provider = memoryProvider();
+  const t1 = new StreamableHTTPClientTransport(new URL(fake.url), { authProvider: provider });
+  await assert.rejects(() => new Client({ name: 's', version: '1' }).connect(t1), UnauthorizedError);
+  const { code } = await fake.authorize(provider.authorizationUrl);
+  await t1.finishAuth(code);
+  await t1.close().catch(() => {});
+
+  const t2 = new StreamableHTTPClientTransport(new URL(fake.url), { authProvider: provider });
+  const c = new Client({ name: 's', version: '1' });
+  await c.connect(t2);
+  t.after(() => c.close().catch(() => {}));
+  return c;
+}
+
 test('fixture: unauthenticated connect yields UnauthorizedError after DCR + PKCE', async (t) => {
   const fake = await startFakeMcpServer();
   t.after(() => fake.close());
@@ -164,4 +180,74 @@ test('fixture: setIssuerPath moves the authorization server', async (t) => {
   await assert.rejects(() => new Client({ name: 's', version: '1' }).connect(t1), UnauthorizedError);
   await t1.close().catch(() => {});
   assert.equal(provider._store.get('issuer'), `${fake.origin}/as-b/`);
+});
+
+// ── Phase 2b: argument-aware, oversized and failing tools ──────────────────
+//
+// The phase-2a fixture returned one static blob per tool and could not see
+// arguments at all (an empty Zod raw shape STRIPS unknown keys). A fetch test
+// written against that fixture would pass while reading the wrong board, which
+// is precisely the bug the generic two-level fetch is most likely to ship.
+
+test('fixture: a handler tool receives the arguments the client sent', async (t) => {
+  const fake = await startFakeMcpServer({
+    tools: [
+      { name: 'list_boards', handler: () => ({ data: [{ id: 'b1' }, { id: 'b2' }] }) },
+      { name: 'get_board_items', handler: (args) => ({ data: [{ id: `${args.board_id}-i1` }] }) },
+    ],
+  });
+  t.after(() => fake.close());
+
+  const c = await connectedClient(fake, t);
+  const r = await c.callTool({ name: 'get_board_items', arguments: { board_id: 'b2' } });
+  assert.deepEqual(JSON.parse(r.content[0].text), { data: [{ id: 'b2-i1' }] });
+  assert.deepEqual(fake.toolCalls.at(-1), { name: 'get_board_items', args: { board_id: 'b2' } });
+  await c.close();
+});
+
+test('fixture: textOnly tools return prose, structured tools return structuredContent', async (t) => {
+  const fake = await startFakeMcpServer({
+    tools: [
+      { name: 'prose', handler: () => 'not json at all', textOnly: true },
+      { name: 'typed', handler: () => ({ data: [{ id: 'x' }] }), structured: true },
+    ],
+  });
+  t.after(() => fake.close());
+
+  const c = await connectedClient(fake, t);
+  const prose = await c.callTool({ name: 'prose', arguments: {} });
+  assert.equal(prose.content[0].text, 'not json at all');
+  assert.equal(prose.structuredContent, undefined);
+
+  const typed = await c.callTool({ name: 'typed', arguments: {} });
+  assert.deepEqual(typed.structuredContent, { data: [{ id: 'x' }] });
+  await c.close();
+});
+
+test('fixture: an error tool resolves with isError rather than rejecting', async (t) => {
+  const fake = await startFakeMcpServer({
+    tools: [{ name: 'boom', error: 'board is private' }],
+  });
+  t.after(() => fake.close());
+
+  const c = await connectedClient(fake, t);
+  const r = await c.callTool({ name: 'boom', arguments: {} });
+  // The SDK server turns a thrown handler into a RESULT, not a rejection —
+  // any generic caller has to check isError itself.
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /board is private/);
+  await c.close();
+});
+
+test('fixture: a handler can return a payload far larger than one note', async (t) => {
+  const big = 'x'.repeat(40_000);
+  const fake = await startFakeMcpServer({
+    tools: [{ name: 'huge', handler: () => ({ data: [{ id: 'h1', text: big }] }) }],
+  });
+  t.after(() => fake.close());
+
+  const c = await connectedClient(fake, t);
+  const r = await c.callTool({ name: 'huge', arguments: {} });
+  assert.equal(JSON.parse(r.content[0].text).data[0].text.length, 40_000);
+  await c.close();
 });

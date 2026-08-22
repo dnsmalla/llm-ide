@@ -26,17 +26,27 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { z } from 'zod';
 
+// The default pair keeps every phase-2a test working unchanged: same names,
+// same static payloads. Phase 2b tests pass their own `tools` array.
 const DEFAULT_TOOLS = [
   { name: 'list_boards', description: 'List Miro boards', result: [{ id: 'b1', name: 'Board One' }] },
   { name: 'get_board_items', description: 'Read one board', result: [{ type: 'sticky_note', text: 'hello' }] },
 ];
 
+// z.looseObject({}) rather than the raw shape `{}`. Verified: an empty raw
+// shape normalises to a STRICT z.object({}), which strips unknown keys, so a
+// handler called with { board_id: 'b2' } receives {} and every argument
+// assertion in a fetch test would be vacuously true. looseObject passes the
+// arguments through untouched — which is what a real server does.
+const LOOSE = z.looseObject({});
+
 const s256 = (v) => crypto.createHash('sha256').update(v).digest('base64url');
 
 /**
  * Start the fixture. Always `await handle.close()` (use `t.after`).
- * @param {{ issuerPath?: string, tools?: Array<{name,description,result}> }} [opts]
+ * @param {{ issuerPath?: string, tools?: Array<{name,description?,result?,handler?,textOnly?,structured?,error?}> }} [opts]
  */
 export async function startFakeMcpServer(opts = {}) {
   const tools = opts.tools || DEFAULT_TOOLS;
@@ -47,14 +57,33 @@ export async function startFakeMcpServer(opts = {}) {
   const requests = [];
   const registrations = [];
   const tokenRequests = [];
+  const toolCalls = [];             // { name, args } per tools/call, in order
 
   function buildMcpServer() {
     const mcp = new McpServer({ name: 'fake-miro', version: '0.0.1' });
-    for (const t of tools) {
+    for (const spec of tools) {
       mcp.registerTool(
-        t.name,
-        { description: t.description, inputSchema: {} },
-        async () => ({ content: [{ type: 'text', text: JSON.stringify(t.result) }] }),
+        spec.name,
+        { description: spec.description || spec.name, inputSchema: LOOSE },
+        async (args) => {
+          toolCalls.push({ name: spec.name, args: args ?? {} });
+
+          // A tool that fails on the server. The SDK turns a throw into
+          // { isError: true, content: [...] } — a RESULT, not a rejection —
+          // so this is the only faithful way to exercise that path.
+          if (spec.error) throw new Error(spec.error);
+
+          const value = spec.handler ? await spec.handler(args ?? {}) : spec.result;
+
+          // textOnly: prose, not JSON. Real servers do this and a parser that
+          // assumes JSON.parse succeeds will throw on the first such tool.
+          if (spec.textOnly) {
+            return { content: [{ type: 'text', text: String(value) }] };
+          }
+          const out = { content: [{ type: 'text', text: JSON.stringify(value) }] };
+          if (spec.structured) out.structuredContent = value;
+          return out;
+        },
       );
     }
     return mcp;
@@ -185,6 +214,7 @@ export async function startFakeMcpServer(opts = {}) {
     requests,
     registrations,
     tokenRequests,
+    toolCalls,
 
     /** Stand in for the user's browser: follow the authorization URL once. */
     async authorize(authorizationUrl) {
@@ -205,7 +235,7 @@ export async function startFakeMcpServer(opts = {}) {
     /** Move the authorization server; proves credentials are issuer-scoped. */
     setIssuerPath(p) { issuerPath = p; },
 
-    clearLog() { requests.length = 0; },
+    clearLog() { requests.length = 0; toolCalls.length = 0; },
 
     async close() {
       server.closeAllConnections?.();
