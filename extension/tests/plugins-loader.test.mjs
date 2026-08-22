@@ -694,3 +694,24 @@ test('own format: hooks are never read', () => {
   assert.deepEqual(plugins.get('example').hookNotes, []);
   rmSync(root, { recursive: true, force: true });
 });
+
+test('vendor: the manifest location travels with the plugin', () => {
+  const root = newRoot();
+  const claudeDir = join(root, 'claudeish');
+  mkdirSync(join(claudeDir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(claudeDir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'claudeish', version: '1.0.0' }), 'utf8');
+  const codexDir = join(root, 'codexish');
+  mkdirSync(join(codexDir, '.codex-plugin'), { recursive: true });
+  writeFileSync(join(codexDir, '.codex-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'codexish', version: '1.0.0' }), 'utf8');
+  plugin(root, 'ownish', { ...validManifest, name: 'ownish' });
+
+  const { plugins } = loadPlugins({ pluginDir: root });
+  // Only the Claude layout is something the Agent SDK can load natively — the
+  // consumer needs to tell the two vendors apart, which `format` alone cannot.
+  assert.equal(plugins.get('claudeish').manifestRel, join('.claude-plugin', 'plugin.json'));
+  assert.equal(plugins.get('codexish').manifestRel, join('.codex-plugin', 'plugin.json'));
+  assert.equal(plugins.get('ownish').manifestRel, 'plugin.json');
+  rmSync(root, { recursive: true, force: true });
+});

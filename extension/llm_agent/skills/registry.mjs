@@ -137,24 +137,75 @@ export function reloadPlugins() {
 }
 
 /**
- * The SDK `hooks` option for this user: the hook declarations of every plugin
- * that is BOTH enabled and hook-trusted. Both switches are required — enabling
- * a plugin adds prompt text, trusting its hooks lets it run shell commands,
- * and conflating the two would turn a routine toggle into a much larger grant.
+ * How this user's enabled plugins reach the v2 engine. Two mechanisms, and each
+ * plugin uses exactly one:
  *
- * Only the v2 SDK engine consumes this; the legacy CLI path has no hook
- * surface, so a plugin's hooks stay catalogued-only there.
+ *   native     — handed to the Agent SDK as `{ type: 'local', path }`. The SDK
+ *                loads the package's skills/commands/agents and runs its hooks
+ *                with full fidelity (every handler type and event it supports),
+ *                which our own translation cannot match.
+ *   translated — llm-ide runs the plugin's `command` hooks itself, bounded by
+ *                its own timeout and output cap (sdk/hooks.mjs).
+ *
+ * Native is the default and is what `nativeEnabled: false` turns off, falling
+ * back to translation. Three rules hold either way:
+ *
+ *  1. **Hook trust still gates everything.** Handing a plugin to the SDK means
+ *     the SDK runs its hooks, so a plugin with hooks is only handed over once
+ *     the user has trusted them. An untrusted plugin's hooks run through
+ *     NEITHER mechanism.
+ *  2. **Never both.** A natively-loaded plugin is excluded from translation, or
+ *     every hook would fire twice.
+ *  3. **MCP stays ours.** `skipMcpDiscovery` is always set: a plugin's declared
+ *     servers keep their own consent gate (mcp/state.mjs) and must not be
+ *     connected by the SDK behind it.
+ *
+ * Only a `.claude-plugin` package can go native — the SDK does not read Codex's
+ * `.codex-plugin` manifest, and an own-format plugin has no vendor manifest at
+ * all, so both keep the translated path.
  */
-export function buildUserPluginHooks(userId, { cwd, env, onNote } = {}) {
+export function buildUserPluginDelivery(userId, { nativeEnabled = true, cwd, env, onNote } = {}) {
   const enabled = listEnabledPlugins(userId);
   const trusted = listHooksTrustedPlugins(userId);
-  const candidates = [];
+  const sdkPlugins = [];
+  const native = [];
+  const translated = [];
+  const toTranslate = [];
+
   for (const p of pluginRegistry.plugins.values()) {
     if (!enabled.has(p.name)) continue;
-    if (!Array.isArray(p.hooks) || p.hooks.length === 0) continue;
-    candidates.push({ name: p.name, hooks: p.hooks });
+    const hooks = Array.isArray(p.hooks) ? p.hooks : [];
+    const hasHooks = hooks.length > 0;
+    const hookTrusted = trusted.has(p.name);
+    const sdkReadable = p.format === 'claude'
+      && typeof p.manifestRel === 'string'
+      && p.manifestRel.startsWith('.claude-plugin');
+
+    if (nativeEnabled && sdkReadable && (!hasHooks || hookTrusted)) {
+      sdkPlugins.push({ type: 'local', path: p.dir, skipMcpDiscovery: true });
+      native.push(p.name);
+      continue;
+    }
+    if (hasHooks && hookTrusted) {
+      toTranslate.push({ name: p.name, hooks });
+      translated.push(p.name);
+    }
   }
-  return buildPluginHooks(candidates, { trusted, cwd, env, onNote });
+
+  return {
+    sdkPlugins,
+    native,
+    translated,
+    hooks: buildPluginHooks(toTranslate, { trusted, cwd, env, onNote }),
+  };
+}
+
+/**
+ * Just the translated-hook half of `buildUserPluginDelivery`, kept for callers
+ * that only need the SDK `hooks` option.
+ */
+export function buildUserPluginHooks(userId, opts = {}) {
+  return buildUserPluginDelivery(userId, opts).hooks;
 }
 
 /** What every installed plugin declares in its `.mcp.json`, grouped by plugin. */

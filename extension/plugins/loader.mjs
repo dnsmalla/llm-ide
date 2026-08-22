@@ -488,6 +488,10 @@ function loadOnePlugin(dir) {
   }
   let manifest;
   let components = {};
+  // Which manifest this plugin was read from, relative to its directory. The
+  // Agent SDK can load a `.claude-plugin` package natively; a `.codex-plugin`
+  // one it cannot, and `format` alone does not distinguish them.
+  let manifestRel = 'plugin.json';
   if (format === 'llmide') {
     let raw;
     try { raw = JSON.parse(readFileSync(join(dir, 'plugin.json'), 'utf8')); }
@@ -496,9 +500,9 @@ function loadOnePlugin(dir) {
     if (v.error) return { error: v.error };
     manifest = v.manifest;
   } else {
-    const manifestPath = VENDOR_MANIFEST_DIRS
-      .map((sub) => join(dir, sub, 'plugin.json'))
-      .find((candidate) => existsSync(candidate));
+    const sub = VENDOR_MANIFEST_DIRS.find((candidate) => existsSync(join(dir, candidate, 'plugin.json')));
+    const manifestPath = join(dir, sub, 'plugin.json');
+    manifestRel = join(sub, 'plugin.json');
     let raw;
     try { raw = JSON.parse(readFileSync(manifestPath, 'utf8')); }
     catch (err) { return { error: `vendor plugin.json parse: ${err.message}` }; }
@@ -689,6 +693,7 @@ function loadOnePlugin(dir) {
       ...manifest,
       dir,
       format,
+      manifestRel,
       skillsDir,
       skillFiles,
       commands,

@@ -38,7 +38,8 @@ import {
   personaForMode, PLAN_LIKE_MODES, restrictsTools, allowedToolNames,
 } from '../runtime/mode-personas.mjs';
 import {
-  readSkillInstructions, buildPerUserSkillSet, internalSkills, pluginEnabledFor, buildUserPluginHooks,
+  readSkillInstructions, buildPerUserSkillSet, internalSkills, pluginEnabledFor,
+  buildUserPluginDelivery,
 } from '../skills/index.mjs';
 import { composeSystemContext } from '../internal/context/compose.mjs';
 import { buildReadableRoots, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
@@ -50,6 +51,7 @@ import { sanitizeForPrompt } from '../../core/utils.mjs';
 import { selectAttachments, buildSkillsText } from '../../core/prompt-framing.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { usdCapForModel } from '../../kb/usage.mjs';
+import { nativePluginsEnabled } from '../../kb/user.mjs';
 import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { getAgentPersona } from '../../kb/personas.mjs';
 import { getSecret, makeSecretReader } from '../../server/vault.mjs';
@@ -764,12 +766,15 @@ export async function runAgentV2Turn(
   // server, with their server-level specs appended to the allowlist composed
   // by buildEngineOptions.
   const userMcp = buildUserMcpServers(userId, mode);
-  // Hooks from plugins this user both enabled AND hook-trusted. Absent that
-  // trust this is `{}` and the SDK gets no hooks option at all — a plugin
-  // cannot arrange to run a shell command by being merely installed. Hook
-  // commands run in the turn's workspace so a plugin script sees the repo the
-  // user is actually working in.
-  const pluginHooks = buildUserPluginHooks(userId, {
+  // How this user's enabled plugins reach the SDK. By default a Claude-format
+  // package is handed over whole (`plugins`) so the SDK loads it and runs its
+  // hooks with full fidelity; the `nativePlugins` pref turns that off and falls
+  // back to llm-ide translating the plugin's `command` hooks itself. Either
+  // way hook trust gates execution and nothing runs twice — see
+  // buildUserPluginDelivery. Hook commands run in the turn's workspace so a
+  // plugin script sees the repo the user is actually working in.
+  const pluginDelivery = buildUserPluginDelivery(userId, {
+    nativeEnabled: nativePluginsEnabled(userId),
     cwd: queryOptions.cwd,
     onNote: (note) => console.warn(note),
   });
@@ -778,7 +783,8 @@ export async function runAgentV2Turn(
     ...(userMcp.allowedTools.length
       ? { allowedTools: [...(queryOptions.allowedTools || []), ...userMcp.allowedTools] }
       : {}),
-    ...(Object.keys(pluginHooks).length ? { hooks: pluginHooks } : {}),
+    ...(pluginDelivery.sdkPlugins.length ? { plugins: pluginDelivery.sdkPlugins } : {}),
+    ...(Object.keys(pluginDelivery.hooks).length ? { hooks: pluginDelivery.hooks } : {}),
     mcpServers: {
       llmide: buildLlmIdeServer(userId, agentContext, message, {
         runClaude,
