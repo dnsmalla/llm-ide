@@ -6,7 +6,10 @@ import os.log
 @Observable
 final class LibraryItemStore {
     private(set) var items: [LibraryItem] = [] {
-        didSet { treeEntriesCache.removeAll() }
+        didSet {
+            treeEntriesCache.removeAll()
+            sourceTreeEntriesCache.removeAll()
+        }
     }
 
     /// Per-category nested forest for the tree-rendered sections (Code,
@@ -25,6 +28,22 @@ final class LibraryItemStore {
         if let cached = treeEntriesCache[category] { return cached }
         let built = CodeEntry.build(from: items(for: category), idPrefix: "\(category.rawValue):")
         treeEntriesCache[category] = built
+        return built
+    }
+
+    /// Memoized per-source forest for the SOURCES sub-groups: the source's
+    /// `.meetings` items nested by their sub-group-relative `treePath`
+    /// (`<YYYY>/<MM>/…` — the source's own raw dir is the sub-group header
+    /// and was dropped at scan time). Same invalidation as `treeEntries`.
+    @ObservationIgnored private var sourceTreeEntriesCache: [String: [CodeEntry]] = [:]
+
+    func sourceTreeEntries(forSourceId id: String) -> [CodeEntry] {
+        if let cached = sourceTreeEntriesCache[id] { return cached }
+        let subset = items.filter {
+            $0.category == .meetings && ($0.sourceId ?? MeetingSource().id) == id
+        }
+        let built = CodeEntry.build(from: subset, idPrefix: "source:\(id):")
+        sourceTreeEntriesCache[id] = built
         return built
     }
 
@@ -277,13 +296,24 @@ final class LibraryItemStore {
                     item.folderOrigin = (parentName == subfolder) ? nil : parentName
                 }
                 // Every input source shares the source/ folder; classify by
-                // the owning raw directory first (source/emails/ IS mail —
-                // raw fetched mail is .txt with no frontmatter), falling back
-                // to frontmatter for loose/unowned files, so the SOURCES
-                // section splits into its Meetings / Mail / … sub-groups.
+                // frontmatter first, then the owning raw directory
+                // (source/emails/ IS mail — raw fetched mail is .txt with no
+                // frontmatter), so the SOURCES section splits into its
+                // Meetings / Mail / … sub-groups.
                 if category == .meetings {
-                    let rawDir = relativeDirComponents(of: fileURL, underComponents: rootComps).first
-                    item.sourceId = sourceId(for: fileURL, rawDirectory: rawDir)
+                    let rel = relativeDirComponents(of: fileURL, underComponents: rootComps)
+                    item.sourceId = sourceId(for: fileURL, rawDirectory: rel.first)
+                    // SOURCES sub-group tree (source/<source dir>/<YYYY>/<MM>/):
+                    // paths render INSIDE a per-source sub-group, so an owning
+                    // source's raw dir (the first component) would just repeat
+                    // the sub-group header — drop it; the sub-tree starts at
+                    // <YYYY>. Unowned dirs (e.g. documents/) keep their full
+                    // path so their location stays visible.
+                    if let first = rel.first, SourceRegistry.source(forRawDirectory: first) != nil {
+                        item.treePath = Array(rel.dropFirst())
+                    } else {
+                        item.treePath = rel
+                    }
                 }
                 scanned.append(item)
             }

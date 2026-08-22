@@ -485,9 +485,11 @@ struct LibraryView: View {
     /// DisclosureGroup styling used elsewhere in the file tree; defaults to
     /// collapsed and shows a muted empty state when it has no files.
     ///
-    /// Note: items are shown as a flat list here — unlike the plain file-tree
-    /// sections, `folderOrigin` nesting is intentionally not reproduced, since
-    /// auto-synced meeting/mail files sit directly in `meetings/`.
+    /// Files render as the source's real on-disk tree
+    /// (`source/<source dir>/<YYYY>/<MM>/…`, sub-group-relative so the tree
+    /// starts at the year) — the same shared forest Code and LLM Doc use.
+    /// Delete is via the row context menu (OutlineGroup isn't a ForEach, so
+    /// no swipe-to-delete).
     @ViewBuilder
     private func sourceSubGroup(source: InputSource, items: [LibraryItem],
                                 tint: Color) -> some View {
@@ -503,14 +505,10 @@ struct LibraryView: View {
             if items.isEmpty {
                 emptyRow(source.emptyText, icon: source.icon, leading: 6)
             } else {
-                ForEach(items) { item in
-                    LibraryFileRow(item: item)
-                        .tag(ShellState.LibrarySelection.file(item.url))
+                OutlineGroup(itemStore.sourceTreeEntries(forSourceId: source.id),
+                             children: \.children) { entry in
+                    treeEntryRow(entry, tint: tint)
                         .padding(.leading, 6)
-                }
-                .onDelete { offsets in
-                    let toDelete = offsets.map { items[$0] }
-                    toDelete.forEach { itemStore.remove(id: $0.id) }
                 }
             }
         } label: {

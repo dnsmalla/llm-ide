@@ -40,6 +40,9 @@ struct LibraryItemStoreSourceScanTests {
 
         let item = try #require(scanItem(named: "2026-08-22-mail.txt", in: root))
         #expect(item.sourceId == EmailSource().id)
+        // Sub-group-relative tree: the "emails" level IS the Mail sub-group
+        // header, so the tree starts at the year.
+        #expect(item.treePath == ["2026", "08"])
     }
 
     @Test("a transcript under source/meetings/ classifies as meeting")
@@ -51,6 +54,7 @@ struct LibraryItemStoreSourceScanTests {
 
         let item = try #require(scanItem(named: "standup.md", in: root))
         #expect(item.sourceId == MeetingSource().id)
+        #expect(item.treePath == ["2026", "08"])
     }
 
     @Test("explicit frontmatter beats the directory — source/meetings/ is shared, and only `platform: slack` separates a Slack transcript from a captured meeting")
@@ -95,5 +99,8 @@ struct LibraryItemStoreSourceScanTests {
 
         let item = try #require(scanItem(named: "spec.txt", in: root))
         #expect(item.sourceId == MeetingSource().id)
+        // Unowned dir: nothing to fold into a sub-group header, so the full
+        // path stays visible in the tree.
+        #expect(item.treePath == ["documents"])
     }
 }

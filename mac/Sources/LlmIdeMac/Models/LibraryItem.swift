@@ -13,15 +13,16 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     /// or the imported root folder's display name (external folder imports).
     var folderOrigin: String? = nil
 
-    /// For categories with `rendersNestedTree` (Code, LLM Doc): directory
-    /// components from the category's scan root down to (not including) the
-    /// file, used to build the nested tree. `nil` for every other category —
-    /// so `treePath != nil` means "tree-rendered", NOT "is a code file";
-    /// guard on `category` when code-specific semantics are needed.
-    ///
-    /// e.g. `<repo>/Sources/App/Foo.swift` → `["InfiniteBrain","Sources","App"]`;
-    /// `llm-doc/emails/2026/08/x.md` → `["emails","2026","08"]`;
-    /// a file directly in the scan root → `[]`.
+    /// Directory components used to build a nested tree, `nil` for flat
+    /// categories — so `treePath != nil` means "tree-rendered", NOT "is a
+    /// code file"; guard on `category` when code-specific semantics are
+    /// needed. The root it's relative to varies:
+    ///   - `rendersNestedTree` categories (Code, LLM Doc): the category's
+    ///     scan root — `llm-doc/emails/2026/08/x.md` → `["emails","2026","08"]`.
+    ///   - `.meetings` (SOURCES): the owning source's raw dir, because the
+    ///     tree renders inside that source's sub-group — `source/emails/2026/
+    ///     08/x.txt` → `["2026","08"]` (unowned dirs keep their full path).
+    /// A file directly in its root → `[]`.
     var treePath: [String]? = nil
 
     /// For `.meetings` items only: the `InputSource.id` this file belongs to
