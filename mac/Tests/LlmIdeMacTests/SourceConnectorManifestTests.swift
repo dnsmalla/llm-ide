@@ -74,6 +74,64 @@ final class SourceConnectorManifestTests: XCTestCase {
         XCTAssertEqual(miro.noiseFilter?.minLength, 3)
     }
 
+    // MARK: - Bundle-lookup contract
+
+    /// `Bundle.module` is a fatalError trap for this target, so the loader must
+    /// never name it. The SwiftPM-generated accessor calls `Swift.fatalError`
+    /// unless `LlmIdeMac_LlmIdeMacLib.bundle` is next to `Bundle.main` or at the
+    /// absolute build path baked in at compile time — and `Scripts/build.sh`
+    /// only rsyncs `Sources/LlmIdeMac/Resources/` into `Contents/Resources/`,
+    /// which the accessor does not look at. Swift evaluates every element of an
+    /// array literal before the loop body, so the old
+    /// `for bundle in [Bundle.main, Bundle.module]` forced the accessor on the
+    /// first call and hard-crashed the shipped app. Nothing runnable under
+    /// `swift test` can catch that (here the bundle exists), so the contract is
+    /// pinned against the source text.
+    func testLoaderSourceNeverReferencesBundleModule() throws {
+        let source = URL(fileURLWithPath: #filePath)          // Tests/LlmIdeMacTests/…
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/LlmIdeMac/SourceConnectors/SourceConnectorManifest.swift")
+        let text = try XCTUnwrap(try? String(contentsOf: source, encoding: .utf8),
+                                 "expected the loader source at \(source.path)")
+        let code = text.split(separator: "\n").filter {
+            !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//")
+        }.joined(separator: "\n")
+        XCTAssertFalse(code.contains("Bundle.module"),
+                       "Bundle.module traps when the SwiftPM resource bundle is not shipped; "
+                       + "use Bundle(url:)/Bundle(path:), which return nil")
+    }
+
+    /// The accessor-free lookup must actually resolve a directory (otherwise
+    /// the shipped manifests would be parsed by no test at all), and every
+    /// candidate it offers must be a readable directory.
+    func testBundledResourceDirectoriesResolveWithoutTheGeneratedAccessor() throws {
+        let dirs = SourceConnectorManifest.bundledResourceDirectories()
+        XCTAssertFalse(dirs.isEmpty, "no source_connectors/ directory found — loadBundled would return []")
+        for dir in dirs {
+            var isDir: ObjCBool = false
+            XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDir))
+            XCTAssertTrue(isDir.boolValue)
+        }
+    }
+
+    /// A miss must degrade to `[]`, never to a trap or a throw.
+    func testLoadManifestsReturnsEmptyForMissingOrJunkDirectory() throws {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("no-such-dir-\(UUID().uuidString)", isDirectory: true)
+        XCTAssertEqual(SourceConnectorManifest.loadManifests(inDirectory: missing), [])
+
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("manifests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        try Data("not json".utf8).write(to: tmp.appendingPathComponent("broken.json"))
+        try Data("ignored".utf8).write(to: tmp.appendingPathComponent("README.md"))
+        XCTAssertEqual(SourceConnectorManifest.loadManifests(inDirectory: tmp), [])
+
+        try Data(slackJSON.utf8).write(to: tmp.appendingPathComponent("slack.json"))
+        XCTAssertEqual(SourceConnectorManifest.loadManifests(inDirectory: tmp).map(\.id), ["slack"])
+    }
+
     /// Reserved-noteType guard: a connector `noteType` that collides with a
     /// legacy plural note directory (`meetings/`, `emails/`, `documents/`)
     /// would shadow it, so `loadBundled` drops it via the same filter.
