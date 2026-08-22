@@ -256,3 +256,81 @@ test('slash: quoted values support spaces', () => {
   assert.equal(out.args.reason, 'multi word value');
   assert.equal(out.prompt, 'multi word value');
 });
+
+// --- Vendor (Claude Code / Codex) format detection ---
+
+test('vendor: minimal .claude-plugin manifest loads with defaults', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example' }), 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(warnings.length, 0, `unexpected warnings: ${warnings.join(', ')}`);
+  const p = plugins.get('example');
+  assert.ok(p, 'plugin missing');
+  assert.equal(p.format, 'claude');
+  assert.equal(p.version, '0.0.0', 'version defaults when manifest lacks one');
+  assert.equal(p.displayName, 'example');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: .codex-plugin manifest uses the same path', () => {
+  const root = newRoot();
+  const dir = join(root, 'codexplug');
+  mkdirSync(join(dir, '.codex-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.codex-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'codexplug', version: '1.2.3', description: 'd' }), 'utf8');
+  const { plugins } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.get('codexplug')?.format, 'claude');
+  assert.equal(plugins.get('codexplug')?.version, '1.2.3');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: author object maps to a name string', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0',
+      author: { name: 'Ada', email: 'a@x.io', url: 'https://x.io' } }), 'utf8');
+  const { plugins } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.get('example')?.author, 'Ada');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: reserved name is rejected', () => {
+  const root = newRoot();
+  const dir = join(root, 'p1');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'core' }), 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.size, 0);
+  assert.ok(warnings.some((w) => w.includes('reserved')), warnings.join(', '));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: traversal component path is rejected', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', skills: '../outside' }), 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.size, 0);
+  assert.ok(warnings.some((w) => w.includes('component path')), warnings.join(', '));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('own format wins when both manifests exist', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest);
+  mkdirSync(join(root, 'example', '.claude-plugin'), { recursive: true });
+  writeFileSync(join(root, 'example', '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', description: 'vendor copy' }), 'utf8');
+  const { plugins } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.get('example')?.format, 'llmide');
+  assert.equal(plugins.get('example')?.description, 'test');
+  rmSync(root, { recursive: true, force: true });
+});

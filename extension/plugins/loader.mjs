@@ -10,6 +10,13 @@
 //                        frontmatter declaring an arg schema; body is
 //                        a prompt template with {{argName}} slots.
 //
+// A vendor plugin (Claude Code / Codex) carries
+// `.claude-plugin/plugin.json` or `.codex-plugin/plugin.json` instead;
+// components live in `skills/<name>/SKILL.md`, `commands/*.md`, and
+// `agents/*.md`. Both layouts normalize into the same internal plugin
+// model, so nothing downstream has to know which vendor a plugin came
+// from.
+//
 // Plugins live under the OS-standard per-user data directory:
 //   ~/Library/Application Support/llm-ide/plugins/   (macOS; legacy: LLM IDE)
 //   $XDG_DATA_HOME/llmide/plugins/                  (Linux)
@@ -28,6 +35,59 @@ import * as yaml from 'js-yaml';
 // Reserved slug — never let a plugin pretend to be a core skill.
 const RESERVED_NAMES = new Set(['global', 'internal', 'core', 'kb', 'system']);
 const NAME_RE = /^[a-z][a-z0-9-]{1,40}$/;
+
+// Vendor plugin manifests (Claude Code `.claude-plugin/plugin.json`, Codex
+// `.codex-plugin/plugin.json`). Codex's format is a near-subset of Claude's,
+// so one code path serves both. `plugin.json` at the root always wins — an
+// own-format plugin is never reinterpreted.
+const VENDOR_MANIFEST_DIRS = ['.claude-plugin', '.codex-plugin'];
+
+function detectPluginFormat(dir) {
+  if (existsSync(join(dir, 'plugin.json'))) return 'llmide';
+  for (const sub of VENDOR_MANIFEST_DIRS) {
+    if (existsSync(join(dir, sub, 'plugin.json'))) return 'claude';
+  }
+  return null;
+}
+
+/**
+ * Validate a vendor manifest into the same normalized shape the own-format
+ * path produces, plus component-path overrides (./skills etc.). Only `name`
+ * is required by the vendor spec; version defaults. `defaultEnabled` is
+ * parsed nowhere on purpose — LLM-IDE stays opt-in regardless of manifest.
+ */
+function validateClaudeManifest(raw) {
+  if (!raw || typeof raw !== 'object') return { error: 'manifest is not an object' };
+  const { name, version } = raw;
+  if (typeof name !== 'string' || !NAME_RE.test(name)) {
+    return { error: `name must match ${NAME_RE} (got ${JSON.stringify(name)})` };
+  }
+  if (RESERVED_NAMES.has(name)) return { error: `name '${name}' is reserved` };
+  const author = typeof raw.author === 'string'
+    ? raw.author.slice(0, 120)
+    : (raw.author && typeof raw.author === 'object' && typeof raw.author.name === 'string')
+      ? raw.author.name.slice(0, 120)
+      : '';
+  const components = {};
+  for (const key of ['skills', 'commands', 'agents']) {
+    const rel = raw[key];
+    if (rel === undefined) continue;
+    if (typeof rel !== 'string' || !/^\.\/[A-Za-z0-9._-]+$/.test(rel) || rel.includes('..')) {
+      return { error: `component path '${key}' must be a './'-prefixed relative path without traversal` };
+    }
+    components[key] = rel.slice(2);
+  }
+  return {
+    manifest: {
+      name,
+      version: (typeof version === 'string' && /^\d+\.\d+\.\d+/.test(version)) ? version : '0.0.0',
+      displayName: typeof raw.displayName === 'string' ? raw.displayName.slice(0, 80) : name,
+      description: typeof raw.description === 'string' ? raw.description.slice(0, 400) : '',
+      author,
+    },
+    components,
+  };
+}
 
 // Hard caps on plugin content so a malicious or oversized plugin
 // can't exhaust the Claude context window or the server's heap.
@@ -219,14 +279,31 @@ function parseCommandFile(path) {
  * Walk one plugin directory. Returns { plugin, warnings } or { error }.
  */
 function loadOnePlugin(dir) {
-  const manifestPath = join(dir, 'plugin.json');
-  if (!existsSync(manifestPath)) return { error: 'no plugin.json' };
-  let raw;
-  try { raw = JSON.parse(readFileSync(manifestPath, 'utf8')); }
-  catch (err) { return { error: `plugin.json parse: ${err.message}` }; }
-  const v = validateManifest(raw);
-  if (v.error) return { error: v.error };
-  const manifest = v.manifest;
+  const format = detectPluginFormat(dir);
+  if (format === null) {
+    return { error: 'no plugin manifest (plugin.json or .claude-plugin/plugin.json)' };
+  }
+  let manifest;
+  let components = {};
+  if (format === 'llmide') {
+    let raw;
+    try { raw = JSON.parse(readFileSync(join(dir, 'plugin.json'), 'utf8')); }
+    catch (err) { return { error: `plugin.json parse: ${err.message}` }; }
+    const v = validateManifest(raw);
+    if (v.error) return { error: v.error };
+    manifest = v.manifest;
+  } else {
+    const manifestPath = VENDOR_MANIFEST_DIRS
+      .map((sub) => join(dir, sub, 'plugin.json'))
+      .find((candidate) => existsSync(candidate));
+    let raw;
+    try { raw = JSON.parse(readFileSync(manifestPath, 'utf8')); }
+    catch (err) { return { error: `vendor plugin.json parse: ${err.message}` }; }
+    const v = validateClaudeManifest(raw);
+    if (v.error) return { error: v.error };
+    manifest = v.manifest;
+    components = v.components;
+  }
   const warnings = [];
 
   // Skills: read every .md file under skills/ if the dir exists. We
@@ -355,6 +432,7 @@ function loadOnePlugin(dir) {
     plugin: {
       ...manifest,
       dir,
+      format,
       skillFiles,
       commands,
       subagents,
