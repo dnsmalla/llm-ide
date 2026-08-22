@@ -246,7 +246,7 @@ Called once per request in `handleCodeAssist` (route.mjs:56). Algorithm:
 
 1. Start with a copy of `internalSkills.skills` (registry.mjs:206).
 2. For each plugin the user has enabled (`listEnabledPlugins(userId)`):
-   - Load the plugin's `skills/` directory through the same validator as core skills.
+   - Load the plugin's skills directory (`skillsDir` — conventionally `skills/`, or wherever a vendor manifest's `skills: './x'` points) through the same validator as core skills. That validator accepts both the flat `<name>.md` layout and the vendor `<name>/SKILL.md` directory layout, where `kind` defaults to `read` and the name must match the directory.
    - For each plugin skill, if its name clashes with a core skill, **core wins** and the plugin version is not loaded (registry.mjs:220–227; logged as a warning).
    - Otherwise, add the skill to the map tagged with `pluginName`.
    - Add the plugin's slash commands to `commands`.

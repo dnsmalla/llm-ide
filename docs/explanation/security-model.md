@@ -73,7 +73,8 @@ Plugins are validated at install time, but they are **not sandboxed at runtime**
 
 The install flow in `extension/plugins/installer.mjs` validates only the bundle shape and install destination:
 
-- `plugin.json` must parse and pass the manifest schema used by `extension/plugins/loader.mjs`
+- the manifest must parse and pass the schema used by `extension/plugins/loader.mjs` — `plugin.json` at the bundle root (own format), or a vendor `.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` (Claude Code / Codex package). A bundle carrying both is treated as own-format
+- a vendor manifest's `defaultEnabled` is never honoured: enablement stays per-user and opt-in, and vendor components LLM-IDE does not run (hooks, MCP servers, themes, LSP, output styles) are catalogued for display only, never executed
 - plugin names must match the loader's slug regex and cannot use reserved names
 - zip entries are scanned before extraction and rejected on path traversal, absolute paths, Windows drive escapes, or invalid bundle shape
 - install happens in a temp staging directory and moves into the real plugin directory only after validation succeeds
