@@ -50,10 +50,32 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import { config } from '../core/config.mjs';
 import { getSecret, setSecret } from '../server/vault.mjs';
+import { getMcpConnectorSeenIds, markMcpConnectorSeen } from '../kb/db.mjs';
+import { toItemArray, pickPath, defaultMcpItemMapper } from './mcp-connector-defs.mjs';
 
 const CLIENT_INFO = { name: 'llm-ide', version: '1.0.0' };
 const CONNECT_TIMEOUT_MS = 20_000;
 const STATE_TTL_MS = 10 * 60 * 1000;
+const TOOL_TIMEOUT_MS = 60_000;
+// Bound one sweep. Both are deliberately modest: ingestion runs on a timer,
+// so leaving work for the next tick is free, while a single unbounded sweep
+// over a large workspace is a 10-minute request that times out and imports
+// nothing.
+const MAX_PARENTS = 25;
+const DEFAULT_ITEM_LIMIT = 50;
+// Per-note ceiling. MCP caps tool OUTPUT (25k tokens by default), but the
+// binding constraint here is downstream: each item becomes one classify call,
+// and a 100k-char board export makes that call slow, expensive and worse at
+// its job. ~12k chars ≈ 3k tokens — a comfortable note.
+export const MAX_ITEM_CHARS = 12_000;
+// A single-level source (phase 3's gcal: `list_events` IS the content) has no
+// readTool, so its listTool doubles as the item descriptor. The mapper reads
+// its text selectors off `readTool.textFields`, and a list descriptor has no
+// reason to carry any — without a generic fallback every such item would land
+// as pickText's JSON dump. Provider-agnostic on purpose: no connector is named.
+const GENERIC_TEXT_FIELDS = Object.freeze([
+  'text', 'content', 'description', 'summary', 'body', 'title', 'name',
+]);
 
 /** Where every MCP connector's authorization redirect lands. */
 export function mcpRedirectUri() {
@@ -253,15 +275,222 @@ export async function withMcpSession(db, userId, def, fn) {
   }
 }
 
-/** Prove an authenticated round trip: connect + tools/list. */
+/**
+ * Prove an authenticated round trip: connect + tools/list.
+ *
+ * `toolSchemas` is additive and load-bearing for setup: the descriptors'
+ * Miro tool names and argument names are unverifiable offline, and this is
+ * the only mechanical way to read the real ones off a live server.
+ */
 export async function testMcpConnection(db, userId, def) {
   return withMcpSession(db, userId, def, async (client) => {
     const { tools } = await client.listTools();
     return {
       server: client.getServerVersion() || { name: def.name, version: '' },
       tools: tools.map((t) => t.name),
+      toolSchemas: tools.map((t) => ({ name: t.name, inputSchema: t.inputSchema ?? null })),
     };
   });
+}
+
+// ─── Generic, descriptor-driven fetch ───────────────────────────────────────
+
+/**
+ * Unwrap a tools/call result into a JS value.
+ *
+ * Three layers, because real servers use all three:
+ *   1. structuredContent — present when the tool declares an outputSchema
+ *   2. JSON in a text block — the common case
+ *   3. plain prose — legal, and a JSON.parse-only parser throws on it
+ *
+ * An `isError` result is a RESULT, not a rejection (the SDK server converts a
+ * thrown handler into one), so a generic caller that does not check this flag
+ * will happily parse an error message as content.
+ */
+export function parseToolResult(result) {
+  if (result?.isError) {
+    const text = (result.content || [])
+      .filter((c) => c?.type === 'text').map((c) => c.text).join(' ').trim();
+    const e = new Error(text.slice(0, 500) || 'the MCP tool reported an error');
+    e.code = 'MCP_TOOL_ERROR';
+    throw e;
+  }
+  if (result?.structuredContent !== undefined) return result.structuredContent;
+  const text = (result?.content || [])
+    .filter((c) => c?.type === 'text').map((c) => c.text).join('\n').trim();
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+async function callMcpTool(client, name, args) {
+  return parseToolResult(
+    await client.callTool({ name, arguments: args || {} }, undefined, { timeout: TOOL_TIMEOUT_MS }),
+  );
+}
+
+/**
+ * Split `text` into pieces no longer than `maxChars`, preferring paragraph
+ * boundaries, then line boundaries, then a hard cut.
+ *
+ * The hard cut is not defensive padding: a single tool result can be one
+ * unbroken run (a serialised table, a minified export), and without it the cap
+ * is advisory and the classify call downstream still gets the whole thing.
+ *
+ * Separators are preserved verbatim (`\n\n` between paragraphs, `\n` between
+ * lines) so re-joining the chunks reproduces the input. Chunk N of a board
+ * export is read by a human; silently reflowing it loses the structure the
+ * paragraph split was chosen to respect in the first place.
+ */
+export function chunkText(text, maxChars = MAX_ITEM_CHARS) {
+  const s = String(text ?? '').trim();
+  if (!s) return [];
+  if (s.length <= maxChars) return [s];
+
+  const out = [];
+  let cur = '';
+  const flush = () => { if (cur.trim()) out.push(cur.trim()); cur = ''; };
+  const append = (piece, sep) => {
+    if (cur && cur.length + sep.length + piece.length > maxChars) flush();
+    cur = cur ? cur + sep + piece : piece;
+  };
+
+  const paras = s.split(/\n{2,}/);
+  for (const [pi, para] of paras.entries()) {
+    const paraSep = pi === 0 ? '' : '\n\n';
+    if (para.length <= maxChars) { append(para, paraSep); continue; }
+    for (const [li, line] of para.split('\n').entries()) {
+      let rest = line;
+      while (rest.length > maxChars) {          // hard cut
+        flush();
+        out.push(rest.slice(0, maxChars));
+        rest = rest.slice(maxChars);
+      }
+      append(rest, li === 0 ? paraSep : '\n');
+    }
+  }
+  flush();
+  return out;
+}
+
+function mcpNotFetchable(def) {
+  const e = new Error(`${def.name} has no fetch mapping configured yet.`);
+  e.code = 'MCP_NOT_FETCHABLE';
+  return e;
+}
+
+/** Mark item ids as imported for this user + connector. */
+export function markMcpSeen(db, userId, def, itemIds) {
+  return { marked: markMcpConnectorSeen(userId, def.id, itemIds) };
+}
+
+/**
+ * The descriptor the mapper sees for a single-level source: its `listTool`
+ * selectors promoted into the `readTool` slot the mapper reads. Still pure
+ * descriptor data — nothing here knows which connector it is looking at.
+ */
+function singleLevelDef(def) {
+  const list = def.listTool || {};
+  return {
+    ...def,
+    readTool: {
+      idField: list.idField || 'id',
+      typeField: list.typeField || 'type',
+      textFields: list.textFields || GENERIC_TEXT_FIELDS,
+      dateField: list.dateField,
+      linkField: list.linkField,
+    },
+  };
+}
+
+/**
+ * One sweep: enumerate parents with `listTool`, read each with `readTool`,
+ * map, drop anything already imported, chunk what is oversized, stop at the
+ * cap. Entirely descriptor-driven — nothing here knows what Miro is.
+ *
+ * Failure isolation matches SlackSource.ingest: one unreadable parent (a
+ * private board, an admin-revoked scope) is collected and skipped, never
+ * allowed to abort the sweep — otherwise every scheduled run re-hits it first
+ * and starves everything else.
+ */
+export async function fetchMcpItems(db, userId, def, { limit = DEFAULT_ITEM_LIMIT } = {}) {
+  if (!def.listTool && !def.readTool) throw mcpNotFetchable(def);
+
+  const seen = new Set(getMcpConnectorSeenIds(userId, def.id));
+  const map = def.mapItem || defaultMcpItemMapper;
+  const items = [];
+  const failures = [];
+  let overCap = 0;
+
+  const collect = (records, parent, mapDef) => {
+    for (const [index, record] of records.entries()) {
+      let mapped;
+      try {
+        mapped = map({ def: mapDef, parent, item: record, index });
+      } catch (e) {
+        failures.push(`item ${index}: ${e.message}`);
+        continue;
+      }
+      if (seen.has(mapped.id)) continue;
+
+      const chunks = chunkText(mapped.body);
+      if (chunks.length === 0) continue;              // nothing to write a note about
+      for (const [k, body] of chunks.entries()) {
+        if (items.length >= limit) { overCap += 1; continue; }
+        const single = chunks.length === 1;
+        items.push({
+          // Each chunk is its own note AND its own dedup key, so a fetch
+          // interrupted mid-item resumes at the right chunk rather than
+          // re-importing the whole thing or skipping the remainder.
+          id: single ? mapped.id : `${mapped.id}#${k + 1}`,
+          fields: single
+            ? mapped.fields
+            : { ...mapped.fields,
+              Part: `${k + 1}/${chunks.length}`,
+              Title: `${mapped.fields.Title} (${k + 1}/${chunks.length})` },
+          body,
+        });
+      }
+    }
+  };
+
+  await withMcpSession(db, userId, def, async (client) => {
+    let parents = [null];
+    if (def.listTool) {
+      const raw = await callMcpTool(client, def.listTool.name, { ...def.listTool.args });
+      const all = toItemArray(raw, def.listTool.itemsPath);
+      if (all.length > MAX_PARENTS) overCap += all.length - MAX_PARENTS;
+      parents = all.slice(0, MAX_PARENTS);
+    }
+
+    if (!def.readTool) {
+      // Single-level source: the list results ARE the content (gcal's
+      // list_events, phase 3). No second call, no parent.
+      collect(parents, null, singleLevelDef(def));
+      return;
+    }
+
+    for (const parent of parents) {
+      const args = { ...def.readTool.args };
+      if (parent && def.readTool.parentArg) {
+        args[def.readTool.parentArg] = pickPath(parent, def.listTool?.idField || 'id');
+      }
+      const label = parent
+        ? String(pickPath(parent, def.listTool?.nameField || 'name')
+                 ?? pickPath(parent, def.listTool?.idField || 'id') ?? '?')
+        : def.name;
+      try {
+        collect(
+          toItemArray(await callMcpTool(client, def.readTool.name, args), def.readTool.itemsPath),
+          parent,
+          def,
+        );
+      } catch (e) {
+        failures.push(`${label}: ${e.message}`);
+      }
+    }
+  });
+
+  return { items, drained: overCap === 0 && failures.length === 0, overCap, failures };
 }
 
 /**

@@ -22,7 +22,9 @@ const { getSecret, setSecret } = await import('../server/vault.mjs');
 const {
   VaultOAuthProvider, mcpRedirectUri, startMcpAuthorization, finishMcpAuthorization,
   isMcpConnected, withMcpSession, testMcpConnection,
+  parseToolResult, chunkText, fetchMcpItems, markMcpSeen, MAX_ITEM_CHARS,
 } = await import('../connectors/mcp-client.mjs');
+const { defaultMcpItemMapper } = await import('../connectors/mcp-connector-defs.mjs');
 const { startFakeMcpServer } = await import('./fixtures/fake-mcp-oauth-server.mjs');
 
 let userCounter = 0;
@@ -237,4 +239,232 @@ test('invalidateCredentials clears only the requested scope', async (t) => {
 
   p.invalidateCredentials('all');
   assert.equal(getSecret(db, user.id, p.key('clientInformation')), null);
+});
+
+// ── Phase 2b: generic fetch, chunking, dedup ───────────────────────────────
+
+/** A def pointed at `fake`, with a two-level fetch over the fixture's shapes. */
+const fetchDef = (fake, over = {}) => defFor(fake, {
+  listTool: { name: 'list_boards', args: {}, itemsPath: 'data', idField: 'id', nameField: 'name' },
+  readTool: {
+    name: 'get_board_items', parentArg: 'board_id', args: {}, itemsPath: 'data',
+    idField: 'id', typeField: 'type', textFields: ['data.content', 'text'],
+    dateField: 'modifiedAt', linkField: 'links.self',
+  },
+  mapItem: defaultMcpItemMapper,
+  ...over,
+});
+
+const BOARD_TOOLS = [
+  { name: 'list_boards', handler: () => ({ data: [{ id: 'b1', name: 'Alpha' }, { id: 'b2', name: 'Beta' }] }) },
+  {
+    name: 'get_board_items',
+    handler: (args) => ({
+      data: [
+        { id: 'i1', type: 'sticky_note', data: { content: `<p>${args.board_id} one</p>` },
+          modifiedAt: '2026-08-01T00:00:00.000Z' },
+        { id: 'i2', type: 'text', text: `${args.board_id} two`,
+          modifiedAt: '2026-08-02T00:00:00.000Z' },
+      ],
+    }),
+  },
+];
+
+test('chunkText splits on paragraphs and hard-splits a single huge run', () => {
+  assert.deepEqual(chunkText('short', 100), ['short']);
+  const paras = chunkText(['a'.repeat(60), 'b'.repeat(60), 'c'.repeat(60)].join('\n\n'), 100);
+  assert.equal(paras.length, 3);
+  assert.ok(paras.every((c) => c.length <= 100));
+  // One unbroken run longer than the budget must still be split, not emitted
+  // whole — otherwise the cap is advisory and a single 200k-char export blows
+  // the classify call.
+  const hard = chunkText('x'.repeat(250), 100);
+  assert.equal(hard.length, 3);
+  assert.ok(hard.every((c) => c.length <= 100));
+  assert.equal(hard.join(''), 'x'.repeat(250));
+  assert.deepEqual(chunkText('', 100), []);
+});
+
+test('parseToolResult prefers structuredContent, then JSON, then prose', () => {
+  assert.deepEqual(parseToolResult({ structuredContent: { a: 1 }, content: [{ type: 'text', text: 'ignored' }] }), { a: 1 });
+  assert.deepEqual(parseToolResult({ content: [{ type: 'text', text: '{"a":2}' }] }), { a: 2 });
+  assert.equal(parseToolResult({ content: [{ type: 'text', text: 'just prose' }] }), 'just prose');
+  assert.equal(parseToolResult({ content: [] }), null);
+  assert.throws(
+    () => parseToolResult({ isError: true, content: [{ type: 'text', text: 'board is private' }] }),
+    (e) => { assert.equal(e.code, 'MCP_TOOL_ERROR'); assert.match(e.message, /private/); return true; },
+  );
+});
+
+test('fetch walks list → read and maps every item', async (t) => {
+  const fake = await startFakeMcpServer({ tools: BOARD_TOOLS });
+  t.after(() => fake.close());
+  const db = kb.getDb();
+  const user = newUser();
+  const def = fetchDef(fake);
+  await connectFully(db, user, def, fake);
+
+  const r = await fetchMcpItems(db, user.id, def);
+  assert.equal(r.items.length, 4, 'two boards × two items');
+  assert.equal(r.drained, true);
+  assert.equal(r.overCap, 0);
+  assert.deepEqual(r.failures, []);
+
+  // The parent id genuinely reached the read tool — the whole reason the
+  // fixture had to become argument-aware.
+  const readArgs = fake.toolCalls.filter((c) => c.name === 'get_board_items').map((c) => c.args.board_id);
+  assert.deepEqual(readArgs.sort(), ['b1', 'b2']);
+
+  const one = r.items.find((i) => i.id === 'miro:b1:i1');
+  assert.ok(one, `expected miro:b1:i1, got ${r.items.map((i) => i.id).join(', ')}`);
+  assert.equal(one.body, 'b1 one', 'HTML unwrapped');
+  assert.equal(one.fields.Board, 'Alpha');
+  assert.equal(one.fields.ItemType, 'sticky_note');
+});
+
+test('fetch skips items already in the seen ledger', async (t) => {
+  const fake = await startFakeMcpServer({ tools: BOARD_TOOLS });
+  t.after(() => fake.close());
+  const db = kb.getDb();
+  const user = newUser();
+  const def = fetchDef(fake);
+  await connectFully(db, user, def, fake);
+
+  const first = await fetchMcpItems(db, user.id, def);
+  markMcpSeen(db, user.id, def, first.items.map((i) => i.id));
+
+  const second = await fetchMcpItems(db, user.id, def);
+  assert.deepEqual(second.items, [], 'a second sweep over unchanged boards is free');
+  assert.equal(second.drained, true);
+});
+
+test('the cap bounds one fetch and reports the remainder', async (t) => {
+  const fake = await startFakeMcpServer({ tools: BOARD_TOOLS });
+  t.after(() => fake.close());
+  const db = kb.getDb();
+  const user = newUser();
+  const def = fetchDef(fake);
+  await connectFully(db, user, def, fake);
+
+  const r = await fetchMcpItems(db, user.id, def, { limit: 3 });
+  assert.equal(r.items.length, 3);
+  assert.equal(r.overCap, 1, 'the Mac surfaces this as "1 more pending"');
+  assert.equal(r.drained, false, 'a capped fetch has NOT drained the source');
+});
+
+test('one failing board does not abort the others', async (t) => {
+  const fake = await startFakeMcpServer({
+    tools: [
+      { name: 'list_boards', handler: () => ({ data: [{ id: 'ok', name: 'Fine' }, { id: 'bad', name: 'Locked' }] }) },
+      {
+        name: 'get_board_items',
+        handler: (args) => {
+          if (args.board_id === 'bad') throw new Error('board is private');
+          return { data: [{ id: 'i1', text: 'kept' }] };
+        },
+      },
+    ],
+  });
+  t.after(() => fake.close());
+  const db = kb.getDb();
+  const user = newUser();
+  const def = fetchDef(fake);
+  await connectFully(db, user, def, fake);
+
+  const r = await fetchMcpItems(db, user.id, def);
+  assert.equal(r.items.length, 1, 'the healthy board still imported');
+  assert.equal(r.failures.length, 1);
+  assert.match(r.failures[0], /Locked|bad/);
+  assert.match(r.failures[0], /private/);
+  assert.equal(r.drained, false, 'a partial sweep must not claim to have drained');
+});
+
+test('an oversized item is chunked into several notes with stable ids', async (t) => {
+  const big = Array.from({ length: 400 }, (_, i) => `paragraph ${i} ${'y'.repeat(80)}`).join('\n\n');
+  const fake = await startFakeMcpServer({
+    tools: [
+      { name: 'list_boards', handler: () => ({ data: [{ id: 'b1', name: 'Alpha' }] }) },
+      { name: 'get_board_items', handler: () => ({ data: [{ id: 'huge', type: 'document', text: big }] }) },
+    ],
+  });
+  t.after(() => fake.close());
+  const db = kb.getDb();
+  const user = newUser();
+  const def = fetchDef(fake);
+  await connectFully(db, user, def, fake);
+
+  const r = await fetchMcpItems(db, user.id, def, { limit: 100 });
+  assert.ok(r.items.length > 1, `expected chunks, got ${r.items.length}`);
+  assert.ok(r.items.every((i) => i.body.length <= MAX_ITEM_CHARS));
+  assert.deepEqual(r.items.map((i) => i.id), r.items.map((_, k) => `miro:b1:huge#${k + 1}`));
+  assert.equal(r.items[0].fields.Part, `1/${r.items.length}`);
+  assert.ok(r.items[0].fields.Title.includes('1/'), 'the part shows in the note title');
+  // Nothing is lost.
+  assert.equal(r.items.map((i) => i.body).join('\n\n').length >= big.length - 10, true);
+});
+
+test('a list-only descriptor (no readTool) treats list results as the items', async (t) => {
+  // gcal in phase 3 is single-level: list_events IS the content. Proving it
+  // now keeps the fetch generic rather than Miro-shaped.
+  const fake = await startFakeMcpServer({
+    tools: [{ name: 'list_events', handler: () => ({ data: [{ id: 'e1', text: 'standup' }] }) }],
+  });
+  t.after(() => fake.close());
+  const db = kb.getDb();
+  const user = newUser();
+  const def = fetchDef(fake, {
+    listTool: { name: 'list_events', args: {}, itemsPath: 'data', idField: 'id', nameField: 'id' },
+    readTool: null,
+  });
+  await connectFully(db, user, def, fake);
+
+  const r = await fetchMcpItems(db, user.id, def);
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0].body, 'standup');
+});
+
+test('fetching without a connection costs nothing and never registers a client', async (t) => {
+  const fake = await startFakeMcpServer({ tools: BOARD_TOOLS });
+  t.after(() => fake.close());
+  const db = kb.getDb();
+  const user = newUser();
+  const def = fetchDef(fake);
+
+  await assert.rejects(() => fetchMcpItems(db, user.id, def), (e) => {
+    assert.equal(e.code, 'MCP_UNAUTHORIZED');
+    return true;
+  });
+  assert.deepEqual(fake.requests, [], 'an ingestion sweep over unconnected users must be free');
+});
+
+test('a descriptor with no fetch mapping refuses instead of returning silence', async (t) => {
+  const fake = await startFakeMcpServer({ tools: BOARD_TOOLS });
+  t.after(() => fake.close());
+  const db = kb.getDb();
+  const user = newUser();
+  const def = fetchDef(fake, { listTool: null, readTool: null });
+  await connectFully(db, user, def, fake);
+
+  await assert.rejects(() => fetchMcpItems(db, user.id, def), (e) => {
+    assert.equal(e.code, 'MCP_NOT_FETCHABLE');
+    return true;
+  });
+});
+
+test('test now also returns the real tool argument schemas', async (t) => {
+  const fake = await startFakeMcpServer({ tools: BOARD_TOOLS });
+  t.after(() => fake.close());
+  const db = kb.getDb();
+  const user = newUser();
+  const def = fetchDef(fake);
+  await connectFully(db, user, def, fake);
+
+  const r = await testMcpConnection(db, user.id, def);
+  assert.deepEqual(r.tools.sort(), ['get_board_items', 'list_boards'], 'unchanged phase-2a shape');
+  // Additive. This is how an operator discovers the REAL Miro argument names
+  // without reading Miro's docs — the descriptor's guesses are corrected from
+  // this response (see mcp-connector-defs.mjs header).
+  const schema = r.toolSchemas.find((s) => s.name === 'get_board_items');
+  assert.ok(schema, 'every listed tool must appear in toolSchemas');
+  assert.equal(schema.inputSchema.type, 'object');
 });
