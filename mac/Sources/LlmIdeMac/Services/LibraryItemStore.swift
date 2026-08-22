@@ -189,18 +189,31 @@ final class LibraryItemStore {
                 if category == .code, !isCodeRelevant(url: fileURL) { continue }
                 // Skip partial-draft notes/transcripts and the reference template.
                 if name.hasSuffix(".partial.md") || name == "template.md" { continue }
+                // NoteService's index.json is app metadata, not a note — it
+                // must not surface as an LLM Doc item.
+                if category == .notes, name == "index.json" { continue }
                 var item = LibraryItem(name: name, path: fileURL.path, category: category)
                 item.sizeBytes = rv.fileSize
-                // folderOrigin == nil when the file sits directly in the
-                // canonical subfolder; otherwise it's the immediate parent
-                // dir name so the sidebar groups it in a DisclosureGroup.
-                let parentName = fileURL.deletingLastPathComponent().lastPathComponent
-                item.folderOrigin = (parentName == subfolder) ? nil : parentName
-                // Code renders as a nested tree: record the directory path
-                // relative to the project's code/ folder (files at its top
-                // level get an empty path).
-                if category == .code {
+                // Code and LLM Doc render as nested trees: record the
+                // directory path relative to the canonical subfolder (files at
+                // its top level get an empty path). For llm-doc that is
+                // `<source>/<YYYY>/<MM>` — NoteService's layout — so the
+                // sidebar shows the real hierarchy instead of a bare month.
+                if category == .code || category == .notes {
                     item.treePath = relativeDirComponents(of: fileURL, under: folderURL)
+                }
+                // folderOrigin == nil when the file sits directly in the
+                // canonical subfolder; otherwise the group name flat consumers
+                // (LibraryPicker, Doc Gen) label the file with. For llm-doc
+                // that's the full relative path — the immediate parent name
+                // alone ("08") is meaningless for the <source>/<YYYY>/<MM>/
+                // nesting. Code keeps the immediate-parent rule its existing
+                // consumers (ReviewView, agent context grouping) expect.
+                if category == .notes, let tp = item.treePath {
+                    item.folderOrigin = tp.isEmpty ? nil : tp.joined(separator: "/")
+                } else {
+                    let parentName = fileURL.deletingLastPathComponent().lastPathComponent
+                    item.folderOrigin = (parentName == subfolder) ? nil : parentName
                 }
                 // Meetings and ingested email share the source/ folder;
                 // classify by frontmatter platform so the SOURCES section can

@@ -327,22 +327,26 @@ struct LibraryView: View {
             // The "MEETINGS" folder is presented as SOURCES, split into
             // Meetings / Mail sub-groups (and, later, Slack).
             sourcesSection(category)
-        } else if category == .code {
-            // Code renders as a real nested directory tree (one node per
-            // repo/root) rather than a flat one-level grouping.
+        } else if category == .code || category == .notes {
+            // Code and LLM Doc render as real nested directory trees rather
+            // than a flat one-level grouping — llm-doc's canonical layout is
+            // <source>/<YYYY>/<MM>/*.md (NoteService.getMonthDir), and a flat
+            // group keyed on the immediate parent collapsed that to a bare
+            // month ("08").
             codeTreeSection(category)
         } else {
             plainFileTreeSection(category)
         }
     }
 
-    // MARK: - Code section (nested tree)
+    // MARK: - Nested tree sections (Code, LLM Doc)
 
-    /// Renders `.code` items as a recursive directory tree via `OutlineGroup`,
-    /// which handles expand/collapse and nesting for us. Each repo/root shows
-    /// its true subfolder hierarchy; files reuse the standard row + selection
-    /// tag. Swipe-to-delete isn't offered here (OutlineGroup isn't a ForEach) —
-    /// acceptable since code files are in-place repo references.
+    /// Renders a category's items as a recursive directory tree (built from
+    /// `LibraryItem.treePath`) via `OutlineGroup`, which handles
+    /// expand/collapse and nesting for us. Each root shows its true subfolder
+    /// hierarchy; files reuse the standard row + selection tag.
+    /// Swipe-to-delete isn't offered here (OutlineGroup isn't a ForEach) —
+    /// acceptable since these files are in-place references/generated notes.
     @ViewBuilder
     private func codeTreeSection(_ category: LibraryItem.Category) -> some View {
         let items = itemStore.items(for: category)
