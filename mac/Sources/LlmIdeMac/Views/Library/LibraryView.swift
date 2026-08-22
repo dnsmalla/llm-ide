@@ -111,6 +111,15 @@ struct LibraryView: View {
         .task { await loadLlmSources() }
         .task { await loadMcpPlugins() }
         .task { await loadConnectors() }
+        // A detail pane can change what these rows should show (MCP consent /
+        // enable / remove). It has no way to call back into this list, so it
+        // bumps ShellState's token and the affected sections reload here.
+        .onChange(of: shell.libraryDirtyToken) {
+            Task {
+                await loadMcpPlugins()
+                await loadPlugins()
+            }
+        }
         .task { await scanClaudeSources() }
         .task { await scanCodexSources() }
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
