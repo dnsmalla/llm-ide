@@ -324,28 +324,45 @@ function loadOnePlugin(dir) {
     return false;
   }
 
-  const skillsDir = join(dir, 'skills');
+  // A vendor manifest may relocate its component dirs (`skills: './x'`);
+  // the own format always uses the conventional names.
+  const skillsDir = join(dir, components.skills ?? 'skills');
   const skillFiles = [];
   if (existsSync(skillsDir)) {
     try {
       let count = 0;
-      for (const entry of readdirSync(skillsDir)) {
-        if (!entry.endsWith('.md')) continue;
+      for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+        // Two layouts: a flat `<name>.md` (own format) or a vendor
+        // `<name>/SKILL.md` directory. A subdirectory without SKILL.md is a
+        // plain asset folder (references/, scripts/) — not a skill.
+        let skillPath;
+        let label;
+        if (entry.isDirectory()) {
+          skillPath = join(skillsDir, entry.name, 'SKILL.md');
+          if (!existsSync(skillPath)) continue;
+          label = `${entry.name}/SKILL.md`;
+        } else {
+          if (!entry.name.endsWith('.md')) continue;
+          skillPath = join(skillsDir, entry.name);
+          label = entry.name;
+        }
         if (count >= MAX_FILES_PER_DIR) {
           warnings.push(`skills/ has more than ${MAX_FILES_PER_DIR} files — extras ignored`);
           break;
         }
-        if (rejectSymlink(skillsDir, entry)) continue;
-        const skillPath = join(skillsDir, entry);
+        // Reject a symlink at whichever level it appears — the entry itself
+        // or the SKILL.md inside a directory entry.
+        if (rejectSymlink(skillsDir, entry.name)) continue;
+        if (entry.isDirectory() && rejectSymlink(join(skillsDir, entry.name), 'SKILL.md')) continue;
         try {
           const content = readFileSync(skillPath, 'utf8');
           if (Buffer.byteLength(content, 'utf8') > MAX_SKILL_BYTES) {
-            warnings.push(`skills/${entry}: exceeds ${MAX_SKILL_BYTES} byte limit`);
+            warnings.push(`skills/${label}: exceeds ${MAX_SKILL_BYTES} byte limit`);
             continue;
           }
           const suspicious = scanForSuspiciousContent(content);
           if (suspicious.length) {
-            warnings.push(`skills/${entry}: suspicious content detected — ${suspicious.join(', ')}`);
+            warnings.push(`skills/${label}: suspicious content detected — ${suspicious.join(', ')}`);
           }
         } catch { /* read error — runtime loader will also fail and skip */ }
         skillFiles.push(skillPath);
@@ -357,7 +374,7 @@ function loadOnePlugin(dir) {
   }
 
   // Commands: file name == trigger. summary.md → /summary.
-  const cmdDir = join(dir, 'commands');
+  const cmdDir = join(dir, components.commands ?? 'commands');
   const commands = {};
   if (existsSync(cmdDir)) {
     try {
@@ -395,7 +412,7 @@ function loadOnePlugin(dir) {
   // global runtime exposes a single generic `ask-subagent` tool;
   // routing to the right body happens in the handler by looking up
   // the union of subagent maps across the user's enabled plugins.
-  const agentsDir = join(dir, 'agents');
+  const agentsDir = join(dir, components.agents ?? 'agents');
   const subagents = {};
   if (existsSync(agentsDir)) {
     try {
@@ -433,6 +450,7 @@ function loadOnePlugin(dir) {
       ...manifest,
       dir,
       format,
+      skillsDir,
       skillFiles,
       commands,
       subagents,

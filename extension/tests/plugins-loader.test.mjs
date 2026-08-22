@@ -334,3 +334,66 @@ test('own format wins when both manifests exist', () => {
   assert.equal(plugins.get('example')?.description, 'test');
   rmSync(root, { recursive: true, force: true });
 });
+
+test('vendor: nested skill directory counted and stashed with SKILL.md path', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'skills', 'code-helper'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'skills', 'code-helper', 'SKILL.md'),
+    `---\nname: code-helper\ndescription: helps\n---\nBody.`, 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(warnings.length, 0, `unexpected warnings: ${warnings.join(', ')}`);
+  const p = plugins.get('example');
+  assert.equal(p.skillFiles.length, 1);
+  assert.ok(p.skillFiles[0].endsWith(join('skills', 'code-helper', 'SKILL.md')));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: component path override relocates the skills dir', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'custom-skills'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0', skills: './custom-skills' }), 'utf8');
+  writeFileSync(join(dir, 'custom-skills', 'x.md'),
+    `---\nname: x\nkind: read\ndescription: d\n---\nBody.`, 'utf8');
+  const { plugins } = loadPlugins({ pluginDir: root });
+  const p = plugins.get('example');
+  assert.equal(p?.skillFiles.length, 1);
+  assert.ok(p.skillsDir.endsWith('custom-skills'),
+    'the resolved skills dir travels with the plugin so the runtime reloads the same files');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: nested skill exceeding the byte cap is skipped with a warning', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'skills', 'big'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'skills', 'big', 'SKILL.md'), 'x'.repeat(33_000), 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.get('example')?.skillFiles.length, 0);
+  assert.ok(warnings.some((w) => w.includes('big/SKILL.md') && w.includes('byte limit')),
+    warnings.join(', '));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: a skills subdirectory without SKILL.md is not a skill', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'skills', 'references'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'skills', 'references', 'notes.md'), 'not a skill', 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.get('example')?.skillFiles.length, 0);
+  assert.equal(warnings.length, 0, `unexpected warnings: ${warnings.join(', ')}`);
+  rmSync(root, { recursive: true, force: true });
+});

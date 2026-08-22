@@ -148,7 +148,7 @@ export function listAllSkills() {
   const plugins = [];
   for (const p of pluginRegistry.plugins.values()) {
     if (p.skillFiles.length === 0) continue;
-    const loaded = loadPluginSkillsCached(join(p.dir, 'skills'));
+    const loaded = loadPluginSkillsCached(pluginSkillsDir(p));
     const skills = [];
     for (const [name, skill] of loaded.skills) {
       skills.push(toEntry(name, skill));
@@ -199,6 +199,14 @@ export function listInstalledPlugins(userId) {
   };
 }
 
+// A vendor manifest can relocate its skills dir (`skills: './x'`), so the
+// loader resolves it once and hands it over as `skillsDir`. Older plugin
+// objects (own format) always used the conventional name — keep that as the
+// fallback so nothing depends on the field's presence.
+function pluginSkillsDir(p) {
+  return p.skillsDir || join(p.dir, 'skills');
+}
+
 // Parsed plugin skills cached by plugin skills-dir. Plugin skill files only
 // change on install/remove, which call reloadPlugins() (clears this) — so we
 // don't re-read + re-parse + re-validate every plugin's skills/ on every
@@ -234,7 +242,7 @@ export function buildPerUserSkillSet(userId) {
     // core skills get. Bad plugin skills are dropped with a warning
     // server-side.
     if (p.skillFiles.length > 0) {
-      const pluginSkills = loadPluginSkillsCached(join(p.dir, 'skills'));
+      const pluginSkills = loadPluginSkillsCached(pluginSkillsDir(p));
       if (pluginSkills.warnings.length > 0) {
         console.warn(`[plugin:${p.name}] skill warnings:`, pluginSkills.warnings);
       }
