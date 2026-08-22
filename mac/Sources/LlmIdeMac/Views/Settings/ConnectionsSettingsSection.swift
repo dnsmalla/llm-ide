@@ -1,5 +1,27 @@
 import SwiftUI
 
+/// Pure visibility rule for `ConnectionsSettingsSection`, split out so it is
+/// unit-testable without a view.
+///
+/// Meetings and Email are **fixed defaults** — they are not catalog
+/// connectors, are never selectable, and can never be hidden (hard spec
+/// constraint, `docs/superpowers/specs/2026-08-22-connector-catalog-design.md`).
+/// Everything else appears only while the user has it selected, in catalog
+/// order. Ids the catalog no longer knows are dropped.
+enum ConnectionsSelection {
+    /// Always shown, always first, never selection-driven.
+    static let fixedOrder = ["meetings", "email"]
+    /// Catalog connectors, in the catalog's own order.
+    static let catalogOrder = ["gdrive", "gcal", "miro", "box", "slack"]
+    /// Cards that have a bespoke, hand-written card in the section; every
+    /// other visible id renders through the generic placeholder card.
+    static let bespokeCardIds: Set<String> = ["meetings", "email", "box", "slack"]
+
+    static func visibleCardIds(selected: Set<String>) -> [String] {
+        fixedOrder + catalogOrder.filter { selected.contains($0) }
+    }
+}
+
 /// Settings → **Connections**: the inputs hub. Connect the sources that feed
 /// the Library — Meetings (auto-capture) and Email — plus planned sources
 /// shown as "coming soon". This is the only place input capture is
@@ -50,6 +72,16 @@ struct ConnectionsSettingsSection: View {
     @State private var importTask: Task<Void, Never>?
     @State private var slackImportTask: Task<Void, Never>?
     @State private var boxSyncTask: Task<Void, Never>?
+    /// Catalog connectors this user has selected in the Library. Drives which
+    /// connector cards this section shows (Meetings/Email are never gated).
+    @State private var selectedConnectorIds: Set<String> = []
+    /// Only true once the selection has actually been read from the server.
+    /// While false the section renders exactly as it did before the catalog
+    /// existed (Slack + Box visible), so a failed request can never hide a
+    /// connector the user has already configured.
+    @State private var connectorsLoaded = false
+    /// Catalog metadata (name/description/icon) for the placeholder cards.
+    @State private var catalogEntries: [ConnectorCatalogEntry] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -57,10 +89,20 @@ struct ConnectionsSettingsSection: View {
             if isExpanded {
                 VStack(alignment: .leading, spacing: Spacing.md) {
                     SettingsHint("Connect the sources that feed your Library.")
+                    // Meetings and Email are fixed defaults — never gated.
                     meetingsCard
                     emailCard
-                    slackCard
-                    boxCard
+                    // Slack and Box are pre-selected server-side; the
+                    // `!connectorsLoaded` guard inside `showsConnectorCard`
+                    // keeps configured connectors visible even if the
+                    // selection request fails.
+                    if showsConnectorCard("slack") { slackCard }
+                    if showsConnectorCard("box") { boxCard }
+                    ForEach(pendingConnectorIds, id: \.self) { id in
+                        if let entry = connectorEntry(id) {
+                            pendingPipelineCard(entry)
+                        }
+                    }
 
                     Text("More inputs")
                         .font(Typography.section)
@@ -97,6 +139,7 @@ struct ConnectionsSettingsSection: View {
                 // auto-cancels when the view disappears.
                 .task {
                     await sourceLinks.refresh(api: api)
+                    await loadConnectorSelection()
                     if config.emailSource?.enabled == true { await runImport() }
                     if config.slackSource?.enabled == true { await runSlackImport() }
                 }
@@ -306,6 +349,56 @@ struct ConnectionsSettingsSection: View {
             Text(line)
                 .font(Typography.caption)
                 .foregroundStyle(resultIsError ? theme.current.danger : theme.current.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Connector selection
+
+    /// Read this user's connector selection (plus catalog metadata for the
+    /// placeholder cards). `connectorsLoaded` only flips on a successful read
+    /// so a network failure leaves the pre-catalog rendering in place.
+    private func loadConnectorSelection() async {
+        guard let list = try? await api.listConnectors() else { return }
+        selectedConnectorIds = Set(list.map(\.id))
+        connectorsLoaded = true
+        if let catalog = try? await api.fetchConnectorCatalog() {
+            catalogEntries = catalog
+        }
+    }
+
+    /// Whether the card for a catalog connector should render.
+    private func showsConnectorCard(_ id: String) -> Bool {
+        guard connectorsLoaded else { return true }
+        return ConnectionsSelection.visibleCardIds(selected: selectedConnectorIds).contains(id)
+    }
+
+    /// Selected connectors without a bespoke card — rendered as placeholders.
+    private var pendingConnectorIds: [String] {
+        guard connectorsLoaded else { return [] }
+        return ConnectionsSelection.visibleCardIds(selected: selectedConnectorIds)
+            .filter { !ConnectionsSelection.bespokeCardIds.contains($0) }
+    }
+
+    private func connectorEntry(_ id: String) -> ConnectorCatalogEntry? {
+        catalogEntries.first { $0.id == id }
+    }
+
+    /// Placeholder card for a selected connector whose fetch pipeline lands in
+    /// a later phase — visible so the selection is real, honest that nothing
+    /// fetches yet.
+    private func pendingPipelineCard(_ entry: ConnectorCatalogEntry) -> some View {
+        InputSourceCard(
+            icon: entry.icon,
+            title: entry.name,
+            subtitle: entry.description,
+            badgeText: "Coming soon",
+            badgeTone: .neutral,
+            isAvailable: false
+        ) {
+            Text("Pipeline lands in an upcoming update — your selection is saved.")
+                .font(Typography.caption)
+                .foregroundStyle(theme.current.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
