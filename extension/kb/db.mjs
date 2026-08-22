@@ -774,6 +774,48 @@ export function markSlackSeen(userId, tsList) {
   tx(ids);
 }
 
+// ---------------------------------------------------------------------------
+// MCP connector state helpers (migration 0031).
+//
+// Seen-set only — see the migration for why there is no high-water twin.
+// ---------------------------------------------------------------------------
+
+const MCP_SEEN_MAX_PER_CALL = 500;
+
+// Every item id this user has already imported for this connector. Returned
+// as a plain array; callers build a Set for O(1) membership during fetch.
+export function getMcpConnectorSeenIds(userId, connectorId) {
+  requireUser(userId);
+  const db = getDb();
+  return lazyPrepare(db,
+    'SELECT item_id FROM mcp_connector_seen WHERE user_id = ? AND connector_id = ?',
+  ).all(userId, String(connectorId || '')).map((r) => r.item_id);
+}
+
+// Record item ids as seen. INSERT OR IGNORE makes re-marking a no-op (the
+// composite PK dedups), which matters because the Mac calls markSeen AFTER
+// writing raw files — a crash between the two means the next run re-marks.
+// Returns the number of rows actually inserted.
+export function markMcpConnectorSeen(userId, connectorId, itemIds) {
+  requireUser(userId);
+  if (!Array.isArray(itemIds)) return 0;
+  const ids = itemIds
+    .filter((x) => typeof x === 'string' && x)
+    .slice(0, MCP_SEEN_MAX_PER_CALL);
+  if (ids.length === 0) return 0;
+  const cid = String(connectorId || '');
+  const db = getDb();
+  const stmt = lazyPrepare(db,
+    'INSERT OR IGNORE INTO mcp_connector_seen (user_id, connector_id, item_id) VALUES (?, ?, ?)',
+  );
+  const tx = db.transaction((rows) => {
+    let inserted = 0;
+    for (const id of rows) inserted += stmt.run(userId, cid, id).changes;
+    return inserted;
+  });
+  return tx(ids);
+}
+
 
 /**
  * Wipe every row owned by `userId` across every user-scoped table,
@@ -838,6 +880,9 @@ export function deleteUserCascade(userId) {
     // account deletion.
     counts.slack_seen      = del('DELETE FROM slack_seen   WHERE user_id = ?');
     counts.slack_state     = del('DELETE FROM slack_state  WHERE user_id = ?');
+    // migration 0031 — per-user, per-connector MCP dedup ledger. No FK, so
+    // the seen-set would outlive the account without this explicit delete.
+    counts.mcp_connector_seen = del('DELETE FROM mcp_connector_seen WHERE user_id = ?');
     // migration 0018 — activity feed + read cursor. Both have ON DELETE CASCADE
     // on the users FK, but we delete explicitly so the count appears in the
     // receipt and so the contract holds regardless of FK enforcement.

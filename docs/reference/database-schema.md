@@ -58,6 +58,23 @@ _From `0004_agent_feedback.sql`._
 | `score` | REAL |
 | `recorded_at` | TEXT NOT NULL DEFAULT (datetime('now')) |
 
+## `agent_sessions`
+
+_From `0029_agent_sessions.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `id` | TEXT PRIMARY KEY |
+| `user_id` | TEXT NOT NULL |
+| `chat_scope` | TEXT NOT NULL DEFAULT 'explorer' |
+| `mac_chat_session_id` | TEXT NOT NULL |
+| `sdk_session_id` | TEXT |
+| `model` | TEXT |
+| `created_at` | TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) |
+| `last_used_at` | TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) |
+| `last_mode` | TEXT |
+| `status` | TEXT NOT NULL DEFAULT 'active' |
+
 ## `audit_log`
 
 _From `0002_multitenancy.sql`._
@@ -74,6 +91,66 @@ _From `0002_multitenancy.sql`._
 | `outcome` | TEXT NOT NULL DEFAULT 'success' CHECK (outcome IN ('success','failure','denied')) |
 | `detail` | TEXT |
 | `created_at` | TEXT NOT NULL DEFAULT (datetime('now')) |
+
+## `chat_messages`
+
+_From `0023_unified_chat_sessions.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `session_id` | TEXT NOT NULL |
+| `user_id` | TEXT NOT NULL |
+| `seq` | INTEGER NOT NULL |
+| `role` | TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')) |
+| `content` | TEXT NOT NULL |
+| `meta_json` | TEXT |
+| `created_at` | REAL NOT NULL |
+
+## `chat_sessions`
+
+_From `0023_unified_chat_sessions.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `id` | TEXT NOT NULL |
+| `user_id` | TEXT NOT NULL |
+| `title` | TEXT NOT NULL DEFAULT 'New chat' |
+| `surface` | TEXT NOT NULL DEFAULT 'any' CHECK (surface IN ('mac', 'extension', 'any')) |
+| `mode` | TEXT NOT NULL DEFAULT 'ask' CHECK (mode IN ('ask', 'agent', 'transcript')) |
+| `project_id` | TEXT |
+| `created_at` | REAL NOT NULL |
+| `updated_at` | REAL NOT NULL |
+
+## `code_graph_edges`
+
+_From `0025_scip_code_graph.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `user_id` | TEXT NOT NULL |
+| `repo_id` | TEXT NOT NULL |
+| `from_id` | TEXT NOT NULL |
+| `to_id` | TEXT NOT NULL |
+| `kind` | TEXT NOT NULL |
+| `confidence` | TEXT NOT NULL DEFAULT 'EXTRACTED' |
+| `source` | TEXT NOT NULL DEFAULT 'scip' |
+
+## `code_graph_nodes`
+
+_From `0025_scip_code_graph.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `user_id` | TEXT NOT NULL |
+| `repo_id` | TEXT NOT NULL |
+| `symbol_id` | TEXT NOT NULL |
+| `title` | TEXT NOT NULL |
+| `kind` | TEXT NOT NULL |
+| `source_file` | TEXT NOT NULL |
+| `line` | INTEGER NOT NULL |
+| `language` | TEXT |
+| `doc` | TEXT |
+| `source` | TEXT NOT NULL DEFAULT 'scip' |
 
 ## `email_seen`
 
@@ -110,6 +187,34 @@ _From `0001_initial.sql`._
 | `created_at` | TEXT NOT NULL DEFAULT (datetime('now')) |
 | `user_id` | TEXT NOT NULL DEFAULT 'legacy' REFERENCES users(id) |
 
+## `issue_schedule`
+
+_From `0020_issue_schedule.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `id` | TEXT PRIMARY KEY |
+| `user_id` | TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE |
+| `provider` | TEXT NOT NULL |
+| `repo` | TEXT NOT NULL |
+| `issue_number` | INTEGER NOT NULL |
+| `start_date` | TEXT |
+| `due_date` | TEXT |
+| `estimate_days` | REAL |
+| `depends_on` | TEXT NOT NULL DEFAULT '[]' |
+| `updated_at` | TEXT NOT NULL DEFAULT (datetime('now','localtime')) |
+
+## `mcp_connector_seen`
+
+_From `0031_mcp_connector_state.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `user_id` | TEXT NOT NULL |
+| `connector_id` | TEXT NOT NULL |
+| `item_id` | TEXT NOT NULL |
+| `seen_at` | TEXT NOT NULL DEFAULT (datetime('now')) |
+
 ## `meetings`
 
 _From `0001_initial.sql`._
@@ -126,6 +231,23 @@ _From `0001_initial.sql`._
 | `created_at` | TEXT NOT NULL DEFAULT (datetime('now')) |
 | `user_id` | TEXT NOT NULL DEFAULT 'legacy' REFERENCES users(id) |
 | `meta` | TEXT NOT NULL DEFAULT '{}' |
+
+## `model_limits`
+
+_From `0019_usage_limits.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `user_id` | TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE |
+| `provider` | TEXT NOT NULL |
+| `model` | TEXT NOT NULL |
+| `priority` | INTEGER NOT NULL DEFAULT 0 |
+| `enabled` | INTEGER NOT NULL DEFAULT 1 |
+| `limit_value` | INTEGER NOT NULL DEFAULT 0 |
+| `unit` | TEXT NOT NULL DEFAULT 'runs' |
+| `window_kind` | TEXT NOT NULL DEFAULT 'daily' |
+| `threshold_pct` | INTEGER NOT NULL DEFAULT 90 |
+| `updated_at` | TEXT NOT NULL DEFAULT (datetime('now','localtime')) |
 
 ## `outcomes`
 
@@ -177,6 +299,7 @@ _From `0011_plan_tasks_indexes.sql`._
 | `risk_reason` | TEXT |
 | `files` | TEXT NOT NULL DEFAULT '[]' |
 | `meta` | TEXT NOT NULL DEFAULT '{}' |
+| `symbols` | TEXT NOT NULL DEFAULT '[]' |
 
 ## `plans`
 
@@ -193,6 +316,19 @@ _From `0001_initial.sql`._
 | `created_at` | TEXT NOT NULL DEFAULT (datetime('now')) |
 | `updated_at` | TEXT NOT NULL DEFAULT (datetime('now')) |
 | `user_id` | TEXT NOT NULL DEFAULT 'legacy' REFERENCES users(id) |
+
+## `quota_state`
+
+_From `0019_usage_limits.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `user_id` | TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE |
+| `provider` | TEXT NOT NULL |
+| `model` | TEXT NOT NULL |
+| `window_start` | TEXT NOT NULL |
+| `exhausted` | INTEGER NOT NULL DEFAULT 1 |
+| `hit_at` | TEXT NOT NULL DEFAULT (datetime('now','localtime')) |
 
 ## `rate_limit_buckets`
 
@@ -251,6 +387,18 @@ _From `0003_user_repos.sql`._
 | `user_id` | TEXT REFERENCES users(id) ON DELETE CASCADE |
 | `expires_at` | TEXT NOT NULL |
 
+## `session_memory`
+
+_From `0028_session_memory.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT |
+| `user_id` | TEXT NOT NULL |
+| `session_id` | TEXT NOT NULL |
+| `fact` | TEXT NOT NULL |
+| `created_at` | REAL NOT NULL |
+
 ## `slack_seen`
 
 _From `0017_slack_state.sql`._
@@ -273,7 +421,7 @@ _From `0017_slack_state.sql`._
 
 ## `sources`
 
-_From `0005_doc_source_kind.sql`._
+_From `0022_sources_user_unique.sql`._
 
 | Column | Type / constraints |
 |---|---|
@@ -287,6 +435,34 @@ _From `0005_doc_source_kind.sql`._
 | `embedding` | BLOB |
 | `indexed_at` | TEXT NOT NULL DEFAULT (datetime('now')) |
 | `user_id` | TEXT NOT NULL DEFAULT 'legacy' REFERENCES users(id) |
+
+## `tool_approvals`
+
+_From `0030_tool_approvals.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `user_id` | TEXT NOT NULL |
+| `tool_name` | TEXT NOT NULL |
+| `created_at` | TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) |
+
+## `usage_ledger`
+
+_From `0019_usage_limits.sql`._
+
+| Column | Type / constraints |
+|---|---|
+| `id` | INTEGER PRIMARY KEY AUTOINCREMENT |
+| `user_id` | TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE |
+| `ts` | TEXT NOT NULL DEFAULT (datetime('now','localtime')) |
+| `provider` | TEXT NOT NULL |
+| `model` | TEXT NOT NULL |
+| `source` | TEXT NOT NULL DEFAULT 'api' |
+| `endpoint` | TEXT |
+| `input_tokens` | INTEGER |
+| `output_tokens` | INTEGER |
+| `runs` | INTEGER NOT NULL DEFAULT 1 |
+| `request_id` | TEXT |
 
 ## `user_flags`
 
@@ -357,11 +533,21 @@ CREATE VIRTUAL TABLE search USING fts5(meeting_id UNINDEXED, entity_id UNINDEXED
 | `agent_ask_messages_user_seq` | `agent_ask_messages` | `user_id, seq DESC` |  | `0007_agent_ask_history.sql` |
 | `idx_agent_feedback_task` | `agent_feedback` | `user_id, plan_task_id` |  | `0004_agent_feedback.sql` |
 | `idx_agent_feedback_user_time` | `agent_feedback` | `user_id, recorded_at` |  | `0004_agent_feedback.sql` |
+| `idx_agent_sessions_user_chat` | `agent_sessions` | `user_id, mac_chat_session_id` |  | `0029_agent_sessions.sql` |
 | `idx_audit_action` | `audit_log` | `action, created_at DESC` |  | `0002_multitenancy.sql` |
 | `idx_audit_user_time` | `audit_log` | `user_id, created_at DESC` |  | `0002_multitenancy.sql` |
+| `chat_messages_session_seq` | `chat_messages` | `session_id, seq ASC` |  | `0023_unified_chat_sessions.sql` |
+| `chat_sessions_user_updated` | `chat_sessions` | `user_id, updated_at DESC` |  | `0023_unified_chat_sessions.sql` |
+| `idx_cge_user_from` | `code_graph_edges` | `user_id, from_id` |  | `0025_scip_code_graph.sql` |
+| `idx_cge_user_repo_source` | `code_graph_edges` | `user_id, repo_id, source` |  | `0027_code_graph_source.sql` |
+| `idx_cge_user_to` | `code_graph_edges` | `user_id, to_id` |  | `0025_scip_code_graph.sql` |
+| `idx_cgn_user_repo_source` | `code_graph_nodes` | `user_id, repo_id, source` |  | `0027_code_graph_source.sql` |
+| `idx_cgn_user_sym` | `code_graph_nodes` | `user_id, symbol_id` |  | `0025_scip_code_graph.sql` |
+| `idx_cgn_user_title` | `code_graph_nodes` | `user_id, title` |  | `0025_scip_code_graph.sql` |
 | `idx_entities_kind` | `entities` | `kind` |  | `0001_initial.sql` |
 | `idx_entities_meeting` | `entities` | `meeting_id` |  | `0001_initial.sql` |
 | `idx_entities_user` | `entities` | `user_id` |  | `0002_multitenancy.sql` |
+| `idx_issue_schedule_user_repo` | `issue_schedule` | `user_id, provider, repo` |  | `0020_issue_schedule.sql` |
 | `idx_meetings_project` | `meetings` | `user_id` | WHERE json_extract(meta, '$.projectId') IS NOT NULL | `0011_plan_tasks_indexes.sql` |
 | `idx_meetings_project_value` | `meetings` | `user_id, json_extract(meta, '$.projectId')` | WHERE json_extract(meta, '$.projectId') IS NOT NULL | `0012_project_value_indexes.sql` |
 | `idx_meetings_user` | `meetings` | `user_id, date DESC` |  | `0002_multitenancy.sql` |
@@ -386,9 +572,11 @@ CREATE VIRTUAL TABLE search USING fts5(meeting_id UNINDEXED, entity_id UNINDEXED
 | `idx_review_status` | `review_items` | `status, created_at DESC` |  | `0001_initial.sql` |
 | `idx_review_task` | `review_items` | `task_id` |  | `0001_initial.sql` |
 | `idx_revoked_jti_expires` | `revoked_jti` | `expires_at` |  | `0003_user_repos.sql` |
-| `idx_sources_kind` | `sources` | `kind` |  | `0005_doc_source_kind.sql` |
-| `idx_sources_ref` | `sources` | `kind, ref` |  | `0005_doc_source_kind.sql` |
-| `idx_sources_user` | `sources` | `user_id, kind` |  | `0005_doc_source_kind.sql` |
+| `session_memory_user_session` | `session_memory` | `user_id, session_id` |  | `0028_session_memory.sql` |
+| `idx_sources_kind` | `sources` | `kind` |  | `0022_sources_user_unique.sql` |
+| `idx_sources_ref` | `sources` | `kind, ref` |  | `0022_sources_user_unique.sql` |
+| `idx_sources_user` | `sources` | `user_id, kind` |  | `0022_sources_user_unique.sql` |
+| `idx_usage_user_prov_model_ts` | `usage_ledger` | `user_id, provider, model, ts` |  | `0019_usage_limits.sql` |
 | `idx_user_repos_user` | `user_repos` | `user_id` |  | `0003_user_repos.sql` |
 | `idx_users_email` | `users` | `email` |  | `0002_multitenancy.sql` |
 
@@ -412,6 +600,6 @@ All triggers keep the `search` FTS5 table in sync with their owning tables.
 | `trg_plans_ad` | AFTER | DELETE | `plans` | `0001_initial.sql` |
 | `trg_plans_ai` | AFTER | INSERT | `plans` | `0001_initial.sql` |
 | `trg_plans_au` | AFTER | UPDATE | `plans` | `0014_fts_update_triggers.sql` |
-| `trg_sources_ad` | AFTER | DELETE | `sources` | `0005_doc_source_kind.sql` |
-| `trg_sources_ai` | AFTER | INSERT | `sources` | `0005_doc_source_kind.sql` |
-| `trg_sources_au` | AFTER | UPDATE | `sources` | `0005_doc_source_kind.sql` |
+| `trg_sources_ad` | AFTER | DELETE | `sources` | `0022_sources_user_unique.sql` |
+| `trg_sources_ai` | AFTER | INSERT | `sources` | `0022_sources_user_unique.sql` |
+| `trg_sources_au` | AFTER | UPDATE | `sources` | `0022_sources_user_unique.sql` |
