@@ -28,7 +28,7 @@ import {
   putMcpState, getMcpState, completeMcpState, takeMcpStatus,
 } from '../connectors/mcp-client.mjs';
 import { mcpConnectorDef } from '../connectors/mcp-connector-defs.mjs';
-import { redactWithKey } from '../core/redact-secrets.mjs';
+import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 
 // Map any error (including VaultError) to a client-safe message.
 // VaultError carries a `publicMessage` precisely so its internal
@@ -37,6 +37,18 @@ import { redactWithKey } from '../core/redact-secrets.mjs';
 function publicMessageFor(err) {
   if (isVaultError(err)) return err.publicMessage || 'Vault operation failed';
   return err?.message || 'Request failed';
+}
+
+// Errors surfaced by the MCP OAuth flow can carry the authorization server's
+// RAW response body verbatim (the SDK appends "Raw body: <body>" whenever the
+// response is not OAuth-shaped). That body reaches an HTML page and the stored
+// flow status, so it is redacted and bounded before it leaves the process — a
+// token endpoint that echoes its request would otherwise echo back `code` or
+// `client_secret`, unbounded in length.
+const MCP_ERR_MAX = 500;
+function mcpPublicMessage(err) {
+  const msg = redactSecrets(publicMessageFor(err));
+  return msg.length > MCP_ERR_MAX ? msg.slice(0, MCP_ERR_MAX) + '…' : msg;
 }
 
 // Shared OAuth-callback HTML response — both Google and Slack redirect here
@@ -510,7 +522,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       completeMcpState(state, { status: 'complete', account });
       oauthCallbackHtml(res, `Connected to ${def.name}.`);
     } catch (e) {
-      const msg = publicMessageFor(e);
+      const msg = mcpPublicMessage(e);
       completeMcpState(state, { status: 'error', message: msg });
       oauthCallbackHtml(res, 'Connection failed: ' + msg);
     }
@@ -680,7 +692,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       }
       send(res, 200, { authUrl: r.authorizationUrl, state });
     } catch (e) {
-      const msg = publicMessageFor(e);
+      const msg = mcpPublicMessage(e);
       completeMcpState(state, { status: 'error', message: msg });
       send(res, 502, { error: { code: 'MCP_AUTH_START_FAILED', message: msg } });
     }
