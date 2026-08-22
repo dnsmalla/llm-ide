@@ -146,21 +146,41 @@ export function pickPath(obj, path) {
   return cur;
 }
 
+/** Array elements that are null/undefined are holes, not records — a note
+ *  whose whole body is the string "null" is worse than no note at all. */
+function compactRecords(arr) {
+  return arr.filter((v) => v != null);
+}
+
 /**
  * The array of records inside a parsed tool result, with four fallbacks in
  * descending order of confidence:
  *   1. the declared itemsPath resolves to an array   — the guess was right
  *   2. the result IS an array                        — server returned bare
- *   3. the first array-valued property                — itemsPath was misnamed
+ *   3. the first NON-EMPTY array-valued property      — itemsPath was misnamed
  *   4. the result is a single object                  — a one-item result
  * A non-object, non-empty result becomes one text item rather than vanishing.
+ *
+ * Tier 3 skips empty arrays deliberately: `{ errors: [], boards: [...] }` and
+ * `{ warnings: [], items: [...] }` are ordinary envelope shapes, and taking
+ * the literal first array would return the empty status channel and report a
+ * silent empty fetch — the exact failure this tolerant design exists to avoid.
+ * An empty array is still returned when it is the only array there is, so a
+ * genuinely empty source stays empty.
  */
 export function toItemArray(parsed, itemsPath) {
   const atPath = pickPath(parsed, itemsPath);
-  if (Array.isArray(atPath)) return atPath;
-  if (Array.isArray(parsed)) return parsed;
+  if (Array.isArray(atPath)) return compactRecords(atPath);
+  if (Array.isArray(parsed)) return compactRecords(parsed);
   if (parsed && typeof parsed === 'object') {
-    for (const v of Object.values(parsed)) if (Array.isArray(v)) return v;
+    let empty = null;
+    for (const v of Object.values(parsed)) {
+      if (!Array.isArray(v)) continue;
+      const records = compactRecords(v);
+      if (records.length) return records;
+      if (empty === null) empty = records;
+    }
+    if (empty) return empty;
     return [parsed];
   }
   if (parsed == null || parsed === '') return [];

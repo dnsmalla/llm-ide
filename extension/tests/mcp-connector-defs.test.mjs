@@ -126,6 +126,27 @@ test('toItemArray survives every plausible wrong itemsPath guess', () => {
   assert.deepEqual(toItemArray({ data: [] }, 'data'), []);
 });
 
+test('toItemArray skips an EMPTY array standing in front of the real one', () => {
+  // Regression: tier 3 took the literally-first array-valued property, so the
+  // very common `{ errors: [], ... }` / `{ warnings: [], ... }` envelope made
+  // the fetch return nothing — indistinguishable from an empty board.
+  assert.deepEqual(toItemArray({ errors: [], boards: [{ id: 1 }, { id: 2 }] }, 'data'),
+    [{ id: 1 }, { id: 2 }]);
+  assert.deepEqual(toItemArray({ warnings: [], items: [{ id: 1 }] }, 'data'), [{ id: 1 }]);
+  // An empty array is still returned when it is genuinely all there is.
+  assert.deepEqual(toItemArray({ errors: [] }, 'data'), []);
+  assert.deepEqual(toItemArray({ errors: [], warnings: [] }, 'data'), []);
+});
+
+test('toItemArray drops null holes so they cannot become "null" notes', () => {
+  assert.deepEqual(toItemArray({ data: [{ id: 1 }, null, undefined, { id: 2 }] }, 'data'),
+    [{ id: 1 }, { id: 2 }]);
+  assert.deepEqual(toItemArray([null, { id: 3 }], 'data'), [{ id: 3 }]);
+  // An array of nothing but holes is empty, not a page of "null" notes.
+  assert.deepEqual(toItemArray({ data: [null, null] }, 'data'), []);
+  assert.deepEqual(toItemArray({ junk: [null], items: [{ id: 4 }] }, 'data'), [{ id: 4 }]);
+});
+
 test('pickText prefers the declared fields and dumps the item when all miss', () => {
   const fields = ['data.content', 'text'];
   assert.equal(pickText({ data: { content: 'hello' } }, fields), 'hello');
