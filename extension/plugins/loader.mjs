@@ -338,10 +338,10 @@ function loadOnePlugin(dir) {
   // directory is already checked via lstatSync in loadPlugins(); this
   // extends that check to every .md file so a plugin author cannot add a
   // skill/command/agent that is a symlink pointing outside the plugin.
-  function rejectSymlink(subdir, entry) {
+  function rejectSymlink(subdir, entry, label = entry) {
     try {
       if (lstatSync(join(subdir, entry)).isSymbolicLink()) {
-        warnings.push(`${entry}: symbolic link rejected in plugin content`);
+        warnings.push(`${label}: symbolic link rejected in plugin content`);
         return true;
       }
     } catch { /* stat failure — treat as skip, readFileSync will also fail */ }
@@ -376,8 +376,8 @@ function loadOnePlugin(dir) {
         }
         // Reject a symlink at whichever level it appears — the entry itself
         // or the SKILL.md inside a directory entry.
-        if (rejectSymlink(skillsDir, entry.name)) continue;
-        if (entry.isDirectory() && rejectSymlink(join(skillsDir, entry.name), 'SKILL.md')) continue;
+        if (rejectSymlink(skillsDir, entry.name, label)) continue;
+        if (entry.isDirectory() && rejectSymlink(join(skillsDir, entry.name), 'SKILL.md', label)) continue;
         try {
           const content = readFileSync(skillPath, 'utf8');
           if (Buffer.byteLength(content, 'utf8') > MAX_SKILL_BYTES) {
