@@ -196,8 +196,9 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
     static let systemCheck = LoopTemplate(
         id: UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000A5")!,
         name: "System Check",
-        summary: "Verify skills, plugins, connectors, GitHub dispatch, backend, the iOS↔Mac shared "
-            + "protocol, and the Mac app itself, repairing whichever subsystem breaks.",
+        summary: "Verify skills, plugins (with their MCP servers and hooks), connectors, GitHub "
+            + "dispatch, backend, the iOS↔Mac shared protocol, and the Mac app itself, repairing "
+            + "whichever subsystem breaks.",
         config: LoopEngineConfig(
             stages: [
                 LoopStage(name: "Skills", kind: .shellCommand,
@@ -209,29 +210,37 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           command: "cd extension && node --test tests/plugins-loader.test.mjs "
                               + "tests/plugins-installer.test.mjs",
                           order: 1),
+                LoopStage(name: "Plugins + MCP", kind: .shellCommand,
+                          command: "cd extension && node --test tests/mcp-config.test.mjs "
+                              + "tests/mcp-state.test.mjs tests/mcp-plugin-servers.test.mjs "
+                              + "tests/plugin-mcp-wiring.test.mjs tests/agent-v2-user-mcp.test.mjs "
+                              + "tests/plugin-hook-trust.test.mjs tests/plugin-hook-runner.test.mjs "
+                              + "tests/plugin-hook-trust-route.test.mjs tests/agent-v2-plugin-hooks.test.mjs "
+                              + "tests/mcp-cli-args.test.mjs tests/route-mcp-mode.test.mjs",
+                          order: 2),
                 LoopStage(name: "Connectors", kind: .shellCommand,
                           command: "cd extension && node --test tests/box-connector.test.mjs "
                               + "tests/box-routes.test.mjs tests/slack-source.test.mjs "
                               + "tests/slack-oauth.test.mjs tests/slack-oauth-routes.test.mjs "
                               + "tests/email-source.test.mjs tests/scip-connector.test.mjs "
                               + "tests/scip-scanner.test.mjs tests/git-connector-chunking.test.mjs",
-                          order: 2),
+                          order: 3),
                 LoopStage(name: "GitHub dispatch", kind: .shellCommand,
                           command: "cd extension && node --test tests/dispatch-concurrency.test.mjs "
                               + "tests/dispatch-preview.test.mjs tests/github-pr-secrets.test.mjs "
                               + "tests/outcome-dispatch-sentinel.test.mjs",
-                          order: 3),
+                          order: 4),
                 // No per-stage timeout on the three below: same reasoning as
                 // Lint/Docs check — a full backend suite, the shared-protocol
                 // package, and the Mac app's XCTest suite routinely run past any
                 // figure worth shipping as a default.
                 LoopStage(name: "Backend", kind: .shellCommand,
-                          command: "cd extension && npm test", order: 4),
+                          command: "cd extension && npm test", order: 5),
                 LoopStage(name: "iOS ↔ Mac shared protocol", kind: .shellCommand,
-                          command: "make test-shared-protocol", order: 5),
+                          command: "make test-shared-protocol", order: 6),
                 LoopStage(name: "Mac app", kind: .shellCommand,
-                          command: "cd mac && swift test", order: 6),
-                LoopStage(name: "Regression", kind: .regressionSweep, order: 7)
+                          command: "cd mac && swift test", order: 7),
+                LoopStage(name: "Regression", kind: .regressionSweep, order: 8)
             ],
             maxIterations: 8, consecutiveFailureStop: 2),
         isBuiltIn: true)

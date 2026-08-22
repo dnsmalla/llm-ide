@@ -74,6 +74,18 @@ enum LoopStageDetector {
             checks.append(("plugins", "Plugins", "cd extension && node --test tests/plugins-loader.test.mjs "
                 + "tests/plugins-installer.test.mjs"))
         }
+        // Plugin↔MCP integration and hook trust: the surfaces where a plugin
+        // acquires capability (declared MCP servers, shell-running hooks). Its
+        // own stage rather than more suites bolted onto "plugins" so a failure
+        // names the subsystem, and because the `plugins` key already shipped.
+        if exists("extension/tests/mcp-plugin-servers.test.mjs") {
+            checks.append(("plugins-mcp", "Plugins + MCP", "cd extension && node --test tests/mcp-config.test.mjs "
+                + "tests/mcp-state.test.mjs tests/mcp-plugin-servers.test.mjs "
+                + "tests/plugin-mcp-wiring.test.mjs tests/agent-v2-user-mcp.test.mjs "
+                + "tests/plugin-hook-trust.test.mjs tests/plugin-hook-runner.test.mjs "
+                + "tests/plugin-hook-trust-route.test.mjs tests/agent-v2-plugin-hooks.test.mjs "
+                + "tests/mcp-cli-args.test.mjs tests/route-mcp-mode.test.mjs"))
+        }
         if exists("extension/tests/box-connector.test.mjs") {
             checks.append(("connectors", "Connectors", "cd extension && node --test tests/box-connector.test.mjs "
                 + "tests/box-routes.test.mjs tests/slack-source.test.mjs tests/slack-oauth.test.mjs "
@@ -232,6 +244,7 @@ enum LoopStageDetector {
         "test": LoopDefaultLoopKey.test,
         "skills": LoopDefaultLoopKey.systemCheck,
         "plugins": LoopDefaultLoopKey.systemCheck,
+        "plugins-mcp": LoopDefaultLoopKey.systemCheck,
         "connectors": LoopDefaultLoopKey.systemCheck,
         "github-dispatch": LoopDefaultLoopKey.systemCheck,
         "backend": LoopDefaultLoopKey.systemCheck,

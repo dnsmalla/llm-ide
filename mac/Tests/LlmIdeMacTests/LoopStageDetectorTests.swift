@@ -129,6 +129,26 @@ final class LoopStageDetectorTests: XCTestCase {
         XCTAssertNotNil(stages.first { $0.name == "Plugins" })
     }
 
+    func testPluginMcpMarkerAddsItsOwnStage() throws {
+        try writeNested("extension/tests/mcp-plugin-servers.test.mjs")
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
+        let stage = stages.first { $0.defaultKey == "plugins-mcp" }
+        XCTAssertNotNil(stage, "the plugin↔MCP surface needs its own stage")
+        XCTAssertEqual(stage?.name, "Plugins + MCP")
+        XCTAssertTrue(stage?.command?.contains("plugin-hook-runner.test.mjs") ?? false,
+                      "hook execution is part of what this stage guards")
+        XCTAssertTrue(stage?.command?.contains("mcp-plugin-servers.test.mjs") ?? false)
+    }
+
+    func testPluginMcpStageIsAbsentWithoutItsMarker() throws {
+        // The detector runs for EVERY project the app opens, so a stage must
+        // never appear on a repo that has none of these suites.
+        try writeNested("extension/tests/plugins-loader.test.mjs")
+        let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
+        XCTAssertNil(stages.first { $0.defaultKey == "plugins-mcp" })
+        XCTAssertNotNil(stages.first { $0.defaultKey == "plugins" }, "the older stage still appears")
+    }
+
     func testConnectorsMarkerAddsConnectorsStage() throws {
         try writeNested("extension/tests/box-connector.test.mjs")
         let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)

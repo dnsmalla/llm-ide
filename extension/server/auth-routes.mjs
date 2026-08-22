@@ -1043,9 +1043,11 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   //
   // Removes the plugin folder + prunes orphaned enable-state entries
   // for users who had it enabled. Plugin removal is a server-wide
-  // operation (plugins are global, enable state is per-user) — any
-  // authenticated user can remove. If you want admin-only later,
-  // wrap with requireAdmin here.
+  // operation (plugins are global, enable state is per-user), so it goes
+  // through requireAdmin below — which on this local-first install means
+  // "authenticated" (see requireAdmin's doc comment in server/auth.mjs).
+  // The gate stays here so a future multi-operator deployment tightens it
+  // in one place.
   if (method === 'DELETE' && url.startsWith('/auth/me/plugins/uninstall/')) {
     try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const pluginName = decodeURIComponent(url.slice('/auth/me/plugins/uninstall/'.length).split('?')[0]);

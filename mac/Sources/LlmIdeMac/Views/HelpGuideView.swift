@@ -112,7 +112,7 @@ struct HelpGuideView: View {
                 helpBullet("Meeting notes — each meeting gets its own markdown file with a timestamp, transcript excerpt, and AI-generated summary")
                 helpBullet("Documents — any extra markdown or text files in your project folder")
                 helpBullet("Agent personas — the AI assistant's personality and instruction set")
-                helpBullet("Plugins — optional extensions that add new capabilities")
+                helpBullet("Plugins — optional extensions that add new capabilities; install, enable, and remove them here (not in Settings)")
             }
 
             helpCard("Tips", icon: "lightbulb") {
@@ -391,7 +391,7 @@ struct HelpGuideView: View {
                 helpBullet("CLI — choose between Claude Code, Cursor, or other AI coding tools")
                 helpBullet("Preferences — language, auto-dispatch, and note formatting options")
                 helpBullet("Auto Code — configure automated tasks and triggers")
-                helpBullet("Plugins — enable or disable plugin extensions")
+                helpBullet("Loop — default stages and budgets for the project's Loop runs")
             }
 
             helpTip("Press ⌘, (comma) from anywhere to jump straight to Settings.")
