@@ -3,6 +3,13 @@ import SwiftUI
 /// Dropdown of "/" command/skill or "@" file candidates, rendered inline above
 /// the Code Assistant input. Selection lives in the controller (keyboard nav
 /// from the text view); a row tap accepts directly.
+///
+/// "/" rows are grouped under section headers (Commands / Skills / Subagents /
+/// Skill Library / Hooks / MCP Servers) the way Claude Code's own menu is.
+/// The controller computes `headers` in the same pass that orders `items`, so
+/// this view only renders — it never re-derives the grouping, and never
+/// indexes the live published array from inside a lazily-materialized row
+/// (the local `items` snapshot below is what every closure captures).
 struct CompletionMenu: View {
     @ObservedObject var controller: CompletionController
     @EnvironmentObject var theme: ThemeStore
@@ -10,12 +17,28 @@ struct CompletionMenu: View {
     var onAccept: () -> Void
 
     var body: some View {
+        // Snapshot once per body evaluation; row closures capture this local
+        // array, so a background catalog refresh shrinking `controller.items`
+        // can't out-of-range a deferred lazy row.
+        let items = controller.items
+        let headers = controller.headers
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(controller.items.enumerated()), id: \.element.id) { index, item in
-                        row(item, isSelected: index == controller.selected)
-                            .id(index)
+                // Lazy: the "/" menu is deliberately comprehensive (commands +
+                // skills + hooks + MCP can run to hundreds of rows). ForEach
+                // identity is the Int index so `proxy.scrollTo(idx)` resolves
+                // even for rows the lazy container hasn't materialized yet —
+                // an explicit `.id()` inside lazy content only registers once
+                // the row exists, which broke keyboard scrolling past the fold.
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(items.indices, id: \.self) { index in
+                        if let title = headers[index] {
+                            SectionLabel(title, size: 9)
+                                .padding(.horizontal, 8)
+                                .padding(.top, 7)
+                                .padding(.bottom, 3)
+                        }
+                        row(items[index], isSelected: index == controller.selected)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 controller.selected = index
@@ -69,6 +92,8 @@ struct CompletionMenu: View {
         case .skill:        return "sparkles"
         case .subagent:     return "person.2"
         case .librarySkill: return "books.vertical"
+        case .hook:         return "bolt"
+        case .mcpServer:    return "server.rack"
         case .file:         return "doc.text"
         }
     }

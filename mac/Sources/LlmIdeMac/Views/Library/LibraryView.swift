@@ -1002,7 +1002,7 @@ struct LibraryView: View {
     private func performInstall(_ op: @escaping (_ replace: Bool) async throws -> PluginInstallResponse) async {
         do {
             let resp = try await op(false)
-            pluginInstallMessage = "Installed \(resp.plugin.displayName.isEmpty ? resp.plugin.name : resp.plugin.displayName) v\(resp.plugin.version)."
+            pluginInstallMessage = "Installed \(resp.plugin.title) v\(resp.plugin.version)."
             await refreshPlugins()
         } catch let APIError.http(_, code, message, _) where code == "HTTP_ERROR" && message.contains("already installed") {
             pendingReplaceInstall = op
@@ -1017,7 +1017,7 @@ struct LibraryView: View {
         pendingReplaceInstall = nil
         do {
             let resp = try await op(true)
-            pluginInstallMessage = "Replaced \(resp.plugin.displayName.isEmpty ? resp.plugin.name : resp.plugin.displayName) — now v\(resp.plugin.version)."
+            pluginInstallMessage = "Replaced \(resp.plugin.title) — now v\(resp.plugin.version)."
             await refreshPlugins()
         } catch {
             pluginInstallMessage = error.localizedDescription

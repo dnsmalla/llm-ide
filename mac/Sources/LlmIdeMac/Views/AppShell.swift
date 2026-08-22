@@ -90,6 +90,12 @@ struct AppShell: View {
             if let raw = note.object as? String,
                let target = ShellState.Section(rawValue: raw) {
                 shell.section = target
+                // Optional deep link: pre-select a Library row (a plugin's
+                // hooks, an MCP server) so the picked item's detail is on
+                // screen, not the undifferentiated Library root.
+                if let selection = note.userInfo?["libraryTarget"] as? ShellState.LibrarySelection {
+                    shell.librarySelection = selection
+                }
                 NSApp.activate(ignoringOtherApps: true)
             }
         }

@@ -41,8 +41,23 @@ extension CodeAssistantPanel {
             // prepended to the message on send (composer stays clean).
             addInvokedSkill(.init(id: id, name: name, action: .directive(directive)))
             draft = newDraft
+        case .navigate(let section, let target, let newDraft):
+            // Hook/MCP row — not invocable from chat; jump straight to that
+            // row's detail in the target section.
+            draft = newDraft
+            navigate(to: section, libraryTarget: target)
         }
         completion.close()
+    }
+
+    /// The one exit to another app section — posts the `.openSection`
+    /// notification AppShell observes (same route the menu bar uses), with an
+    /// optional Library row to pre-select so hook/MCP menu picks land on the
+    /// exact plugin/server detail rather than the Library root.
+    func navigate(to section: ShellState.Section, libraryTarget: ShellState.LibrarySelection? = nil) {
+        NotificationCenter.default.post(
+            name: .openSection, object: section.rawValue,
+            userInfo: libraryTarget.map { ["libraryTarget": $0] })
     }
 
     /// Append an invoked-skill chip, deduped by id.
@@ -768,7 +783,7 @@ extension CodeAssistantPanel {
             return
         }
         if let section = ChatSlashCommands.sectionCommand(msg) {
-            NotificationCenter.default.post(name: .openSection, object: section.rawValue)
+            navigate(to: section)
             return
         }
         if let modelQuery = ChatSlashCommands.modelArgument(msg) {

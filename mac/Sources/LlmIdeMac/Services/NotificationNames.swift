@@ -20,7 +20,10 @@ extension Notification.Name {
     /// Switch the main window to a specific section. Post with the
     /// target `ShellState.Section.rawValue` as `object`. Posted by
     /// MenuBarMenu rows so a click from the menu bar lands the user
-    /// inside the right tab.
+    /// inside the right tab, and by the chat composer's "/" commands
+    /// and hook/MCP menu rows — the latter may add a
+    /// `userInfo["libraryTarget"]: ShellState.LibrarySelection` to
+    /// pre-select the exact Library row being navigated to.
     static let openSection = Notification.Name("openSection")
 
     /// Posted by Library detail views when the user clicks

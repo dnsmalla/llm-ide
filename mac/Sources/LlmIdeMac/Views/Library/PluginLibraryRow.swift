@@ -13,7 +13,7 @@ struct PluginLibraryRow: View {
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
-                    Text(plugin.displayName.isEmpty ? plugin.name : plugin.displayName)
+                    Text(plugin.title)
                         .font(.callout)
                         .lineLimit(1)
                     if !plugin.enabled {

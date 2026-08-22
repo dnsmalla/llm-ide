@@ -48,6 +48,16 @@ extension LlmIdeAPIClient {
             if isHosted { return url ?? "(no url)" }
             return ([command ?? "(no command)"] + args).joined(separator: " ")
         }
+        /// The first gate currently blocking this server, in the order the
+        /// user must clear them: enable → consent → credential. Lives on the
+        /// model (next to `endpointSummary`) so every surface phrases the
+        /// two-gate consent+enable semantics the same way.
+        var statusSummary: String {
+            if !enabled { return "disabled" }
+            if !consented { return "needs consent" }
+            if credentialMissing { return "credential missing" }
+            return "enabled"
+        }
 
         enum CodingKeys: String, CodingKey {
             case id, name, transport, command, args, env, url, headers

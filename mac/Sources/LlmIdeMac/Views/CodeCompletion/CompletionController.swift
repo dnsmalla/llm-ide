@@ -11,7 +11,22 @@ import Foundation
 @MainActor
 final class CompletionController: ObservableObject {
 
-    enum Kind { case command, skill, subagent, librarySkill, file }
+    enum Kind { case command, skill, subagent, librarySkill, hook, mcpServer, file }
+
+    /// Menu section header for a kind — the "/" menu groups its rows the way
+    /// Claude Code's own menu does, instead of one undifferentiated list.
+    /// nil (files) means "no header" (the "@" menu is single-purpose).
+    static func sectionTitle(_ kind: Kind) -> String? {
+        switch kind {
+        case .command:      return "Commands"
+        case .skill:        return "Skills"
+        case .subagent:     return "Subagents"
+        case .librarySkill: return "Skill Library"
+        case .hook:         return "Hooks"
+        case .mcpServer:    return "MCP Servers"
+        case .file:         return nil
+        }
+    }
 
     struct Item: Identifiable, Equatable {
         let id: String
@@ -21,11 +36,23 @@ final class CompletionController: ObservableObject {
         let insert: String?    // command/skill: text the draft becomes
         let fileURL: URL?      // file: attach this
         let skillId: String?   // librarySkill: "<family>/<dir>" sent to the server
+        let target: ShellState.LibrarySelection?  // hook/mcp: row to select in the Library
+        // Search keys, precomputed at build time (items are built once per
+        // catalog load / file walk) so per-keystroke ranking allocates nothing:
+        // lowercased label without its leading "/" (typing "sum" must
+        // prefix-match "/summary" — the query never includes the slash), and
+        // the lowercased detail.
+        let searchLabel: String
+        let searchDetail: String
 
         init(id: String, kind: Kind, label: String, detail: String,
-             insert: String?, fileURL: URL?, skillId: String? = nil) {
+             insert: String?, fileURL: URL?, skillId: String? = nil,
+             target: ShellState.LibrarySelection? = nil) {
             self.id = id; self.kind = kind; self.label = label; self.detail = detail
             self.insert = insert; self.fileURL = fileURL; self.skillId = skillId
+            self.target = target
+            self.searchLabel = (label.hasPrefix("/") ? String(label.dropFirst()) : label).lowercased()
+            self.searchDetail = detail.lowercased()
         }
     }
 
@@ -41,37 +68,78 @@ final class CompletionController: ObservableObject {
         /// chip whose `directive` ("Use the X skill:") is prepended to the
         /// message on send, so the composer stays clean (same UX as useSkill).
         case useDirective(id: String, name: String, directive: String, newDraft: String)
+        /// Jump to an app section, pre-selecting `target` there — hook/MCP rows
+        /// aren't invocable from chat (a hook fires on events; an MCP server is
+        /// managed in the Library), so accepting one lands on that exact row's
+        /// detail instead of an undifferentiated Library root.
+        case navigate(section: ShellState.Section, target: ShellState.LibrarySelection?, newDraft: String)
     }
 
     private enum Mode { case none, command, file }
 
     @Published private(set) var isOpen = false
     @Published private(set) var items: [Item] = []
+    /// Section title to draw ABOVE the row at each index — computed here, in
+    /// the same pass that orders `items`, so the view never re-derives (or
+    /// worse, re-indexes live state to derive) the grouping invariant.
+    @Published private(set) var headers: [Int: String] = [:]
     @Published var selected = 0
 
     private var mode: Mode = .none
     private var query = ""
+    /// Draft text whose next `update` should NOT re-open the menu: accepting a
+    /// no-argument command row rewrites the draft to exactly that command,
+    /// which would otherwise re-trigger the "/" menu on the row just accepted
+    /// and swallow the next Return.
+    private var suppressedDraft: String?
 
-    // Caches. Commands+skills load once; files reload when the repo root changes.
-    private var commandItems: [Item] = []
+    // Caches, one per source, each overwritten only by ITS OWN successful
+    // fetch — a failed fetch keeps the previous candidates instead of wiping
+    // them. Files reload when the repo root changes.
+    private var commandItems: [Item] = CompletionController.builtinItems
     private var skillItems: [Item] = []
     private var subagentItems: [Item] = []
     private var libraryItems: [Item] = []
+    private var hookItems: [Item] = []
+    private var mcpItems: [Item] = []
     private var fileItems: [Item] = []
-    private var metaLoaded = false
+    /// When the catalog last loaded IN FULL. NOT a one-shot latch: plugins can
+    /// be installed/enabled/trusted mid-session, so the "/" menu refreshes on
+    /// open once the snapshot is older than `metaRefreshInterval`. Only
+    /// stamped when every fetch succeeded — a partial success updates the
+    /// caches it can but stays "stale" so the failed sources retry soon
+    /// (bounded by `lastMetaAttempt`) instead of freezing empty for a minute.
+    private var lastMetaLoad: Date?
+    /// Failure backoff: without it, a down backend would re-fire all five
+    /// fetches on every menu open.
+    private var lastMetaAttempt: Date?
     private var loadingMeta = false
+    private let metaRefreshInterval: TimeInterval = 60
+    private let metaRetryInterval: TimeInterval = 5
     private var filesLoadedFor: URL?
     private var loadingFiles = false
 
     private weak var api: LlmIdeAPIClient?
     private var repoRoot: URL?
 
-    private let maxItems = 50
+    /// "@" file menu cap — one flat list, 50 is plenty to scan visually. The
+    /// "/" menu is deliberately uncapped: its whole point is that EVERYTHING
+    /// discoverable (commands, skills, hooks, MCP) is in it, the sections are
+    /// ordered, and the menu view renders lazily.
+    private let maxFileItems = 50
     private let maxFilesScanned = 4000
 
     // MARK: Configuration
 
     func configure(api: LlmIdeAPIClient, repoRoot: URL?) {
+        if let old = self.api, old !== api {
+            // A different client means a different server/account — the meta
+            // caches describe someone else's plugins. Invalidate so the next
+            // loadMetaIfNeeded (the panel calls it right after configure)
+            // refetches instead of trusting the freshness stamp.
+            lastMetaLoad = nil
+            lastMetaAttempt = nil
+        }
         self.api = api
         if repoRoot?.standardizedFileURL != self.repoRoot?.standardizedFileURL {
             self.repoRoot = repoRoot?.standardizedFileURL
@@ -82,67 +150,56 @@ final class CompletionController: ObservableObject {
         }
     }
 
-    /// Load the "/" command + skill catalog. Best-effort, retryable: latches
-    /// `metaLoaded` only on a successful fetch, so a fetch that hit the backend
-    /// during a restart/cold-start window can be retried (e.g. the next time the
-    /// user types "/"). The `loadingMeta` guard prevents overlapping fetches.
+    /// Load (or refresh) the "/" catalog: plugin commands, agent skills,
+    /// plugin subagents, the central skill library, plugin hooks, and MCP
+    /// servers. Best-effort and retryable: `lastMetaLoad` is only stamped on
+    /// a fully successful round, so a fetch that hit the backend during a
+    /// restart/cold-start window is retried (after a short backoff) the next
+    /// time the menu opens. The `loadingMeta` guard prevents overlapping
+    /// fetches.
     func loadMetaIfNeeded() async {
-        guard !metaLoaded, !loadingMeta, let api else { return }
+        if let last = lastMetaLoad, Date().timeIntervalSince(last) < metaRefreshInterval { return }
+        if let attempt = lastMetaAttempt, Date().timeIntervalSince(attempt) < metaRetryInterval { return }
+        guard !loadingMeta, let api else { return }
         loadingMeta = true
+        lastMetaAttempt = Date()
         defer { loadingMeta = false }
         async let cmds = try? api.listAgentCommands()
         async let cat = try? api.listAgentSkillCatalog()
         async let lib = try? api.skillLibrary()
-        let commands = await cmds
-        let catalog = await cat
-        let library = await lib
-        // Only latch as loaded once a fetch actually succeeds — otherwise a
-        // cold-start failure (server not up yet) would permanently disable the
-        // "/" menu; leaving metaLoaded false lets a later .task retry.
-        guard commands != nil || catalog != nil || library != nil else { return }
-        metaLoaded = true
+        async let plug = try? api.listPlugins()
+        async let mcp = try? api.listMcpPlugins()
+        let (commands, catalog, library, plugins, mcpPlugins) = await (cmds, cat, lib, plug, mcp)
+        if commands != nil, catalog != nil, library != nil, plugins != nil, mcpPlugins != nil {
+            lastMetaLoad = Date()
+        }
+        // Plugin slash-commands (server-side prompt expansion) — annotated
+        // with the owning plugin. Triggers that collide with a built-in are
+        // dropped: submit() dispatches built-ins BEFORE the server sees the
+        // text, so a shadowed plugin command could never run, and listing a
+        // second identical "/name" row would be a lie.
+        if let commands {
+            let pluginCommands: [Item] = commands.compactMap { c in
+                guard !ChatSlashCommands.reservedNames.contains("/\(c.trigger.lowercased())") else { return nil }
+                return Item(id: "cmd:\(c.trigger)", kind: .command,
+                            label: "/\(c.trigger)",
+                            detail: Self.ownedDetail(c.pluginName, c.description),
+                            insert: Self.commandInsert(c), fileURL: nil)
+            }
+            commandItems = Self.builtinItems + pluginCommands
+        }
         // Central skills-repo catalog (the skills the IDE agent can't itself
         // run): selecting one invokes it via the server's skill channel — we
         // carry the skill id and the server reads its SKILL.md and frames it as
         // instructions to FOLLOW (NOT a file attachment, which the assistant
-        // would treat as data to edit).
-        libraryItems = (library ?? []).map { s in
-            // sourceName tells which registered skills repo this came from —
-            // more useful now that multiple sources can be enabled than the
-            // family (always "skills"/"runtime", low information).
-            let detail = s.sourceName.isEmpty ? s.description : "\(s.sourceName) · \(s.description)"
-            return Item(id: "lib:\(s.id)", kind: .librarySkill,
-                 label: s.name, detail: detail,
-                 insert: nil, fileURL: nil, skillId: s.id)
-        }
-        // Built-in commands are a real client-side UI action (ChatSlashCommands
-        // in ChatComposer.submit()), not server-side prompt expansion like
-        // plugin commands — shown first so they're discoverable the same
-        // way. Aliases (/reset, /new, /settings, /plugins) still work if
-        // typed, just not listed separately here to avoid triplicating one
-        // entry. Only commands with a REAL llm-ide action are listed — see
-        // ChatSlashCommands.swift's header note on why the rest of Claude
-        // Code's own command set isn't mirrored here.
-        let builtinCommandItems: [Item] = [
-            Item(id: "cmd:clear", kind: .command, label: "/clear",
-                 detail: "Clear this conversation", insert: "/clear", fileURL: nil),
-            Item(id: "cmd:model", kind: .command, label: "/model",
-                 detail: "Switch the model for the current provider", insert: "/model ", fileURL: nil),
-            Item(id: "cmd:config", kind: .command, label: "/config",
-                 detail: "Open Settings", insert: "/config", fileURL: nil),
-            Item(id: "cmd:loop", kind: .command, label: "/loop",
-                 detail: "Open the Loop Engine", insert: "/loop", fileURL: nil),
-            Item(id: "cmd:mcp", kind: .command, label: "/mcp",
-                 detail: "Open Library → MCP Plugins", insert: "/mcp", fileURL: nil),
-            Item(id: "cmd:plugin", kind: .command, label: "/plugin",
-                 detail: "Open Library → Plugins", insert: "/plugin", fileURL: nil),
-            Item(id: "cmd:agents", kind: .command, label: "/agents",
-                 detail: "Open Library → Plugins (subagents)", insert: "/agents", fileURL: nil),
-        ]
-        commandItems = builtinCommandItems + (commands ?? []).map { c in
-            Item(id: "cmd:\(c.trigger)", kind: .command,
-                 label: "/\(c.trigger)", detail: c.description,
-                 insert: Self.commandInsert(c), fileURL: nil)
+        // would treat as data to edit). sourceName tells which registered
+        // skills repo it came from.
+        if let library {
+            libraryItems = library.map { s in
+                Item(id: "lib:\(s.id)", kind: .librarySkill,
+                     label: s.name, detail: Self.ownedDetail(s.sourceName, s.description),
+                     insert: nil, fileURL: nil, skillId: s.id)
+            }
         }
         if let catalog {
             var skills: [Item] = []
@@ -155,7 +212,7 @@ final class CompletionController: ObservableObject {
             for g in catalog.skills.plugins {
                 for s in g.skills {
                     skills.append(Item(id: "skill:\(g.pluginName):\(s.name)", kind: .skill,
-                                       label: s.name, detail: s.description,
+                                       label: s.name, detail: Self.ownedDetail(g.pluginName, s.description),
                                        insert: "Use the \(s.name) skill: ", fileURL: nil))
                 }
             }
@@ -167,13 +224,57 @@ final class CompletionController: ObservableObject {
             for g in catalog.subagents.plugins {
                 for s in g.subagents {
                     subs.append(Item(id: "sub:\(g.pluginName):\(s.name)", kind: .subagent,
-                                     label: s.name, detail: s.description,
+                                     label: s.name, detail: Self.ownedDetail(g.pluginName, s.description),
                                      insert: "Use the \(s.name) subagent: ", fileURL: nil))
                 }
             }
             subagentItems = subs
         }
+        // Hooks — one row per hook-bearing plugin (llm-ide has no free-floating
+        // hooks; every hook belongs to a plugin, and its handlers + trust
+        // toggle live in the Library's plugin detail). Discovery rows, not
+        // invocations: accepting navigates to that plugin's detail.
+        if let plugins {
+            hookItems = plugins.plugins.filter { $0.hookCount > 0 }.map { p in
+                Item(id: "hook:\(p.name)", kind: .hook,
+                     label: p.title, detail: p.hookSummary,
+                     insert: nil, fileURL: nil, target: .plugin(p.name))
+            }
+        }
+        // MCP servers — same idea: discovery rows that land on that server's
+        // detail in Library → MCP Plugins, where consent/enable/credentials
+        // are managed.
+        if let mcpPlugins {
+            mcpItems = mcpPlugins.map { m in
+                Item(id: "mcp:\(m.id)", kind: .mcpServer,
+                     label: m.name, detail: "\(m.statusSummary) · \(m.endpointSummary)",
+                     insert: nil, fileURL: nil, target: .mcpPlugin(m.id))
+            }
+        }
+        // Re-rank with the fresh caches. If the menu is open under the user's
+        // arrow keys, re-anchor the selection to the same ROW (by id), not the
+        // same index — fresh data may have shifted everything.
+        let selectedId = (isOpen && items.indices.contains(selected)) ? items[selected].id : nil
         rebuild()
+        if let selectedId, let idx = items.firstIndex(where: { $0.id == selectedId }) {
+            selected = idx
+        }
+    }
+
+    /// Built-in commands are a real client-side UI action (ChatSlashCommands
+    /// in ChatComposer.submit()), not server-side prompt expansion like
+    /// plugin commands. The catalog lives in ChatSlashCommands next to the
+    /// recognizers so the menu can't drift from the behavior.
+    private static let builtinItems: [Item] = ChatSlashCommands.builtins.map { b in
+        Item(id: "cmd:\(b.label)", kind: .command, label: b.label,
+             detail: b.detail, insert: b.insert, fileURL: nil)
+    }
+
+    /// "<owner> · <description>", dropping a nil/empty owner — the one
+    /// spelling of the annotation every plugin-/source-owned row uses.
+    private static func ownedDetail(_ owner: String?, _ description: String) -> String {
+        guard let owner, !owner.isEmpty else { return description }
+        return "\(owner) · \(description)"
     }
 
     private static func commandInsert(_ c: LlmIdeAPIClient.AgentCommand) -> String {
@@ -188,16 +289,26 @@ final class CompletionController: ObservableObject {
     // MARK: Trigger detection (called on every draft change)
 
     func update(draft: String) {
+        // A draft we just wrote ourselves by accepting a command row — don't
+        // re-open the menu on it (one-shot; the user's next edit re-triggers
+        // normally).
+        if let suppressed = suppressedDraft {
+            suppressedDraft = nil
+            if draft == suppressed { closeInternal(); return }
+        }
         // Command/skill: a leading "/" still being typed (no whitespace yet).
         if draft.hasPrefix("/") {
             let after = String(draft.dropFirst())
             if !after.contains(where: \.isWhitespace) {
+                let entering = mode != .command
                 mode = .command; query = after
-                // Retry the catalog fetch on demand: if the initial load (on
-                // panel appear) failed — e.g. the backend was mid-restart — this
-                // recovers the menu the moment the user reaches for it, instead
-                // of leaving "/" permanently empty until the panel reappears.
-                if !metaLoaded { Task { await loadMetaIfNeeded() } }
+                // Fetch/refresh the catalog when the menu OPENS (not on every
+                // keystroke — a landed refresh re-ranks the open menu, so keep
+                // that window to the moment of opening): recovers from a
+                // cold-start failure the moment the user reaches for "/", and
+                // picks up plugins installed/enabled since the last load.
+                // loadMetaIfNeeded itself no-ops while the snapshot is fresh.
+                if entering { Task { await loadMetaIfNeeded() } }
                 rebuild(); return
             }
         }
@@ -226,7 +337,12 @@ final class CompletionController: ObservableObject {
         switch item.kind {
         case .command:
             // Slash command: replace the draft so the user can fill in args.
-            return .replaceDraft(item.insert ?? item.label)
+            let insert = item.insert ?? item.label
+            // A no-argument command (no trailing space) would immediately
+            // re-trigger the "/" menu via the caller's draft onChange —
+            // suppress that one echo so Return-to-accept → Return-to-act works.
+            if !insert.hasSuffix(" ") { suppressedDraft = insert }
+            return .replaceDraft(insert)
         case .skill, .subagent:
             // In-built skill/subagent the agent runs by name → a chip whose
             // directive ("Use the X skill:") is prepended to the message on send,
@@ -240,6 +356,10 @@ final class CompletionController: ObservableObject {
             // following it). Strip the in-progress "/query" from the draft.
             guard let id = item.skillId else { return nil }
             return .useSkill(id: id, name: item.label,
+                             newDraft: Self.draftRemovingLastToken(currentDraft))
+        case .hook, .mcpServer:
+            // Not invocable from chat — jump to the exact row in the Library.
+            return .navigate(section: .library, target: item.target,
                              newDraft: Self.draftRemovingLastToken(currentDraft))
         case .file:
             // A file attaches itself; strip the in-progress "@token".
@@ -257,39 +377,60 @@ final class CompletionController: ObservableObject {
         case .none:
             closeInternal(); return
         case .command:
-            // Everything discoverable from "/": commands, the agent's own
-            // skills, plugin subagents, and the full central skills-repo library
-            // — comprehensive, nothing filtered out.
-            let pool = commandItems + skillItems + subagentItems + libraryItems
-            // Match against the label without its leading "/" so typing "sum"
-            // prefix-matches "/summary" (the query never includes the slash).
-            items = Self.rank(pool, query: q, keys: {
-                [$0.label.hasPrefix("/") ? String($0.label.dropFirst()) : $0.label, $0.detail]
-            }, limit: maxItems)
+            // Everything discoverable from "/": built-in + plugin commands, the
+            // agent's own skills, plugin subagents, the central skills-repo
+            // library, plugin hooks, and MCP servers — comprehensive, nothing
+            // capped away. Ranked WITHIN each group (label-prefix, then
+            // label-contains, then detail-contains), with group order fixed so
+            // the menu renders stable Claude-style sections instead of
+            // interleaving kinds.
+            let groups: [[Item]] = [commandItems, skillItems, subagentItems,
+                                    libraryItems, hookItems, mcpItems]
+            items = groups.flatMap { Self.rank($0, query: q) }
         case .file:
-            items = Self.rank(fileItems, query: q, keys: { [$0.label, $0.detail] }, limit: maxItems)
+            items = Array(Self.rank(fileItems, query: q).prefix(maxFileItems))
         }
         if items.isEmpty { closeInternal(); return }
-        selected = min(selected, items.count - 1)
+        // Anchor the selection to the best GLOBAL match: a label-prefix hit in
+        // a later group (e.g. the `design` skill) must win over an earlier
+        // group's weaker detail-substring hit, or Return would accept the
+        // wrong row. Empty query → first row ("".hasPrefix everywhere).
+        selected = items.firstIndex { $0.searchLabel.hasPrefix(q) } ?? 0
+        headers = Self.headerIndex(for: items)
         isOpen = true
     }
 
     private func closeInternal() {
-        mode = .none; query = ""; items = []; selected = 0; isOpen = false
+        mode = .none; query = ""; items = []; headers = [:]; selected = 0; isOpen = false
     }
 
-    /// Substring match across `keys`, ranking prefix hits first, then by label.
-    private static func rank(_ pool: [Item], query q: String,
-                             keys: (Item) -> [String], limit: Int) -> [Item] {
-        if q.isEmpty { return Array(pool.prefix(limit)) }
-        var prefix: [Item] = []
-        var contains: [Item] = []
+    /// Tiered match against the precomputed search keys: label-prefix hits
+    /// first, then label-contains, then detail-contains. Pure comparisons —
+    /// no per-keystroke string allocation.
+    private static func rank(_ pool: [Item], query q: String) -> [Item] {
+        if q.isEmpty { return pool }
+        var labelPrefix: [Item] = []
+        var labelContains: [Item] = []
+        var detailContains: [Item] = []
         for item in pool {
-            let fields = keys(item).map { $0.lowercased() }
-            if fields.contains(where: { $0.hasPrefix(q) }) { prefix.append(item) }
-            else if fields.contains(where: { $0.contains(q) }) { contains.append(item) }
+            if item.searchLabel.hasPrefix(q) { labelPrefix.append(item) }
+            else if item.searchLabel.contains(q) { labelContains.append(item) }
+            else if item.searchDetail.contains(q) { detailContains.append(item) }
         }
-        return Array((prefix + contains).prefix(limit))
+        return labelPrefix + labelContains + detailContains
+    }
+
+    /// Section header positions for an ordered item list: an entry at each
+    /// index where the section title changes. Exposed for the menu view.
+    private static func headerIndex(for items: [Item]) -> [Int: String] {
+        var out: [Int: String] = [:]
+        var previous: String?
+        for (i, item) in items.enumerated() {
+            let title = sectionTitle(item.kind)
+            if let title, title != previous { out[i] = title }
+            previous = title
+        }
+        return out
     }
 
     // MARK: File walk

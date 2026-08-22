@@ -233,6 +233,11 @@ struct PluginInstallResponse: Decodable {
         let commandCount: Int
         let subagentCount: Int
         let replaced: Bool
+        /// Same display-name fallback as `PluginInfo.title`.
+        var title: String {
+            let trimmed = displayName.trimmingCharacters(in: .whitespaces)
+            return trimmed.isEmpty ? name : trimmed
+        }
     }
 }
 
@@ -296,6 +301,22 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     /// do not apply. Follows both hook trust and the `nativePlugins` pref.
     let nativeDelivery: Bool
     var id: String { name }
+    /// Display name with a fallback to the manifest name — `displayName`
+    /// can be missing or whitespace in hand-written manifests. The one
+    /// place this fallback lives (rows, menus, install toasts all use it).
+    var title: String {
+        let trimmed = displayName.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? name : trimmed
+    }
+    /// One-line hook summary shared by the "/" menu row and any other
+    /// surface describing this plugin's hooks — one phrasing of the fact,
+    /// so two views can't drift apart.
+    var hookSummary: String {
+        var bits = ["\(hookCount) handler\(hookCount == 1 ? "" : "s")",
+                    hooksTrusted ? "trusted" : "not trusted"]
+        if !enabled { bits.append("plugin disabled") }
+        return bits.joined(separator: " · ")
+    }
     // Identity plus the fields a row/detail actually renders differently:
     // toggling the native-plugins pref changes `nativeDelivery` alone, and
     // without it here the view would keep describing the old delivery route.
