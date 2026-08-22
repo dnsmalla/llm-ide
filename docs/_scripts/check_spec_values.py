@@ -51,6 +51,7 @@ def _read(path: str) -> str:
 def build_checks() -> list[tuple[str, object, object, str]]:
     """Return (label, source_value, documented_value, spec_page) tuples."""
     cross = _read("docs/spec/cross-cutting.md")
+    api_server = _read("docs/spec/api-server.md")
     kb = _read("docs/spec/knowledge-base.md")
     arch = _read("docs/explanation/architecture.md")
     server = _read("extension/server.mjs")
@@ -93,6 +94,12 @@ def build_checks() -> list[tuple[str, object, object, str]]:
         ("SERVER_API_VERSION — cross-cutting.md",
          api, first_int(cross, r"SERVER_API_VERSION = (\d+)"),
          "docs/spec/cross-cutting.md"),
+        # api-server.md states the same value independently, and drifted to 18
+        # while cross-cutting.md stayed current — pinning only one copy left the
+        # other free to rot.
+        ("SERVER_API_VERSION — api-server.md",
+         api, first_int(api_server, r"SERVER_API_VERSION = (\d+)"),
+         "docs/spec/api-server.md"),
         ("body-limit default MB — cross-cutting.md",
          body, first_int(cross, r"\*\*(\d+) MB\*\* default"),
          "docs/spec/cross-cutting.md"),
