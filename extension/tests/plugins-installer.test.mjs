@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 
 import { installFromZip, uninstall } from '../plugins/installer.mjs';
+import { loadPlugins } from '../plugins/loader.mjs';
 
 function hasZip() {
   const r = spawnSync('zip', ['--version'], { stdio: 'ignore' });
@@ -109,7 +110,7 @@ test('refuses install when plugin.json is missing', { skip: skipReason || false 
 
     const result = await installFromZip(readFileSync(zipPath), { pluginDir: installDir });
     assert.equal(result.ok, undefined);
-    assert.match(result.error, /plugin\.json not found/);
+    assert.match(result.error, /plugin manifest not found/);
     assert.equal(result.status, 400);
   } finally {
     rmSync(stage, { recursive: true, force: true });
@@ -280,4 +281,57 @@ test('uninstall rejects invalid plugin names', async () => {
   assert.match(r2.error, /invalid plugin name/);
   const r3 = await uninstall('');
   assert.match(r3.error, /invalid plugin name/);
+});
+
+test('installs a vendor zip whose .claude-plugin/plugin.json sits in a top-level dir', { skip: skipReason || false }, async () => {
+  const stage = newTempRoot();
+  const installDir = newTempRoot();
+  try {
+    const srcPlugin = join(stage, 'vendor-plug');
+    mkdirSync(join(srcPlugin, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(srcPlugin, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'vendor-plug', version: '1.0.0' }), 'utf8');
+    mkdirSync(join(srcPlugin, 'skills', 'helper'), { recursive: true });
+    writeFileSync(join(srcPlugin, 'skills', 'helper', 'SKILL.md'),
+      '---\nname: helper\ndescription: helps\n---\nBody.', 'utf8');
+    const zipPath = join(stage, 'pkg.zip');
+    zipDirectory(srcPlugin, zipPath, { includeParent: true });
+
+    const result = await installFromZip(readFileSync(zipPath), { pluginDir: installDir });
+    assert.equal(result.ok, true, `install failed: ${result.error || ''}`);
+    assert.equal(result.plugin.name, 'vendor-plug');
+    assert.ok(existsSync(join(installDir, 'vendor-plug', '.claude-plugin', 'plugin.json')));
+    const { plugins } = loadPlugins({ pluginDir: installDir });
+    const p = plugins.get('vendor-plug');
+    assert.equal(p?.format, 'claude');
+    assert.equal(p?.skillFiles.length, 1);
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+    rmSync(installDir, { recursive: true, force: true });
+  }
+});
+
+test('installs a vendor zip whose manifest sits at the archive root', { skip: skipReason || false }, async () => {
+  const stage = newTempRoot();
+  const installDir = newTempRoot();
+  try {
+    const srcPlugin = join(stage, 'root-vendor');
+    mkdirSync(join(srcPlugin, '.codex-plugin'), { recursive: true });
+    writeFileSync(join(srcPlugin, '.codex-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'root-vendor', version: '2.0.0' }), 'utf8');
+    const zipPath = join(stage, 'pkg.zip');
+    zipDirectory(srcPlugin, zipPath);
+
+    const result = await installFromZip(readFileSync(zipPath), { pluginDir: installDir });
+    assert.equal(result.ok, true, `install failed: ${result.error || ''}`);
+    assert.equal(result.plugin.version, '2.0.0');
+    // The plugin ROOT is the archive root, NOT the .codex-plugin/ dir that
+    // happens to be its only top-level entry — installing the manifest dir
+    // as the plugin would silently drop every sibling component.
+    const { plugins } = loadPlugins({ pluginDir: installDir });
+    assert.equal(plugins.get('root-vendor')?.format, 'claude');
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+    rmSync(installDir, { recursive: true, force: true });
+  }
 });

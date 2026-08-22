@@ -9,8 +9,10 @@
 //   3. Reject if the zip listing (via `unzip -l`) reveals path
 //      traversal entries (../, absolute paths, symlinks).
 //   4. Extract via `unzip -o -qq` into a temp staging directory.
-//   5. Locate `plugin.json` — at root, or inside a single top-level
-//      subdirectory (the common shape when users zip a folder).
+//   5. Locate the manifest — `plugin.json`, or a vendor
+//      `.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` —
+//      at the archive root or inside a single top-level subdirectory
+//      (the common shape when users zip a folder).
 //   6. Re-parse the manifest with the same validator the runtime
 //      uses; refuse on any error.
 //   7. Move the staged folder atomically into
@@ -93,20 +95,32 @@ async function listZipEntries(zipPath) {
   return { entries };
 }
 
+// Manifest candidates, own format first (a package carrying BOTH is an
+// own-format plugin — the loader enforces the same precedence). The returned
+// `manifestDir` is always the plugin ROOT, never the `.claude-plugin/` dir
+// the manifest happens to live in.
+const MANIFESTS = ['plugin.json', join('.claude-plugin', 'plugin.json'), join('.codex-plugin', 'plugin.json')];
+
 async function findManifest(stagingDir) {
-  // The zip might contain plugin.json at root, OR a single top-level
-  // dir containing plugin.json (which is how `Compress with Finder`
-  // and `zip -r foo.zip my-plugin/` both produce archives). Prefer
-  // root; fall back to single subdir.
-  if (existsSync(join(stagingDir, 'plugin.json'))) {
-    return { manifestDir: stagingDir };
+  // The zip might carry its manifest at root, OR inside a single top-level
+  // dir (which is how `Compress with Finder` and `zip -r foo.zip my-plugin/`
+  // both produce archives). Prefer root; fall back to the single subdir.
+  for (const rel of MANIFESTS) {
+    if (existsSync(join(stagingDir, rel))) return { manifestDir: stagingDir };
   }
   const entries = await readdir(stagingDir, { withFileTypes: true });
-  const dirs = entries.filter((e) => e.isDirectory());
-  if (dirs.length === 1 && existsSync(join(stagingDir, dirs[0].name, 'plugin.json'))) {
-    return { manifestDir: join(stagingDir, dirs[0].name) };
+  // Dot-dirs don't count toward "single": a vendor package whose only
+  // top-level entry is `.claude-plugin/` has its ROOT at the archive root,
+  // and __MACOSX is Finder debris that would otherwise break the count.
+  const dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== '__MACOSX');
+  if (dirs.length === 1) {
+    for (const rel of MANIFESTS) {
+      if (existsSync(join(stagingDir, dirs[0].name, rel))) {
+        return { manifestDir: join(stagingDir, dirs[0].name) };
+      }
+    }
   }
-  return { error: 'plugin.json not found at zip root or in a single top-level directory' };
+  return { error: 'plugin manifest not found at zip root or in a single top-level directory (plugin.json, .claude-plugin/plugin.json, or .codex-plugin/plugin.json)' };
 }
 
 /**
