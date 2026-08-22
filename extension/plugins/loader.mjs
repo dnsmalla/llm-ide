@@ -28,7 +28,7 @@
 // only loads the enabled ones.
 
 import { readdirSync, readFileSync, lstatSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import os from 'node:os';
 import * as yaml from 'js-yaml';
 
@@ -95,6 +95,11 @@ const MAX_SKILL_BYTES    = 32_768;   // 32 KB per skill file
 const MAX_COMMAND_BYTES  = 16_384;   // 16 KB per command template
 const MAX_SUBAGENT_BYTES = 32_768;   // 32 KB per subagent system prompt
 const MAX_FILES_PER_DIR  = 50;       // max skills/commands/subagents per plugin
+const MAX_MCP_JSON_BYTES = 65_536;   // 64 KB per .mcp.json
+const MAX_MCP_SERVERS    = 20;       // max servers one plugin may declare
+const MAX_HOOKS_JSON_BYTES = 65_536; // 64 KB per hooks.json
+const MAX_HOOKS          = 40;       // max hook handlers one plugin may declare
+const HOOK_TIMEOUT_MS    = 30_000;   // per-handler ceiling AND default
 
 // Strip known prompt-injection delimiters that the server itself uses
 // as content fences.  A plugin author could accidentally (or
@@ -300,6 +305,180 @@ function parseCommandFile(path) {
 }
 
 /**
+ * Parse a vendor plugin's `.mcp.json` into transport-normalized declarations.
+ *
+ * Declarations only — NOTHING here connects, registers, or runs. The servers
+ * become registry entries the user consents to individually (mcp/state.mjs),
+ * so a plugin cannot bring a live MCP connection along with it.
+ *
+ * `env`/`headers` values are kept verbatim, placeholders included
+ * (`${TOKEN}`): resolving them to real secrets is the vault's job at
+ * config-build time, never this layer's.
+ */
+function parseMcpDeclarations(path) {
+  let raw;
+  try { raw = readFileSync(path, 'utf8'); }
+  catch (err) { return { error: `read failed: ${err.message}` }; }
+  if (Buffer.byteLength(raw, 'utf8') > MAX_MCP_JSON_BYTES) {
+    return { error: `exceeds ${MAX_MCP_JSON_BYTES} byte limit` };
+  }
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (err) { return { error: `parse: ${err.message}` }; }
+  const servers = parsed?.mcpServers;
+  // A `.mcp.json` with no `mcpServers` map declares nothing — benign, not an
+  // error. Warnings from here reach the installer, which fails a bundle on
+  // any warning, so only genuinely unparseable JSON may warn.
+  if (!servers || typeof servers !== 'object' || Array.isArray(servers)) {
+    return { declarations: [], warnings: [] };
+  }
+  const declarations = [];
+  const warnings = [];
+  for (const [name, cfg] of Object.entries(servers)) {
+    if (declarations.length >= MAX_MCP_SERVERS) {
+      warnings.push(`declares more than ${MAX_MCP_SERVERS} servers — extras ignored`);
+      break;
+    }
+    if (!/^[A-Za-z][A-Za-z0-9._-]{0,60}$/.test(name)) {
+      warnings.push(`server name '${name}' is not a plain identifier`);
+      continue;
+    }
+    if (!cfg || typeof cfg !== 'object') {
+      warnings.push(`server '${name}': not an object`);
+      continue;
+    }
+    const wantsHttp = cfg.type === 'http' || cfg.type === 'sse' || (!cfg.command && cfg.url);
+    if (wantsHttp) {
+      // http(s) only. A file:/ws: URL is not a transport llm-ide can express,
+      // and passing it downstream would only fail deeper in, or reach for a
+      // local path a plugin has no business naming.
+      let url;
+      try { url = new URL(String(cfg.url)); } catch { url = null; }
+      if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
+        warnings.push(`server '${name}': a http(s) url is required`);
+        continue;
+      }
+      declarations.push({
+        name,
+        transport: cfg.type === 'sse' ? 'sse' : 'http',
+        url: url.toString(),
+        ...(cfg.headers && typeof cfg.headers === 'object' ? { headers: { ...cfg.headers } } : {}),
+      });
+      continue;
+    }
+    if (typeof cfg.command !== 'string' || !cfg.command.trim()) {
+      warnings.push(`server '${name}': needs a command or a http(s) url`);
+      continue;
+    }
+    declarations.push({
+      name,
+      transport: 'stdio',
+      command: cfg.command,
+      args: Array.isArray(cfg.args) ? cfg.args.filter((a) => typeof a === 'string') : [],
+      ...(cfg.env && typeof cfg.env === 'object' ? { env: { ...cfg.env } } : {}),
+    });
+  }
+  return { declarations, warnings };
+}
+
+
+// The hook events llm-ide can actually deliver on the v2 (Agent SDK) engine.
+// Claude Code defines many more; a plugin naming one of those gets it
+// catalogued, never silently treated as wired up.
+const SUPPORTED_HOOK_EVENTS = new Set([
+  'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'SessionStart', 'SessionEnd',
+  'Stop', 'SubagentStop', 'PreCompact', 'Notification',
+]);
+
+/**
+ * Parse a vendor plugin's `hooks/hooks.json`.
+ *
+ * Returns `{ hooks, notes }`: `hooks` are `command`-type handlers on events
+ * this engine delivers — the only kind that can ever run, and only once the
+ * user trusts the plugin's hooks explicitly. `notes` describe everything that
+ * was recognized but will NOT run (http/mcp_tool/prompt/agent handlers,
+ * unsupported events, refused commands) so the UI can say so plainly.
+ *
+ * Nothing here executes anything, and problems are notes rather than
+ * warnings: the installer fails a bundle on any loader warning, and a plugin
+ * whose hooks llm-ide won't run must still install.
+ */
+function parseHookDeclarations(path, pluginDir) {
+  const notes = [];
+  let raw;
+  try { raw = readFileSync(path, 'utf8'); }
+  catch (err) { return { hooks: [], notes: [`hooks.json: read failed: ${err.message}`] }; }
+  if (Buffer.byteLength(raw, 'utf8') > MAX_HOOKS_JSON_BYTES) {
+    return { hooks: [], notes: [`hooks.json: exceeds ${MAX_HOOKS_JSON_BYTES} byte limit`] };
+  }
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (err) { return { hooks: [], notes: [`hooks.json: parse: ${err.message}`] }; }
+  const events = parsed?.hooks;
+  if (!events || typeof events !== 'object' || Array.isArray(events)) return { hooks: [], notes };
+
+  const hooks = [];
+  for (const [event, matchers] of Object.entries(events)) {
+    if (!SUPPORTED_HOOK_EVENTS.has(event)) {
+      notes.push(`${event}: event not supported here — declared hooks will not run`);
+      continue;
+    }
+    for (const entry of Array.isArray(matchers) ? matchers : []) {
+      const matcher = typeof entry?.matcher === 'string' && entry.matcher ? entry.matcher : null;
+      for (const handler of Array.isArray(entry?.hooks) ? entry.hooks : []) {
+        if (hooks.length >= MAX_HOOKS) {
+          notes.push(`more than ${MAX_HOOKS} hooks declared — extras ignored`);
+          return { hooks, notes };
+        }
+        if (handler?.type !== 'command') {
+          notes.push(`${event}: '${handler?.type || 'unknown'}' handlers are shown but not run`);
+          continue;
+        }
+        const expanded = expandPluginRoot(handler.command, pluginDir);
+        if (expanded.error) {
+          notes.push(`${event}: ${expanded.error}`);
+          continue;
+        }
+        const declared = Number(handler.timeout);
+        hooks.push({
+          event,
+          matcher,
+          command: expanded.command,
+          timeoutMs: Number.isFinite(declared) && declared > 0
+            ? Math.min(declared * 1000, HOOK_TIMEOUT_MS)
+            : HOOK_TIMEOUT_MS,
+        });
+      }
+    }
+  }
+  return { hooks, notes };
+}
+
+/**
+ * Substitute the `${CLAUDE_PLUGIN_ROOT}` / `${CODEX_PLUGIN_ROOT}` variables
+ * both vendors use, and refuse a command whose resolved script escapes the
+ * plugin directory — a plugin may only run its OWN files.
+ */
+function expandPluginRoot(command, pluginDir) {
+  if (typeof command !== 'string' || !command.trim()) return { error: 'hook command is empty' };
+  const expanded = command
+    .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, pluginDir)
+    .replace(/\$\{CODEX_PLUGIN_ROOT\}/g, pluginDir)
+    .trim();
+  // Only paths pointing INTO the plugin are checked for containment; a bare
+  // shell word (`echo hi`, `git status`) is not a plugin file reference.
+  const first = expanded.split(/\s+/)[0];
+  if (first.startsWith('/') || first.startsWith('.')) {
+    const target = resolve(first);
+    const root = resolve(pluginDir);
+    if (target !== root && !target.startsWith(root + sep)) {
+      return { error: `hook command resolves outside the plugin directory (${first})` };
+    }
+  }
+  return { command: expanded };
+}
+
+/**
  * Walk one plugin directory. Returns { plugin, warnings } or { error }.
  */
 function loadOnePlugin(dir) {
@@ -309,6 +488,10 @@ function loadOnePlugin(dir) {
   }
   let manifest;
   let components = {};
+  // Which manifest this plugin was read from, relative to its directory. The
+  // Agent SDK can load a `.claude-plugin` package natively; a `.codex-plugin`
+  // one it cannot, and `format` alone does not distinguish them.
+  let manifestRel = 'plugin.json';
   if (format === 'llmide') {
     let raw;
     try { raw = JSON.parse(readFileSync(join(dir, 'plugin.json'), 'utf8')); }
@@ -317,9 +500,9 @@ function loadOnePlugin(dir) {
     if (v.error) return { error: v.error };
     manifest = v.manifest;
   } else {
-    const manifestPath = VENDOR_MANIFEST_DIRS
-      .map((sub) => join(dir, sub, 'plugin.json'))
-      .find((candidate) => existsSync(candidate));
+    const sub = VENDOR_MANIFEST_DIRS.find((candidate) => existsSync(join(dir, candidate, 'plugin.json')));
+    const manifestPath = join(dir, sub, 'plugin.json');
+    manifestRel = join(sub, 'plugin.json');
     let raw;
     try { raw = JSON.parse(readFileSync(manifestPath, 'utf8')); }
     catch (err) { return { error: `vendor plugin.json parse: ${err.message}` }; }
@@ -480,12 +663,29 @@ function loadOnePlugin(dir) {
   // detail view renders instead.
   const unsupportedComponents = [];
   const pendingComponents = [];
+  const mcpServers = [];
+  const hooks = [];
+  const hookNotes = [];
   if (format === 'claude') {
     for (const rel of ['themes', 'output-styles', 'monitors', 'workflows', 'bin', '.lsp.json', 'settings.json']) {
       if (existsSync(join(dir, rel))) unsupportedComponents.push(rel);
     }
-    if (existsSync(join(dir, 'hooks', 'hooks.json'))) pendingComponents.push('hooks');
-    if (existsSync(join(dir, '.mcp.json'))) pendingComponents.push('mcp');
+    if (existsSync(join(dir, 'hooks', 'hooks.json'))) {
+      pendingComponents.push('hooks');
+      const parsed = parseHookDeclarations(join(dir, 'hooks', 'hooks.json'), dir);
+      hooks.push(...parsed.hooks);
+      hookNotes.push(...parsed.notes);
+    }
+    if (existsSync(join(dir, '.mcp.json'))) {
+      pendingComponents.push('mcp');
+      const parsed = parseMcpDeclarations(join(dir, '.mcp.json'));
+      if (parsed.error) {
+        warnings.push(`.mcp.json: ${parsed.error}`);
+      } else {
+        mcpServers.push(...parsed.declarations);
+        for (const w of parsed.warnings) warnings.push(`.mcp.json: ${w}`);
+      }
+    }
   }
 
   return {
@@ -493,12 +693,16 @@ function loadOnePlugin(dir) {
       ...manifest,
       dir,
       format,
+      manifestRel,
       skillsDir,
       skillFiles,
       commands,
       subagents,
       unsupportedComponents,
       pendingComponents,
+      mcpServers,
+      hooks,
+      hookNotes,
     },
     warnings,
   };

@@ -11,7 +11,14 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSkills } from './loader.mjs';
 import { loadPlugins } from '../../plugins/loader.mjs';
-import { listEnabled as listEnabledPlugins, pruneOrphans as prunePluginOrphans } from '../../plugins/state.mjs';
+import {
+  listEnabled as listEnabledPlugins,
+  listHooksTrusted as listHooksTrustedPlugins,
+  pruneOrphans as prunePluginOrphans,
+} from '../../plugins/state.mjs';
+import { syncPluginMcpServers } from '../../mcp/state.mjs';
+import { buildPluginHooks } from '../sdk/hooks.mjs';
+import { nativePluginsEnabled } from '../../kb/user.mjs';
 import { INTERNAL_HANDLERS } from '../runtime/handlers/ask-internal.mjs';
 import { GLOBAL_HANDLER_NAMES } from '../runtime/global-handlers.mjs';
 
@@ -81,6 +88,15 @@ let pluginRegistry = loadPlugins();
 if (pluginRegistry.warnings.length > 0) {
   console.warn('[llm_agent] plugin warnings:', pluginRegistry.warnings);
 }
+// Boot-time reconcile so a plugin installed while the server was down (or by
+// an earlier build that predated MCP support) still gets its declared servers
+// registered — unconsented, as always.
+try {
+  const synced = syncPluginMcpServers(mcpDeclarationGroups());
+  if (synced.skipped?.length) console.warn('[plugins] mcp declarations skipped:', synced.skipped);
+} catch (err) {
+  console.warn('[plugins] mcp sync failed at boot:', err?.message || err);
+}
 
 /**
  * Re-scan the plugin directory at runtime. Called by the plugin
@@ -105,11 +121,119 @@ export function reloadPlugins() {
   } catch (err) {
     console.warn('[plugins] orphan prune failed:', err?.message || err);
   }
+  // Reconcile the MCP registry with what the installed plugins declare. This
+  // layer does the wiring because plugins/ and mcp/ are peers that may not
+  // import each other, and llm_agent may import both. Registration is not
+  // activation: every entry lands unconsented, and an uninstalled plugin's
+  // entries go away with it.
+  try {
+    const synced = syncPluginMcpServers(mcpDeclarationGroups());
+    if (synced.skipped?.length) console.warn('[plugins] mcp declarations skipped:', synced.skipped);
+  } catch (err) {
+    console.warn('[plugins] mcp sync failed:', err?.message || err);
+  }
   return {
     pluginDir: pluginRegistry.pluginDir,
     count: pluginRegistry.plugins.size,
     warnings: pluginRegistry.warnings,
   };
+}
+
+/**
+ * How this user's enabled plugins reach the v2 engine. Two mechanisms, and each
+ * plugin uses exactly one:
+ *
+ *   native     — handed to the Agent SDK as `{ type: 'local', path }`. The SDK
+ *                loads the package's skills/commands/agents and runs its hooks
+ *                with full fidelity (every handler type and event it supports),
+ *                which our own translation cannot match.
+ *   translated — llm-ide runs the plugin's `command` hooks itself, bounded by
+ *                its own timeout and output cap (sdk/hooks.mjs).
+ *
+ * Native is the default and is what `nativeEnabled: false` turns off, falling
+ * back to translation. Three rules hold either way:
+ *
+ *  1. **Hook trust still gates everything.** Handing a plugin to the SDK means
+ *     the SDK runs its hooks, so a plugin with hooks is only handed over once
+ *     the user has trusted them. An untrusted plugin's hooks run through
+ *     NEITHER mechanism.
+ *  2. **Never both.** A natively-loaded plugin is excluded from translation, or
+ *     every hook would fire twice.
+ *  3. **MCP stays ours.** `skipMcpDiscovery` is always set: a plugin's declared
+ *     servers keep their own consent gate (mcp/state.mjs) and must not be
+ *     connected by the SDK behind it.
+ *
+ * Only a `.claude-plugin` package can go native — the SDK does not read Codex's
+ * `.codex-plugin` manifest, and an own-format plugin has no vendor manifest at
+ * all, so both keep the translated path.
+ */
+export function buildUserPluginDelivery(userId, { nativeEnabled = true, cwd, env, onNote } = {}) {
+  const enabled = listEnabledPlugins(userId);
+  const trusted = listHooksTrustedPlugins(userId);
+  const sdkPlugins = [];
+  const native = [];
+  const translated = [];
+  const toTranslate = [];
+
+  for (const p of pluginRegistry.plugins.values()) {
+    if (!enabled.has(p.name)) continue;
+    const hooks = Array.isArray(p.hooks) ? p.hooks : [];
+    const hasHooks = hooks.length > 0;
+    const hookTrusted = trusted.has(p.name);
+    const sdkReadable = p.format === 'claude'
+      && typeof p.manifestRel === 'string'
+      && p.manifestRel.startsWith('.claude-plugin');
+
+    if (nativeEnabled && sdkReadable && (!hasHooks || hookTrusted)) {
+      sdkPlugins.push({ type: 'local', path: p.dir, skipMcpDiscovery: true });
+      native.push(p.name);
+      continue;
+    }
+    if (hasHooks && hookTrusted) {
+      toTranslate.push({ name: p.name, hooks });
+      translated.push(p.name);
+    }
+  }
+
+  return {
+    sdkPlugins,
+    native,
+    translated,
+    hooks: buildPluginHooks(toTranslate, { trusted, cwd, env, onNote }),
+  };
+}
+
+/**
+ * Just the translated-hook half of `buildUserPluginDelivery`, kept for callers
+ * that only need the SDK `hooks` option.
+ */
+export function buildUserPluginHooks(userId, opts = {}) {
+  return buildUserPluginDelivery(userId, opts).hooks;
+}
+
+/** What every installed plugin declares in its `.mcp.json`, grouped by plugin. */
+function mcpDeclarationGroups() {
+  const groups = [];
+  for (const p of pluginRegistry.plugins.values()) {
+    if (Array.isArray(p.mcpServers) && p.mcpServers.length > 0) {
+      groups.push({ pluginName: p.name, servers: p.mcpServers });
+    }
+  }
+  return groups;
+}
+
+/**
+ * Predicate for `effectiveMcpServers({ pluginEnabled })`: is this plugin
+ * enabled for this user? A plugin-declared MCP server must go dark when the
+ * plugin itself is switched off, so the MCP layer asks this before including
+ * one. An unknown name answers false — a server whose plugin is no longer
+ * installed is never effective.
+ */
+export function pluginEnabledFor(userId) {
+  const enabled = listEnabledPlugins(userId);
+  return (pluginName) => typeof pluginName === 'string'
+    && enabled.has(pluginName)
+    && pluginRegistry.plugins.has(pluginName);
 }
 
 // Cache for listAllSkills() — populated on first call, invalidated by
@@ -172,6 +296,13 @@ export function listAllSkills() {
  */
 export function listInstalledPlugins(userId) {
   const enabled = listEnabledPlugins(userId);
+  const hooksTrusted = listHooksTrustedPlugins(userId);
+  // Which plugins this user's next turn would hand to the SDK. Reported so the
+  // UI can describe hook behaviour truthfully: natively the SDK runs every
+  // handler type it supports, translated only `command` ones.
+  const nativeNames = new Set(buildUserPluginDelivery(userId, {
+    nativeEnabled: nativePluginsEnabled(userId),
+  }).native);
   const items = [];
   for (const p of pluginRegistry.plugins.values()) {
     items.push({
@@ -197,6 +328,15 @@ export function listInstalledPlugins(userId) {
       format: p.format || 'llmide',
       unsupportedComponents: p.unsupportedComponents || [],
       pendingComponents: p.pendingComponents || [],
+      // Hooks: how many runnable handlers the plugin declares, what llm-ide
+      // will NOT run from its hooks file, and whether this user has trusted
+      // them. The count gates the trust toggle — there is nothing to trust
+      // when it is zero.
+      hookCount: Array.isArray(p.hooks) ? p.hooks.length : 0,
+      hookNotes: p.hookNotes || [],
+      hooksTrusted: hooksTrusted.has(p.name),
+      nativeDelivery: nativeNames.has(p.name),
+      mcpServerCount: Array.isArray(p.mcpServers) ? p.mcpServers.length : 0,
     });
   }
   return {

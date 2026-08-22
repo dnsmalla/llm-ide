@@ -74,7 +74,12 @@ Plugins are validated at install time, but they are **not sandboxed at runtime**
 The install flow in `extension/plugins/installer.mjs` validates only the bundle shape and install destination:
 
 - the manifest must parse and pass the schema used by `extension/plugins/loader.mjs` — `plugin.json` at the bundle root (own format), or a vendor `.claude-plugin/plugin.json` / `.codex-plugin/plugin.json` (Claude Code / Codex package). A bundle carrying both is treated as own-format
-- a vendor manifest's `defaultEnabled` is never honoured: enablement stays per-user and opt-in, and vendor components LLM-IDE does not run (hooks, MCP servers, themes, LSP, output styles) are catalogued for display only, never executed
+- a vendor manifest's `defaultEnabled` is never honoured: enablement stays per-user and opt-in, and vendor components LLM-IDE cannot run (themes, LSP, output styles, monitors, workflows, `bin/`) are catalogued for display only, never executed
+
+A vendor plugin's **MCP servers** and **hooks** are the two components that can gain capability, and each has its own gate:
+
+- servers declared in a plugin's `.mcp.json` are registered unconsented (`source: 'plugin'`); they reach a turn only once the user consents to and enables that server **and** the declaring plugin is enabled for them. Uninstalling the plugin removes its servers and prunes their per-user state.
+- hooks declared in `hooks/hooks.json` run only for a plugin the user has explicitly **hook-trusted** (`plugin.hooks.trust`, audited; default off, revocable, pruned on uninstall). Hook execution is v2-engine-only, by one of two routes: the engine hands a trusted `.claude-plugin` package to the Agent SDK (default) and the SDK runs its hooks as written, or LLM-IDE translates the plugin's `command` hooks itself — bounded by a per-handler timeout and a 4 KB output cap, with a command resolving outside its own plugin directory refused at parse time. Trust gates both routes, and a plugin is never delivered by both. Native delivery always sets `skipMcpDiscovery`, so the SDK cannot connect a plugin's MCP servers around their own consent gate.
 - plugin names must match the loader's slug regex and cannot use reserved names
 - zip entries are scanned before extraction and rejected on path traversal, absolute paths, Windows drive escapes, or invalid bundle shape
 - install happens in a temp staging directory and moves into the real plugin directory only after validation succeeds

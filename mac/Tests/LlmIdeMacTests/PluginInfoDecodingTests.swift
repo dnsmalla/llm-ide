@@ -29,3 +29,56 @@ final class PluginInfoDecodingTests: XCTestCase {
         XCTAssertEqual(info.pendingComponents, [])
     }
 }
+
+/// Hook fields on the plugins payload. A plugin's hooks run shell commands, so
+/// the client must read the count (is there anything to trust?) and the trust
+/// flag (has this user granted it?) — and default both to "nothing, untrusted"
+/// when talking to a server that predates them.
+extension PluginInfoDecodingTests {
+    func testHookFieldsDecode() throws {
+        let json = """
+        {"name":"hooked","version":"1.0.0","displayName":"Hooked","description":"d",
+         "author":"a","enabled":true,"skillCount":0,"commands":[],"subagents":[],
+         "format":"claude","pendingComponents":["hooks"],
+         "hookCount":3,"hookNotes":["PreToolUse: 'http' handlers are shown but not run"],
+         "hooksTrusted":true,"mcpServerCount":2}
+        """.data(using: .utf8)!
+        let info = try JSONDecoder().decode(PluginInfo.self, from: json)
+        XCTAssertEqual(info.hookCount, 3)
+        XCTAssertEqual(info.hooksTrusted, true)
+        XCTAssertEqual(info.hookNotes.count, 1)
+        XCTAssertEqual(info.mcpServerCount, 2)
+    }
+
+    func testHookFieldsDefaultToUntrusted() throws {
+        let json = """
+        {"name":"plain","version":"1.0.0","displayName":"Plain","description":"d",
+         "author":"a","enabled":true,"skillCount":1,"commands":[],"subagents":[]}
+        """.data(using: .utf8)!
+        let info = try JSONDecoder().decode(PluginInfo.self, from: json)
+        XCTAssertEqual(info.hookCount, 0)
+        XCTAssertEqual(info.hooksTrusted, false)
+        XCTAssertEqual(info.hookNotes, [])
+        XCTAssertEqual(info.mcpServerCount, 0)
+    }
+}
+
+/// The synced pref that decides how plugins are delivered. `nil` must survive
+/// as `nil` — the server reads absence as "on", so a client that coerced it to
+/// `false` would silently disable native loading on the next save.
+final class NativePluginsPrefTests: XCTestCase {
+    func testAbsentStaysNil() throws {
+        let json = "{\"language\":\"en\"}".data(using: .utf8)!
+        let prefs = try JSONDecoder().decode(LlmIdeAPIClient.UserPrefs.self, from: json)
+        XCTAssertNil(prefs.nativePlugins)
+    }
+
+    func testRoundTripsBothValues() throws {
+        for value in [true, false] {
+            let encoded = try JSONEncoder().encode(
+                LlmIdeAPIClient.UserPrefs(language: "en", bilingual: false, nativePlugins: value))
+            let decoded = try JSONDecoder().decode(LlmIdeAPIClient.UserPrefs.self, from: encoded)
+            XCTAssertEqual(decoded.nativePlugins, value)
+        }
+    }
+}

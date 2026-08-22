@@ -123,6 +123,44 @@ enum PluginGitInstaller {
         return StagedPackage(zipURL: zipURL, cleanup: cleanup)
     }
 
+    /// A clone that is KEPT for further work (reading a marketplace manifest,
+    /// then zipping one plugin out of it). `cloneAndZip` above throws its clone
+    /// away as soon as the zip exists; this hands the tree back instead.
+    struct StagedRepo {
+        let repoRoot: URL
+        let cleanup: () -> Void
+    }
+
+    static func cloneKeepingRepo(url rawURL: String, ref: String? = nil) async throws -> StagedRepo {
+        let normalizedURL = try normalize(rawURL)
+        let stage = try makeTempDir(prefix: "llmide-marketplace-")
+        let clonedDir = stage.appendingPathComponent("repo", isDirectory: true)
+
+        var args = ["clone", "--depth", "1", "--single-branch"]
+        if let ref, !ref.isEmpty { args += ["--branch", ref] }
+        args += ["--", normalizedURL, clonedDir.path]
+
+        let cloneRes = try await runProcess("/usr/bin/git", args: args)
+        guard cloneRes.code == 0 else {
+            try? FileManager.default.removeItem(at: stage)
+            let stderr = cloneRes.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            log.error("git clone failed: \(stderr, privacy: .public)")
+            throw InstallError.cloneFailed(stderr.isEmpty ? "git exited \(cloneRes.code)" : stderr)
+        }
+        try? FileManager.default.removeItem(at: clonedDir.appendingPathComponent(".git"))
+        return StagedRepo(repoRoot: clonedDir, cleanup: { try? FileManager.default.removeItem(at: stage) })
+    }
+
+    /// Zip a directory's CONTENTS to `zipURL` — the shape the install endpoint
+    /// expects (manifest at the zip root).
+    static func zipDirectory(_ directory: URL, to zipURL: URL) async throws {
+        let res = try await runProcess("/usr/bin/zip", args: ["-rq", zipURL.path, "."], cwd: directory)
+        guard res.code == 0 else {
+            let stderr = res.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw InstallError.zipFailed(stderr.isEmpty ? "zip exited \(res.code)" : stderr)
+        }
+    }
+
     // MARK: - Internals
 
     private static func makeTempDir(prefix: String) throws -> URL {

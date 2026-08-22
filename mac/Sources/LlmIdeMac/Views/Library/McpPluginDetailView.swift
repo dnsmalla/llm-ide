@@ -9,11 +9,12 @@ import SwiftUI
 /// (extension/mcp/mcp-config.mjs), and only once this user has both
 /// consented AND enabled it.
 ///
-/// Mutations here don't push a refresh back to the sidebar's own
-/// `[McpPluginInfo]` state — matching `LlmSourceDetailView`'s same gap; the
-/// sidebar catches up on the next full Library reload.
+/// Mutations here bump `ShellState.libraryDirtyToken`, which the Library
+/// sidebar watches — consenting to a server no longer leaves its row showing
+/// the old state until a full Library reload.
 struct McpPluginDetailView: View {
     @EnvironmentObject private var theme: ThemeStore
+    @Environment(ShellState.self) private var shell
     let api: LlmIdeAPIClient
     let pluginId: String
 
@@ -21,6 +22,9 @@ struct McpPluginDetailView: View {
     @State private var loaded = false
     @State private var loadError: String?
     @State private var busy = false
+    /// Typed into the inline credential field; never persisted client-side —
+    /// it goes straight to the server vault and the field is cleared.
+    @State private var credentialDraft = ""
 
     var body: some View {
         ScrollView {
@@ -82,10 +86,19 @@ struct McpPluginDetailView: View {
                 if p.credentialMissing {
                     // Registered but unauthenticated: the server is still
                     // passed to the CLI, so it will fail at connect time until
-                    // the value is stored. Say so rather than let it look fine.
-                    Text("No value stored for \(cred.vaultKey) — this server will fail to authenticate. Add it in Settings → Model Providers.")
+                    // the value is stored. Say so, and take the value here —
+                    // this key lives in no other screen, so pointing the user
+                    // elsewhere was pointing at nothing.
+                    Text("No value stored for \(cred.vaultKey) — this server will fail to authenticate.")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                    HStack(spacing: 8) {
+                        SecureField(cred.label ?? cred.vaultKey, text: $credentialDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 280)
+                        Button("Save Credential") { Task { await saveCredential(key: cred.vaultKey) } }
+                            .disabled(busy || credentialDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
                 }
             }
             Toggle("Consented", isOn: Binding(
@@ -137,6 +150,7 @@ struct McpPluginDetailView: View {
         defer { busy = false }
         do {
             _ = try await api.consentMcpPlugin(id: pluginId, consented: consented)
+            shell.markLibraryDirty()
             await load()
         } catch {
             loadError = error.localizedDescription
@@ -148,6 +162,7 @@ struct McpPluginDetailView: View {
         defer { busy = false }
         do {
             _ = try await api.toggleMcpPlugin(id: pluginId, enabled: enabled)
+            shell.markLibraryDirty()
             await load()
         } catch {
             loadError = error.localizedDescription
@@ -159,6 +174,24 @@ struct McpPluginDetailView: View {
         defer { busy = false }
         do {
             try await api.removeMcpPlugin(id: pluginId)
+            shell.markLibraryDirty()
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    /// Write the server's declared credential straight into the vault under the
+    /// key the registry names. The value never touches client storage.
+    private func saveCredential(key: String) async {
+        let value = credentialDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            try await api.setSecret(key: key, value: value)
+            credentialDraft = ""
+            shell.markLibraryDirty()
+            await load()
         } catch {
             loadError = error.localizedDescription
         }

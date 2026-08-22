@@ -527,3 +527,191 @@ test('own format: no unsupported/pending fields leak into old plugins', () => {
   assert.deepEqual(p.pendingComponents, []);
   rmSync(root, { recursive: true, force: true });
 });
+
+// --- Plugin-declared MCP servers (.mcp.json) ---
+
+test('vendor: .mcp.json servers are parsed into declarations', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, '.mcp.json'), JSON.stringify({
+    mcpServers: {
+      local: { command: 'npx', args: ['-y', 'srv'], env: { TOKEN: '${TOKEN}' } },
+      hosted: { type: 'http', url: 'https://mcp.example.com/v1', headers: { 'X-A': 'b' } },
+    },
+  }), 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(warnings.length, 0, `unexpected warnings: ${warnings.join(', ')}`);
+  const p = plugins.get('example');
+  assert.deepEqual(p.mcpServers.map((s) => s.name).sort(), ['hosted', 'local']);
+  const local = p.mcpServers.find((s) => s.name === 'local');
+  assert.equal(local.transport, 'stdio');
+  assert.equal(local.command, 'npx');
+  assert.deepEqual(local.args, ['-y', 'srv']);
+  assert.deepEqual(local.env, { TOKEN: '${TOKEN}' });
+  const hosted = p.mcpServers.find((s) => s.name === 'hosted');
+  assert.equal(hosted.transport, 'http');
+  assert.equal(hosted.url, 'https://mcp.example.com/v1');
+  assert.deepEqual(hosted.headers, { 'X-A': 'b' });
+  // Still catalogued as pending — nothing is active until the user consents.
+  assert.deepEqual(p.pendingComponents, ['mcp']);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: a malformed .mcp.json warns and yields no declarations', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, '.mcp.json'), '{ not json', 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.deepEqual(plugins.get('example')?.mcpServers, []);
+  assert.ok(warnings.some((w) => w.includes('.mcp.json')), warnings.join(', '));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: a server with neither command nor url is rejected', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, '.mcp.json'), JSON.stringify({
+    mcpServers: { broken: { note: 'nothing runnable' }, ok: { command: 'srv' } },
+  }), 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.deepEqual(plugins.get('example').mcpServers.map((s) => s.name), ['ok']);
+  assert.ok(warnings.some((w) => w.includes('broken')), warnings.join(', '));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: a non-http(s) url is refused rather than passed downstream', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, '.mcp.json'), JSON.stringify({
+    mcpServers: { sneaky: { type: 'http', url: 'file:///etc/passwd' } },
+  }), 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.deepEqual(plugins.get('example').mcpServers, []);
+  assert.ok(warnings.some((w) => w.includes('sneaky')), warnings.join(', '));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('own format: no mcp declarations are read even if a .mcp.json exists', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, { '.mcp.json': JSON.stringify({ mcpServers: { x: { command: 'y' } } }) });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  assert.deepEqual(plugins.get('example').mcpServers, []);
+  rmSync(root, { recursive: true, force: true });
+});
+
+// --- Plugin hooks (hooks/hooks.json) ---
+
+const HOOKS_JSON = JSON.stringify({
+  hooks: {
+    PreToolUse: [{
+      matcher: 'Bash',
+      hooks: [
+        { type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/scripts/guard.sh', timeout: 12 },
+        { type: 'http', url: 'https://example.com/hook' },
+      ],
+    }],
+    SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }] }],
+    NotAnEvent: [{ hooks: [{ type: 'command', command: 'echo nope' }] }],
+  },
+});
+
+test('hooks: command handlers are parsed, plugin root expanded, others catalogued', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'hooks'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'hooks', 'hooks.json'), HOOKS_JSON, 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(warnings.length, 0, `catalogue must not warn: ${warnings.join(', ')}`);
+  const p = plugins.get('example');
+  assert.deepEqual(p.pendingComponents, ['hooks']);
+
+  assert.equal(p.hooks.length, 2, 'two runnable command handlers');
+  const pre = p.hooks.find((h) => h.event === 'PreToolUse');
+  assert.equal(pre.matcher, 'Bash');
+  assert.equal(pre.command, join(dir, 'scripts', 'guard.sh'),
+    '${CLAUDE_PLUGIN_ROOT} resolves to the plugin directory');
+  assert.equal(pre.timeoutMs, 12_000);
+  const start = p.hooks.find((h) => h.event === 'SessionStart');
+  assert.equal(start.matcher, null);
+  assert.equal(start.command, 'echo hi');
+
+  // Non-command handlers and unknown events are shown, never run.
+  assert.ok(p.hookNotes.some((n) => n.includes('http')), p.hookNotes.join(', '));
+  assert.ok(p.hookNotes.some((n) => n.includes('NotAnEvent')), p.hookNotes.join(', '));
+});
+
+test('hooks: a command escaping the plugin directory is refused', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'hooks'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'hooks', 'hooks.json'), JSON.stringify({
+    hooks: { SessionStart: [{ hooks: [{ type: 'command', command: '${CLAUDE_PLUGIN_ROOT}/../../evil.sh' }] }] },
+  }), 'utf8');
+  const { plugins } = loadPlugins({ pluginDir: root });
+  assert.deepEqual(plugins.get('example').hooks, []);
+  assert.ok(plugins.get('example').hookNotes.some((n) => n.includes('outside the plugin')),
+    plugins.get('example').hookNotes.join(', '));
+});
+
+test('hooks: an unparseable hooks.json is catalogued, not fatal', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'hooks'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'hooks', 'hooks.json'), '{ nope', 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.deepEqual(plugins.get('example').hooks, []);
+  assert.equal(warnings.length, 0, 'a bad hooks file must not block install');
+  assert.ok(plugins.get('example').hookNotes.some((n) => n.includes('parse')),
+    plugins.get('example').hookNotes.join(', '));
+});
+
+test('own format: hooks are never read', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, { 'hooks/hooks.json': HOOKS_JSON });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  assert.deepEqual(plugins.get('example').hooks, []);
+  assert.deepEqual(plugins.get('example').hookNotes, []);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: the manifest location travels with the plugin', () => {
+  const root = newRoot();
+  const claudeDir = join(root, 'claudeish');
+  mkdirSync(join(claudeDir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(claudeDir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'claudeish', version: '1.0.0' }), 'utf8');
+  const codexDir = join(root, 'codexish');
+  mkdirSync(join(codexDir, '.codex-plugin'), { recursive: true });
+  writeFileSync(join(codexDir, '.codex-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'codexish', version: '1.0.0' }), 'utf8');
+  plugin(root, 'ownish', { ...validManifest, name: 'ownish' });
+
+  const { plugins } = loadPlugins({ pluginDir: root });
+  // Only the Claude layout is something the Agent SDK can load natively — the
+  // consumer needs to tell the two vendors apart, which `format` alone cannot.
+  assert.equal(plugins.get('claudeish').manifestRel, join('.claude-plugin', 'plugin.json'));
+  assert.equal(plugins.get('codexish').manifestRel, join('.codex-plugin', 'plugin.json'));
+  assert.equal(plugins.get('ownish').manifestRel, 'plugin.json');
+  rmSync(root, { recursive: true, force: true });
+});

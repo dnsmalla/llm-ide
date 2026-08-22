@@ -5,10 +5,15 @@ extension LlmIdeAPIClient {
     // Per-user UI preferences, synced server-side via /auth/me/prefs.
     // Both the Chrome extension and Mac app read this on login and PUT
     // on change so a language switch in one client follows the user to
-    // the other.  Allow-listed keys today: language, bilingual.
+    // the other.  Allow-listed keys today: language, bilingual, nativePlugins.
     struct UserPrefs: Codable, Equatable {
         var language: String?
         var bilingual: Bool?
+        /// Hand Claude-format plugins to the Agent SDK to load themselves
+        /// (skills, commands, agents, and their hooks at full fidelity) instead
+        /// of llm-ide translating their `command` hooks. `nil` means unset,
+        /// which the server treats as ON — see `nativePluginsEnabled`.
+        var nativePlugins: Bool?
     }
     struct UserPrefsWrap: Codable { let prefs: UserPrefs }
 
@@ -76,6 +81,17 @@ extension LlmIdeAPIClient {
 
     func listPlugins() async throws -> PluginsListResponse {
         try await get("/auth/me/plugins", authenticated: true)
+    }
+
+    /// Authorize (or revoke) shell execution for one plugin's hooks. Separate
+    /// from `togglePlugin` on purpose — the server audits it as its own grant.
+    func setPluginHookTrust(name: String, trusted: Bool) async throws -> Bool {
+        struct Req: Encodable { let name: String; let trusted: Bool }
+        struct Ack: Decodable { let ok: Bool; let hooksTrusted: Bool }
+        let ack: Ack = try await post("/auth/me/plugins/hook-trust",
+                                      body: Req(name: name, trusted: trusted),
+                                      authenticated: true)
+        return ack.hooksTrusted
     }
 
     func togglePlugin(name: String, enabled: Bool) async throws {
@@ -146,6 +162,62 @@ extension LlmIdeAPIClient {
                               authenticated: true)
     }
 
+    // MARK: - Vendor plugin updates
+    //
+    // Both bridges expose the same two shapes, so the client does too: refresh
+    // re-scans the vendor's own directories, updates compares what was
+    // imported against what the source now offers.
+
+    func refreshClaudeSources() async throws -> PluginRefreshResponse {
+        try await post("/auth/me/claude-plugins/refresh", body: EmptyBody(), authenticated: true)
+    }
+
+    func claudePluginUpdates() async throws -> [PluginUpdate] {
+        let response: PluginUpdatesResponse = try await get("/auth/me/claude-plugins/updates", authenticated: true)
+        return response.updates
+    }
+
+    func refreshCodexSources() async throws -> PluginRefreshResponse {
+        try await post("/auth/me/codex-plugins/refresh", body: EmptyBody(), authenticated: true)
+    }
+
+    func codexPluginUpdates() async throws -> [PluginUpdate] {
+        let response: PluginUpdatesResponse = try await get("/auth/me/codex-plugins/updates", authenticated: true)
+        return response.updates
+    }
+
+}
+
+/// One available update for an imported vendor plugin, as
+/// /auth/me/{claude,codex}-plugins/updates reports it. These endpoints existed
+/// server-side with no client at all — this is what the Plugins header badge
+/// counts and what one-click re-import acts on.
+struct PluginUpdate: Decodable, Identifiable, Equatable {
+    let name: String
+    let importedVersion: String
+    let sourceVersion: String
+    let source: String
+    var id: String { name }
+
+    /// The name to pass back to import: the stored plugin carries the vendor
+    /// namespace prefix (`claude-`/`codex-`), the SOURCE plugin does not.
+    var sourcePluginName: String {
+        for prefix in ["claude-", "codex-"] where name.hasPrefix(prefix) {
+            return String(name.dropFirst(prefix.count))
+        }
+        return name
+    }
+}
+
+struct PluginUpdatesResponse: Decodable {
+    let updates: [PluginUpdate]
+}
+
+/// What a vendor rescan found — reported back so the user learns the refresh
+/// did something, rather than watching an unchanged list.
+struct PluginRefreshResponse: Decodable {
+    let installed: Int
+    let marketplace: Int
 }
 
 struct PluginInstallResponse: Decodable {
@@ -207,13 +279,36 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     let unsupportedComponents: [String]
     /// Vendor components present but inactive until a later phase (hooks, MCP).
     let pendingComponents: [String]
+    /// Runnable hook handlers the plugin declares. Zero means there is nothing
+    /// to trust, and the trust toggle stays hidden.
+    let hookCount: Int
+    /// What llm-ide will NOT run from this plugin's hooks file (non-command
+    /// handler types, unsupported events, refused commands).
+    let hookNotes: [String]
+    /// Whether THIS user has authorized this plugin's hooks to run shell
+    /// commands. Never implied by enabling the plugin.
+    let hooksTrusted: Bool
+    /// MCP servers the plugin declares; each needs its own consent in the MCP
+    /// Plugins section before it connects.
+    let mcpServerCount: Int
+    /// True when this plugin would be handed to the agent engine to load itself
+    /// — so its hooks run at full fidelity, and the "not run here" notes below
+    /// do not apply. Follows both hook trust and the `nativePlugins` pref.
+    let nativeDelivery: Bool
     var id: String { name }
-    static func == (lhs: PluginInfo, rhs: PluginInfo) -> Bool { lhs.name == rhs.name && lhs.enabled == rhs.enabled }
+    // Identity plus the fields a row/detail actually renders differently:
+    // toggling the native-plugins pref changes `nativeDelivery` alone, and
+    // without it here the view would keep describing the old delivery route.
+    static func == (lhs: PluginInfo, rhs: PluginInfo) -> Bool {
+        lhs.name == rhs.name && lhs.enabled == rhs.enabled
+            && lhs.hooksTrusted == rhs.hooksTrusted && lhs.nativeDelivery == rhs.nativeDelivery
+    }
 
     enum CodingKeys: String, CodingKey {
         case name, version, displayName, description, author
         case enabled, skillCount, commands, subagents
         case format, unsupportedComponents, pendingComponents
+        case hookCount, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -229,6 +324,11 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         self.format      = try c.decodeIfPresent(String.self, forKey: .format) ?? "llmide"
         self.unsupportedComponents = try c.decodeIfPresent([String].self, forKey: .unsupportedComponents) ?? []
         self.pendingComponents     = try c.decodeIfPresent([String].self, forKey: .pendingComponents) ?? []
+        self.hookCount      = try c.decodeIfPresent(Int.self, forKey: .hookCount) ?? 0
+        self.hookNotes      = try c.decodeIfPresent([String].self, forKey: .hookNotes) ?? []
+        self.hooksTrusted   = try c.decodeIfPresent(Bool.self, forKey: .hooksTrusted) ?? false
+        self.mcpServerCount = try c.decodeIfPresent(Int.self, forKey: .mcpServerCount) ?? 0
+        self.nativeDelivery = try c.decodeIfPresent(Bool.self, forKey: .nativeDelivery) ?? false
     }
 }
 

@@ -11,7 +11,7 @@ import path from 'node:path';
 import { runAgentLoop, runNativeAgentLoop } from './loop.mjs';
 import { composeGlobalPrompt } from '../global/compose-prompt.mjs';
 import { expandSlashCommand } from '../../plugins/loader.mjs';
-import { globalSkills, internalSkills, buildPerUserSkillSet } from '../skills/index.mjs';
+import { globalSkills, internalSkills, buildPerUserSkillSet, pluginEnabledFor } from '../skills/index.mjs';
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { expandTilde } from '../../graphkit/memory.mjs';
@@ -160,6 +160,10 @@ export async function handleCodeAssist({
     mode: resolvedMode,
     restrictsToolsFn: restrictsTools,
     readSecret: makeSecretReader(getDb(), userId),
+    // A plugin-declared server answers to the plugin's own toggle as well as
+    // its MCP consent — see effectiveMcpServers. mcp/ cannot ask plugins/
+    // itself (peer layers), so the predicate is supplied here.
+    pluginEnabled: pluginEnabledFor(userId),
   });
 
   // Slash-command expansion. If the user's message starts with /foo,

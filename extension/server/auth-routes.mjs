@@ -184,6 +184,7 @@ export function isAuthRoute(url) {
       || path === '/auth/me/prefs'
       || path === '/auth/me/plugins'
       || path === '/auth/me/plugins/toggle'
+      || path === '/auth/me/plugins/hook-trust'
       || path === '/auth/me/plugins/reload'
       || path === '/auth/me/plugins/install'
       || path.startsWith('/auth/me/plugins/uninstall/')
@@ -958,6 +959,32 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     return;
   }
 
+  // POST /auth/me/plugins/hook-trust → { name, trusted }
+  // Trusting a plugin's hooks authorizes shell commands from that plugin to
+  // run during a turn, so it is a separate, audited grant — never implied by
+  // enabling the plugin.
+  if (method === 'POST' && url === '/auth/me/plugins/hook-trust') {
+    let body;
+    try { body = await readJson(req, bodyLimit); }
+    catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
+    const { setPluginHookTrust } = await import('../plugins/hook-trust.mjs');
+    const { listInstalledPlugins } = await import('../llm_agent/runtime/route.mjs');
+    const result = setPluginHookTrust(req.user.id, body?.name, body?.trusted, {
+      listPlugins: (userId) => listInstalledPlugins(userId).plugins,
+    });
+    if (result.error) {
+      send(res, result.status || 400, { error: { code: 'VALIDATION_FAILED', message: result.error } });
+      return;
+    }
+    safeAudit(db, {
+      userId: req.user.id, requestId, ip, userAgent: ua,
+      action: result.hooksTrusted ? 'plugin.hooks.trust' : 'plugin.hooks.revoke',
+      resource: body.name, outcome: 'success',
+    });
+    send(res, 200, result);
+    return;
+  }
+
   if (method === 'POST' && url === '/auth/me/plugins/reload') {
     try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const { reloadPlugins } = await import('../llm_agent/skills/index.mjs');
@@ -1016,9 +1043,11 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   //
   // Removes the plugin folder + prunes orphaned enable-state entries
   // for users who had it enabled. Plugin removal is a server-wide
-  // operation (plugins are global, enable state is per-user) — any
-  // authenticated user can remove. If you want admin-only later,
-  // wrap with requireAdmin here.
+  // operation (plugins are global, enable state is per-user), so it goes
+  // through requireAdmin below — which on this local-first install means
+  // "authenticated" (see requireAdmin's doc comment in server/auth.mjs).
+  // The gate stays here so a future multi-operator deployment tightens it
+  // in one place.
   if (method === 'DELETE' && url.startsWith('/auth/me/plugins/uninstall/')) {
     try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const pluginName = decodeURIComponent(url.slice('/auth/me/plugins/uninstall/'.length).split('?')[0]);

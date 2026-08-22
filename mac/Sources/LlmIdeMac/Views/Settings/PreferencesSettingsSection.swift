@@ -7,6 +7,7 @@ struct PreferencesSettingsSection: View {
 
     @State private var language: String = ""
     @State private var prefsBilingual: Bool = false
+    @State private var prefsNativePlugins: Bool = true
     @State private var prefsLoaded: Bool = false
     @State private var prefsBusy: Bool = false
     @State private var prefsStatus: String?
@@ -44,6 +45,19 @@ struct PreferencesSettingsSection: View {
                 }
                 .toggleStyle(.switch)
                 .disabled(!prefsLoaded || prefsBusy)
+                Toggle(isOn: $prefsNativePlugins) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Let plugins load natively")
+                            .font(Typography.body)
+                            .foregroundStyle(theme.current.text)
+                        Text("Claude-format plugins are loaded by the agent engine itself, so their skills, commands, agents and hooks work exactly as their author intended. Turn this off to fall back to LLM-IDE's own hook handling. Either way, a plugin's hooks only run once you trust them, and its MCP servers still need your consent.")
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch)
+                .disabled(!prefsLoaded || prefsBusy)
                 HStack {
                     Button(prefsBusy ? "Saving…" : "Save") {
                         Task { await savePrefs() }
@@ -68,6 +82,9 @@ struct PreferencesSettingsSection: View {
             let p = try await api.getUserPrefs()
             language = p.language ?? "en"
             prefsBilingual = p.bilingual ?? false
+            // Unset means on — mirror the server's default rather than
+            // defaulting the switch off and silently turning it off on save.
+            prefsNativePlugins = p.nativePlugins ?? true
             // Mirror locally for the synchronous consumers (ProjectScaffolder
             // stamps this into new projects' docs and can't await the server).
             config.preferredLanguage = language
@@ -82,7 +99,9 @@ struct PreferencesSettingsSection: View {
         prefsStatus = nil
         defer { prefsBusy = false }
         do {
-            _ = try await api.setUserPrefs(.init(language: language, bilingual: prefsBilingual))
+            _ = try await api.setUserPrefs(.init(language: language,
+                                                 bilingual: prefsBilingual,
+                                                 nativePlugins: prefsNativePlugins))
             config.preferredLanguage = language
             prefsStatus = "✓ Saved."
         } catch {

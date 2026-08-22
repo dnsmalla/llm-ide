@@ -14,6 +14,7 @@ struct PluginDetailView: View {
     @State private var loaded = false
     @State private var loadError: String?
     @State private var togglePending = false
+    @State private var trustPending = false
 
     var body: some View {
         ScrollView {
@@ -28,6 +29,7 @@ struct PluginDetailView: View {
                     descriptionBlock(plugin)
                     commandsBlock(plugin)
                     subagentsBlock(plugin)
+                    hooksBlock(plugin)
                     componentsBlock(plugin)
                 } else {
                     Text("Plugin not found — it may have been uninstalled.")
@@ -156,12 +158,8 @@ struct PluginDetailView: View {
         if !plugin.pendingComponents.isEmpty || !plugin.unsupportedComponents.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Components").font(.headline)
-                if plugin.pendingComponents.contains("hooks") {
-                    Label("Hooks — detected, not run yet (requires plugin hook trust)", systemImage: "clock")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
                 if plugin.pendingComponents.contains("mcp") {
-                    Label("MCP servers — detected, not active yet", systemImage: "clock")
+                    Label(mcpSummary(plugin), systemImage: "bolt.horizontal.circle")
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 ForEach(plugin.unsupportedComponents, id: \.self) { component in
@@ -172,7 +170,77 @@ struct PluginDetailView: View {
         }
     }
 
+    /// Hook trust. A plugin's hooks are shell commands its author wrote, so
+    /// this is a deliberate, revocable grant that enabling the plugin does not
+    /// give — the warning says exactly what turning it on means.
+    @ViewBuilder
+    private func hooksBlock(_ plugin: PluginInfo) -> some View {
+        if plugin.hookCount > 0 || !plugin.hookNotes.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Hooks").font(.headline)
+                if plugin.hookCount > 0 {
+                    Toggle(isOn: Binding(
+                        get: { plugin.hooksTrusted },
+                        set: { newValue in Task { await setHookTrust(newValue) } }
+                    )) {
+                        Text("Trust hooks (\(plugin.hookCount) handler\(plugin.hookCount == 1 ? "" : "s"))")
+                    }
+                    .toggleStyle(.switch)
+                    .disabled(trustPending || !plugin.enabled)
+                    Text(trustExplanation(plugin))
+                        .font(.caption)
+                        .foregroundStyle(plugin.hooksTrusted ? .orange : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !plugin.enabled {
+                        Text("Enable the plugin first — hooks only run for an enabled plugin.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if !plugin.nativeDelivery {
+                    // These notes describe what LLM-IDE's own hook handling
+                    // skips. When the engine loads the plugin natively it runs
+                    // those handlers itself, so showing them would be wrong.
+                    ForEach(plugin.hookNotes, id: \.self) { note in
+                        Label(note, systemImage: "minus.circle")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    /// What trusting (or having trusted) this plugin's hooks actually means —
+    /// which differs by delivery route, so the copy follows it rather than
+    /// describing one mechanism for both.
+    private func trustExplanation(_ plugin: PluginInfo) -> String {
+        guard plugin.hooksTrusted else {
+            return "Turning this on lets this plugin run commands from its hooks file during a turn. Leave it off unless you trust the author."
+        }
+        return plugin.nativeDelivery
+            ? "The agent engine loads this plugin and runs its hooks as its author wrote them, with the same access as the app."
+            : "LLM-IDE runs this plugin's command hooks during a turn, with the same access as the app."
+    }
+
+    /// MCP servers a plugin declares are registered but inert until consented
+    /// in the MCP Plugins section — say where to go rather than just "pending".
+    private func mcpSummary(_ plugin: PluginInfo) -> String {
+        let n = plugin.mcpServerCount
+        guard n > 0 else { return "MCP servers — declared, none registered" }
+        return "\(n) MCP server\(n == 1 ? "" : "s") declared — consent to each under MCP Plugins to activate"
+    }
+
     // MARK: - Data + actions
+
+    private func setHookTrust(_ trusted: Bool) async {
+        trustPending = true
+        defer { trustPending = false }
+        do {
+            _ = try await api.setPluginHookTrust(name: pluginName, trusted: trusted)
+            await load()
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
 
     private func load() async {
         loaded = false

@@ -75,7 +75,7 @@ export function userRepoAllowlist(userId) {
 // Adding a new pref is one entry in ALLOWED_UI_PREF_KEYS + a coercion
 // case below; both clients then read/write through the same shape.
 
-const ALLOWED_UI_PREF_KEYS = new Set(['language', 'bilingual']);
+const ALLOWED_UI_PREF_KEYS = new Set(['language', 'bilingual', 'nativePlugins']);
 const PREF_STR_MAX = 32;
 
 // Returns one of:
@@ -89,6 +89,15 @@ function coerceUiPref(key, raw) {
     return v ? { ok: true, value: v } : { clear: true };
   }
   if (key === 'bilingual') {
+    if (typeof raw === 'boolean') return { ok: true, value: raw };
+    if (raw === null) return { clear: true };
+    return null;
+  }
+  // Whether a Claude-format plugin is handed to the Agent SDK to load itself
+  // (the default) or delivered through llm-ide's own hook translation. Absent
+  // means default-on: `nativePluginsEnabled` below is the single reader, so
+  // "unset" and "true" cannot drift apart.
+  if (key === 'nativePlugins') {
     if (typeof raw === 'boolean') return { ok: true, value: raw };
     if (raw === null) return { clear: true };
     return null;
@@ -113,6 +122,20 @@ export function getUserPrefs(userId) {
     } catch { /* bad blob — return empty defaults */ }
   }
   return out;
+}
+
+/**
+ * Native plugin delivery: on unless the user turned it off. Absence of the pref
+ * is the default-on case, which is why every caller reads it through here
+ * rather than testing `prefs.nativePlugins` directly.
+ */
+export function nativePluginsEnabled(userId) {
+  try {
+    return getUserPrefs(userId).nativePlugins !== false;
+  } catch {
+    // No user row yet (first boot, a test fixture) — keep the default.
+    return true;
+  }
 }
 
 export function setUserPrefs(userId, patch) {

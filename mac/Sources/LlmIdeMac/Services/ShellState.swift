@@ -99,6 +99,16 @@ final class ShellState {
         set { librarySelection = newValue.map { .meeting($0) } }
     }
 
+    /// Bumped whenever a Library DETAIL pane mutates something the sidebar
+    /// lists (MCP consent/enable/remove, and anything else that changes a row's
+    /// state). The sidebar and the detail column are siblings under AppShell —
+    /// neither can call the other — so the list watches this token and reloads.
+    /// Monotonic on purpose: a toggled-then-toggled-back value must still read
+    /// as "changed", or the second mutation would show stale.
+    private(set) var libraryDirtyToken = 0
+
+    func markLibraryDirty() { libraryDirtyToken += 1 }
+
     /// Set by the Library list's "Re-summarize" context action. The meeting
     /// detail consumes it once its view model has loaded for this id (and
     /// clears it), so the action works even when that meeting's detail pane
