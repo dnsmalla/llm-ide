@@ -47,10 +47,50 @@ export const MCP_CONNECTOR_DEFS = Object.freeze([
     clientName: CLIENT_NAME,
     byoClientIdKey: 'mcp.miro.byoClientId',
     byoClientSecretKey: 'mcp.miro.byoClientSecret',
-    // Phase 2b: the fetch pipeline.
-    listTool: null,
-    readTool: null,
-    mapItem: null,
+    // ── Phase 2b: the fetch pipeline ───────────────────────────────────────
+    //
+    // ⚠ UNVERIFIED. Miro's real MCP tool names and argument names cannot be
+    // checked offline — there is no vendored schema and no test may contact
+    // mcp.miro.com. Everything below is an educated guess from the published
+    // capability list ("board read: sticky notes, shapes, frames, text,
+    // cards, tables, comments").
+    //
+    // To CONFIRM or CORRECT: connect Miro, then
+    //   POST /kb/mcp-connector/test { "id": "miro" }
+    // whose response carries `tools` (real names) and `toolSchemas` (real
+    // argument names). Fixing a wrong guess is editing the string literals
+    // below and nothing else — no code path branches on them.
+    //
+    // Every selector is tolerant (see toItemArray / pickText): a wrong path
+    // degrades to a rawer note, never to an empty fetch.
+    listTool: Object.freeze({
+      name: 'list_boards',        // ⚠ guess
+      args: Object.freeze({}),    // static extra arguments, if any
+      itemsPath: 'data',          // where the array lives in the parsed result
+      idField: 'id',
+      nameField: 'name',
+    }),
+    readTool: Object.freeze({
+      name: 'get_board_items',    // ⚠ guess
+      parentArg: 'board_id',      // ⚠ guess — carries the listTool item's id
+      args: Object.freeze({}),
+      itemsPath: 'data',
+      idField: 'id',
+      typeField: 'type',
+      // Tried in order; the first non-blank wins. Covers the shapes Miro's
+      // REST API uses for stickies, text, cards, shapes and comments.
+      textFields: Object.freeze([
+        'data.content', 'data.title', 'data.plainText', 'data.description',
+        'text', 'content', 'title', 'plainText',
+      ]),
+      dateField: 'modifiedAt',
+      linkField: 'links.self',
+    }),
+    // `defaultMcpItemMapper` is a hoisted function declaration at the bottom
+    // of this file, so naming it here — inside the frozen literal — is legal.
+    // It must be done here: Object.freeze makes properties non-writable AND
+    // non-configurable, so patching the slot in afterwards would throw.
+    mapItem: defaultMcpItemMapper,
   }),
 ]);
 
@@ -82,4 +122,142 @@ export function mcpConnectorDef(id) {
   if (!base) return null;
   const override = overrideServerUrl(base.id);
   return override ? Object.freeze({ ...base, serverUrl: override }) : base;
+}
+
+// ─── Generic tool-result shaping ────────────────────────────────────────────
+//
+// These exist so a descriptor is DATA. Everything a provider varies — where
+// the array is, which key holds the text, what the id field is called — is a
+// string in the table above, and these functions consume those strings.
+//
+// The design rule throughout: a wrong guess DEGRADES. Miro's tool surface is
+// not verifiable from this repo, so the failure mode that matters is not "the
+// mapping is imperfect" (fixable in a minute) but "the fetch silently returned
+// nothing" (indistinguishable from an empty board, and expensive to diagnose).
+
+/** Read a dotted path out of a plain object. undefined on any miss — never throws. */
+export function pickPath(obj, path) {
+  if (!path) return obj;
+  let cur = obj;
+  for (const seg of String(path).split('.')) {
+    if (cur == null || typeof cur !== 'object') return undefined;
+    cur = cur[seg];
+  }
+  return cur;
+}
+
+/**
+ * The array of records inside a parsed tool result, with four fallbacks in
+ * descending order of confidence:
+ *   1. the declared itemsPath resolves to an array   — the guess was right
+ *   2. the result IS an array                        — server returned bare
+ *   3. the first array-valued property                — itemsPath was misnamed
+ *   4. the result is a single object                  — a one-item result
+ * A non-object, non-empty result becomes one text item rather than vanishing.
+ */
+export function toItemArray(parsed, itemsPath) {
+  const atPath = pickPath(parsed, itemsPath);
+  if (Array.isArray(atPath)) return atPath;
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === 'object') {
+    for (const v of Object.values(parsed)) if (Array.isArray(v)) return v;
+    return [parsed];
+  }
+  if (parsed == null || parsed === '') return [];
+  return [{ text: String(parsed) }];
+}
+
+// Keys that are plumbing rather than content. Excluded from the last-resort
+// JSON dump so a mis-guessed textFields still yields a readable note.
+const META_KEYS = new Set([
+  'id', 'type', 'createdAt', 'modifiedAt', 'createdBy', 'modifiedBy',
+  'links', 'parent', 'geometry', 'position', 'style', 'widgetType',
+]);
+
+/** First non-blank value among `candidates`; a metadata-stripped dump otherwise. */
+export function pickText(item, candidates) {
+  for (const p of candidates || []) {
+    const v = pickPath(item, p);
+    if (typeof v === 'string' && v.trim()) return v;
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  }
+  if (typeof item === 'string') return item;
+  const rest = {};
+  for (const [k, v] of Object.entries(item || {})) if (!META_KEYS.has(k)) rest[k] = v;
+  return Object.keys(rest).length ? JSON.stringify(rest, null, 2) : JSON.stringify(item ?? null);
+}
+
+/**
+ * Unwrap the small HTML subset board tools return in sticky/text content.
+ * Not a sanitiser and not trying to be — the output is a plain-text note body
+ * written to disk, never rendered as markup.
+ */
+export function stripHtml(s) {
+  return String(s ?? '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    // A non-breaking space usually sits next to a real one in board markup
+    // ("&amp;&nbsp;co"), so absorb one adjacent space rather than emitting a
+    // double. Deliberately narrow: a blanket horizontal-whitespace collapse
+    // would also wreck the indentation of pickText's JSON-dump fallback.
+    .replace(/[ \t]?&nbsp;[ \t]?/g, ' ')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')            // last, so &amp;lt; does not become <
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
+}
+
+function normalizeDate(v) {
+  if (typeof v === 'string' || typeof v === 'number') {
+    const d = new Date(v);
+    if (!Number.isNaN(d.getTime())) return d.toISOString();
+  }
+  // The inbox writer needs a Date header to name and order the raw file; an
+  // item with no timestamp is "now" rather than 1970.
+  return new Date().toISOString();
+}
+
+/**
+ * The one mapper every MCP connector uses until one genuinely needs its own.
+ * Reads nothing but the descriptor's `listTool`/`readTool` strings, so
+ * retargeting it at a different provider is a table edit.
+ *
+ * The returned `id` is the dedup key written to mcp_connector_seen, so it must
+ * be STABLE across runs and UNIQUE across parents. `<connector>:<parent>:<item>`
+ * satisfies both; `idx<n>` is the positional fallback for items a server
+ * returns without an id of their own.
+ */
+export function defaultMcpItemMapper({ def, parent, item, index = 0 }) {
+  const list = def.listTool || {};
+  const read = def.readTool || {};
+
+  const parentId = parent ? String(pickPath(parent, list.idField || 'id') ?? '') : '';
+  const parentName = parent
+    ? String(pickPath(parent, list.nameField || 'name') ?? parentId ?? def.name)
+    : def.name;
+
+  const rawId = String(pickPath(item, read.idField || 'id') ?? '');
+  const id = [def.id, parentId, rawId || `idx${index}`].filter(Boolean).join(':');
+
+  const itemType = String(pickPath(item, read.typeField || 'type') ?? 'item');
+  const body = stripHtml(pickText(item, read.textFields));
+  const link = String(pickPath(item, read.linkField) ?? '');
+
+  return {
+    id,
+    // These keys are the contract with the Mac manifest's `rawHeaders` map.
+    // Changing one here means changing it in the manifest JSON too.
+    // `ItemId` is deliberately absent: the server returns the id alongside
+    // the fields, and the Mac adapter injects it (see McpConnectorAdapter).
+    fields: {
+      Title: parentName ? `${parentName} — ${itemType}` : itemType,
+      Board: parentName,
+      ItemType: itemType,
+      Date: normalizeDate(pickPath(item, read.dateField)),
+      Link: link,
+    },
+    body,
+  };
 }

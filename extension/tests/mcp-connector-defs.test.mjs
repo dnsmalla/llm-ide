@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MCP_CONNECTOR_DEFS, MCP_CONNECTOR_IDS, mcpConnectorDef,
+  pickPath, toItemArray, pickText, stripHtml, defaultMcpItemMapper,
 } from '../connectors/mcp-connector-defs.mjs';
 
 test('phase 2a ships exactly one connector: Miro', () => {
@@ -74,4 +75,103 @@ test('the override accepts https anywhere and http only on loopback', () => {
       delete process.env.LLMIDE_MCP_MIRO_URL;
     }
   }
+});
+
+// ── Phase 2b: the fetch mapping ────────────────────────────────────────────
+//
+// The Miro tool NAMES here are unverified against the live server (see the
+// module header). These tests deliberately assert the SHAPE and the tolerance
+// of the mapping, not the names — so correcting a name is a one-line fix that
+// does not cascade into the test suite.
+
+test('Miro now declares a two-level fetch and a mapper', () => {
+  const miro = mcpConnectorDef('miro');
+  assert.equal(typeof miro.listTool.name, 'string');
+  assert.ok(miro.listTool.name.length > 0);
+  assert.equal(typeof miro.readTool.name, 'string');
+  assert.equal(typeof miro.readTool.parentArg, 'string',
+    'the read tool must know which argument carries the parent id');
+  assert.equal(typeof miro.mapItem, 'function');
+  assert.equal(miro.mapItem, defaultMcpItemMapper,
+    'the descriptor stays pure data: it names the shared mapper, not a closure');
+  assert.ok(Array.isArray(miro.readTool.textFields) && miro.readTool.textFields.length > 0);
+  // Naming the hoisted mapper inside the frozen literal must not have cost
+  // the descriptor its frozen shape.
+  assert.ok(Object.isFrozen(miro));
+  assert.ok(Object.isFrozen(miro.listTool) && Object.isFrozen(miro.readTool));
+});
+
+test('pickPath walks dotted paths and never throws on a miss', () => {
+  const o = { a: { b: { c: 1 } }, n: null };
+  assert.equal(pickPath(o, 'a.b.c'), 1);
+  assert.equal(pickPath(o, 'a.b.zzz'), undefined);
+  assert.equal(pickPath(o, 'n.deep.deeper'), undefined);
+  assert.equal(pickPath(o, 'nope.at.all'), undefined);
+  assert.equal(pickPath(o, ''), o);
+});
+
+test('toItemArray survives every plausible wrong itemsPath guess', () => {
+  // The happy path.
+  assert.deepEqual(toItemArray({ data: [{ id: 1 }] }, 'data'), [{ id: 1 }]);
+  // Guessed 'data', server said 'items' → fall back to the only array present.
+  assert.deepEqual(toItemArray({ items: [{ id: 2 }] }, 'data'), [{ id: 2 }]);
+  // Server returned a bare array.
+  assert.deepEqual(toItemArray([{ id: 3 }], 'data'), [{ id: 3 }]);
+  // Server returned a single object with no array anywhere → treat it as one item.
+  assert.deepEqual(toItemArray({ id: 4 }, 'data'), [{ id: 4 }]);
+  // Non-JSON prose → one text item, not a crash and not silence.
+  assert.deepEqual(toItemArray('plain prose', 'data'), [{ text: 'plain prose' }]);
+  // Genuinely empty.
+  assert.deepEqual(toItemArray(null, 'data'), []);
+  assert.deepEqual(toItemArray({ data: [] }, 'data'), []);
+});
+
+test('pickText prefers the declared fields and dumps the item when all miss', () => {
+  const fields = ['data.content', 'text'];
+  assert.equal(pickText({ data: { content: 'hello' } }, fields), 'hello');
+  assert.equal(pickText({ text: 'fallback' }, fields), 'fallback');
+  assert.equal(pickText({ data: { content: '   ' }, text: 'used' }, fields), 'used',
+    'a blank match is not a match');
+  // Every guess missed. The note must still carry the payload — an empty note
+  // is indistinguishable from "the board was empty", which is the failure mode
+  // that costs hours.
+  const dumped = pickText({ id: 'x', type: 'shape', weirdField: 'payload' }, fields);
+  assert.match(dumped, /payload/);
+  assert.doesNotMatch(dumped, /"id"/, 'known metadata keys are excluded from the dump');
+});
+
+test('stripHtml unwraps the markup Miro puts in sticky content', () => {
+  assert.equal(stripHtml('<p>hello <strong>world</strong></p>'), 'hello world');
+  assert.equal(stripHtml('a<br>b'), 'a\nb');
+  assert.equal(stripHtml('&lt;tag&gt; &amp; &nbsp;co'), '<tag> & co');
+  assert.equal(stripHtml('no markup here'), 'no markup here');
+});
+
+test('defaultMcpItemMapper produces a stable id and the manifest field set', () => {
+  const def = mcpConnectorDef('miro');
+  const parent = { id: 'b1', name: 'Roadmap' };
+  const item = { id: 'i9', type: 'sticky_note', data: { content: '<p>ship it</p>' },
+                 modifiedAt: '2026-08-01T10:00:00.000Z' };
+
+  const a = def.mapItem({ def, parent, item, index: 0 });
+  assert.equal(a.id, 'miro:b1:i9');
+  assert.equal(a.body, 'ship it');
+  assert.equal(a.fields.Board, 'Roadmap');
+  assert.equal(a.fields.ItemType, 'sticky_note');
+  assert.match(a.fields.Date, /^\d{4}-\d{2}-\d{2}T/);
+  assert.ok(a.fields.Title.includes('Roadmap'));
+
+  // Stable across calls — the id IS the dedup key, so instability means
+  // every sweep re-imports the whole board.
+  assert.equal(def.mapItem({ def, parent, item, index: 0 }).id, a.id);
+  assert.equal(def.mapItem({ def, parent, item, index: 7 }).id, a.id,
+    'the index is only a fallback for items with no id of their own');
+
+  // Same item id on a different board is a different note.
+  const b = def.mapItem({ def, parent: { id: 'b2', name: 'Other' }, item, index: 0 });
+  assert.notEqual(b.id, a.id);
+
+  // An item with no id at all still gets a deterministic, positional one.
+  const c = def.mapItem({ def, parent, item: { text: 'anon' }, index: 3 });
+  assert.equal(c.id, 'miro:b1:idx3');
 });
