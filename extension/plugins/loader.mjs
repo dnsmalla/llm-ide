@@ -469,6 +469,23 @@ function loadOnePlugin(dir) {
     }
   }
 
+  // Vendor components LLM-IDE does not run. Catalogued for display only —
+  // parsing them must never lead to execution (spec: parse-and-ignore).
+  // `pending` are the ones a later phase will activate behind their own
+  // consent gate (hooks) or MCP consent flow.
+  const unsupportedComponents = [];
+  const pendingComponents = [];
+  if (format === 'claude') {
+    for (const rel of ['themes', 'output-styles', 'monitors', 'workflows', 'bin', '.lsp.json', 'settings.json']) {
+      if (existsSync(join(dir, rel))) unsupportedComponents.push(rel);
+    }
+    if (existsSync(join(dir, 'hooks', 'hooks.json'))) pendingComponents.push('hooks');
+    if (existsSync(join(dir, '.mcp.json'))) pendingComponents.push('mcp');
+    if (unsupportedComponents.length) {
+      warnings.push(`unsupported components ignored: ${unsupportedComponents.join(', ')}`);
+    }
+  }
+
   return {
     plugin: {
       ...manifest,
@@ -478,6 +495,8 @@ function loadOnePlugin(dir) {
       skillFiles,
       commands,
       subagents,
+      unsupportedComponents,
+      pendingComponents,
     },
     warnings,
   };

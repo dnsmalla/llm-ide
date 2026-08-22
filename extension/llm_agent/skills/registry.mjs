@@ -191,6 +191,12 @@ export function listInstalledPlugins(userId) {
         description: p.subagents[name].description,
         allowedTools: p.subagents[name].allowedTools,
       })),
+      // Vendor-package provenance + the components that came along but stay
+      // inert here, so the Library detail view can say so instead of the user
+      // wondering why a Claude plugin's hooks do nothing.
+      format: p.format || 'llmide',
+      unsupportedComponents: p.unsupportedComponents || [],
+      pendingComponents: p.pendingComponents || [],
     });
   }
   return {

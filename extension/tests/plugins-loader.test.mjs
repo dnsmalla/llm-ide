@@ -491,3 +491,38 @@ test('own-format {{arg}} substitution is untouched', () => {
   assert.match(expanded.prompt, /Summarize foo\./);
   rmSync(root, { recursive: true, force: true });
 });
+
+test('vendor: unsupported and pending components are catalogued, never executed', () => {
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'themes'), { recursive: true });
+  mkdirSync(join(dir, 'output-styles'), { recursive: true });
+  mkdirSync(join(dir, 'hooks'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
+  writeFileSync(join(dir, 'themes', 'dark.json'), '{}', 'utf8');
+  writeFileSync(join(dir, 'hooks', 'hooks.json'), '{}', 'utf8');
+  writeFileSync(join(dir, '.mcp.json'), '{}', 'utf8');
+  writeFileSync(join(dir, '.lsp.json'), '{}', 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  const p = plugins.get('example');
+  assert.ok(p);
+  assert.deepEqual([...p.unsupportedComponents].sort(), ['.lsp.json', 'output-styles', 'themes']);
+  assert.deepEqual([...p.pendingComponents].sort(), ['hooks', 'mcp']);
+  assert.ok(warnings.some((w) => w.includes('unsupported components')),
+    `expected an info warning, got: ${warnings.join(', ')}`);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('own format: no unsupported/pending fields leak into old plugins', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'skills/x.md': `---\nname: x\nkind: read\ndescription: d\n---\nBody.`,
+  });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  const p = plugins.get('example');
+  assert.deepEqual(p.unsupportedComponents, []);
+  assert.deepEqual(p.pendingComponents, []);
+  rmSync(root, { recursive: true, force: true });
+});
