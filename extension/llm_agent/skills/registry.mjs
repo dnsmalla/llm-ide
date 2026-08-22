@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { loadSkills } from './loader.mjs';
 import { loadPlugins } from '../../plugins/loader.mjs';
 import { listEnabled as listEnabledPlugins, pruneOrphans as prunePluginOrphans } from '../../plugins/state.mjs';
+import { syncPluginMcpServers } from '../../mcp/state.mjs';
 import { INTERNAL_HANDLERS } from '../runtime/handlers/ask-internal.mjs';
 import { GLOBAL_HANDLER_NAMES } from '../runtime/global-handlers.mjs';
 
@@ -81,6 +82,14 @@ let pluginRegistry = loadPlugins();
 if (pluginRegistry.warnings.length > 0) {
   console.warn('[llm_agent] plugin warnings:', pluginRegistry.warnings);
 }
+// Boot-time reconcile so a plugin installed while the server was down (or by
+// an earlier build that predated MCP support) still gets its declared servers
+// registered — unconsented, as always.
+try {
+  syncPluginMcpServers(mcpDeclarationGroups());
+} catch (err) {
+  console.warn('[plugins] mcp sync failed at boot:', err?.message || err);
+}
 
 /**
  * Re-scan the plugin directory at runtime. Called by the plugin
@@ -105,11 +114,46 @@ export function reloadPlugins() {
   } catch (err) {
     console.warn('[plugins] orphan prune failed:', err?.message || err);
   }
+  // Reconcile the MCP registry with what the installed plugins declare. This
+  // layer does the wiring because plugins/ and mcp/ are peers that may not
+  // import each other, and llm_agent may import both. Registration is not
+  // activation: every entry lands unconsented, and an uninstalled plugin's
+  // entries go away with it.
+  try {
+    syncPluginMcpServers(mcpDeclarationGroups());
+  } catch (err) {
+    console.warn('[plugins] mcp sync failed:', err?.message || err);
+  }
   return {
     pluginDir: pluginRegistry.pluginDir,
     count: pluginRegistry.plugins.size,
     warnings: pluginRegistry.warnings,
   };
+}
+
+/** What every installed plugin declares in its `.mcp.json`, grouped by plugin. */
+function mcpDeclarationGroups() {
+  const groups = [];
+  for (const p of pluginRegistry.plugins.values()) {
+    if (Array.isArray(p.mcpServers) && p.mcpServers.length > 0) {
+      groups.push({ pluginName: p.name, servers: p.mcpServers });
+    }
+  }
+  return groups;
+}
+
+/**
+ * Predicate for `effectiveMcpServers({ pluginEnabled })`: is this plugin
+ * enabled for this user? A plugin-declared MCP server must go dark when the
+ * plugin itself is switched off, so the MCP layer asks this before including
+ * one. An unknown name answers false — a server whose plugin is no longer
+ * installed is never effective.
+ */
+export function pluginEnabledFor(userId) {
+  const enabled = listEnabledPlugins(userId);
+  return (pluginName) => typeof pluginName === 'string'
+    && enabled.has(pluginName)
+    && pluginRegistry.plugins.has(pluginName);
 }
 
 // Cache for listAllSkills() — populated on first call, invalidated by

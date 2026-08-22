@@ -37,7 +37,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import {
   personaForMode, PLAN_LIKE_MODES, restrictsTools, allowedToolNames,
 } from '../runtime/mode-personas.mjs';
-import { readSkillInstructions, buildPerUserSkillSet, internalSkills } from '../skills/index.mjs';
+import { readSkillInstructions, buildPerUserSkillSet, internalSkills, pluginEnabledFor } from '../skills/index.mjs';
 import { composeSystemContext } from '../internal/context/compose.mjs';
 import { buildReadableRoots, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
 import { expandTilde } from '../../graphkit/memory.mjs';
@@ -50,7 +50,7 @@ import { getDb } from '../../kb/db.mjs';
 import { usdCapForModel } from '../../kb/usage.mjs';
 import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { getAgentPersona } from '../../kb/personas.mjs';
-import { getSecret } from '../../server/vault.mjs';
+import { getSecret, makeSecretReader } from '../../server/vault.mjs';
 import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { mapSdkMessage } from './events.mjs';
@@ -59,6 +59,7 @@ import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
 import { get as registryGet, entries as registryEntries } from '../tools/registry.mjs';
 import { hasAlwaysAllow, setAlwaysAllow } from '../../kb/tool-approvals.mjs';
 import { runBashGate, writePathGate } from '../tools/gates.mjs';
+import { effectiveMcpServers } from '../../mcp/mcp-config.mjs';
 
 // --- Auth: per-user vault key first, operator env as fallback -------------
 // (Moved here from spike-engine.mjs, which re-exports it for compatibility —
@@ -196,6 +197,57 @@ export function v2ToolPolicyForMode(mode) {
     ...NATIVE_GATED_TOOLS,
   ]);
   return { allowedTools: V2_ALLOWED_TOOLS.filter(keep), disallowedTools: [...disallowed] };
+}
+
+// The in-process llmide server owns this name; a user server answering to it
+// would REPLACE llm-ide's own tool surface for the turn.
+const RESERVED_MCP_NAME = 'llmide';
+
+/**
+ * The user's own MCP servers for one turn, in SDK `mcpServers` shape, plus the
+ * tool specs that pre-approve them.
+ *
+ * Until now the v2 engine mounted only the in-process `llmide` server, so a
+ * user who had consented to (say) Linear got its tools on the legacy CLI path
+ * and silently nothing here. Policy is deliberately identical to
+ * buildMcpConfigForUser: enabled AND consented, and NOTHING in a restricted
+ * mode (plan/review/document) — a mode that narrows llm-ide's own tools must
+ * not hand over an unbounded third-party surface instead.
+ *
+ * Pre-approval uses the SDK's server-level spec (`mcp__<server>`) because the
+ * tool names of a server are unknowable before connecting — and without it
+ * every call would land in canUseTool, which denies anything it doesn't
+ * recognize (DENY_UNKNOWN_TOOL).
+ */
+export function buildUserMcpServers(userId, mode, {
+  restrictsToolsFn = restrictsTools,
+  readSecret,
+  pluginEnabled,
+} = {}) {
+  const empty = { servers: {}, allowedTools: [] };
+  const requestedMode = typeof mode === 'string' && mode ? mode : 'execute';
+  if (typeof restrictsToolsFn === 'function' && restrictsToolsFn(requestedMode)) return empty;
+  let effective;
+  try {
+    effective = effectiveMcpServers(userId, {
+      readSecret: readSecret || makeSecretReader(getDb(), userId),
+      pluginEnabled: pluginEnabled || pluginEnabledFor(userId),
+    });
+  } catch (err) {
+    // A turn must not die because the MCP registry is unreadable — the user
+    // loses their MCP tools for this turn, not the reply.
+    console.warn('[agent-v2] user MCP unavailable:', err?.message || err);
+    return empty;
+  }
+  const servers = {};
+  for (const [id, cfg] of Object.entries(effective)) {
+    if (id === RESERVED_MCP_NAME) {
+      console.warn(`[agent-v2] MCP server '${id}' shadows llm-ide's own tool server — not mounted`);
+      continue;
+    }
+    servers[id] = cfg;
+  }
+  return { servers, allowedTools: Object.keys(servers).map((id) => `mcp__${id}`) };
 }
 
 const MAX_PROMPT_CHARS = 20_000;
@@ -706,8 +758,15 @@ export async function runAgentV2Turn(
   // module export.
   const { skills: userSkills, subagents: userSubagents } = buildPerUserSkillSet(userId);
 
+  // The user's consented MCP servers ride alongside the in-process llmide
+  // server, with their server-level specs appended to the allowlist composed
+  // by buildEngineOptions.
+  const userMcp = buildUserMcpServers(userId, mode);
   const q = queryFactory(prompt, {
     ...queryOptions,
+    ...(userMcp.allowedTools.length
+      ? { allowedTools: [...(queryOptions.allowedTools || []), ...userMcp.allowedTools] }
+      : {}),
     mcpServers: {
       llmide: buildLlmIdeServer(userId, agentContext, message, {
         runClaude,
@@ -715,6 +774,7 @@ export async function runAgentV2Turn(
         userSubagents,
         internalSkills: { base: internalSkills.base },
       }),
+      ...userMcp.servers,
     },
     canUseTool,
     maxTurns: MAX_TURNS,

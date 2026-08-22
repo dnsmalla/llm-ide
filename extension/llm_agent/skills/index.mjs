@@ -13,6 +13,7 @@ export {
   listAllSkills,
   listInstalledPlugins,
   buildPerUserSkillSet,
+  pluginEnabledFor,
   assertReadSkillsWired,
 } from './registry.mjs';
 export { listSkillLibrary, readSkillInstructions, _resetSkillLibraryCache } from './skill-library.mjs';

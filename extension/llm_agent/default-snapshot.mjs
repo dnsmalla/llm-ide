@@ -78,6 +78,7 @@ import { basename, dirname, join } from 'node:path';
 import { listSources, listDiscoveryHooks, defaultSourcesDir, defaultSourcesLocation, BUILTIN_ID, DEFAULT_SOURCES_ID } from '../llm-sources/registry.mjs';
 import { listEnabled } from '../llm-sources/state.mjs';
 import { effectiveMcpServers } from '../mcp/mcp-config.mjs';
+import { pluginEnabledFor } from './skills/index.mjs';
 import { makeSecretReader } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { CLAUDE_CODE_COMMANDS } from './claude-code-commands.mjs';
@@ -325,7 +326,12 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
   // come exclusively from enabled+consented MCP plugins.
   // Same injected-reader reason as route.mjs: the snapshot must show the same
   // truth the live --mcp-config carries, credentials included.
-  const mcpServers = effectiveMcpServers(userId, { readSecret: makeSecretReader(getDb(), userId) });
+  const mcpServers = effectiveMcpServers(userId, {
+    readSecret: makeSecretReader(getDb(), userId),
+    // Same gate the live config applies, or the snapshot would advertise a
+    // plugin's server as active while chat correctly withholds it.
+    pluginEnabled: pluginEnabledFor(userId),
+  });
   counts.mcpServers = Object.keys(mcpServers).length;
   writeFileSync(join(staging, '.mcp.json'), JSON.stringify({ mcpServers }, null, 2));
 
