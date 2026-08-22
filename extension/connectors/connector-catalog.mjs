@@ -3,8 +3,10 @@
 // a connector is a deliberate product decision, not data entry.
 //
 // pipelineReady marks whether the fetch→folder→llm-doc pipeline exists:
-// true only for connectors that already work today. The new three (gdrive,
-// gcal, miro) flip to true in phases 2–3 of the connector-catalog spec.
+// true only for connectors that already work today. Miro flipped true once it
+// gained a server descriptor and the ingest driver started sweeping it; gdrive
+// and gcal have no descriptor yet and flip in phase 3 of the connector-catalog
+// spec.
 //
 // icon is an SF Symbol name; the Mac app renders it directly.
 export const CONNECTOR_CATALOG = Object.freeze([
@@ -27,7 +29,7 @@ export const CONNECTOR_CATALOG = Object.freeze([
     description: 'Fetch board text content (stickies, text items) into llm-doc notes.',
     icon: 'square.grid.3x3', authKind: 'miro-oauth',
     docsUrl: 'https://developers.miro.com/docs',
-    pipelineReady: false,
+    pipelineReady: true,
   }),
   Object.freeze({
     id: 'box', name: 'Box',
