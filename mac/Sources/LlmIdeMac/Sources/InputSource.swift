@@ -76,4 +76,13 @@ protocol InputSource {
 
 extension InputSource {
     @MainActor func fetchAndIngest(_ ctx: SourceContext) async -> SourceIngestResult { .none }
+
+    /// Directory under `source/` this source's RAW files land in — the same
+    /// mapping every writer uses (`NoteType(...).directoryName`: email →
+    /// "emails", meeting → "meetings", slack → "slack"). Drives the
+    /// location-first Library classification: a file under `source/emails/`
+    /// IS mail, whatever its extension or frontmatter says. SourceConnector
+    /// overrides this with its manifest's `noteType`, which can differ from
+    /// the connector id.
+    var rawDirectoryName: String { NoteType(rawValue: id).directoryName }
 }

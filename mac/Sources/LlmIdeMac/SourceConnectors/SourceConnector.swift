@@ -40,6 +40,9 @@ final class SourceConnector: InputSource {
     nonisolated var emptyText: String { manifest.emptyText }
     nonisolated var platforms: [String] { manifest.platforms }
     nonisolated var mode: SourceMode { manifest.mode == .liveCapture ? .liveCapture : .fetch }
+    /// Raw inbox dir matches `ensureSetup`/`fetchAndIngest`'s writes, which
+    /// key on the manifest's noteType (may differ from the connector id).
+    nonisolated var rawDirectoryName: String { NoteType(manifest.noteType).directoryName }
 
     /// Eagerly create the source inbox folder and the llm-doc notes folder so
     /// both exist from the moment a connector is connected (fixes the "no

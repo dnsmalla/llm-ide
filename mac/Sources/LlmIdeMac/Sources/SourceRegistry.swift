@@ -39,6 +39,16 @@ enum SourceRegistry {
         return all.first { $0.platforms.contains(key) } ?? MeetingSource()
     }
 
+    /// Match a raw-inbox directory name under `source/` (e.g. "emails") to
+    /// its source, or nil for a directory no source owns (e.g. "documents").
+    /// Location is authoritative for classification: every fetch source
+    /// writes its raw files into its own directory, so the file's home says
+    /// what it is even when it has no readable frontmatter (raw mail is
+    /// .txt) — which is how all fetched mail used to land under "Meetings".
+    static func source(forRawDirectory dir: String) -> InputSource? {
+        all.first { $0.rawDirectoryName == dir }
+    }
+
     static func source(id: String) -> InputSource? {
         all.first { $0.id == id }
     }

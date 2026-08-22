@@ -121,15 +121,36 @@ final class LibraryItemStore {
     /// `platform` is the third frontmatter key, so a small head read covers it.
     /// `nonisolated` (pure function) so it can run off the main actor and be
     /// unit-tested directly.
-    nonisolated static func sourceId(for url: URL) -> String {
-        guard url.pathExtension.lowercased() == "md",
-              let handle = try? FileHandle(forReadingFrom: url) else {
-            return MeetingSource().id
+    ///
+    /// Precedence: explicit frontmatter first, then the owning raw directory
+    /// under `source/`, then the historical meeting default.
+    ///   - Frontmatter stays primary because `source/meetings/` is SHARED —
+    ///     Slack transcripts are written there too (MeetingFileStore) and
+    ///     only their `platform: slack` line tells them apart.
+    ///   - `rawDirectory` (the file's first path component under `source/`)
+    ///     catches everything frontmatter can't: raw fetched mail is `.txt`
+    ///     with no frontmatter at all, so classifying by content alone
+    ///     dumped every email in `source/emails/` into the "Meetings" group.
+    nonisolated static func sourceId(for url: URL, rawDirectory: String? = nil) -> String {
+        if let explicit = frontmatterSourceId(for: url) { return explicit }
+        if let rawDirectory, let owner = SourceRegistry.source(forRawDirectory: rawDirectory) {
+            return owner.id
         }
+        return MeetingSource().id
+    }
+
+    /// The source a file's own frontmatter claims, or nil when it makes no
+    /// recognizable claim (non-.md, no frontmatter, or a platform/source
+    /// value no registered source owns — an unknown value must NOT collapse
+    /// to the meeting default here, or the directory fallback above could
+    /// never run).
+    nonisolated private static func frontmatterSourceId(for url: URL) -> String? {
+        guard url.pathExtension.lowercased() == "md",
+              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         let head = (try? handle.read(upToCount: 2048))
             .flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        guard head.hasPrefix("---") else { return MeetingSource().id }
+        guard head.hasPrefix("---") else { return nil }
         // Walk the frontmatter block (between the opening and closing "---").
         // Prefer `platform:` (meetings/captures); fall back to `source:` for
         // ingested notes that identify themselves by source id (e.g. email
@@ -142,15 +163,22 @@ final class LibraryItemStore {
             if line.hasPrefix("platform:") {
                 let value = line.dropFirst("platform:".count)
                     .trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
-                return SourceRegistry.source(forPlatform: value).id
+                    .lowercased()
+                if let owner = SourceRegistry.all.first(where: { $0.platforms.contains(value) }) {
+                    return owner.id
+                }
+                continue
             }
             if fallbackId == nil, line.hasPrefix("source:") {
                 let value = line.dropFirst("source:".count)
                     .trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
-                if !value.isEmpty { fallbackId = SourceRegistry.source(forPlatform: value).id }
+                    .lowercased()
+                if let owner = SourceRegistry.all.first(where: { $0.platforms.contains(value) }) {
+                    fallbackId = owner.id
+                }
             }
         }
-        return fallbackId ?? MeetingSource().id
+        return fallbackId
     }
 
     /// Rebuild `items` from the bound project folder.  Authoritative for
@@ -248,11 +276,14 @@ final class LibraryItemStore {
                 } else {
                     item.folderOrigin = (parentName == subfolder) ? nil : parentName
                 }
-                // Meetings and ingested email share the source/ folder;
-                // classify by frontmatter platform so the SOURCES section can
-                // split them into Meetings / Mail sub-groups.
+                // Every input source shares the source/ folder; classify by
+                // the owning raw directory first (source/emails/ IS mail —
+                // raw fetched mail is .txt with no frontmatter), falling back
+                // to frontmatter for loose/unowned files, so the SOURCES
+                // section splits into its Meetings / Mail / … sub-groups.
                 if category == .meetings {
-                    item.sourceId = sourceId(for: fileURL)
+                    let rawDir = relativeDirComponents(of: fileURL, underComponents: rootComps).first
+                    item.sourceId = sourceId(for: fileURL, rawDirectory: rawDir)
                 }
                 scanned.append(item)
             }
