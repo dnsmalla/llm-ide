@@ -5,13 +5,68 @@
 // way. Plugin-registry layout (Claude's installed_plugins.json vs Codex's
 // config.toml) and marketplace discovery differ per vendor and stay in each
 // adapter.
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, copyFileSync, lstatSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, copyFileSync, lstatSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultPluginDir } from './loader.mjs';
 
 // Plugin names are joined into filesystem paths, so they MUST be validated to
 // prevent path traversal (e.g. "../../etc").
 export const PLUGIN_NAME_RE = /^[a-z][a-z0-9-]{1,40}$/;
+
+// Where a vendor package keeps its manifest. Claude Code and Codex use
+// different dot-dirs for the same JSON shape, and llm-ide's loader reads
+// either in place — so a manifest-bearing source is imported whole rather
+// than flattened into the own format.
+export const VENDOR_MANIFEST_RELS = Object.freeze([
+  join('.claude-plugin', 'plugin.json'),
+  join('.codex-plugin', 'plugin.json'),
+]);
+
+/** The vendor manifest inside `dir`, or null when there is none. */
+export function findVendorManifestRel(dir) {
+  return VENDOR_MANIFEST_RELS.find((rel) => existsSync(join(dir, rel))) || null;
+}
+
+// Tree-copy limits for whole-plugin imports. Deliberately more generous than
+// the zip path (5 MB) because vendor trees can carry references/ and assets/
+// alongside SKILL.md — but still bounded.
+export const TREE_COPY_LIMITS = Object.freeze({
+  maxFileBytes: 512 * 1024, maxTotalBytes: 10 * 1024 * 1024, maxFiles: 500,
+});
+
+/**
+ * Copy a vendor plugin tree wholesale, layout preserved. Symlinks are skipped
+ * (same policy as the loader), oversized files skipped, and the whole copy
+ * aborts if the tree exceeds the total/file-count limits — callers delete the
+ * partial target so a half-copied plugin is never left behind. Throws on a
+ * limit breach.
+ * @returns {{files: number, skipped: string[]}}
+ */
+export function copyPluginTree(src, dst) {
+  let totalBytes = 0;
+  let files = 0;
+  const skipped = [];
+  const walk = (from, to, prefix) => {
+    mkdirSync(to, { recursive: true });
+    for (const e of readdirSync(from, { withFileTypes: true })) {
+      const label = prefix ? `${prefix}/${e.name}` : e.name;
+      if (e.isSymbolicLink()) { skipped.push(`${label}: symlink rejected`); continue; }
+      const fromPath = join(from, e.name);
+      const toPath = join(to, e.name);
+      if (e.isDirectory()) { walk(fromPath, toPath, label); continue; }
+      if (!e.isFile()) continue; // fifos, sockets, devices
+      if (files >= TREE_COPY_LIMITS.maxFiles) throw new Error('plugin exceeds max file count');
+      const size = statSync(fromPath).size;
+      if (size > TREE_COPY_LIMITS.maxFileBytes) { skipped.push(`${label}: too large`); continue; }
+      totalBytes += size;
+      files += 1;
+      if (totalBytes > TREE_COPY_LIMITS.maxTotalBytes) throw new Error('plugin exceeds max total bytes');
+      copyFileSync(fromPath, toPath);
+    }
+  };
+  walk(src, dst, '');
+  return { files, skipped };
+}
 
 /**
  * Semver-aware version comparison. Returns true if `a` is strictly newer
@@ -174,7 +229,10 @@ export function listImportedNames(mnDirOverride) {
       if (!entry.isDirectory()) continue;
       // Skip symlinks (same policy as loader.mjs)
       try { if (lstatSync(join(dir, entry.name)).isSymbolicLink()) continue; } catch { continue; }
-      if (existsSync(join(dir, entry.name, 'plugin.json'))) names.add(entry.name);
+      // A whole-tree vendor copy has no root plugin.json — its manifest
+      // stays where the vendor put it.
+      if (existsSync(join(dir, entry.name, 'plugin.json'))
+        || findVendorManifestRel(join(dir, entry.name))) names.add(entry.name);
     }
   } catch { /* ignore */ }
   return names;
@@ -186,7 +244,9 @@ export function listImportedNames(mnDirOverride) {
  */
 export function getImportedVersion(pluginName, mnDirOverride) {
   const dir = mnDirOverride || defaultPluginDir();
-  const manifestPath = join(dir, pluginName, 'plugin.json');
+  const pluginDir = join(dir, pluginName);
+  const vendorRel = existsSync(join(pluginDir, 'plugin.json')) ? null : findVendorManifestRel(pluginDir);
+  const manifestPath = join(pluginDir, vendorRel || 'plugin.json');
   if (!existsSync(manifestPath)) return null;
   try {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));

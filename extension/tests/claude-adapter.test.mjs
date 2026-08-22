@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { claudePluginsRoot, scanInstalled, scanMarketplace, importPlugin, listImportedNames, getImportedVersion, checkForUpdates } from '../plugins/claude-adapter.mjs';
@@ -333,5 +333,102 @@ test('imported skills pass skill-loader validation (kind + name injected)', () =
   } finally {
     rmSync(claudeRoot, { recursive: true, force: true });
     rmSync(mnRoot, { recursive: true, force: true });
+  }
+});
+
+test('manifest-bearing marketplace plugin imports whole with layout preserved', () => {
+  const claudeRoot = mkdtempSync(join(tmpdir(), 'claude-mp-'));
+  const llmideDir = mkdtempSync(join(tmpdir(), 'llmide-plugins-'));
+  const mpDir = join(claudeRoot, 'marketplaces', 'claude-plugins-official', 'plugins', 'treeplug');
+  mkdirSync(join(mpDir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(mpDir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'treeplug', version: '2.0.0', description: 'tree plugin' }), 'utf8');
+  mkdirSync(join(mpDir, 'skills', 'nested'), { recursive: true });
+  writeFileSync(join(mpDir, 'skills', 'nested', 'SKILL.md'),
+    '---\nname: nested\ndescription: nested skill\n---\nBody.', 'utf8');
+  mkdirSync(join(mpDir, 'agents'), { recursive: true });
+  writeFileSync(join(mpDir, 'agents', 'researcher.md'),
+    '---\ndescription: researches\ntools: Read, Grep\n---\nYou research.', 'utf8');
+  try {
+    const result = importPlugin({ claudeRoot, llmidePluginDir: llmideDir, source: 'marketplace', name: 'treeplug' });
+    assert.equal(result.ok, true, `import failed: ${result.error || ''}`);
+    const target = join(llmideDir, 'claude-treeplug');
+    assert.ok(existsSync(join(target, '.claude-plugin', 'plugin.json')), 'vendor manifest must survive');
+    assert.ok(!existsSync(join(target, 'plugin.json')), 'no generated root manifest for vendor plugins');
+    assert.ok(existsSync(join(target, 'agents', 'researcher.md')), 'agents/ must no longer be dropped');
+    assert.ok(existsSync(join(target, 'skills', 'nested', 'SKILL.md')), 'nested layout must not be flattened');
+    assert.equal(result.plugin.version, '2.0.0', 'version comes from the vendor manifest');
+    // Identity: the copied manifest's name is rewritten to the namespaced
+    // directory name so enable-state and update-checking key consistently.
+    const copied = JSON.parse(readFileSync(join(target, '.claude-plugin', 'plugin.json'), 'utf8'));
+    assert.equal(copied.name, 'claude-treeplug');
+    assert.equal(copied.description, 'tree plugin', 'the rest of the manifest is preserved verbatim');
+    const { plugins } = loadPlugins({ pluginDir: llmideDir });
+    const p = plugins.get('claude-treeplug');
+    assert.equal(p?.format, 'claude');
+    assert.ok(p?.subagents.researcher, 'agent must be discovered');
+    assert.deepEqual(p.subagents.researcher.allowedTools, ['read', 'grep']);
+    assert.equal(p?.skillFiles.length, 1);
+    // The runtime skill loader sees the nested skill through the same path.
+    const loaded = loadSkills(join(target, 'skills'));
+    assert.ok(loaded.skills.has('nested'), 'nested skill not loadable at runtime');
+    // Update checking still sees the imported plugin.
+    assert.ok([...listImportedNames(llmideDir)].includes('claude-treeplug'));
+    assert.equal(getImportedVersion('claude-treeplug', llmideDir), '2.0.0');
+  } finally {
+    rmSync(claudeRoot, { recursive: true, force: true });
+    rmSync(llmideDir, { recursive: true, force: true });
+  }
+});
+
+test('checkForUpdates compares vendor-manifest versions for whole-tree imports', () => {
+  const claudeRoot = mkdtempSync(join(tmpdir(), 'claude-mp-upd-'));
+  const llmideDir = mkdtempSync(join(tmpdir(), 'llmide-plugins-upd-'));
+  const mpDir = join(claudeRoot, 'marketplaces', 'claude-plugins-official', 'plugins', 'treeplug');
+  mkdirSync(join(mpDir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(mpDir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'treeplug', version: '2.0.0' }), 'utf8');
+  try {
+    assert.equal(importPlugin({ claudeRoot, llmidePluginDir: llmideDir, source: 'marketplace', name: 'treeplug' }).ok, true);
+    // Simulate a stale import: rewrite the copy's version, leave the source at 2.0.0.
+    const copiedPath = join(llmideDir, 'claude-treeplug', '.claude-plugin', 'plugin.json');
+    const copied = JSON.parse(readFileSync(copiedPath, 'utf8'));
+    copied.version = '1.0.0';
+    writeFileSync(copiedPath, JSON.stringify(copied), 'utf8');
+
+    const updates = checkForUpdates({ claudeRoot, llmidePluginDir: llmideDir });
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].name, 'claude-treeplug');
+    assert.equal(updates[0].importedVersion, '1.0.0');
+    assert.equal(updates[0].sourceVersion, '2.0.0');
+  } finally {
+    rmSync(claudeRoot, { recursive: true, force: true });
+    rmSync(llmideDir, { recursive: true, force: true });
+  }
+});
+
+test('whole-tree import skips symlinks and oversized files', () => {
+  const claudeRoot = mkdtempSync(join(tmpdir(), 'claude-mp-sym-'));
+  const llmideDir = mkdtempSync(join(tmpdir(), 'llmide-plugins-sym-'));
+  const mpDir = join(claudeRoot, 'marketplaces', 'official', 'plugins', 'symplug');
+  mkdirSync(join(mpDir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(mpDir, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'symplug', version: '1.0.0' }), 'utf8');
+  mkdirSync(join(mpDir, 'skills', 'ok'), { recursive: true });
+  writeFileSync(join(mpDir, 'skills', 'ok', 'SKILL.md'),
+    '---\nname: ok\ndescription: fine\n---\nBody.', 'utf8');
+  symlinkSync('/etc/passwd', join(mpDir, 'skills', 'leak.md'));
+  writeFileSync(join(mpDir, 'huge.bin'), 'x'.repeat(600 * 1024), 'utf8');
+  try {
+    const result = importPlugin({ claudeRoot, llmidePluginDir: llmideDir, source: 'marketplace', name: 'symplug' });
+    assert.equal(result.ok, true, `import failed: ${result.error || ''}`);
+    const target = join(llmideDir, 'claude-symplug');
+    assert.ok(!existsSync(join(target, 'skills', 'leak.md')), 'symlink must not be copied');
+    assert.ok(!existsSync(join(target, 'huge.bin')), 'oversized file must not be copied');
+    assert.ok(existsSync(join(target, 'skills', 'ok', 'SKILL.md')));
+    assert.ok(result.warnings?.some((w) => w.includes('leak.md')), `warnings: ${JSON.stringify(result.warnings)}`);
+  } finally {
+    rmSync(claudeRoot, { recursive: true, force: true });
+    rmSync(llmideDir, { recursive: true, force: true });
   }
 });

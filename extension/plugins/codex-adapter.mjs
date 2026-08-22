@@ -20,12 +20,12 @@
 // capability.
 import { join } from 'node:path';
 import os from 'node:os';
-import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { parseTomlLite } from '../core/toml-lite.mjs';
 import { defaultPluginDir } from './loader.mjs';
 import {
   PLUGIN_NAME_RE, semverNewer, copySkills, copyCmds, countSkills, countCommands,
-  listImportedNames, getImportedVersion,
+  listImportedNames, getImportedVersion, copyPluginTree, findVendorManifestRel,
 } from './vendor-import-shared.mjs';
 
 export { listImportedNames, getImportedVersion };
@@ -158,6 +158,56 @@ export function importPlugin(opts) {
 
   const mnName = name.startsWith('codex-') ? name : `codex-${name}`;
   const targetDir = join(mnDir, mnName);
+  if (!PLUGIN_NAME_RE.test(mnName)) {
+    return { ok: false, error: `namespaced name '${mnName}' is too long to install` };
+  }
+
+  // Manifest-bearing source: copy the tree whole — llm-ide's loader reads
+  // `.codex-plugin/plugin.json` natively, so there is no generated manifest
+  // and no lossy flattening. In practice every real Codex plugin takes this
+  // path; the adapted path below survives for a manifest-less directory.
+  const vendorRel = findVendorManifestRel(sourceDir);
+  if (vendorRel) {
+    let vendorManifest;
+    try { vendorManifest = JSON.parse(readFileSync(join(sourceDir, vendorRel), 'utf8')); }
+    catch { return { ok: false, error: 'vendor plugin.json is not valid JSON' }; }
+    if (typeof vendorManifest.name !== 'string' || !PLUGIN_NAME_RE.test(vendorManifest.name)) {
+      return { ok: false, error: `vendor manifest name invalid (got ${JSON.stringify(vendorManifest.name)})` };
+    }
+    // Codex versions are calendar-ish (26.521.10419) but still dotted
+    // integers, so the same semver-ish gate applies.
+    const vendorVersion = (typeof vendorManifest.version === 'string' && /^\d+\.\d+\.\d+/.test(vendorManifest.version))
+      ? vendorManifest.version : '0.0.0';
+    rmSync(targetDir, { recursive: true, force: true });
+    let copied;
+    try { copied = copyPluginTree(sourceDir, targetDir); }
+    catch (err) {
+      rmSync(targetDir, { recursive: true, force: true });
+      return { ok: false, error: `plugin tree not copied: ${err.message}` };
+    }
+    // Only the name is rewritten — to match the namespaced directory, which is
+    // the identity enable-state and update-checking key off.
+    writeFileSync(join(targetDir, vendorRel),
+      JSON.stringify({ ...vendorManifest, name: mnName, version: vendorVersion }, null, 2), 'utf8');
+    return {
+      ok: true,
+      warnings: copied.skipped.length > 0 ? copied.skipped : undefined,
+      plugin: {
+        name: mnName,
+        version: vendorVersion,
+        displayName: vendorManifest.displayName || name,
+        description: typeof vendorManifest.description === 'string'
+          ? vendorManifest.description.slice(0, 200)
+          : `Imported from Codex (${source})`,
+        author: typeof vendorManifest.author === 'string'
+          ? vendorManifest.author
+          : vendorManifest.author?.name || 'OpenAI Codex',
+        skillCount: countSkills(join(targetDir, 'skills')),
+        commandCount: countCommands(join(targetDir, 'commands')),
+        origin: 'codex',
+      },
+    };
+  }
 
   const sourceManifest = readCodexManifest(sourceDir) || {};
   const version = typeof sourceManifest.version === 'string' ? sourceManifest.version : '0.0.0';
@@ -297,26 +347,44 @@ export function checkForUpdates(opts = {}) {
   const updates = [];
 
   for (const mnName of imported) {
-    const manifestPath = join(mnDir, mnName, 'plugin.json');
-    if (!existsSync(manifestPath)) continue;
-    let manifest;
-    try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')); } catch { continue; }
-    if (manifest.origin !== 'codex') continue;
+    // A whole-tree vendor copy has no root manifest and no `origin` marker —
+    // it IS codex-origin by construction. Its source name comes from the
+    // directory: as-is first, then with the namespace prefix stripped, since
+    // a plugin already called `codex-*` is never re-prefixed.
+    const vendorRel = findVendorManifestRel(join(mnDir, mnName));
+    let importedVersion;
+    let sourceNames;
+    if (vendorRel) {
+      try {
+        importedVersion = JSON.parse(readFileSync(join(mnDir, mnName, vendorRel), 'utf8')).version || '0.0.0';
+      } catch { continue; }
+      sourceNames = [mnName, mnName.replace(/^codex-/, '')];
+    } else {
+      const manifestPath = join(mnDir, mnName, 'plugin.json');
+      if (!existsSync(manifestPath)) continue;
+      let manifest;
+      try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')); } catch { continue; }
+      if (manifest.origin !== 'codex') continue;
+      importedVersion = manifest.version || '0.0.0';
+      sourceNames = [manifest.sourcePlugin || mnName.replace(/^codex-/, '')];
+    }
 
-    const sourceName = manifest.sourcePlugin || mnName.replace(/^codex-/, '');
-    const importedVersion = manifest.version || '0.0.0';
-
+    let found = false;
     for (const source of ['installed', 'marketplace']) {
-      const sourceDir = findCodexPlugin(codexRoot, source, sourceName);
-      if (!sourceDir) continue;
+      for (const sourceName of sourceNames) {
+        const sourceDir = findCodexPlugin(codexRoot, source, sourceName);
+        if (!sourceDir) continue;
+        found = true;
 
-      const sourceManifest = readCodexManifest(sourceDir);
-      const sourceVersion = typeof sourceManifest?.version === 'string' ? sourceManifest.version : '0.0.0';
+        const sourceManifest = readCodexManifest(sourceDir);
+        const sourceVersion = typeof sourceManifest?.version === 'string' ? sourceManifest.version : '0.0.0';
 
-      if (semverNewer(sourceVersion, importedVersion)) {
-        updates.push({ name: mnName, importedVersion, sourceVersion, source });
+        if (semverNewer(sourceVersion, importedVersion)) {
+          updates.push({ name: mnName, importedVersion, sourceVersion, source });
+        }
+        break;
       }
-      break;
+      if (found) break;
     }
   }
   return updates;
