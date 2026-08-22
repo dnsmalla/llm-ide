@@ -86,6 +86,9 @@ final class ShellState {
         case llmSource(String)
         /// An MCP-plugin row. String is the plugin's `id` field.
         case mcpPlugin(String)
+        /// A connector row. String is the catalog entry's `id` field
+        /// (e.g. "box", "slack", "gdrive").
+        case connector(String)
     }
 
     var section: Section = .explorer

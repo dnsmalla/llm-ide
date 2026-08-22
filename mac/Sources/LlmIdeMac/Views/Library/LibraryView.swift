@@ -73,11 +73,23 @@ struct LibraryView: View {
     /// anyone who had configured nothing, that meant no way in at all.
     @State private var mcpCatalog: [LlmIdeAPIClient.McpCatalogEntry] = []
     @State private var mcpAddSheet: McpAddSheet.Mode?
+    /// The connectors this user has selected, plus the whole curated catalog
+    /// behind the header's "Add from catalog…" sheet. Selection is what makes
+    /// a connector's card appear in Settings → Connections; Meetings and Email
+    /// are fixed defaults and are deliberately NOT in this catalog. Load
+    /// errors surface (like `mcpPlugins`, unlike `plugins`/`llmSources`) —
+    /// "nothing selected" and "the fetch failed" must not look identical.
+    /// See docs/superpowers/specs/2026-08-22-connector-catalog-design.md.
+    @State private var connectors: [ConnectorCatalogEntry] = []
+    @State private var connectorCatalog: [ConnectorCatalogEntry] = []
+    @State private var connectorsError: String?
+    @State private var connectorMessage: String?
+    @State private var showingConnectorAddSheet = false
     /// Persisted set of COLLAPSED section ids (comma-joined). Absence ⇒
     /// expanded. One uniform mechanism drives every section's chevron.
     /// Every section is seeded collapsed so the library opens in a clean,
     /// fully-closed state; the user expands what they need. Survives relaunch.
-    @AppStorage("library.collapsedSections") private var collapsedSectionsRaw = "meetings,code,data,notes,plugins,llmSources,mcpPlugins"
+    @AppStorage("library.collapsedSections") private var collapsedSectionsRaw = "meetings,code,data,notes,plugins,llmSources,mcpPlugins,connectors"
 
     var body: some View {
         Group {
@@ -98,6 +110,7 @@ struct LibraryView: View {
         .task { await loadPlugins() }
         .task { await loadLlmSources() }
         .task { await loadMcpPlugins() }
+        .task { await loadConnectors() }
         .task { await scanClaudeSources() }
         .task { await scanCodexSources() }
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
@@ -197,7 +210,7 @@ struct LibraryView: View {
             .buttonStyle(.plain)
             .disabled(refreshingAll)
             .accessibilityLabel("Refresh library")
-            .help("Reload files, plugins, LLM sources, and MCP plugins")
+            .help("Reload files, plugins, LLM sources, MCP plugins, and connectors")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
@@ -277,6 +290,15 @@ struct LibraryView: View {
             // Claude CLI's --mcp-config. See
             // docs/superpowers/specs/2026-08-12-mcp-plugin-runtime-design.md.
             mcpPluginsSection
+
+            // ── Connectors section ─────────────────────────────────────
+            // The curated inbound-source catalog (Box, Slack, Drive, …).
+            // Adding one here is what makes its card appear in
+            // Settings → Connections; Meetings and Email are fixed defaults
+            // and are not part of the catalog. Removing is visibility only —
+            // it never deletes fetched data. See
+            // docs/superpowers/specs/2026-08-22-connector-catalog-design.md.
+            connectorsSection
         }
         .listStyle(.inset)
         .animation(.easeInOut(duration: 0.2), value: vm.groupedRows.map(\.group))
@@ -684,6 +706,7 @@ struct LibraryView: View {
         await loadPlugins()
         await loadLlmSources()
         await loadMcpPlugins()
+        await loadConnectors()
     }
 
     private func load() async {
@@ -1210,6 +1233,124 @@ struct LibraryView: View {
             await refreshMcpPlugins()
         } catch {
             mcpPluginMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - Connectors
+
+    @ViewBuilder
+    private var connectorsSection: some View {
+        Section {
+            if sectionExpanded("connectors").wrappedValue {
+                if let connectorsError {
+                    HStack(spacing: 6) {
+                        Text(connectorsError).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        Button("Retry") { Task { await loadConnectors() } }
+                            .font(.caption)
+                    }
+                    .padding(.vertical, 2)
+                } else if connectors.isEmpty {
+                    emptyRow("No connectors added yet.", icon: "point.3.connected.trianglepath.dotted")
+                } else {
+                    ForEach(connectors) { entry in
+                        ConnectorRow(entry: entry)
+                            .tag(ShellState.LibrarySelection.connector(entry.id))
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    Task { await removeConnector(entry.id) }
+                                } label: { Label("Remove", systemImage: "trash") }
+                            }
+                    }
+                }
+            }
+        } header: {
+            connectorsHeader
+        }
+    }
+
+    /// Section header row with the "Add from catalog…" menu.
+    @ViewBuilder
+    private var connectorsHeader: some View {
+        unifiedSectionHeader(
+            id: "connectors", title: "Connectors",
+            icon: "point.3.connected.trianglepath.dotted",
+            tint: theme.current.info, count: connectors.count
+        ) {
+            Menu {
+                Button {
+                    showingConnectorAddSheet = true
+                } label: { Label("Add from catalog…", systemImage: "plus.circle") }
+                Divider()
+                Button {
+                    // The connectors' own configuration (credentials, folders)
+                    // lives in Settings → Connections; this section only
+                    // decides which cards appear there.
+                    shell.section = .settings
+                    NotificationCenter.default.post(name: .scrollSettingsToCard, object: "connections")
+                } label: { Label("Configure in Settings…", systemImage: "gearshape") }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.current.info.opacity(0.6))
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 20)
+            .help("Add a connector")
+        }
+        .alert("Connector", isPresented: Binding(
+            get: { connectorMessage != nil },
+            set: { if !$0 { connectorMessage = nil } }
+        )) {
+            Button("OK") { connectorMessage = nil }
+        } message: {
+            Text(connectorMessage ?? "")
+        }
+        .sheet(isPresented: $showingConnectorAddSheet) {
+            ConnectorAddSheet(catalog: connectorCatalog) { entry in
+                Task { await addConnector(entry) }
+            }
+            .environmentObject(theme)
+        }
+    }
+
+    /// Load the selected list AND the catalog. Selected-list failures surface
+    /// (see `connectors`' comment); a catalog failure is best-effort — it only
+    /// empties the add sheet, and reporting it over the selection list would
+    /// bury the more important state.
+    private func loadConnectors() async {
+        do {
+            connectors = try await api.listConnectors()
+            connectorsError = nil
+        } catch {
+            connectorsError = error.localizedDescription
+        }
+        connectorCatalog = (try? await api.fetchConnectorCatalog()) ?? connectorCatalog
+    }
+
+    private func addConnector(_ entry: ConnectorCatalogEntry) async {
+        do {
+            try await api.addConnector(id: entry.id)
+            connectorMessage = entry.pipelineReady
+                ? "Added \(entry.name). Configure it in Settings → Connections."
+                : "Added \(entry.name). Its fetch pipeline lands in an upcoming update — the selection is saved."
+            await loadConnectors()
+        } catch {
+            connectorMessage = error.localizedDescription
+        }
+    }
+
+    private func removeConnector(_ id: String) async {
+        do {
+            try await api.removeConnector(id: id)
+            if case .connector(let sel) = shell.librarySelection, sel == id {
+                shell.librarySelection = nil
+            }
+            await loadConnectors()
+        } catch {
+            connectorMessage = error.localizedDescription
         }
     }
 

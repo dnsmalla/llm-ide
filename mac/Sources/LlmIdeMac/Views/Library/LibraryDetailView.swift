@@ -7,6 +7,7 @@ import SwiftUI
 /// - Plugin selected      → PluginDetailView
 /// - LLM source selected  → LlmSourceDetailView
 /// - MCP plugin selected  → McpPluginDetailView
+/// - Connector selected   → ConnectorDetailView
 /// - Nothing selected     → placeholder
 struct LibraryDetailView: View {
     let api: LlmIdeAPIClient
@@ -28,6 +29,9 @@ struct LibraryDetailView: View {
 
         case .mcpPlugin(let id):
             McpPluginDetailView(api: api, pluginId: id)
+
+        case .connector(let id):
+            ConnectorDetailView(api: api, connectorId: id)
 
         case nil:
             ContentUnavailableView {
