@@ -55,11 +55,39 @@ final class LoopDefaultLoopsTests: XCTestCase {
 
     // MARK: - What each default loop contains
 
-    func testBareRepoGetsOnlyTheRegressionLoop() {
+    func testBareRepoGetsTheRegressionAndPlanLoops() {
         let loops = LoopStageDetector.defaultLoops(gitRoot: repo)
-        XCTAssertEqual(loops.map(\.defaultKey), [LoopDefaultLoopKey.regression])
+        XCTAssertEqual(loops.map(\.defaultKey),
+                       [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.plan])
         XCTAssertEqual(loops[0].name, "Regression")
         XCTAssertEqual(loops[0].config.stages.map(\.kind), [.regressionSweep])
+    }
+
+    /// The Plan loop is generate-only: two `.skill` stages with their skill ids
+    /// pinned AND a self-sufficient prompt each — the prompt must carry the
+    /// whole contract, because the central skills repo may not be installed on
+    /// the machine running the loop.
+    func testPlanLoopShipsTwoSkillStagesWithPinnedSkillsAndPrompts() {
+        let plan = LoopStageDetector.defaultLoops(gitRoot: repo)
+            .first { $0.defaultKey == LoopDefaultLoopKey.plan }
+        XCTAssertEqual(plan?.name, "Plan")
+        XCTAssertEqual(plan?.config.stages.map(\.kind), [.skill, .skill])
+        XCTAssertEqual(plan?.config.stages.compactMap(\.defaultKey),
+                       ["plan-structure-index", "plan-director"])
+        XCTAssertEqual(plan?.config.stages.compactMap(\.skillId),
+                       ["skills/plan-structure-index", "skills/plan-director"])
+        for stage in plan?.config.stages ?? [] {
+            XCTAssertFalse(stage.prompt?.isEmpty ?? true, "\(stage.name) has no prompt")
+            XCTAssertEqual(stage.targetPath, "llm-doc/plans")
+            XCTAssertFalse(stage.outputPath?.isEmpty ?? true, "\(stage.name) has no output path")
+        }
+    }
+
+    /// Like every default loop, Plan is gated on a resolvable working tree —
+    /// with no root there is nothing to index or consolidate against.
+    func testPlanLoopIsAbsentWithoutAGitRoot() {
+        XCTAssertNil(LoopStageDetector.defaultLoops(gitRoot: nil)
+            .first { $0.defaultKey == LoopDefaultLoopKey.plan })
     }
 
     /// The Regression loop's own process: check the faults, repair, then prove
@@ -90,12 +118,12 @@ final class LoopDefaultLoopsTests: XCTestCase {
             .first { $0.defaultKey == LoopDefaultLoopKey.systemCheck })
     }
 
-    func testLlmIdeLayoutGetsAllThreeLoopsWithTheChecksInSystemCheck() throws {
+    func testLlmIdeLayoutGetsAllFourLoopsWithTheChecksInSystemCheck() throws {
         try writeLlmIdeLayout()
         let loops = LoopStageDetector.defaultLoops(gitRoot: repo)
         XCTAssertEqual(loops.map(\.defaultKey),
                        [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.test,
-                        LoopDefaultLoopKey.systemCheck])
+                        LoopDefaultLoopKey.systemCheck, LoopDefaultLoopKey.plan])
         let systemCheck = loops.first { $0.defaultKey == LoopDefaultLoopKey.systemCheck }
         XCTAssertEqual(systemCheck?.name, "System Check")
         XCTAssertEqual(Set(systemCheck?.config.stages.compactMap(\.defaultKey) ?? []),
@@ -191,7 +219,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
         ])
     }
 
-    func testLegacyAggregateLoopSplitsIntoTheThreeDefaultLoops() throws {
+    func testLegacyAggregateLoopSplitsIntoTheDefaultLoops() throws {
         try writeLlmIdeLayout()
         let migrated = LoopStageDetector.ensureDefaultLoops(in: legacyAggregateStore(), gitRoot: repo)
         XCTAssertEqual(Set(migrated.loops.compactMap(\.defaultKey)),
@@ -231,7 +259,10 @@ final class LoopDefaultLoopsTests: XCTestCase {
             .config.stages.first { $0.defaultKey == "backend" }
         XCTAssertEqual(backend?.command, "cd extension && npm run test:fast")
         XCTAssertEqual(backend?.enabled, false)
-        for loop in migrated.loops {
+        // The Plan loop is excluded: no stage of it existed pre-split, so it is
+        // freshly CREATED (with the stock defaults), not migrated — there are
+        // no project budgets its stages "came from".
+        for loop in migrated.loops where loop.defaultKey != LoopDefaultLoopKey.plan {
             XCTAssertEqual(loop.config.maxIterations, 7, "\(loop.name) lost the project's budgets")
             XCTAssertEqual(loop.config.maxRepairsPerStage, 5)
         }
@@ -354,7 +385,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
         try writeLlmIdeLayout()
         var store = LoopStageDetector.ensureDefaultLoops(
             in: LoopEngineProjectStore(loops: []), gitRoot: repo)
-        XCTAssertEqual(store.scheduledLoops.count, 3)
+        XCTAssertEqual(store.scheduledLoops.count, 4)
 
         let testIndex = store.loops.firstIndex { $0.defaultKey == LoopDefaultLoopKey.test }!
         store.loops[testIndex].runsOnSchedule = false
@@ -364,7 +395,8 @@ final class LoopDefaultLoopsTests: XCTestCase {
             copy.enabled = false
             return copy
         }
-        XCTAssertEqual(store.scheduledLoops.map(\.defaultKey), [LoopDefaultLoopKey.regression])
+        XCTAssertEqual(store.scheduledLoops.map(\.defaultKey),
+                       [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.plan])
     }
 
     /// "Run just this stage" has to find the stage wherever it lives now — the

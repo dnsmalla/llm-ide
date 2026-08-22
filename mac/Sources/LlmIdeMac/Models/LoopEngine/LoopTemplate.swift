@@ -61,7 +61,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
     /// `testAndFix` is what a project with no template history should reach for.
     static let builtIns: [LoopTemplate] = [
         testAndFix, fullVerify, regressionOnly, testOnly, skillLoop, docsRefresh,
-        operationDiagnosis, systemCheck
+        operationDiagnosis, systemCheck, planDirector
     ]
 
     /// The default recipe, and the one that matches what the loop did before
@@ -243,5 +243,44 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                 LoopStage(name: "Regression", kind: .regressionSweep, order: 8)
             ],
             maxIterations: 8, consecutiveFailureStop: 2),
+        isBuiltIn: true)
+
+    /// The Plan default loop's recipe (`LoopDefaultLoopKey.plan`), offered as a
+    /// template too — same hand-kept-in-sync relationship `systemCheck` has
+    /// with its default loop. Two generate stages, no verify: refresh the
+    /// structure indexes, then consolidate every plan in `llm-doc/plans/` into
+    /// one hierarchical, line-limited master plan. Skill stages always
+    /// complete, so a run ends after one pass — `maxIterations` is a backstop,
+    /// not a budget.
+    static let planDirector = LoopTemplate(
+        id: UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000A9")!,
+        name: "Plan Director",
+        summary: "Rebuild the plan structure indexes, then consolidate every collected plan in "
+            + "llm-doc/plans/ into one hierarchical, line-limited master plan.",
+        config: LoopEngineConfig(
+            stages: [
+                LoopStage(name: "Structure Index", kind: .skill, order: 0,
+                          skillId: "skills/plan-structure-index",
+                          targetPath: "llm-doc/plans",
+                          outputPath: "llm-doc/plans/INDEX.md",
+                          prompt: "Refresh the plan structure index at llm-doc/plans/INDEX.md, creating it if "
+                              + "missing. The project root is the directory containing system/project.json — the "
+                              + "repo root itself, or two levels up when the repo is checked out under code/. "
+                              + "INDEX.md holds: a folder-structure index of the codebase, a file index and a "
+                              + "function index for the areas the collected plans touch, and a registry of every "
+                              + "file in llm-doc/plans/. Compare against the real tree and rewrite only the "
+                              + "sections that have drifted."),
+                LoopStage(name: "Plan Director", kind: .skill, order: 1,
+                          skillId: "skills/plan-director",
+                          targetPath: "llm-doc/plans",
+                          outputPath: "llm-doc/plans/PLAN.md",
+                          prompt: "Consolidate every plan in llm-doc/plans/ into the master plan "
+                              + "llm-doc/plans/PLAN.md: a hierarchy of areas → file plans → function plans, each "
+                              + "entry with a stable task ID, a status, and links back to its source plan and its "
+                              + "INDEX.md rows. Keep every plan file within the 250-line limit, splitting "
+                              + "oversized areas into llm-doc/plans/areas/. Preserve existing task IDs and "
+                              + "completed ticks; never delete or rewrite the source plans.")
+            ],
+            maxIterations: 2, consecutiveFailureStop: 2),
         isBuiltIn: true)
 }

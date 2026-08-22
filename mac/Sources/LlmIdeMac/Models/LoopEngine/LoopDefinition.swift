@@ -114,9 +114,13 @@ enum LoopDefaultLoopKey {
     /// llm-ide's per-subsystem checks (Skills, Plugins, Connectors, …), each a
     /// marker-gated stage inside this one loop.
     static let systemCheck = "system-check"
+    /// The plan-generation loop: refresh the structure indexes, then
+    /// consolidate every plan collected in `llm-doc/plans/` into one
+    /// hierarchical master plan (the "plan director").
+    static let plan = "plan"
 
     /// Creation/display order.
-    static let all = [regression, test, systemCheck]
+    static let all = [regression, test, systemCheck, plan]
 }
 
 /// A project's full set of Loops — the schema `system/loop.json` holds. See

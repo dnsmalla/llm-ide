@@ -6,12 +6,13 @@ import Foundation
 ///
 /// **Loops, not one pipeline.** The built-in checks used to be pinned stages
 /// inside a single loop, so one iteration re-ran all of them from the top and
-/// a Mac-app failure dragged the whole suite round again. They are now three
-/// independent loops (`LoopDefaultLoopKey`) — Regression, Test, System Check —
-/// each with its own process, budgets, and run history, each runnable on its
-/// own. `defaultStages(forLoop:gitRoot:)` is the authority for what each one
-/// contains; `ensureDefaultLoops` creates them, splits a pre-split project's
-/// aggregate loop into them, and is idempotent so it can run on every load.
+/// a Mac-app failure dragged the whole suite round again. They are now
+/// independent loops (`LoopDefaultLoopKey`) — Regression, Test, System Check,
+/// Plan — each with its own process, budgets, and run history, each runnable
+/// on its own. `defaultStages(forLoop:gitRoot:)` is the authority for what
+/// each one contains; `ensureDefaultLoops` creates them, splits a pre-split
+/// project's aggregate loop into them, and is idempotent so it can run on
+/// every load.
 ///
 /// Everything stays marker-gated: on a repo that is not llm-ide none of the
 /// System Check markers match, so that loop is never created, and a repo with
@@ -250,7 +251,49 @@ enum LoopStageDetector {
         "backend": LoopDefaultLoopKey.systemCheck,
         "shared-protocol": LoopDefaultLoopKey.systemCheck,
         "mac-app": LoopDefaultLoopKey.systemCheck,
+        "plan-structure-index": LoopDefaultLoopKey.plan,
+        "plan-director": LoopDefaultLoopKey.plan,
     ]
+
+    /// The Plan loop's two generate stages: refresh the structure indexes,
+    /// then consolidate every collected plan into the master plan. Both are
+    /// `.skill` stages, so they need no shell approval and never gate the run
+    /// — the loop exists to (re)generate `llm-doc/plans/INDEX.md` and
+    /// `PLAN.md`, not to verify anything.
+    ///
+    /// The `prompt` carries the whole contract on its own: the skill ids
+    /// (`skills/plan-structure-index`, `skills/plan-director`) deepen the
+    /// instructions when the central skills repo is installed, but a machine
+    /// without it must still produce the right artifacts. `targetPath` /
+    /// `outputPath` are the runner's usual text hints. Paths are written
+    /// relative to the PROJECT root (the folder holding `system/project.json`),
+    /// which in the clone-into-code layout is two levels above the git root —
+    /// the prompt tells the agent how to find it.
+    private static func planStages() -> [LoopStage] {
+        [
+            LoopStage(name: "Structure Index", kind: .skill, order: 0,
+                      skillId: "skills/plan-structure-index",
+                      targetPath: "llm-doc/plans",
+                      outputPath: "llm-doc/plans/INDEX.md",
+                      prompt: "Refresh the plan structure index at llm-doc/plans/INDEX.md, creating it if missing. "
+                          + "The project root is the directory containing system/project.json — the repo root itself, "
+                          + "or two levels up when the repo is checked out under code/. INDEX.md holds: a "
+                          + "folder-structure index of the codebase, a file index and a function index for the areas "
+                          + "the collected plans touch, and a registry of every file in llm-doc/plans/. Compare "
+                          + "against the real tree and rewrite only the sections that have drifted.",
+                      isDefault: true, defaultKey: "plan-structure-index"),
+            LoopStage(name: "Plan Director", kind: .skill, order: 1,
+                      skillId: "skills/plan-director",
+                      targetPath: "llm-doc/plans",
+                      outputPath: "llm-doc/plans/PLAN.md",
+                      prompt: "Consolidate every plan in llm-doc/plans/ into the master plan llm-doc/plans/PLAN.md: "
+                          + "a hierarchy of areas → file plans → function plans, each entry with a stable task ID, a "
+                          + "status, and links back to its source plan and its INDEX.md rows. Keep every plan file "
+                          + "within the 250-line limit, splitting oversized areas into llm-doc/plans/areas/. Preserve "
+                          + "existing task IDs and completed ticks; never delete or rewrite the source plans.",
+                      isDefault: true, defaultKey: "plan-director"),
+        ]
+    }
 
     /// The default stages of ONE default loop, in run order — the authority for
     /// what each built-in loop contains.
@@ -295,6 +338,16 @@ enum LoopStageDetector {
                 LoopStage(name: check.name, kind: .shellCommand, command: check.command,
                           order: index, isDefault: true, defaultKey: check.key)
             }
+        case LoopDefaultLoopKey.plan:
+            // Gated like Regression — on a resolvable working tree only. The
+            // loop is generic (index the structure, consolidate whatever plans
+            // exist, create the director when missing), so there is no
+            // llm-ide-style marker to require; `llm-doc/plans/` lives at the
+            // PROJECT root, which in the clone-into-code layout is not under
+            // `gitRoot` at all, so a filesystem marker here would wrongly
+            // suppress the loop for exactly that layout.
+            guard gitRoot != nil else { return [] }
+            return planStages()
         default:
             return []
         }
@@ -306,6 +359,7 @@ enum LoopStageDetector {
         case LoopDefaultLoopKey.regression: return "Regression"
         case LoopDefaultLoopKey.test: return "Test"
         case LoopDefaultLoopKey.systemCheck: return "System Check"
+        case LoopDefaultLoopKey.plan: return "Plan"
         default: return loopKey
         }
     }
@@ -326,6 +380,12 @@ enum LoopStageDetector {
         case LoopDefaultLoopKey.systemCheck:
             return ("Keep every subsystem of this project passing its own checks.",
                     "Every enabled subsystem check exits 0.")
+        case LoopDefaultLoopKey.plan:
+            return ("Keep one coherent, indexed master plan: every plan collected in llm-doc/plans/ "
+                        + "consolidated into a clear hierarchy whose structure indexes match the real codebase.",
+                    "llm-doc/plans/INDEX.md and PLAN.md exist, reference every active plan and the files and "
+                        + "functions it touches, match the current folder structure, and every plan file stays "
+                        + "within the 250-line limit.")
         default:
             return nil
         }

@@ -109,15 +109,20 @@ and reusable stage lists are what templates are for.
 ## Templates
 
 A `LoopTemplate` is a named stage list plus the budgets and policy it expects —
-the knowledge "this is what a docs-refresh loop looks like", made portable. Four
+the knowledge "this is what a docs-refresh loop looks like", made portable. Nine
 starters ship:
 
 | Template | Pipeline |
 |---|---|
 | **Test & Fix** | Regression → Test. The default, and what the loop did before templates existed |
 | **Full Verify** | Lint (advisory) → Test → Regression. The pre-merge gate |
+| **Regression** | The fault sweep alone |
+| **Test** | The test suite alone |
 | **Skill Loop** | Skill → Test → Regression. The generate-then-verify shape |
 | **Docs Refresh** | Skill → `make docs-check` |
+| **Operation App Diagnosis** | Server health → extension build → Mac build → Regression (llm-ide-specific) |
+| **System Check** | One stage per llm-ide subsystem (llm-ide-specific) |
+| **Plan Director** | Structure-index skill → plan-director skill: consolidate `llm-doc/plans/` into one indexed master plan |
 
 `LoopTemplateStore` holds these plus the user's own saved recipes. It is
 **app-wide, not per-project** — carrying a recipe to the next project is the whole
@@ -149,7 +154,7 @@ scope allowlist and run history, and each is run on its own — from its row in
 the Loop page's LOOPS pane, or by the scheduled Auto Task.
 
 This is the shape the built-in checks take. `LoopStageDetector.defaultLoops`
-seeds three, every one of them marker-gated so a repo that is not this one gets
+seeds four, every one of them gated so a repo that is not this one gets
 only what applies to it:
 
 | Loop | Its process | Created when |
@@ -157,6 +162,7 @@ only what applies to it:
 | **Regression** | The fault sweep, then the test suite — find the code behind a fault, repair it, then prove the repair did not break anything | always |
 | **Test** | The project's own test command, alone | test tooling is recognised (`swift test`, `npm test`, `make test`, `pytest`) |
 | **System Check** | One marker-gated stage per subsystem (Skills, Plugins, Connectors, GitHub dispatch, Backend, iOS ↔ Mac shared protocol, Mac app) | that subsystem's own files are present |
+| **Plan** | Two generate-only skill stages: refresh the structure indexes (`llm-doc/plans/INDEX.md` — folder, file, and function indexes), then consolidate every plan collected in `llm-doc/plans/` into the hierarchical, line-limited master plan `PLAN.md` (the `plan-structure-index` and `plan-director` central skills) | a git working tree resolves (like Regression — `llm-doc/` lives at the *project* root, which in the clone-into-code layout is not under the git root, so no filesystem marker would be safe) |
 
 They used to be pinned *stages inside one loop*, which meant one iteration
 re-ran all of them from the top: a failing Mac-app check dragged the fault
