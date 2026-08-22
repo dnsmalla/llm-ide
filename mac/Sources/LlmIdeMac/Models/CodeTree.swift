@@ -1,6 +1,7 @@
 import Foundation
 
-/// Single source of truth for nesting `.code` `LibraryItem`s into a directory
+/// Single source of truth for nesting tree-rendered `LibraryItem`s (the
+/// categories with `rendersNestedTree`: Code, LLM Doc) into a directory
 /// forest, keyed on each item's `treePath`. BOTH the Library/Regression tree
 /// (`CodeEntry`) and the CodeGraph/Review/Visual tree (`FSNode` in
 /// FileTreePanel) are built from this, so every view renders an identical
@@ -73,13 +74,18 @@ struct CodeEntry: Identifiable {
     let item: LibraryItem?      // non-nil → file leaf
     var children: [CodeEntry]?  // non-nil → directory
 
-    /// Build the top-level forest from a flat list of `.code` items, via the
-    /// shared `CodeTreeNester` (so this matches the FileTreePanel FSNode tree).
-    static func build(from items: [LibraryItem]) -> [CodeEntry] {
+    /// Build the top-level forest from a flat list of tree-rendered items,
+    /// via the shared `CodeTreeNester` (so this matches the FileTreePanel
+    /// FSNode tree). `idPrefix` namespaces directory ids per caller/category:
+    /// Code and LLM Doc trees render in the SAME Library List, so a repo and
+    /// a note-type dir sharing a name (e.g. "documents") must not produce
+    /// two rows with one Identifiable id. (File ids are absolute paths and
+    /// can't collide across categories.)
+    static func build(from items: [LibraryItem], idPrefix: String = "") -> [CodeEntry] {
         CodeTreeNester.forest(
             from: items,
             makeDir: { name, dirKey, _, children in
-                CodeEntry(id: "dir:" + dirKey, name: name, item: nil, children: children)
+                CodeEntry(id: "dir:" + idPrefix + dirKey, name: name, item: nil, children: children)
             },
             makeFile: { item in
                 CodeEntry(id: "file:" + item.path, name: item.name, item: item, children: nil)

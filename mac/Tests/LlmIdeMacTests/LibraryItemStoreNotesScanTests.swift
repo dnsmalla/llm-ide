@@ -35,13 +35,33 @@ struct LibraryItemStoreNotesScanTests {
         #expect(note.folderOrigin == "emails/2026/08")
     }
 
-    @Test("NoteService's index.json never surfaces as an LLM Doc item")
-    func indexJsonExcluded() throws {
+    @Test("NoteService's ROOT index.json never surfaces; a nested index.json is user data and stays visible")
+    func indexJsonExcludedAtRootOnly() throws {
         let root = try makeProject()
         defer { try? FileManager.default.removeItem(at: root) }
+        // NoteService only ever writes llm-doc/index.json; a nested one is
+        // somebody's data (e.g. an exported metadata file) — hiding it would
+        // make an Add File appear to silently fail.
+        try Data("{}".utf8).write(
+            to: root.appendingPathComponent("llm-doc/emails/2026/08/index.json"))
 
         let items = LibraryItemStore.performScan(root: root, externalFolders: [])
-        #expect(!items.contains { $0.name == "index.json" })
+        let indexItems = items.filter { $0.name == "index.json" }
+        #expect(indexItems.count == 1)
+        #expect(indexItems.first?.treePath == ["emails", "2026", "08"])
+    }
+
+    @Test("tree-entry directory ids are namespaced per category, so a CODE repo and an llm-doc dir sharing a name can't collide in one List")
+    func treeEntryIdsAreNamespaced() {
+        var code = LibraryItem(name: "a.swift", path: "/p/code/documents/a.swift", category: .code)
+        code.treePath = ["documents"]
+        var note = LibraryItem(name: "b.md", path: "/p/llm-doc/documents/b.md", category: .notes)
+        note.treePath = ["documents"]
+
+        let codeIds = CodeEntry.build(from: [code], idPrefix: "Code:").map(\.id)
+        let noteIds = CodeEntry.build(from: [note], idPrefix: "Notes:").map(\.id)
+        #expect(codeIds == ["dir:Code:documents"])
+        #expect(noteIds == ["dir:Notes:documents"])
     }
 
     @Test("a file directly in llm-doc/ stays a loose top-level item")

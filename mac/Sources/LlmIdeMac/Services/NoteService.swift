@@ -189,9 +189,14 @@ public final class NoteService: Sendable {
         notesRoot.appendingPathComponent("documents", isDirectory: true)
     }
 
+    /// Filename of the unified note index — app metadata, not a note. The
+    /// one spelling shared by `indexPath`, this class's directory scan, and
+    /// LibraryItemStore's llm-doc scan, so the skip rules can't drift.
+    public static let indexFileName = "index.json"
+
     /// Path to unified note index: notesRoot/index.json
     public var indexPath: URL {
-        notesRoot.appendingPathComponent("index.json")
+        notesRoot.appendingPathComponent(Self.indexFileName)
     }
 
     /// Get the appropriate subdirectory for a note type
@@ -391,7 +396,7 @@ public final class NoteService: Sendable {
 
             // Skip index.json, directories, and dotfiles — hidden markers
             // like the scaffolder's .gitkeep must never surface as notes.
-            if filename == "index.json" || filename.hasPrefix(".") {
+            if filename == Self.indexFileName || filename.hasPrefix(".") {
                 continue
             }
 

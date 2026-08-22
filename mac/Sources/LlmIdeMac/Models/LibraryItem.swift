@@ -5,16 +5,23 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     var path: String
     var category: Category
     var addedAt: Date = Date()
-    /// Non-nil when this file was imported as part of a folder import.
-    /// Stores the display name of the root folder so files can be grouped.
+    /// Group label for flat consumers (LibraryPicker, Doc Gen, category
+    /// trees); nil when the file sits directly in its scan root. What it
+    /// holds depends on the category: the immediate parent dir name (code /
+    /// data / meetings), the "/"-joined relative path (`.notes`, whose
+    /// <source>/<YYYY>/<MM>/ nesting makes a bare parent name meaningless),
+    /// or the imported root folder's display name (external folder imports).
     var folderOrigin: String? = nil
 
-    /// For `.code` items only: directory components from the CODE-section
-    /// root down to (not including) the file, used to build the nested code
-    /// tree. `nil` for every other category.
+    /// For categories with `rendersNestedTree` (Code, LLM Doc): directory
+    /// components from the category's scan root down to (not including) the
+    /// file, used to build the nested tree. `nil` for every other category —
+    /// so `treePath != nil` means "tree-rendered", NOT "is a code file";
+    /// guard on `category` when code-specific semantics are needed.
     ///
     /// e.g. `<repo>/Sources/App/Foo.swift` → `["InfiniteBrain","Sources","App"]`;
-    /// a file directly in the project's `code/` → `[]`.
+    /// `llm-doc/emails/2026/08/x.md` → `["emails","2026","08"]`;
+    /// a file directly in the scan root → `[]`.
     var treePath: [String]? = nil
 
     /// For `.meetings` items only: the `InputSource.id` this file belongs to
@@ -69,6 +76,14 @@ struct LibraryItem: Identifiable, Codable, Hashable {
             }
         }
 
+        /// Whether this category renders as a real nested directory tree
+        /// (built from `LibraryItem.treePath`) rather than a flat one-level
+        /// folder grouping. THE single answer to that question — the scan
+        /// (populate treePath), the Library sidebar, and FileTreePanel all
+        /// key off this, so the membership can't drift between them again.
+        /// llm-doc's canonical layout is <source>/<YYYY>/<MM>/ (NoteService),
+        /// which a flat grouping collapsed to a bare month ("08").
+        var rendersNestedTree: Bool { self == .code || self == .notes }
     }
 
     // Equality/identity by path (== `id`), consistent with the derived id.

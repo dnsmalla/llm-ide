@@ -327,13 +327,13 @@ struct LibraryView: View {
             // The "MEETINGS" folder is presented as SOURCES, split into
             // Meetings / Mail sub-groups (and, later, Slack).
             sourcesSection(category)
-        } else if category == .code || category == .notes {
+        } else if category.rendersNestedTree {
             // Code and LLM Doc render as real nested directory trees rather
             // than a flat one-level grouping — llm-doc's canonical layout is
             // <source>/<YYYY>/<MM>/*.md (NoteService.getMonthDir), and a flat
             // group keyed on the immediate parent collapsed that to a bare
             // month ("08").
-            codeTreeSection(category)
+            treeSection(category)
         } else {
             plainFileTreeSection(category)
         }
@@ -341,22 +341,22 @@ struct LibraryView: View {
 
     // MARK: - Nested tree sections (Code, LLM Doc)
 
-    /// Renders a category's items as a recursive directory tree (built from
-    /// `LibraryItem.treePath`) via `OutlineGroup`, which handles
-    /// expand/collapse and nesting for us. Each root shows its true subfolder
-    /// hierarchy; files reuse the standard row + selection tag.
-    /// Swipe-to-delete isn't offered here (OutlineGroup isn't a ForEach) —
-    /// acceptable since these files are in-place references/generated notes.
+    /// Renders a tree category's items as a recursive directory tree (the
+    /// store's memoized `treeEntries(for:)` forest) via `OutlineGroup`, which
+    /// handles expand/collapse and nesting for us. Each root shows its true
+    /// subfolder hierarchy; files reuse the standard row + selection tag —
+    /// including the context-menu Remove, which is the delete affordance
+    /// here (OutlineGroup isn't a ForEach, so there's no swipe-to-delete).
     @ViewBuilder
-    private func codeTreeSection(_ category: LibraryItem.Category) -> some View {
+    private func treeSection(_ category: LibraryItem.Category) -> some View {
         let items = itemStore.items(for: category)
         Section {
             if sectionExpanded(sectionId(category)).wrappedValue {
                 if items.isEmpty {
                     emptyRow("No \(category.sectionTitle.lowercased()) files yet")
                 } else {
-                    OutlineGroup(CodeEntry.build(from: items), children: \.children) { entry in
-                        codeEntryRow(entry, tint: theme.current.tint(for: category))
+                    OutlineGroup(itemStore.treeEntries(for: category), children: \.children) { entry in
+                        treeEntryRow(entry, tint: theme.current.tint(for: category))
                     }
                 }
             }
@@ -366,7 +366,7 @@ struct LibraryView: View {
     }
 
     @ViewBuilder
-    private func codeEntryRow(_ entry: CodeEntry, tint: Color) -> some View {
+    private func treeEntryRow(_ entry: CodeEntry, tint: Color) -> some View {
         if let item = entry.item {
             LibraryFileRow(item: item)
                 .tag(ShellState.LibrarySelection.file(item.url))
@@ -384,7 +384,9 @@ struct LibraryView: View {
         }
     }
 
-    /// Standard single-list file-tree section (Code / Data / Notes).
+    /// Standard single-list file-tree section. After the tree routing above,
+    /// DATA is the only category that reaches this — Code and LLM Doc render
+    /// via `treeSection`, Sources via `sourcesSection`.
     @ViewBuilder
     private func plainFileTreeSection(_ category: LibraryItem.Category) -> some View {
         let sectionItems = itemStore.items(for: category)
@@ -678,7 +680,12 @@ struct LibraryView: View {
         panel.prompt = "Add Folder"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         itemStore.addFolder(url: url, category: category)
-        expandedFolders.insert("\(category.rawValue):\(url.lastPathComponent)")
+        // Auto-expand the new group — only meaningful for the flat
+        // (plainFileTreeSection) categories; the nested trees keep their own
+        // ephemeral OutlineGroup state and never read these keys.
+        if !category.rendersNestedTree {
+            expandedFolders.insert("\(category.rawValue):\(url.lastPathComponent)")
+        }
     }
 
     // MARK: - Empty / error states

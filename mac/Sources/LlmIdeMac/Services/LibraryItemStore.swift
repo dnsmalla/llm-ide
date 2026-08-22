@@ -5,7 +5,28 @@ import os.log
 @MainActor
 @Observable
 final class LibraryItemStore {
-    private(set) var items: [LibraryItem] = []
+    private(set) var items: [LibraryItem] = [] {
+        didSet { treeEntriesCache.removeAll() }
+    }
+
+    /// Per-category nested forest for the tree-rendered sections (Code,
+    /// LLM Doc), memoized so LibraryView's frequent body re-evaluations
+    /// (plugin/connector polling, unrelated @State churn) don't re-derive an
+    /// O(N log N) forest per pass — only an actual `items` change does.
+    /// @ObservationIgnored: filling the cache from a view body must not
+    /// count as a state mutation during view update.
+    @ObservationIgnored private var treeEntriesCache: [LibraryItem.Category: [CodeEntry]] = [:]
+
+    /// The memoized `CodeEntry` forest for a tree-rendered category. Ids are
+    /// namespaced by category so a CODE repo and an llm-doc source dir with
+    /// the same name can't produce duplicate Identifiable ids in the one
+    /// Library List.
+    func treeEntries(for category: LibraryItem.Category) -> [CodeEntry] {
+        if let cached = treeEntriesCache[category] { return cached }
+        let built = CodeEntry.build(from: items(for: category), idPrefix: "\(category.rawValue):")
+        treeEntriesCache[category] = built
+        return built
+    }
 
     /// The active project's root.  When non-nil the store's `items` are a
     /// SCAN of the project's canonical subfolders plus any external
@@ -171,6 +192,9 @@ final class LibraryItemStore {
         var scanned: [LibraryItem] = []
         for (subfolder, category) in scanFolders {
             let folderURL = root.appendingPathComponent(subfolder, isDirectory: true)
+            // Loop-invariant: standardized once per subfolder, not per file —
+            // relativeDirComponents runs for every code + notes file.
+            let rootComps = folderURL.standardizedFileURL.pathComponents
             guard let enumerator = fm.enumerator(
                 at: folderURL,
                 includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .fileSizeKey],
@@ -189,18 +213,24 @@ final class LibraryItemStore {
                 if category == .code, !isCodeRelevant(url: fileURL) { continue }
                 // Skip partial-draft notes/transcripts and the reference template.
                 if name.hasSuffix(".partial.md") || name == "template.md" { continue }
-                // NoteService's index.json is app metadata, not a note — it
-                // must not surface as an LLM Doc item.
-                if category == .notes, name == "index.json" { continue }
+                let parentName = fileURL.deletingLastPathComponent().lastPathComponent
+                // NoteService's index at the llm-doc ROOT is app metadata, not
+                // a note — it must not surface as an LLM Doc item. Scoped to
+                // the top level (NoteService only ever writes it there): a
+                // nested <source>/<YYYY>/<MM>/index.json is somebody's data
+                // and stays visible. Case-insensitive to match the volume.
+                if category == .notes,
+                   name.caseInsensitiveCompare(NoteService.indexFileName) == .orderedSame,
+                   parentName == subfolder { continue }
                 var item = LibraryItem(name: name, path: fileURL.path, category: category)
                 item.sizeBytes = rv.fileSize
-                // Code and LLM Doc render as nested trees: record the
-                // directory path relative to the canonical subfolder (files at
-                // its top level get an empty path). For llm-doc that is
-                // `<source>/<YYYY>/<MM>` — NoteService's layout — so the
-                // sidebar shows the real hierarchy instead of a bare month.
-                if category == .code || category == .notes {
-                    item.treePath = relativeDirComponents(of: fileURL, under: folderURL)
+                // Tree categories (Code, LLM Doc) record the directory path
+                // relative to the canonical subfolder (files at its top level
+                // get an empty path). For llm-doc that is <source>/<YYYY>/<MM>
+                // — NoteService's layout — so the sidebar shows the real
+                // hierarchy instead of a bare month.
+                if category.rendersNestedTree {
+                    item.treePath = relativeDirComponents(of: fileURL, underComponents: rootComps)
                 }
                 // folderOrigin == nil when the file sits directly in the
                 // canonical subfolder; otherwise the group name flat consumers
@@ -208,11 +238,14 @@ final class LibraryItemStore {
                 // that's the full relative path — the immediate parent name
                 // alone ("08") is meaningless for the <source>/<YYYY>/<MM>/
                 // nesting. Code keeps the immediate-parent rule its existing
-                // consumers (ReviewView, agent context grouping) expect.
-                if category == .notes, let tp = item.treePath {
-                    item.folderOrigin = tp.isEmpty ? nil : tp.joined(separator: "/")
+                // consumers (ReviewView, agent context grouping) expect. If
+                // treePath resolution failed for a NESTED note (an empty path
+                // despite a non-root parent — e.g. a URL-scheme mismatch), the
+                // parent-name rule is the fallback so notes degrade to the old
+                // flat grouping rather than a sea of unlabeled loose rows.
+                if category == .notes, let tp = item.treePath, !tp.isEmpty {
+                    item.folderOrigin = tp.joined(separator: "/")
                 } else {
-                    let parentName = fileURL.deletingLastPathComponent().lastPathComponent
                     item.folderOrigin = (parentName == subfolder) ? nil : parentName
                 }
                 // Meetings and ingested email share the source/ folder;
@@ -361,7 +394,13 @@ final class LibraryItemStore {
     /// Returns `[]` when the file sits directly in `root`, and `[]` (not a
     /// crash) when `fileURL` isn't actually under `root`.
     nonisolated static func relativeDirComponents(of fileURL: URL, under root: URL) -> [String] {
-        let rootComps = root.standardizedFileURL.pathComponents
+        relativeDirComponents(of: fileURL, underComponents: root.standardizedFileURL.pathComponents)
+    }
+
+    /// Hot-loop variant: takes the root's already-standardized path
+    /// components so a per-subfolder scan standardizes the root once, not
+    /// once per file.
+    nonisolated static func relativeDirComponents(of fileURL: URL, underComponents rootComps: [String]) -> [String] {
         let fileComps = fileURL.standardizedFileURL.pathComponents
         guard fileComps.count > rootComps.count else { return [] }
         // Case-insensitive prefix match: FileManager.enumerator reports the

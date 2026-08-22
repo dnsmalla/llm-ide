@@ -477,9 +477,12 @@ struct FileTreePanel: View {
 
     private func buildTrees(for category: LibraryItem.Category) -> [FSNode] {
         let items = store.items(for: category)
-        // Code renders as a real nested hierarchy (one repo folder, no
-        // parent-name collisions); llm-doc/data keep the flat folder grouping.
-        return category == .code ? buildCodeTrees(items: items) : buildCategoryTrees(items: items)
+        // Code and llm-doc render as real nested hierarchies keyed on
+        // treePath (same forest the Library tab shows — llm-doc's layout is
+        // <source>/<YYYY>/<MM>/); data keeps the flat folder grouping.
+        return category.rendersNestedTree
+            ? buildCodeTrees(items: items)
+            : buildCategoryTrees(items: items)
     }
 
     // MARK: - File / folder pickers

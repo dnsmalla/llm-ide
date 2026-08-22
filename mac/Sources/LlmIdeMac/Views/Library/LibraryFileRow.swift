@@ -40,11 +40,15 @@ struct LibraryFileRow: View {
             }
         }
         .confirmationDialog("Remove \"\(item.name)\" from the library?", isPresented: $showRemoveConfirmation) {
-            Button("Remove", role: .destructive) {
+            Button("Delete", role: .destructive) {
                 store.remove(id: item.id)
             }
         } message: {
-            Text("The file will remain on disk but won't appear in the library.")
+            // Must match store.remove(id:)'s actual behavior: a file INSIDE
+            // the project is deleted from disk (items is a derived scan, so
+            // an in-memory removal would just be resurrected by the next
+            // rescan); external referenced files are never touched.
+            Text("The file will be deleted from the project folder. Files in external referenced folders are never deleted.")
         }
     }
 

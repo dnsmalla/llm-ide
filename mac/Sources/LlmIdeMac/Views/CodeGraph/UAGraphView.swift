@@ -1245,7 +1245,12 @@ struct UAGraphView: View {
         let selectedFiles: [URL]?
         if let item = selectedItem, item.category == .data || item.category == .notes {
             if let origin = item.folderOrigin {
-                selectedFiles = library.items.filter { $0.folderOrigin == origin }.map(\.url)
+                // Same category only: folderOrigin values are per-category
+                // labels (llm-doc/plans and data/plans both yield "plans"),
+                // so an unguarded match would chunk unrelated files.
+                selectedFiles = library.items
+                    .filter { $0.category == item.category && $0.folderOrigin == origin }
+                    .map(\.url)
             } else {
                 selectedFiles = [item.url]
             }
