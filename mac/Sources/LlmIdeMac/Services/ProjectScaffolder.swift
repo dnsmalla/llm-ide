@@ -37,7 +37,7 @@ enum ProjectScaffolder {
     static let requiredDirectories = [
         "source",
         "source/meetings", "source/emails", "source/documents",
-        "code", "data", "llm-doc", "templates",
+        "code", "data", "llm-doc", "llm-doc/plans", "templates",
         "system", "system/faults", "system/graph", "system/cache",
         ".claude",
     ]
