@@ -211,12 +211,28 @@ function parseSubagentFile(path) {
 
   const suspicious = scanForSuspiciousContent(body);
 
-  const allowedTools = Array.isArray(fm.allowed_tools)
-    ? fm.allowed_tools.filter((s) => typeof s === 'string' && /^[a-z][a-z0-9-]{0,40}$/.test(s))
+  // Tool list: the own format uses `allowed_tools` (a YAML list of lowercase
+  // ids). Vendor frontmatter (Claude Code / Codex) uses `tools` — a CSV string
+  // or a list of Capitalized names — normalized here: lowercased, and the
+  // charset widened to allow underscores (mcp__server__tool) up to 64 chars.
+  // `allowed_tools` wins when a plugin carries both.
+  let toolList = fm.allowed_tools;
+  if (toolList === undefined && fm.tools !== undefined) {
+    toolList = typeof fm.tools === 'string'
+      ? fm.tools.split(',').map((t) => t.trim()).filter(Boolean)
+      : fm.tools;
+  }
+  const allowedTools = Array.isArray(toolList)
+    ? toolList
+      .filter((t) => typeof t === 'string')
+      .map((t) => t.trim().toLowerCase())
+      .filter((t) => /^[a-z][a-z0-9_-]{0,63}$/.test(t))
     : [];
 
-  const maxIters = Number.isFinite(fm.maxIterations) && fm.maxIterations > 0
-    ? Math.min(fm.maxIterations, 5)
+  // Vendor `maxTurns` maps onto our maxIterations, same clamp.
+  const rawIters = fm.maxIterations ?? fm.maxTurns;
+  const maxIters = Number.isFinite(rawIters) && rawIters > 0
+    ? Math.min(rawIters, 5)
     : 3;
 
   // Optional sub-model override, e.g. `model: claude-haiku-4-5` to run

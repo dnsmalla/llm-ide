@@ -397,3 +397,70 @@ test('vendor: a skills subdirectory without SKILL.md is not a skill', () => {
   assert.equal(warnings.length, 0, `unexpected warnings: ${warnings.join(', ')}`);
   rmSync(root, { recursive: true, force: true });
 });
+
+test('vendor agent: Claude tools CSV + maxTurns map onto the subagent model', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'agents/researcher.md': `---
+description: Researches things
+tools: Read, Grep, mcp__web__fetch
+maxTurns: 8
+---
+You research.`,
+  });
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(warnings.length, 0, `unexpected warnings: ${warnings.join(', ')}`);
+  const sub = plugins.get('example')?.subagents.researcher;
+  assert.ok(sub);
+  assert.deepEqual(sub.allowedTools, ['read', 'grep', 'mcp__web__fetch']);
+  assert.equal(sub.maxIterations, 5, 'maxTurns clamps to the existing cap of 5');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor agent: tools as a YAML list also works; maxTurns absent defaults to 3', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'agents/researcher.md': `---
+description: Researches things
+tools: [Bash, WebSearch]
+---
+You research.`,
+  });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  const sub = plugins.get('example')?.subagents.researcher;
+  assert.deepEqual(sub.allowedTools, ['bash', 'websearch']);
+  assert.equal(sub.maxIterations, 3);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor agent: own-format allowed_tools keeps working unchanged', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'agents/s.md': `---
+description: x
+allowed_tools: [search-kb]
+maxIterations: 2
+---
+Body.`,
+  });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  const sub = plugins.get('example')?.subagents.s;
+  assert.deepEqual(sub.allowedTools, ['search-kb']);
+  assert.equal(sub.maxIterations, 2);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor agent: allowed_tools wins over tools when both are present', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'agents/s.md': `---
+description: x
+allowed_tools: [search-kb]
+tools: Read, Bash
+---
+Body.`,
+  });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  assert.deepEqual(plugins.get('example')?.subagents.s.allowedTools, ['search-kb']);
+  rmSync(root, { recursive: true, force: true });
+});
