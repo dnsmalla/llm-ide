@@ -66,7 +66,7 @@ final class SourceConnector: InputSource {
         let inboxRoot = ctx.sourceConnectorRoot.appendingPathComponent(NoteType(manifest.noteType).directoryName, isDirectory: true)
         for item in batch.items {
             let headers = resolveHeaders(from: item.fields)
-            let slug = InboxStore.slugify(item.fields.values.first ?? manifest.id)
+            let slug = Self.rawSlug(for: item.fields, fallbackId: manifest.id)
             do {
                 _ = try InboxStore(root: inboxRoot).write(headers: headers, body: item.body, slug: slug)
             } catch {
@@ -97,6 +97,30 @@ final class SourceConnector: InputSource {
         }
         if processed == 0 { return .none }
         return .imported(processed, moreAvailable: batch.overCap, oversize: 0)
+    }
+
+    /// Slug for one item's raw filename (`<yyyy-MM-dd-HHmmss>-<slug>.txt`).
+    ///
+    /// Two things used to make a whole batch collapse onto one filename, each
+    /// item silently overwriting the previous one and then being marked seen:
+    ///   * the slug came from `fields.values.first`, and `Dictionary` iteration
+    ///     order is arbitrary — it picked a different field per item and per
+    ///     run, so even the same item got a different name on a re-fetch;
+    ///   * the MCP item mapper gives every item on a board the same
+    ///     Title/Board/ItemType and stamps `now` for anything with no date, so
+    ///     the timestamp half does not disambiguate either.
+    ///
+    /// `ItemId` is unique per item and is injected by every MCP connector, so
+    /// it is appended when present. Sources without one (Slack-shaped fields)
+    /// keep a field-value slug — now picked deterministically by sorted key —
+    /// and rely on `InboxStore` refusing to clobber on a collision.
+    nonisolated static func rawSlug(for fields: [String: String], fallbackId: String) -> String {
+        let base = fields.sorted { $0.key < $1.key }
+            .first { !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }?.value
+            ?? fallbackId
+        let itemId = fields["ItemId"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !itemId.isEmpty, itemId != base else { return InboxStore.slugify(base) }
+        return "\(InboxStore.slugify(base))-\(InboxStore.slugify(itemId))"
     }
 
     /// Applies the manifest's rawHeaders mapping (e.g. "Channel": "$Channel")
