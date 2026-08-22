@@ -281,11 +281,19 @@ function parseCommandFile(path) {
 
   const suspicious = scanForSuspiciousContent(parsed.body);
 
+  // Vendor command bodies (Claude Code / Codex) use `$ARGUMENTS` for
+  // "everything the user typed after the trigger" — exactly our `{{_rest}}`
+  // semantics, so translate at parse time and let expandSlashCommand do the
+  // rest. `argument-hint` is display-only; fold it into the description.
+  const template = parsed.body.trim().replace(/\$ARGUMENTS\b/g, '{{_rest}}');
+  const hint = typeof fm['argument-hint'] === 'string' ? fm['argument-hint'].slice(0, 80) : '';
+  const baseDescription = typeof fm.description === 'string' ? fm.description.slice(0, 200) : '';
+
   return {
     command: {
-      description: typeof fm.description === 'string' ? fm.description.slice(0, 200) : '',
+      description: hint ? `${baseDescription} (args: ${hint})`.slice(0, 240) : baseDescription,
       args: cleanArgs,
-      template: parsed.body.trim(),
+      template,
     },
     suspicious,
   };

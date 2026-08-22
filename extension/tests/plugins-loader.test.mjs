@@ -464,3 +464,30 @@ Body.`,
   assert.deepEqual(plugins.get('example')?.subagents.s.allowedTools, ['search-kb']);
   rmSync(root, { recursive: true, force: true });
 });
+
+test('vendor command: $ARGUMENTS maps to {{_rest}} expansion', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'commands/review.md': `---\ndescription: Review a PR\nargument-hint: <pr-number>\n---\nReview $ARGUMENTS carefully.`,
+  });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  const cmd = plugins.get('example')?.commands.review;
+  assert.ok(cmd);
+  assert.match(cmd.description, /\(args: <pr-number>\)/);
+  const expanded = expandSlashCommand('/review 1234', new Map([['review', cmd]]));
+  assert.match(expanded.prompt, /Review 1234 carefully\.$/);
+  assert.doesNotMatch(expanded.prompt, /\$ARGUMENTS|\{\{_rest\}\}/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('own-format {{arg}} substitution is untouched', () => {
+  const root = newRoot();
+  plugin(root, 'example', validManifest, {
+    'commands/summary.md': `---\ndescription: Summarize\nargs:\n  repo:\n    type: string\n    required: true\n---\nSummarize {{repo}}.`,
+  });
+  const { plugins } = loadPlugins({ pluginDir: root });
+  const expanded = expandSlashCommand('/summary repo=foo',
+    new Map([['summary', plugins.get('example').commands.summary]]));
+  assert.match(expanded.prompt, /Summarize foo\./);
+  rmSync(root, { recursive: true, force: true });
+});
