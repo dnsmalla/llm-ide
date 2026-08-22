@@ -34,6 +34,14 @@ let package = Package(
                 .copy("Resources/highlight.min.js"),
                 .copy("Resources/atom-one-dark.min.css"),
                 .copy("Resources/atom-one-light.min.css"),
+                // Directory copy: the Source Connector manifest engine reads
+                // `source_connectors/*.json` as a directory, not by filename.
+                // Required even though Scripts/build.sh already rsyncs
+                // Sources/LlmIdeMac/Resources/ into the .app — without the
+                // declaration SwiftPM warns about unhandled files, and
+                // Bundle.module (the only bundle `swift test` can see) would
+                // not carry the manifests.
+                .copy("Resources/source_connectors"),
             ],
             linkerSettings: [
                 .linkedLibrary("sqlite3")

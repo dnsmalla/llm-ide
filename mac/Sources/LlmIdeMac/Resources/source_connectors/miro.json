@@ -1,0 +1,28 @@
+{
+  "id": "miro",
+  "displayName": "Miro",
+  "icon": "square.grid.3x3",
+  "emptyText": "No Miro board items yet",
+  "platforms": ["miro"],
+  "mode": "fetch",
+  "inboxFolder": "MiroInbox",
+  "noteType": "miro",
+  "endpoints": {
+    "test": "/kb/mcp-connector/test",
+    "fetch": "/kb/mcp-connector/fetch",
+    "seen": "/kb/mcp-connector/seen",
+    "classify": "/kb/mcp-connector/classify"
+  },
+  "adapter": "McpConnectorAdapter",
+  "configFields": [],
+  "rawHeaders": {
+    "Subject": "$Title",
+    "Board": "$Board",
+    "ItemType": "$ItemType",
+    "ItemId": "$ItemId",
+    "Date": "$Date",
+    "Link": "$Link",
+    "Part": "$Part"
+  },
+  "noiseFilter": { "minLength": 3, "skipEmojiOnly": true }
+}

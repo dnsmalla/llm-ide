@@ -1,0 +1,28 @@
+{
+  "id": "gcal",
+  "displayName": "Google Calendar",
+  "icon": "calendar",
+  "emptyText": "No Google Calendar events yet",
+  "platforms": ["gcal"],
+  "mode": "fetch",
+  "inboxFolder": "GCalInbox",
+  "noteType": "gcal",
+  "endpoints": {
+    "test": "/kb/mcp-connector/test",
+    "fetch": "/kb/mcp-connector/fetch",
+    "seen": "/kb/mcp-connector/seen",
+    "classify": "/kb/mcp-connector/classify"
+  },
+  "adapter": "McpConnectorAdapter",
+  "configFields": [],
+  "rawHeaders": {
+    "Subject": "$Title",
+    "Board": "$Board",
+    "ItemType": "$ItemType",
+    "ItemId": "$ItemId",
+    "Date": "$Date",
+    "Link": "$Link",
+    "Part": "$Part"
+  },
+  "noiseFilter": { "minLength": 3, "skipEmojiOnly": true }
+}

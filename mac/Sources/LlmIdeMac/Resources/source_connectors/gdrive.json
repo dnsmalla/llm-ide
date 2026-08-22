@@ -1,0 +1,28 @@
+{
+  "id": "gdrive",
+  "displayName": "Google Drive",
+  "icon": "externaldrive.fill.badge.icloud",
+  "emptyText": "No Google Drive files yet",
+  "platforms": ["gdrive"],
+  "mode": "fetch",
+  "inboxFolder": "GDriveInbox",
+  "noteType": "gdrive",
+  "endpoints": {
+    "test": "/kb/mcp-connector/test",
+    "fetch": "/kb/mcp-connector/fetch",
+    "seen": "/kb/mcp-connector/seen",
+    "classify": "/kb/mcp-connector/classify"
+  },
+  "adapter": "McpConnectorAdapter",
+  "configFields": [],
+  "rawHeaders": {
+    "Subject": "$Title",
+    "Board": "$Board",
+    "ItemType": "$ItemType",
+    "ItemId": "$ItemId",
+    "Date": "$Date",
+    "Link": "$Link",
+    "Part": "$Part"
+  },
+  "noiseFilter": { "minLength": 3, "skipEmojiOnly": true }
+}

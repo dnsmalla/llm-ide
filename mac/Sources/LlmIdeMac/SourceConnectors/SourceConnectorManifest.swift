@@ -107,22 +107,31 @@ struct SourceConnectorManifest: Codable, Equatable {
         manifests.filter { !reservedNoteTypes.contains($0.noteType) }
     }
 
-    /// Loads every bundled `Resources/source_connectors/*.json`. Returns an
-    /// empty array if the resource directory is absent (Plan A ships no
-    /// manifests; Plan B adds email.json + slack.json).
+    /// Loads every bundled `Resources/source_connectors/*.json`, id-sorted,
+    /// with reserved-noteType manifests dropped.
+    ///
+    /// Searches `Bundle.main` then `Bundle.module`, because the two differ and
+    /// both matter:
+    ///   * Packaged app — `Scripts/build.sh` rsyncs `Sources/LlmIdeMac/Resources/`
+    ///     into `Contents/Resources/`, so `Bundle.main` finds them.
+    ///   * `swift test` — `Bundle.main` is the xctest runner and finds nothing;
+    ///     only `Bundle.module` carries the SwiftPM-declared resources.
+    /// Without the fallback the shipped JSON is parsed by no test at all, and a
+    /// typo in a manifest ships silently as a missing connector.
     static func loadBundled() -> [SourceConnectorManifest] {
-        guard let dir = Bundle.main.url(forResource: "source_connectors", withExtension: nil),
-              let urls = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else {
-            return []
-        }
-        return droppingReservedNoteTypes(
-            urls
+        for bundle in [Bundle.main, Bundle.module] {
+            guard let dir = bundle.url(forResource: "source_connectors", withExtension: nil),
+                  let urls = try? FileManager.default.contentsOfDirectory(
+                      at: dir, includingPropertiesForKeys: nil) else { continue }
+            let loaded = urls
                 .filter { $0.pathExtension.lowercased() == "json" }
-                .compactMap { url in
+                .compactMap { url -> SourceConnectorManifest? in
                     guard let data = try? Data(contentsOf: url) else { return nil }
                     return try? JSONDecoder().decode(SourceConnectorManifest.self, from: data)
                 }
-        )
-        .sorted { $0.id < $1.id }
+            if loaded.isEmpty { continue }
+            return droppingReservedNoteTypes(loaded).sorted { $0.id < $1.id }
+        }
+        return []
     }
 }
