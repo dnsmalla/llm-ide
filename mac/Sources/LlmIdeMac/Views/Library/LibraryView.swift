@@ -45,6 +45,10 @@ struct LibraryView: View {
     @State private var showingClaudeImportSheet = false
     @State private var showingCodexImportSheet = false
     @State private var pluginInstallMessage: String?
+    /// Updates available for imported vendor plugins. The server has reported
+    /// these since the bridge shipped; nothing ever asked for them until now.
+    @State private var pluginUpdates: [PluginUpdate] = []
+    @State private var updatingPlugin: String?
     /// Held when an install hits "already installed" (409): re-runs the same
     /// install with replace=true if the user confirms. Replaces the old
     /// "go to Settings → Plugins to overwrite" punt now that management is
@@ -111,6 +115,7 @@ struct LibraryView: View {
         .task { await loadLlmSources() }
         .task { await loadMcpPlugins() }
         .task { await loadConnectors() }
+        .task { await loadPluginUpdates() }
         // A detail pane can change what these rows should show (MCP consent /
         // enable / remove). It has no way to call back into this list, so it
         // bumps ShellState's token and the affected sections reload here.
@@ -776,24 +781,49 @@ struct LibraryView: View {
                 Button {
                     showingCodexImportSheet = true
                 } label: { Label("Import from Codex…", systemImage: "arrow.down.circle") }
+                if !pluginUpdates.isEmpty {
+                    Divider()
+                    Section("Updates available") {
+                        ForEach(pluginUpdates) { update in
+                            Button {
+                                Task { await applyPluginUpdate(update) }
+                            } label: {
+                                Label("\(update.name) → \(update.sourceVersion)",
+                                      systemImage: "arrow.triangle.2.circlepath")
+                            }
+                            .disabled(updatingPlugin != nil)
+                        }
+                        Button {
+                            Task { await applyAllPluginUpdates() }
+                        } label: { Label("Update all (\(pluginUpdates.count))", systemImage: "square.and.arrow.down.on.square") }
+                        .disabled(updatingPlugin != nil)
+                    }
+                }
                 Divider()
                 Button {
                     revealPluginsFolder()
                 } label: { Label("Reveal plugin folder", systemImage: "folder") }
                 Button {
+                    Task { await rescanVendorSources() }
+                } label: { Label("Check for plugin updates", systemImage: "arrow.clockwise.circle") }
+                Button {
                     Task { await reloadPlugins() }
                 } label: { Label("Reload from disk", systemImage: "arrow.clockwise") }
             } label: {
-                Image(systemName: "plus")
+                Image(systemName: pluginUpdates.isEmpty ? "plus" : "arrow.triangle.2.circlepath")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(theme.current.categoryTeal.opacity(0.6))
+                    .foregroundStyle(pluginUpdates.isEmpty
+                                     ? theme.current.categoryTeal.opacity(0.6)
+                                     : theme.current.categoryTeal)
                     .frame(width: 18, height: 18)
                     .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .frame(width: 20)
-            .help("Install or reload plugins")
+            .help(pluginUpdates.isEmpty
+                  ? "Install or reload plugins"
+                  : "\(pluginUpdates.count) plugin update\(pluginUpdates.count == 1 ? "" : "s") available")
         }
         .sheet(isPresented: $showingGitInstallSheet) {
             PluginGitInstallSheet { url, ref in
@@ -842,6 +872,87 @@ struct LibraryView: View {
     private func refreshPlugins() async {
         let resp = try? await api.listPlugins()
         self.plugins = resp?.plugins ?? []
+        await loadPluginUpdates()
+    }
+
+    /// Ask both bridges what the vendor sources now offer. Best-effort per
+    /// vendor: a machine with Claude Code but no Codex (or neither) must not
+    /// surface an error here — it simply has no updates.
+    private func loadPluginUpdates() async {
+        var found: [PluginUpdate] = []
+        found.append(contentsOf: (try? await api.claudePluginUpdates()) ?? [])
+        found.append(contentsOf: (try? await api.codexPluginUpdates()) ?? [])
+        pluginUpdates = found
+    }
+
+    /// Re-scan the vendors' own plugin directories, then re-check. This is the
+    /// only way a plugin added to Claude Code *after* llm-ide started becomes
+    /// visible without a restart.
+    private func rescanVendorSources() async {
+        let claude = try? await api.refreshClaudeSources()
+        let codex = try? await api.refreshCodexSources()
+        await loadPluginUpdates()
+        await scanClaudeSources()
+        await scanCodexSources()
+        // Split out of the message expression: inlining these sums plus two
+        // nested interpolations defeated the type-checker's time budget.
+        let claudeSeen: Int = (claude?.installed ?? 0) + (claude?.marketplace ?? 0)
+        let codexSeen: Int = (codex?.installed ?? 0) + (codex?.marketplace ?? 0)
+        let seen: Int = claudeSeen + codexSeen
+        let pendingCount: Int = pluginUpdates.count
+        if pendingCount == 0 {
+            let plural: String = seen == 1 ? "" : "s"
+            pluginInstallMessage = "Re-scanned \(seen) vendor plugin\(plural). Everything imported is up to date."
+        } else {
+            let plural: String = pendingCount == 1 ? "" : "s"
+            pluginInstallMessage = "\(pendingCount) update\(plural) available."
+        }
+    }
+
+    /// Re-import one plugin at the version its source now offers. Re-import IS
+    /// the update path — the same call the import sheet makes, which overwrites
+    /// the stored copy in place and keeps its enable state.
+    private func applyPluginUpdate(_ update: PluginUpdate) async {
+        updatingPlugin = update.name
+        defer { updatingPlugin = nil }
+        do {
+            if update.name.hasPrefix("codex-") {
+                _ = try await api.importCodexPlugin(name: update.sourcePluginName, source: update.source)
+            } else {
+                _ = try await api.importClaudePlugin(name: update.sourcePluginName, source: update.source)
+            }
+            await refreshPlugins()
+            pluginInstallMessage = "Updated \(update.name) to \(update.sourceVersion)."
+        } catch {
+            pluginInstallMessage = "Could not update \(update.name): \(error.localizedDescription)"
+        }
+    }
+
+    private func applyAllPluginUpdates() async {
+        let pending = pluginUpdates
+        var failures: [String] = []
+        for update in pending {
+            updatingPlugin = update.name
+            do {
+                if update.name.hasPrefix("codex-") {
+                    _ = try await api.importCodexPlugin(name: update.sourcePluginName, source: update.source)
+                } else {
+                    _ = try await api.importClaudePlugin(name: update.sourcePluginName, source: update.source)
+                }
+            } catch {
+                failures.append(update.name)
+            }
+        }
+        updatingPlugin = nil
+        await refreshPlugins()
+        if failures.isEmpty {
+            let plural: String = pending.count == 1 ? "" : "s"
+            pluginInstallMessage = "Updated \(pending.count) plugin\(plural)."
+        } else {
+            let names: String = failures.joined(separator: ", ")
+            let done: Int = pending.count - failures.count
+            pluginInstallMessage = "Updated \(done) of \(pending.count); failed: \(names)."
+        }
     }
 
     private func reloadPlugins() async {

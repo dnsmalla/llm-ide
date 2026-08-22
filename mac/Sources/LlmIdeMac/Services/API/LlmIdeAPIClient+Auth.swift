@@ -157,6 +157,62 @@ extension LlmIdeAPIClient {
                               authenticated: true)
     }
 
+    // MARK: - Vendor plugin updates
+    //
+    // Both bridges expose the same two shapes, so the client does too: refresh
+    // re-scans the vendor's own directories, updates compares what was
+    // imported against what the source now offers.
+
+    func refreshClaudeSources() async throws -> PluginRefreshResponse {
+        try await post("/auth/me/claude-plugins/refresh", body: EmptyBody(), authenticated: true)
+    }
+
+    func claudePluginUpdates() async throws -> [PluginUpdate] {
+        let response: PluginUpdatesResponse = try await get("/auth/me/claude-plugins/updates", authenticated: true)
+        return response.updates
+    }
+
+    func refreshCodexSources() async throws -> PluginRefreshResponse {
+        try await post("/auth/me/codex-plugins/refresh", body: EmptyBody(), authenticated: true)
+    }
+
+    func codexPluginUpdates() async throws -> [PluginUpdate] {
+        let response: PluginUpdatesResponse = try await get("/auth/me/codex-plugins/updates", authenticated: true)
+        return response.updates
+    }
+
+}
+
+/// One available update for an imported vendor plugin, as
+/// /auth/me/{claude,codex}-plugins/updates reports it. These endpoints existed
+/// server-side with no client at all — this is what the Plugins header badge
+/// counts and what one-click re-import acts on.
+struct PluginUpdate: Decodable, Identifiable, Equatable {
+    let name: String
+    let importedVersion: String
+    let sourceVersion: String
+    let source: String
+    var id: String { name }
+
+    /// The name to pass back to import: the stored plugin carries the vendor
+    /// namespace prefix (`claude-`/`codex-`), the SOURCE plugin does not.
+    var sourcePluginName: String {
+        for prefix in ["claude-", "codex-"] where name.hasPrefix(prefix) {
+            return String(name.dropFirst(prefix.count))
+        }
+        return name
+    }
+}
+
+struct PluginUpdatesResponse: Decodable {
+    let updates: [PluginUpdate]
+}
+
+/// What a vendor rescan found — reported back so the user learns the refresh
+/// did something, rather than watching an unchanged list.
+struct PluginRefreshResponse: Decodable {
+    let installed: Int
+    let marketplace: Int
 }
 
 struct PluginInstallResponse: Decodable {
