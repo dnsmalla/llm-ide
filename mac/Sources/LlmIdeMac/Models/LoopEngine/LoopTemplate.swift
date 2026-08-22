@@ -273,7 +273,10 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                               + "system/project.json: the repo root itself, or two levels up when the repo is "
                               + "checked out under code/. The index holds: a folder-structure index of the "
                               + "codebase, a file index and a function index for the areas the collected plans "
-                              + "touch, and a registry of every plan file in the Input directory."),
+                              + "touch, and a registry of every plan file in the Input directory. With no plans "
+                              + "yet, build the index from the code itself: entry points, each area's key modules "
+                              + "and public functions, and every refactor candidate (files over 500 lines), "
+                              + "marked status proposed."),
                 LoopStage(name: "Plan Director", kind: .skill, order: 1,
                           skillId: "skills/plan-director",
                           targetPath: "llm-doc/plans",
@@ -281,9 +284,13 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           prompt: "Consolidate every plan in the Input directory into the master plan at the "
                               + "Output path: a hierarchy of areas → file plans → function plans, each entry with "
                               + "a stable task ID, a status, and links back to its source plan and its "
-                              + "structure-index rows. Keep every generated plan file within the 250-line limit, "
-                              + "splitting oversized areas into an areas/ folder beside the Output file. Preserve "
-                              + "existing task IDs and completed ticks; never delete or rewrite the source plans.")
+                              + "structure-index rows. With no plans yet, derive the first master plan from the "
+                              + "code itself via the structure index: propose areas from real signals (oversized "
+                              + "files, missing tests, TODO/FIXME markers, layering violations), with concrete "
+                              + "function tasks marked proposed — future plans build on these indexes. Keep every "
+                              + "generated plan file within the 250-line limit, splitting oversized areas into an "
+                              + "areas/ folder beside the Output file. Preserve existing task IDs and completed "
+                              + "ticks; never delete or rewrite the source plans.")
             ],
             maxIterations: 2, consecutiveFailureStop: 2),
         isBuiltIn: true)
