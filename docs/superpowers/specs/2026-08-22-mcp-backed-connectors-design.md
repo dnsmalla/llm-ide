@@ -82,9 +82,11 @@ encrypted vault, per user, keyed by connector id:
 
 | Hook | Storage |
 |---|---|
-| `clientInformation()` / `saveClientInformation()` | `mcp.<id>.clientInformation` — pre-seeded from the operator's BYO client for Google; written by DCR for Miro |
-| `tokens()` / `saveTokens()` | `mcp.<id>.tokens` |
-| `codeVerifier()` / `saveCodeVerifier()` | `mcp.<id>.codeVerifier` |
+| `clientInformation()` / `saveClientInformation()` | `mcp.<id>-<tag>.clientInformation` — pre-seeded from the operator's BYO client for Google; written by DCR for Miro |
+| `tokens()` / `saveTokens()` | `mcp.<id>-<tag>.tokens` |
+| `codeVerifier()` / `saveCodeVerifier()` | `mcp.<id>-<tag>.codeVerifier` |
+| `state()` | returns our own state token, so the callback route can find the user |
+| `saveDiscoveryState()` | records the discovered issuer in `mcp.<id>.issuer` and rebinds `<tag>` |
 | `redirectToAuthorization(url)` | **does not redirect** — captures the URL for the start route to hand to the Mac app |
 | `redirectUrl` | `http://127.0.0.1:3456/auth/mcp-connector/callback` |
 
@@ -92,7 +94,19 @@ Google and Miro differ only in whether `clientInformation()` is pre-seeded. No p
 branching in the flow itself.
 
 Credentials MUST be keyed by issuer as well as connector id — the SDK docs are explicit that a
-client registered with one authorization server must never be reused against another.
+client registered with one authorization server must never be reused against another. The
+catch, found while prototyping: the transport calls `tokens()` to build the `Authorization`
+header **before any discovery has run**, so the key namespace has to be computable with zero
+network. Resolution is trust-on-first-use — `<tag>` is `sha256(boundIssuer)[0..12)`, where
+`boundIssuer` starts from the recorded `mcp.<id>.issuer` (falling back to the MCP server's own
+origin on a cold start) and is rebound by `saveDiscoveryState()`, which the SDK always calls
+before `clientInformation()`. When the issuer changes the tag changes, the old credentials
+become unreachable rather than being replayed, and the SDK re-registers. Cross-issuer reuse is
+impossible by construction rather than by convention. All four key shapes already satisfy
+`MCP_CREDENTIAL_KEY_RE` (`server/vault.mjs:176`) — no vault change is needed.
+
+`discoveryState()` is deliberately **not** implemented: caching discovery would require knowing
+the issuer before we know the issuer. Two extra well-known GETs on the cold path only.
 
 ### OAuth routes
 
@@ -103,8 +117,10 @@ status), which already stores a per-user token in the vault:
 - `GET  /auth/mcp-connector/callback` → `transport.finishAuth(searchParams)`, persist tokens
 - `GET  /auth/mcp-connector/status?id=` → `{ connected, account? }`
 
-`UnauthorizedError` on connect means re-auth: the SDK requires a **fresh transport** after
-`finishAuth` — a started transport cannot be restarted.
+`UnauthorizedError` on connect means re-auth. `finishAuth(code)` takes the **authorization code
+string** (not the callback's search params) and works on a never-started transport, which is
+exactly what the callback route needs. Verifying the result afterwards requires a **fresh
+transport** — a started one throws `already started`, confirmed by running it.
 
 ### `connectors/mcp-connector-defs.mjs`
 
