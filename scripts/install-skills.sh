@@ -52,7 +52,9 @@ bash "$KIT/scripts/install.sh" "$ROOT" "${args[@]}"
 # symlinks — the kit's install.sh would replace that with an empty symlink dir.
 echo "==> Installing claude skills"
 mkdir -p "$ROOT/.claude/skills"
-python3 - <<'PY'
+# NOTE: the heredoc runs in a child process, so KIT/ROOT must cross the
+# environment explicitly — without this the script resolved "None/registry.yaml".
+KIT="$KIT" ROOT="$ROOT" python3 - <<'PY'
 import os, yaml, pathlib
 
 kit = os.environ.get("KIT")
