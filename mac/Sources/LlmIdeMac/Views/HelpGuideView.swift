@@ -387,11 +387,11 @@ struct HelpGuideView: View {
             }
 
             helpCard("Project settings", icon: "folder.badge.gearshape") {
+                helpBullet("Paths — where your project files and notes are stored (also in Explorer → Project folders)")
                 helpBullet("Repositories — GitLab and GitHub tokens, saved repos, and automation allow-list")
             }
 
             helpCard("Elsewhere", icon: "arrow.turn.down.right") {
-                helpBullet("Explorer → Project folders — read-only layout, rebuild missing folders, notes index")
                 helpBullet("Loop → New project defaults — budgets and policy inherited by new projects")
             }
 

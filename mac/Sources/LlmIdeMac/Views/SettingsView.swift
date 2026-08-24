@@ -39,6 +39,7 @@ struct SettingsView: View {
                                 Text("Project")
                                     .font(Typography.title)
                                     .foregroundStyle(theme.current.textMuted)
+                                PathsSettingsSection()
                                 RepoSettingsSection(api: api)
                                 // Still here (not on a feature page) because its
                                 // auto-update cadence Stepper has no other home —
