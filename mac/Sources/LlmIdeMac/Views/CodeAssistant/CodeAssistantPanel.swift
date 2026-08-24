@@ -328,6 +328,10 @@ struct CodeAssistantPanel: View {
                 showModelPicker: showModelPicker,
                 pendingTool: engine.agent.pendingTool,
                 tasks: engine.agent.agentPendingTasks,
+                planExecution: engine.agent.planExecution,
+                onReviewPlanExecution: { reviewPlanExecutionChanges() },
+                onCommitPlanExecution: { Task { await commitPlanExecutionChanges() } },
+                onDismissPlanExecution: { dismissPlanExecution() },
                 diffPreview: pendingUpdateFileDiff,
                 draft: $draft,
                 expandedTurns: $expandedTurns,
@@ -341,12 +345,15 @@ struct CodeAssistantPanel: View {
                 onSavePlanFromMessage: { message in
                     Task { await savePlanFromMessage(message) }
                 },
-                onExecutePlan: { payload in executeSavedPlan(payload) },
-                onEditPlan: { payload in editSavedPlanInChat(payload) }
+                onExecutePlan: { messageId, payload in executeSavedPlan(payload, messageId: messageId) },
+                onEditPlan: { messageId, payload in editSavedPlanInChat(payload, messageId: messageId) }
             )
             Divider().background(theme.current.border)
             if !attachmentState.selectedSkills.isEmpty { skillBar }
-            if !attachmentState.attachments.isEmpty { attachmentBar }
+            if !attachmentState.attachments.isEmpty,
+               engine.agent.planExecution?.phase != .running {
+                attachmentBar
+            }
             if let attachNotice { attachNoticeBar(attachNotice) }
             if agentV2ProviderBlocked { agentV2ProviderHintBar }
             if let prompt = engine.agent.nudgePrompt, activeRepoRoot != nil {

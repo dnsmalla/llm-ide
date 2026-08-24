@@ -30,12 +30,14 @@ extension CodeAssistantPanel {
     /// the turn starts immediately (queued when one is already running, the
     /// same rule the composer applies).
     @MainActor
-    func executeSavedPlan(_ payload: ChatMessage.ToolResultPayload) {
+    func executeSavedPlan(_ payload: ChatMessage.ToolResultPayload, messageId: UUID) {
+        markPlanCardAction(.execute, for: messageId)
         // A parked legacy proposal (update-file/bash card) is a write the
         // agent is waiting on — firing a new turn now would abandon it
         // unanswered. (A parked v2 approval keeps `busy` true, so that case
         // lands on the enqueue branch below instead.)
         guard engine.agent.pendingTool == nil else {
+            clearPlanCardAction(for: messageId)
             attachNotice = "Resolve the pending action card first, then execute the plan."
             return
         }
@@ -55,6 +57,7 @@ extension CodeAssistantPanel {
             // carries the full plan text, so attach that instead of silently
             // dropping the user into Execute mode with nothing attached.
             guard Self.executePlanCanFire(attached: false, hasPlanContent: payload.planContent != nil) else {
+                clearPlanCardAction(for: messageId)
                 attachNotice = "Couldn't read the saved plan file — attach it manually or re-save the plan."
                 return
             }
@@ -83,10 +86,19 @@ extension CodeAssistantPanel {
         let outgoing = directives.isEmpty
             ? baseMessage
             : directives.joined(separator: "\n") + "\n\n" + baseMessage
+        beginPlanExecution(messageId: messageId, payload: payload, planContent: planContent)
+        let stepCount = engine.agent.planExecution?.steps.count ?? 0
+        let displayTitle = payload.planTitle ?? Self.planTitle(from: planContent)
+        // No count rather than a wrong one: an unparseable plan sent the
+        // generic execute message, so there is no step list to promise.
+        let stepSuffix = stepCount > 0 ? " (\(stepCount) step\(stepCount == 1 ? "" : "s"))" : ""
+        let userMeta = ChatMessage.Metadata(
+            planExecuteDisplay: "Execute plan: \(displayTitle)\(stepSuffix)"
+        )
         if engine.busy {
-            engine.enqueue(outgoing, skillIds: skillIds)
+            engine.enqueue(outgoing, skillIds: skillIds, userMetadata: userMeta)
         } else {
-            engine.startTurn(outgoing, skillIds: skillIds)
+            engine.startTurn(outgoing, skillIds: skillIds, userMetadata: userMeta)
         }
     }
 
@@ -245,7 +257,8 @@ extension CodeAssistantPanel {
     /// The seed names the card's own plan: a transcript can hold several plan
     /// cards, and a bare "Revise the plan:" would read as the latest one.
     @MainActor
-    func editSavedPlanInChat(_ payload: ChatMessage.ToolResultPayload) {
+    func editSavedPlanInChat(_ payload: ChatMessage.ToolResultPayload, messageId: UUID) {
+        markPlanCardAction(.edit, for: messageId)
         if modelState.selectedMode != .plan && modelState.selectedMode != .assistPlan {
             modelState.selectedMode = .plan
         }
@@ -301,6 +314,23 @@ extension CodeAssistantPanel {
             setPlanSavedFlag(nil, for: message.id)
             engine.error = failure
         }
+    }
+
+    @MainActor
+    private func markPlanCardAction(_ action: ChatMessage.PlanCardAction, for messageId: UUID) {
+        guard let idx = engine.messages.firstIndex(where: { $0.id == messageId }) else { return }
+        var meta = engine.messages[idx].metadata ?? ChatMessage.Metadata()
+        meta.planCardAction = action
+        engine.messages[idx].metadata = meta
+    }
+
+    /// Re-enable the card when execute could not start (blocked pending tool, unreadable plan).
+    @MainActor
+    private func clearPlanCardAction(for messageId: UUID) {
+        guard let idx = engine.messages.firstIndex(where: { $0.id == messageId }) else { return }
+        var meta = engine.messages[idx].metadata ?? ChatMessage.Metadata()
+        meta.planCardAction = nil
+        engine.messages[idx].metadata = meta
     }
 
     /// Read/write the per-message planSaved metadata flag in the LIVE

@@ -134,6 +134,85 @@ struct ChatEngineTurnTests {
         #expect(engine.queued.map(\.text) == ["ignored"])
     }
 
+    // MARK: - Plan execution tracker
+
+    private func runningTracker() -> CodeAssistantAgentState.PlanExecutionTracker {
+        CodeAssistantAgentState.PlanExecutionTracker(
+            planTitle: "Add dark mode",
+            steps: ["Add tokens", "Wire the toggle"],
+            planCardMessageId: UUID())
+    }
+
+    // A stop takes an early return that skips the tracker's only other exit
+    // from `.running`. Left running, its card has no Dismiss and the
+    // attachment bar stays hidden — the session is the only way out.
+    @Test("Stop mid-execution lands the plan tracker on .failed, not stuck .running")
+    func stopLandsPlanExecution() async {
+        let (engine, t) = makeEngine()
+        engine.agent.planExecution = runningTracker()
+        t.thrownError = CancellationError()
+        await engine.runTurn("execute the plan")
+        #expect(engine.agent.planExecution?.phase == .failed)
+    }
+
+    @Test("A real failure also lands the plan tracker rather than leaving it running")
+    func failureLandsPlanExecution() async {
+        let (engine, t) = makeEngine()
+        engine.agent.planExecution = runningTracker()
+        t.thrownError = APIError.agent(message: "down")
+        await engine.runTurn("execute the plan")
+        #expect(engine.agent.planExecution?.phase == .failed)
+    }
+
+    @Test("All tasks completed with no continue finishes the plan tracker")
+    func completedTasksFinishPlanExecution() async {
+        let (engine, t) = makeEngine()
+        engine.agent.planExecution = runningTracker()
+        t.result = .init(
+            reply: "done",
+            pendingTool: nil,
+            tasks: [AgentTask(id: "1", title: "Add tokens", status: .completed),
+                    AgentTask(id: "2", title: "Wire the toggle", status: .completed)],
+            continueNeeded: false, usage: nil, mode: nil)
+        await engine.runTurn("execute the plan")
+        #expect(engine.agent.planExecution?.phase == .finished)
+        #expect(engine.agent.planExecution?.lastTasks.count == 2)
+    }
+
+    @Test("A failed task stops the plan tracker even while other steps remain")
+    func failedTaskStopsPlanExecution() async {
+        let (engine, t) = makeEngine()
+        engine.agent.planExecution = runningTracker()
+        t.result = .init(
+            reply: "hit an error",
+            pendingTool: nil,
+            tasks: [AgentTask(id: "1", title: "Add tokens", status: .failed),
+                    AgentTask(id: "2", title: "Wire the toggle", status: .pending)],
+            continueNeeded: false, usage: nil, mode: nil)
+        await engine.runTurn("execute the plan")
+        #expect(engine.agent.planExecution?.phase == .failed)
+    }
+
+    @Test("Work still pending keeps the plan tracker running")
+    func pendingTasksKeepPlanExecutionRunning() async {
+        let (engine, t) = makeEngine()
+        engine.agent.planExecution = runningTracker()
+        // Pre-set the stop flag purely to keep this test hermetic: the tracker
+        // update runs before the auto-continue branch, so the phase assertion
+        // is unaffected, but no "Continue working…" turn gets scheduled onto
+        // the main queue to fire after the test has ended. (`onTurnStart`
+        // defaults to a no-op here, so nothing clears the flag.)
+        engine.agent.agentStopRequested = true
+        t.result = .init(
+            reply: "step 1 done",
+            pendingTool: nil,
+            tasks: [AgentTask(id: "1", title: "Add tokens", status: .completed),
+                    AgentTask(id: "2", title: "Wire the toggle", status: .pending)],
+            continueNeeded: true, usage: nil, mode: nil)
+        await engine.runTurn("execute the plan")
+        #expect(engine.agent.planExecution?.phase == .running)
+    }
+
     @Test("Announcements route through the injected hook, not NSAccessibility")
     func announcementHook() async {
         let (engine, t) = makeEngine()

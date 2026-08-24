@@ -186,6 +186,7 @@ extension ChatEngine {
         agent.nudgePrompt = nil
         agent.agentSessionId = UUID().uuidString
         agent.agentPendingTasks = []
+        agent.planExecution = nil
         agent.agentIsAutonomous = false
         agent.agentStopRequested = false
         sessionEpoch += 1

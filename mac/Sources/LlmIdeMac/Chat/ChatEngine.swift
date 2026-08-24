@@ -41,6 +41,7 @@ final class ChatEngine {
         let id = UUID()
         let text: String
         let skillIds: [String]
+        var userMetadata: ChatMessage.Metadata?
     }
 
     // MARK: - Observable state (moved 1:1 from the panel)
@@ -319,8 +320,8 @@ final class ChatEngine {
     // MARK: - Turn lifecycle
 
     /// Launch a turn as an unstructured Task whose handle Stop can cancel.
-    func startTurn(_ message: String, skillIds: [String] = []) {
-        runTask = Task { await runTurn(message, skillIds: skillIds) }
+    func startTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil) {
+        runTask = Task { await runTurn(message, skillIds: skillIds, userMetadata: userMetadata) }
     }
 
     /// Cancel the in-flight turn — panel-driven (`runTask`) or phone-driven
@@ -334,14 +335,14 @@ final class ChatEngine {
 
     /// Queue a message the user sent while a turn was running. Drained FIFO,
     /// one per turn, by `runTurn`'s tail.
-    func enqueue(_ text: String, skillIds: [String]) {
-        queued.append(.init(text: text, skillIds: skillIds))
+    func enqueue(_ text: String, skillIds: [String], userMetadata: ChatMessage.Metadata? = nil) {
+        queued.append(.init(text: text, skillIds: skillIds, userMetadata: userMetadata))
     }
 
     /// Run one user turn end-to-end. On completion it drains `queued` (if any)
     /// as a FRESH task — an unstructured `Task {}` does NOT inherit the current
     /// task's cancellation, so a stopped turn still lets the queued message run.
-    func runTurn(_ message: String, skillIds: [String] = []) async {
+    func runTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil) async {
         onTurnStart()
         onRecordPrompt(message)
         onNudge(message)
@@ -351,7 +352,7 @@ final class ChatEngine {
         // confirmers' synthetic acks): this one is known statically to be a
         // real human turn, so a prompt that happens to start with "(" must
         // not be classified as a tool result.
-        messages.append(ChatMessage(role: .user, content: message, status: .done, createdAt: Date()))
+        messages.append(ChatMessage(role: .user, content: message, status: .done, createdAt: Date(), metadata: userMetadata))
         busy = true
         statusText = ""
         error = nil
@@ -461,7 +462,7 @@ final class ChatEngine {
     func drainQueueOrRelease() {
         if !queued.isEmpty {
             let next = queued.removeFirst()
-            startTurn(next.text, skillIds: next.skillIds)
+            startTurn(next.text, skillIds: next.skillIds, userMetadata: next.userMetadata)
         } else {
             busy = false
             runTask = nil
@@ -701,11 +702,26 @@ final class ChatEngine {
             // flag stayed stuck `true` forever after a stop even though
             // `busy`/`runTask` correctly cleared via the caller's own tail.
             agent.agentIsAutonomous = false
+            // It must also LAND the plan-execute tracker. `updatePlanExecution`
+            // below is the only other exit from `.running`, and this return
+            // skips it — so a Stop (or any error path passing `stopped: true`)
+            // mid-execution left the running card spinning forever with no
+            // Dismiss button, the attachment bar hidden behind
+            // `phase != .running`, and the plan card stuck on "Executing plan…".
+            // `.failed` is the honest phase: its card reads "Plan execution
+            // stopped" and carries the Dismiss the running card doesn't have.
+            if var tracker = agent.planExecution, tracker.phase == .running {
+                tracker.phase = .failed
+                agent.planExecution = tracker
+            }
             return
         }
         self.agent.pendingTool = pendingTool
         if let newTasks = tasks {
             agent.agentPendingTasks = newTasks
+            updatePlanExecution(with: newTasks, continueNeeded: continueNeeded)
+        } else if continueNeeded == false {
+            updatePlanExecution(with: agent.agentPendingTasks, continueNeeded: continueNeeded)
         }
         if continueNeeded == true && !agent.agentStopRequested {
             agent.agentIsAutonomous = true
@@ -739,6 +755,20 @@ final class ChatEngine {
             agent.lastMemoryTokens = u.memoryApproxTokens
             agent.lastMemoryHasChat = u.memoryHasChatMemory ?? false
         }
+    }
+
+    /// Advance the plan-execute tracker when server tasks complete or fail.
+    private func updatePlanExecution(with tasks: [AgentTask], continueNeeded: Bool?) {
+        guard var tracker = agent.planExecution, tracker.phase == .running else { return }
+        if !tasks.isEmpty { tracker.lastTasks = tasks }
+        if tasks.contains(where: { $0.status == .failed }) {
+            tracker.phase = .failed
+        } else if !tasks.isEmpty,
+                  !tasks.contains(where: { $0.status == .pending || $0.status == .inProgress }),
+                  continueNeeded != true {
+            tracker.phase = .finished
+        }
+        agent.planExecution = tracker
     }
 
 }

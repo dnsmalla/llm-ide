@@ -8,6 +8,9 @@ import AppKit
 
 struct FileDetailView: View {
     let url: URL
+    /// When set (Library detail pane), shows a close control that clears the
+    /// selection so the file list can use the full detail column again.
+    var onClose: (() -> Void)? = nil
 
     var body: some View {
         Group {
@@ -22,19 +25,32 @@ struct FileDetailView: View {
         .id(url) // force view rebuild when url changes
         .navigationTitle(url.lastPathComponent)
         .navigationSubtitle(subtitle)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: { NSWorkspace.shared.open(url) }) {
-                    Label("Open in App", systemImage: "arrow.up.right.square")
+        .toolbar { toolbarContent }
+        .onExitCommand { onClose?() }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        if let onClose {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(action: onClose) {
+                    Label("Close", systemImage: "xmark")
                 }
-                .help("Open in default app")
+                .help("Close file (Esc)")
+                .keyboardShortcut(.escape, modifiers: [])
             }
-            ToolbarItem(placement: .primaryAction) {
-                Button(action: { NSWorkspace.shared.activateFileViewerSelecting([url]) }) {
-                    Label("Reveal", systemImage: "folder")
-                }
-                .help("Reveal in Finder")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button(action: { NSWorkspace.shared.open(url) }) {
+                Label("Open in App", systemImage: "arrow.up.right.square")
             }
+            .help("Open in default app")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button(action: { NSWorkspace.shared.activateFileViewerSelecting([url]) }) {
+                Label("Reveal", systemImage: "folder")
+            }
+            .help("Reveal in Finder")
         }
     }
 

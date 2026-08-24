@@ -193,6 +193,17 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         /// "Save Plan" affordance). Optional so pre-existing persisted
         /// sessions decode unchanged.
         var planSaved: Bool?
+        /// PlanSavedCard: which follow-up the user chose (retires Execute/Edit).
+        var planCardAction: PlanCardAction?
+        /// Compact label for a plan-execute user turn (hides the long prompt in chat).
+        var planExecuteDisplay: String?
+    }
+
+    /// User choice on a saved-plan card — persisted so reloaded sessions
+    /// cannot re-trigger Execute or Edit.
+    enum PlanCardAction: String, Codable, Equatable, Sendable {
+        case execute
+        case edit
     }
 
     struct RetryPayload: Codable, Equatable, Sendable {

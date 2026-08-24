@@ -19,7 +19,9 @@ struct LibraryDetailView: View {
             MeetingDetailView(api: api)
 
         case .file(let url):
-            FileDetailView(url: url)
+            FileDetailView(url: url) {
+                shell.librarySelection = nil
+            }
 
         case .plugin(let name):
             PluginDetailView(api: api, pluginName: name)

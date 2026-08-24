@@ -24,6 +24,27 @@ final class CodeAssistantAgentState {
     var agentIsAutonomous: Bool = false
     var agentStopRequested: Bool = false
     var agentPendingTasks: [AgentTask] = []
+    /// Active plan execute session — drives step-by-step progress UI and the
+    /// completion Review/Commit card. Cleared when the user dismisses or commits.
+    var planExecution: PlanExecutionTracker?
+
+    /// Tracks one saved-plan execute run in the chat UI.
+    struct PlanExecutionTracker: Equatable {
+        enum Phase: String, Equatable {
+            case running
+            case finished
+            case failed
+        }
+
+        var planTitle: String
+        var steps: [String]
+        var planCardMessageId: UUID
+        var phase: Phase = .running
+        /// Snapshot kept when execution ends (live `agentPendingTasks` clears on the next turn).
+        var lastTasks: [AgentTask] = []
+
+        var totalSteps: Int { max(steps.count, lastTasks.count) }
+    }
     /// Per-request project-memory overhead from the last turn, surfaced on the
     /// 🧠 button so the always-on memory block's token cost is visible.
     var lastMemoryTokens: Int?

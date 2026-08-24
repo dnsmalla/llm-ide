@@ -12,13 +12,20 @@ import AppKit
 /// saved session is identical to one that just arrived live.
 struct PlanSavedCard: View {
     let payload: ChatMessage.ToolResultPayload
-    /// Wraps `CodeAssistantPanel.executeSavedPlan(_:)`.
+    /// Persisted choice from the owning tool-result message, if any.
+    let actionTaken: ChatMessage.PlanCardAction?
+    /// When executing, the parsed step count (hides plan preview and file link).
+    let executingStepCount: Int?
+    /// Wraps `CodeAssistantPanel.executeSavedPlan(_:messageId:)`.
     let onExecute: () -> Void
-    /// Wraps `CodeAssistantPanel.editSavedPlanInChat()`.
+    /// Wraps `CodeAssistantPanel.editSavedPlanInChat(_:messageId:)`.
     let onEdit: () -> Void
 
     @EnvironmentObject var theme: ThemeStore
     @State private var expanded = false
+    /// Optimistic local lock — disables both buttons immediately on tap,
+    /// before the engine persists `planCardAction` on the message.
+    @State private var localAction: ChatMessage.PlanCardAction?
     /// Measured height of the expanded markdown web view (same self-sizing
     /// pattern as the assistant bubble, but state-local — this card doesn't
     /// need the engine's shared height store).
@@ -47,10 +54,12 @@ struct PlanSavedCard: View {
         return s
     }
 
+    private var isExecuting: Bool { effectiveAction == .execute }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
-            if !content.isEmpty { preview }
+            if !content.isEmpty, !isExecuting { preview }
             actions
         }
         .padding(12)
@@ -61,6 +70,16 @@ struct PlanSavedCard: View {
                 .stroke(theme.current.border, lineWidth: 1)
         )
         .cornerRadius(10)
+        .onAppear { syncLocalAction() }
+        .onChange(of: actionTaken) { _, _ in syncLocalAction() }
+    }
+
+    private var effectiveAction: ChatMessage.PlanCardAction? {
+        localAction ?? actionTaken
+    }
+
+    private func syncLocalAction() {
+        localAction = actionTaken
     }
 
     private var header: some View {
@@ -72,15 +91,21 @@ struct PlanSavedCard: View {
                 Text(payload.planTitle ?? "Plan saved")
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(2)
-                Text(pathCaption)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(theme.current.textMuted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
+                if isExecuting, let count = executingStepCount, count > 0 {
+                    Text("\(count) steps · executing one at a time")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.current.textMuted)
+                } else if !isExecuting {
+                    Text(pathCaption)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(theme.current.textMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
             }
             Spacer(minLength: 0)
-            if let path = payload.url {
+            if let path = payload.url, !isExecuting {
                 Button {
                     NSWorkspace.shared.open(URL(fileURLWithPath: path))
                 } label: {
@@ -128,23 +153,40 @@ struct PlanSavedCard: View {
         .foregroundStyle(theme.current.accent)
     }
 
+    @ViewBuilder
     private var actions: some View {
-        HStack(spacing: 8) {
-            Button(action: onExecute) {
-                Label("Execute plan", systemImage: "bolt.fill")
-                    .font(.system(size: 12, weight: .medium))
+        if let action = effectiveAction {
+            Label(
+                action == .execute ? "Executing plan…" : "Editing in chat…",
+                systemImage: action == .execute ? "bolt.fill" : "pencil"
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(theme.current.textMuted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(spacing: 8) {
+                Button {
+                    localAction = .execute
+                    onExecute()
+                } label: {
+                    Label("Execute plan", systemImage: "bolt.fill")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .help("Switch to Execute mode with this plan attached")
+                Button {
+                    localAction = .edit
+                    onEdit()
+                } label: {
+                    Label("Edit in chat", systemImage: "pencil")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Keep refining the plan in this chat")
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .help("Switch to Execute mode with this plan attached")
-            Button(action: onEdit) {
-                Label("Edit in chat", systemImage: "pencil")
-                    .font(.system(size: 12))
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help("Keep refining the plan in this chat")
-            Spacer(minLength: 0)
         }
     }
 }

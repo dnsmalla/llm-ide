@@ -23,9 +23,13 @@ struct ChatMessageList: View {
     let engine: ChatEngine
     let showModelPicker: Bool
     let pendingTool: PendingTool?
-    /// Current multi-step task list — `CodeAssistantAgentState.agentPendingTasks`,
-    /// rendered as a live checklist above the latest assistant turn.
+    /// Current multi-step task list — `CodeAssistantAgentState.agentPendingTasks`.
     let tasks: [AgentTask]
+    /// Active plan execute session, if any (step-by-step progress + finish card).
+    let planExecution: CodeAssistantAgentState.PlanExecutionTracker?
+    let onReviewPlanExecution: () -> Void
+    let onCommitPlanExecution: () -> Void
+    let onDismissPlanExecution: () -> Void
     /// Precomputed diff stats for the current `update-file` pendingTool, if
     /// any — see CodeAssistantPanel.pendingUpdateFileDiff.
     let diffPreview: DiffStats?
@@ -59,13 +63,13 @@ struct ChatMessageList: View {
     /// engine the plan IS the reply, so saving is a client-side action on
     /// that reply rather than a tool proposal the loop confirms).
     let onSavePlanFromMessage: (ChatMessage) -> Void
-    /// Wraps `CodeAssistantPanel.executeSavedPlan(_:)` — the PlanSavedCard's
+    /// Wraps `CodeAssistantPanel.executeSavedPlan(_:messageId:)` — the PlanSavedCard's
     /// "Execute plan" action (switch to Execute mode, attach the plan file).
-    let onExecutePlan: (ChatMessage.ToolResultPayload) -> Void
-    /// Wraps `CodeAssistantPanel.editSavedPlanInChat(_:)` — the card's "Edit
+    let onExecutePlan: (UUID, ChatMessage.ToolResultPayload) -> Void
+    /// Wraps `CodeAssistantPanel.editSavedPlanInChat(_:messageId:)` — the card's "Edit
     /// in chat" action (stay in a plan-like mode, seed the composer with the
     /// card's own plan title).
-    let onEditPlan: (ChatMessage.ToolResultPayload) -> Void
+    let onEditPlan: (UUID, ChatMessage.ToolResultPayload) -> Void
 
     @EnvironmentObject var theme: ThemeStore
 
@@ -89,7 +93,23 @@ struct ChatMessageList: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.md) {
                         ForEach(history) { turn in
-                            if turn.role == .assistant, turn.id == lastAssistantTurnId, !tasks.isEmpty {
+                            if let pe = planExecution,
+                               pe.phase == .running,
+                               turn.role == .assistant,
+                               turn.id == lastAssistantTurnId {
+                                PlanExecutionCard(
+                                    tracker: pe,
+                                    liveTasks: tasks,
+                                    onReview: onReviewPlanExecution,
+                                    onCommit: onCommitPlanExecution,
+                                    onDismiss: onDismissPlanExecution
+                                )
+                                .padding(.bottom, 4)
+                                .transition(.opacity)
+                            } else if turn.role == .assistant,
+                                      turn.id == lastAssistantTurnId,
+                                      !tasks.isEmpty,
+                                      planExecution == nil {
                                 PlanTimelineCard(tasks: tasks)
                                     .padding(.bottom, 4)
                                     .transition(.opacity)
@@ -225,6 +245,17 @@ struct ChatMessageList: View {
                                 .padding(.top, 4)
                                 .help("Save this plan to llm-doc/plans/ in the open project")
                             }
+                        }
+                        if let pe = planExecution, pe.phase == .finished || pe.phase == .failed {
+                            PlanExecutionCard(
+                                tracker: pe,
+                                liveTasks: tasks,
+                                onReview: onReviewPlanExecution,
+                                onCommit: onCommitPlanExecution,
+                                onDismiss: onDismissPlanExecution
+                            )
+                            .padding(.top, 4)
+                            .transition(.opacity)
                         }
                         if engine.busy {
                             HStack(spacing: 6) {
@@ -438,8 +469,11 @@ struct ChatMessageList: View {
                 // a one-line capsule — the whole point of saving it is acting
                 // on it. Centered like the other tool notices.
                 PlanSavedCard(payload: payload,
-                              onExecute: { onExecutePlan(payload) },
-                              onEdit: { onEditPlan(payload) })
+                              actionTaken: turn.metadata?.planCardAction,
+                              executingStepCount: planExecution?.planCardMessageId == turn.id
+                                  ? planExecution?.steps.count : nil,
+                              onExecute: { onExecutePlan(turn.id, payload) },
+                              onEdit: { onEditPlan(turn.id, payload) })
                     .frame(maxWidth: .infinity, alignment: .center)
             } else {
                 toolNoticeView(payload)
@@ -457,8 +491,8 @@ struct ChatMessageList: View {
                         ModeBadge(mode: mode)
                     }
                     if isUser {
-                        // User input is plain text — render verbatim (no markdown).
-                        Text(turn.content)
+                        // Plan-execute turns show a one-line summary, not the full prompt.
+                        Text(turn.metadata?.planExecuteDisplay ?? turn.content)
                             .font(.system(size: 12))
                             .foregroundStyle(theme.current.text)
                             .textSelection(.enabled)
