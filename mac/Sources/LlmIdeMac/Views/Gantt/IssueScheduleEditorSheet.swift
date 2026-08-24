@@ -119,7 +119,7 @@ struct IssueScheduleEditorSheet: View {
             Text("Depends on").font(Typography.bodyStrong).foregroundStyle(t.text)
             TextField("issue numbers, comma-separated (e.g. 12, 34)", text: $dependsOnText)
                 .textFieldStyle(.roundedBorder).font(Typography.body)
-            Text("Blocking issues — drawn as dependencies in a later update.")
+            Text("Blocking issues — shown as arrows from the blocker bar to this issue.")
                 .font(Typography.caption).foregroundStyle(t.textMuted)
         }
     }

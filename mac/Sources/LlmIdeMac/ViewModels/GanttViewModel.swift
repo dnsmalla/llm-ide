@@ -140,6 +140,21 @@ final class GanttViewModel: ObservableObject {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    /// Finish-to-start dependency pairs among visible issues: blocker issue
+    /// number → dependent issue number. Skips deps on issues not in the list
+    /// (filtered out or missing from the project).
+    func dependencyEdges(in visibleIssues: [RepoIssue]) -> [(blocker: Int, dependent: Int)] {
+        let visible = Set(visibleIssues.map(\.number))
+        var out: [(Int, Int)] = []
+        for issue in visibleIssues {
+            guard let deps = schedules[issue.number]?.dependsOn, !deps.isEmpty else { continue }
+            for blocker in deps where visible.contains(blocker) {
+                out.append((blocker, issue.number))
+            }
+        }
+        return out
+    }
+
     // MARK: - Date helpers
 
     /// Default bar length when only one end of a schedule is known.

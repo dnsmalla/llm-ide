@@ -302,6 +302,14 @@ struct GanttView: View {
                         .frame(width: 13, height: 13)
                     Text("Milestone").font(.system(size: 11)).foregroundStyle(t.textMuted)
                 }
+                if vm.dependencyEdges(in: vm.filteredIssues).isEmpty == false {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.turn.down.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(t.accent4.opacity(0.9))
+                        Text("Depends").font(.system(size: 11)).foregroundStyle(t.textMuted)
+                    }
+                }
 
                 refreshButton(t: t)
             }
@@ -713,18 +721,31 @@ struct GanttView: View {
                 style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
         }
 
+        // Dependency edges (finish-to-start), behind the bars
+        // `uniquingKeysWith` — issue numbers are unique within one provider,
+        // but this runs inside Canvas draw, where a transient duplicate
+        // (e.g. mid provider switch) must degrade, never crash the app.
+        let rowByNumber = Dictionary(issues.enumerated().map { ($1.number, $0) },
+                                     uniquingKeysWith: { first, _ in first })
+        for edge in vm.dependencyEdges(in: issues) {
+            guard let blockerIdx = rowByNumber[edge.blocker],
+                  let dependentIdx = rowByNumber[edge.dependent],
+                  let from = barAnchor(for: issues[blockerIdx], rowIndex: blockerIdx,
+                                       start: start, dayWidth: dayWidth, cal: cal, trailing: true),
+                  let to = barAnchor(for: issues[dependentIdx], rowIndex: dependentIdx,
+                                     start: start, dayWidth: dayWidth, cal: cal, trailing: false)
+            else { continue }
+            drawDependencyEdge(ctx: ctx, from: from, to: to, color: t.accent4.opacity(0.9))
+        }
+
         // Gantt bars
         for (idx, issue) in issues.enumerated() {
-            let s  = vm.startDate(for: issue)
-            let e  = vm.endDate(for: issue) ?? cal.dayOffset(1, from: s)
-            let offD = max(0, cal.dateComponents([.day],
-                from: cal.startOfDay(for: start), to: cal.startOfDay(for: s)).day ?? 0)
-            let lenD = max(1, cal.dateComponents([.day],
-                from: cal.startOfDay(for: s), to: cal.startOfDay(for: e)).day ?? 1)
-            let x = CGFloat(offD) * dayWidth
-            let w = CGFloat(lenD) * dayWidth - 2
-            let y = CGFloat(idx) * rowHeight + 6
-            let h = rowHeight - 12
+            guard let geom = barGeometry(for: issue, rowIndex: idx,
+                                         start: start, dayWidth: dayWidth, cal: cal) else { continue }
+            let x = geom.x
+            let w = geom.width
+            let y = geom.y
+            let h = geom.height
 
             let over = isOverdue(issue)
             let barColor: Color = issue.state == "closed" ? t.accent3
@@ -752,6 +773,65 @@ struct GanttView: View {
                 ctx.stroke(bar, with: .color(t.text.opacity(0.6)), lineWidth: 1.5)
             }
         }
+    }
+
+    // MARK: - Bar geometry & dependencies
+
+    private struct BarGeometry {
+        let x: CGFloat
+        let y: CGFloat
+        let width: CGFloat
+        let height: CGFloat
+
+        func anchor(trailing: Bool) -> CGPoint {
+            let edgeX = trailing ? x + max(2, width) : x
+            return CGPoint(x: edgeX, y: y + height / 2)
+        }
+    }
+
+    private func barGeometry(for issue: RepoIssue, rowIndex: Int,
+                             start: Date, dayWidth: CGFloat, cal: Calendar) -> BarGeometry? {
+        let s = vm.startDate(for: issue)
+        let e = vm.endDate(for: issue) ?? cal.dayOffset(1, from: s)
+        let offD = max(0, cal.dateComponents([.day],
+            from: cal.startOfDay(for: start), to: cal.startOfDay(for: s)).day ?? 0)
+        let lenD = max(1, cal.dateComponents([.day],
+            from: cal.startOfDay(for: s), to: cal.startOfDay(for: e)).day ?? 1)
+        return BarGeometry(
+            x: CGFloat(offD) * dayWidth + 1,
+            y: CGFloat(rowIndex) * rowHeight + 6,
+            width: CGFloat(lenD) * dayWidth - 2,
+            height: rowHeight - 12
+        )
+    }
+
+    private func barAnchor(for issue: RepoIssue, rowIndex: Int,
+                           start: Date, dayWidth: CGFloat, cal: Calendar,
+                           trailing: Bool) -> CGPoint? {
+        barGeometry(for: issue, rowIndex: rowIndex, start: start, dayWidth: dayWidth, cal: cal)?
+            .anchor(trailing: trailing)
+    }
+
+    private func drawDependencyEdge(ctx: GraphicsContext, from: CGPoint, to: CGPoint, color: Color) {
+        let stub: CGFloat = 8
+        let elbowX = max(from.x + stub, to.x - stub)
+        var path = Path()
+        path.move(to: from)
+        path.addLine(to: CGPoint(x: elbowX, y: from.y))
+        path.addLine(to: CGPoint(x: elbowX, y: to.y))
+        path.addLine(to: to)
+        ctx.stroke(
+            path,
+            with: .color(color),
+            style: StrokeStyle(lineWidth: 1.25, lineCap: .round, lineJoin: .round))
+        // Arrowhead at the dependent's start, pointing left.
+        let ah: CGFloat = 4
+        var head = Path()
+        head.move(to: to)
+        head.addLine(to: CGPoint(x: to.x + ah, y: to.y - ah * 0.7))
+        head.addLine(to: CGPoint(x: to.x + ah, y: to.y + ah * 0.7))
+        head.closeSubpath()
+        ctx.fill(head, with: .color(color))
     }
 
     // MARK: - Helpers

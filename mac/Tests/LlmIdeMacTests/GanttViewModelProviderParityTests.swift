@@ -187,4 +187,22 @@ final class GanttViewModelProviderParityTests: XCTestCase {
         vm.selectedMilestoneIds = ["3"]
         XCTAssertEqual(vm.filteredIssues.map(\.number), [1])
     }
+
+    func testDependencyEdgesListsVisibleBlockerPairs() {
+        let vm = GanttViewModel()
+        vm.issues = [issue(number: 3), issue(number: 7), issue(number: 9)]
+        vm.schedules = [7: schedule(7, start: "2026-03-02", due: "2026-03-10", dependsOn: [3, 99])]
+
+        let edges = vm.dependencyEdges(in: vm.issues)
+        XCTAssertEqual(edges, [(3, 7)])
+    }
+
+    func testDependencyEdgesRespectsTheVisibleIssueList() {
+        let vm = GanttViewModel()
+        vm.issues = [issue(number: 3), issue(number: 7)]
+        vm.schedules = [7: schedule(7, start: "2026-03-02", dependsOn: [3])]
+
+        let edges = vm.dependencyEdges(in: [vm.issues[1]])
+        XCTAssertTrue(edges.isEmpty, "blocker filtered out → no drawable edge")
+    }
 }
