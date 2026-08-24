@@ -64,9 +64,13 @@ struct DocTemplate: Identifiable, Codable, Equatable {
         let folderName: String
         let name: String
         let sections: [String]
+        var ingestKind: IngestTemplateKind? = nil
 
         func markdown() -> String {
-            DocTemplate.markdownBody(name: name, sections: sections)
+            if let kind = ingestKind {
+                return IngestTemplateRenderer.defaultTemplate(kind)
+            }
+            return DocTemplate.markdownBody(name: name, sections: sections)
         }
     }
 
@@ -96,10 +100,23 @@ struct DocTemplate: Identifiable, Codable, Equatable {
             folderName: "action-plan",
             name: "Action Plan",
             sections: ["Objective", "Actions", "Owners", "Timeline", "Success Criteria"]),
+        SeedDefinition(
+            id: UUID(uuidString: "A0000006-0000-4000-8000-000000000006")!,
+            folderName: "meeting-note",
+            name: "Meeting Note (auto)",
+            sections: ["Summary", "Key points", "Full notes", "Decisions", "Action items", "Blockers", "Transcript"],
+            ingestKind: .meetingNote),
+        SeedDefinition(
+            id: UUID(uuidString: "A0000007-0000-4000-8000-000000000007")!,
+            folderName: "email-note",
+            name: "Email Note (auto)",
+            sections: ["Summary", "To-dos", "Original"],
+            ingestKind: .emailNote),
     ]
 
     /// Shipped skeletons when no project is open (fallback UI).
-    static let builtins: [DocTemplate] = seedDefinitions.map {
+    /// Ingest seeds are excluded — they are auto-note layouts, not Doc Gen templates.
+    static let builtins: [DocTemplate] = seedDefinitions.filter { $0.ingestKind == nil }.map {
         DocTemplate(
             id: $0.id,
             name: $0.name,

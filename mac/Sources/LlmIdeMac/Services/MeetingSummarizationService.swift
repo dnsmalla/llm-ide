@@ -6,32 +6,12 @@ private let sumLog = Logger(subsystem: "com.llmide.macapp", category: "Summariza
 /// Shared summarization pipeline used by AppShell, CaptionScraper, and
 /// MeetingDetailViewModel.
 ///
-/// Each call site used to inline the same four-step pattern:
-///   1. `api.summarize` (no wall-clock deadline — see Step 1 below)
-///   2. `writeSummary(into:)` on success
-///   3. Fallback `MeetingSummary` + `writeSummary` on failure
-///   4. `MeetingNoteGenerator.generateDocx(...)` to produce the polished note
-///
-/// Extracting it here means a single change propagates to all consumers
-/// and the individual call sites stay readable.
+/// Produces **two** llm-doc outputs per meeting:
+///   1. `.docx` via bundled `note_template.docx` + Python (existing polished note)
+///   2. `.md`  via `<project>/templates/meeting-note/template.md` (editable layout)
 enum MeetingSummarizationService {
 
-    /// Run the summarisation pipeline for a single meeting.
-    ///
-    /// - Parameters:
-    ///   - api: Authenticated API client.
-    ///   - transcript: Raw transcript text to send to the model.
-    ///   - title: Meeting title; also used as the fallback `gist` when the API fails.
-    ///   - language: Transcript language code (empty string → infer from content).
-    ///   - startedAt: Meeting start time — written into the .docx header.
-    ///   - durationSeconds: Optional meeting duration in seconds.
-    ///   - participants: Participant list written into the .docx header.
-    ///   - transcriptFileURL: The `.md` file whose frontmatter will receive the summary.
-    ///   - docxOutputURL: Where to write the generated `.docx`. Pass `nil` to skip
-    ///     `.docx` generation (e.g. when the notes folder is unknown).
-    ///   - root: `MeetingFileStore` root used for `writeSummary`.
-    /// - Returns: The produced `MeetingSummary` — may be a minimal fallback
-    ///   if the API call fails or times out.
+    /// Run summarisation, then write both the `.docx` and template-based `.md` notes.
     @discardableResult
     static func run(
         api: LlmIdeAPIClient,
@@ -42,19 +22,11 @@ enum MeetingSummarizationService {
         durationSeconds: Int?,
         participants: [String],
         transcriptFileURL: URL,
-        docxOutputURL: URL?,
+        projectRoot: URL,
+        rawFile: String,
         root: URL
     ) async -> MeetingSummary {
 
-        // ── Step 1: AI summary, with no wall-clock deadline ──
-        // This used to race `api.summarize` against a 5-minute `Task.sleep` and
-        // throw when the sleep won. Summarising a long meeting transcript is
-        // exactly the case that loses that race: the user recorded a two-hour
-        // call, waited five minutes, and got the fallback summary instead of the
-        // real one. The client session no longer imposes a clock either (see
-        // LlmIdeAPIClient), so the request now runs until the server answers or
-        // the surrounding Task is cancelled — and the `catch` below still lands on
-        // the local fallback if it genuinely fails.
         let summary: MeetingSummary
         do {
             let s = try await api.summarize(
@@ -71,9 +43,6 @@ enum MeetingSummarizationService {
             }
             summary = s
         } catch {
-            // Summarisation failed or timed out — build a minimal fallback so:
-            //   • The Library row clears "Summarising…" (gist = title)
-            //   • The .docx is still produced with the raw transcript
             sumLog.error("summarize failed — using fallback: \(error.localizedDescription, privacy: .public)")
             let fallback = MeetingSummary(
                 gist: title,
@@ -88,17 +57,53 @@ enum MeetingSummarizationService {
             summary = fallback
         }
 
-        // ── Step 2: Generate the polished .docx note ──
-        guard let docxOutputURL else { return summary }
-        try? FileManager.default.createDirectory(
-            at: docxOutputURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true)
+        let writer = MeetingNoteWriter(repoRoot: projectRoot)
+
+        // ── Step 2a: polished .docx (existing pipeline) ──
+        let tempDocx = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llmide-meeting-\(UUID().uuidString).docx")
         MeetingNoteGenerator.generateDocx(
             summary: summary,
             title: title,
             startedAt: startedAt,
             participants: participants,
-            outputURL: docxOutputURL)
+            outputURL: tempDocx)
+        if let docxData = try? Data(contentsOf: tempDocx) {
+            do {
+                _ = try await writer.writeDocxNote(
+                    docxContent: docxData,
+                    title: title,
+                    startedAt: startedAt,
+                    participants: participants,
+                    rawFile: rawFile)
+                try? FileManager.default.removeItem(at: tempDocx)
+            } catch {
+                // Keep the temp .docx on failure — it is the only copy of the
+                // polished note (the .md below is a separate layout).
+                sumLog.error("writeDocxNote failed, keeping \(tempDocx.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+
+        // ── Step 2b: template .md (project templates/meeting-note/) ──
+        let markdown = IngestTemplateRenderer.renderMeetingNote(
+            projectRoot: projectRoot,
+            summary: summary,
+            title: title,
+            startedAt: startedAt,
+            durationSeconds: durationSeconds,
+            participants: participants,
+            transcript: transcript,
+            rawFile: rawFile)
+        do {
+            _ = try await writer.writeMarkdownNote(
+                markdown: markdown,
+                title: title,
+                startedAt: startedAt,
+                participants: participants,
+                rawFile: rawFile)
+        } catch {
+            sumLog.error("writeMarkdownNote failed: \(error.localizedDescription, privacy: .public)")
+        }
 
         return summary
     }

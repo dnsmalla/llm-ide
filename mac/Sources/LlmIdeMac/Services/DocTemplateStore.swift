@@ -160,6 +160,11 @@ final class DocTemplateStore: ObservableObject {
                   let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
                 continue
             }
+            // Ingest templates (meeting-note/email-note) are rendered by
+            // IngestTemplateRenderer with {{placeholders}} — not Doc Gen
+            // material, and their `# {{title}}` heading would surface as a
+            // literal "{{title}}" entry in the template picker.
+            if content.contains("llmide:ingest-template") { continue }
             templates.append(DocTemplate(
                 id: DocTemplate.stableID(forFolder: folderName),
                 name: DocTemplate.displayName(from: content, folderName: folderName),

@@ -1,5 +1,7 @@
 // Meeting note writer using unified NoteService
 // Writes generated meeting notes to llm-doc/meetings/ via NoteService.
+//   • `.docx` — bundled Word template (existing polished note)
+//   • `.md`   — project template at templates/meeting-note/template.md
 
 import Foundation
 import os.log
@@ -15,19 +17,57 @@ struct MeetingNoteWriter {
         self.noteService = NoteService(repoRoot: repoRoot)
     }
 
-    /// Write a generated meeting note (.docx content) to the unified notes structure.
+    /// Write a generated meeting note (`.docx` content) to the unified notes structure.
     @discardableResult
-    func writeNote(
+    func writeDocxNote(
         docxContent: Data,
         title: String,
         startedAt: Date,
         participants: [String],
         rawFile: String
     ) async throws -> URL {
-        // Generate filename
-        let filename = Self.filename(startedAt: startedAt, title: title)
+        try await saveNote(
+            content: docxContent,
+            filename: Self.docxFilename(startedAt: startedAt, title: title),
+            title: title,
+            startedAt: startedAt,
+            participants: participants,
+            rawFile: rawFile)
+    }
 
-        // Create note metadata
+    /// Write a template-rendered meeting note (`.md` content).
+    @discardableResult
+    func writeMarkdownNote(
+        markdown: String,
+        title: String,
+        startedAt: Date,
+        participants: [String],
+        rawFile: String
+    ) async throws -> URL {
+        try await saveNote(
+            content: Data(markdown.utf8),
+            filename: Self.markdownFilename(startedAt: startedAt, title: title),
+            title: title,
+            startedAt: startedAt,
+            participants: participants,
+            rawFile: rawFile)
+    }
+
+    /// Get the output directory for meeting notes.
+    func outputDirectory(for date: Date) -> URL {
+        noteService.getMonthDir(type: .meeting, date: date)
+    }
+
+    // MARK: - Private
+
+    private func saveNote(
+        content: Data,
+        filename: String,
+        title: String,
+        startedAt: Date,
+        participants: [String],
+        rawFile: String
+    ) async throws -> URL {
         let metadata = NoteMetadata(
             id: "",
             type: .meeting,
@@ -40,43 +80,37 @@ struct MeetingNoteWriter {
             generatedAt: AppDateFormatter.isoString(Date()),
             tags: ["meeting"],
             participants: participants,
-            fileSize: Int64(docxContent.count)
+            fileSize: Int64(content.count)
         )
 
-        // Save via NoteService
         let saved = try await noteService.saveNote(
             type: .meeting,
             filename: filename,
-            content: docxContent,
+            content: content,
             metadata: metadata
         )
 
         logger.info("Meeting note saved: \(saved.path, privacy: .public)")
-
-        // Return full file URL
         return repoRoot.appendingPathComponent(saved.path)
     }
 
-    /// Get the output directory for meeting notes.
-    /// Returns the full path to llm-doc/meetings/YYYY/MM/.
-    func outputDirectory(for date: Date) -> URL {
-        // getMonthDir already returns an absolute URL rooted at `repoRoot`
-        // (NoteService was constructed with it) — re-appending `.path` here
-        // used to double the whole prefix (e.g. `/project/project/llm-doc/…`),
-        // littering the project with a bogus nested folder tree.
-        noteService.getMonthDir(type: .meeting, date: date)
+    // MARK: - Filenames
+
+    private static func docxFilename(startedAt: Date, title: String) -> String {
+        baseFilename(startedAt: startedAt, title: title, suffix: "meeting-notes.docx")
     }
 
-    // MARK: - Helpers
+    private static func markdownFilename(startedAt: Date, title: String) -> String {
+        baseFilename(startedAt: startedAt, title: title, suffix: "meeting-notes.md")
+    }
 
-    private static func filename(startedAt: Date, title: String) -> String {
+    private static func baseFilename(startedAt: Date, title: String, suffix: String) -> String {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd-HHmmss"
         dateFormatter.timeZone = TimeZone(identifier: "UTC")
         let dateSlug = dateFormatter.string(from: startedAt)
-
         let slug = slugify(title.isEmpty ? "meeting" : title)
-        return "\(dateSlug)-\(slug)-meeting-notes.docx"
+        return "\(dateSlug)-\(slug)-\(suffix)"
     }
 
     private static func slugify(_ s: String) -> String {

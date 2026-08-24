@@ -927,16 +927,6 @@ struct AppShell: View {
             let monthPath = AppDateFormatter.yearMonthPath(fm.startedAt)
             let rawFile = "meetings/\(monthPath)/\(rawFileName)"
 
-            // Create MeetingNoteWriter
-            let writer = MeetingNoteWriter(repoRoot: projectRoot)
-
-            // Build .docx path using unified structure
-            let dateSlug = AppDateFormatter.dateHourMinuteLocal(fm.startedAt)
-            let stem     = fileURL.deletingPathExtension().lastPathComponent.prefix(8)
-            let filename = "\(dateSlug)-\(stem)-meeting-notes.docx"
-            let docxURL  = writer.outputDirectory(for: fm.startedAt).appendingPathComponent(filename)
-
-            // 1. AI summary + write summary + generate .docx (shared pipeline).
             await MeetingSummarizationService.run(
                 api: api,
                 transcript: transcript,
@@ -946,26 +936,9 @@ struct AppShell: View {
                 durationSeconds: fm.durationSeconds,
                 participants: fm.participants,
                 transcriptFileURL: fileURL,
-                docxOutputURL: docxURL,
+                projectRoot: projectRoot,
+                rawFile: rawFile,
                 root: root)
-
-            // 2. Read the generated .docx and save it via MeetingNoteWriter for unified storage
-            if let docxData = try? Data(contentsOf: docxURL) {
-                do {
-                    _ = try await writer.writeNote(
-                        docxContent: docxData,
-                        title: title,
-                        startedAt: fm.startedAt,
-                        participants: fm.participants,
-                        rawFile: rawFile
-                    )
-                    // Remove the temporary .docx file
-                    try? FileManager.default.removeItem(at: docxURL)
-                } catch {
-                    // Leave the temp .docx in place on failure — deleting it
-                    // here would lose the only copy of the note.
-                }
-            }
 
             // 3. Re-scan so the library row updates with the new gist.
             try? indexer?.fullScan()
@@ -1042,16 +1015,6 @@ struct AppShell: View {
                 //    fullScan() is thread-safe (serialised via scanLock).
                 try? indexer?.fullScan()
 
-                // 5. Create MeetingNoteWriter for unified storage
-                let writer = MeetingNoteWriter(repoRoot: projectRoot)
-
-                // Build .docx path using unified structure
-                let dateSlug = AppDateFormatter.dateHourMinuteLocal(startedAt)
-                let idSuffix = payload.sessionId.prefix(8)
-                let filename = "\(dateSlug)-\(idSuffix)-meeting-notes.docx"
-                let docxURL  = writer.outputDirectory(for: startedAt).appendingPathComponent(filename)
-
-                // 6+8. AI summary + .docx note (non-fatal, 5-minute hard cap).
                 await MeetingSummarizationService.run(
                     api: api,
                     transcript: payload.transcript,
@@ -1061,35 +1024,15 @@ struct AppShell: View {
                     durationSeconds: nil,
                     participants: payload.participants,
                     transcriptFileURL: url,
-                    docxOutputURL: docxURL,
+                    projectRoot: projectRoot,
+                    rawFile: rawFile,
                     root: root)
 
-                // 7. Read the generated .docx and save it via MeetingNoteWriter for unified storage
-                if let docxData = try? Data(contentsOf: docxURL) {
-                    do {
-                        _ = try await writer.writeNote(
-                            docxContent: docxData,
-                            title: title,
-                            startedAt: startedAt,
-                            participants: payload.participants,
-                            rawFile: rawFile
-                        )
-                        // Remove the temporary .docx file
-                        try? FileManager.default.removeItem(at: docxURL)
-                    } catch {
-                        // Leave the temp .docx in place on failure — deleting
-                        // it here would lose the only copy of the note.
-                    }
-                }
-
-                // 8. Re-scan so the index picks up any frontmatter changes.
                 try? indexer?.fullScan()
 
                 // Keep the raw .md transcript in meetings/ so it
                 // appears in the MEETINGS section of the Library.
-                // The .docx note lives in llm-doc/ for the NOTES section —
-                // both are useful: transcript for full verbatim text,
-                // .docx for the AI-summarised version.
+                // The generated note lives in llm-doc/meetings/ for LLM Doc.
 
                 // 8. Notify the Library to refresh — must be on main thread.
                 //    LibraryView's handler calls syncMeetingNotes(from: notesOutputFolder)

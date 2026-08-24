@@ -71,7 +71,7 @@ and the Library UI labels the section "LLM Doc".
 
 ```
 <project>/llm-doc/
-├── meetings/      <YYYY>/<MM>/<filename>.docx
+├── meetings/      <YYYY>/<MM>/<filename>.docx + .md
 ├── emails/        <YYYY>/<MM>/<filename>.md
 ├── documents/     <YYYY>/<MM>/<filename>.md
 ├── <noteType>/    new Source Connectors use their raw type name (e.g. slack/)
@@ -90,7 +90,7 @@ and the Library UI labels the section "LLM Doc".
 
 | `NoteType` | Directory | Filename pattern |
 |---|---|---|
-| `meeting` | `meetings/` | `<YYYY-MM-DD-HHmmss>-<slug>-meeting-notes.docx` |
+| `meeting` | `meetings/` | `<YYYY-MM-DD-HHmmss>-<slug>-meeting-notes.docx` and `-meeting-notes.md` |
 | `email` | `emails/` | `<YYYY-MM-DD-HHmmss>-<slug>.md` |
 | `document` | `documents/` | `<YYYY-MM-DD-HHmmss>-<slug>.md` |
 | any other (`slack/`, …) | `<rawValue>/` | writer-defined |
@@ -99,8 +99,9 @@ and the Library UI labels the section "LLM Doc".
 
 | Writer | Produces | Input |
 |---|---|---|
-| `MeetingNoteGenerator` + `MeetingNoteWriter` | meeting `.docx` via bundled Python (`generate_meeting_note.py`) | transcript + AI summary (`POST /kb/summarize`) |
-| `EmailNoteWriter` | email `.md` with YAML frontmatter (todos, `sourceHash`) | classified email |
+| `MeetingNoteGenerator` + `MeetingNoteWriter` | meeting `.docx` via bundled Python (`generate_meeting_note.py`) | transcript + AI summary |
+| `MeetingNoteWriter` + `IngestTemplateRenderer` | meeting `.md` from `templates/meeting-note/template.md` | same summary (parallel output) |
+| `EmailNoteWriter` + `IngestTemplateRenderer` | email `.md` from `templates/email-note/template.md` | classified email |
 | `SourceConnectorNoteWriter` | connector notes (e.g. `slack/`) | fetched + classified source items |
 | `NoteService.saveNote` | any note + `index.json` update | all of the above route through this |
 
