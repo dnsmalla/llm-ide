@@ -457,4 +457,42 @@ struct LlmChatViewModelTests {
         let stoppedAssistant = ChatMessage(role: .assistant, content: "partial", status: .stopped, createdAt: Date())
         #expect(vm.recoverableDraftAfterFailure(oldValue: [userMsg], newValue: [userMsg, stoppedAssistant]) == nil)
     }
+
+    @Test("loadHistory keeps a locally stopped tail when the server later persists .done for the same turn")
+    func loadHistoryPreservesStoppedTailAgainstServerDone() async {
+        let (vm, _, history) = makeViewModel()
+        let user = ChatMessage(role: .user, content: "hello", status: .done, createdAt: Date())
+        let stopped = ChatMessage(role: .assistant, content: "partial…", status: .stopped, createdAt: Date())
+        vm.engine.replaceMessages([user, stopped])
+        vm.stop()
+
+        history.items = [
+            .init(seq: 1, role: "user", content: "hello", createdAt: 0),
+            .init(seq: 2, role: "assistant", content: "full server reply", createdAt: 1),
+        ]
+        await vm.loadHistory()
+
+        #expect(vm.engine.messages.count == 2)
+        #expect(vm.engine.messages.last?.status == .stopped)
+        #expect(vm.engine.messages.last?.content == "partial…")
+    }
+
+    @Test("loadHistory accepts server growth after stop when the iPhone added a turn")
+    func loadHistoryAfterStopAcceptsLongerServerHistory() async {
+        let (vm, _, history) = makeViewModel()
+        let user = ChatMessage(role: .user, content: "hello", status: .done, createdAt: Date())
+        let stopped = ChatMessage(role: .assistant, content: "partial…", status: .stopped, createdAt: Date())
+        vm.engine.replaceMessages([user, stopped])
+        vm.stop()
+
+        history.items = [
+            .init(seq: 1, role: "user", content: "hello", createdAt: 0),
+            .init(seq: 2, role: "assistant", content: "full server reply", createdAt: 1),
+            .init(seq: 3, role: "user", content: "from phone", createdAt: 2),
+        ]
+        await vm.loadHistory()
+
+        #expect(vm.engine.messages.count == 3)
+        #expect(vm.engine.messages.last?.content == "from phone")
+    }
 }

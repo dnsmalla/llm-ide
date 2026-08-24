@@ -347,3 +347,27 @@ export function clearAgentAskMessages(userId) {
   ).run(userId);
   return { removed: result.changes };
 }
+
+/// Remove the newest persisted ask row for this user. When `role` is set,
+/// only deletes if that row matches — used to retract a user turn when the
+/// client disconnects before the assistant reply is persisted.
+export function retractLastAgentAskMessage(userId, { role } = {}) {
+  requireUser(userId);
+  const db = getDb();
+  const row = role
+    ? lazyPrepare(db, `
+        SELECT seq FROM agent_ask_messages
+         WHERE user_id = ? AND role = ?
+         ORDER BY seq DESC LIMIT 1
+      `).get(userId, role)
+    : lazyPrepare(db, `
+        SELECT seq FROM agent_ask_messages
+         WHERE user_id = ?
+         ORDER BY seq DESC LIMIT 1
+      `).get(userId);
+  if (!row) return false;
+  lazyPrepare(db,
+    'DELETE FROM agent_ask_messages WHERE user_id = ? AND seq = ?',
+  ).run(userId, row.seq);
+  return true;
+}

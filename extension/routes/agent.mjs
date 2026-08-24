@@ -250,8 +250,12 @@ export async function handleAgentRoutes(req, res, ctx) {
       process.stderr.write(`[kb/agent/ask] user history append failed: ${err?.message || err}\n`);
     }
 
+    // Abort when the client disconnects (Stop cancels URLSessionTask).
+    const ac = new AbortController();
+    req.on('close', () => ac.abort());
+
     try {
-      const result = await runClaude(prompt, { userId, images, provider, model });
+      const result = await runClaude(prompt, { userId, images, provider, model, signal: ac.signal });
       const reply = (result || '').trim();
       // Assistant append is non-fatal — the user already has the reply
       // in this response; missing it in history is a degradation,
@@ -263,6 +267,17 @@ export async function handleAgentRoutes(req, res, ctx) {
       }
       sendJSON(res, 200, { reply });
     } catch (err) {
+      if (ac.signal.aborted) {
+        try {
+          kb.retractLastAgentAskMessage(userId, { role: 'user' });
+        } catch (retractErr) {
+          process.stderr.write(`[kb/agent/ask] user history retract failed: ${retractErr?.message || retractErr}\n`);
+        }
+        if (!res.writableEnded) {
+          sendJSON(res, 499, { error: { code: 'AGENT_ASK_ABORTED', message: 'cancelled' } });
+        }
+        return true;
+      }
       sendJSON(res, 500, { error: { code: 'AGENT_ASK_FAILED', message: err.message || 'agent ask failed' } });
     }
     return true;

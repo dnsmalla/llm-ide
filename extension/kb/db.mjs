@@ -496,6 +496,7 @@ export {
   appendAgentAskMessage,
   listAgentAskMessages,
   clearAgentAskMessages,
+  retractLastAgentAskMessage,
 } from './personas.mjs';
 
 export {

@@ -23,15 +23,12 @@ extension LlmIdeAPIClient: AgentAskHistoryFetching {}
 /// Nothing about that lifecycle is specific to this sheet; only the
 /// server-persisted-history polling below is.
 ///
-/// IMPORTANT limitation this whole file works around rather than solves
+/// IMPORTANT limitation this whole file works around for late-cancel races
 /// (code review, Task 11 follow-up — see `stop()` and `chatMessage(from:)`
-/// below for the two places it bites): `/kb/agent/ask` has NO server-side
-/// cancel channel, and `loadHistory()`'s poll always maps rows to
-/// `status: .done`. So `.stopped`/`.failed` are BEST-EFFORT, CLIENT-ONLY
-/// states that the next successful poll can silently overwrite with
-/// whatever the server actually persisted. Task 16 (Retry UX) needs to
-/// account for this — either special-case this surface or accept that a
-/// failed/stopped bubble here isn't guaranteed to survive 2 more seconds.
+/// below): when Stop arrives after the server already persisted a reply,
+/// `loadHistory()`'s poll can overwrite a local `.stopped` bubble. Server-side
+/// cancel now retracts the user row and skips the assistant append when the
+/// client disconnects in time; `clientStoppedTurnActive` covers the late case.
 @MainActor
 @Observable
 final class LlmChatViewModel {
@@ -49,6 +46,13 @@ final class LlmChatViewModel {
     /// redundant refresh loop.
     private var awaitingOwnTurn = false
 
+    /// After the user hits Stop, `loadHistory()` must not replace the local
+    /// `.stopped` tail with the server's eventual `.done` row for the same
+    /// turn (`/kb/agent/ask` has no server-side cancel). Cleared on the next
+    /// `send()` / `clearHistory()`, or when the server history grows (e.g.
+    /// a turn started from the iPhone).
+    private var clientStoppedTurnActive = false
+
     init(engine: ChatEngine, historyAPI: AgentAskHistoryFetching) {
         self.engine = engine
         self.historyAPI = historyAPI
@@ -63,21 +67,20 @@ final class LlmChatViewModel {
     /// user is clearly back online and sending again.
     func send(_ text: String) {
         lastError = nil
+        clientStoppedTurnActive = false
         awaitingOwnTurn = true
         engine.startTurn(text)
     }
 
     /// Cancel the in-flight turn, if any.
     ///
-    /// WARNING: this only cancels the CLIENT's wait — `/kb/agent/ask` has no
-    /// server-side cancel channel, so the server's `runClaude` call keeps
-    /// running and persists its reply regardless. The turn shows as
-    /// `.stopped` locally for as long as it takes the next `loadHistory()`
-    /// poll (≤2s) to fetch that persisted reply and overwrite it. This is a
-    /// real, accepted UX gap for this surface (unlike `/code-assist`, which
-    /// has no such gap) — see this class's header comment.
+    /// Cancels the client's URLSession wait; the server aborts `runClaude`
+    /// on socket close and retracts the persisted user row when cancel lands
+    /// in time. `clientStoppedTurnActive` still guards the poll against a
+    /// late server reply overwriting the local `.stopped` bubble.
     func stop() {
         engine.stop()
+        clientStoppedTurnActive = true
     }
 
     /// Fetch the most recent persisted Ask-the-Agent turns and replace the
@@ -104,12 +107,16 @@ final class LlmChatViewModel {
             let items = try await historyAPI.listAgentAskHistory(limit: limit)
             guard !engine.busy else { return }
             let mapped = items.map(Self.chatMessage(from:))
-            // Skip the write when nothing actually changed: `@Observable`
-            // publishes on WRITE, not on value-change, so an unconditional
-            // `replaceMessages` here would invalidate the whole sheet body
-            // (including every WKWebView-backed assistant bubble) on every
-            // 2s tick even when the server has nothing new.
-            if mapped != engine.messages {
+            if clientStoppedTurnActive {
+                // Server finished a turn the user stopped — same row count,
+                // assistant flips to `.done`. Keep the local `.stopped` tail.
+                if mapped.count > engine.messages.count {
+                    clientStoppedTurnActive = false
+                    if mapped != engine.messages {
+                        engine.replaceMessages(mapped)
+                    }
+                }
+            } else if mapped != engine.messages {
                 engine.replaceMessages(mapped)
             }
             lastError = nil
@@ -126,6 +133,7 @@ final class LlmChatViewModel {
     func clearHistory() async {
         do {
             _ = try await historyAPI.clearAgentAskHistory()
+            clientStoppedTurnActive = false
             engine.replaceMessages([])
             lastError = nil
             NotificationCenter.default.post(name: .llmChatTranscriptChanged, object: nil)
