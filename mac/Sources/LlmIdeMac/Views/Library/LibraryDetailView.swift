@@ -33,9 +33,6 @@ struct LibraryDetailView: View {
         case .connector(let id):
             ConnectorDetailView(api: api, connectorId: id)
 
-        case .emailTodos:
-            EmailTodosView()
-
         case nil:
             ContentUnavailableView {
                 Label("Select an Item", systemImage: "doc.text")

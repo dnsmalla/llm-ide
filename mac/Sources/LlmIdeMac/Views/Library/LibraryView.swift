@@ -279,13 +279,6 @@ struct LibraryView: View {
             // ── Notes section ─────────────────────────────────────────
             fileTreeSection(.notes)
 
-            Section {
-                Label("Email To-dos", systemImage: "checklist")
-                    .tag(ShellState.LibrarySelection.emailTodos)
-            } header: {
-                Text("Review")
-            }
-
             // ── Plugins section ───────────────────────────────────────
             // User-scoped — shown regardless of active project. Install /
             // import / reload live in this section's header menu (the ⊕);
