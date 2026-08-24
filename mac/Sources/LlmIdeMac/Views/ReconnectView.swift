@@ -66,6 +66,11 @@ struct ReconnectView: View {
             statusRow
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            if backend.serverVersionTooOld,
+               let versionMsg = backend.versionMismatchBannerText {
+                BackendVersionMismatchBanner(message: versionMsg)
+            }
+
             VStack(spacing: Spacing.sm) {
                 Button {
                     Task { await session.reconnect(api: api) }
@@ -119,13 +124,25 @@ struct ReconnectView: View {
                     .foregroundStyle(theme.current.textMuted)
             }
         } else if case .running = backend.status {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.current.accent3)
-                Text("Server is running — retrying…")
-                    .font(Typography.caption)
-                    .foregroundStyle(theme.current.textMuted)
+            if backend.serverVersionTooOld {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.current.warning)
+                    Text("Server is running but the API is too old — update the backend checkout.")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.current.accent3)
+                    Text("Server is running — retrying…")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                }
             }
         } else if !config.backendNodePath.isEmpty && !config.backendWorkingDir.isEmpty {
             VStack(alignment: .leading, spacing: Spacing.xs) {

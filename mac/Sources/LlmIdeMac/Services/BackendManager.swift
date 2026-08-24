@@ -401,7 +401,7 @@ final class BackendManager {
     /// the stable-uptime restart-budget reset.
     private func markRunning(nodePath: String, workURL: URL, proc: Process) {
         status = .running
-        lastError = nil
+        clearLastErrorUnlessVersionTooOld()
         lastSuccessfulStartAt = Date()
         lastStartArgs = (nodePath: nodePath, workingDirectory: workURL.path)
         append("--- Server ready (pid \(proc.processIdentifier)) ---", stream: .info)
@@ -599,13 +599,31 @@ final class BackendManager {
         return apiVersion < minimumServerApiVersion
     }
 
-    /// Back-compat wrapper for callers that only need reachability.
-    ///
-    /// Prefer `probeHealthDetail()` anywhere the result decides that the
-    /// backend is usable — this wrapper discards the version, which is how a
-    /// too-old server went unnoticed for so long.
+    /// Back-compat wrapper: true when `/health` returns 2xx. Does NOT check
+    /// API version — a too-old server still answers `/health`. Prefer
+    /// `probeHealthUsable()` when deciding whether chat/KB/mobile features
+    /// can run; keep this for reachability-only checks (e.g. "did the
+    /// process die?" in `reconcileHealthAfterFailure`).
     nonisolated static func probeHealth() async -> Bool {
         await probeHealthDetail().ok
+    }
+
+    /// True when `/health` answers AND the reported API version meets
+    /// `minimumServerApiVersion`. Use for status surfaces that mean
+    /// "backend features will work", not merely "something is listening".
+    nonisolated static func probeHealthUsable() async -> Bool {
+        let health = await probeHealthDetail()
+        return health.ok && !health.versionTooOld
+    }
+
+    /// Clears a stale startup error when promoting to `.running`. Skipped when
+    /// `recordServerVersion` just flagged a too-old server — the spawn path
+    /// calls this immediately after that, and wiping `lastError` there was the
+    /// bug that hid the version mismatch banner.
+    internal func clearLastErrorUnlessVersionTooOld() {
+        if !serverVersionTooOld {
+            lastError = nil
+        }
     }
 
     /// Record a probe's version verdict and, when the server is too old, say so
@@ -720,5 +738,20 @@ final class BackendManager {
         lastError = message
         status = .stopped
         append("ERROR: \(message)", stream: .stderr)
+    }
+}
+
+extension BackendManager {
+    /// User-facing text when `/health` reports an API below
+    /// `minimumServerApiVersion`. Prefer the detailed message from
+    /// `recordServerVersion`; synthesize a fallback when the flag is set but
+    /// `lastError` was cleared elsewhere. Shared by Settings, Login, and
+    /// Reconnect so a version mismatch is never visible in only one place.
+    var versionMismatchBannerText: String? {
+        if let err = lastError, !err.isEmpty { return err }
+        guard serverVersionTooOld else { return nil }
+        let running = serverApiVersion.map(String.init) ?? "unknown"
+        return "Backend is too old: API v\(running), this app needs v\(Self.minimumServerApiVersion). "
+            + "Restart from a current checkout (Settings → Backend → Kill & Restart)."
     }
 }

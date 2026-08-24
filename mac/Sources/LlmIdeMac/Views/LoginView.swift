@@ -46,6 +46,7 @@ struct LoginView: View {
         // user doesn't need to click the button a second time.
         .onChange(of: backend.status) { _, newStatus in
             guard case .running = newStatus, serverUnreachable,
+                  !backend.serverVersionTooOld,
                   !email.isEmpty, !password.isEmpty else { return }
             error = nil
             serverUnreachable = false
@@ -73,6 +74,10 @@ struct LoginView: View {
 
                 if let error {
                     errorBanner(message: error)
+                } else if backend.serverVersionTooOld,
+                          let versionMsg = backend.versionMismatchBannerText {
+                    BackendVersionMismatchBanner(message: versionMsg)
+                    startServerRow
                 } else if !backendReady {
                     // Proactive first-run guidance: when the local server
                     // isn't up yet, surface setup help BEFORE a failed sign-in
@@ -207,13 +212,25 @@ struct LoginView: View {
                     .foregroundStyle(theme.current.textMuted)
             }
         } else if case .running = backend.status {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.current.accent3)
-                Text("Server is running — try signing in.")
-                    .font(Typography.caption)
-                    .foregroundStyle(theme.current.textMuted)
+            if backend.serverVersionTooOld {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.current.warning)
+                    Text("Server is running but the API is too old — update the backend checkout, then restart.")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.current.accent3)
+                    Text("Server is running — try signing in.")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                }
             }
         } else if !config.backendNodePath.isEmpty && !config.backendWorkingDir.isEmpty {
             VStack(alignment: .leading, spacing: Spacing.xs) {

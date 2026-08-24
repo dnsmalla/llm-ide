@@ -1371,7 +1371,7 @@ final class MobileControlManager {
             gitBranch = ctx.currentBranch
             workspacePath = ctx.workspaceRoot
         }
-        let backendUp = await BackendManager.probeHealth()
+        let backendUp = await BackendManager.probeHealthUsable()
         let mobileControlUp: Bool = {
             if case .running = status { return true }
             return false

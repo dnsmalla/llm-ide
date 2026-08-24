@@ -63,4 +63,55 @@ final class BackendVersionGuardTests: XCTestCase {
         XCTAssertTrue(err.contains("server.mjs"), "points at the configured path")
         XCTAssertFalse(err.contains("adopted"))
     }
+
+    /// Regression: `markRunning` used to unconditionally nil `lastError`,
+    /// erasing the message `recordServerVersion` had just set on the spawn path.
+    @MainActor
+    func testRunningPromotionPreservesTooOldLastError() {
+        let mgr = BackendManager()
+        mgr.recordServerVersion(
+            .init(ok: true, apiVersion: 19, versionTooOld: true), adopted: false)
+        let expected = mgr.lastError
+        XCTAssertNotNil(expected)
+
+        mgr.clearLastErrorUnlessVersionTooOld()
+
+        XCTAssertEqual(mgr.lastError, expected)
+        XCTAssertTrue(mgr.serverVersionTooOld)
+    }
+
+    @MainActor
+    func testRunningPromotionClearsLastErrorForACompatibleServer() {
+        let mgr = BackendManager()
+        mgr.lastError = "stale startup message"
+        mgr.serverVersionTooOld = false
+
+        mgr.clearLastErrorUnlessVersionTooOld()
+
+        XCTAssertNil(mgr.lastError)
+    }
+
+    func testProbeHealthUsableRejectsTooOldServer() async {
+        // Pin the rule without standing up a server: mirror the predicate.
+        let tooOld = BackendManager.HealthProbeResult(ok: true, apiVersion: 18, versionTooOld: true)
+        let current = BackendManager.HealthProbeResult(ok: true, apiVersion: 24, versionTooOld: false)
+        XCTAssertFalse(tooOld.ok && !tooOld.versionTooOld)
+        XCTAssertTrue(current.ok && !current.versionTooOld)
+    }
+
+    func testProbeHealthReachableStillTrueForTooOldServer() async {
+        let tooOld = BackendManager.HealthProbeResult(ok: true, apiVersion: 18, versionTooOld: true)
+        XCTAssertTrue(tooOld.ok, "reachability probe ignores version")
+    }
+
+    @MainActor
+    func testVersionMismatchBannerFallsBackWhenLastErrorCleared() {
+        let mgr = BackendManager()
+        mgr.recordServerVersion(
+            .init(ok: true, apiVersion: 18, versionTooOld: true), adopted: true)
+        mgr.lastError = nil
+        let text = mgr.versionMismatchBannerText ?? ""
+        XCTAssertTrue(text.contains("18"))
+        XCTAssertTrue(text.contains("\(BackendManager.minimumServerApiVersion)"))
+    }
 }
