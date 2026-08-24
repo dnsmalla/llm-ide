@@ -181,3 +181,41 @@ test('catalog credential vault keys are accepted by the vault allowlist', async 
       `${e.id}: vault would reject '${e.credential.vaultKey}' as an unknown key`);
   }
 });
+
+test('revoking consent also disables — the enabled-but-unconsented state is unreachable', () => {
+  writeMcpRegistry([]);
+  const { plugin } = addMcpPlugin({ name: 'Seq', command: 'npx', args: ['-y', 'seq'], source: 'manual' });
+  setConsented('user-c', plugin.id, true);
+  setEnabledMcp('user-c', plugin.id, true);
+
+  // Revoking consent leaves a server that LOOKS on (its switch reads enabled)
+  // yet never reaches the CLI, because effectiveMcpServers needs both gates.
+  // Clearing enable keeps the state honest.
+  setConsented('user-c', plugin.id, false);
+  const after = listMcpPluginsWithState('user-c').plugins.find((p) => p.id === plugin.id);
+  assert.equal(after.consented, false);
+  assert.equal(after.enabled, false, 'revoking consent must clear enable');
+
+  // Re-consenting does NOT silently re-enable — the user opts in again.
+  setConsented('user-c', plugin.id, true);
+  const reconsented = listMcpPluginsWithState('user-c').plugins.find((p) => p.id === plugin.id);
+  assert.equal(reconsented.enabled, false, 're-consent must not resurrect enable');
+});
+
+test('setEnabledMcp refuses to enable an unconsented server and reports what it stored', () => {
+  writeMcpRegistry([]);
+  const { plugin } = addMcpPlugin({ name: 'Gate', command: 'npx', args: ['-y', 'gate'], source: 'manual' });
+
+  const refused = setEnabledMcp('user-d', plugin.id, true);
+  assert.equal(refused.enabled, false);
+  assert.match(refused.error, /consent/i);
+  assert.equal(listMcpPluginsWithState('user-d').plugins.find((p) => p.id === plugin.id).enabled, false);
+
+  setConsented('user-d', plugin.id, true);
+  const allowed = setEnabledMcp('user-d', plugin.id, true);
+  assert.equal(allowed.enabled, true);
+  assert.equal(allowed.error, undefined);
+
+  // Disabling never needs consent — it can only reduce access.
+  assert.equal(setEnabledMcp('user-d', plugin.id, false).enabled, false);
+});

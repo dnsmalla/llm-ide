@@ -310,17 +310,38 @@ export function pruneMcpState(validIds) {
   if (touched) writeState(all);
 }
 
+/**
+ * Grant or revoke consent. Revoking also clears `enabled`, because
+ * effectiveMcpServers needs BOTH gates: an enabled-but-unconsented server
+ * still renders as a switch in the on position while reaching neither the CLI
+ * nor the SDK, which reads as "MCP is broken" rather than "consent is missing".
+ * Granting never sets `enabled` — activation stays an explicit second opt-in.
+ */
 export function setConsented(userId, id, consented) {
   if (!SLUG_RE.test(id)) return;
   const st = readState();
-  ensurePluginEntry(st, userId, id).consented = !!consented;
+  const entry = ensurePluginEntry(st, userId, id);
+  entry.consented = !!consented;
+  if (!entry.consented) entry.enabled = false;
   writeState(st);
 }
+/**
+ * Enable or disable. Enabling an UNCONSENTED server is refused rather than
+ * stored: consent is the first gate, and recording `enabled` behind it only
+ * produces a row whose switch says on while nothing runs. Returns the state
+ * actually stored so the route can report the truth instead of echoing the
+ * request back.
+ */
 export function setEnabledMcp(userId, id, enabled) {
-  if (!SLUG_RE.test(id)) return;
+  if (!SLUG_RE.test(id)) return { enabled: false, error: 'invalid id' };
   const st = readState();
-  ensurePluginEntry(st, userId, id).enabled = !!enabled;
+  const entry = ensurePluginEntry(st, userId, id);
+  if (enabled && !entry.consented) {
+    return { enabled: !!entry.enabled, error: 'consent required before enabling' };
+  }
+  entry.enabled = !!enabled;
   writeState(st);
+  return { enabled: entry.enabled };
 }
 
 export function listMcpPluginsWithState(userId) {

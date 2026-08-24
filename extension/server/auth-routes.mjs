@@ -1548,14 +1548,23 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'id + enabled required' } }); return;
     }
     const { setEnabledMcp } = await import('../mcp/state.mjs');
-    setEnabledMcp(req.user.id, body.id, body.enabled);
+    // Enabling without consent is refused by the state layer — report that
+    // instead of echoing `body.enabled`, so the client never shows a switch
+    // in a position the server did not store.
+    const toggled = setEnabledMcp(req.user.id, body.id, body.enabled);
+    if (toggled.error) {
+      safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
+        action: 'mcp-plugin.enable', resource: body.id, outcome: 'failure', detail: { error: toggled.error } });
+      send(res, 409, { error: { code: 'CONSENT_REQUIRED', message: toggled.error } });
+      return;
+    }
     try {
       const { scheduleSnapshotRefresh } = await import('../llm_agent/default-snapshot.mjs');
       scheduleSnapshotRefresh(req.user.id);
     } catch { /* snapshot is best-effort; toggle already succeeded */ }
     safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
-      action: body.enabled ? 'mcp-plugin.enable' : 'mcp-plugin.disable', resource: body.id, outcome: 'success' });
-    send(res, 200, { ok: true, enabled: body.enabled });
+      action: toggled.enabled ? 'mcp-plugin.enable' : 'mcp-plugin.disable', resource: body.id, outcome: 'success' });
+    send(res, 200, { ok: true, enabled: toggled.enabled });
     return;
   }
 

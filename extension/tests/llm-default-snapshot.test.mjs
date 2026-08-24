@@ -64,8 +64,10 @@ setEnabled(USER, 'extra', true);
 
 // One enabled+consented MCP plugin — this is what chat actually gets.
 writeMcpRegistry([{ id: 'fs-server', name: 'FS', command: 'npx', args: ['-y', 'fs-mcp'], builtin: false }]);
-setEnabledMcp(USER, 'fs-server', true);
+// Consent BEFORE enable — the order the state layer enforces (enabling an
+// unconsented server is refused, so the reverse order stores nothing).
 setConsented(USER, 'fs-server', true);
+setEnabledMcp(USER, 'fs-server', true);
 
 test('refreshDefaultSnapshot materializes skills+agents from enabled sources only', () => {
   const summary = refreshDefaultSnapshot(USER);
@@ -213,8 +215,8 @@ test('legacy app-support snapshot location is retired after a refresh', () => {
 test('MCP plugin env vars are carried into the snapshot .mcp.json', () => {
   writeMcpRegistry([{ id: 'env-server', name: 'Env', command: 'node', args: ['e.js'],
     env: { TOKEN: 'secret' }, builtin: false }]);
-  setEnabledMcp(USER, 'env-server', true);
   setConsented(USER, 'env-server', true);
+  setEnabledMcp(USER, 'env-server', true);
   setEnabled(USER, BUILTIN_ID, true);
   refreshDefaultSnapshot(USER);
   const mcp = JSON.parse(fs.readFileSync(path.join(defaultSnapshotDir(), '.mcp.json'), 'utf8'));
