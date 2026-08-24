@@ -23,14 +23,25 @@ struct McpPluginRow: View {
                 Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
+            // Unconsented reads as a labelled call to action, not a bare
+            // glyph: consent is the gate a new server is always stuck behind,
+            // and an icon-only shield left users toggling the (inert) switch
+            // instead. Consented collapses back to the compact check.
             Button {
                 onToggleConsent(!plugin.consented)
             } label: {
-                Image(systemName: plugin.consented ? "checkmark.shield.fill" : "shield")
-                    .foregroundStyle(plugin.consented ? Color.green : Color.secondary)
+                if plugin.consented {
+                    Image(systemName: "checkmark.shield.fill").foregroundStyle(Color.green)
+                } else {
+                    HStack(spacing: 3) {
+                        Image(systemName: "shield")
+                        Text("Consent").font(.caption2)
+                    }
+                    .foregroundStyle(Color.orange)
+                }
             }
             .buttonStyle(.plain)
-            .help(plugin.consented ? "Consented — click to revoke" : "Not consented — click to consent")
+            .help(plugin.consented ? "Consented — click to revoke" : "Not consented — click to consent. Until you do, this server never reaches the agent.")
             Toggle("", isOn: Binding(get: { plugin.enabled }, set: onToggleEnabled))
                 .toggleStyle(.switch)
                 .labelsHidden()
@@ -51,6 +62,13 @@ struct McpPluginRow: View {
     }
 
     /// A hosted server has no command to show — its URL is the identity.
-    /// `endpointSummary` picks the right one for the transport.
-    private var subtitle: String { plugin.endpointSummary }
+    /// `endpointSummary` picks the right one for the transport. A server that
+    /// is not effectively active leads with the gate blocking it (same
+    /// "<status> · <endpoint>" form the completion menu uses), so the row says
+    /// WHY it does nothing instead of only what it would run.
+    private var subtitle: String {
+        plugin.statusSummary == "enabled"
+            ? plugin.endpointSummary
+            : "\(plugin.statusSummary) · \(plugin.endpointSummary)"
+    }
 }
