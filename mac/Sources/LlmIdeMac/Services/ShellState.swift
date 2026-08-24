@@ -89,6 +89,8 @@ final class ShellState {
         /// A connector row. String is the catalog entry's `id` field
         /// (e.g. "box", "slack", "gdrive").
         case connector(String)
+        /// Review panel for open to-dos extracted from email notes.
+        case emailTodos
     }
 
     var section: Section = .explorer

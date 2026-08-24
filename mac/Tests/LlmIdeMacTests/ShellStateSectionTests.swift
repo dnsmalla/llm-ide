@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class ShellStateSectionTests: XCTestCase {
-    /// The Loop's toolbar button is hideable via Settings → Menu Bar. It was
+    /// The Loop's toolbar button is hideable via Settings → Workspace. It was
     /// deliberately excluded before, on the grounds that it is the permanent home
     /// for regression — hiding it is only acceptable because the page stays
     /// reachable without its button (see `testHidingASectionDoesNotRemoveItFromTheEnum`
