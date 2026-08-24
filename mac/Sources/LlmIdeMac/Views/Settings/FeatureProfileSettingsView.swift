@@ -1,17 +1,17 @@
 import SwiftUI
 
-/// Collapsible settings card for the System Feature Minimizer — matches
-/// `SettingsSectionCard` styling used by Menu Bar, Auto Tasks, etc.
+/// Workspace presets, feature gates, and top-bar visibility in one card.
 struct FeatureProfileSettingsSection: View {
     @ObservedObject var registry = FeatureRegistry.shared
     @Environment(AppEnvironment.self) private var environment
     @EnvironmentObject var theme: ThemeStore
+    @EnvironmentObject var config: AppConfig
 
     var body: some View {
-        SettingsSectionCard(icon: "slider.horizontal.3", title: "Feature Minimizer") {
+        SettingsSectionCard(icon: "slider.horizontal.3", title: "Workspace") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 SettingsHint(
-                    "Choose a preset or toggle individual components. Disabled features hide from the toolbar and stop background services."
+                    "Presets turn features off completely (toolbar + navigation). Toolbar toggles below only hide menu buttons — deep links and shortcuts still work."
                 )
 
                 HStack(spacing: Spacing.md) {
@@ -40,12 +40,45 @@ struct FeatureProfileSettingsSection: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, Spacing.xs)
 
-                let features = AppFeature.allCases
-                let last = features.last
+                let features = AppFeature.settingsToggleable
+                let lastFeature = features.last
                 ForEach(features) { feature in
                     featureRow(feature)
-                    if feature != last { Divider().opacity(0.4) }
+                    if feature != lastFeature { Divider().opacity(0.4) }
                 }
+
+                Divider().padding(.vertical, Spacing.xs)
+
+                Text("Menu bar")
+                    .font(Typography.captionStrong)
+                    .foregroundStyle(theme.current.textMuted)
+
+                Picker("Home opens", selection: Binding(
+                    get: { config.homeSection },
+                    set: { config.homeSection = $0 }
+                )) {
+                    ForEach(ShellState.Section.allCases.filter { $0 != .settings && $0 != .live }, id: \.self) { section in
+                        Text(section.label).tag(section.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+                .padding(.bottom, Spacing.xs)
+
+                let hideable = ShellState.Section.userHideable
+                let lastSection = hideable.last
+                ForEach(hideable, id: \.self) { section in
+                    menuBarRow(for: section)
+                    if section != lastSection { Divider().opacity(0.4) }
+                }
+
+                HStack {
+                    Spacer()
+                    Button("Show all toolbar items") { config.hiddenSidebarSections = [] }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(config.hiddenSidebarSections.isEmpty)
+                }
+                .padding(.top, Spacing.xs)
             }
         }
     }
@@ -91,10 +124,41 @@ struct FeatureProfileSettingsSection: View {
         .padding(.vertical, 2)
     }
 
+    @ViewBuilder
+    private func menuBarRow(for section: ShellState.Section) -> some View {
+        let t = theme.current
+        let binding = Binding<Bool>(
+            get: { !config.hiddenSidebarSections.contains(section.rawValue) },
+            set: { isVisible in
+                if isVisible {
+                    config.hiddenSidebarSections.remove(section.rawValue)
+                } else {
+                    config.hiddenSidebarSections.insert(section.rawValue)
+                }
+            }
+        )
+        HStack(spacing: Spacing.md) {
+            Image(systemName: section.systemImage)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(section.tint(t))
+                .frame(width: 22, height: 22)
+            Text(section.label)
+                .font(Typography.body)
+                .foregroundStyle(t.text)
+            Spacer()
+            Toggle("", isOn: binding)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .labelsHidden()
+                .help(binding.wrappedValue ? "Hide \(section.label) in toolbar" : "Show \(section.label) in toolbar")
+        }
+        .padding(.vertical, 2)
+    }
+
     private func description(for preset: ProfilePreset) -> String {
         switch preset {
         case .fullPower:
-            return "All features including 3D Code Graph, Mobile Sync, Gantt, and Auto Tasks."
+            return "All features including 3D Code Graph, Gantt, and Auto Tasks."
         case .focusedAI:
             return "AI Chat, File Explorer, and DocGen only — lighter UI and fewer background services."
         case .minimalEditor:

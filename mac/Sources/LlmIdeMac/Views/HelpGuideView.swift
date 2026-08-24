@@ -139,9 +139,10 @@ struct HelpGuideView: View {
             }
 
             helpCard("During the session", icon: "text.bubble") {
-                helpBullet("Captions scroll in real time — the app reads them from the meeting window via Accessibility APIs")
+                helpBullet("Captions scroll in the Transcript tab as the app reads them from Zoom/Teams via Accessibility APIs")
                 helpBullet("Speaker names are detected automatically when the platform provides them")
                 helpBullet("You can minimize LLM-IDE — capture continues in the background")
+                helpBullet("The knowledge base is updated when you **Stop & Save** — captions are not pushed to the server mid-meeting")
             }
 
             helpTip("When the Chrome extension is capturing a web meeting, the Live page mirrors that remote session too — you'll see captions from Google Meet, Teams Web, or Zoom Web in real time.")
@@ -376,22 +377,22 @@ struct HelpGuideView: View {
             helpParagraph("Settings is split into two groups: App settings that apply everywhere, and Project settings that are specific to the currently open project.")
 
             helpCard("App settings", icon: "macwindow") {
-                helpBullet("Account — view your profile and sign out")
-                helpBullet("Server — configure which LLM-IDE server to connect to")
-                helpBullet("Backend — choose AI providers and models for note generation")
-                helpBullet("Appearance — switch between light, dark, and system themes")
-                helpBullet("Menu Bar — show or hide the toolbar tools you don't use")
-                helpBullet("Capture — configure how captions are captured (Accessibility settings)")
+                helpBullet("Workspace — feature presets, per-feature toggles, and toolbar visibility")
+                helpBullet("Server & Backend — URL, local Node process, and log")
+                helpBullet("Connections — meetings, email, Slack, Box, and other inputs")
+                helpBullet("General — theme, language, and synced preferences")
+                helpBullet("Model Providers — API keys, default model, and Agent engine toggle")
+                helpBullet("Mobile Control — pair your iPhone companion")
                 helpBullet("Updates — check for app updates (powered by Sparkle)")
             }
 
             helpCard("Project settings", icon: "folder.badge.gearshape") {
-                helpBullet("Paths — where your project files and notes are stored")
-                helpBullet("GitLab / GitHub — link a remote repository for code review and issues")
-                helpBullet("CLI — choose between Claude Code, Cursor, or other AI coding tools")
-                helpBullet("Preferences — language, auto-dispatch, and note formatting options")
-                helpBullet("Auto Code — configure automated tasks and triggers")
-                helpBullet("Loop — default stages and budgets for the project's Loop runs")
+                helpBullet("Repositories — GitLab and GitHub tokens, saved repos, and automation allow-list")
+            }
+
+            helpCard("Elsewhere", icon: "arrow.turn.down.right") {
+                helpBullet("Explorer → Project folders — read-only layout, rebuild missing folders, notes index")
+                helpBullet("Loop → New project defaults — budgets and policy inherited by new projects")
             }
 
             helpTip("Press ⌘, (comma) from anywhere to jump straight to Settings.")

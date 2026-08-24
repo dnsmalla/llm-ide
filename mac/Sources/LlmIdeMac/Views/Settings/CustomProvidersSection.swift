@@ -99,8 +99,7 @@ struct CustomProvidersSection: View {
     /// transient failure (e.g. auth drift) must not block the UI; the next
     /// mutation or section re-appearance retries.
     private func syncAll() {
-        let all = CustomProvider.loadAll()
-        Task { try? await api.syncCustomProviders(all) }
+        CustomProvider.syncAllToBackend(api: api)
     }
 }
 

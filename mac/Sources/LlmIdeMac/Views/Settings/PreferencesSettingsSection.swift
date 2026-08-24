@@ -13,8 +13,29 @@ struct PreferencesSettingsSection: View {
     @State private var prefsStatus: String?
 
     var body: some View {
-        SettingsSectionCard(icon: "globe", title: "Preferences (synced)") {
+        SettingsSectionCard(icon: "globe", title: "General") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
+                Text("Appearance")
+                    .font(Typography.captionStrong)
+                    .foregroundStyle(theme.current.textMuted)
+                Picker("", selection: Binding(
+                    get: { theme.current.id },
+                    set: { id in
+                        theme.apply(id: id)
+                        config.themeID = id
+                    }
+                )) {
+                    ForEach(Theme.all) { t in Text(t.name).tag(t.id) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                Divider().padding(.vertical, Spacing.xs)
+
+                Text("Preferences (synced)")
+                    .font(Typography.captionStrong)
+                    .foregroundStyle(theme.current.textMuted)
+
                 HStack(spacing: Spacing.md) {
                     Text("Language")
                         .font(Typography.body)
@@ -71,7 +92,7 @@ struct PreferencesSettingsSection: View {
                             .foregroundStyle(s.hasPrefix("✓") ? theme.current.text : theme.current.danger)
                     }
                 }
-                SettingsHint("Language drives every LLM output (notes, plans, agent questions) and applies on both this app and the Chrome extension once signed in.")
+                SettingsHint("Theme applies immediately on this Mac. Language drives every LLM output (notes, plans, agent questions) and applies on both this app and the Chrome extension once signed in.")
             }
         }
         .task { await loadPrefs() }

@@ -104,16 +104,11 @@ struct ConnectionsSettingsSection: View {
                         }
                     }
 
-                    Text("More inputs")
-                        .font(Typography.section)
-                        .foregroundStyle(theme.current.textMuted)
-                        .padding(.top, Spacing.xs)
-
-                    ForEach(InputSourceRegistry.planned) { src in
-                        InputSourceCard(icon: src.icon, title: src.title,
-                                        subtitle: src.subtitle,
-                                        badgeText: "Coming soon", badgeTone: .neutral,
-                                        isAvailable: false)
+                    if !InputSourceRegistry.planned.isEmpty {
+                        Text("Planned later: \(InputSourceRegistry.planned.map(\.title).joined(separator: ", ")).")
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
+                            .padding(.top, Spacing.xs)
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))

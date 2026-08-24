@@ -104,6 +104,11 @@ struct LoopEngineHomeView: View {
                 }
             }
             .listStyle(.sidebar)
+
+            Divider()
+            LoopNewProjectDefaultsPanel()
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
         }
         .background(t.surface)
     }

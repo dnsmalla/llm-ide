@@ -11,6 +11,8 @@ struct ExplorerView: View {
     @EnvironmentObject private var projectStore: ProjectStore
     @EnvironmentObject private var config: AppConfig
 
+    @State private var showProjectPaths = false
+
     // Lazy tree state: which folders are expanded, and a cache of each
     // expanded folder's children (filled on first expand so repeated
     // toggles don't re-hit the filesystem).
@@ -157,6 +159,9 @@ struct ExplorerView: View {
         } message: {
             Text(deleteError ?? "")
         }
+        .sheet(isPresented: $showProjectPaths) {
+            ProjectPathsSheet()
+        }
         }
     }
 
@@ -269,6 +274,13 @@ struct ExplorerView: View {
                     }
                 }
             Spacer(minLength: 4)
+            if projectStore.activeProject != nil {
+                Button { showProjectPaths = true } label: {
+                    Image(systemName: "folder.badge.gearshape")
+                }
+                .buttonStyle(.borderless)
+                .help("Project folders")
+            }
             Button { filePrompt = .newFile(in: targetDir) } label: {
                 Image(systemName: "doc.badge.plus")
             }
@@ -405,7 +417,7 @@ struct ExplorerView: View {
         EmptyStateView(
             icon: "folder",
             title: "No files to browse yet",
-            message: "Open a project, or set a code folder in Settings → Paths to browse files here.",
+            message: "Open a project, or use Explorer → Project folders to inspect the folder layout.",
             actionLabel: "Open Settings",
             action: { NotificationCenter.default.post(name: .openSection, object: "settings") }
         )

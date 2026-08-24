@@ -149,7 +149,7 @@ final class ProjectStore: ObservableObject {
     }
 
     /// Rebuild canonical folders + refresh the central skills kit for the
-    /// active project. Used by Settings → Paths → "Rebuild missing folders".
+    /// active project. Used by Explorer → Project folders → "Rebuild missing folders".
     func rebuildActiveProjectFolders() throws {
         guard let ap = activeProject else {
             throw ProjectStoreError.noActiveProject

@@ -2,6 +2,9 @@ import SwiftUI
 import GraphKit
 
 struct GitLabSettingsSection: View {
+    /// When true, renders only the inner controls (for `RepoSettingsSection` tabs).
+    var embedded: Bool = false
+
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
@@ -30,8 +33,23 @@ struct GitLabSettingsSection: View {
     }
 
     var body: some View {
-        SettingsSectionCard(icon: "checklist", title: "GitLab") {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
+        Group {
+            if embedded {
+                settingsContent
+            } else {
+                SettingsSectionCard(icon: "checklist", title: "GitLab") {
+                    settingsContent
+                }
+            }
+        }
+        .onAppear {
+            gitLabTokenDraft = config.gitLabToken
+        }
+    }
+
+    @ViewBuilder
+    private var settingsContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
 
                 // Provider preference banner
                 if !config.gitHubToken.isEmpty && !config.gitLabToken.isEmpty {
@@ -189,10 +207,6 @@ struct GitLabSettingsSection: View {
                     }
                 }
             }
-        }
-        .onAppear {
-            gitLabTokenDraft = config.gitLabToken
-        }
     }
 
     // MARK: - Project deletion

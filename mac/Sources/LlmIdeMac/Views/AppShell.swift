@@ -1116,7 +1116,7 @@ struct DisabledFeaturePlaceholderView: View {
                 .foregroundColor(.secondary)
             Text("\(featureName) is currently disabled")
                 .font(.headline)
-            Text("You can re-enable this feature in System Feature Minimizer Settings.")
+            Text("You can re-enable this feature in Settings → Workspace.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }

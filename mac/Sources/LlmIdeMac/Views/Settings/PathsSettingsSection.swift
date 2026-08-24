@@ -1,20 +1,10 @@
-// Settings → Paths.
-//
-// Display-only. A project's folder layout is fixed when the project is
-// created (New Project) or read from disk (Open Existing). There are no
-// global path settings to manage here. KB plans land in the project tree
-// at llm-doc/plans/ (shown like every other folder; auto-generated).
-//
-//   ┌─ Paths ──────────────────────────────────────────────────┐
-//   │ ℹ These folders belong to the active project.            │
-//   │   source/ code/ data/ llm-doc/ llm-doc/plans/ system/    │
-//   │   [ Rebuild missing folders ]                             │
-//   └──────────────────────────────────────────────────────────┘
+// Project folder layout — read-only tree of the active project's canonical
+// folders. Shown from Explorer → "Project folders" (not Settings).
 
 import SwiftUI
 import AppKit
 
-struct PathsSettingsSection: View {
+struct ProjectPathsPanel: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var templateStore: DocTemplateStore
@@ -25,14 +15,12 @@ struct PathsSettingsSection: View {
     @State private var rebuildingIndex = false
 
     var body: some View {
-        SettingsSectionCard(icon: "folder.badge.gearshape", title: "Paths") {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                if let ap = projectStore.activeProject {
-                    SettingsHint("These folders belong to the active project. A project's location is set when you create or open it — there are no global path settings to manage here.")
-                    projectPathsPanel(ap)
-                } else {
-                    noProjectHint
-                }
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            if let ap = projectStore.activeProject {
+                SettingsHint("These folders belong to the active project. A project's location is set when you create or open it.")
+                projectPathsPanel(ap)
+            } else {
+                noProjectHint
             }
         }
     }

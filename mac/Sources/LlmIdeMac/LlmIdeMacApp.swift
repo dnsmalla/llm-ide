@@ -323,6 +323,9 @@ public struct LlmIdeMacApp: App {
                     if authed {
                         liveMirror.start()
                         Task { await sourceLinkStore.refresh(api: api) }
+                        if case .running = backend.status {
+                            CustomProvider.syncAllToBackend(api: api)
+                        }
                         // Refresh the cached language pref here, not only when
                         // Settings → Preferences happens to be opened. That
                         // view was the sole writer of the mirror, so a user who
@@ -352,8 +355,13 @@ public struct LlmIdeMacApp: App {
                     if config.mobileControlEnabled {
                         mobileControl.onMacEnvironmentChanged()
                     }
-                    if case .running = newStatus, config.mobileControlEnabled {
-                        mobileControl.onBackendReady()
+                    if case .running = newStatus {
+                        if session.isAuthenticated {
+                            CustomProvider.syncAllToBackend(api: api)
+                        }
+                        if config.mobileControlEnabled {
+                            mobileControl.onBackendReady()
+                        }
                     }
                 }
                 // Stop the supervised backend on Cmd-Q so we don't

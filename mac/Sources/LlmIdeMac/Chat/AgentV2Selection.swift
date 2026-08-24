@@ -10,7 +10,7 @@ import Foundation
 enum AgentV2Selection {
 
     /// `@AppStorage`/UserDefaults key for the user's engine toggle. The
-    /// Settings row (`CodeAssistantSettingsSection`) writes through
+    /// Settings row (`ProvidersSettingsSection`) writes through
     /// `@AppStorage`, which is backed by the same `UserDefaults.standard`
     /// this type reads — the two can never disagree.
     static let toggleKey = "chat.useAgentV2"

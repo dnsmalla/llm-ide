@@ -1,7 +1,6 @@
 import Foundation
 
 public enum AppFeature: String, CaseIterable, Codable, Identifiable {
-    case codeEditor        = "code_editor"
     case fileExplorer      = "file_explorer"
     case agentChat         = "agent_chat"
     case codeGraph3D       = "code_graph_3d"
@@ -15,7 +14,6 @@ public enum AppFeature: String, CaseIterable, Codable, Identifiable {
     
     public var displayName: String {
         switch self {
-        case .codeEditor:     return "Code Editor"
         case .fileExplorer:   return "File Explorer"
         case .agentChat:      return "AI Agent Chat"
         case .codeGraph3D:    return "3D Code Graph Engine"
@@ -39,7 +37,6 @@ public enum AppFeature: String, CaseIterable, Codable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .codeEditor:   return "chevron.left.forwardslash.chevron.right"
         case .fileExplorer: return "folder"
         case .agentChat:    return "bubble.left.and.bubble.right"
         case .codeGraph3D:  return "cube.transparent"
@@ -49,6 +46,12 @@ public enum AppFeature: String, CaseIterable, Codable, Identifiable {
         case .mobileSync:   return "iphone"
         case .autoTasks:    return "arrow.triangle.2.circlepath.circle"
         }
+    }
+
+    /// Features listed in Settings → Workspace. Omits flags with a dedicated
+    /// card (`mobileSync` → Mobile Control).
+    static let settingsToggleable: [AppFeature] = allCases.filter {
+        $0 != .mobileSync
     }
 
     /// Drop features whose dependencies are not satisfied (e.g. disabling File
@@ -84,7 +87,7 @@ public enum ProfilePreset: String, CaseIterable, Identifiable {
         case .focusedAI:
             return [.agentChat, .docGen, .fileExplorer]
         case .minimalEditor:
-            return [.codeEditor, .fileExplorer, .terminal]
+            return [.fileExplorer, .terminal]
         case .custom:
             return []
         }

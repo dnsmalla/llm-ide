@@ -68,7 +68,7 @@ enum ProjectDocTemplatesSeeder {
 
     - Open any `template.md` in your editor, or use **Doc Gen → Sources → Manage**.
     - Section structure comes from `## Heading` lines.
-    - Add a new template: create `templates/my-template/template.md` with at least one `##` section, then reopen the project or use **Rebuild missing folders** in Settings → Paths.
+    - Add a new template: create `templates/my-template/template.md` with at least one `##` section, then reopen the project or use **Rebuild missing folders** in Explorer → Project folders.
 
     Generated documents export as Markdown (`.md`) into the project's `data/` folder.
 

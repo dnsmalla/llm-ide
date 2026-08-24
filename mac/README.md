@@ -30,7 +30,7 @@
 | | |
 |---|---|
 | **OS** | macOS 14 Sonoma or newer |
-| **Backend** | LLM-IDE server running at `127.0.0.1:3456` (API v15+) |
+| **Backend** | LLM-IDE server running at `127.0.0.1:3456` (API **v20+**; check Settings → Backend if features 404) |
 | **GitLab** | Personal Access Token with `api` scope (for Issues / Gantt) |
 
 ---
@@ -84,14 +84,16 @@ To use the Issues board and Gantt chart:
 
 ## Capturing a Meeting
 
-1. Open **Zoom** or **Microsoft Teams** and join a call
+**Native capture (this app):** Zoom and Microsoft Teams **desktop** apps via the Accessibility API. For **Google Meet**, **Teams web**, or **Zoom web**, use the [Chrome extension](../extension/) — the Mac app’s **Live** tab mirrors extension sessions in real time.
+
+1. Open **Zoom** or **Microsoft Teams** (desktop) and join a call
 2. Enable **Closed Captions** in the meeting controls
    - Zoom: *Show Captions*
    - Teams: *More → Language and speech → Turn on live captions*
 3. Click **Start recording** in the app header — the menu-bar icon turns red
-4. Captions stream into the **Transcript** tab in real time
+4. Captions appear in the **Transcript** tab as they are read from the meeting app (local preview; not streamed to the server during the call)
 5. When the meeting ends, optionally set a title, then click **Stop & Save**
-6. The meeting is saved to the KB and immediately available across all clients
+6. The transcript is POSTed to **`POST /kb/ingest`** and becomes available across all clients
 
 ---
 
@@ -285,9 +287,11 @@ Sources/LlmIdeMac/
     │   ├── GanttView.swift            # timeline canvas + header bar + legend
     │   └── GanttFilterBar.swift       # search · state · milestone · assignee · label · date
     ├── Settings/
-    │   ├── GitLabSettingsSection.swift
-    │   ├── GitHubSettingsSection.swift
-    │   ├── AppearanceSettingsSection.swift
+    │   ├── BackendSettingsSection.swift      # Server & Backend (URL + Node process)
+    │   ├── RepoSettingsSection.swift         # GitLab + GitHub tabs
+    │   ├── FeatureProfileSettingsView.swift  # Workspace presets + toolbar
+    │   ├── PreferencesSettingsSection.swift  # General (theme, language, …)
+    │   ├── ProvidersSettingsSection.swift    # Model providers + Agent engine
     │   └── …
     ├── Shell/
     │   └── SidebarView.swift

@@ -140,7 +140,7 @@ struct CodeAssistantPanel: View {
     /// Agent engine — on by default. When on (AND the turn's
     /// provider is Anthropic), the engine's transport answers turns on the
     /// v2 agent engine; see `AgentV2Selection`. Written by
-    /// `CodeAssistantSettingsSection` in Settings; the panel only READS it
+    /// `ProvidersSettingsSection` in Settings; the panel only READS it
     /// (plus swapping the transport when it flips).
     @AppStorage(AgentV2Selection.toggleKey) var useAgentV2 = true
     /// True when THIS chat would run on the Agent engine but its selected

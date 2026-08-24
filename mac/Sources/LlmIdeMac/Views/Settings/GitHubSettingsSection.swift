@@ -4,6 +4,9 @@ import GraphKit
 /// Mirrors GitLabSettingsSection. Only the auth shape differs: GitHub
 /// uses a Bearer-token PAT against api.github.com; no per-host base URL.
 struct GitHubSettingsSection: View {
+    /// When true, renders only the inner controls (for `RepoSettingsSection` tabs).
+    var embedded: Bool = false
+
     /// Used to mirror the PAT into the server-side secrets vault — see
     /// `syncTokenToServerVault`.
     let api: LlmIdeAPIClient
@@ -24,8 +27,23 @@ struct GitHubSettingsSection: View {
     private let repoManager = RepoManager()
 
     var body: some View {
-        SettingsSectionCard(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub") {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
+        Group {
+            if embedded {
+                settingsContent
+            } else {
+                SettingsSectionCard(icon: "chevron.left.forwardslash.chevron.right", title: "GitHub") {
+                    settingsContent
+                }
+            }
+        }
+        .onAppear {
+            tokenDraft = config.gitHubToken
+        }
+    }
+
+    @ViewBuilder
+    private var settingsContent: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
 
                 // Provider preference banner
                 if !config.gitHubToken.isEmpty && !config.gitLabToken.isEmpty {
@@ -184,10 +202,6 @@ struct GitHubSettingsSection: View {
                     }
                 }
             }
-        }
-        .onAppear {
-            tokenDraft = config.gitHubToken
-        }
     }
 
     // MARK: - Row

@@ -75,4 +75,13 @@ extension CustomProvider {
         all.removeAll { $0.id == id }
         CustomProvider.saveAll(all)
     }
+
+    /// Re-push every locally-persisted provider into the backend registry
+    /// (POST /kb/custom-providers). The server keeps this map in memory only,
+    /// so call after backend restart and once the user is authenticated.
+    static func syncAllToBackend(api: LlmIdeAPIClient) {
+        let all = loadAll()
+        guard !all.isEmpty else { return }
+        Task { try? await api.syncCustomProviders(all) }
+    }
 }

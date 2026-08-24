@@ -4,7 +4,6 @@ struct SettingsView: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var projectStore: ProjectStore
-    @ObservedObject var registry = FeatureRegistry.shared
 
     var body: some View {
         // ScrollViewReader so Library's "Open in Settings" deep-link can
@@ -21,28 +20,13 @@ struct SettingsView: View {
                             .font(Typography.title)
                             .foregroundStyle(theme.current.textMuted)
                         FeatureProfileSettingsSection()
-                        ServerSettingsSection()
                         BackendSettingsSection()
                         ConnectionsSettingsSection(api: api).id("connections")
-                        AppearanceSettingsSection()
-                        SidebarVisibilitySection()
                         UpdatesSettingsSection()
-                        // Gated by Feature Profile — hidden automatically
-                        // when the user has turned Mobile Sync off (e.g.
-                        // the "Minimal Code Editor" preset), instead of
-                        // always showing regardless of whether the
-                        // feature itself is enabled.
-                        if registry.isEnabled(.mobileSync) {
-                            MobileControlSettingsSection()
-                        }
+                        MobileControlSettingsSection()
                         PreferencesSettingsSection(api: api)
                         ProvidersSettingsSection(api: api)
-                        CodeAssistantSettingsSection()
                         CustomProvidersSection(api: api)
-                        // App-scoped, not Project: these are the values a NEW
-                        // project's Loop config inherits. A project already opened
-                        // in the Loop keeps its own, edited on that page.
-                        LoopSettingsSection()
                     }
 
                     // Project-scoped settings — only visible when a project is
@@ -55,9 +39,11 @@ struct SettingsView: View {
                                 Text("Project")
                                     .font(Typography.title)
                                     .foregroundStyle(theme.current.textMuted)
-                                PathsSettingsSection()
-                                GitLabSettingsSection()
-                                GitHubSettingsSection(api: api)
+                                RepoSettingsSection(api: api)
+                                // Still here (not on a feature page) because its
+                                // auto-update cadence Stepper has no other home —
+                                // dropping it from Settings orphaned the only UI
+                                // for GraphAutoUpdater's interval.
                                 GraphMemorySettingsSection()
                             }
                         }

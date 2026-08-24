@@ -30,10 +30,33 @@ struct ProvidersSettingsSection: View {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 SettingsHint("Pick the default provider (◉) and model for new Code & Doc Review chats, and add each provider's credentials. A key runs over the fast HTTP API; with no key, “Check CLI” uses your logged-in CLI (subscription). Keys are stored in the server vault — never on disk here. You can also switch provider/model live in the chat composer. For multiple named providers (GLM, Ollama, …), see Custom Providers below.")
                 ForEach(providers) { providerRow($0) }
+
+                Divider().padding(.vertical, Spacing.sm)
+
+                agentEngineToggle
             }
         }
         .task { await loadConfigured() }
         .onAppear(perform: normalizeActiveCLI)
+    }
+
+    @AppStorage(AgentV2Selection.toggleKey) private var useAgentV2 = true
+
+    @ViewBuilder
+    private var agentEngineToggle: some View {
+        Toggle(isOn: $useAgentV2) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Agent engine (Code Assistant)")
+                    .font(Typography.body)
+                    .foregroundStyle(theme.current.text)
+                Text("New chats use the Claude Agent engine (Anthropic provider only). Turn off to use the classic engine.")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .toggleStyle(.switch)
+        SettingsHint("The Agent engine answers AskUserQuestion cards mid-turn and keeps its own server-side session per chat. Other providers and phone-driven background chats keep using the classic engine.")
     }
 
     private func isActive(_ p: ProviderCatalog.Entry) -> Bool {
