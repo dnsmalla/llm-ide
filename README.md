@@ -2,7 +2,7 @@
 
 > Local-first AI workspace — capture meetings and sources, plan in a searchable library, automate code review and implementation, and dispatch to GitHub/GitLab/tickets. Everything runs on `127.0.0.1` unless you approve an outbound action.
 
-[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](./extension/package.json)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](./extension/package.json)
 [![API](https://img.shields.io/badge/API-v22-green.svg)](./docs/reference/api/openapi.yaml)
 [![Manifest](https://img.shields.io/badge/manifest-V3-orange.svg)](./extension/manifest.json)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg)](#license)

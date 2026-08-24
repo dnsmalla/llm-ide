@@ -1,6 +1,6 @@
 {
   "name": "llm-ide-extension",
-  "version": "3.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "description": "Conversation-driven autonomous project system — meetings → plans → tickets → code, fully local",
