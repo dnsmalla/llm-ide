@@ -76,9 +76,13 @@ extension CodeAssistantPanel {
             if case .library(let id) = s.action { return id } else { return nil }
         }
         attachmentState.selectedSkills = []
+        let planContent = Self.planContentForExecute(
+            payload: payload,
+            attachments: attachmentState.attachments)
+        let baseMessage = Self.executePlanMessage(forPlanContent: planContent, planTitle: payload.planTitle)
         let outgoing = directives.isEmpty
-            ? Self.executePlanMessage
-            : directives.joined(separator: "\n") + "\n\n" + Self.executePlanMessage
+            ? baseMessage
+            : directives.joined(separator: "\n") + "\n\n" + baseMessage
         if engine.busy {
             engine.enqueue(outgoing, skillIds: skillIds)
         } else {
@@ -91,6 +95,141 @@ extension CodeAssistantPanel {
     static let executePlanMessage =
         "Execute the attached plan step by step, starting from step 1. "
         + "Report progress after each step."
+
+    /// Structured execute instruction: lists parsed steps and tells the agent
+    /// to seed `task-create` before working. Falls back to the legacy generic
+    /// message when the plan has no parseable steps.
+    static func executePlanMessage(forPlanContent content: String, planTitle: String?) -> String {
+        let steps = parsePlanSteps(from: content)
+        guard !steps.isEmpty else { return executePlanMessage }
+
+        var parts: [String] = [
+            "Execute the attached approved plan.",
+        ]
+        if let planTitle, !planTitle.isEmpty {
+            parts.append("Plan title: \"\(planTitle)\".")
+        }
+        parts.append(
+            "First, call task-create once per step below (exact titles). "
+            + "Then mark step 1 in_progress and implement it. "
+            + "Use Edit/Write for code changes, Bash for builds/tests, "
+            + "and ask-subagent when a step matches an enabled plugin subagent."
+        )
+        parts.append("Steps:")
+        for (index, step) in steps.enumerated() {
+            parts.append("\(index + 1). \(step)")
+        }
+        parts.append("Track progress with task-update after each step. Report what you completed.")
+        return parts.joined(separator: "\n")
+    }
+
+    /// Best-effort step list from plan markdown, in the order of preference a
+    /// reader would use: an explicit steps section if the plan has one, then
+    /// its numbered / "Step N" lines, and only bullets when the plan numbers
+    /// nothing. Caps at 30 steps to keep the execute prompt bounded.
+    ///
+    /// The scoping is not cosmetic — the agent is told to `task-create` one
+    /// task per line returned here, so a flat scan of the whole document turns
+    /// a 3-step plan into a task list that also contains its Context prose,
+    /// its "Files to change" paths, every sub-bullet, and its Risks section.
+    static func parsePlanSteps(from content: String) -> [String] {
+        let scoped = stepsSection(in: content) ?? content
+        let numbered = stepLines(in: scoped, patterns: [
+            #"^(\d+[.)])\s+(.+)$"#,
+            #"^(#{1,4}\s*Step\s*\d*[.:)]?)\s*(.+)$"#,
+            #"^(#{1,4}\s*\d+[.:)])\s*(.+)$"#,
+        ])
+        if !numbered.isEmpty { return numbered }
+        return stepLines(in: scoped, patterns: [#"^([-*])\s+(.+)$"#])
+    }
+
+    /// Body of the first heading that reads as the plan's step list, up to the
+    /// next heading of the same or higher level. `nil` when the plan has no
+    /// such section (then the whole document is scanned).
+    private static func stepsSection(in content: String) -> String? {
+        guard let headingRegex = try? NSRegularExpression(
+            pattern: #"^(#{1,6})\s*(?:\d+[.:)]\s*)?(steps?|implementation|implementation plan|tasks?|work items?)\b.*$"#,
+            options: [.caseInsensitive]),
+              let anyHeading = try? NSRegularExpression(pattern: #"^(#{1,6})\s"#)
+        else { return nil }
+
+        let lines = content.components(separatedBy: .newlines)
+        var startIndex: Int?
+        var level = 0
+        for (index, line) in lines.enumerated() {
+            let range = NSRange(line.startIndex..<line.endIndex, in: line)
+            guard let match = headingRegex.firstMatch(in: line, range: range),
+                  let hashes = Range(match.range(at: 1), in: line) else { continue }
+            startIndex = index + 1
+            level = line[hashes].count
+            break
+        }
+        guard let start = startIndex else { return nil }
+
+        var end = lines.count
+        for index in start..<lines.count {
+            let line = lines[index]
+            let range = NSRange(line.startIndex..<line.endIndex, in: line)
+            guard let match = anyHeading.firstMatch(in: line, range: range),
+                  let hashes = Range(match.range(at: 1), in: line),
+                  line[hashes].count <= level
+            else { continue }
+            end = index
+            break
+        }
+        let section = lines[start..<end].joined(separator: "\n")
+        return section.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : section
+    }
+
+    /// Lines matching any of `patterns` at the top nesting level, with the
+    /// marker and any `- [ ]` checkbox stripped off the captured title.
+    private static func stepLines(in content: String, patterns: [String]) -> [String] {
+        let regexes = patterns.compactMap { try? NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
+        var steps: [String] = []
+        for line in content.components(separatedBy: .newlines) {
+            guard steps.count < 30 else { break }
+            // Indented lines are sub-details of the step above, not steps.
+            let indent = line.prefix { $0 == " " || $0 == "\t" }.count
+            guard indent < 2 else { continue }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            for regex in regexes {
+                let nsRange = NSRange(trimmed.startIndex..<trimmed.endIndex, in: trimmed)
+                guard let match = regex.firstMatch(in: trimmed, range: nsRange),
+                      match.numberOfRanges > 2,
+                      let capture = Range(match.range(at: 2), in: trimmed)
+                else { continue }
+                let step = stripCheckbox(String(trimmed[capture]))
+                guard step.count > 2 else { continue }
+                steps.append(step)
+                break
+            }
+        }
+        return steps
+    }
+
+    /// `[ ] Add tests` → `Add tests`, so a checklist plan doesn't seed task
+    /// titles that carry their own markdown checkbox.
+    private static func stripCheckbox(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("["), trimmed.count > 3 else { return trimmed }
+        let marker = trimmed.prefix(3).lowercased()
+        guard marker == "[ ]" || marker == "[x]" || marker == "[-]" else { return trimmed }
+        return String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Plan body for execute-message parsing: card fallback, then attached file.
+    static func planContentForExecute(
+        payload: ChatMessage.ToolResultPayload,
+        attachments: [LlmIdeAPIClient.CodeAttachment]
+    ) -> String {
+        if let content = payload.planContent, !content.isEmpty { return content }
+        if let path = payload.url {
+            let match = attachments.first { $0.path == path || $0.path.hasSuffix((path as NSString).lastPathComponent) }
+            if let content = match?.content, !content.isEmpty { return content }
+        }
+        return attachments.first(where: { $0.path.hasSuffix(".md") || $0.path.contains("plan") })?.content ?? ""
+    }
 
     /// Whether the Execute action may fire the turn: the plan file attached,
     /// or the card still carries the plan text as a fallback. Pure, so the

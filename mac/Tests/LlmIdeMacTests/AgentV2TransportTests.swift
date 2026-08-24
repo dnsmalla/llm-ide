@@ -114,7 +114,28 @@ struct AgentV2TransportTests {
         #expect(result.continueNeeded == false)
     }
 
-    // MARK: - Approvals
+    @Test("tasks event after result maps continueNeeded and task list")
+    func tasksEventMapped() async throws {
+        let stream = ScriptedAgentV2Stream()
+        stream.events = [
+            .init_(AgentV2Init(sessionId: "sdk-tasks", claudeCodeVersion: nil, model: nil,
+                               tools: [], capabilities: [], mcpServers: [])),
+            .result(AgentV2Result(subtype: nil, costUsd: nil, numTurns: nil,
+                                  durationMs: nil, sessionId: nil, stopReason: nil)),
+            .tasks(tasks: [AgentTask(id: "1", title: "Step one", status: .pending)],
+                   continueNeeded: true),
+        ]
+        let transport = AgentV2Transport(streamer: stream)
+        let result = try await transport.roundTrip(
+            makeInput(),
+            onProgress: { _ in },
+            onChunk: { _ in },
+            onApproval: { _ in }
+        )
+        #expect(result.continueNeeded == true)
+        #expect(result.tasks?.count == 1)
+        #expect(result.tasks?.first?.title == "Step one")
+    }
 
     @Test("onApproval fires exactly once per approvalRequest, twice for two")
     func approvalFiresOncePerRequest() async throws {

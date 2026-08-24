@@ -9,7 +9,7 @@ import Foundation
 //                                       tool_args_delta/tool_result/
 //                                       usage/result/sdk
 //   extension/llm_agent/sdk/engine.mjs   approval_request/approval_resolved
-//   extension/routes/agent-v2.mjs        mode_set/error
+//   extension/routes/agent-v2.mjs        mode_set/error/tasks
 //
 // The wire keys are camelCase (`sessionId`, `costUsd`, `partialJson`, …) —
 // they mirror these property names exactly, and the explicit CodingKeys
@@ -199,6 +199,9 @@ enum AgentV2Event: Sendable, Equatable {
     /// `{"type":"mode_set","mode":…}` — resolved-mode echo, injected by the
     /// route right after `init`.
     case modeSet(String)
+    /// `{"type":"tasks","tasks":[…],"continueNeeded":…}` — session task list
+    /// after a successful turn (legacy /code-assist parity).
+    case tasks(tasks: [AgentTask], continueNeeded: Bool)
     /// `{"type":"result", …}` — terminal on success.
     case result(AgentV2Result)
     /// `{"type":"error","code":…,"message":…}` — terminal on failure. The
@@ -235,6 +238,8 @@ enum AgentV2Event: Sendable, Equatable {
             return Self.payload(ApprovalResolvedWire.self, data).map { .approvalResolved(requestId: $0.requestId, outcome: $0.outcome) }
         case "mode_set":
             return Self.payload(ModeSetWire.self, data).map { .modeSet($0.mode) }
+        case "tasks":
+            return Self.payload(TasksWire.self, data).map { .tasks(tasks: $0.tasks, continueNeeded: $0.continueNeeded) }
         case "result":
             return Self.payload(AgentV2Result.self, data).map { .result($0) }
         case "error":
@@ -262,6 +267,7 @@ enum AgentV2Event: Sendable, Equatable {
     private struct ToolArgsDeltaWire: Decodable { let index: Int; let partialJson: String }
     private struct ApprovalResolvedWire: Decodable { let requestId: String; let outcome: String }
     private struct ModeSetWire: Decodable { let mode: String }
+    private struct TasksWire: Decodable { let tasks: [AgentTask]; let continueNeeded: Bool }
     private struct ErrorWire: Decodable { let code: String?; let message: String }
     /// `sdk` events carry the raw upstream message in `raw` — decoding it
     /// is not required to observe the type, and forcing it would make a

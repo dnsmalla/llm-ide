@@ -18,7 +18,6 @@ import { expandTilde } from '../../graphkit/memory.mjs';
 import { persistTurnMemory } from './memory-persist.mjs';
 import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { buildReadableRoots } from './handlers/repo-files.mjs';
-import { tasks, taskStatusIcon } from './handlers/session-tasks.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
 import { buildDispatch } from '../tools/registry.mjs';
@@ -27,8 +26,7 @@ import { skillsToOpenAITools } from './openai-tools.mjs';
 import { fastModelFor } from '../../kb/usage.mjs';
 import { classifyCodeAssistMode, MODES } from './mode-classify.mjs';
 import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES } from './mode-personas.mjs';
-import { classifyTaskType } from './task-skill-routing.mjs';
-import { readSkillInstructions } from '../skills/skill-library.mjs';
+import { buildSessionTaskPromptBlock, taskTurnResponse } from './task-session-context.mjs';
 import { buildMcpConfigForUser } from '../../mcp/mcp-config.mjs';
 import { makeSecretReader } from '../../server/vault.mjs';
 import { getDb } from '../../kb/db.mjs';
@@ -289,40 +287,7 @@ export async function handleCodeAssist({
     }
   } catch { /* memory is best-effort — keep the base without it */ }
 
-  // Inject session task list so the agent always sees its own task state.
-  // Gated on !restrictsTools(resolvedMode) — a restricted mode (plan/
-  // review/document) never tracks a multi-step plan itself, but a PRIOR
-  // turn in the same session could have left real tasks behind (tasks are
-  // keyed only by userId:sessionId, with no mode dimension, and are never
-  // cleared on a mode switch) — without this gate, a later restricted-mode
-  // turn would inject stale Execute-mode task-list/skill-guidance text into
-  // a prompt whose tools have already been stripped to read-only,
-  // contradicting that mode's own persona one paragraph later.
-  // Same resolver the task-tool dispatch ctx (buildDispatch, below) and the
-  // response's tasks/continueNeeded fields use — all three MUST agree, or a
-  // turn writes its tasks under one key and reads them back under another.
-  const sessionId = resolveChatSessionId(agentContext);
-  const sessionTasks = tasks.listTasks(userId, sessionId);
-  if (sessionTasks.length > 0 && !restrictsTools(resolvedMode)) {
-    const taskLines = sessionTasks.map((t) => `- ${taskStatusIcon(t.status)} (id:${t.id}) ${t.title}`).join('\n');
-    personaBase += `\n\n## Your current task list\n${taskLines}\n\nLegend: [ ] pending  [~] in_progress  [x] completed  [-] skipped  [!] failed`;
-
-    // Per-step skill auto-routing (Execute mode, naturally — plan/review/
-    // document personas forbid task tracking, and the tool allowlist for
-    // those modes excludes task-create/task-update, so sessionTasks is
-    // empty for those and this block simply doesn't run). Frozen for the
-    // whole HTTP turn, same as the task-list block above — loop.mjs never
-    // re-reads task state mid-loop.
-    const activeTask = sessionTasks.find((t) => t.status === 'in_progress')
-                     || sessionTasks.find((t) => t.status === 'pending');
-    if (activeTask) {
-      const skillId = classifyTaskType(activeTask.title);
-      const instructions = skillId ? readSkillInstructions(skillId, userId) : null;
-      if (instructions) {
-        personaBase += `\n\n## Guidance for your current task ("${activeTask.title}")\n${instructions.content}`;
-      }
-    }
-  }
+  personaBase += buildSessionTaskPromptBlock(userId, agentContext, resolvedMode);
 
   // Mode persona addition — appended after the task-list/skill-routing
   // blocks above so it reads as the most recent, highest-priority
@@ -607,13 +572,7 @@ export async function handleCodeAssist({
   // the task tools were dispatched with (buildDispatch above) and the prompt's
   // task-list block was built from. Reading a different key here would report
   // an empty/stale task list for a chat whose tools just wrote real ones.
-  const taskSessionId = resolveChatSessionId(agentContext);
-  const continueNeeded = restrictsTools(resolvedMode)
-    ? false
-    : tasks.hasPendingWork(userId, taskSessionId);
-  const currentTasks = restrictsTools(resolvedMode)
-    ? []
-    : tasks.listTasks(userId, taskSessionId);
+  const { tasks: currentTasks, continueNeeded } = taskTurnResponse(userId, agentContext, resolvedMode);
   return {
     ...out,
     memoryUsage,

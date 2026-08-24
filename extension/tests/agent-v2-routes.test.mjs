@@ -117,7 +117,10 @@ test('stream: happy path emits init → mode_set → … → result, maps sessio
   assert.equal(evs[0].type, 'init');
   assert.equal(evs[1].type, 'mode_set');
   assert.equal(evs[1].mode, 'plan');
-  assert.equal(evs.at(-1).type, 'result');
+  assert.equal(evs.at(-1).type, 'tasks');
+  assert.equal(evs.at(-1).continueNeeded, false);
+  assert.deepEqual(evs.at(-1).tasks, []);
+  assert.equal(evs.at(-2).type, 'result');
   // The session the stream reported (sdk-1) is bound to the chat mapping.
   assert.equal(getOrCreateAgentSession(db, user.id, 'chat-1', 'explorer').sdk_session_id, 'sdk-1');
   // The turn is metered into the usage ledger (per-model caps keep working).
@@ -451,7 +454,7 @@ test('stream: classifier failure falls back to execute; the turn still runs', as
     user,
   }), res, { runTurn: fakeTurn, classifyMode });
   assert.equal(sawMode, 'execute');
-  assert.equal(res.sseEvents().at(-1).type, 'result');
+  assert.equal(res.sseEvents().at(-1).type, 'tasks');
 });
 
 test('stream: a leading-slash message is expanded via the user command set before the turn', async () => {

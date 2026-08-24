@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runAgentV2Turn, agentSdkHomeFor } from '../llm_agent/sdk/engine.mjs';
+import { taskTurnResponse } from '../llm_agent/runtime/task-session-context.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
 import { classifyCodeAssistMode, MODES } from '../llm_agent/runtime/mode-classify.mjs';
 import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
@@ -278,6 +279,10 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       inputTokens: usageTotals?.inputTokens,
       outputTokens: usageTotals?.outputTokens,
     });
+    // Task parity with legacy /code-assist: emit after the SDK result so the
+    // Mac can populate PlanTimelineCard and auto-continue when work remains.
+    const { tasks: currentTasks, continueNeeded } = taskTurnResponse(userId, agentContext, mode);
+    send({ type: 'tasks', tasks: currentTasks, continueNeeded });
   } catch (err) {
     if (err?.code === 'SESSION_UNRESUMABLE') {
       // The resumed SDK session is gone (pruned/cleared). Terminal error

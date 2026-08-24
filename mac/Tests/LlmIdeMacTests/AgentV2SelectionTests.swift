@@ -593,6 +593,95 @@ struct AgentV2SelectionTests {
         #expect(!CodeAssistantPanel.executePlanCanFire(attached: false, hasPlanContent: false))
     }
 
+    @Test("Plan step parsing: numbered lines and Step headings; bullets lose to numbering")
+    func planStepParsing() {
+        let md = """
+        # Plan
+
+        1. Add model types
+        2. Wire transport
+        - Write tests
+        ## Step 3: Update docs
+        """
+        let steps = CodeAssistantPanel.parsePlanSteps(from: md)
+        // "- Write tests" is dropped: a plan that numbers its steps is read as
+        // numbered, so stray bullets elsewhere never become tasks.
+        #expect(steps == [
+            "Add model types",
+            "Wire transport",
+            "Update docs",
+        ])
+    }
+
+    // A real saved plan has Context/Files/Risks sections and sub-bullets. Each
+    // returned line becomes a task-create call, so anything but the actual
+    // steps is a junk task the agent then grinds through.
+    @Test("Plan step parsing: scopes to the Steps section, ignoring prose, paths, sub-bullets, risks")
+    func planStepParsingScopesToStepsSection() {
+        let md = """
+        # Add dark mode
+
+        ## Context
+
+        - The app currently hardcodes light colors.
+        - Users have asked for this since March.
+
+        ## Files to change
+
+        - Sources/Theme.swift
+
+        ## Steps
+
+        1. Add a Theme token table
+           - define light palette
+           - define dark palette
+        2. Wire the toggle into Settings
+        3. Migrate AppShell to tokens
+
+        ## Risks
+
+        - Existing screenshots will need regenerating.
+        """
+        #expect(CodeAssistantPanel.parsePlanSteps(from: md) == [
+            "Add a Theme token table",
+            "Wire the toggle into Settings",
+            "Migrate AppShell to tokens",
+        ])
+    }
+
+    @Test("Plan step parsing: checklist markers are stripped from task titles")
+    func planStepParsingStripsCheckboxes() {
+        let md = """
+        ## Steps
+
+        - [ ] Add model types
+        - [x] Wire transport
+        """
+        #expect(CodeAssistantPanel.parsePlanSteps(from: md) == [
+            "Add model types",
+            "Wire transport",
+        ])
+    }
+
+    @Test("Plan with no parseable steps falls back to the generic execute message")
+    func planStepParsingFallback() {
+        let prose = "We should probably modernize the theme layer at some point."
+        #expect(CodeAssistantPanel.parsePlanSteps(from: prose).isEmpty)
+        #expect(CodeAssistantPanel.executePlanMessage(forPlanContent: prose, planTitle: nil)
+                == CodeAssistantPanel.executePlanMessage)
+    }
+
+    @Test("Execute plan message lists parsed steps and task-create guidance")
+    func executePlanMessageStructured() {
+        let msg = CodeAssistantPanel.executePlanMessage(
+            forPlanContent: "1. First\n2. Second",
+            planTitle: "My plan")
+        #expect(msg.contains("task-create"))
+        #expect(msg.contains("1. First"))
+        #expect(msg.contains("2. Second"))
+        #expect(msg.contains("My plan"))
+    }
+
     @Test("Plan title derivation: first non-empty heading line, hashes stripped, capped")
     func planTitleDerivation() {
         #expect(CodeAssistantPanel.planTitle(from: "# Add dark mode\n\nSteps…") == "Add dark mode")

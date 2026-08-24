@@ -208,16 +208,28 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         var reply = ""
         var resolvedMode: String?
         var sawTerminal = false
+        var resolvedTasks: [AgentTask]?
+        var resolvedContinueNeeded = false
         // toolUseId → wire name, so a nameless tool_result can still report
         // which tool finished.
         var toolNames: [String: String] = [:]
 
         try await streamer.agentV2Stream(body) { event in
+            // `tasks` may arrive after `result` — same ordering as legacy
+            // /code-assist (done, then tasks). Handle it outside the terminal
+            // guard so PlanTimelineCard and auto-continue still work.
+            if case .tasks(let tasks, let continueNeeded) = event {
+                resolvedTasks = tasks
+                resolvedContinueNeeded = continueNeeded
+                return
+            }
             // `result` and `error` are terminal; the route's post-turn
             // bookkeeping could still emit events (a known server-side
             // wrinkle), and deltas after either would corrupt the reply.
             guard !sawTerminal else { return }
             switch event {
+            case .tasks:
+                break // handled above the terminal guard
             case .init_(let payload):
                 if let sid = payload.sessionId { self.sdkSessionId = sid }
             case .delta(let text):
@@ -267,8 +279,8 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         return ChatTransportResult(
             reply: reply,
             pendingTool: nil,
-            tasks: nil,
-            continueNeeded: false,
+            tasks: resolvedTasks,
+            continueNeeded: resolvedContinueNeeded,
             usage: LlmIdeAPIClient.CodeAssistResponse.Usage(
                 attachmentCount: input.attachments.count,
                 attachmentChars: input.attachments.reduce(0) { $0 + $1.content.count },

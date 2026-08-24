@@ -74,7 +74,7 @@ struct AgentContext: Codable, Equatable {
 /// `extension/llm_agent/runtime/handlers/session-tasks.mjs`'s
 /// `taskStatusIcon` and `task-update.md`'s schema enum) — the raw values
 /// below are NOT freely renameable, they must match the wire strings.
-enum AgentTaskStatus: String, Codable {
+enum AgentTaskStatus: String, Codable, Equatable {
     case pending
     case inProgress = "in_progress"
     case completed
@@ -93,7 +93,7 @@ enum AgentTaskStatus: String, Codable {
     }
 }
 
-struct AgentTask: Codable, Identifiable {
+struct AgentTask: Codable, Identifiable, Equatable {
     let id: String
     let title: String
     let status: AgentTaskStatus

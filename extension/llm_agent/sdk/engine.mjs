@@ -42,6 +42,8 @@ import {
   buildUserPluginDelivery,
 } from '../skills/index.mjs';
 import { composeSystemContext } from '../internal/context/compose.mjs';
+import { buildSessionTaskPromptBlock } from '../runtime/task-session-context.mjs';
+import { V2_EXECUTE_GUIDANCE } from '../runtime/execute-guidance.mjs';
 import { buildReadableRoots, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
 import { expandTilde } from '../../graphkit/memory.mjs';
 import { redactFence } from '../runtime/redaction.mjs';
@@ -322,6 +324,9 @@ export function buildEngineOptions(
   // Claude Code (checks git, reaches for harness cron tools).
   appendParts.push(composeSystemContext(agentContext, userId, message, { memory: false }));
   if (persona) appendParts.push(persona);
+  if (resolvedMode === 'execute') appendParts.push(V2_EXECUTE_GUIDANCE);
+  const taskBlock = buildSessionTaskPromptBlock(userId, agentContext, resolvedMode);
+  if (taskBlock) appendParts.push(taskBlock.trimStart());
   // User's own custom persona (kb/personas.mjs) — distinct from the MODE
   // persona above. Mirrors the legacy loop's exact framing/sanitization
   // (llm_agent/runtime/route.mjs) so a persona reads identically across
