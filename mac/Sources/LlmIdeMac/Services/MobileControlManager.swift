@@ -849,11 +849,8 @@ final class MobileControlManager {
                               message: "No loop is set up for the active project. Create one on the Mac first."))
                 return
             }
-            guard !state.running else {
-                append(.info, "loop_start ignored — a run is already in flight")
-                reply(LoopAck(accepted: false, message: "A loop run is already in progress."))
-                return
-            }
+            // When a run is already in flight, queue behind it — the runner's
+            // `LoopRunQueue` waits instead of rejecting concurrent callers.
             // The PRIMARY loop specifically, not the whole scheduled sweep:
             // this page shows one loop's stages, log tail and history, and a
             // project now has several independent loops. Starting the sweep
@@ -875,8 +872,9 @@ final class MobileControlManager {
             let started = autoCode.runSingleLoop(loopId: primary.id)
             loopStartedHere = started
             append(started ? .info : .stderr, "loop_start \(started ? "accepted" : "declined by scheduler")")
+            let queuedNote = state.running ? " Queued behind the current run." : ""
             reply(LoopAck(accepted: started,
-                          message: started ? "Loop started." : "The Mac declined to start a run right now."))
+                          message: started ? "Loop started.\(queuedNote)" : "The Mac declined to start a run right now."))
 
         case MobileProtocol.Tag.loopStartStage:
             guard let req = try? decoder.decode(LoopStartStage.self, from: data),
@@ -898,27 +896,20 @@ final class MobileControlManager {
                               message: "No loop is set up for the active project. Create one on the Mac first."))
                 return
             }
-            guard !state.running else {
-                append(.info, "loop_start_stage ignored — a run is already in flight")
-                reply(LoopAck(accepted: false, message: "A loop run is already in progress."))
-                return
-            }
-            // The stage can vanish between the phone's snapshot and this tap
-            // (deleted or replaced on the Mac). Refuse by name-able identity
-            // rather than letting the sweep discover it later — the phone gets
-            // an actionable message instead of a task error it can't see.
             guard let stage = state.stages.first(where: { $0.stageId == req.stageId }) else {
                 append(.stderr, "loop_start_stage: unknown stage id")
                 reply(LoopAck(accepted: false,
                               message: "That stage no longer exists — refresh and try again."))
                 return
             }
+            // Queue behind an in-flight run when needed — see `loop_start`.
             let started = autoCode.runSingleLoopStage(stageId: req.stageId)
             loopStartedHere = started
             append(started ? .info : .stderr,
                    "loop_start_stage \(started ? "accepted" : "declined by scheduler") — \(stage.name)")
+            let queuedNote = state.running ? " Queued behind the current run." : ""
             reply(LoopAck(accepted: started,
-                          message: started ? "Stage \"\(stage.name)\" started."
+                          message: started ? "Stage \"\(stage.name)\" started.\(queuedNote)"
                                            : "The Mac declined to start a run right now."))
 
         case MobileProtocol.Tag.loopStop:
@@ -952,7 +943,7 @@ final class MobileControlManager {
               let context = WorkspaceRoot.context(config: config, projectStore: projectStore) else {
             return LoopState(configured: false, projectName: nil, running: false, startedHere: false,
                              iteration: 0, maxIterations: 0, logTail: [], lastStatusSummary: nil,
-                             lastFinishedAt: nil, stages: [])
+                             lastFinishedAt: nil, stages: [], queuedCount: 0)
         }
         let projectId = project.bundle.id
         let loopConfig = Self.resolveLoopConfig(projectRoot: context.projectRoot,
@@ -970,6 +961,7 @@ final class MobileControlManager {
                                                              gitRoot: context.gitRoot)
         let savedStageIds = Set(savedPrimary?.config.stages.map(\.id) ?? [])
         let running = context.gitRoot.map { LoopEngineRunner.isRunActive(gitRoot: $0) } ?? false
+        let queuedCount = context.gitRoot.map { LoopEngineRunner.queuedRunCount(gitRoot: $0) } ?? 0
         let recent = loopHistory(limit: 1).first
 
         let tail = (logStore?.buffers[AutoTask.loopEngineering.rawValue] ?? [])
@@ -997,9 +989,10 @@ final class MobileControlManager {
                 .map {
                     LoopStageInfo(name: $0.name, kind: $0.kind.rawValue,
                                   severity: $0.severity.rawValue,
-                                  enabled: $0.enabled ?? true, order: $0.order,
+                                  enabled: $0.enabled, order: $0.order,
                                   stageId: savedStageIds.contains($0.id) ? $0.id : nil)
-                }
+                },
+            queuedCount: queuedCount
         )
     }
 

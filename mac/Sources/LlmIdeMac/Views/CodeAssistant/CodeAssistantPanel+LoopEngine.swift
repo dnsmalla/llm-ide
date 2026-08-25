@@ -209,7 +209,8 @@ extension CodeAssistantPanel {
 
         if engine.sessionEpoch == startEpoch {
             let logText = runner.log.map(\.text).joined(separator: "\n")
-            let resultLine = result.map { "\n\n**Result:** \($0.summary)" } ?? "\n\n**Result:** a run is already in progress for this repo"
+            let resultLine = result.map { "\n\n**Result:** \($0.summary)" }
+                ?? "\n\n**Result:** run did not start (busy or cancelled while queued)"
             engine.setTurnContent(id: placeholderId, logText + resultLine)
         }
 

@@ -134,6 +134,9 @@ struct LoopEngineView: View {
     @State var newTemplateSummary = ""
     /// Mirrors `LoopEngineConfig.writeSummaryNote`; edited in the Output section.
     @State var writeSummaryNote = false
+    /// When enabled, a run that would queue on the main checkout uses an
+    /// isolated git worktree instead.
+    @State var useWorktreesForConcurrentRuns = false
     /// Filename of the most recent run-summary note, for the Output section's
     /// "last written" line. Read from disk rather than the note index so an
     /// unindexed/hand-deleted note cannot make the row lie.
@@ -505,12 +508,14 @@ struct LoopEngineView: View {
 
     private var toolbar: some View {
         HStack(spacing: Spacing.md) {
-            Button(runner.running ? "Running… (iteration \(runner.iteration))" : "Run") {
+            Button(runner.waitingInQueue ? "Queued…"
+                   : runner.running ? "Running… (iteration \(runner.iteration))" : "Run") {
                 startRun()
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .disabled(runner.running || !stages.contains(where: \.enabled) || activeGitRootURL == nil)
+            .disabled(runner.running || runner.waitingInQueue
+                      || !stages.contains(where: \.enabled) || activeGitRootURL == nil)
             if runner.running {
                 // Cancelling `runTask` makes `Task.isCancelled` true on the
                 // same task `runner.run` is awaiting on, which is how a
@@ -519,13 +524,21 @@ struct LoopEngineView: View {
                 // still journals the run, same as any other terminal status.
                 Button("Stop") { runTask?.cancel() }
                     .controlSize(.small)
+            } else if runner.waitingInQueue {
+                Button("Leave queue") { runTask?.cancel() }
+                    .controlSize(.small)
             }
             if let lastStatus {
                 Text(lastStatus.summary)
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
             } else if didRejectLastRun {
-                Text("A run is already in progress for this repo")
+                Text("This runner was already busy")
+                    .font(Typography.caption)
+                    .foregroundStyle(.orange)
+            } else if runner.waitingInQueue, let gitRoot = activeGitRootURL {
+                let ahead = LoopEngineRunner.queuedRunCount(gitRoot: gitRoot)
+                Text(ahead > 0 ? "Waiting — \(ahead + 1) in line" : "Waiting for the current run")
                     .font(Typography.caption)
                     .foregroundStyle(.orange)
             }
@@ -815,7 +828,8 @@ struct LoopEngineView: View {
             maxRepairsPerStage: maxRepairsPerStage,
             protectedPathPolicy: protectedPathPolicy,
             extraProtectedGlobs: extraProtectedGlobs,
-            writeSummaryNote: writeSummaryNote)
+            writeSummaryNote: writeSummaryNote,
+            useWorktreesForConcurrentRuns: useWorktreesForConcurrentRuns)
     }
 
     /// The full `LoopDefinition` this page currently represents — `currentConfig`
@@ -863,6 +877,7 @@ struct LoopEngineView: View {
             protectedPathPolicy = ensuredConfig.protectedPathPolicy
             extraProtectedGlobs = ensuredConfig.extraProtectedGlobs
             writeSummaryNote = ensuredConfig.writeSummaryNote
+            useWorktreesForConcurrentRuns = ensuredConfig.useWorktreesForConcurrentRuns
             loopName = existing.name
             isPrimaryLoop = existing.isPrimary
             goal = existing.goal ?? ""
@@ -917,6 +932,7 @@ struct LoopEngineView: View {
         protectedPathPolicy = seed.protectedPathPolicy
         extraProtectedGlobs = seed.extraProtectedGlobs
         writeSummaryNote = seed.writeSummaryNote
+        useWorktreesForConcurrentRuns = seed.useWorktreesForConcurrentRuns
         // Reset the loop-identity/contract state too — without this, closing
         // a project that had a loop with a Goal set and opening one with no
         // config yet would leave that Goal text displayed against the new,
@@ -1141,6 +1157,7 @@ struct LoopEngineView: View {
         protectedPathPolicy = applied.protectedPathPolicy
         extraProtectedGlobs = applied.extraProtectedGlobs
         writeSummaryNote = applied.writeSummaryNote
+        useWorktreesForConcurrentRuns = applied.useWorktreesForConcurrentRuns
         // Stage ids are regenerated on apply, so the old selection no longer exists.
         selectedStageId = nil
     }

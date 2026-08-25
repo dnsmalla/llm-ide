@@ -43,6 +43,7 @@ struct LoopView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: state?.running)
+            .animation(.easeInOut(duration: 0.2), value: state?.queuedCount)
             .navigationTitle("Loop")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -88,9 +89,9 @@ struct LoopView: View {
         Section(s.projectName ?? "Loop") {
             HStack {
                 Circle()
-                    .fill(s.running ? DesignSystem.Colors.primary : DesignSystem.Colors.textTertiary)
+                    .fill(statusIndicatorColor(s))
                     .frame(width: 8, height: 8)
-                Text(s.running ? "Running" : "Idle")
+                Text(statusHeadline(s))
                     .font(DesignSystem.Typography.headlineFont)
                 Spacer()
                 if s.running && !s.startedHere {
@@ -101,6 +102,12 @@ struct LoopView: View {
                         .font(DesignSystem.Typography.footnoteFont)
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                 }
+            }
+
+            if s.queuedCount > 0 {
+                Text(queueDetailText(s))
+                    .font(DesignSystem.Typography.footnoteFont)
+                    .foregroundColor(DesignSystem.Colors.primaryDark)
             }
 
             if let summary = s.lastStatusSummary, !s.running {
@@ -221,6 +228,33 @@ struct LoopView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Status helpers
+
+    private func statusHeadline(_ s: LoopState) -> String {
+        if s.running {
+            return s.queuedCount > 0 ? "Running · \(s.queuedCount) queued" : "Running"
+        }
+        if s.queuedCount > 0 {
+            return "\(s.queuedCount) queued"
+        }
+        return "Idle"
+    }
+
+    private func statusIndicatorColor(_ s: LoopState) -> Color {
+        if s.running { return DesignSystem.Colors.primary }
+        if s.queuedCount > 0 { return DesignSystem.Colors.primaryDark }
+        return DesignSystem.Colors.textTertiary
+    }
+
+    private func queueDetailText(_ s: LoopState) -> String {
+        if s.running {
+            let noun = s.queuedCount == 1 ? "run" : "runs"
+            return "\(s.queuedCount) \(noun) waiting behind the current one."
+        }
+        let noun = s.queuedCount == 1 ? "run" : "runs"
+        return "\(s.queuedCount) \(noun) waiting to start."
     }
 
     // MARK: - Formatting

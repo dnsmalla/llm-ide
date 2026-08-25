@@ -664,11 +664,9 @@ extension AutoCodeUpdateService {
 
         // Every loop this project schedules, each run INDEPENDENTLY: its own
         // iteration budget, its own journal record, its own goal. They go one
-        // at a time only because a single working tree cannot host two runs
-        // (`LoopEngineRunner`'s per-git-root guard) — NOT because they are one
-        // pipeline. That is the point of the split: a failing Mac-app check no
-        // longer drags the fault sweep and the whole test suite round again on
-        // the next iteration.
+        // at a time on the main checkout unless a loop opts into worktree
+        // isolation (`useWorktreesForConcurrentRuns`) — then a concurrent
+        // run gets its own tree under `<project>/system/loop-worktrees/`.
         //
         // `LoopEngineConfigStore.loops` is the shared entry point (see its doc
         // comment): it creates this project's default loops, migrates a
@@ -816,11 +814,9 @@ extension AutoCodeUpdateService {
                 // treats every non-`.success` terminal status, aborted included.
                 logStore.append(.loopEngineering, "\(loop.name) aborted.", level: .error)
             case nil:
-                // Rejected — a run is already in progress for this repo elsewhere
-                // (e.g. the user started one from the chat panel or the Loop page).
-                // Nothing else in this list can start either, so stop here and
-                // leave any existing taskErrors entry as-is.
-                logStore.append(.loopEngineering, "Skipped — a Loop run is already in progress for this repo.")
+                // Same runner instance already running, or cancelled while
+                // waiting in the queue — not a concurrent-repo rejection.
+                logStore.append(.loopEngineering, "\(loop.name) skipped — runner was busy or cancelled before start.")
                 return
             }
         }

@@ -47,8 +47,8 @@ struct LoopDefinition: Codable, Equatable, Identifiable {
     /// Each scheduled loop is run as its own INDEPENDENT run — its own
     /// iteration budget, its own journal record, its own goal — not chained
     /// into one long pipeline. They are run one after another only because a
-    /// single working tree cannot host two runs at once (`LoopEngineRunner`'s
-    /// per-git-root guard).
+    /// single working tree runs one at a time; extra callers wait in
+    /// `LoopRunQueue` (`LoopEngineRunner`'s FIFO per git root).
     var runsOnSchedule: Bool
 
     var config: LoopEngineConfig

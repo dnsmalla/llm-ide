@@ -300,6 +300,12 @@ extension LoopEngineView {
                               consecutiveFailureStop: $consecutiveFailureStop,
                               wallClockMinutes: $wallClockMinutes,
                               maxRepairsPerStage: $maxRepairsPerStage)
+            Toggle("Use isolated git worktrees for concurrent runs", isOn: $useWorktreesForConcurrentRuns)
+                .font(Typography.body)
+            Text("When another run is already using the main checkout, start in an isolated worktree instead of waiting. Changed worktrees and their branches are retained for review. Off by default.")
+                .font(Typography.caption)
+                .foregroundStyle(t.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
             Text("A non-improving failure is one whose failing-test count did not shrink; for runners we can't parse, one whose output is unchanged.")
                 .font(Typography.caption)
                 .foregroundStyle(t.textMuted)

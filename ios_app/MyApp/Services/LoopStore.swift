@@ -89,11 +89,10 @@ final class LoopStore: ObservableObject {
 
     // MARK: — Polling
 
-    /// Poll while a run is in flight so the log tail and status advance without
-    /// the user pulling to refresh. Stops as soon as the Mac reports idle, so
-    /// an idle phone left on this screen is not talking to the Mac every 2s.
+    /// Poll while a run is in flight or others are queued so the log tail,
+    /// queue depth, and status advance without the user pulling to refresh.
     func startPollingIfRunning() {
-        guard state?.running == true else { return }
+        guard state?.running == true || (state?.queuedCount ?? 0) > 0 else { return }
         pollGeneration += 1
         let generation = pollGeneration
         pollTask?.cancel()
@@ -101,7 +100,7 @@ final class LoopStore: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 guard let self, !Task.isCancelled, generation == self.pollGeneration else { return }
-                guard self.state?.running == true else {
+                guard self.state?.running == true || (self.state?.queuedCount ?? 0) > 0 else {
                     // One last refresh so the terminal status and the finished
                     // run land before polling stops.
                     self.refreshAll()
@@ -145,9 +144,7 @@ final class LoopStore: ObservableObject {
             guard let s = try? JSONDecoder().decode(LoopState.self, from: data) else { return }
             let wasRunning = state?.running ?? false
             state = s
-            // A run that just started needs the poller armed; one that just
-            // finished needs history refreshed so it appears in the list.
-            if s.running && !wasRunning { startPollingIfRunning() }
+            if s.running || s.queuedCount > 0 { startPollingIfRunning() }
             if !s.running && wasRunning { loadHistory() }
 
         case MobileProtocol.Tag.loopAck:

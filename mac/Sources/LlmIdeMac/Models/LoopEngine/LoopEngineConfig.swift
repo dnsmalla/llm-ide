@@ -48,6 +48,12 @@ struct LoopEngineConfig: Codable, Equatable {
     /// a deleted test as a fix.
     var extraProtectedGlobs: [String] = []
 
+    /// When another run already holds the main git root, provision an isolated
+    /// worktree instead of waiting in `LoopRunQueue`. Off by default — queueing
+    /// is safer when disk or git state is tight. Stage approvals still key off
+    /// the main repo path, and worktrees with changes are retained for review.
+    var useWorktreesForConcurrentRuns: Bool = false
+
     /// The full protected set this config enforces.
     var protectedGlobs: [String] {
         GitRepairScopeGuard.defaultProtectedGlobs + extraProtectedGlobs
@@ -62,13 +68,13 @@ struct LoopEngineConfig: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case stages, maxIterations, consecutiveFailureStop
         case wallClockBudgetSeconds, maxRepairsPerStage, protectedPathPolicy, extraProtectedGlobs
-        case writeSummaryNote
+        case writeSummaryNote, useWorktreesForConcurrentRuns
     }
 
     init(stages: [LoopStage], maxIterations: Int = 10, consecutiveFailureStop: Int = 2,
          wallClockBudgetSeconds: Double? = nil, maxRepairsPerStage: Int = 3,
          protectedPathPolicy: ProtectedPathPolicy = .revert, extraProtectedGlobs: [String] = [],
-         writeSummaryNote: Bool = false) {
+         writeSummaryNote: Bool = false, useWorktreesForConcurrentRuns: Bool = false) {
         self.stages = stages
         self.maxIterations = maxIterations
         self.consecutiveFailureStop = consecutiveFailureStop
@@ -77,6 +83,7 @@ struct LoopEngineConfig: Codable, Equatable {
         self.protectedPathPolicy = protectedPathPolicy
         self.extraProtectedGlobs = extraProtectedGlobs
         self.writeSummaryNote = writeSummaryNote
+        self.useWorktreesForConcurrentRuns = useWorktreesForConcurrentRuns
     }
 
     /// Same rule as `LoopStage.init(from:)`: every field added after the first
@@ -100,6 +107,8 @@ struct LoopEngineConfig: Codable, Equatable {
             ProtectedPathPolicy.self, forKey: .protectedPathPolicy) ?? .revert
         extraProtectedGlobs = try container.decodeIfPresent([String].self, forKey: .extraProtectedGlobs) ?? []
         writeSummaryNote = try container.decodeIfPresent(Bool.self, forKey: .writeSummaryNote) ?? false
+        useWorktreesForConcurrentRuns = try container.decodeIfPresent(
+            Bool.self, forKey: .useWorktreesForConcurrentRuns) ?? false
     }
 
     /// Hand-written so `wallClockBudgetSeconds` is encoded as an explicit JSON
@@ -118,6 +127,7 @@ struct LoopEngineConfig: Codable, Equatable {
         try container.encode(protectedPathPolicy, forKey: .protectedPathPolicy)
         try container.encode(extraProtectedGlobs, forKey: .extraProtectedGlobs)
         try container.encode(writeSummaryNote, forKey: .writeSummaryNote)
+        try container.encode(useWorktreesForConcurrentRuns, forKey: .useWorktreesForConcurrentRuns)
     }
 
     /// Whether an auto-detected stage list is safe to persist as the

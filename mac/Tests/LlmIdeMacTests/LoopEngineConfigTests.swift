@@ -52,7 +52,8 @@ final class LoopEngineConfigTests: XCTestCase {
             maxRepairsPerStage: 1,
             protectedPathPolicy: .warn,
             extraProtectedGlobs: ["fixtures/**"],
-            writeSummaryNote: true)
+            writeSummaryNote: true,
+            useWorktreesForConcurrentRuns: true)
 
         config.save(for: "proj-all", defaults: suite)
         let loaded = LoopEngineConfig.load(for: "proj-all", defaults: suite)
@@ -62,6 +63,7 @@ final class LoopEngineConfigTests: XCTestCase {
         // Spot-check the two most easily lost, since equality alone would not say
         // WHICH field drifted if this ever fails.
         XCTAssertEqual(loaded?.writeSummaryNote, true)
+        XCTAssertEqual(loaded?.useWorktreesForConcurrentRuns, true)
         XCTAssertEqual(loaded?.extraProtectedGlobs, ["fixtures/**"])
         XCTAssertEqual(loaded?.stages.first?.severity, .advisory)
         XCTAssertEqual(loaded?.stages.first?.timeoutSeconds, 45)

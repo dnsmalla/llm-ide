@@ -32,6 +32,9 @@ final class LoopEngineRunner: ObservableObject {
     }
 
     @Published private(set) var running = false
+    /// True while this instance is waiting in `LoopRunQueue` for another run
+    /// on the same git root to finish.
+    @Published private(set) var waitingInQueue = false
     @Published private(set) var log: [LogLine] = []
     @Published private(set) var status: LoopEngineStatus?
     @Published private(set) var iteration = 0
@@ -46,27 +49,27 @@ final class LoopEngineRunner: ObservableObject {
     /// append site is enough to fix that without moving any ownership.
     var onLog: ((LogLine) -> Void)?
 
-    /// Process-wide set of git roots with a run currently in flight,
-    /// keyed by symlink-resolved filesystem path. Guards against two
-    /// *different* `LoopEngineRunner` instances (e.g. a chat-triggered
-    /// run and a scheduled Auto Task run — the design spec explicitly
-    /// promises these are rejected the same way) racing on the same
-    /// working tree. The instance-scoped `running` flag alone can't
-    /// catch that, since each caller constructs its own runner instance.
-    @MainActor private static var activeRoots: Set<String> = []
-
     /// Whether ANY runner instance is mid-run on `gitRoot`, resolved the same
-    /// way `activeRoots` keys it. Read-only view of the guard above, for
+    /// way `LoopRunQueue` keys it. Read-only view of the process-wide lock, for
     /// callers that need to report on a run they do not own — the mobile
     /// bridge asks this so the phone can never show "idle" while the desktop
     /// is mid-run, without either side having to share a runner instance.
     @MainActor
     static func isRunActive(gitRoot: URL) -> Bool {
-        activeRoots.contains(gitRoot.resolvingSymlinksInPath().path)
+        let key = gitRoot.resolvingSymlinksInPath().path
+        if LoopRunQueue.isActive(rootKey: key) { return true }
+        if LoopWorktreeManager.activeWorktreeRunCount(mainRepo: gitRoot) > 0 { return true }
+        return false
+    }
+
+    /// Runs waiting behind the in-flight one for `gitRoot`, if any.
+    @MainActor
+    static func queuedRunCount(gitRoot: URL) -> Int {
+        LoopRunQueue.queuedCount(rootKey: gitRoot.resolvingSymlinksInPath().path)
     }
 
     /// Which loop owns the in-flight run on each `gitRoot`, keyed the same
-    /// way `activeRoots` is. Lets any surface's running-indicator (e.g. the
+    /// way `LoopRunQueue` is. Lets any surface's running-indicator (e.g. the
     /// loop-list pane's dot) land on the correct loop regardless of whether
     /// the run was started from this page, another window, or the Auto Task
     /// scheduler — same reasoning `MobileControlManager.buildLoopState()`
@@ -201,16 +204,12 @@ final class LoopEngineRunner: ObservableObject {
 
     /// Runs `config`'s ordered stages to completion, success, or give-up.
     ///
-    /// Returns `nil` when the run never started at all — either this
-    /// instance is already mid-run, or another `LoopEngineRunner`
-    /// instance is already running against the same `gitRoot`. Callers
-    /// (e.g. the chat command and the Auto Task scheduler) MUST check
-    /// for `nil` rather than assume every call produced a real status:
-    /// `status` is only meaningful when this returns non-nil — on a
-    /// `nil` return, `status` still holds whatever a PREVIOUS run on
-    /// this instance left behind (or `nil` if there was none), since a
-    /// rejected call doesn't touch it. The rejection is still recorded
-    /// to `log`, which is never cleared automatically.
+    /// Returns `nil` when the run never started at all — this instance is
+    /// already mid-run, or the call was cancelled while waiting in
+    /// `LoopRunQueue`. When another runner already holds the same
+    /// `gitRoot`, this call waits in the queue and then runs normally.
+    /// Callers MUST check for `nil` rather than assume every call produced
+    /// a real status: `status` is only meaningful when this returns non-nil.
     /// Otherwise returns the final `LoopEngineStatus` (also available
     /// afterwards via `status`).
     ///
@@ -244,35 +243,65 @@ final class LoopEngineRunner: ObservableObject {
             appendLog(.warn, "Loop not started · this runner instance is already running")
             return nil
         }
-        // Resolve symlinks (not just `standardizedFileURL`, which only
-        // normalizes path components like "." and ".." — it does NOT
-        // resolve symlinks that exist on disk, e.g. a symlinked worktree,
-        // or collapse APFS case-insensitivity/firmlink aliasing) so two
-        // different-looking paths to the SAME actual directory can't both
-        // be admitted as "different" roots and race each other. This only
-        // helps for paths that actually exist; two non-existent paths can
-        // still alias, but a real `gitRoot` always exists on disk.
-        let rootKey = gitRoot.resolvingSymlinksInPath().path
-        guard !Self.activeRoots.contains(rootKey) else {
-            appendLog(.warn, "Loop not started · a run is already in progress for this repo")
+        let mainGitRoot = gitRoot
+        let mainRootKey = mainGitRoot.resolvingSymlinksInPath().path
+        var runGitRoot = mainGitRoot
+        var lockRootKey = mainRootKey
+        var worktreeLease: LoopWorktreeManager.Lease?
+
+        if config.useWorktreesForConcurrentRuns && LoopRunQueue.willWait(rootKey: mainRootKey) {
+            if let lease = await LoopWorktreeManager.createIfPossible(mainRepo: mainGitRoot,
+                                                                      faultsRoot: faultsRoot) {
+                worktreeLease = lease
+                runGitRoot = lease.worktreePath
+                lockRootKey = runGitRoot.resolvingSymlinksInPath().path
+                appendLog(.info,
+                          "Parallel run · isolated worktree \(lease.worktreePath.lastPathComponent)")
+            }
+        }
+
+        if worktreeLease == nil && LoopRunQueue.willWait(rootKey: mainRootKey) {
+            let ahead = LoopRunQueue.queuedCount(rootKey: mainRootKey)
+            let place = ahead + 1
+            appendLog(.info, "Queued · waiting for another run on this repo (\(place) ahead)")
+        }
+        waitingInQueue = worktreeLease == nil && LoopRunQueue.willWait(rootKey: mainRootKey)
+        defer { waitingInQueue = false }
+        do {
+            try await LoopRunQueue.acquire(rootKey: lockRootKey)
+        } catch {
+            if let lease = worktreeLease {
+                await LoopWorktreeManager.finish(lease)
+            }
+            if error is CancellationError {
+                appendLog(.warn, "Loop not started · cancelled while queued")
+            } else {
+                appendLog(.warn, "Loop not started · \(error.localizedDescription)")
+            }
             return nil
         }
-        Self.activeRoots.insert(rootKey)
-        Self.activeLoopIds[rootKey] = loopId
+        Self.activeLoopIds[lockRootKey] = loopId
         running = true
         status = nil
         iteration = 0
         iterationRecords = []
         let startedAt = Date()
-        currentRunContext = RunContext(config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+        currentRunContext = RunContext(config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                                        projectId: projectId, startedAt: startedAt,
                                        loopId: loopId, loopName: loopName)
         defer {
             running = false
-            Self.activeRoots.remove(rootKey)
-            Self.activeLoopIds.removeValue(forKey: rootKey)
+            Self.activeLoopIds.removeValue(forKey: lockRootKey)
             currentRunContext = nil
+            LoopRunQueue.release(rootKey: lockRootKey)
+            if let lease = worktreeLease {
+                Task { await LoopWorktreeManager.finish(lease) }
+            }
         }
+
+        // Shell commands and repairs run in `runGitRoot`; approvals stay keyed to
+        // the linked main checkout so worktree runs do not need re-approval.
+        let approvalRepo = mainGitRoot
 
         // Disabled stages are skipped entirely — not run, not preflighted.
         // Preflighting them anyway would let a disabled stage's missing
@@ -287,7 +316,7 @@ final class LoopEngineRunner: ObservableObject {
                 : "Every stage is disabled — enable at least one"
             appendLog(.warn, "Loop not run · \(reason)")
             return await finish(.error(reason),
-                                config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                                config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                                 projectId: projectId, startedAt: startedAt,
                                 loopId: loopId, loopName: loopName)
         }
@@ -304,14 +333,14 @@ final class LoopEngineRunner: ObservableObject {
             case .shellCommand:
                 guard let command = Self.validCommand(stage) else {
                     return await finish(.error("Stage \"\(stage.name)\" has no command"),
-                                        config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                                        config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
-                guard approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command) else {
+                guard approvals.isStageApproved(repo: approvalRepo, stageId: stage.id, command: command) else {
                     appendLog(.warn, "  [\(stage.name)] needs approval: \(command)")
                     return await finish(.needsApproval(stageName: stage.name),
-                                        config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                                        config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
@@ -323,7 +352,7 @@ final class LoopEngineRunner: ObservableObject {
                 guard let skillId = stage.skillId,
                       !skillId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     return await finish(.error("Stage \"\(stage.name)\" has no skill chosen"),
-                                        config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                                        config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
@@ -374,16 +403,16 @@ final class LoopEngineRunner: ObservableObject {
                 switch stage.kind {
                 case .regressionSweep:
                     decision = await runRegressionStage(
-                        stage, config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                        stage, config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                         progress: &progress)
                 case .shellCommand:
                     decision = await runShellStage(
-                        stage, config: config, gitRoot: gitRoot,
+                        stage, config: config, gitRoot: runGitRoot,
                         progress: &progress, repairsUsed: &repairsUsed,
                         goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
                 case .skill:
                     decision = await runSkillStage(
-                        stage, config: config, gitRoot: gitRoot,
+                        stage, config: config, gitRoot: runGitRoot,
                         goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
                 }
 
@@ -415,7 +444,7 @@ final class LoopEngineRunner: ObservableObject {
             status = .aborted
         }
         return await finish(status ?? .givenUp(reason: .maxIterations),
-                            config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
+                            config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                             projectId: projectId, startedAt: startedAt,
                             loopId: loopId, loopName: loopName)
     }

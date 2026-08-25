@@ -51,7 +51,8 @@ final class LoopMessagesTests: XCTestCase {
             logTail: ["stage 1 passed", "stage 2 failed"],
             lastStatusSummary: "given up (max iterations)", lastFinishedAt: 1_700_000_100,
             stages: [LoopStageInfo(name: "Build", kind: "shellCommand", severity: "blocking",
-                                   enabled: true, order: 0)])
+                                   enabled: true, order: 0)],
+            queuedCount: 2)
         let back = try roundTrip(state)
         XCTAssertEqual(back, state)
         XCTAssertEqual(back.type, MobileProtocol.Tag.loopState)
@@ -60,6 +61,20 @@ final class LoopMessagesTests: XCTestCase {
         // phone renders differently — it must survive the wire.
         XCTAssertTrue(back.running)
         XCTAssertFalse(back.startedHere)
+        XCTAssertEqual(back.queuedCount, 2)
+    }
+
+    /// Older Mac snapshots omit `queuedCount`; the phone must treat that as none
+    /// queued rather than failing the whole decode.
+    func testStateDecodesOldMacJSONWithoutQueuedCount() throws {
+        let oldMacJSON = Data("""
+        {"type":"loop_state","configured":true,"projectName":"LLM","running":true,
+         "startedHere":false,"iteration":0,"maxIterations":8,"logTail":[],
+         "lastStatusSummary":null,"lastFinishedAt":null,"stages":[]}
+        """.utf8)
+        let state = try JSONDecoder().decode(LoopState.self, from: oldMacJSON)
+        XCTAssertEqual(state.queuedCount, 0)
+        XCTAssertTrue(state.running)
     }
 
     /// The unconfigured snapshot is what the phone shows as "set this up on the

@@ -75,10 +75,15 @@ public struct LoopState: Codable, Equatable {
     public let lastStatusSummary: String?
     public let lastFinishedAt: Double?
     public let stages: [LoopStageInfo]
+    /// Runs waiting in the Mac's process-wide FIFO for this project's git root.
+    /// Does not include the in-flight run — only callers blocked on
+    /// `LoopRunQueue.acquire`. Omitted on older Mac builds; decodes as 0.
+    public let queuedCount: Int
 
     public init(configured: Bool, projectName: String?, running: Bool, startedHere: Bool,
                 iteration: Int, maxIterations: Int, logTail: [String],
-                lastStatusSummary: String?, lastFinishedAt: Double?, stages: [LoopStageInfo]) {
+                lastStatusSummary: String?, lastFinishedAt: Double?,
+                stages: [LoopStageInfo], queuedCount: Int = 0) {
         self.configured = configured
         self.projectName = projectName
         self.running = running
@@ -89,10 +94,43 @@ public struct LoopState: Codable, Equatable {
         self.lastStatusSummary = lastStatusSummary
         self.lastFinishedAt = lastFinishedAt
         self.stages = stages
+        self.queuedCount = queuedCount
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        configured = try c.decode(Bool.self, forKey: .configured)
+        projectName = try c.decodeIfPresent(String.self, forKey: .projectName)
+        running = try c.decode(Bool.self, forKey: .running)
+        startedHere = try c.decode(Bool.self, forKey: .startedHere)
+        iteration = try c.decode(Int.self, forKey: .iteration)
+        maxIterations = try c.decode(Int.self, forKey: .maxIterations)
+        logTail = try c.decode([String].self, forKey: .logTail)
+        lastStatusSummary = try c.decodeIfPresent(String.self, forKey: .lastStatusSummary)
+        lastFinishedAt = try c.decodeIfPresent(Double.self, forKey: .lastFinishedAt)
+        stages = try c.decode([LoopStageInfo].self, forKey: .stages)
+        queuedCount = try c.decodeIfPresent(Int.self, forKey: .queuedCount) ?? 0
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(MobileProtocol.Tag.loopState, forKey: .type)
+        try c.encode(configured, forKey: .configured)
+        try c.encodeIfPresent(projectName, forKey: .projectName)
+        try c.encode(running, forKey: .running)
+        try c.encode(startedHere, forKey: .startedHere)
+        try c.encode(iteration, forKey: .iteration)
+        try c.encode(maxIterations, forKey: .maxIterations)
+        try c.encode(logTail, forKey: .logTail)
+        try c.encodeIfPresent(lastStatusSummary, forKey: .lastStatusSummary)
+        try c.encodeIfPresent(lastFinishedAt, forKey: .lastFinishedAt)
+        try c.encode(stages, forKey: .stages)
+        try c.encode(queuedCount, forKey: .queuedCount)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case type, configured, projectName, running, startedHere, iteration, maxIterations
-        case logTail, lastStatusSummary, lastFinishedAt, stages
+        case logTail, lastStatusSummary, lastFinishedAt, stages, queuedCount
     }
 }
 
@@ -125,8 +163,9 @@ public struct LoopStop: Codable, Equatable {
 }
 
 /// Answer to start/stop. `accepted: false` is a normal outcome, not an error —
-/// most often a run is already in flight for this working tree, which the Mac
-/// refuses process-wide so two runs can never repair the same tree at once.
+/// for example when the Mac's auto-code scheduler already has a phone-triggered
+/// run pending. An accepted start may queue behind an in-flight run on the
+/// same git root rather than starting immediately.
 public struct LoopAck: Codable, Equatable {
     public let type = MobileProtocol.Tag.loopAck
     public let accepted: Bool

@@ -3,6 +3,13 @@ import XCTest
 
 @MainActor
 final class LoopEngineRunnerTests: XCTestCase {
+
+    override func tearDown() {
+        LoopRunQueue._resetForTesting()
+        LoopWorktreeManager._resetForTesting()
+        super.tearDown()
+    }
+
     /// Keyed by command string (not just call count) so a single stub can
     /// drive multi-stage tests; still supports the single-stage
     /// call-count-based sequencing the earlier tests need via a captured
@@ -214,9 +221,9 @@ final class LoopEngineRunnerTests: XCTestCase {
     }
 
     // Unique per test-method invocation (XCTest creates a fresh instance
-    // per test, re-running this initializer each time) so the new
-    // process-wide `LoopEngineRunner.activeRoots` static state can't
-    // leak a "still locked" false-rejection between unrelated tests.
+    // per test, re-running this initializer each time) so the process-wide
+    // `LoopRunQueue` state can't leak a "still locked" false-rejection
+    // between unrelated tests.
     private let repoRoot = URL(fileURLWithPath: "/tmp/repo-\(UUID().uuidString)")
 
     func testAllStagesPassOnFirstIterationSucceeds() async {
@@ -578,9 +585,9 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(repairer.repairCount, 0)
     }
 
-    // MARK: - Fix 1: process-wide concurrency guard
+    // MARK: - Fix 1: process-wide concurrency guard (FIFO queue)
 
-    func testConcurrentRunsOnSameGitRootAreRejected() async {
+    func testConcurrentRunsOnSameGitRootAreQueued() async {
         let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") }
         let repairer = BlockingRepairer()
         let approvals = makeApprovals(approve: [("t1", "swift test")])
@@ -602,17 +609,18 @@ final class LoopEngineRunnerTests: XCTestCase {
         )
 
         let task1 = Task { await runner1.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot) }
-        // Wait for runner1 to actually be mid-repair (holding the gitRoot
-        // lock) before starting runner2, instead of racing on timing.
         await repairer.started.wait()
 
-        let result2 = await runner2.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
-        XCTAssertNil(result2)
-        XCTAssertNil(runner2.status)
-        XCTAssertFalse(runner2.running)
+        let task2 = Task { await runner2.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot) }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(runner2.waitingInQueue)
+        XCTAssertTrue(LoopRunQueue.isActive(rootKey: repoRoot.path))
 
         await repairer.release.fire()
         _ = await task1.value
+        let result2 = await task2.value
+        XCTAssertNotNil(result2)
+        XCTAssertFalse(runner2.waitingInQueue)
     }
 
     /// `handleAppTerminating` is the synchronous path `willTerminate` calls —
@@ -1703,9 +1711,9 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(runner.log.contains { $0.text.contains("Run journal not written: disk full") })
     }
 
-    /// A rejected call never started a run, so it must not fabricate a journal
-    /// entry — that would make the run list count phantom runs.
-    func testRejectedConcurrentRunIsNotJournalled() async {
+    /// A queued call must not fabricate a journal entry before it acquires
+    /// the lock — that would make the run list count phantom runs.
+    func testQueuedConcurrentRunIsNotJournalledUntilItStarts() async {
         let journal = InMemoryJournal()
         let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") }
         let repairer = BlockingRepairer()
@@ -1725,12 +1733,15 @@ final class LoopEngineRunnerTests: XCTestCase {
 
         let task1 = Task { await runner1.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot) }
         await repairer.started.wait()
-        let rejected = await runner2.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
-        XCTAssertNil(rejected)
+        let task2 = Task { await runner2.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot) }
+        try? await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertTrue(journal.written.isEmpty)
 
         await repairer.release.fire()
         _ = await task1.value
+        let result2 = await task2.value
+        XCTAssertNotNil(result2)
+        XCTAssertEqual(journal.written.count, 1)
     }
 
     // MARK: - Summary note output
@@ -1798,9 +1809,8 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(runner.log.contains { $0.text.contains("Run summary note not written: note index locked") })
     }
 
-    /// A run that never started must not produce a note either — the note list
-    /// would otherwise count runs that did not happen.
-    func testRejectedRunWritesNoSummaryNote() async {
+    /// A queued call must not produce a note before it acquires the lock.
+    func testQueuedRunWritesNoSummaryNoteUntilItStarts() async {
         let summary = StubSummaryWriter()
         let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") }
         let repairer = BlockingRepairer()
@@ -1820,12 +1830,14 @@ final class LoopEngineRunnerTests: XCTestCase {
 
         let task1 = Task { await runner1.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot) }
         await repairer.started.wait()
-        let rejected = await runner2.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
-        XCTAssertNil(rejected)
+        let task2 = Task { await runner2.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot) }
+        try? await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertTrue(summary.written.isEmpty)
 
         await repairer.release.fire()
         _ = await task1.value
+        _ = await task2.value
+        XCTAssertEqual(summary.written.count, 1)
     }
 
     // MARK: - Loop identity (multi-loop)
