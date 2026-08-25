@@ -57,6 +57,16 @@ final class LoopWorktreeManagerTests: XCTestCase {
         XCTAssertNil(lease)
     }
 
+    func testCreateIfPossibleReturnsNilForDirtyMainRepo() async throws {
+        try Data("uncommitted".utf8).write(
+            to: mainRepo.appendingPathComponent("working-copy.txt"))
+
+        let lease = await LoopWorktreeManager.createIfPossible(
+            mainRepo: mainRepo, faultsRoot: projectRoot)
+
+        XCTAssertNil(lease, "a worktree from HEAD would silently omit current edits")
+    }
+
     private func initGitRepo(at repo: URL) throws {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")

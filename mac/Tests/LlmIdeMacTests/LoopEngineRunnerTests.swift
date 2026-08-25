@@ -623,6 +623,35 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertFalse(runner2.waitingInQueue)
     }
 
+    func testSameRunnerCannotReenterWhileWaitingInQueue() async throws {
+        let rootKey = repoRoot.resolvingSymlinksInPath().path
+        try await LoopRunQueue.acquire(rootKey: rootKey)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals())
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep,
+                      command: nil, order: 0)
+        ])
+
+        let first = Task {
+            await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertTrue(runner.waitingInQueue)
+
+        let second = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertNil(second)
+        XCTAssertEqual(LoopRunQueue.queuedCount(rootKey: rootKey), 1)
+
+        LoopRunQueue.release(rootKey: rootKey)
+        let firstResult = await first.value
+        XCTAssertNotNil(firstResult)
+    }
+
     /// `handleAppTerminating` is the synchronous path `willTerminate` calls —
     /// it must never be reachable through `run`'s own cooperative-cancellation
     /// exit, since the whole point is to cover the case where the process is
@@ -1881,7 +1910,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertFalse(journal.written.last?.loopId?.isEmpty ?? true)
     }
 
-    func testActiveLoopIdReflectsWhichLoopOwnsAnInFlightRun() async {
+    func testIsLoopActiveReflectsWhichLoopOwnsAnInFlightRun() async {
         let repairer = BlockingRepairer()
         let runner = makeRunner(
             verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
@@ -1894,18 +1923,18 @@ final class LoopEngineRunnerTests: XCTestCase {
             LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
         ], maxIterations: 5, consecutiveFailureStop: 5)
 
-        XCTAssertNil(LoopEngineRunner.activeLoopId(gitRoot: repoRoot))
+        XCTAssertFalse(LoopEngineRunner.isLoopActive(loopId: "loop-active", gitRoot: repoRoot))
         let task = Task {
             await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot,
                              loopId: "loop-active", loopName: "Active")
         }
         await repairer.started.wait()
-        XCTAssertEqual(LoopEngineRunner.activeLoopId(gitRoot: repoRoot), "loop-active")
+        XCTAssertTrue(LoopEngineRunner.isLoopActive(loopId: "loop-active", gitRoot: repoRoot))
 
         await repairer.release.fire()
         _ = await task.value
-        XCTAssertNil(LoopEngineRunner.activeLoopId(gitRoot: repoRoot),
-                    "must clear once the run finishes")
+        XCTAssertFalse(LoopEngineRunner.isLoopActive(loopId: "loop-active", gitRoot: repoRoot),
+                       "must clear once the run finishes")
     }
 
     // MARK: - Goal/acceptance context

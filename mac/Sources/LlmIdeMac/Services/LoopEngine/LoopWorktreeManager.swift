@@ -3,8 +3,8 @@ import Foundation
 /// Isolated git worktrees for concurrent Loop runs on the same linked repo.
 ///
 /// When enabled on a loop config, a run that would wait in `LoopRunQueue` on
-/// the main working tree is redirected into `<project>/system/loop-worktrees/<id>`
-/// instead, so repairs never race in one checkout.
+/// the main working tree is redirected into a managed worktree instead, so
+/// repairs never race in one checkout.
 @MainActor
 enum LoopWorktreeManager {
 
@@ -17,6 +17,7 @@ enum LoopWorktreeManager {
 
     enum Error: Swift.Error, Equatable {
         case notAGitRepository
+        case dirtyWorkingTree
         case worktreePathExists
         case gitFailed(String)
     }
@@ -42,6 +43,10 @@ enum LoopWorktreeManager {
     static func create(mainRepo: URL, faultsRoot: URL,
                        runGit: ([String], URL) async throws -> String = defaultRunGit) async throws -> Lease {
         _ = try await runGit(["rev-parse", "--is-inside-work-tree"], mainRepo)
+        let status = try await runGit(["status", "--porcelain"], mainRepo)
+        guard status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw Error.dirtyWorkingTree
+        }
         let baseCommit = try await runGit(["rev-parse", "HEAD"], mainRepo)
             .trimmingCharacters(in: .whitespacesAndNewlines)
 

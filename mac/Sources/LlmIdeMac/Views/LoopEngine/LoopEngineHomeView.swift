@@ -169,7 +169,7 @@ struct LoopEngineHomeView: View {
 
     private func isRunning(_ loop: LoopDefinition) -> Bool {
         guard let gitRoot = workspaceContext?.gitRoot else { return false }
-        return LoopEngineRunner.activeLoopId(gitRoot: gitRoot) == loop.id
+        return LoopEngineRunner.isLoopActive(loopId: loop.id, gitRoot: gitRoot)
     }
 
     private var emptyState: some View {

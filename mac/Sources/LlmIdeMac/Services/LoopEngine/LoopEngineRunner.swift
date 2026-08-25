@@ -32,6 +32,10 @@ final class LoopEngineRunner: ObservableObject {
     }
 
     @Published private(set) var running = false
+    /// Admission covers queue/worktree provisioning as well as execution.
+    /// `running` becomes true only after the root lock is acquired, so it
+    /// cannot by itself prevent the same instance entering twice while waiting.
+    private var isAdmitted = false
     /// True while this instance is waiting in `LoopRunQueue` for another run
     /// on the same git root to finish.
     @Published private(set) var waitingInQueue = false
@@ -68,19 +72,30 @@ final class LoopEngineRunner: ObservableObject {
         LoopRunQueue.queuedCount(rootKey: gitRoot.resolvingSymlinksInPath().path)
     }
 
-    /// Which loop owns the in-flight run on each `gitRoot`, keyed the same
-    /// way `LoopRunQueue` is. Lets any surface's running-indicator (e.g. the
-    /// loop-list pane's dot) land on the correct loop regardless of whether
-    /// the run was started from this page, another window, or the Auto Task
-    /// scheduler — same reasoning `MobileControlManager.buildLoopState()`
-    /// already documents for `running` itself.
-    @MainActor private static var activeLoopIds: [String: String] = [:]
+    /// Per-main-root run counts by loop id. Counts (not a Set) matter when two
+    /// worktrees run the same loop concurrently: one finishing must not clear
+    /// the other's indicator.
+    @MainActor private static var activeLoopCounts: [String: [String: Int]] = [:]
 
-    /// The loop id owning the in-flight run on `gitRoot`, or `nil` when no
-    /// run is active there.
     @MainActor
-    static func activeLoopId(gitRoot: URL) -> String? {
-        activeLoopIds[gitRoot.resolvingSymlinksInPath().path]
+    static func isLoopActive(loopId: String, gitRoot: URL) -> Bool {
+        let rootKey = gitRoot.resolvingSymlinksInPath().path
+        return (activeLoopCounts[rootKey]?[loopId] ?? 0) > 0
+    }
+
+    private static func registerActiveLoop(rootKey: String, loopId: String) {
+        activeLoopCounts[rootKey, default: [:]][loopId, default: 0] += 1
+    }
+
+    private static func unregisterActiveLoop(rootKey: String, loopId: String) {
+        guard var loops = activeLoopCounts[rootKey],
+              let count = loops[loopId] else { return }
+        if count <= 1 {
+            loops.removeValue(forKey: loopId)
+        } else {
+            loops[loopId] = count - 1
+        }
+        activeLoopCounts[rootKey] = loops.isEmpty ? nil : loops
     }
 
     private let verifier: FaultVerifier
@@ -221,7 +236,7 @@ final class LoopEngineRunner: ObservableObject {
     ///   - projectId: recorded in the journal so runs can be attributed to a
     ///     project later. Optional — a missing id degrades analysis, never the run.
     ///   - loopId: which `LoopDefinition` this run executes — recorded on the
-    ///     journal and exposed via `activeLoopId(gitRoot:)`. Defaulted so every
+    ///     journal and exposed via `isLoopActive(loopId:gitRoot:)`. Defaulted so every
     ///     pre-existing caller (and every existing test) is unaffected; real
     ///     callers pass the loop's actual id.
     ///   - loopName: the loop's name at run time, recorded alongside `loopId`.
@@ -239,10 +254,12 @@ final class LoopEngineRunner: ObservableObject {
              projectId: String? = nil, loopId: String = "primary", loopName: String = "Loop",
              goal: String? = nil, acceptanceCriteria: String? = nil,
              scopeGlobs: [String] = []) async -> LoopEngineStatus? {
-        guard !running else {
-            appendLog(.warn, "Loop not started · this runner instance is already running")
+        guard !isAdmitted else {
+            appendLog(.warn, "Loop not started · this runner instance is already active")
             return nil
         }
+        isAdmitted = true
+        defer { isAdmitted = false }
         let mainGitRoot = gitRoot
         let mainRootKey = mainGitRoot.resolvingSymlinksInPath().path
         var runGitRoot = mainGitRoot
@@ -280,7 +297,7 @@ final class LoopEngineRunner: ObservableObject {
             }
             return nil
         }
-        Self.activeLoopIds[lockRootKey] = loopId
+        Self.registerActiveLoop(rootKey: mainRootKey, loopId: loopId)
         running = true
         status = nil
         iteration = 0
@@ -291,7 +308,7 @@ final class LoopEngineRunner: ObservableObject {
                                        loopId: loopId, loopName: loopName)
         defer {
             running = false
-            Self.activeLoopIds.removeValue(forKey: lockRootKey)
+            Self.unregisterActiveLoop(rootKey: mainRootKey, loopId: loopId)
             currentRunContext = nil
             LoopRunQueue.release(rootKey: lockRootKey)
             if let lease = worktreeLease {
