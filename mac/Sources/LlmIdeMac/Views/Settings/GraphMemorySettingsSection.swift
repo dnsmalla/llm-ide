@@ -71,6 +71,12 @@ struct GraphMemorySettingsSection: View {
                         .controlSize(.small)
                 }
                 .padding(.top, 2)
+
+                if let truncation = graphAutoUpdater.lastUploadTruncation,
+                   truncation.repoPath == state.repoPath,
+                   truncation.didTruncate {
+                    StatusBanner(severity: .warning, message: truncation.summary)
+                }
             }
         }
         .task(id: projectStore.activeProject?.bundle.id) { refresh() }
@@ -115,6 +121,8 @@ struct GraphMemoryState {
     var lastGenerated: String?
     var memoryFiles: [MemFile] = []
     var repoLabel = "No project open"
+    /// Standardized path of the graphed repo — matches `CodeGraphUploadTruncation.repoPath`.
+    var repoPath = ""
     var anyMemoryFile: Bool { memoryFiles.contains { $0.present } }
 
     static let empty = GraphMemoryState()
@@ -140,6 +148,7 @@ struct GraphMemoryState {
         }()
         var s = GraphMemoryState()
         s.repoLabel = repo.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        s.repoPath = repo.standardizedFileURL.path
 
         let layout = ProjectLayout(root: repo)
         let graphIndex = layout.graphDir.appendingPathComponent("index.md")

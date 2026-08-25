@@ -126,4 +126,51 @@ final class CodeGraphUploadServiceTests: XCTestCase {
         let did = await service.upload(graph: .empty, repoRoot: URL(fileURLWithPath: "/tmp/repo"))
         XCTAssertFalse(did)
     }
+
+    // MARK: - truncation selection
+
+    func testPrepareForUploadLeavesSmallGraphsUntouched() {
+        let nodes = nodes(10)
+        let edges = edges(5)
+        let out = CodeGraphUploadService.prepareForUpload(
+            nodes: nodes, edges: edges, repoPath: "/tmp/repo", maxNodes: 100, maxEdges: 100)
+        XCTAssertNil(out.truncation)
+        XCTAssertEqual(out.nodes.count, 10)
+        XCTAssertEqual(out.edges.count, 5)
+    }
+
+    func testPrepareForUploadPrefersEntryFilesOverTestPaths() {
+        let prod = CGNode(id: "file:Sources/App/main.swift", title: "main.swift", kind: .file)
+        let test = CGNode(id: "file:Tests/Generated/test_999.swift", title: "test_999.swift", kind: .file)
+        let filler = (0..<5).map {
+            CGNode(id: "file:Sources/Deep/Nested/f\($0).swift", title: "f\($0).swift", kind: .file)
+        }
+        let allNodes = filler + [test, prod]
+        let allEdges = allNodes.dropLast().enumerated().map {
+            CGEdge(fromId: $0.element.id, toId: allNodes[$0.offset + 1].id, kind: .imports)
+        }
+        let out = CodeGraphUploadService.prepareForUpload(
+            nodes: allNodes, edges: Array(allEdges), repoPath: "/tmp/repo", maxNodes: 2, maxEdges: 10)
+        XCTAssertNotNil(out.truncation)
+        XCTAssertEqual(out.nodes.count, 2)
+        XCTAssertTrue(out.nodes.contains(where: { $0.id == prod.id }))
+        XCTAssertFalse(out.nodes.contains(where: { $0.id == test.id }))
+    }
+
+    func testPrepareForUploadDropsEdgesWithMissingEndpoints() {
+        let n1 = CGNode(id: "file:a.swift", title: "a.swift", kind: .file)
+        let n2 = CGNode(id: "file:b.swift", title: "b.swift", kind: .file)
+        let n3 = CGNode(id: "file:c.swift", title: "c.swift", kind: .file)
+        let edges = [
+            CGEdge(fromId: n1.id, toId: n2.id, kind: .imports),
+            CGEdge(fromId: n2.id, toId: n3.id, kind: .imports),
+        ]
+        let out = CodeGraphUploadService.prepareForUpload(
+            nodes: [n1, n2, n3], edges: edges, repoPath: "/tmp/repo", maxNodes: 2, maxEdges: 10)
+        XCTAssertEqual(out.nodes.count, 2)
+        for edge in out.edges {
+            XCTAssertTrue(out.nodes.contains(where: { $0.id == edge.fromId }))
+            XCTAssertTrue(out.nodes.contains(where: { $0.id == edge.toId }))
+        }
+    }
 }

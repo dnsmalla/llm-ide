@@ -3,6 +3,27 @@ import GraphKit
 import CryptoKit
 import os
 
+/// When a repo exceeds the upload ceiling, records what was sent vs dropped.
+struct CodeGraphUploadTruncation: Equatable {
+    let repoPath: String
+    let originalNodeCount: Int
+    let originalEdgeCount: Int
+    let uploadedNodeCount: Int
+    let uploadedEdgeCount: Int
+
+    var didTruncate: Bool {
+        uploadedNodeCount < originalNodeCount || uploadedEdgeCount < originalEdgeCount
+    }
+
+    var summary: String {
+        "Code graph upload capped at \(CodeGraphUploadService.maxNodes.formatted()) nodes / "
+            + "\(CodeGraphUploadService.maxEdges.formatted()) edges — sent "
+            + "\(uploadedNodeCount.formatted())/\(originalNodeCount.formatted()) nodes and "
+            + "\(uploadedEdgeCount.formatted())/\(originalEdgeCount.formatted()) edges. "
+            + "Agent symbol search may miss symbols in dropped regions."
+    }
+}
+
 /// Ships the locally-generated structural code graph to the backend
 /// (`/kb/ingest-code-graph`) so server-side agents can traverse it.
 ///
@@ -21,13 +42,13 @@ final class CodeGraphUploadService {
     /// Per-request batch sizes. The server caps a single request at 5000 nodes /
     /// 20000 edges and the transport at an 8 MB body; these sit well under both
     /// so a big repo uploads across several calls instead of being rejected.
-    static let nodesPerBatch = 1500
-    static let edgesPerBatch = 4000
+    nonisolated static let nodesPerBatch = 1500
+    nonisolated static let edgesPerBatch = 4000
 
     /// Whole-upload ceiling. A pathological repo shouldn't spend minutes
     /// uploading; what gets dropped is logged rather than silently discarded.
-    static let maxNodes = 40_000
-    static let maxEdges = 120_000
+    nonisolated static let maxNodes = 40_000
+    nonisolated static let maxEdges = 120_000
 
     weak var api: LlmIdeAPIClient?
 
@@ -48,6 +69,10 @@ final class CodeGraphUploadService {
     /// Newest request received while an upload was in flight, replayed once on
     /// completion so a graph change mid-upload isn't dropped until the next tick.
     private var pending: (graph: CGData, repoRoot: URL)?
+
+    /// Set when the most recent upload for a repo hit the ceiling. Cleared on
+    /// the next full upload for that repo. Read by Settings → Graph & Memory.
+    private(set) var lastTruncation: CodeGraphUploadTruncation?
 
     nonisolated private static let log = Logger(subsystem: "com.llmide.macapp",
                                                 category: "CodeGraphUpload")
@@ -94,6 +119,93 @@ final class CodeGraphUploadService {
         return out
     }
 
+    /// Rank nodes for upload when the graph exceeds the ceiling. Prefer
+    /// structural anchors (files, modules, types) and deprioritize generated or
+    /// test-only regions so prefix truncation keeps agent grounding useful.
+    nonisolated static func nodePriority(_ node: CGNode) -> Int {
+        var score = 0
+        switch node.kind {
+        case .file, .module: score += 120
+        case .classType, .service, .endpoint, .pipeline: score += 90
+        case .function, .symbol: score += 70
+        case .config, .table, .schemaNode, .resource: score += 50
+        default: score += 30
+        }
+        let id = node.id.lowercased()
+        if id.contains("node_modules") || id.contains("/.build/")
+            || id.contains("/tests/") || id.contains("/test/")
+            || id.contains("/__tests__/") || id.contains("/dist/") {
+            score -= 250
+        }
+        if id.hasSuffix("main.swift") || id.hasSuffix("app.swift")
+            || id.contains("server.mjs") || id.hasSuffix("index.ts")
+            || id.hasSuffix("index.js") || id.hasSuffix("mod.rs") {
+            score += 60
+        }
+        let depth = id.filter { $0 == "/" || $0 == ":" }.count
+        score -= depth * 3
+        return score
+    }
+
+    nonisolated static func edgePriority(_ edge: CGEdge) -> Int {
+        switch edge.kind {
+        case .imports, .contains: return 100
+        case .calls, .inherits, .implements: return 80
+        default: return 40
+        }
+    }
+
+    /// Select the highest-value nodes/edges that fit under the upload caps.
+    /// Pure + static for tests. Edges whose endpoints were dropped are excluded
+    /// so the server never receives dangling references from arbitrary prefixing.
+    nonisolated static func prepareForUpload(
+        nodes: [CGNode],
+        edges: [CGEdge],
+        repoPath: String,
+        maxNodes: Int = maxNodes,
+        maxEdges: Int = maxEdges
+    ) -> (nodes: [CGNode], edges: [CGEdge], truncation: CodeGraphUploadTruncation?) {
+        guard nodes.count > maxNodes || edges.count > maxEdges else {
+            return (nodes, edges, nil)
+        }
+        let originalNodeCount = nodes.count
+        let originalEdgeCount = edges.count
+
+        let keptNodes: [CGNode]
+        if nodes.count > maxNodes {
+            keptNodes = Array(nodes.sorted {
+                let lp = nodePriority($0), rp = nodePriority($1)
+                if lp != rp { return lp > rp }
+                return $0.id < $1.id
+            }.prefix(maxNodes))
+        } else {
+            keptNodes = nodes
+        }
+        let keptIds = Set(keptNodes.map(\.id))
+
+        let viable = edges.filter { keptIds.contains($0.fromId) && keptIds.contains($0.toId) }
+        let keptEdges: [CGEdge]
+        if viable.count > maxEdges {
+            keptEdges = Array(viable.sorted {
+                let lp = edgePriority($0), rp = edgePriority($1)
+                if lp != rp { return lp > rp }
+                let lf = $0.fromId + ">" + $0.toId
+                let rf = $1.fromId + ">" + $1.toId
+                return lf < rf
+            }.prefix(maxEdges))
+        } else {
+            keptEdges = viable
+        }
+
+        let truncation = CodeGraphUploadTruncation(
+            repoPath: repoPath,
+            originalNodeCount: originalNodeCount,
+            originalEdgeCount: originalEdgeCount,
+            uploadedNodeCount: keptNodes.count,
+            uploadedEdgeCount: keptEdges.count)
+        return (keptNodes, keptEdges, truncation)
+    }
+
     /// Upload `graph` for `repoRoot` unless an identical graph was already
     /// uploaded. Returns true when a fresh upload completed.
     ///
@@ -127,16 +239,18 @@ final class CodeGraphUploadService {
         let fp = Self.fingerprint(graph)
         if lastUploaded[repoPath] == fp { return false }
 
-        var nodes = graph.nodes
-        var edges = graph.edges
-        if nodes.count > Self.maxNodes || edges.count > Self.maxEdges {
+        let prepared = Self.prepareForUpload(nodes: graph.nodes, edges: graph.edges, repoPath: repoPath)
+        let nodes = prepared.nodes
+        let edges = prepared.edges
+        if let truncation = prepared.truncation {
+            lastTruncation = truncation
             Self.log.notice("""
                 code graph exceeds upload ceiling for \(repoRoot.lastPathComponent, privacy: .public) — \
-                sending \(min(nodes.count, Self.maxNodes), privacy: .public)/\(nodes.count, privacy: .public) nodes, \
-                \(min(edges.count, Self.maxEdges), privacy: .public)/\(edges.count, privacy: .public) edges
+                sending \(truncation.uploadedNodeCount, privacy: .public)/\(truncation.originalNodeCount, privacy: .public) nodes, \
+                \(truncation.uploadedEdgeCount, privacy: .public)/\(truncation.originalEdgeCount, privacy: .public) edges (priority-selected)
                 """)
-            nodes = Array(nodes.prefix(Self.maxNodes))
-            edges = Array(edges.prefix(Self.maxEdges))
+        } else {
+            lastTruncation = nil
         }
 
         do {
@@ -170,5 +284,8 @@ final class CodeGraphUploadService {
     /// Forget the per-repo fingerprints so the next generation re-uploads in
     /// full. Used when the server-side graph may no longer match (sign-out /
     /// server change).
-    func reset() { lastUploaded.removeAll() }
+    func reset() {
+        lastUploaded.removeAll()
+        lastTruncation = nil
+    }
 }
