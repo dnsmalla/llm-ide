@@ -85,6 +85,16 @@ final class GitLabClient {
     /// Settings → GitLab. Mirrors `GitHubClient.savedReposBridge()`.
     func savedProjectsBridge() -> [SavedGitLabProject] { config.gitLabSavedProjects }
 
+    /// Persist a resolved numeric project id back into Settings so Issues /
+    /// Gantt pickers and Auto Tasks share the same mapping.
+    func persistResolvedProject(_ project: GitLabProject, savedEntryId: String) {
+        guard let idx = config.gitLabSavedProjects.firstIndex(where: { $0.id == savedEntryId }) else { return }
+        config.gitLabSavedProjects[idx].resolvedId = project.id
+        if config.gitLabSavedProjects[idx].displayName.isEmpty {
+            config.gitLabSavedProjects[idx].displayName = project.name
+        }
+    }
+
     // MARK: - Projects
 
     func listProjects(search: String = "", page: Int = 1) async throws -> [GitLabProject] {

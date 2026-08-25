@@ -22,7 +22,22 @@ extension GitLabClient: RepoBackend {
         // NOT every project the token can access (the membership search
         // returned dozens, flooding the picker). Mirrors
         // GitHubClient.listProjects(), which lists saved repos only.
-        savedProjectsBridge().compactMap { $0.asRepoProject }
+        //
+        // GitLab issue calls need a numeric project id. When the user adds a
+        // project and pastes a URL but doesn't press Enter in Settings, resolve
+        // it here (same API as Settings → Resolve) and persist the id.
+        var out: [RepoProject] = []
+        for var saved in savedProjectsBridge() {
+            if saved.resolvedId == nil,
+               !saved.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let resolved = try? await resolveProject(rawURL: saved.url) {
+                persistResolvedProject(resolved, savedEntryId: saved.id)
+                saved.resolvedId = resolved.id
+                if saved.displayName.isEmpty { saved.displayName = resolved.name }
+            }
+            if let project = saved.asRepoProject { out.append(project) }
+        }
+        return out
     }
 
     func getProject(id: String) async throws -> RepoProject {

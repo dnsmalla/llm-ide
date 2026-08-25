@@ -282,6 +282,11 @@ final class AppConfig: ObservableObject {
             } else {
                 KeychainStore.saveGitLabToken(gitLabToken, host: gitLabBaseURL)
             }
+            let host = gitLabBaseURL
+            let token = gitLabToken
+            Task.detached(priority: .utility) {
+                GlabAuthSync.sync(host: host, token: token)
+            }
         }
     }
     /// GitLab instance base URL — defaults to gitlab.com.
@@ -291,6 +296,11 @@ final class AppConfig: ObservableObject {
             if persistsSecrets, !gitLabToken.isEmpty {
                 KeychainStore.deleteGitLabToken(host: oldValue)
                 KeychainStore.saveGitLabToken(gitLabToken, host: gitLabBaseURL)
+                let host = gitLabBaseURL
+                let token = gitLabToken
+                Task.detached(priority: .utility) {
+                    GlabAuthSync.sync(host: host, token: token)
+                }
             }
         }
     }
@@ -434,6 +444,22 @@ final class AppConfig: ObservableObject {
         if gitHubSavedRepos.contains(where: { $0.localPath.map { norm(URL(fileURLWithPath: $0)) } == target }) { return .github }
         if gitLabSavedProjects.contains(where: { $0.localPath.map { norm(URL(fileURLWithPath: $0)) } == target }) { return .gitlab }
         return nil
+    }
+
+    /// Stable fingerprint of saved repos for one provider. Issues and Gantt
+    /// key their project reload on this so a repo added in Settings appears
+    /// without restarting the app.
+    func savedRepoProjectsKey(for backend: RepoBackendKind) -> String {
+        switch backend {
+        case .gitlab:
+            return gitLabSavedProjects
+                .map { "\($0.id):\($0.url):\($0.resolvedId ?? 0):\($0.isActive)" }
+                .joined(separator: ";")
+        case .github:
+            return gitHubSavedRepos
+                .map { "\($0.id):\($0.url):\($0.isActive)" }
+                .joined(separator: ";")
+        }
     }
 
     // ── External sources: Email ───────────────────────────────────────

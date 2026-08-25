@@ -83,12 +83,14 @@ struct GanttContainerView: View {
         .task(id: loadKey) { await loadProjects() }
     }
 
-    /// Re-runs the project load when the backend changes AND when the set of
-    /// configured providers changes. Keying on the backend alone left the view
-    /// stuck on the "not configured" state after the user added a token in
-    /// Settings and came back, since the resolved backend hadn't changed.
+    /// Re-runs the project load when the backend changes, when the set of
+    /// configured providers changes, or when saved repos are edited in
+    /// Settings. Keying on the backend alone left pickers stale after adding
+    /// a project and returning to Issues / Gantt.
     private var loadKey: String {
-        availableBackends.map(\.rawValue).joined(separator: ",") + "|" + effectiveBackend.rawValue
+        availableBackends.map(\.rawValue).joined(separator: ",")
+            + "|" + effectiveBackend.rawValue
+            + "|" + config.savedRepoProjectsKey(for: effectiveBackend)
     }
 
     @ViewBuilder
@@ -247,7 +249,6 @@ struct GanttContainerView: View {
 
     private func loadProjects(force: Bool = false) async {
         guard availableBackends.contains(effectiveBackend) else { return }
-        if !force && !projects.isEmpty { return }   // already loaded — skip on tab re-visit
         isLoadingProjects = true
         projectError = nil
         defer { isLoadingProjects = false }

@@ -106,6 +106,9 @@ public struct LlmIdeMacApp: App {
         KeychainStore.warmSessionCache(
             refreshTokenHost: cfg.serverURL,
             gitLabHost: cfg.gitLabBaseURL)
+        Task.detached(priority: .utility) {
+            GlabAuthSync.sync(host: cfg.gitLabBaseURL, token: cfg.gitLabToken)
+        }
         let store = SessionStore(server: cfg.serverURL)
         let client = LlmIdeAPIClient(baseURL: cfg.serverURL, sessionStore: store)
         // Honour the user's Capture → poll-interval setting (stored in ms).

@@ -76,6 +76,13 @@ struct RepoIssuesView: View {
         return availableBackends.first ?? .gitlab
     }
 
+    /// Re-load saved projects when Settings adds or edits a repo.
+    private var loadKey: String {
+        availableBackends.map(\.rawValue).joined(separator: ",")
+            + "|" + (activeBackend ?? defaultActiveBackend).rawValue
+            + "|" + config.savedRepoProjectsKey(for: activeBackend ?? defaultActiveBackend)
+    }
+
     private var currentClient: RepoBackend {
         let backend = activeBackend ?? defaultActiveBackend
         switch backend {
@@ -116,8 +123,7 @@ struct RepoIssuesView: View {
                 content
             }
         }
-        .task { await initialLoad() }
-        .onChange(of: activeBackend) { _, _ in Task { await switchBackend() } }
+        .task(id: loadKey) { await initialLoad() }
         .onChange(of: filter.state) { _, _ in Task { await reloadIssues() } }
         .onChange(of: filter.labelName) { _, _ in Task { await reloadIssues() } }
         .onChange(of: filter.assigneeId) { _, _ in Task { await reloadIssues() } }

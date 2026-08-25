@@ -170,6 +170,12 @@ Recommended scopes:
 3. Paste into LLM-IDE **Settings → GitLab → API Token**
 4. Click **Verify & Save**
 
+#### Single auth path (Settings only)
+
+Configure GitLab **once** in Settings. The Mac app stores the PAT in Keychain and automatically syncs it to the `glab` CLI on save and launch. Cursor/terminal agents should use `./scripts/gitlab.sh` (reads the same Keychain token) — **do not** run a separate `glab auth login`.
+
+If CLI auth fails after rotating a token, re-save in **Settings → GitLab**; that refreshes both Keychain and `glab`.
+
 ### Verify Your Configuration
 
 After saving, LLM-IDE will:
