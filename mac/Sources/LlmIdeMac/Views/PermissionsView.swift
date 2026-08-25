@@ -45,7 +45,7 @@ struct PermissionsView: View {
                         icon: "accessibility",
                         iconColor: theme.current.accent2,
                         title: "Accessibility",
-                        detail: "Read live captions from Zoom and Teams desktop apps.",
+                        detail: MeetingCaptureMatrix.accessibilityDetail,
                         note: "Required for caption capture.",
                         state: permissions.accessibility,
                         pane: .accessibility,
@@ -113,10 +113,13 @@ struct PermissionsView: View {
             Image(systemName: "info.circle.fill")
                 .font(.system(size: 12))
                 .foregroundStyle(theme.current.accent2)
-            Text("After enabling Accessibility, **quit and relaunch** LLM-IDE — macOS caches the trust state per-process, so the running app will keep saying \"needed\" until restart.")
-                .font(Typography.caption)
-                .foregroundStyle(theme.current.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text("After enabling Accessibility, **quit and relaunch** LLM-IDE — macOS caches the trust state per-process, so the running app will keep saying \"needed\" until restart.")
+                Text(MeetingCaptureMatrix.extensionNote)
+            }
+            .font(Typography.caption)
+            .foregroundStyle(theme.current.textMuted)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)

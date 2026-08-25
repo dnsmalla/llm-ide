@@ -181,7 +181,7 @@ struct ConnectionsSettingsSection: View {
         InputSourceCard(
             icon: "waveform",
             title: "Meetings",
-            subtitle: "Google Meet · Teams · Zoom",
+            subtitle: MeetingCaptureMatrix.connectionsSubtitle,
             badgeText: config.autoCaptureOnMeeting ? "On" : "Off",
             badgeTone: config.autoCaptureOnMeeting ? .positive : .neutral
         ) {
@@ -190,12 +190,15 @@ struct ConnectionsSettingsSection: View {
                     Text("Auto-capture when a meeting app is frontmost")
                         .font(Typography.body)
                         .foregroundStyle(theme.current.text)
-                    Text("Starts recording automatically once Zoom or Teams becomes the active app.")
+                    Text(MeetingCaptureMatrix.autoCaptureDetail)
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
                 }
             }
             .toggleStyle(.switch)
+
+            MeetingCaptureMatrixView()
+                .environmentObject(theme)
 
             DisclosureGroup(isExpanded: $showMeetingAdvanced) {
                 HStack {

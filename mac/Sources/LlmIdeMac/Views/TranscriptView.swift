@@ -340,7 +340,7 @@ struct TranscriptView: View {
                 Text("Recording — but no captions detected yet.")
                     .font(Typography.bodyStrong)
                     .foregroundStyle(theme.current.warning)
-                Text("Turn on captions in your meeting (Meet / Teams / Zoom) so LLM-IDE can read them.")
+                Text("Turn on captions in Zoom or Teams (desktop), or in your browser tab when using the Chrome extension.")
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
                     .fixedSize(horizontal: false, vertical: true)

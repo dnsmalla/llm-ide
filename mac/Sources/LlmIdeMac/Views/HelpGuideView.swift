@@ -81,22 +81,23 @@ struct HelpGuideView: View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             helpHeader("Welcome to LLM-IDE", icon: "hand.wave", tint: .blue)
 
-            helpParagraph("LLM-IDE captures live meeting captions from Zoom and Microsoft Teams, then uses AI to generate structured notes, action items, and summaries — so you can focus on the conversation instead of typing.")
+            helpParagraph("LLM-IDE captures live meeting captions, then uses AI to generate structured notes, action items, and summaries — so you can focus on the conversation instead of typing. On macOS, native capture works with \(MeetingCaptureMatrix.nativePlatformNames) desktop apps; \(MeetingCaptureMatrix.extensionOnlyPlatformNames) and web clients use the Chrome extension.")
 
             helpCard("How it works", icon: "arrow.triangle.2.circlepath") {
-                helpStep(1, "Open a meeting in Zoom or Teams on your Mac")
+                helpStep(1, "Join a meeting — Zoom or Teams desktop on your Mac, or Google Meet / web via the Chrome extension")
                 helpStep(2, "Press ⌘N (or Record in the account menu) to start capturing captions")
                 helpStep(3, "When the meeting ends, click Stop — notes are generated automatically")
                 helpStep(4, "Find your notes in the Library tool, ready to review, edit, or export")
             }
 
             helpCard("First-time setup", icon: "checkmark.seal") {
-                helpBullet("Grant Accessibility permission so the app can read captions from meeting windows")
+                helpBullet("Grant Accessibility permission so the Mac app can read captions from Zoom and Teams desktop windows")
+                helpBullet("Install the Chrome extension for Google Meet, Teams web, and Zoom web")
                 helpBullet("Sign in with your LLM-IDE account (your admin provides the server URL)")
                 helpBullet("Create or open a project — this is where your notes will be saved")
             }
 
-            helpTip("You can also capture meetings from the Chrome extension for Google Meet, Teams Web, and Zoom Web. The Mac app and extension share the same account and server.")
+            helpTip(MeetingCaptureMatrix.extensionNote + " The Mac app and extension share the same account and server.")
         }
     }
 
@@ -132,20 +133,21 @@ struct HelpGuideView: View {
             helpParagraph("The Live page shows a real-time transcript while you're recording a meeting. Captions appear as they're spoken — you can watch the conversation unfold without switching windows.")
 
             helpCard("How to start a live session", icon: "play.circle") {
-                helpStep(1, "Join your meeting in Zoom or Teams")
-                helpStep(2, "Make sure captions/subtitles are turned on in the meeting app")
-                helpStep(3, "Press ⌘N (or Record in the account menu) to start")
+                helpStep(1, "Join your meeting — Zoom or Teams desktop on Mac, or start capture from the Chrome extension for Meet / web")
+                helpStep(2, "Make sure captions/subtitles are turned on in the meeting app or browser")
+                helpStep(3, "Press ⌘N (or Record in the account menu) to start native capture, or start from the extension for web meetings")
                 helpStep(4, "The Live tab appears automatically with a red dot indicator")
             }
 
             helpCard("During the session", icon: "text.bubble") {
-                helpBullet("Captions scroll in the Transcript tab as the app reads them from Zoom/Teams via Accessibility APIs")
+                helpBullet("Native capture: captions scroll as the Mac app reads Zoom/Teams desktop windows via Accessibility APIs")
+                helpBullet("Extension capture: the Live tab mirrors the Chrome extension session for Google Meet, Teams web, and Zoom web")
                 helpBullet("Speaker names are detected automatically when the platform provides them")
                 helpBullet("You can minimize LLM-IDE — capture continues in the background")
                 helpBullet("The knowledge base is updated when you **Stop & Save** — captions are not pushed to the server mid-meeting")
             }
 
-            helpTip("When the Chrome extension is capturing a web meeting, the Live page mirrors that remote session too — you'll see captions from Google Meet, Teams Web, or Zoom Web in real time.")
+            helpTip(MeetingCaptureMatrix.extensionNote)
 
             helpWarning("Don't close the meeting window while recording. The app needs the captions to be visible (even if the window is behind other windows).")
         }
@@ -421,10 +423,10 @@ struct HelpGuideView: View {
             helpHeader("Troubleshooting", icon: "wrench.and.screwdriver", tint: .orange)
 
             helpCard("Captions aren't being captured", icon: "mic.slash") {
-                helpStep(1, "Open System Settings → Privacy & Security → Accessibility")
-                helpStep(2, "Make sure LLM-IDE is listed and enabled")
+                helpStep(1, "Confirm you're on a supported path — Zoom/Teams desktop in this app, or Meet/web via the Chrome extension")
+                helpStep(2, "Open System Settings → Privacy & Security → Accessibility and enable LLM-IDE (required for desktop capture)")
                 helpStep(3, "Restart the meeting app (Zoom/Teams) after granting permission")
-                helpStep(4, "Ensure captions/subtitles are turned on inside the meeting")
+                helpStep(4, "Ensure captions/subtitles are turned on inside the meeting or browser tab")
             }
 
             helpCard("Can't connect to the server", icon: "wifi.exclamationmark") {
