@@ -3,8 +3,9 @@ import XCTest
 
 final class MeetingCaptureMatrixTests: XCTestCase {
     func testNativeCaptureLimitedToDesktopScrapers() {
-        let native = MeetingCaptureMatrix.platforms.filter(\.nativeMac).map(\.id)
-        XCTAssertEqual(Set(native), ["zoom", "teams"])
+        let advertised = Set(MeetingCaptureMatrix.platforms.compactMap(\.nativeSourceRawValue))
+        let implemented = Set(PlatformDetector.allScrapers.map(\.source.rawValue))
+        XCTAssertEqual(advertised, implemented)
     }
 
     func testMeetIsExtensionOnly() {

@@ -7,14 +7,21 @@ enum MeetingCaptureMatrix {
     struct Platform: Equatable, Identifiable, Sendable {
         let id: String
         let displayName: String
-        let nativeMac: Bool
+        /// `CaptureSource.rawValue` implemented by the native scraper, or nil
+        /// when this platform is extension-only.
+        let nativeSourceRawValue: String?
         let chromeExtension: Bool
+
+        var nativeMac: Bool { nativeSourceRawValue != nil }
     }
 
     static let platforms: [Platform] = [
-        Platform(id: "zoom", displayName: "Zoom", nativeMac: true, chromeExtension: true),
-        Platform(id: "teams", displayName: "Microsoft Teams", nativeMac: true, chromeExtension: true),
-        Platform(id: "meet", displayName: "Google Meet", nativeMac: false, chromeExtension: true),
+        Platform(id: "zoom", displayName: "Zoom",
+                 nativeSourceRawValue: CaptureSource.zoomDesktop.rawValue, chromeExtension: true),
+        Platform(id: "teams", displayName: "Microsoft Teams",
+                 nativeSourceRawValue: CaptureSource.teamsDesktop.rawValue, chromeExtension: true),
+        Platform(id: "meet", displayName: "Google Meet",
+                 nativeSourceRawValue: nil, chromeExtension: true),
     ]
 
     /// Settings → Connections → Meetings card subtitle.
