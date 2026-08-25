@@ -37,9 +37,14 @@ final class GraphAutoUpdater: ObservableObject {
     /// best-effort — see CodeGraphUploadService.
     let uploader = CodeGraphUploadService()
 
-    /// Mirrors `uploader.lastTruncation` after each background upload so
-    /// Settings can warn when a large repo hit the server-side cap.
-    var lastUploadTruncation: CodeGraphUploadTruncation? { uploader.lastTruncation }
+    /// Successful truncation state for the active project's graphed repo.
+    /// Switching projects cannot clear or misattribute another repo's warning.
+    var lastUploadTruncation: CodeGraphUploadTruncation? {
+        guard let project = projectStore?.activeProject,
+              let repo = Self.repoToGraph(
+                projectRoot: URL(fileURLWithPath: project.localPath)) else { return nil }
+        return uploader.truncation(for: repo)
+    }
 
     private weak var projectStore: ProjectStore?
     private var intervalSeconds: TimeInterval

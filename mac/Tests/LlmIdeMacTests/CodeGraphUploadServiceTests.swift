@@ -157,6 +157,14 @@ final class CodeGraphUploadServiceTests: XCTestCase {
         XCTAssertFalse(out.nodes.contains(where: { $0.id == test.id }))
     }
 
+    func testNodePriorityRecognizesTestDirectoryAfterKindPrefix() {
+        let test = CGNode(id: "file:Tests/Generated/test.swift", title: "test.swift", kind: .file)
+        let source = CGNode(id: "file:Sources/Generated/source.swift",
+                            title: "source.swift", kind: .file)
+        XCTAssertLessThan(CodeGraphUploadService.nodePriority(test),
+                          CodeGraphUploadService.nodePriority(source))
+    }
+
     func testPrepareForUploadDropsEdgesWithMissingEndpoints() {
         let n1 = CGNode(id: "file:a.swift", title: "a.swift", kind: .file)
         let n2 = CGNode(id: "file:b.swift", title: "b.swift", kind: .file)

@@ -70,9 +70,13 @@ final class CodeGraphUploadService {
     /// completion so a graph change mid-upload isn't dropped until the next tick.
     private var pending: (graph: CGData, repoRoot: URL)?
 
-    /// Set when the most recent upload for a repo hit the ceiling. Cleared on
-    /// the next full upload for that repo. Read by Settings → Graph & Memory.
-    private(set) var lastTruncation: CodeGraphUploadTruncation?
+    /// Successful upload truncation state keyed by standardized repo path.
+    /// Failed uploads never alter this state, because nothing was actually sent.
+    private var truncationsByRepo: [String: CodeGraphUploadTruncation] = [:]
+
+    func truncation(for repoRoot: URL) -> CodeGraphUploadTruncation? {
+        truncationsByRepo[repoRoot.standardizedFileURL.path]
+    }
 
     nonisolated private static let log = Logger(subsystem: "com.llmide.macapp",
                                                 category: "CodeGraphUpload")
@@ -132,9 +136,13 @@ final class CodeGraphUploadService {
         default: score += 30
         }
         let id = node.id.lowercased()
-        if id.contains("node_modules") || id.contains("/.build/")
-            || id.contains("/tests/") || id.contains("/test/")
-            || id.contains("/__tests__/") || id.contains("/dist/") {
+        // Graph ids carry a kind prefix (`file:Tests/...`). Treat the prefix
+        // separator as a path separator so root-level Tests/ and dist/ folders
+        // match the same rules as nested directories.
+        let path = "/" + id.replacingOccurrences(of: ":", with: "/")
+        if path.contains("/node_modules/") || path.contains("/.build/")
+            || path.contains("/tests/") || path.contains("/test/")
+            || path.contains("/__tests__/") || path.contains("/dist/") {
             score -= 250
         }
         if id.hasSuffix("main.swift") || id.hasSuffix("app.swift")
@@ -243,14 +251,11 @@ final class CodeGraphUploadService {
         let nodes = prepared.nodes
         let edges = prepared.edges
         if let truncation = prepared.truncation {
-            lastTruncation = truncation
             Self.log.notice("""
                 code graph exceeds upload ceiling for \(repoRoot.lastPathComponent, privacy: .public) — \
                 sending \(truncation.uploadedNodeCount, privacy: .public)/\(truncation.originalNodeCount, privacy: .public) nodes, \
                 \(truncation.uploadedEdgeCount, privacy: .public)/\(truncation.originalEdgeCount, privacy: .public) edges (priority-selected)
                 """)
-        } else {
-            lastTruncation = nil
         }
 
         do {
@@ -272,6 +277,11 @@ final class CodeGraphUploadService {
                 }
             }
             lastUploaded[repoPath] = fp
+            if let truncation = prepared.truncation {
+                truncationsByRepo[repoPath] = truncation
+            } else {
+                truncationsByRepo.removeValue(forKey: repoPath)
+            }
             Self.log.info("uploaded code graph: \(uploadedNodes, privacy: .public) nodes / \(uploadedEdges, privacy: .public) edges for \(repoRoot.lastPathComponent, privacy: .public)")
             return true
         } catch {
@@ -286,6 +296,6 @@ final class CodeGraphUploadService {
     /// server change).
     func reset() {
         lastUploaded.removeAll()
-        lastTruncation = nil
+        truncationsByRepo.removeAll()
     }
 }
