@@ -74,6 +74,44 @@ final class LoopRunJournalTests: XCTestCase {
         XCTAssertEqual(decoded, record)
     }
 
+    func testLoadRecordReadsByIdAndStartedAt() {
+        let journal = FileLoopRunJournal()
+        let record = makeRecord(id: "load-me")
+        XCTAssertNil(journal.write(record, root: root))
+        XCTAssertEqual(journal.loadRecord(id: "load-me", startedAt: record.startedAt, root: root), record)
+    }
+
+    func testLoadRecordFallsBackToScanWhenBucketDiffers() {
+        let journal = FileLoopRunJournal()
+        let record = makeRecord(id: "scan-me")
+        XCTAssertNil(journal.write(record, root: root))
+        // Wrong month — scan should still find the file.
+        let wrongMonth = record.startedAt.addingTimeInterval(90 * 24 * 3600)
+        XCTAssertEqual(journal.loadRecord(id: "scan-me", startedAt: wrongMonth, root: root), record)
+    }
+
+    /// The bucket-mismatch fallback used to match on `hasSuffix`, so a short id
+    /// resolved to any run whose filename merely ended with it.
+    func testLoadRecordDoesNotMatchAnIdThatIsOnlyASuffix() {
+        let journal = FileLoopRunJournal()
+        XCTAssertNil(journal.write(makeRecord(id: "load-me"), root: root))
+        XCTAssertNil(journal.loadRecord(id: "me", startedAt: Date(), root: root))
+    }
+
+    func testResolveRecordURLPointsAtTheFileLoadRecordUsed() throws {
+        let journal = FileLoopRunJournal()
+        let record = makeRecord(id: "resolve-me")
+        XCTAssertNil(journal.write(record, root: root))
+        let wrongMonth = record.startedAt.addingTimeInterval(90 * 24 * 3600)
+        let url = try XCTUnwrap(
+            journal.resolveRecordURL(id: "resolve-me", startedAt: wrongMonth, root: root))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testLoadRecordReturnsNilForMissingId() {
+        XCTAssertNil(FileLoopRunJournal().loadRecord(id: "missing", startedAt: Date(), root: root))
+    }
+
     func testDurationIsDerivedFromTheRecordedTimestamps() {
         XCTAssertEqual(makeRecord().durationSeconds, 42, accuracy: 0.001)
     }

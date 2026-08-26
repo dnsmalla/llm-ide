@@ -94,6 +94,11 @@ struct LoopEngineView: View {
     @State private var skillCatalog: [LlmIdeAPIClient.SkillLibraryEntry] = []
     @State private var skillsLoaded = false
     @State private var pastRuns: [LoopRunIndexEntry] = []
+    /// Past-run inspector — when set, the log pane shows the journal record
+    /// instead of the live in-memory log.
+    @State var selectedPastRunId: String?
+    @State var inspectedPastRun: LoopRunRecord?
+    @State var pastRunInspectLoadFailed = false
     /// The in-flight `Task { await runLoop() }`, held only so Stop has
     /// something to cancel. `runner.running` alone can't be acted on — it's
     /// a `@Published` observation, not a handle — and cancelling this Task
@@ -230,6 +235,7 @@ struct LoopEngineView: View {
             runner.clearLog()
             lastStatus = nil
             didRejectLastRun = false
+            clearPastRunInspection()
             loadConfig()
             Task { await loadSkillsIfNeeded() }
         }
@@ -669,38 +675,69 @@ struct LoopEngineView: View {
 
     private var logPane: some View {
         let t = theme.current
+        let inspecting = inspectedPastRun != nil || pastRunInspectLoadFailed
         return VStack(spacing: 0) {
             HStack {
-                SectionLabel("RUN LOG")
+                SectionLabel(inspecting ? "RUN DETAIL" : "RUN LOG")
                 Spacer()
-                Button("Clear") { runner.clearLog() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(runner.log.isEmpty)
+                if inspecting {
+                    if let record = inspectedPastRun,
+                       let root = workspaceContext?.projectRoot {
+                        // Ask the journal where the file actually is — recomputing
+                        // the month bucket here would miss the scan fallback and
+                        // hand Finder a path that does not exist.
+                        if let url = journal.resolveRecordURL(
+                            id: record.id, startedAt: record.startedAt, root: root) {
+                            Button("Reveal JSON") {
+                                NSWorkspace.shared.activateFileViewerSelecting([url])
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                    Button("Back") { clearPastRunInspection() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                } else {
+                    Button("Clear") { runner.clearLog() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(runner.log.isEmpty)
+                }
             }
             .padding(.horizontal, Spacing.lg)
             .padding(.vertical, Spacing.sm)
             Divider().background(t.border)
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        if runner.log.isEmpty {
-                            Text("No runs yet.")
-                                .font(Typography.caption)
-                                .foregroundStyle(t.textMuted)
-                                .padding(Spacing.lg)
+            if pastRunInspectLoadFailed {
+                Text("Could not load this run's journal record.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.danger)
+                    .padding(Spacing.lg)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else if let record = inspectedPastRun {
+                pastRunInspector(record)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            if runner.log.isEmpty {
+                                Text("No runs yet.")
+                                    .font(Typography.caption)
+                                    .foregroundStyle(t.textMuted)
+                                    .padding(Spacing.lg)
+                            }
+                            ForEach(runner.log) { line in
+                                logRow(line).id(line.id)
+                            }
                         }
-                        ForEach(runner.log) { line in
-                            logRow(line).id(line.id)
-                        }
+                        .padding(.horizontal, Spacing.md)
+                        .padding(.vertical, 4)
                     }
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.vertical, 4)
-                }
-                .onChange(of: runner.log.count) { _, _ in
-                    if let last = runner.log.last {
-                        withAnimation(.linear(duration: 0.1)) {
-                            proxy.scrollTo(last.id, anchor: .bottom)
+                    .onChange(of: runner.log.count) { _, _ in
+                        if let last = runner.log.last {
+                            withAnimation(.linear(duration: 0.1)) {
+                                proxy.scrollTo(last.id, anchor: .bottom)
+                            }
                         }
                     }
                 }
@@ -728,21 +765,31 @@ struct LoopEngineView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 4) {
                         ForEach(pastRuns, id: \.id) { entry in
-                            HStack(alignment: .top, spacing: 6) {
-                                Circle()
-                                    .fill(entry.statusCode == "success" ? t.success : t.danger)
-                                    .frame(width: 5, height: 5)
-                                    .padding(.top, 5)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(entry.statusSummary)
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(t.text)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                    Text("\(AppDateFormatter.hourMinuteSecond(entry.startedAt)) · \(entry.trigger.rawValue) · \(entry.iterationsUsed) iter · \(Int(entry.durationSeconds))s")
-                                        .font(.system(size: 9, design: .monospaced))
-                                        .foregroundStyle(t.textMuted)
+                            Button { selectPastRun(entry) } label: {
+                                HStack(alignment: .top, spacing: 6) {
+                                    Circle()
+                                        .fill(entry.statusCode == "success" ? t.success : t.danger)
+                                        .frame(width: 5, height: 5)
+                                        .padding(.top, 5)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(entry.statusSummary)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(t.text)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        Text("\(AppDateFormatter.hourMinuteSecond(entry.startedAt)) · \(entry.trigger.rawValue) · \(entry.iterationsUsed) iter · \(Int(entry.durationSeconds))s")
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundStyle(t.textMuted)
+                                    }
+                                    Spacer(minLength: 0)
                                 }
+                                .padding(.vertical, 3)
+                                .padding(.horizontal, 4)
+                                .background(
+                                    selectedPastRunId == entry.id
+                                        ? t.accent.opacity(0.12) : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 4))
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, Spacing.md)
@@ -1114,6 +1161,33 @@ struct LoopEngineView: View {
         let recent = journal.recentRuns(root: root, limit: 60)
         pastRuns = Array(recent.filter { $0.loopId == loopId || ($0.loopId == nil && isPrimaryLoop) }.prefix(15))
         lastSummaryNoteName = Self.newestSummaryNoteName(projectRoot: root)
+        refreshInspectedPastRun(projectRoot: root)
+    }
+
+    func selectPastRun(_ entry: LoopRunIndexEntry) {
+        selectedPastRunId = entry.id
+        guard let root = workspaceContext?.projectRoot else {
+            inspectedPastRun = nil
+            pastRunInspectLoadFailed = true
+            return
+        }
+        inspectedPastRun = journal.loadRecord(id: entry.id, startedAt: entry.startedAt, root: root)
+        pastRunInspectLoadFailed = inspectedPastRun == nil
+    }
+
+    func clearPastRunInspection() {
+        selectedPastRunId = nil
+        inspectedPastRun = nil
+        pastRunInspectLoadFailed = false
+    }
+
+    /// Re-load the open inspector after a fresh run appends to the journal.
+    private func refreshInspectedPastRun(projectRoot: URL) {
+        guard let id = selectedPastRunId,
+              let entry = pastRuns.first(where: { $0.id == id })
+        else { return }
+        inspectedPastRun = journal.loadRecord(id: entry.id, startedAt: entry.startedAt, root: projectRoot)
+        pastRunInspectLoadFailed = inspectedPastRun == nil
     }
 
     /// Newest filename under `llm-doc/loop/`, or nil. Walks the directory rather
@@ -1193,6 +1267,7 @@ struct LoopEngineView: View {
     ///   only for this run.
     @MainActor
     private func runLoop(only single: LoopStage? = nil) async {
+        clearPastRunInspection()
         // `gitRoot` is `LoopEngineRunner.run`'s non-optional parameter, so a
         // run must not start until a real git working tree is resolved —
         // guards against running git-dependent stages with no working tree.

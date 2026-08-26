@@ -93,6 +93,42 @@ final class FileLoopRunJournal: LoopRunJournaling {
         runsDirectory(root: root).appendingPathComponent("index.jsonl")
     }
 
+    /// Month-bucketed JSON path for a run — matches `write(_:root:)`.
+    static func recordFileURL(id: String, startedAt: Date, root: URL) -> URL {
+        runsDirectory(root: root)
+            .appendingPathComponent(monthFormatter.string(from: startedAt), isDirectory: true)
+            .appendingPathComponent("\(id).json")
+    }
+
+    /// Resolves the on-disk file for a run listed in `index.jsonl`.
+    /// Uses `startedAt` for the month bucket first, then scans all buckets —
+    /// the index is authoritative for identity, but `monthFormatter` is
+    /// `TimeZone.current`, so a record written near a month boundary can land
+    /// in a different bucket than a later read computes.
+    func resolveRecordURL(id: String, startedAt: Date, root: URL) -> URL? {
+        let primary = Self.recordFileURL(id: id, startedAt: startedAt, root: root)
+        if FileManager.default.fileExists(atPath: primary.path) { return primary }
+        let runsDir = Self.runsDirectory(root: root)
+        let wanted = "\(id).json"
+        guard let subpaths = try? FileManager.default.subpathsOfDirectory(atPath: runsDir.path),
+              // Compare the last component, not a suffix: `hasSuffix` would let
+              // id "me" match "load-me.json".
+              let match = subpaths.first(where: { ($0 as NSString).lastPathComponent == wanted })
+        else { return nil }
+        return runsDir.appendingPathComponent(match)
+    }
+
+    /// Loads the full journal record for a run listed in `index.jsonl`.
+    func loadRecord(id: String, startedAt: Date, root: URL) -> LoopRunRecord? {
+        guard let url = resolveRecordURL(id: id, startedAt: startedAt, root: root) else { return nil }
+        return Self.decodeRecord(at: url)
+    }
+
+    private static func decodeRecord(at url: URL) -> LoopRunRecord? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? decoder().decode(LoopRunRecord.self, from: data)
+    }
+
     func write(_ record: LoopRunRecord, root: URL) -> String? {
         let dir = Self.runsDirectory(root: root)
             .appendingPathComponent(Self.monthFormatter.string(from: record.startedAt), isDirectory: true)
