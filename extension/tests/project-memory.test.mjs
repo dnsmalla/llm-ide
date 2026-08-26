@@ -774,6 +774,29 @@ test('DELETE /kb/agent/project-memory removes one fact and clears all', async ()
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// The viewer sends the fact back verbatim, so the delete keys on factIndex —
+// the store's own identity. factKey would strip the tag and leading filler and
+// take same-text facts with DIFFERENT subject ids down with it.
+test('DELETE /kb/agent/project-memory deletes only the clicked subject id', async () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'http-del-factindex');
+  writer.appendChatMemory({
+    root,
+    facts: ['[db|engine] uses SQLite WAL', '[perf|store] the project uses SQLite WAL', 'keep me'],
+  });
+  const res = mkRes();
+  await handleAgentRoutes(
+    mkReq('DELETE', '/kb/agent/project-memory',
+          { repo: root, fact: '[db|engine] uses SQLite WAL' }),
+    res, { userId: u, url: '/kb/agent/project-memory' },
+  );
+  assert.equal(res.statusCode, 200);
+  // Both facts share the factKey "uses sqlite wal"; only the clicked one goes.
+  assert.deepEqual(res.body.facts, ['[perf|store] the project uses SQLite WAL', 'keep me']);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 // ── Session-scoped memory (kb/session-memory.mjs, a real DB table) ────
 // Project memory (above) is durable and edit-only — it no longer carries any
 // session attribution and is never auto-pruned by a chat's lifecycle. Session
@@ -789,6 +812,47 @@ test('appendSessionMemory + listSessionMemory round-trip, oldest first', () => {
   sessionMemory.appendSessionMemory(u, 'S', ['fact one']);
   sessionMemory.appendSessionMemory(u, 'S', ['fact two', 'fact three']);
   assert.deepEqual(sessionMemory.listSessionMemory(u, 'S'), ['fact one', 'fact two', 'fact three']);
+});
+
+test('appendSessionMemory upserts by factIndex, keeping the row position', () => {
+  reset();
+  const u = provision();
+  sessionMemory.appendSessionMemory(u, 'S', [
+    'first fact', '[tooling|build-cmd] runs via make', 'third fact',
+  ]);
+  sessionMemory.appendSessionMemory(u, 'S', ['[tooling|build-cmd] runs via build.sh']);
+  // Middle slot is rewritten in place — a delete + re-append would move it last.
+  assert.deepEqual(sessionMemory.listSessionMemory(u, 'S'), [
+    'first fact', '[tooling|build-cmd] runs via build.sh', 'third fact',
+  ]);
+});
+
+test('appendSessionMemory reports how many rows it inserted or updated', () => {
+  reset();
+  const u = provision();
+  assert.equal(sessionMemory.appendSessionMemory(u, 'S', ['a', 'b']), 2, 'two inserts');
+  assert.equal(sessionMemory.appendSessionMemory(u, 'S', ['a']), 0, 'identical row is a no-op');
+  assert.equal(
+    sessionMemory.appendSessionMemory(u, 'S', ['[x|id1] one']), 1, 'new subject id inserts',
+  );
+  assert.equal(
+    sessionMemory.appendSessionMemory(u, 'S', ['[x|id1] two']), 1, 'same subject id updates',
+  );
+});
+
+test('appendSessionMemory removes superseded facts by factKey, not exact text', () => {
+  reset();
+  const u = provision();
+  sessionMemory.appendSessionMemory(u, 'S', ['[tooling|pkg] uses npm workspaces', 'keep me']);
+  sessionMemory.appendSessionMemory(u, 'S', ['[tooling|deploy] deploys via gitlab'], {
+    // Neither the tag nor the "the project " lead-in is present: this only
+    // matches if factKey normalisation is actually applied to both sides.
+    remove: ['the project uses npm workspaces'],
+  });
+  assert.deepEqual(
+    sessionMemory.listSessionMemory(u, 'S'),
+    ['keep me', '[tooling|deploy] deploys via gitlab'],
+  );
 });
 
 test('session memory is isolated per session id, not per user globally', () => {

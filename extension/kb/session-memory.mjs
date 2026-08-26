@@ -9,6 +9,7 @@
 // Distinct from project memory by design: project memory is durable and
 // edit-only (never auto-pruned), while session memory is deleted wholesale
 // the moment its session is cleared or removed — see deleteSessionMemory.
+import { factIndex, factKey } from '../core/fact-key.mjs';
 import { getDb, requireUser, lazyPrepare } from './db.mjs';
 
 /**
@@ -33,23 +34,92 @@ function nowSec() {
   return Date.now() / 1000;
 }
 
-/** Append facts extracted from one turn, oldest-first eviction past the cap. */
-export function appendSessionMemory(userId, sessionId, facts) {
+/**
+ * Merge facts extracted from one turn into this session's memory.
+ *
+ * Mirrors graphkit/memory-writer.mjs upsert semantics so session recall stays
+ * aligned with project memory from the same extraction pass:
+ *   - `remove` drops rows whose factKey matches a superseded fact
+ *   - incoming facts with the same factIndex UPDATE in place (position kept)
+ *   - new subjects INSERT at the end
+ *
+ * Oldest-first eviction past MAX_FACTS_PER_SESSION still applies after merge.
+ *
+ * @param {object} [opts]
+ * @param {string[]} [opts.remove] superseded facts (verbatim from extractor)
+ * @returns {number} rows inserted or updated (not counting removals)
+ */
+export function appendSessionMemory(userId, sessionId, facts, opts = {}) {
   requireUser(userId);
   if (typeof sessionId !== 'string' || !sessionId) return 0;
-  const clean = (Array.isArray(facts) ? facts : [])
+  const incoming = (Array.isArray(facts) ? facts : [])
     .filter((f) => typeof f === 'string' && f.trim())
     .map((f) => f.trim().slice(0, FACT_MAX));
-  if (clean.length === 0) return 0;
+  const removeKeys = new Set((Array.isArray(opts.remove) ? opts.remove : [])
+    .map((f) => factKey(String(f)))
+    .filter(Boolean));
+  if (incoming.length === 0 && removeKeys.size === 0) return 0;
 
   const db = getDb();
   const ts = nowSec();
-  const tx = db.transaction((uid, sid, items) => {
-    const insert = lazyPrepare(db, 'INSERT INTO session_memory (user_id, session_id, fact, created_at) VALUES (?, ?, ?, ?)');
-    for (const fact of items) insert.run(uid, sid, fact, ts);
+  const tx = db.transaction((uid, sid, items, toRemove) => {
+    const selectAll = lazyPrepare(
+      db,
+      'SELECT id, fact FROM session_memory WHERE user_id = ? AND session_id = ? ORDER BY id ASC',
+    );
+    let rows = selectAll.all(uid, sid);
+
+    if (toRemove.size > 0) {
+      const delOne = lazyPrepare(db, 'DELETE FROM session_memory WHERE user_id = ? AND session_id = ? AND id = ?');
+      rows = rows.filter((row) => {
+        if (!toRemove.has(factKey(row.fact))) return true;
+        delOne.run(uid, sid, row.id);
+        return false;
+      });
+    }
+
+    // First row wins as the slot for an index — same order as parseChatMemoryFacts.
+    const slotByKey = new Map();
+    rows.forEach((row, i) => {
+      const k = factIndex(row.fact);
+      if (k && !slotByKey.has(k)) slotByKey.set(k, i);
+    });
+
+    const insert = lazyPrepare(
+      db,
+      'INSERT INTO session_memory (user_id, session_id, fact, created_at) VALUES (?, ?, ?, ?)',
+    );
+    const update = lazyPrepare(
+      db,
+      'UPDATE session_memory SET fact = ?, created_at = ? WHERE user_id = ? AND session_id = ? AND id = ?',
+    );
+    let changed = 0;
+    for (const fact of items) {
+      const k = factIndex(fact);
+      if (!k) continue;
+      const slot = slotByKey.get(k);
+      if (slot === undefined) {
+        insert.run(uid, sid, fact, ts);
+        const newId = lazyPrepare(db, 'SELECT last_insert_rowid() AS id').get().id;
+        rows.push({ id: newId, fact });
+        slotByKey.set(k, rows.length - 1);
+        changed++;
+      } else {
+        const row = rows[slot];
+        if (row.fact !== fact) {
+          update.run(fact, ts, uid, sid, row.id);
+          row.fact = fact;
+          changed++;
+        }
+      }
+    }
+
     // Evict oldest-first past the cap — a runaway session must not grow
     // this table unbounded (chat_messages has its own analogous cap).
-    const count = lazyPrepare(db, 'SELECT COUNT(*) AS n FROM session_memory WHERE user_id = ? AND session_id = ?').get(uid, sid).n;
+    const count = lazyPrepare(
+      db,
+      'SELECT COUNT(*) AS n FROM session_memory WHERE user_id = ? AND session_id = ?',
+    ).get(uid, sid).n;
     const over = count - MAX_FACTS_PER_SESSION;
     if (over > 0) {
       lazyPrepare(db, `
@@ -58,9 +128,9 @@ export function appendSessionMemory(userId, sessionId, facts) {
         )
       `).run(uid, sid, over);
     }
-    return items.length;
+    return changed;
   });
-  return tx(userId, sessionId, clean);
+  return tx(userId, sessionId, incoming, removeKeys);
 }
 
 /** Facts for one session, oldest-first (matches how they were learned). */

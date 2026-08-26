@@ -96,7 +96,9 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
     // DELETE /kb/agent/session-memory). Best-effort: a failure here must
     // never take down project-memory capture, which already succeeded.
     if (sessionId) {
-      try { appendSessionMemory(userId, sessionId, facts); } catch { /* best-effort */ }
+      try {
+        appendSessionMemory(userId, sessionId, facts, { remove: superseded });
+      } catch { /* best-effort */ }
     }
     const added = meta.added ?? Math.max(0, (Array.isArray(saved) ? saved.length : 0) - existing.length);
     logger.audit('project_memory', {

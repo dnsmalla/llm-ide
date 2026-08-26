@@ -19,11 +19,9 @@ import {
   resolveAllowedRepoRoot,
   readChatMemoryFacts,
   writeChatMemoryFacts,
+  factIndex,
 } from '../graphkit/index.mjs';
 import { deleteSessionMemory } from '../kb/session-memory.mjs';
-
-// Normalised key for matching a fact line (mirrors memory-writer.factKey).
-const normFact = (s) => String(s).trim().replace(/\s+/g, ' ').toLowerCase();
 
 // Vision input for /kb/agent/ask. Accepts a data URL string
 // ("data:image/jpeg;base64,…") or { mediaType, data } objects, one or many.
@@ -433,8 +431,14 @@ export async function handleAgentRoutes(req, res, ctx) {
       sendJSON(res, 200, { facts: writeChatMemoryFacts(root, []) });
       return true;
     }
-    const target = normFact(body.fact);
-    const remaining = readChatMemoryFacts(root).filter((f) => normFact(f) !== target);
+    // `factIndex`, not `factKey`: factIndex is the store's own identity (what
+    // parseChatMemoryFacts dedupes on), so it deletes exactly the row the
+    // viewer showed. factKey strips the tag and leading filler, so two facts
+    // with different subject ids but the same text — `[db|engine] uses SQLite`
+    // and `[perf|store] the project uses SQLite` — would BOTH be deleted by a
+    // single click.
+    const target = factIndex(body.fact);
+    const remaining = readChatMemoryFacts(root).filter((f) => factIndex(f) !== target);
     sendJSON(res, 200, { facts: writeChatMemoryFacts(root, remaining) });
     return true;
   }

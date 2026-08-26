@@ -120,6 +120,14 @@ extension LlmIdeAPIClient {
     /// store as project memory (chat-memory.md, above): project memory is
     /// durable and never touched by a session's lifecycle, only its own
     /// explicit per-fact edit/delete. Returns how many facts were dropped.
+    ///
+    /// Deliberately NOT auto-retried here. `send()` retries GETs only, because
+    /// re-issuing a DELETE can double-apply a side effect — and a retry would
+    /// not buy anything anyway: this path uses the `llmSession` 2-hour timeout,
+    /// so a slow backend never throws (it hangs, and retrying would triple the
+    /// stall), while a refused connection is refused again a half-second later.
+    /// A lost response after a server-side delete would also make the returned
+    /// count a lie. Orphan rows want a durable retry queue, not three fast tries.
     @discardableResult
     func forgetSessionMemory(sessionId: String) async throws -> Int {
         let resp: ForgetSessionMemoryResponse = try await send(
