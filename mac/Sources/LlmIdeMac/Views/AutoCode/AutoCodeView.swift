@@ -54,7 +54,10 @@ struct AutoCodeView: View {
                 selectedCustomTaskId = nil
             }
         }
-        .onAppear { customTasks = CustomAutoTask.loadAll() }
+        .onAppear {
+            customTasks = CustomAutoTask.loadAll()
+            autoCode.loadRunHistoryForDisplay()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .customAutoTasksChanged)) { _ in
             customTasks = CustomAutoTask.loadAll()
         }
@@ -189,8 +192,38 @@ struct AutoCodeView: View {
 
             Divider()
 
-            // Run history
-            Text("History")
+            // Recent Auto Task executions
+            Text("Recent runs")
+                .font(Typography.section)
+                .foregroundStyle(theme.current.textMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
+            if autoCode.runHistoryEntries.isEmpty {
+                Text("No runs recorded yet. Use Run Now or ▶ on a task.")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(autoCode.runHistoryEntries) { record in
+                            runHistoryRow(record)
+                        }
+                    }
+                }
+                .frame(maxHeight: 140)
+            }
+
+            Divider()
+
+            // Meeting action-item pipeline (Sources → Implement)
+            Text("Action items")
                 .font(Typography.section)
                 .foregroundStyle(theme.current.textMuted)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -199,7 +232,7 @@ struct AutoCodeView: View {
                 .padding(.bottom, 4)
 
             if autoCode.allEntries.isEmpty {
-                Text("No actions found yet. Run Auto Tasks or record a meeting with action items.")
+                Text("No action items yet. Run Sources → Issue or record a meeting with action items.")
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
                     .padding(.horizontal, 12)
@@ -214,6 +247,7 @@ struct AutoCodeView: View {
                         }
                     }
                 }
+                .frame(maxHeight: 120)
             }
 
             Spacer(minLength: 0)
@@ -437,6 +471,48 @@ struct AutoCodeView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
+    }
+
+    private func runHistoryRow(_ record: AutoTaskRunRecord) -> some View {
+        Button {
+            if let name = record.logFileName {
+                autoCode.revealLogFile(named: name)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                runStatusIcon(record.status).frame(width: 14)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(record.taskLabel)
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.text)
+                        .lineLimit(1)
+                    Text("\(record.trigger.rawValue) · \(Int(record.finishedAt.timeIntervalSince(record.startedAt)))s")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(theme.current.textMuted)
+                }
+                Spacer(minLength: 4)
+                Text(record.finishedAt, style: .relative)
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(record.logFileName != nil ? "Reveal log in Finder" : record.summary ?? "")
+    }
+
+    private func runStatusIcon(_ status: AutoTaskRunStatus) -> some View {
+        let t = theme.current
+        let (symbol, color): (String, Color) = switch status {
+        case .success:   ("checkmark.circle.fill", t.success)
+        case .failed:    ("xmark.circle.fill", t.danger)
+        case .cancelled: ("stop.circle.fill", t.warning)
+        case .skipped:   ("minus.circle.fill", t.textMuted)
+        }
+        return Image(systemName: symbol).foregroundStyle(color).font(.system(size: 11))
     }
 
     // MARK: - Right pane

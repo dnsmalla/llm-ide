@@ -542,18 +542,18 @@ final class MobileControlManager {
                 var started = false
                 var unrecognized = false
                 if let raw = m.task, let t = AutoTask(rawValue: raw) {
-                    started = ac.runSingle(t)
+                    started = ac.runSingle(t, trigger: .phone)
                     if started {
                         append(.info, "Auto-task run single: \(t.rawValue)")
                     }
                 } else if let raw = m.task,
                           let custom = CustomAutoTask.loadAll().first(where: { $0.id == raw }) {
-                    started = ac.runSingleCustom(custom)
+                    started = ac.runSingleCustom(custom, trigger: .phone)
                     if started {
                         append(.info, "Custom auto-task run: \(custom.name)")
                     }
                 } else if m.task == nil {
-                    started = ac.runNow()
+                    started = ac.runNow(trigger: .phone)
                     if started {
                         append(.info, "Auto-task run now")
                     }
@@ -869,7 +869,7 @@ final class MobileControlManager {
             }
             // runSingleLoop is @MainActor-sync and spins its own Task; false
             // means the scheduler declined (already busy).
-            let started = autoCode.runSingleLoop(loopId: primary.id)
+            let started = autoCode.runSingleLoop(loopId: primary.id, trigger: .phone)
             loopStartedHere = started
             append(started ? .info : .stderr, "loop_start \(started ? "accepted" : "declined by scheduler")")
             let queuedNote = state.running ? " Queued behind the current run." : ""
@@ -903,7 +903,7 @@ final class MobileControlManager {
                 return
             }
             // Queue behind an in-flight run when needed — see `loop_start`.
-            let started = autoCode.runSingleLoopStage(stageId: req.stageId)
+            let started = autoCode.runSingleLoopStage(stageId: req.stageId, trigger: .phone)
             loopStartedHere = started
             append(started ? .info : .stderr,
                    "loop_start_stage \(started ? "accepted" : "declined by scheduler") — \(stage.name)")

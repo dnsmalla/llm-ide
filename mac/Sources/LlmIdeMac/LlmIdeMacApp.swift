@@ -120,6 +120,8 @@ public struct LlmIdeMacApp: App {
         let appSupportBase = AppIdentity.applicationSupportRoot()
         let registryURL = appSupportBase.appendingPathComponent("processed-actions.json")
         let registry = ProcessedActionsRegistry(storeURL: registryURL)
+        let runHistoryURL = appSupportBase.appendingPathComponent("auto-task-runs.json")
+        let runHistory = AutoTaskRunHistory(storeURL: runHistoryURL)
         let projectStoreStateDir = appSupportBase
         let autoTaskSettingsInstance = AutoTaskSettings()
         let projectStoreInstance = ProjectStore(
@@ -146,6 +148,7 @@ public struct LlmIdeMacApp: App {
             autoTaskSettings: autoTaskSettingsInstance,
             backend: nil,
             registry: registry,
+            runHistory: runHistory,
             projectStore: projectStoreInstance,
             api: client,
             logStore: taskLogStore)
@@ -157,6 +160,11 @@ public struct LlmIdeMacApp: App {
         registry.onSaveError = { [weak autoCode] error in
             Task { @MainActor in
                 autoCode?.setError("Action history failed to save: \(error.localizedDescription)")
+            }
+        }
+        runHistory.onSaveError = { [weak autoCode] error in
+            Task { @MainActor in
+                autoCode?.setError("Run history failed to save: \(error.localizedDescription)")
             }
         }
 

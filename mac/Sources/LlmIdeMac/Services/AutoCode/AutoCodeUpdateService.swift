@@ -27,6 +27,8 @@ final class AutoCodeUpdateService: ObservableObject {
     @Published var implementedCount = 0
     @Published var failedCount = 0
     @Published var allEntries: [ProcessedActionsRegistry.RegistryEntry] = []
+    /// Recent Auto Task executions (newest first).
+    @Published var runHistoryEntries: [AutoTaskRunRecord] = []
     @Published var lastError: String? = nil
     /// Human-readable reason for the last `resolveBackendAndProject()` nil —
     /// token / active-project / clone-path state. Surfaced in the task log +
@@ -58,6 +60,7 @@ final class AutoCodeUpdateService: ObservableObject {
     /// changes from Settings are picked up without a restart.
     let backendOverride: RepoBackend?
     let registry: ProcessedActionsRegistry
+    let runHistory: AutoTaskRunHistory
     let projectStore: ProjectStore?
     /// Optional API client used by the regression auto-task. When nil
     /// (e.g. older callers + tests), the regression step is skipped and the
@@ -110,12 +113,21 @@ final class AutoCodeUpdateService: ObservableObject {
 
     @MainActor
     init(config: AppConfig, autoTaskSettings: AutoTaskSettings, backend: RepoBackend? = nil,
-         registry: ProcessedActionsRegistry, projectStore: ProjectStore? = nil,
+         registry: ProcessedActionsRegistry, runHistory: AutoTaskRunHistory? = nil,
+         projectStore: ProjectStore? = nil,
          api: LlmIdeAPIClient? = nil, logStore: TaskLogStore) {
         self.config = config
         self.autoTaskSettings = autoTaskSettings
         self.backendOverride = backend
         self.registry = registry
+        // The app always injects the real store (see `LlmIdeMacApp`). The nil
+        // default exists only so older callers + tests keep compiling, so it
+        // MUST NOT resolve to the production file: tests drive real runs, and
+        // pointing them at Application Support would append test records to —
+        // and, before a load, truncate — the user's actual history.
+        self.runHistory = runHistory ?? AutoTaskRunHistory(
+            storeURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("llmide-auto-task-runs-\(UUID().uuidString).json"))
         self.projectStore = projectStore
         self.api = api
         self.logStore = logStore
@@ -143,6 +155,7 @@ final class AutoCodeUpdateService: ObservableObject {
         // Lazy registry bootstrap — disk read deferred from app launch
         // until first .task tick (when start() is called).
         registry.bootstrap()
+        loadRunHistoryForDisplay()
         if let loadErr = registry.loadError {
             setError("Action history failed to load: \(loadErr.localizedDescription)")
         }
@@ -168,10 +181,10 @@ final class AutoCodeUpdateService: ObservableObject {
     /// the Run Now button so an in-flight run can be stopped via `cancel()`.
     /// Returns false when a run is already scheduled or in flight.
     @discardableResult
-    func runNow() -> Bool {
+    func runNow(trigger: AutoTaskRunTrigger = .pipeline) -> Bool {
         guard runTask == nil else { return false }
         runTask = Task { [weak self] in
-            await self?.run()
+            await self?.run(trigger: trigger)
             self?.runTask = nil
         }
         return true
@@ -181,10 +194,10 @@ final class AutoCodeUpdateService: ObservableObject {
     /// task body, ignoring its enable checkbox. Shares the `runTask` re-entrancy
     /// guard with `runNow()` so a global run and a per-task run can't overlap.
     @discardableResult
-    func runSingle(_ task: AutoTask) -> Bool {
+    func runSingle(_ task: AutoTask, trigger: AutoTaskRunTrigger = .manual) -> Bool {
         guard runTask == nil else { return false }
         runTask = Task { [weak self] in
-            await self?.runOne(task)
+            await self?.runOne(task, trigger: trigger)
             self?.runTask = nil
         }
         return true
@@ -196,10 +209,10 @@ final class AutoCodeUpdateService: ObservableObject {
     /// untouched. Shares the `runTask` re-entrancy guard, so it can never
     /// overlap a global run, a per-task run, or a custom run.
     @discardableResult
-    func runSingleLoopStage(stageId: String) -> Bool {
+    func runSingleLoopStage(stageId: String, trigger: AutoTaskRunTrigger = .manual) -> Bool {
         guard runTask == nil else { return false }
         runTask = Task { [weak self] in
-            await self?.runLoopFiltered(loopId: nil, stageId: stageId)
+            await self?.runLoopFiltered(loopId: nil, stageId: stageId, trigger: trigger)
             self?.runTask = nil
         }
         return true
@@ -213,10 +226,10 @@ final class AutoCodeUpdateService: ObservableObject {
     /// stages, log and history, so starting three would report on one and run
     /// three. Same re-entrancy guard as every other entry point.
     @discardableResult
-    func runSingleLoop(loopId: String) -> Bool {
+    func runSingleLoop(loopId: String, trigger: AutoTaskRunTrigger = .manual) -> Bool {
         guard runTask == nil else { return false }
         runTask = Task { [weak self] in
-            await self?.runLoopFiltered(loopId: loopId, stageId: nil)
+            await self?.runLoopFiltered(loopId: loopId, stageId: nil, trigger: trigger)
             self?.runTask = nil
         }
         return true
@@ -226,14 +239,25 @@ final class AutoCodeUpdateService: ObservableObject {
     /// of `runOne(_:)` with a loop and/or stage filter threaded through. Kept
     /// separate for the same reason `runCustomTask(_:)` is: the resolve/guard
     /// shell is per-entry-point state management, not shareable logic.
-    private func runLoopFiltered(loopId: String?, stageId: String?) async {
+    private func runLoopFiltered(loopId: String?, stageId: String?,
+                                 trigger: AutoTaskRunTrigger) async {
         guard !isRunning else { return }
         isRunning = true
+        let startedAt = Date()
+        let loopLabel = AutoTask.loopEngineering.label
+        // Set once the sweep reports back; read by the defer below.
+        var didStart = true
         defer {
             isRunning = false
             currentTask = nil
             currentStep = nil
             lastRunDate = Date()
+            appendRunRecord(taskId: AutoTask.loopEngineering.rawValue, label: loopLabel,
+                            logSuffix: AutoTask.loopEngineering.logSuffix, startedAt: startedAt,
+                            trigger: trigger,
+                            status: runStatus(forTaskId: AutoTask.loopEngineering.rawValue,
+                                              didStart: didStart),
+                            summary: statusMessage)
         }
         guard let resolved = resolveBackendAndProject() else {
             let reason = lastResolveDiagnosis ?? "No linked repo — configure in GitLab or GitHub settings"
@@ -246,10 +270,10 @@ final class AutoCodeUpdateService: ObservableObject {
         currentStep = stageId != nil ? "Running Loop stage" : "Running Loop"
         logStore.append(.loopEngineering,
                         stageId != nil ? "Running Loop (single stage)…" : "Running Loop (one loop)…")
-        await runLoopEngineeringSweep(projectRoot: resolved.projectRoot,
-                                      gitRoot: resolved.gitRoot,
-                                      projectId: projectStore?.activeProject?.bundle.id,
-                                      onlyStageId: stageId, onlyLoopId: loopId)
+        didStart = await runLoopEngineeringSweep(projectRoot: resolved.projectRoot,
+                                                gitRoot: resolved.gitRoot,
+                                                projectId: projectStore?.activeProject?.bundle.id,
+                                                onlyStageId: stageId, onlyLoopId: loopId)
         statusMessage = "\(AutoTask.loopEngineering.label) — done"
     }
 
@@ -257,10 +281,10 @@ final class AutoCodeUpdateService: ObservableObject {
     /// `runTask` re-entrancy guard, so a built-in run and a custom run
     /// can't overlap either.
     @discardableResult
-    func runSingleCustom(_ task: CustomAutoTask) -> Bool {
+    func runSingleCustom(_ task: CustomAutoTask, trigger: AutoTaskRunTrigger = .manual) -> Bool {
         guard runTask == nil else { return false }
         runTask = Task { [weak self] in
-            await self?.runCustomTask(task)
+            await self?.runCustomTask(task, trigger: trigger)
             self?.runTask = nil
         }
         return true
@@ -272,15 +296,20 @@ final class AutoCodeUpdateService: ObservableObject {
     /// instead of switching on a fixed `AutoTask` case. Every custom task
     /// requires a linked repo (there is no source-ingest-only custom task,
     /// unlike the built-in `sourceUpdate`).
-    func runCustomTask(_ task: CustomAutoTask) async {
+    func runCustomTask(_ task: CustomAutoTask, trigger: AutoTaskRunTrigger = .manual) async {
         guard !isRunning else { return }
         isRunning = true
         currentCustomTaskId = task.id
+        let startedAt = Date()
         defer {
             isRunning = false
             currentCustomTaskId = nil
             currentStep = nil
             lastRunDate = Date()
+            appendRunRecord(taskId: task.id, label: task.name, logSuffix: task.id,
+                            startedAt: startedAt, trigger: trigger,
+                            status: runStatus(forTaskId: task.id),
+                            summary: statusMessage)
         }
         guard let logDir = logsDirectory() else {
             statusMessage = "Logs directory unavailable"
@@ -373,8 +402,8 @@ final class AutoCodeUpdateService: ObservableObject {
         for task in dueBuiltIn { realignNextFire(for: task, now: now) }       // realign BEFORE running
         for task in dueCustom { realignCustomNextFire(for: task, now: now) }
         runTask = Task { [weak self] in
-            for task in dueBuiltIn { await self?.runOne(task) }
-            for task in dueCustom { await self?.runCustomTask(task) }
+            for task in dueBuiltIn { await self?.runOne(task, trigger: .cron) }
+            for task in dueCustom { await self?.runCustomTask(task, trigger: .cron) }
             self?.runTask = nil
         }
         return true
@@ -385,9 +414,10 @@ final class AutoCodeUpdateService: ObservableObject {
     var hasScheduledRun: Bool { runTask != nil }
 
     /// Resolve backend/project once, then run a single task body.
-    private func runOne(_ task: AutoTask) async {
+    private func runOne(_ task: AutoTask, trigger: AutoTaskRunTrigger) async {
         guard !isRunning else { return }
         isRunning = true
+        let startedAt = Date()
         defer {
             isRunning = false
             currentTask = nil
@@ -396,6 +426,10 @@ final class AutoCodeUpdateService: ObservableObject {
         }
         guard let logDir = logsDirectory() else {
             statusMessage = "Logs directory unavailable"
+            appendRunRecord(taskId: task.rawValue, label: task.label,
+                            logSuffix: task.logSuffix, startedAt: startedAt,
+                            trigger: trigger, status: .failed,
+                            summary: "Logs directory unavailable")
             return
         }
         if task.requiresLinkedRepo {
@@ -404,11 +438,16 @@ final class AutoCodeUpdateService: ObservableObject {
                 statusMessage = "No linked repo"
                 logStore.append(task, "⚠ \(reason)", level: .error)
                 taskErrors[task.rawValue] = reason
+                appendRunRecord(taskId: task.rawValue, label: task.label,
+                                logSuffix: task.logSuffix, startedAt: startedAt,
+                                trigger: trigger, status: .failed, summary: reason)
                 return
             }
-            await runTaskBody(task, resolved: resolved, projectId: projectStore?.activeProject?.bundle.id, logDir: logDir)
+            await runTaskBody(task, resolved: resolved, projectId: projectStore?.activeProject?.bundle.id,
+                              logDir: logDir, startedAt: startedAt, trigger: trigger)
         } else {
-            await runTaskBody(task, resolved: nil, projectId: projectStore?.activeProject?.bundle.id, logDir: logDir)
+            await runTaskBody(task, resolved: nil, projectId: projectStore?.activeProject?.bundle.id,
+                              logDir: logDir, startedAt: startedAt, trigger: trigger)
         }
         statusMessage = "\(task.label) — done"
     }
@@ -424,7 +463,18 @@ final class AutoCodeUpdateService: ObservableObject {
     ///   `enabledOrder` loop runs several tasks in sequence with awaits
     ///   between them) can't pair a later task with a DIFFERENT project's id
     ///   than the one `resolved` was computed against.
-    private func runTaskBody(_ task: AutoTask, resolved: ResolvedRepo?, projectId: String?, logDir: URL) async {
+    private func runTaskBody(_ task: AutoTask, resolved: ResolvedRepo?, projectId: String?, logDir: URL,
+                             startedAt: Date, trigger: AutoTaskRunTrigger) async {
+        // Only the Loop sweep can report "nothing started"; every other task
+        // body runs to a terminal status by construction.
+        var didStart = true
+        defer {
+            appendRunRecord(taskId: task.rawValue, label: task.label,
+                            logSuffix: task.logSuffix, startedAt: startedAt,
+                            trigger: trigger,
+                            status: runStatus(forTaskId: task.rawValue, didStart: didStart),
+                            summary: taskErrors[task.rawValue])
+        }
         logStore.append(task, "Running \(task.label)…")
         currentTask = task
         defer { currentTask = nil }
@@ -483,7 +533,8 @@ final class AutoCodeUpdateService: ObservableObject {
                 await runRegressionSweep(projectRoot: resolved.projectRoot, gitRoot: resolved.gitRoot)
             case .loopEngineering:
                 currentStep = "Running Loop"
-                await runLoopEngineeringSweep(projectRoot: resolved.projectRoot, gitRoot: resolved.gitRoot, projectId: projectId)
+                didStart = await runLoopEngineeringSweep(
+                    projectRoot: resolved.projectRoot, gitRoot: resolved.gitRoot, projectId: projectId)
             case .generateKnowledge:
                 currentStep = "Reviewing Knowledge"
                 reportKnowledge(projectRoot: resolved.projectRoot)
@@ -544,7 +595,7 @@ final class AutoCodeUpdateService: ObservableObject {
 
     // MARK: - Main run loop
 
-    func run() async {
+    func run(trigger: AutoTaskRunTrigger = .pipeline) async {
         guard !isRunning else { return }
         isRunning = true
         currentStep = "Initializing"
@@ -621,7 +672,8 @@ final class AutoCodeUpdateService: ObservableObject {
 
         for task in enabledOrder where isTaskEnabled(task) {
             if Task.isCancelled { break }
-            await runTaskBody(task, resolved: resolved, projectId: projectIdAtResolveTime, logDir: logDir)
+            await runTaskBody(task, resolved: resolved, projectId: projectIdAtResolveTime, logDir: logDir,
+                              startedAt: Date(), trigger: trigger)
         }
 
         let parts: [String] = [
@@ -704,6 +756,61 @@ final class AutoCodeUpdateService: ObservableObject {
     func revealLogsInFinder() {
         guard let dir = logsDirectory() else { return }
         NSWorkspace.shared.activateFileViewerSelecting([dir])
+    }
+
+    func revealLogFile(named fileName: String) {
+        guard let dir = logsDirectory() else { return }
+        let url = dir.appendingPathComponent(fileName)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            revealLogsInFinder()
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// Publish the stored history without arming the scheduler. `start()` only
+    /// runs when the Auto Task cron is enabled (default off), so the Auto Code
+    /// page has to seed itself — otherwise it reports "no runs recorded yet"
+    /// over a populated store. Also surfaces a load error the same way `start()`
+    /// does, so a quarantined file isn't silent for cron-disabled users.
+    func loadRunHistoryForDisplay() {
+        runHistory.bootstrap()
+        if let err = runHistory.loadError {
+            setError("Run history failed to load: \(err.localizedDescription)")
+        }
+        refreshRunHistory()
+    }
+
+    private func refreshRunHistory() {
+        runHistoryEntries = runHistory.recentEntries(limit: 50)
+    }
+
+    /// `didStart` is false only when a sweep bailed out before any work
+    /// reached a terminal status — that is `.skipped`, not a silent `.success`.
+    /// Cancellation still wins: a run the user stopped reads as `.cancelled`.
+    private func runStatus(forTaskId taskId: String, didStart: Bool = true) -> AutoTaskRunStatus {
+        if Task.isCancelled { return .cancelled }
+        if !didStart { return .skipped }
+        if taskErrors[taskId] != nil { return .failed }
+        return .success
+    }
+
+    private func appendRunRecord(taskId: String, label: String, logSuffix: String?,
+                                 startedAt: Date, trigger: AutoTaskRunTrigger,
+                                 status: AutoTaskRunStatus, summary: String?) {
+        runHistory.record(AutoTaskRunRecord(
+            id: UUID().uuidString,
+            taskId: taskId,
+            taskLabel: label,
+            trigger: trigger,
+            startedAt: startedAt,
+            finishedAt: Date(),
+            status: status,
+            summary: summary,
+            logFileName: logSuffix.map { "auto-task-\($0).log" },
+            projectId: projectStore?.activeProject?.bundle.id
+        ))
+        refreshRunHistory()
     }
 
     private func logsDirectory() -> URL? {

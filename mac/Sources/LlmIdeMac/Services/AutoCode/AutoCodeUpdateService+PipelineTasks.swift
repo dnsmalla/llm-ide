@@ -631,21 +631,26 @@ extension AutoCodeUpdateService {
     ///   loop is disabled for this run only, and the saved config is
     ///   untouched. An id that matches no stage refuses the run — falling back
     ///   to the full sweep would silently do far more than the user asked for.
+    /// Returns `false` when the sweep ended without any loop reaching a terminal
+    /// status — the runner was already busy, or the run was cancelled while
+    /// queued. The caller records that as `.skipped`, so a run that never
+    /// started can't inherit an earlier run's `taskErrors` entry.
+    @discardableResult
     func runLoopEngineeringSweep(
         projectRoot: String, gitRoot: String, projectId: String?, defaults: UserDefaults = .standard,
         onlyStageId: String? = nil, onlyLoopId: String? = nil
-    ) async {
+    ) async -> Bool {
         guard let api else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no API client wired."
-            return
+            return true
         }
         guard !projectRoot.isEmpty else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no project root resolved."
-            return
+            return true
         }
         guard !gitRoot.isEmpty else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no git working tree resolved."
-            return
+            return true
         }
         // LoopEngineConfig is keyed by the stable llm-ide Project.id (see the
         // contract documented on LoopEngineConfig.load/save in Task 1) — NOT
@@ -657,7 +662,7 @@ extension AutoCodeUpdateService {
         // key here would silently split one project's config in two.
         guard let projectId else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no active project."
-            return
+            return true
         }
         let faultsRoot = URL(fileURLWithPath: projectRoot, isDirectory: true)
         let gitRootURL = URL(fileURLWithPath: gitRoot, isDirectory: true)
@@ -689,7 +694,7 @@ extension AutoCodeUpdateService {
                 logStore.append(.loopEngineering,
                                 "Loop skipped — single-stage run asked for a stage that no longer exists.",
                                 level: .error)
-                return
+                return true
             }
             owner.config.stages = soloed
             targets = [owner]
@@ -705,7 +710,7 @@ extension AutoCodeUpdateService {
                 logStore.append(.loopEngineering,
                                 "Loop skipped — the requested loop is gone or fully disabled.",
                                 level: .error)
-                return
+                return true
             }
             targets = [loop]
         } else {
@@ -722,14 +727,17 @@ extension AutoCodeUpdateService {
             logStore.append(.loopEngineering, store.loops.isEmpty
                 ? "Loop skipped — no loops are configured for this project."
                 : "Loop skipped — no loop is scheduled with an enabled stage.")
-            return
+            return false
         }
 
         var failures: [String] = []
         var passed = 0
         var totalIterations = 0
+        // Whether ANY loop reached a terminal status. Decides the caller's
+        // record status, so it must survive a mid-sweep bail-out below.
+        var reachedTerminal = false
 
-        for loop in targets {
+        sweep: for loop in targets {
             // The Stop button cancels the enclosing task; stop starting NEW
             // loops the moment that happens rather than working through the
             // rest of the list.
@@ -776,6 +784,7 @@ extension AutoCodeUpdateService {
                                           goal: loop.goal, acceptanceCriteria: loop.acceptanceCriteria,
                                           scopeGlobs: loop.scopeGlobs)
             totalIterations += runner.iteration
+            if result != nil { reachedTerminal = true }
 
             switch result {
             case .success:
@@ -816,8 +825,11 @@ extension AutoCodeUpdateService {
             case nil:
                 // Same runner instance already running, or cancelled while
                 // waiting in the queue — not a concurrent-repo rejection.
+                // Stop starting loops, but fall through to the `failures`
+                // bookkeeping below: returning from here would drop an earlier
+                // loop's genuine failure and turn the task card green.
                 logStore.append(.loopEngineering, "\(loop.name) skipped — runner was busy or cancelled before start.")
-                return
+                break sweep
             }
         }
 
@@ -832,6 +844,7 @@ extension AutoCodeUpdateService {
             detail: ["iterations": totalIterations, "loops": targets.count],
             link: ShellState.Section.loopEngine.rawValue
         )
+        return reachedTerminal
     }
 
     /// Refreshes plan task statuses from external outcome trackers (GitHub/GitLab/Linear/Backlog).
