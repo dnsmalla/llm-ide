@@ -1,0 +1,50 @@
+{
+  "metadata": { "tool_info": { "name": "scip-typescript" } },
+  "documents": [
+    {
+      "relative_path": "src/app.ts",
+      "symbols": [
+        {
+          "symbol": "scip-typescript npm src app add()",
+          "relationships": []
+        },
+        {
+          "symbol": "scip-typescript npm src app main()",
+          "relationships": [
+            { "symbol": "scip-typescript npm src app add()", "is_reference": true }
+          ]
+        }
+      ],
+      "occurrences": [
+        { "symbol": "scip-typescript npm src app add()", "symbol_roles": 1, "range": [3, 9, 12], "enclosing_range": [3, 0, 5, 1] },
+        { "symbol": "scip-typescript npm src app main()", "symbol_roles": 1, "range": [7, 9, 13], "enclosing_range": [7, 0, 11, 1] },
+        { "symbol": "scip-typescript npm src app add()", "symbol_roles": 8, "range": [9, 2, 5] }
+      ]
+    },
+    {
+      "relative_path": "src/container.py",
+      "language": "Python",
+      "symbols": [
+        {
+          "symbol": "scip-python python container Container#",
+          "display_name": "Container",
+          "kind": 7,
+          "documentation": ["A container class."],
+          "relationships": []
+        },
+        {
+          "symbol": "scip-python python container Container#run().",
+          "display_name": "run",
+          "kind": 26,
+          "relationships": []
+        }
+      ],
+      "occurrences": [
+        { "symbol": "scip-python python container Container#", "symbol_roles": 1, "range": [1, 6, 15], "enclosing_range": [1, 0, 10, 1] },
+        { "symbol": "scip-python python container Container#run().", "symbol_roles": 1, "range": [3, 6, 9], "enclosing_range": [3, 2, 5, 3] },
+        { "symbol": "scip-typescript npm src app add()", "symbol_roles": 8, "range": [4, 4, 7] }
+      ]
+    }
+  ],
+  "external_symbols": []
+}

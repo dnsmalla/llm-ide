@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "nodes": [
+    {"id": "file:App.swift", "type": "file",     "name": "App.swift", "filePath": "App.swift"},
+    {"id": "cls:App",        "type": "class",     "name": "App",       "filePath": "App.swift", "lineRange": [10, 50]},
+    {"id": "fn:main",        "type": "function",  "name": "main",      "filePath": "App.swift", "lineRange": [30, 40]}
+  ],
+  "edges": [
+    {"source": "file:App.swift", "target": "cls:App",  "type": "contains"},
+    {"source": "cls:App",        "target": "fn:main",  "type": "contains"}
+  ],
+  "layers": [],
+  "tour": []
+}

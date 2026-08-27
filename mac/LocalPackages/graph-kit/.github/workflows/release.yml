@@ -1,0 +1,77 @@
+name: Release
+
+# Tag-driven release: push a semver tag (e.g. `1.6.0`) and this workflow
+# re-runs the full test matrix, creates a GitHub Release, and publishes the
+# TypeScript package to npm when an NPM_TOKEN secret is configured.
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  test-swift:
+    name: Swift tests
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test
+
+  test-ts:
+    name: TypeScript tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+      - name: Verify package.json version matches the tag
+        working-directory: typescript
+        run: |
+          pkg_ver=$(node -p "require('./package.json').version")
+          if [ "$pkg_ver" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::typescript/package.json ($pkg_ver) != tag (${GITHUB_REF_NAME})"
+            exit 1
+          fi
+      - run: npm ci
+        working-directory: typescript
+      - run: npm test
+        working-directory: typescript
+
+  release:
+    name: GitHub Release + npm publish
+    needs: [test-swift, test-ts]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract this version's CHANGELOG section
+        run: |
+          awk -v ver="${GITHUB_REF_NAME}" '
+            $0 ~ "^## \\[" ver "\\]" {flag=1; next}
+            /^## \[/ {flag=0}
+            flag' CHANGELOG.md > release-notes.md
+          test -s release-notes.md || echo "See CHANGELOG.md." > release-notes.md
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --notes-file release-notes.md
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - name: Publish to npm (skipped when NPM_TOKEN is not configured)
+        working-directory: typescript
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN not configured — skipping npm publish."
+            exit 0
+          fi
+          npm ci
+          npm publish --access public

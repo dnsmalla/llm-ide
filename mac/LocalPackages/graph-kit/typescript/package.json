@@ -1,0 +1,27 @@
+{
+  "name": "@dnsmalla/graph-kit",
+  "version": "1.5.1",
+  "description": "TypeScript implementation of the GraphKit canonical graph engine — code/text → typed node/edge graph. Schema-compatible with the Swift package.",
+  "type": "module",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/dnsmalla/graph-kit.git" },
+  "exports": {
+    ".": { "types": "./dist/src/index.d.ts", "import": "./dist/src/index.js" }
+  },
+  "bin": { "graph-kit": "./dist/src/cli.js" },
+  "files": ["dist"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
+    "cli": "node dist/src/cli.js",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "zod": "^3.23.8",
+    "typescript": "^5.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0"
+  }
+}

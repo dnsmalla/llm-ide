@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dnsmalla/graph-kit/schema/graph.schema.json",
+  "title": "GraphKit GraphDocument",
+  "description": "Canonical language-neutral graph format. See SCHEMA.md.",
+  "type": "object",
+  "required": ["schemaVersion", "nodes", "edges"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+    "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
+    "layers": { "type": "array", "items": { "$ref": "#/$defs/layer" } },
+    "tour": { "type": "array", "items": { "$ref": "#/$defs/tourStep" } }
+  },
+  "$defs": {
+    "nodeKind": {
+      "enum": [
+        "file", "symbol", "module", "function", "classType", "config", "service",
+        "table", "endpoint", "pipeline", "schemaNode", "resource", "domain", "flow",
+        "step", "docPage", "memoryDoc", "memoryChunk", "noteDecision", "noteTask",
+        "noteQuestion", "noteFact", "noteConcept", "notePlaybook", "noteHypothesis",
+        "noteEvent", "noteSource", "article", "entity", "topic", "claim",
+        "skill", "agent", "other"
+      ]
+    },
+    "edgeKind": {
+      "enum": [
+        "imports", "exports", "contains", "defines", "inherits", "implements", "calls",
+        "references", "subscribes", "publishes", "middleware", "routes", "readsFrom",
+        "writesTo", "transforms", "validates", "migrates", "definesSchema", "dependsOn",
+        "testedBy", "configures", "deploys", "serves", "provisions", "triggers",
+        "documents", "containsFlow", "flowStep", "crossDomain", "relatedTo", "similarTo",
+        "cites", "contradicts", "buildsOn", "exemplifies", "categorizedUnder", "authoredBy"
+      ]
+    },
+    "confidence": { "enum": ["EXTRACTED", "INFERRED", "AMBIGUOUS"] },
+    "node": {
+      "type": "object",
+      "required": ["id", "title", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "kind": { "$ref": "#/$defs/nodeKind" },
+        "position": {
+          "type": "object",
+          "required": ["x", "y"],
+          "additionalProperties": false,
+          "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+        },
+        "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["fromId", "toId", "kind", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "fromId": { "type": "string", "minLength": 1 },
+        "toId": { "type": "string", "minLength": 1 },
+        "kind": { "$ref": "#/$defs/edgeKind" },
+        "confidence": { "$ref": "#/$defs/confidence" }
+      }
+    },
+    "layer": {
+      "type": "object",
+      "required": ["id", "name", "nodeIds"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "nodeIds": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "tourStep": {
+      "type": "object",
+      "required": ["nodeId", "title", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "nodeId": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" }
+      }
+    }
+  }
+}
