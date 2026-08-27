@@ -20,6 +20,9 @@ struct MenuBarChatView: View {
     @State private var pendingDirectives: [String] = []
     @FocusState private var inputFocused: Bool
 
+    @State private var voiceService = VoiceInputService()
+    @State private var voiceState = ChatVoiceState()
+
     private static let greetingBlue = Color(red: 0.26, green: 0.52, blue: 0.96)
     private static let suggestionPrompts = [
         "Discuss a topic with me",
@@ -49,6 +52,7 @@ struct MenuBarChatView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             wireEngine()
+            wireVoiceService()
             completion.configure(api: api, repoRoot: nil)
             inputFocused = true
             Task {
@@ -149,11 +153,55 @@ struct MenuBarChatView: View {
 
     @ViewBuilder
     private var contentArea: some View {
-        if engine.messages.isEmpty {
+        if voiceState.isRecording {
+            recordingOverlay
+        } else if engine.messages.isEmpty {
             welcomeState
         } else {
             transcriptView
         }
+    }
+
+    private var recordingOverlay: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: "waveform")
+                .font(.system(size: 40))
+                .symbolEffect(.variableColor.iterative.reversing, options: .speed(1.5))
+                .foregroundStyle(Self.greetingBlue)
+            
+            VStack(spacing: 8) {
+                Text("Listening…")
+                    .font(.headline)
+                    .foregroundStyle(theme.current.text)
+                
+                if !voiceState.interimText.isEmpty {
+                    Text(voiceState.interimText)
+                        .font(.body)
+                        .italic()
+                        .foregroundStyle(theme.current.textMuted)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                }
+            }
+            
+            Button {
+                toggleVoiceInput()
+            } label: {
+                Text("Stop")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 10)
+                    .background(Self.greetingBlue)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .transition(.opacity)
     }
 
     private var welcomeState: some View {
@@ -188,6 +236,42 @@ struct MenuBarChatView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func statusDot(_ label: String, up: Bool) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(up ? Color.green : Color.red)
+                .frame(width: 7, height: 7)
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(theme.current.textMuted)
+        }
+    }
+
+    private func voiceErrorBanner(_ error: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.current.danger)
+            Text(error)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.current.textMuted)
+                .lineLimit(1)
+            Spacer()
+            Button {
+                voiceState.error = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(theme.current.textMuted)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(theme.current.danger.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private func suggestionPill(_ text: String) -> some View {
@@ -272,6 +356,11 @@ struct MenuBarChatView: View {
 
     private var composerSection: some View {
         VStack(spacing: 0) {
+            if let err = voiceState.error {
+                voiceErrorBanner(err)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 6)
+            }
             if completion.isOpen {
                 CompletionMenu(controller: completion, onAccept: acceptCompletion)
                     .padding(.horizontal, 12)
@@ -300,6 +389,9 @@ struct MenuBarChatView: View {
                     Spacer()
 
                     modelMenu
+
+                    voiceButton
+                        .keyboardShortcut("m", modifiers: .command)
 
                     sendButton
                 }
@@ -358,6 +450,32 @@ struct MenuBarChatView: View {
         .help(engine.busy ? "Stop" : "Send")
     }
 
+    private var voiceButton: some View {
+        Button {
+            toggleVoiceInput()
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(voiceState.isRecording ? theme.current.danger : Color(nsColor: .controlBackgroundColor))
+                    .frame(width: 36, height: 36)
+                
+                Image(systemName: voiceState.isRecording ? "waveform" : "mic.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(voiceState.isRecording ? .white : theme.current.textMuted)
+                    .symbolEffect(.pulse, options: .speed(1.5), isActive: voiceState.isRecording)
+                
+                if !voiceState.isRecording {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 8))
+                        .foregroundStyle(theme.current.accent)
+                        .padding(4)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .help(voiceState.isRecording ? "Stop recording" : "Voice input")
+    }
+
     // MARK: - Actions
 
     private var canSend: Bool {
@@ -400,6 +518,40 @@ struct MenuBarChatView: View {
                 provider: ChatTransportInput.makeProvider(selectedProvider: tool.rawValue),
                 mode: nil
             )
+        }
+    }
+
+    private func wireVoiceService() {
+        voiceService.onFinalResult = { text in
+            if !text.isEmpty {
+                draft = text
+                sendDraft()
+            }
+            voiceState.reset()
+        }
+        voiceService.onPartialResult = { text in
+            voiceState.updateInterimText(text)
+        }
+        voiceService.onError = { error in
+            voiceState.setError(error)
+        }
+    }
+
+    private func toggleVoiceInput() {
+        if voiceState.isRecording {
+            voiceState.setRecording(false)
+            voiceService.stopListening()
+            return
+        }
+        Task { @MainActor in
+            let started = await voiceService.startListening()
+            if started {
+                withAnimation {
+                    voiceState.setRecording(true)
+                }
+            } else if voiceState.error == nil {
+                voiceState.setError("Failed to start voice input")
+            }
         }
     }
 
