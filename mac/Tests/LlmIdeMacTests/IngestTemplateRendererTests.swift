@@ -29,8 +29,8 @@ struct IngestTemplateRendererTests {
         #expect(md.contains("# Standup"))
         #expect(md.contains("Quick sync on launch."))
         #expect(md.contains("- [ ] Send recap (@Aki)"))
-        #expect(md.contains("- Go with option B"))
-        #expect(md.contains("Aki: hello"))
+        #expect(!md.contains("Aki: hello"))
+        #expect(!md.contains("Go with option B"))
         #expect(md.hasSuffix(".md") == false)
         #expect(md.contains("source: meeting"))
     }
@@ -57,7 +57,7 @@ struct IngestTemplateRendererTests {
         #expect(md.contains("# PR review"))
         #expect(md.contains("Please review the PR."))
         #expect(md.contains("- [ ] Review PR"))
-        #expect(md.contains("Can you review?"))
+        #expect(!md.contains("Can you review?"))
         #expect(md.contains("source: email"))
         #expect(md.contains("issue: null"))
     }

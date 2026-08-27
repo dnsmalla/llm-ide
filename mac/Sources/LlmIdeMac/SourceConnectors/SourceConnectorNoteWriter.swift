@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 
 /// Writes Source Connector notes via the unified `NoteService` (notes land
 /// under `llm-doc/<noteType>/`). Generalizes `EmailNoteWriter`: any
@@ -6,11 +7,14 @@ import Foundation
 /// `sourceHash`.
 struct SourceConnectorNoteWriter {
     let noteService: NoteService
+    let repoRoot: URL
     let noteType: NoteType
     let platform: String
+    private let logger = Logger(subsystem: "LlmIdeMac", category: "SourceConnectorNoteWriter")
 
     init(repoRoot: URL, noteType: NoteType, platform: String? = nil) {
         self.noteService = NoteService(repoRoot: repoRoot)
+        self.repoRoot = repoRoot
         self.noteType = noteType
         self.platform = platform ?? noteType.rawValue
     }
@@ -21,6 +25,11 @@ struct SourceConnectorNoteWriter {
         classification c: SourceConnectorClassification,
         originalBody: String, sourceHash: String, rawFile: String
     ) async throws -> URL {
+        if let existing = await existingNote(forSourceHash: sourceHash) {
+            logger.info("Skipping connector note — already generated for \(sourceHash.prefix(8), privacy: .public)…")
+            return noteService.notesRoot.appendingPathComponent(existing.path)
+        }
+
         let fm = FrontMatter(source: platform, platform: platform, noteType: noteType.rawValue,
                              headers: headers, date: AppDateFormatter.isoString(date),
                              category: c.category, noteWorthy: true, sourceHash: sourceHash,
@@ -47,6 +56,11 @@ struct SourceConnectorNoteWriter {
         headers: [String: String], title: String, date: Date, category: String,
         originalBody: String, sourceHash: String, rawFile: String
     ) async throws -> URL {
+        if let existing = await existingNote(forSourceHash: sourceHash) {
+            logger.info("Skipping connector stub — already generated for \(sourceHash.prefix(8), privacy: .public)…")
+            return noteService.notesRoot.appendingPathComponent(existing.path)
+        }
+
         let fm = FrontMatter(source: platform, platform: platform, noteType: noteType.rawValue,
                              headers: headers, date: AppDateFormatter.isoString(date),
                              category: category, noteWorthy: false, sourceHash: sourceHash,
@@ -58,8 +72,13 @@ struct SourceConnectorNoteWriter {
     }
 
     func existingSourceHashes() async throws -> Set<String> {
-        let notes = try await noteService.queryNotes(NoteFilter(type: noteType))
-        return Set(notes.compactMap { $0.sourceHash })
+        await IngestNoteDedup.sourceHashes(repoRoot: repoRoot, type: noteType)
+    }
+
+    private func existingNote(forSourceHash hash: String) async -> NoteMetadata? {
+        guard !hash.isEmpty else { return nil }
+        let notes = try? await noteService.queryNotes(NoteFilter(type: noteType))
+        return notes?.first { $0.sourceHash == hash }
     }
 
     private func save(filename: String, md: String, date: Date, title: String, tags: [String],

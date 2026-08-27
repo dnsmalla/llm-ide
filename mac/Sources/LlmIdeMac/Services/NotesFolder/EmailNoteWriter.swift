@@ -3,11 +3,13 @@
 // Body layout comes from `<project>/templates/email-note/template.md`.
 
 import Foundation
+import os.log
 
 /// Writes email notes using the unified NoteService.
 struct EmailNoteWriter {
     let noteService: NoteService
     let repoRoot: URL
+    private let logger = Logger(subsystem: "LlmIdeMac", category: "EmailNoteWriter")
 
     init(repoRoot: URL) {
         self.repoRoot = repoRoot
@@ -25,6 +27,11 @@ struct EmailNoteWriter {
         sourceHash: String,
         rawFile: String
     ) async throws -> URL {
+        if let existing = await existingNote(forSourceHash: sourceHash) {
+            logger.info("Skipping email note — already generated for \(sourceHash.prefix(8), privacy: .public)…")
+            return repoRoot.appendingPathComponent(existing.path)
+        }
+
         let md = IngestTemplateRenderer.renderEmailNote(
             projectRoot: repoRoot,
             from: from,
@@ -73,6 +80,11 @@ struct EmailNoteWriter {
         sourceHash: String,
         rawFile: String
     ) async throws -> URL {
+        if let existing = await existingNote(forSourceHash: sourceHash) {
+            logger.info("Skipping skipped-email stub — already generated for \(sourceHash.prefix(8), privacy: .public)…")
+            return repoRoot.appendingPathComponent(existing.path)
+        }
+
         let md = IngestTemplateRenderer.renderSkippedEmailNote(
             projectRoot: repoRoot,
             from: from,
@@ -112,14 +124,18 @@ struct EmailNoteWriter {
 
     /// Scan existing notes and collect source hashes.
     func existingSourceHashes() async throws -> Set<String> {
-        let notes = try await noteService.queryNotes(NoteFilter(type: .email))
-        var hashes: Set<String> = []
-        for note in notes {
-            if let hash = note.sourceHash {
-                hashes.insert(hash)
-            }
-        }
-        return hashes
+        await IngestNoteDedup.sourceHashes(repoRoot: repoRoot, type: .email)
+    }
+
+    func hasNote(forSourceHash hash: String) async -> Bool {
+        guard !hash.isEmpty else { return false }
+        return (try? await existingSourceHashes())?.contains(hash) ?? false
+    }
+
+    private func existingNote(forSourceHash hash: String) async -> NoteMetadata? {
+        guard !hash.isEmpty else { return nil }
+        let notes = try? await noteService.queryNotes(NoteFilter(type: .email))
+        return notes?.first { $0.sourceHash == hash }
     }
 
     // MARK: - Helpers

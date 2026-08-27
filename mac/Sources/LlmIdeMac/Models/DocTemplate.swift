@@ -104,13 +104,13 @@ struct DocTemplate: Identifiable, Codable, Equatable {
             id: UUID(uuidString: "A0000006-0000-4000-8000-000000000006")!,
             folderName: "meeting-note",
             name: "Meeting Note (auto)",
-            sections: ["Summary", "Key points", "Full notes", "Decisions", "Action items", "Blockers", "Transcript"],
+            sections: ["Summary", "Action items"],
             ingestKind: .meetingNote),
         SeedDefinition(
             id: UUID(uuidString: "A0000007-0000-4000-8000-000000000007")!,
             folderName: "email-note",
             name: "Email Note (auto)",
-            sections: ["Summary", "To-dos", "Original"],
+            sections: ["Summary", "To-dos"],
             ingestKind: .emailNote),
     ]
 

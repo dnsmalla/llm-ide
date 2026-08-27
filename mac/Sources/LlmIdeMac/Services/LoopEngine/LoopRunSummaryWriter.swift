@@ -43,6 +43,11 @@ final class NoteLoopRunSummaryWriter: LoopRunSummaryWriting {
 
     func write(_ record: LoopRunRecord, root: URL) async -> LoopSummaryNoteResult {
         let service = NoteService(repoRoot: root)
+        if let existing = try? await service.queryNotes(NoteFilter(type: Self.noteType)),
+           let note = existing.first(where: { $0.sourceHash == record.id }) {
+            return .written(path: note.path)
+        }
+
         let title = "Loop run — \(record.statusSummary)"
         let filename = "loop-\(Self.filenameFormatter.string(from: record.startedAt)).md"
         let markdown = Self.render(record, title: title)

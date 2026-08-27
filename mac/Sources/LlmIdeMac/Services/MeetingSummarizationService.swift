@@ -12,6 +12,7 @@ private let sumLog = Logger(subsystem: "com.llmide.macapp", category: "Summariza
 enum MeetingSummarizationService {
 
     /// Run summarisation, then write both the `.docx` and template-based `.md` notes.
+    /// Skips when an llm-doc note already exists for `rawFile`, unless `forceRegenerate`.
     @discardableResult
     static func run(
         api: LlmIdeAPIClient,
@@ -24,8 +25,22 @@ enum MeetingSummarizationService {
         transcriptFileURL: URL,
         projectRoot: URL,
         rawFile: String,
-        root: URL
+        root: URL,
+        forceRegenerate: Bool = false
     ) async -> MeetingSummary {
+        let writer = MeetingNoteWriter(repoRoot: projectRoot)
+        if !forceRegenerate, await writer.hasNote(forRawFile: rawFile) {
+            sumLog.info("Skipping meeting summarization — note already exists for \(rawFile, privacy: .public)")
+            return MeetingSummary(
+                gist: title,
+                tldr: [],
+                full: "",
+                actions: [],
+                decisions: [],
+                blockers: [],
+                model: "skipped-existing",
+                generatedAt: Date())
+        }
 
         let summary: MeetingSummary
         do {
@@ -56,8 +71,6 @@ enum MeetingSummarizationService {
             try? MeetingFileStore(root: root).writeSummary(into: transcriptFileURL, summary: fallback)
             summary = fallback
         }
-
-        let writer = MeetingNoteWriter(repoRoot: projectRoot)
 
         // ── Step 2a: polished .docx (existing pipeline) ──
         let tempDocx = FileManager.default.temporaryDirectory

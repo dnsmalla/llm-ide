@@ -938,7 +938,8 @@ struct AppShell: View {
                 transcriptFileURL: fileURL,
                 projectRoot: projectRoot,
                 rawFile: rawFile,
-                root: root)
+                root: root,
+                forceRegenerate: true)
 
             // 3. Re-scan so the library row updates with the new gist.
             try? indexer?.fullScan()

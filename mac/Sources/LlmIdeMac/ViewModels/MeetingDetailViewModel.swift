@@ -68,7 +68,8 @@ final class MeetingDetailViewModel {
             transcriptFileURL: fileURL,
             projectRoot: projectRoot,
             rawFile: rawFile,
-            root: root)
+            root: root,
+            forceRegenerate: true)
 
         try? await load()
         NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)

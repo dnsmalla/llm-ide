@@ -181,46 +181,20 @@ enum IngestTemplateRenderer {
             source: meeting
             title: "{{title_yaml}}"
             date: {{date}}
-            participants:
-            {{participants_yaml}}
             rawFile: {{raw_file}}
-            generatedBy: {{model}}
             ---
 
             # {{title}}
 
             <!-- llmide:ingest-template source=meeting -->
 
-            **Date:** {{date_display}}  
-            **Participants:** {{participants}}
-
             ## Summary
 
             {{gist}}
 
-            ## Key points
-
-            {{tldr}}
-
-            ## Full notes
-
-            {{full}}
-
-            ## Decisions
-
-            {{decisions}}
-
             ## Action items
 
             {{actions}}
-
-            ## Blockers
-
-            {{blockers}}
-
-            ## Transcript
-
-            {{transcript}}
             """
         case .emailNote:
             return """
@@ -248,10 +222,6 @@ enum IngestTemplateRenderer {
             ## To-dos
 
             {{todos}}
-
-            ## Original
-
-            {{original_body}}
             """
         }
     }

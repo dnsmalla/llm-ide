@@ -66,7 +66,7 @@ enum ProjectDocTemplatesSeeder {
 
     ## Editing
 
-    - **Ingest templates** (`meeting-note`, `email-note`): use `{{title}}`, `{{summary}}`, `{{todos}}`, etc. Rebuild folders or reopen the project to seed missing templates.
+    - **Ingest templates** (`meeting-note`, `email-note`): summary + action items only (`{{gist}}`/`{{summary}}`, `{{actions}}`/`{{todos}}`). Full transcript and original email stay in `source/` via `rawFile`. Rebuild folders or reopen the project to seed missing templates.
     - **Doc Gen templates**: section structure comes from `## Heading` lines.
     - Add a new Doc Gen template: create `templates/my-template/template.md` with at least one `##` section, then reopen the project or use **Rebuild missing folders** in Explorer → Project folders.
 
