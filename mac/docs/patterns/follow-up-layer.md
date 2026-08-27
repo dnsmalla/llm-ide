@@ -2,7 +2,7 @@
 
 Three advanced utilities completing the centralization strategy for network, security, and URL handling.
 
----
+***
 
 ## 1. HTTPClientUtilities — Network & Retry Logic
 
@@ -59,7 +59,7 @@ print(HTTPClientUtilities.redactedForLogging(token))
 - `.rateLimited` — 429 errors
 - `.serverError(code)` — 5xx errors
 
----
+***
 
 ## 2. AuthenticationUtilities — Token & Credential Management
 
@@ -123,7 +123,7 @@ if let code = AuthenticationUtilities.extractAuthorizationCode(from: callbackURL
 | Basic | `Authorization` | `Basic dXNlcjpwYXNz` |
 | Custom | User-defined | Any header name |
 
----
+***
 
 ## 3. URLBuilderUtilities — Safe URL Construction
 
@@ -192,7 +192,7 @@ let newFile = builder.replacingFileExtension("json", in: fileURL)
 - ✅ **Automatic encoding** — URLQueryItem handles percent-encoding
 - ✅ **Scheme validation** — Optional HTTP(S) checking
 
----
+***
 
 ## Complete Centralization Status
 
@@ -212,7 +212,7 @@ let newFile = builder.replacingFileExtension("json", in: fileURL)
 
 **TOTAL:** 296+ files, 938+ scattered patterns → **9 centralized utilities**
 
----
+***
 
 ## Expected Impact
 
@@ -233,7 +233,7 @@ let newFile = builder.replacingFileExtension("json", in: fileURL)
 - **Code review:** Easier to spot anti-patterns (all auth in one file)
 - **Testing:** 9 utilities to test vs 100+ implementations
 
----
+***
 
 ## Migration Priority
 
@@ -254,7 +254,7 @@ Start with high-traffic services:
 - GitHubClient → AuthenticationUtilities + HTTPClientUtilities
 - Then remaining services over time
 
----
+***
 
 ## Next Steps
 

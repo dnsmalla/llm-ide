@@ -8,7 +8,7 @@
 
 **Tech Stack:** Swift 5.9, SwiftUI macOS 14+, Combine, Foundation.Process, OSAllocatedUnfairLock, Swift Testing
 
----
+***
 
 ## File Structure
 
@@ -24,7 +24,7 @@
 - `Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift` — error banners, confirmation, empty states, history timestamp, accessibility
 - `Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift` — navigation button in hint
 
----
+***
 
 ### Task 1: NoteAction safe string parsing
 
@@ -114,7 +114,7 @@ git add Sources/LlmIdeMac/Models/NoteAction.swift
 git commit -m "fix: add bounds guards to NoteAction string parsing"
 ```
 
----
+***
 
 ### Task 2: LibraryItemStore safe storeURL
 
@@ -233,7 +233,7 @@ git add Sources/LlmIdeMac/Services/LibraryItemStore.swift
 git commit -m "fix: replace force-unwrap in LibraryItemStore.storeURL with safe optional"
 ```
 
----
+***
 
 ### Task 3: Safe URLs in AutoCodeUpdateService and LlmIdeMacApp
 
@@ -379,7 +379,7 @@ git add Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift \
 git commit -m "fix: replace [0] force-subscript with safe .first in URL lookups"
 ```
 
----
+***
 
 ### Task 4: Sidebar keyboard shortcut cap at 9
 
@@ -426,7 +426,7 @@ git add Sources/LlmIdeMac/Views/Shell/SidebarView.swift
 git commit -m "fix: cap sidebar keyboard shortcuts at 9 to avoid multi-char Character"
 ```
 
----
+***
 
 ### Task 5: AutoCodeUpdateService resource management
 
@@ -526,7 +526,7 @@ git add Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift
 git commit -m "fix: add deinit, fix sink stop(), unify localPath capture in AutoCodeUpdateService"
 ```
 
----
+***
 
 ### Task 6: File handle cleanup with defer in runCLI
 
@@ -619,7 +619,7 @@ git add Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift
 git commit -m "fix: use defer for FileHandle cleanup in runCLI to prevent leaks"
 ```
 
----
+***
 
 ### Task 7: AppShell recovery background task timeout
 
@@ -693,7 +693,7 @@ git add Sources/LlmIdeMac/Views/AppShell.swift
 git commit -m "fix: add 30s timeout to AppShell recovery background task"
 ```
 
----
+***
 
 ### Task 8: AutoCodeUpdateService error properties and do/catch in run()
 
@@ -848,7 +848,7 @@ git add Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift
 git commit -m "feat: add lastError/taskErrors to AutoCodeUpdateService, replace try? with do/catch"
 ```
 
----
+***
 
 ### Task 9: ProcessedActionsRegistry error callbacks and LlmIdeMacApp wiring
 
@@ -966,7 +966,7 @@ git add Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift \
 git commit -m "feat: add error callbacks to ProcessedActionsRegistry, wire to AutoCodeUpdateService"
 ```
 
----
+***
 
 ### Task 10: GitLabClient better error message
 
@@ -1008,7 +1008,7 @@ git add Sources/LlmIdeMac/Services/GitLabClient.swift
 git commit -m "fix: include HTTP status code in GitLabClient fallback error message"
 ```
 
----
+***
 
 ### Task 11: AppShell scan and rescan error handling
 
@@ -1083,7 +1083,7 @@ git add Sources/LlmIdeMac/Views/AppShell.swift
 git commit -m "fix: surface checkRecovery and rescanIndex errors to AppShell banner"
 ```
 
----
+***
 
 ### Task 12: AutoCodeView error banners
 
@@ -1218,7 +1218,7 @@ git add Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift
 git commit -m "feat: add error banners to AutoCodeView for run and per-task CLI failures"
 ```
 
----
+***
 
 ### Task 13: "Restore Default" confirmation dialog
 
@@ -1295,7 +1295,7 @@ git add Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift
 git commit -m "feat: add confirmation dialog to Restore Default button in AutoCodeView"
 ```
 
----
+***
 
 ### Task 14: Empty state messages and history row timestamp
 
@@ -1426,7 +1426,7 @@ git add Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift \
 git commit -m "feat: improve empty state messages and add timestamp to AutoTasks history row"
 ```
 
----
+***
 
 ### Task 15: ProcessedActionsRegistry retry cap in resetStuckImplementing
 
@@ -1485,7 +1485,7 @@ git add Sources/LlmIdeMac/Models/ProcessedActionsRegistry.swift
 git commit -m "fix: cap retry count at 3 in ProcessedActionsRegistry.resetStuckImplementing"
 ```
 
----
+***
 
 ### Task 16: "No linked repo" hint with navigation button
 
@@ -1544,7 +1544,7 @@ git add Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift
 git commit -m "feat: add Open GitLab Settings navigation button to AutoCode settings hint"
 ```
 
----
+***
 
 ### Task 17: Accessibility labels throughout
 
@@ -1666,7 +1666,7 @@ git add Sources/LlmIdeMac/Views/Shell/SidebarView.swift \
 git commit -m "feat: add accessibilityLabel to sidebar rows, record buttons, and status icons"
 ```
 
----
+***
 
 ### Task 18: Build app and verify
 
@@ -1697,7 +1697,7 @@ git add -p   # stage only intentional changes
 git commit -m "fix: post-verification corrections"
 ```
 
----
+***
 
 ## Self-Review
 

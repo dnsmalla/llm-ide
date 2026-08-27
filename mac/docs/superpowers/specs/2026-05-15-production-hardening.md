@@ -8,7 +8,7 @@
 
 **Tech Stack:** Swift 5.9, SwiftUI macOS, Combine, Foundation.Process, OSAllocatedUnfairLock
 
----
+***
 
 ## Section 1: Crash Prevention
 
@@ -48,7 +48,7 @@
 
 **Fix:** `guard idx < 9 else { continue }` — only register shortcuts for the first 9 sidebar items. Items beyond 9 get no shortcut.
 
----
+***
 
 ## Section 2: Error Propagation
 
@@ -101,7 +101,7 @@
 
 **Fix:** Replace with `do/catch`. On error, set a `@State var indexError: String?` and show it in a `.alert` on the root view. This is a one-time startup error — an alert is appropriate (not a banner).
 
----
+***
 
 ## Section 3: Resource Management
 
@@ -160,7 +160,7 @@ Use `capturedLocalPath` for all subsequent steps.
 
 **Fix:** Wrap the body in a `withThrowingTaskGroup` with a second task that calls `Task.sleep(for: .seconds(30))` then throws `TimeoutError()`. First-to-finish cancels the other.
 
----
+***
 
 ## Section 4: UX Polish
 
@@ -223,7 +223,7 @@ Use `capturedLocalPath` for all subsequent steps.
 
 **Fix:** Add `retryCount: Int` (default 0) to `RegistryEntry`. In `resetStuckImplementing()`, increment `retryCount`. If `retryCount >= 3`, set status to `.failed` with `actionText` prefixed with `"[max retries] "` instead of resetting to pending. This caps infinite retry loops.
 
----
+***
 
 ## File Structure
 

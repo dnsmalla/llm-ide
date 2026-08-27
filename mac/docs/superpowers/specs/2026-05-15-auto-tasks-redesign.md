@@ -4,13 +4,13 @@
 **Status:** Approved
 **Scope:** macOS app (`llm-ide/mac`)
 
----
+***
 
 ## Goal
 
 Rename "Auto Code" to "Auto Tasks" throughout the app, and replace the current single-column Auto Tasks page with a two-pane layout: a left pane for task selection and run history, and a right pane for editing the CLI prompt template for each task type.
 
----
+***
 
 ## Changes
 
@@ -27,7 +27,7 @@ All occurrences updated:
 
 SF Symbol unchanged: `arrow.triangle.2.circlepath.circle`.
 
----
+***
 
 ### 2. `AppConfig` — three new template properties
 
@@ -53,7 +53,7 @@ autoTaskTemplateReviewConflicts:
    named fix/conflicts, resolve all conflicts, commit, and push."
 ```
 
----
+***
 
 ### 3. `AutoCodeView` — two-pane layout
 
@@ -103,7 +103,7 @@ Replace the current single-column view with a `HSplitView` (or `NavigationSplitV
 - "Restore Default" button resets the property to its hardcoded default string
 - Right pane shows a placeholder ("Select a task to edit its template") when nothing is selected
 
----
+***
 
 ### 4. `AutoCodeUpdateService` — use templates in run loop
 
@@ -126,7 +126,7 @@ if config.autoCodeRunReviewConflicts {
 
 The existing meeting-note → issue → implement flow is unchanged and runs first.
 
----
+***
 
 ## Files to Create / Modify
 
@@ -138,7 +138,7 @@ The existing meeting-note → issue → implement flow is unchanged and runs fir
 | `Views/Shell/SidebarView.swift` | Rename label |
 | `Views/Settings/AutoCodeSettingsSection.swift` | Rename card title |
 
----
+***
 
 ## Out of Scope
 

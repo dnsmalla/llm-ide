@@ -4,7 +4,7 @@
 
 The system enforces that **only one repo provider (GitLab OR GitHub) is active at a time**.
 
----
+***
 
 ## Architecture
 
@@ -77,7 +77,7 @@ if !config.gitHubToken.isEmpty && !config.gitLabToken.isEmpty {
 }
 ```
 
----
+***
 
 ## Resolution Flow (`AutoCodeUpdateService.resolveBackendAndProject()`)
 
@@ -116,7 +116,7 @@ case .github:
 
 **Key: `.first(where: { $0.isActive })` — only finds ACTIVE repos**
 
----
+***
 
 ## Data Model
 
@@ -146,7 +146,7 @@ struct SavedGitHubRepo: Codable, Identifiable, Equatable {
 }
 ```
 
----
+***
 
 ## Usage Flow
 
@@ -173,7 +173,7 @@ struct SavedGitHubRepo: Codable, Identifiable, Equatable {
 - Both can be independently configured
 - Whichever has an active repo is used
 
----
+***
 
 ## Verification Points
 
@@ -195,7 +195,7 @@ struct SavedGitHubRepo: Codable, Identifiable, Equatable {
 ✅ **API Methods**
 - `clearProviderPreference()` — restore independent management
 
----
+***
 
 ## Known Limitations
 
@@ -210,7 +210,7 @@ struct SavedGitHubRepo: Codable, Identifiable, Equatable {
 3. **UI only in Settings**: Preference toggle only visible in Settings
    - **Could add**: Quick-switch in Issues tab header when both providers available
 
----
+***
 
 ## Testing Checklist
 
@@ -221,7 +221,7 @@ struct SavedGitHubRepo: Codable, Identifiable, Equatable {
 - [ ] Verify linked projects override global preference
 - [ ] Verify preference persists across app restart
 
----
+***
 
 ## Conclusion
 

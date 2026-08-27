@@ -6,7 +6,7 @@
 [![Swift](https://img.shields.io/badge/swift-5.9-orange.svg)](#tech-stack)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey.svg)](#license)
 
----
+***
 
 ## Features
 
@@ -23,7 +23,7 @@
 | **Chat Assistant** | AI-powered code assistant with file attachments, git operations, issue management, PR/MR creation, bash execution, web search, and more |
 | **Developer Tools** | Full git workflow integration, issue tracking, code review, file editing, and command execution |
 
----
+***
 
 ## Requirements
 
@@ -33,7 +33,7 @@
 | **Backend** | LLM-IDE server running at `127.0.0.1:3456` (API **v20+**; check Settings → Backend if features 404) |
 | **GitLab** | Personal Access Token with `api` scope (for Issues / Gantt) |
 
----
+***
 
 ## Quick Start
 
@@ -80,7 +80,7 @@ To use the Issues board and Gantt chart:
 3. Click **Add project**, paste your project URL (e.g. `https://gitlab.com/group/project`), and press **Return**
 4. The app resolves the project ID automatically from the URL — no manual configuration needed
 
----
+***
 
 ## Capturing a Meeting
 
@@ -95,7 +95,7 @@ To use the Issues board and Gantt chart:
 5. When the meeting ends, optionally set a title, then click **Stop & Save**
 6. The transcript is POSTed to **`POST /kb/ingest`** and becomes available across all clients
 
----
+***
 
 ## Daily Workflows
 
@@ -116,7 +116,7 @@ To use the Issues board and Gantt chart:
 | Search the KB | **History** tab → text search + kind filter |
 | Change theme or server | **Settings** tab |
 
----
+***
 
 ## Chat Assistant
 
@@ -187,7 +187,7 @@ This modular design makes the 3000+ line codebase easy to navigate and extend.
 - **Path validation**: File operations only work on explicitly attached files
 - **Edit modes**: Auto mode for trusted files, Review mode for full control
 
----
+***
 
 ## Configuration
 
@@ -214,7 +214,7 @@ All editable from the **Settings** tab.
 2. The app signs you out automatically
 3. Sign in against the new server
 
----
+***
 
 ## Project Layout
 
@@ -309,7 +309,7 @@ Sources/LlmIdeMac/
     └── Shared/
 ```
 
----
+***
 
 ## Adding a Caption Scraper for a New Platform
 
@@ -320,7 +320,7 @@ The orchestrator selects the first available scraper, so supporting a new platfo
 
 The orchestrator's `tick()` picks it up automatically on the next recording start.
 
----
+***
 
 ## Troubleshooting
 
@@ -344,7 +344,7 @@ LLMIDE_LOG_LEVEL=debug node server.mjs
 
 Open **Console.app** and filter on subsystem `com.llmide.macapp` for capture, session, and API logs from the app.
 
----
+***
 
 ## Distribution
 
@@ -365,7 +365,7 @@ The default `build_app.sh` produces an **ad-hoc signed** build, which Gatekeeper
 4. **Auto-update:** wire [Sparkle](https://sparkle-project.org/) — the DMG is already UDZO format and Sparkle-compatible
 5. **Skip the Mac App Store** — Accessibility-based caption scraping conflicts with MAS sandbox requirements
 
----
+***
 
 ## Tech Stack
 
@@ -382,13 +382,13 @@ The default `build_app.sh` produces an **ad-hoc signed** build, which Gatekeeper
 | Process | Swift Process() for shell command execution |
 | File I/O | FileManager · atomically-safe writes · path canonicalization |
 
----
+***
 
 ## Documentation
 
 Full engineering docs: <SITE_URL>. See also [How to build the macOS app](../docs/how-to/build-the-macos-app.md).
 
----
+***
 
 ## License
 

@@ -8,7 +8,7 @@
 
 **Tech Stack:** SwiftUI, `Foundation.UserDefaults`, `@Published`/`ObservableObject`, `Foundation.Process`
 
----
+***
 
 ## File Map
 
@@ -20,7 +20,7 @@
 | `Sources/LlmIdeMac/Views/Shell/SidebarView.swift` | Rename label "Auto Code" → "Auto Tasks" |
 | `Sources/LlmIdeMac/Views/Settings/AutoCodeSettingsSection.swift` | Rename card title "Auto Code Update" → "Auto Tasks" |
 
----
+***
 
 ## Task 1: Add template properties to AppConfig
 
@@ -116,7 +116,7 @@ git add Sources/LlmIdeMac/Models/Config.swift Tests/LlmIdeMacTests/AppConfigAuto
 git commit -m "feat: add autoTaskTemplate properties to AppConfig"
 ```
 
----
+***
 
 ## Task 2: Add prompt-based runCLI overload to AutoCodeUpdateService
 
@@ -269,7 +269,7 @@ git add Sources/LlmIdeMac/Services/AutoCodeUpdateService.swift
 git commit -m "feat: add prompt-based runCLI overload, invoke per-task-type templates in run()"
 ```
 
----
+***
 
 ## Task 3: Rewrite AutoCodeView as two-pane layout
 
@@ -604,7 +604,7 @@ git add Sources/LlmIdeMac/Views/AutoCode/AutoCodeView.swift
 git commit -m "feat: rewrite AutoCodeView as two-pane layout with template editor"
 ```
 
----
+***
 
 ## Task 4: Rename labels
 
@@ -653,7 +653,7 @@ git add Sources/LlmIdeMac/Views/Shell/SidebarView.swift Sources/LlmIdeMac/Views/
 git commit -m "feat: rename Auto Code → Auto Tasks in sidebar and settings"
 ```
 
----
+***
 
 ## Task 5: Build app and smoke test
 

@@ -2,7 +2,7 @@
 
 These three utilities address data safety, security, and observability issues affecting 150+ files.
 
----
+***
 
 ## 1. FileSystemUtilities — Safe File Operations
 
@@ -39,7 +39,7 @@ let backupPath = fs.backupAsCorrupt(at: badFileURL)
 - ✅ **Full logging** — Every operation logged for debugging
 - ✅ **Safe recovery** — Corrupt file handling built-in
 
----
+***
 
 ## 2. ErrorTrackingWrapper — Track Silent Failures
 
@@ -90,7 +90,7 @@ let strategy = ErrorTrackingWrapper.retryStrategy(for: error)
 - ✅ **Retry hints** — Automatic transient error detection
 - ✅ **Debugging** — Full context for each failure
 
----
+***
 
 ## 3. LoggingFactory — Consistent Logger Setup
 
@@ -144,7 +144,7 @@ logger.info("Project loaded")  // Logs: "[ProjectManager] Project loaded"
 - ✅ **Structured** — Helper methods reduce boilerplate
 - ✅ **Findable** — All app logs under com.llmide.macapp in Console.app
 
----
+***
 
 ## Available Categories
 
@@ -165,7 +165,7 @@ logger.info("Project loaded")  // Logs: "[ProjectManager] Project loaded"
 | `.performance` | Timing metrics |
 | `.system` | System-level events |
 
----
+***
 
 ## Impact Summary
 
@@ -177,7 +177,7 @@ logger.info("Project loaded")  // Logs: "[ProjectManager] Project loaded"
 | Time to diagnose file issue | 30+ mins | 5 mins | **6x faster** |
 | Time to find all logs for a service | Variable | 1 search in Console.app | **Instant** |
 
----
+***
 
 ## Migration Path
 
@@ -196,7 +196,7 @@ logger.info("Project loaded")  // Logs: "[ProjectManager] Project loaded"
 8. ⬜ Remove hardcoded Logger instances
 9. ⬜ Audit logging for coverage
 
----
+***
 
 ## Testing
 
@@ -218,7 +218,7 @@ XCTAssertEqual(trackedErrors.count, 1)
 // LoggingFactory is just a factory — nothing to test
 ```
 
----
+***
 
 ## Next Steps After Implementation
 
