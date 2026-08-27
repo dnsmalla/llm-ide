@@ -65,11 +65,11 @@ final class LlmChatViewModel {
     /// Clears `lastError` up front, matching the original sheet's `send()` —
     /// a stale history-fetch error banner shouldn't keep showing once the
     /// user is clearly back online and sending again.
-    func send(_ text: String) {
+    func send(_ text: String, skillIds: [String] = []) {
         lastError = nil
         clientStoppedTurnActive = false
         awaitingOwnTurn = true
-        engine.startTurn(text)
+        engine.startTurn(text, skillIds: skillIds)
     }
 
     /// Cancel the in-flight turn, if any.

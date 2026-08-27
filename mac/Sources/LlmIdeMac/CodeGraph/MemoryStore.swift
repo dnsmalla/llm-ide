@@ -131,7 +131,7 @@ public struct MemoryStore: Sendable {
 
     /// Pure disk work — list + decode all faults. Safe to call from a
     /// background executor (MemoryStore is Sendable). The @MainActor
-    /// callers (RegressionView, MenuBarMenu) await this off-main so the
+    /// callers (RegressionView) await this off-main so the
     /// frontmatter decode never blocks the UI thread.
     func faultStatusSnapshot(at repo: URL) -> FaultStatusSnapshot {
         let urls = listFaults(at: repo)

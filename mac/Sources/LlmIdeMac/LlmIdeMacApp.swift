@@ -451,38 +451,17 @@ public struct LlmIdeMacApp: App {
             }
         }
 
-        // Menu-bar item — visible status of the recording state and a
-        // one-click Start/Stop.  Lets capture continue when the main
-        // window is closed.
+        // Menu-bar chat — Gemini-style llm-agent surface (same transcript as iPhone).
         MenuBarExtra {
-            MenuBarMenu(api: api)
+            MenuBarChatView(api: api)
                 .environmentObject(theme)
                 .environmentObject(session)
-                .environmentObject(capture)
                 .environmentObject(config)
-                .environmentObject(projectStore)
         } label: {
-            Image(systemName: capture.isRunning ? "record.circle.fill" : "record.circle")
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(capture.isRunning ? .red : .secondary)
-                .accessibilityLabel(capture.isRunning ? "\(L.App.name) — recording" : L.App.name)
-        }
-        .menuBarExtraStyle(.menu)
-
-        // Auto Tasks — manual Run Now / Stop without opening the main window.
-        MenuBarExtra {
-            MenuBarAutoTaskView()
-                .environmentObject(theme)
-                .environmentObject(autoTaskSettings)
-                .environmentObject(autoCodeUpdate)
-                .environmentObject(logStore)
-        } label: {
-            Image(systemName: autoCodeUpdate.isRunning
-                  ? "arrow.triangle.2.circlepath.circle.fill"
-                  : "arrow.triangle.2.circlepath.circle")
+            Image(systemName: "bubble.left.and.text.bubble.right")
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(autoTaskSettings.enabled ? .primary : .secondary)
-                .accessibilityLabel("Auto Tasks")
+                .foregroundStyle(session.isAuthenticated ? theme.current.accent : .secondary)
+                .accessibilityLabel("\(L.App.name) chat")
         }
         .menuBarExtraStyle(.window)
     }
@@ -571,124 +550,4 @@ public struct LlmIdeMacApp: App {
             }
         }
     }
-}
-
-/// Compact menu-bar menu — tiny on purpose so it doesn't compete with
-/// the main window.  All real interaction happens in the window; the
-/// menu is just the persistent status surface.
-struct MenuBarMenu: View {
-    @EnvironmentObject var capture: CaptionOrchestrator
-    @EnvironmentObject var session: SessionStore
-    @EnvironmentObject var config: AppConfig
-    @EnvironmentObject var projectStore: ProjectStore
-    let api: LlmIdeAPIClient
-
-    /// Open-fault count cached on appear + every 30s. Counting faults is
-    /// disk-bound (decode every frontmatter); recomputing on every
-    /// menu render would flicker and stutter.
-    @State private var openFaultCount: Int = 0
-    @State private var refreshTimer: Timer?
-
-    var body: some View {
-        if capture.isRunning {
-            Button("Stop recording") { capture.stop() }
-        } else {
-            Button("Start recording") {
-                if AXCaptionReader.canRead { capture.start() }
-            }
-            .disabled(!AXCaptionReader.canRead)
-        }
-
-        // Status pill — only the rows that have non-zero signal.
-        // Each row opens the relevant tab and brings the window
-        // forward via .openSection.
-        if openFaultCount > 0 || config.lastRegressionRunAt != nil {
-            Divider()
-        }
-        if openFaultCount > 0 {
-            Button {
-                NotificationCenter.default.post(
-                    name: .openSection,
-                    object: ShellState.Section.loopEngine.rawValue
-                )
-            } label: {
-                Text("🐜 \(openFaultCount) open fault report\(openFaultCount == 1 ? "" : "s")")
-            }
-        }
-        if let last = config.lastRegressionRunAt {
-            Button {
-                NotificationCenter.default.post(
-                    name: .openSection,
-                    object: ShellState.Section.loopEngine.rawValue
-                )
-            } label: {
-                let n = config.lastRegressionRegressedCount
-                let when = MenuBarMenu.relativeFormatter.localizedString(for: last, relativeTo: Date())
-                if n > 0 {
-                    Text("⚠ \(n) regression\(n == 1 ? "" : "s") · \(when)")
-                } else {
-                    Text("✓ No regressions · \(when)")
-                }
-            }
-        }
-
-        Divider()
-        if let user = session.user {
-            Text("Signed in as \(user.email)")
-        } else {
-            Text("Not signed in")
-        }
-        Divider()
-        Button("Quit \(L.App.name)") { NSApplication.shared.terminate(nil) }
-            .keyboardShortcut("q")
-        // The MenuBarExtra menu re-renders on each open, but
-        // @State doesn't get a fresh init on each render — so
-        // onAppear fires once. We still want a periodic refresh
-        // in case bugs are added/closed elsewhere while the menu
-        // sits open, hence the timer.
-        EmptyView()
-            .onAppear {
-                refreshOpenFaultCount()
-                if refreshTimer == nil {
-                    // Timer.scheduledTimer retains its target via the run
-                    // loop, so we MUST invalidate on disappear. Without
-                    // this the timer (and the closure it owns) lives for
-                    // the entire app process, performing disk I/O every
-                    // 30s for the lifetime of the app.
-                    refreshTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
-                        Task { @MainActor in refreshOpenFaultCount() }
-                    }
-                }
-            }
-            .onDisappear {
-                refreshTimer?.invalidate()
-                refreshTimer = nil
-            }
-    }
-
-    private func refreshOpenFaultCount() {
-        // Count faults at the active PROJECT root (`<root>/system/faults`) —
-        // the same place CodeAssistantPanel writes them and Loop Engineering
-        // reads them. `config.activeRepoLocalURL` pointed at the clone
-        // (`code/<repo>`), so the menu under-counted (usually showed 0).
-        guard let repo = WorkspaceRoot.resolve(config: config, projectStore: projectStore) else {
-            openFaultCount = 0
-            return
-        }
-        let store = config.memoryStore
-        // Counting faults decodes every frontmatter — keep it off the main
-        // actor so the periodic (30s) refresh never stutters the menu.
-        Task {
-            let count = await Task.detached(priority: .utility) {
-                store.faultStatusSnapshot(at: repo).openCount
-            }.value
-            openFaultCount = count
-        }
-    }
-
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .abbreviated
-        return f
-    }()
 }
