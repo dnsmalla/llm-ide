@@ -85,6 +85,11 @@ struct AppShell: View {
             if projectStore.activeProject == nil {
                 initWelcomeEnv()
             }
+            NSApp.activate(ignoringOtherApps: true)
+            for window in NSApp.windows where window.identifier?.rawValue == "main" {
+                window.makeKeyAndOrderFront(nil)
+                if window.isMiniaturized { window.deminiaturize(nil) }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSection)) { note in
             if let raw = note.object as? String,
@@ -97,6 +102,10 @@ struct AppShell: View {
                     shell.librarySelection = selection
                 }
                 NSApp.activate(ignoringOtherApps: true)
+                for window in NSApp.windows where window.identifier?.rawValue == "main" {
+                    window.makeKeyAndOrderFront(nil)
+                    if window.isMiniaturized { window.deminiaturize(nil) }
+                }
             }
         }
         .onAppear {

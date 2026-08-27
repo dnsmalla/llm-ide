@@ -8,6 +8,8 @@ struct MenuBarChatView: View {
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var session: SessionStore
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismiss) private var dismiss
 
     @State private var engine: ChatEngine
     @State private var viewModel: LlmChatViewModel
@@ -101,9 +103,20 @@ struct MenuBarChatView: View {
 
     private var headerBar: some View {
         HStack(spacing: 10) {
-            Spacer()
             Button {
-                NotificationCenter.default.post(name: .openSection, object: ShellState.Section.explorer.rawValue)
+                dismiss()
+            } label: {
+                Image(systemName: "minus")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(theme.current.textMuted)
+            }
+            .buttonStyle(.plain)
+            .help("Close chat popover")
+
+            Spacer()
+
+            Button {
+                openMainWindow(section: .explorer)
             } label: {
                 Image(systemName: "macwindow")
                     .font(.system(size: 13))
@@ -121,7 +134,7 @@ struct MenuBarChatView: View {
                 .disabled(engine.messages.isEmpty)
                 Divider()
                 Button("Settings…") {
-                    NotificationCenter.default.post(name: .openSettings, object: nil)
+                    openMainWindow(section: .settings)
                 }
                 Button("Quit \(L.App.name)") {
                     NSApplication.shared.terminate(nil)
@@ -306,6 +319,7 @@ struct MenuBarChatView: View {
                                 .font(.caption)
                                 .foregroundStyle(theme.current.textMuted)
                         }
+                        .id("typing-indicator")
                     }
                     if let err = combinedError {
                         Text(err)
@@ -322,6 +336,14 @@ struct MenuBarChatView: View {
                     }
                 }
             }
+            .onChange(of: engine.revealedCount) { _, _ in
+                if let last = engine.messages.last, last.id == engine.revealingTurnID {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
+            .onChange(of: engine.busy) { _, b in
+                if b { withAnimation { proxy.scrollTo("typing-indicator", anchor: .bottom) } }
+            }
         }
     }
 
@@ -330,26 +352,39 @@ struct MenuBarChatView: View {
         if msg.status == .streaming && msg.content.isEmpty {
             EmptyView()
         } else {
-            VStack(alignment: msg.role == .user ? .trailing : .leading, spacing: 4) {
-                Text(msg.role == .user ? "You" : "LLM-IDE")
+            let isUser = msg.role == .user
+            VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
+                Text(isUser ? "You" : "LLM-IDE")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(theme.current.textMuted)
-                Text(msg.content)
+                
+                Text(displayedContent(for: msg))
                     .font(.subheadline)
                     .foregroundStyle(theme.current.text)
                     .textSelection(.enabled)
-                    .multilineTextAlignment(msg.role == .user ? .trailing : .leading)
+                    .multilineTextAlignment(isUser ? .trailing : .leading)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(
-                        msg.role == .user
+                        isUser
                             ? Self.greetingBlue.opacity(0.12)
                             : Color(nsColor: .controlBackgroundColor)
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+                
+                if !isUser, msg.status == .stopped {
+                    Text("Stopped")
+                        .font(.caption2)
+                        .foregroundStyle(theme.current.textMuted)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: msg.role == .user ? .trailing : .leading)
+            .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
         }
+    }
+
+    private func displayedContent(for msg: ChatMessage) -> String {
+        guard msg.id == engine.revealingTurnID else { return msg.content }
+        return String(msg.content.prefix(engine.revealedCount))
     }
 
     // MARK: - Composer
@@ -571,7 +606,7 @@ struct MenuBarChatView: View {
             draft = newDraft
         case .navigate(let section, _, let newDraft):
             draft = newDraft
-            NotificationCenter.default.post(name: .openSection, object: section.rawValue)
+            openMainWindow(section: section)
         case .attachFile:
             completion.close()
         }
@@ -590,7 +625,7 @@ struct MenuBarChatView: View {
         }
         if let section = ChatSlashCommands.sectionCommand(text) {
             draft = ""
-            NotificationCenter.default.post(name: .openSection, object: section.rawValue)
+            openMainWindow(section: section)
             return
         }
 
@@ -602,5 +637,17 @@ struct MenuBarChatView: View {
         let skills = pendingSkillIds
         pendingSkillIds = []
         viewModel.send(text, skillIds: skills)
+    }
+
+    private func openMainWindow(section: ShellState.Section) {
+        openWindow(id: "main")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            if section == .settings {
+                NotificationCenter.default.post(name: .openSettings, object: nil)
+            } else {
+                NotificationCenter.default.post(name: .openSection, object: section.rawValue)
+            }
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 }
