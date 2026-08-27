@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { MsgType, isMessage } from '../../lib/messages';
 import { debug } from '../../lib/config';
+import { isValidCaption } from '../../content/caption-validation';
 import { saveTranscript as persistTranscript, StorageQuotaError } from '../../lib/storage';
 import { isSupportedUrl, stripPlatformSuffix } from '../../lib/platforms';
 
@@ -233,6 +234,7 @@ export function useTranscript() {
       if (message.type === MsgType.CAPTION_FINAL && isRecordingRef.current && captureModeRef.current === 'captions') {
         const { speaker, text, timestamp, sessionId } = message;
         const safeName = speaker.trim().slice(0, 50) || 'Unknown';
+        if (!isValidCaption(safeName, text)) return;
 
         setDiagnostics((d) => ({
           ...d,

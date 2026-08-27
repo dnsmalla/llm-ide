@@ -403,7 +403,7 @@ function handleSendError(e: Error): void {
     if (contextInvalidated) return;
     contextInvalidated = true;
 
-    console.error('[LLM-IDE] Extension context lost — stopping scraper. Reload the tab to resume.');
+    debug('[caption-scraper] extension context lost — stopping scraper');
     isCapturing = false;
     stopScraping();
 
@@ -429,8 +429,8 @@ function handleSendError(e: Error): void {
     return;
   }
 
-  // Transient errors — log but keep scraping.
-  console.warn('[LLM-IDE] send failed (will retry):', msg);
+  // Transient errors — retry silently; debug channel only when LLMIDE_DEBUG=1.
+  debug('[caption-scraper] send failed (will retry):', msg);
 }
 
 function sendUpdate(speaker: string, text: string, sessionId: string): void {
@@ -444,13 +444,6 @@ function sendUpdate(speaker: string, text: string, sessionId: string): void {
     sessionId,
   };
   chrome.runtime.sendMessage(msg).catch((e: Error) => handleSendError(e));
-
-  // Notify the floating overlay (same tab — custom events are shared across content scripts)
-  window.dispatchEvent(
-    new CustomEvent('llmide:caption', {
-      detail: { speaker, text, sessionId },
-    }),
-  );
 }
 
 function scrape(): void {
@@ -463,6 +456,7 @@ function scrape(): void {
   const now = Date.now();
 
   for (const { speaker, text } of blocks) {
+    if (!isValidCaption(speaker, text)) continue;
     const prev = speakerState.get(speaker);
 
     // New session if: first time seeing this speaker, or silent > SESSION_GAP_MS.

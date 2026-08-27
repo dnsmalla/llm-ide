@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {
   GROUP_ICON_RE,
   isActiveMeetingPage,
+  isHumanTranscriptSource,
   isValidCaption,
   sanitizeSpeaker,
 } from '../src/content/caption-validation.ts';
@@ -62,4 +63,11 @@ test('isActiveMeetingPage guards Meet landing pages', () => {
   assert.equal(isActiveMeetingPage('meet', '/'), false);
   assert.equal(isActiveMeetingPage('teams', '/landing'), true);
   assert.equal(isActiveMeetingPage(null, '/anything'), true);
+});
+
+test('isHumanTranscriptSource excludes agent commentary', () => {
+  assert.equal(isHumanTranscriptSource('extension-cc'), true);
+  assert.equal(isHumanTranscriptSource(undefined), true);
+  assert.equal(isHumanTranscriptSource('agent-system'), false);
+  assert.equal(isHumanTranscriptSource('agent-question'), false);
 });

@@ -176,6 +176,10 @@ final class LiveSessionMirror: ObservableObject {
     /// utterances that are genuinely contiguous.  A speaker who says the
     /// same opening phrase later in the meeting is NOT merged with the
     /// earlier utterance.
+    private static func isHumanTranscriptSource(_ source: String) -> Bool {
+        !source.hasPrefix("agent-")
+    }
+
     private func mergeCaptionInPlace(_ incoming: MirroredCaption) {
         let MERGE_WINDOW = 10
         let start = max(0, captions.count - MERGE_WINDOW)
@@ -205,6 +209,7 @@ final class LiveSessionMirror: ObservableObject {
             let r = try await api.liveCaptions(sessionId: session.sessionId, since: sinceSeq)
             if !r.captions.isEmpty {
                 for c in r.captions {
+                    guard Self.isHumanTranscriptSource(c.source) else { continue }
                     let incoming = MirroredCaption(
                         id: c.seq,
                         speaker: c.speaker,
@@ -241,7 +246,9 @@ final class LiveSessionMirror: ObservableObject {
                 var seenSpeakers = [String]()
                 var seenSet = Set<String>()
                 var lines = [String]()
-                for c in captions {
+                let humanCaptions = captions.filter { Self.isHumanTranscriptSource($0.source) }
+                guard !humanCaptions.isEmpty else { return r.finalized ? finalizedSlowdownNs : captionIntervalNs }
+                for c in humanCaptions {
                     let t = c.timestamp
                     let hms = String(format: "%02d:%02d:%02d",
                                      Calendar.current.component(.hour, from: t),
@@ -257,7 +264,7 @@ final class LiveSessionMirror: ObservableObject {
                     sessionId: sid,
                     meetingTitle: sessionTitle,
                     startedAt: startedAt,
-                    captions: captions,
+                    captions: humanCaptions,
                     transcript: lines.joined(separator: "\n"),
                     participants: seenSpeakers)
                 log.info("live session finalized — firing note-gen notification for \(sid, privacy: .public)")

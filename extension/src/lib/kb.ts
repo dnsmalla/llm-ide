@@ -2,7 +2,6 @@
 // so it can be used from hooks, exporters, and (later) the connectors UI.
 
 import { authFetch, getServerUrl, parseJsonResponse, REQUEST_TIMEOUT_MS } from './config';
-import type { ExtractedEntities } from './entities';
 
 export interface KBSearchHit {
   kind: 'meeting' | 'action' | 'decision' | 'blocker';
@@ -71,53 +70,10 @@ export async function connectQA(opts: { xml: string; source?: string }): Promise
   return postJSON('/kb/connect-qa', opts, 60_000);
 }
 
-// ---- Phase 4: planning + risk + code-sync ----------------------------
+// ---- Plan stub (extension agent toggle bar only) -----------------------
 
-import type { Plan, PlanTask, RiskLevel, TaskStatus } from './plan';
+import type { Plan } from './plan';
 
-export async function generatePlan(opts: {
-  meetingId: string;
-  goal?: string;
-  language?: string;
-  skipRisk?: boolean;
-  skipCodeSync?: boolean;
-}): Promise<Plan> {
-  // Plan + risk together can take a while (multiple Claude calls).
-  return postJSON('/kb/generate-plan', opts, 5 * 60_000);
-}
-
-export async function analyzeRisks(opts: { planId?: string; plan?: Plan; language?: string }): Promise<Plan> {
-  return postJSON('/kb/analyze-risks', opts, 5 * 60_000);
-}
-
-export async function codeSyncPlan(opts: { planId?: string; plan?: Plan }): Promise<Plan> {
-  return postJSON('/kb/code-sync', opts, 60_000);
-}
-
-export async function getPlan(id: string): Promise<Plan | null> {
-  const serverUrl = await getServerUrl();
-  const r = await authFetch(`${serverUrl}/kb/plan/${encodeURIComponent(id)}`);
-  if (!r.ok) return null;
-  return await r.json();
-}
-
-export async function updateTask(
-  taskId: string,
-  patch: Partial<{
-    status: TaskStatus;
-    risk: RiskLevel | null;
-    riskReason: string;
-    owner: string;
-    due: string;
-    files: PlanTask['files'];
-  }>,
-): Promise<PlanTask | null> {
-  return postJSON('/kb/plan-task/update', { taskId, patch }, 30_000);
-}
-
-// LLM-free save.  Used for the "auto-stub on record" flow (no
-// meeting transcript yet, so no planner call) and inline rename.
-// Pass an existing id to update title/goal; omit id to create.
 export async function savePlan(opts: {
   id?: string;
   title: string;
@@ -127,70 +83,6 @@ export async function savePlan(opts: {
   meetingId?: string;
 }): Promise<Plan> {
   return postJSON('/kb/plan/save', opts, 10_000);
-}
-
-interface IngestArgs {
-  serverUrl: string; // already resolved by the caller
-  meetingId: string;
-  meetingTitle: string;
-  date: string; // ISO
-  durationSec: number;
-  language?: string;
-  participants: string[];
-  transcript: string;
-  entities: ExtractedEntities;
-}
-
-// Flatten the typed entity union into the rows the server expects.
-// `meta` carries everything that varies per kind (owner / due / status /
-// severity / participants) so the SQL schema doesn't need a column per
-// future entity flavor.
-export async function ingestToKB(args: IngestArgs): Promise<void> {
-  const flatEntities = [
-    ...args.entities.actions.map((a) => ({
-      id: a.id,
-      kind: 'action',
-      text: a.text,
-      quote: a.quote,
-      meta: { owner: a.owner, due: a.due, status: a.status },
-    })),
-    ...args.entities.decisions.map((d) => ({
-      id: d.id,
-      kind: 'decision',
-      text: d.text,
-      quote: d.quote,
-      meta: { participants: d.participants },
-    })),
-    ...args.entities.blockers.map((b) => ({
-      id: b.id,
-      kind: 'blocker',
-      text: b.text,
-      quote: b.quote,
-      meta: { severity: b.severity },
-    })),
-  ];
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    await authFetch(`${args.serverUrl}/kb/ingest`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: args.meetingId,
-        title: args.meetingTitle,
-        date: args.date,
-        duration: args.durationSec,
-        language: args.language,
-        participants: args.participants,
-        transcript: args.transcript,
-        entities: flatEntities,
-      }),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 export async function searchKB(opts: {

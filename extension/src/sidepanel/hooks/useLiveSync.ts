@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { authFetch, getServerUrl } from '../../lib/config';
+import { isValidCaption } from '../../content/caption-validation';
 import type { TranscriptSegment } from './useTranscript';
 
 const PUSH_DEBOUNCE_MS = 800;
@@ -192,6 +193,7 @@ async function pushPendingSegments(
   for (let i = 0; i < segments.length; i += 1) {
     const s = segments[i];
     if (!s.speaker || !s.text) continue;
+    if (!isValidCaption(s.speaker, s.text)) continue;
     const isNew = i >= lastPushedIndex.current;
     const changed = s.text !== lastPushedTexts.current[i];
     if (isNew || changed) {

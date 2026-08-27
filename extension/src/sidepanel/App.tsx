@@ -5,16 +5,11 @@ import { useNotes } from './hooks/useNotes';
 import { useAudioDevices } from './hooks/useAudioDevices';
 import { useChat } from './hooks/useChat';
 import { useQuestions } from './hooks/useQuestions';
-// `usePlan` is kept (the agent toggle bar uses it for stub creation
-// + inline rename), but the entity / dispatch / review / notify /
-// outcomes hooks aren't needed in the trimmed-down extension — the
-// Mac app owns those flows.
 import { usePlan } from './hooks/usePlan';
 import { useSession } from './hooks/useSession';
 import { getServerUrl, HEALTH_CHECK_TIMEOUT_MS, TIMING } from '../lib/config';
 import RecordingControls from './components/RecordingControls';
 import { useAgent } from './hooks/useAgent';
-import { useAgentMirror } from './hooks/useAgentMirror';
 import { useRemoteSessions, RemoteSession } from './hooks/useRemoteSessions';
 import { useRemoteTranscript } from './hooks/useRemoteTranscript';
 import LanguageSelector from './components/LanguageSelector';
@@ -236,13 +231,6 @@ export default function App() {
     for (const r of agent.runs) agent.stop(r.sessionId);
     // deps intentionally narrow — only the toggle transition matters here
   }, [agentEnabled]);
-  // Mirror agent contributions from /kb/live/<sessionId> into the
-  // transcript view.  Only polls while at least one run is attached.
-  const agentMirror = useAgentMirror({
-    sessionId,
-    isAttached: sessionHasRun,
-  });
-
   // Cross-client session discovery and mirroring.
   const discovery = useRemoteSessions();
   const mirror = useRemoteTranscript({
@@ -597,8 +585,6 @@ export default function App() {
               interimText={isMirroring ? '' : transcript.interimText}
               speakerNames={transcript.speakerNames}
               onRenameSpeaker={transcript.renameSpeaker}
-              agentCaptions={isMirroring ? mirror.agentCaptions : agentMirror.captions}
-              onAgentFeedback={agentMirror.submitFeedback}
               isRecording={!isMirroring && transcript.isRecording}
             />
             {transcript.segments.length > 0 && (

@@ -1,22 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { authFetch, getServerUrl } from '../../lib/config';
+import { isHumanTranscriptSource } from '../../content/caption-validation';
 import { TranscriptSegment } from './useTranscript';
-import { AgentCaption } from './useAgentMirror';
 
 const POLL_MS = 1500;
 const MAX_SEGMENTS = 5000;
-const MAX_AGENT_CAPTIONS = 2000;
 
 export function useRemoteTranscript({ sessionId, isMirroring }: { sessionId: string; isMirroring: boolean }) {
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
-  const [agentCaptions, setAgentCaptions] = useState<AgentCaption[]>([]);
   const sinceRef = useRef(0);
   const cancelledRef = useRef(false);
 
   useEffect(() => {
     sinceRef.current = 0;
     setSegments([]);
-    setAgentCaptions([]);
   }, [sessionId]);
 
   useEffect(() => {
@@ -53,32 +50,22 @@ export function useRemoteTranscript({ sessionId, isMirroring }: { sessionId: str
                 const j = JSON.parse(chunk.slice(6));
                 const raw = j.captions || [];
                 const newSegments: TranscriptSegment[] = [];
-                const newAgent: AgentCaption[] = [];
 
                 for (const c of raw) {
-                  if (c.source === 'captions' || c.source === 'mic' || c.source === 'extension-cc') {
-                    newSegments.push({
-                      speaker: c.speaker,
-                      text: c.text,
-                      timestamp: c.ts,
-                      isFinal: true,
-                    });
-                  } else if (c.source.startsWith('agent-')) {
-                    newAgent.push(c);
-                  }
+                  if (!isHumanTranscriptSource(c.source)) continue;
+                  newSegments.push({
+                    speaker: c.speaker,
+                    text: c.text,
+                    timestamp: c.ts,
+                    isFinal: true,
+                  });
                 }
 
-                if (!cancelledRef.current) {
-                  if (newSegments.length > 0)
-                    setSegments((prev: TranscriptSegment[]) => {
-                      const merged = prev.concat(newSegments);
-                      return merged.length > MAX_SEGMENTS ? merged.slice(-MAX_SEGMENTS) : merged;
-                    });
-                  if (newAgent.length > 0)
-                    setAgentCaptions((prev: AgentCaption[]) => {
-                      const merged = prev.concat(newAgent);
-                      return merged.length > MAX_AGENT_CAPTIONS ? merged.slice(-MAX_AGENT_CAPTIONS) : merged;
-                    });
+                if (!cancelledRef.current && newSegments.length > 0) {
+                  setSegments((prev: TranscriptSegment[]) => {
+                    const merged = prev.concat(newSegments);
+                    return merged.length > MAX_SEGMENTS ? merged.slice(-MAX_SEGMENTS) : merged;
+                  });
                 }
 
                 if (typeof j.sequence === 'number') sinceRef.current = j.sequence;
@@ -112,5 +99,5 @@ export function useRemoteTranscript({ sessionId, isMirroring }: { sessionId: str
     };
   }, [sessionId, isMirroring]);
 
-  return { segments, agentCaptions };
+  return { segments };
 }
