@@ -19,7 +19,6 @@ protocol AgentAskSending: Sendable {
 // needs (`listAgentAskHistory`/`clearAgentAskHistory`), lives in
 // `LlmChatViewModel.swift` next to its one consumer, with its own
 // `extension LlmIdeAPIClient: AgentAskHistoryFetching {}`.
-extension LlmIdeAPIClient: AgentAskSending {}
 
 /// `ChatTransport` for the LLM Chat sheet's `/kb/agent/ask` endpoint — the
 /// same shared transcript the iPhone's `llmide_chat` uses via

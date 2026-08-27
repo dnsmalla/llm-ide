@@ -126,6 +126,41 @@ struct ChatMessageList: View {
                                 PendingActionCard(
                                     pendingTool: pt,
                                     diffPreview: diffPreview,
+                                    onOpen: {
+                                        switch pt.kind {
+                                        case .createIssue:
+                                            sheets.showingIssueSheet = true
+                                        case .commentIssue:
+                                            sheets.showingCommentSheet = true
+                                        case .getIssue:
+                                            sheets.showingGetIssueSheet = true
+                                        case .updateIssue:
+                                            sheets.showingUpdateIssueSheet = true
+                                        case .listIssues:
+                                            sheets.showingListIssuesSheet = true
+                                        case .createBranch:
+                                            sheets.showingCreateBranchSheet = true
+                                            Task { sheets.branchSheetContext = await loadBranchContext() }
+                                        case .createPR:
+                                            sheets.showingCreatePRSheet = true
+                                        case .triggerReviewCode:
+                                            sheets.showingReviewCodeSheet = true
+                                        case .updateFile:
+                                            sheets.showingUpdateFileSheet = true
+                                        case .gitOp:
+                                            if let g = pt.gitOpArgs, g.op.tier == .read {
+                                                Task { await onGitOp(g) }
+                                            } else {
+                                                sheets.showingGitOpSheet = true
+                                            }
+                                        case .bash:
+                                            Task { await onBash(pt.bashArgs) }
+                                        case .savePlan:
+                                            Task { await onSavePlan() }
+                                        case nil:
+                                            break
+                                        }
+                                    },
                                     editActions: pt.kind == .updateFile
                                         ? .init(apply: onApplyEdit,
                                                 skip: onSkipEdit,
@@ -136,41 +171,7 @@ struct ChatMessageList: View {
                                                 canApply: (diffPreview?.added ?? 0) > 0
                                                        || (diffPreview?.removed ?? 0) > 0)
                                         : nil
-                                ) {
-                                    switch pt.kind {
-                                    case .createIssue:
-                                        sheets.showingIssueSheet = true
-                                    case .commentIssue:
-                                        sheets.showingCommentSheet = true
-                                    case .getIssue:
-                                        sheets.showingGetIssueSheet = true
-                                    case .updateIssue:
-                                        sheets.showingUpdateIssueSheet = true
-                                    case .listIssues:
-                                        sheets.showingListIssuesSheet = true
-                                    case .createBranch:
-                                        sheets.showingCreateBranchSheet = true
-                                        Task { sheets.branchSheetContext = await loadBranchContext() }
-                                    case .createPR:
-                                        sheets.showingCreatePRSheet = true
-                                    case .triggerReviewCode:
-                                        sheets.showingReviewCodeSheet = true
-                                    case .updateFile:
-                                        sheets.showingUpdateFileSheet = true
-                                    case .gitOp:
-                                        if let g = pt.gitOpArgs, g.op.tier == .read {
-                                            Task { await onGitOp(g) }
-                                        } else {
-                                            sheets.showingGitOpSheet = true
-                                        }
-                                    case .bash:
-                                        Task { await onBash(pt.bashArgs) }
-                                    case .savePlan:
-                                        Task { await onSavePlan() }
-                                    case nil:
-                                        break
-                                    }
-                                }
+                                )
                                 .padding(.top, 4)
                                 .transition(.opacity)
                             }

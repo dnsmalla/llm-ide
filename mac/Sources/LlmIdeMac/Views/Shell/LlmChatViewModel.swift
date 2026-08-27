@@ -12,8 +12,6 @@ protocol AgentAskHistoryFetching: Sendable {
     func clearAgentAskHistory() async throws -> Int
 }
 
-extension LlmIdeAPIClient: AgentAskHistoryFetching {}
-
 /// View model for `LlmChatSheet` — `send`/`stop`/`loadHistory`/`clearHistory`
 /// pulled out of the view so they're unit-testable without instantiating
 /// SwiftUI. Wraps a `ChatEngine` (built by the view with `AgentAskTransport`)

@@ -148,7 +148,7 @@ private struct FlatErrorEnvelope: Decodable {
 /// Single-tenant client paired with the `SessionStore`.  Reads its
 /// access token from the store on every call so token rotation
 /// (background refresh) is transparent to call sites.
-final class LlmIdeAPIClient {
+final class LlmIdeAPIClient: @unchecked Sendable {
     let baseURL: String
     /// Short-timeout session for `/auth/*` — login, refresh, register,
     /// prefs, secrets. These are cheap server-side; a 240 s timeout
@@ -454,3 +454,6 @@ final class LlmIdeAPIClient {
         return try await session(for: path).data(for: req)
     }
 }
+
+extension LlmIdeAPIClient: AgentAskSending {}
+extension LlmIdeAPIClient: AgentAskHistoryFetching {}

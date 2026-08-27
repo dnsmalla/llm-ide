@@ -216,7 +216,6 @@ final class CaptionOrchestrator: ObservableObject {
                 let summarizeFM = handle.frontmatter
                 let summarizeParticipants = participants
                 let summarizeTitle = request.title
-                let sessionId = handle.id
                 Task.detached(priority: .background) { [api] in
                     // Build the .docx output path before entering the service.
                     let projectRoot = root.deletingLastPathComponent()
