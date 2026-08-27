@@ -9,13 +9,14 @@ struct MenuBarChatView: View {
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var session: SessionStore
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.dismiss) private var dismiss
 
     @State private var engine: ChatEngine
     @State private var viewModel: LlmChatViewModel
     @State private var draft: String = ""
     @State private var confirmingClear = false
+    @State private var clearingHistory = false
     @State private var historyRefreshTask: Task<Void, Never>?
+    @State private var popoverWindow: NSWindow?
     @State private var selectedModelId: String? = nil
     @StateObject private var completion = CompletionController()
     @State private var pendingSkillIds: [String] = []
@@ -52,6 +53,8 @@ struct MenuBarChatView: View {
         }
         .frame(width: 380, height: 520)
         .background(Color(nsColor: .windowBackgroundColor))
+        .background(MenuBarChatWindowAccessor(window: $popoverWindow))
+        .onExitCommand { closePopover() }
         .onAppear {
             wireEngine()
             wireVoiceService()
@@ -61,16 +64,15 @@ struct MenuBarChatView: View {
                 await viewModel.loadHistory()
                 await completion.loadMetaIfNeeded()
             }
-            historyRefreshTask = Task {
-                while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    await viewModel.loadHistory()
-                }
-            }
+            startHistoryRefresh()
         }
         .onDisappear {
             historyRefreshTask?.cancel()
             historyRefreshTask = nil
+            if voiceState.isRecording {
+                voiceState.setRecording(false)
+                voiceService.cancel()
+            }
         }
         .onChange(of: selectedModelId) { _, _ in wireEngine() }
         .onChange(of: draft) { _, newValue in
@@ -85,13 +87,9 @@ struct MenuBarChatView: View {
         .onReceive(NotificationCenter.default.publisher(for: .llmChatTranscriptChanged)) { _ in
             Task { await viewModel.loadHistory() }
         }
-        .confirmationDialog(
-            "Clear the conversation?",
-            isPresented: $confirmingClear,
-            titleVisibility: .visible
-        ) {
+        .alert("Clear the conversation?", isPresented: $confirmingClear) {
             Button("Clear", role: .destructive) {
-                Task { await viewModel.clearHistory() }
+                Task { await performClearHistory() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -104,16 +102,20 @@ struct MenuBarChatView: View {
     private var headerBar: some View {
         HStack(spacing: 10) {
             Button {
-                dismiss()
+                closePopover()
             } label: {
                 Image(systemName: "minus")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(theme.current.textMuted)
             }
             .buttonStyle(.plain)
-            .help("Close chat popover")
+            .help("Minimize chat")
 
             Spacer()
+
+            if clearingHistory {
+                ProgressView().controlSize(.small)
+            }
 
             Button {
                 openMainWindow(section: .explorer)
@@ -131,7 +133,7 @@ struct MenuBarChatView: View {
                 Button("Clear conversation", role: .destructive) {
                     confirmingClear = true
                 }
-                .disabled(engine.messages.isEmpty)
+                .disabled(engine.messages.isEmpty || engine.busy || clearingHistory)
                 Divider()
                 Button("Settings…") {
                     openMainWindow(section: .settings)
@@ -538,6 +540,42 @@ struct MenuBarChatView: View {
         return tool.models
     }
 
+    private func closePopover() {
+        if voiceState.isRecording {
+            voiceState.setRecording(false)
+            voiceService.cancel()
+        }
+        MenuBarChatWindow.orderOut(popoverWindow)
+    }
+
+    private func startHistoryRefresh() {
+        historyRefreshTask?.cancel()
+        historyRefreshTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard !clearingHistory else { continue }
+                await viewModel.loadHistory()
+            }
+        }
+    }
+
+    private func performClearHistory() async {
+        guard !clearingHistory else { return }
+        clearingHistory = true
+        defer { clearingHistory = false }
+        if voiceState.isRecording {
+            voiceState.setRecording(false)
+            voiceService.cancel()
+        }
+        draft = ""
+        pendingSkillIds = []
+        pendingDirectives = []
+        voiceState.reset()
+        if engine.busy { viewModel.stop() }
+        await viewModel.clearHistory()
+        startHistoryRefresh()
+    }
+
     private func wireEngine() {
         engine.resolveTransportInput = { message, history, attachments, skills in
             let tool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
@@ -620,7 +658,7 @@ struct MenuBarChatView: View {
 
         if ChatSlashCommands.isClearCommand(text) {
             draft = ""
-            Task { await viewModel.clearHistory() }
+            confirmingClear = true
             return
         }
         if let section = ChatSlashCommands.sectionCommand(text) {
