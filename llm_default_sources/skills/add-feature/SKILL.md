@@ -23,20 +23,22 @@ A production feature is a **vertical slice**: schema → migration → service/r
 
 ## The slice (order is binding)
 
-Each step either (a) edits `system.yaml` and re-runs a generator, or (b) writes hand-code in a predictable location. Generator-emitted files are marked `[GEN]`; code you write is `[HAND]`.
+Almost every layer is GENERATED from `database.entities`. Only the web screen
+is hand-written. `[GEN]` files must NOT be authored by hand — they get
+overwritten, and hand copies drift from what the engine emits.
 
 | # | Step | Owner | Input | Output |
 |---|------|-------|-------|--------|
 | 1 | **Model the entity** | `configure-database` | Feature's core noun(s) | `database.entities[]` in system.yaml |
 | 2 | **Emit schema + migration** | `generate:database` | `database.entities[]` | `[GEN]` services/core-api/src/db/schema.ts, `[GEN]` migrations/000_extensions.sql |
 | 3 | **Apply migration** | drizzle-kit + psql | schema.ts | Live DB has the new table |
-| 4 | **Write repository** | hand | schema.ts | `[HAND]` services/core-api/src/repositories/<entity>Repo.ts |
-| 5 | **Write service** | hand | repository | `[HAND]` services/core-api/src/services/<feature>Service.ts |
-| 6 | **Add route** | hand | service | `[HAND]` services/core-api/src/routes/<feature>.ts; register in routes/index.ts |
-| 7 | **Update OpenAPI contract** | `model-api-contract` | new route | `[HAND]` services/core-api/docs/openapi.yaml |
-| 8 | **Build screen** | hand | primitives | `[HAND]` apps/web/app/<feature>/page.tsx (+ iOS / Android mirrors if in scope) |
-| 9 | **Wire client** | hand | route contract | `[HAND]` apps/web/services/<feature>-api.ts (or extend auth-api pattern) |
-| 10 | **Tests** | `test-driven-development` | all of the above | `[HAND]` services/core-api/tests/<feature>.test.ts + apps/web/app/<feature>/__tests__/ |
+| 4 | **Repository** | `generate:feature` | `database.entities[]` | `[GEN]` src/repositories/<e>Repo.ts |
+| 5 | **Service** | `generate:feature` | repository | `[GEN]` src/services/<e>.service.ts |
+| 6 | **Route + registration** | `generate:feature` | service | `[GEN]` src/routes/<e>.ts, and routes/index.ts is wired AUTOMATICALLY — do not hand-wire it |
+| 7 | **OpenAPI contract** | `generate:openapi-from-routes` | the route graph | `[GEN]` docs/openapi.yaml paths |
+| 8 | **Screen** | hand, from `templates/` | primitives | `[HAND]` apps/web/app/<plural>/page.tsx — the ONLY hand-written layer |
+| 9 | **Client registry + models** | `generate:api-client`, `generate:api-models` | the OpenAPI spec | `[GEN]` src/generated/apiEndpoints.ts, src/generated/models.ts |
+| 10 | **Tests** | `generate:feature` | all of the above | `[GEN]` src/__tests__/<e>.integration.test.ts; add cases by hand only for behaviour it cannot know |
 | 11 | **Run compliance** | `./master.sh compliance` | — | Pass, or loop on the failure |
 
 ## Entity checklist (step 1)
@@ -50,62 +52,16 @@ Before declaring, decide:
 - **Unique constraints** — email, slug, external ID — use `unique: true` plus an explicit index for sort performance
 - **Indexes** — every FK gets one; every filter column gets one; composite if multi-column queries dominate
 
-## Route scaffold (step 6)
+## UI scaffold (step 8) — the only hand-written layer
 
-Drop into `services/core-api/src/routes/<feature>.ts` following the shape of the generated `auth.ts`:
+Compose primitives: no raw hex, no `<div style={{padding: 16}}>`. Layer 3
+compliance fails otherwise.
 
-```ts
-import type { IncomingMessage, ServerResponse } from "http";
-import { postsService } from "../services/postsService";
-// stub — reach for real auth middleware/guards here
+Do not write the screen from scratch and do not read the template to retype
+it — copy it (see the chain section below), then edit the copy:
 
-export const handleListPosts = async (req: any, res: ServerResponse) => {
-  const rows = await postsService.list({ userId: req.user?.id });
-  sendJson(res, 200, { success: true, data: rows });
-};
-
-export const handleCreatePost = async (req: any, res: ServerResponse) => {
-  const { title, body } = req.body ?? {};
-  if (!title) return badRequest(res, "title is required");
-  const row = await postsService.create({ userId: req.user.id, title, body });
-  sendJson(res, 201, { success: true, data: row });
-};
-```
-
-Register in `routes/index.ts`:
-
-```ts
-if (path === "/v1/posts" && req.method === "GET")  return handleListPosts(req, res);
-if (path === "/v1/posts" && req.method === "POST") return handleCreatePost(req, res);
-```
-
-## UI scaffold (step 8)
-
-Compose primitives — no raw hex, no `<div style={{padding: 16}}>`. Layer 3 compliance will fail otherwise.
-
-```tsx
-import { Screen, Stack, Surface, Text, Button } from "@/components/shared";
-import { postsApi } from "@/services/posts-api";
-import { useEffect, useState } from "react";
-
-export default function PostsPage() {
-  const [items, setItems] = useState([]);
-  useEffect(() => { postsApi.list().then(r => setItems(r.data)); }, []);
-  return (
-    <Screen>
-      <Stack gap="m">
-        <Text variant="h1">Posts</Text>
-        {items.map((p: any) => (
-          <Surface key={p.id} elevation={1} radius="m">
-            <Text variant="h3">{p.title}</Text>
-            <Text role="secondary">{p.body}</Text>
-          </Surface>
-        ))}
-        <Button variant="primary" onClick={() => {/* open compose modal */}}>New post</Button>
-      </Stack>
-    </Screen>
-  );
-}
+```bash
+skills/add-feature/scripts/paste-entity.sh <singular> <plural> .
 ```
 
 ## Common tasks
@@ -143,58 +99,68 @@ export default function PostsPage() {
 
 ---
 
-## Two ways to get the code — try the generator FIRST
+## Declare the entity, then run the chain — do not author these files
 
-### 1. `generate:feature` (preferred — zero authoring)
+Almost everything a feature needs is GENERATED from
+`database.entities`. Authoring it by hand costs tokens twice (reading an
+example, then retyping it) and drifts from what the engine emits.
 
-The engine already emits the whole layered backend from a declared entity:
+### 1. Declare the entity
+
+Merge `templates/snippets/system.yaml.entity` into
+`.auto_system/system.yaml`. This is the generator's INPUT — the only part
+you write.
+
+### 2. Run the chain, in order
 
 ```bash
-# 1. add the entity to .auto_system/system.yaml (see the snippet below)
-# 2. then:
-./master.sh generate:feature
+./master.sh generate:feature               # schema, repo, service, route, test
+./master.sh generate:openapi-from-routes   # OpenAPI paths from the route graph
+./master.sh generate:api-client            # ApiEndpoints registry per platform
+./master.sh generate:api-models            # typed client models from the spec
 ```
 
-That writes `src/schemas/<e>.schema.ts`, `repositories/<e>Repo.ts`,
-`services/<e>.service.ts`, `routes/<e>.ts` and
-`__tests__/<e>.integration.test.ts` — from config, identically every run,
-at zero model cost. Use it whenever the entity is expressible as columns.
+What that covers, measured on a two-platform project:
 
-### 2. Templates (fallback — when the generator cannot express it)
+| Layer | Emitted by |
+|---|---|
+| `src/schemas/<e>.schema.ts` | `generate:feature` |
+| `src/repositories/<e>Repo.ts` | `generate:feature` |
+| `src/services/<e>.service.ts` | `generate:feature` |
+| `src/routes/<e>.ts` | `generate:feature` |
+| `src/__tests__/<e>.integration.test.ts` | `generate:feature` |
+| **route registration in `routes/index.ts`** | `generate:feature` (automatic — do not hand-wire) |
+| `docs/openapi.yaml` paths | `generate:openapi-from-routes` |
+| `src/generated/apiEndpoints.ts` | `generate:api-client` |
+| `src/generated/models.ts` | `generate:api-models` |
 
-For anything the generator does not cover (custom route shapes, a web screen,
-an OpenAPI block), copy the templates instead of retyping them:
+### 3. The one thing the chain does NOT emit: the web screen
+
+There is no generator for the UI page, so it is the only template here:
 
 ```bash
 skills/add-feature/scripts/paste-entity.sh <singular> <plural> [project-root]
 # e.g. paste-entity.sh comment comments .
 ```
 
-It copies these and renames `posts`/`Posts`/`post`/`Post` in **paths and
-contents**, skipping anything that already exists:
+Copies `templates/apps/web/app/posts/page.tsx` to
+`apps/web/app/<plural>/page.tsx`, renaming the entity in the path and in
+identifiers (`postsApi` → `<plural>Api`, `PostsPage` → `<Plural>Page`), and
+skips the file if it already exists.
 
-| template | lands at |
-|---|---|
-| `templates/services/core-api/src/repositories/postsRepo.ts` | `…/repositories/<plural>Repo.ts` |
-| `templates/services/core-api/src/services/postsService.ts` | `…/services/<plural>Service.ts` |
-| `templates/services/core-api/src/routes/posts.ts` | `…/routes/<plural>.ts` |
-| `templates/services/core-api/docs/openapi.yaml` | merge into the existing spec |
-| `templates/services/core-api/tests/posts.test.ts` | `…/tests/<plural>.test.ts` |
-| `templates/apps/web/services/posts-api.ts` | `apps/web/services/<plural>-api.ts` |
-| `templates/apps/web/app/posts/page.tsx` | `apps/web/app/<plural>/page.tsx` |
+**Do not `Read` the template.** Copying costs nothing; reading it to retype
+it costs tokens twice and yields different output each run. Read it only if
+you must edit it after copying.
 
-Two merge into files that already exist, so the script leaves them alone:
-
-- `templates/snippets/system.yaml.entity` → `.auto_system/system.yaml`
-- `templates/snippets/routes-index.registration.ts` → `src/routes/index.ts`
-
-**Do not `Read` the template files.** Copying them costs nothing; reading 341
-lines of example code into context to retype it as 341 similar lines costs
-tokens twice and produces different output every run. Read one only when you
-must edit it after copying.
-
-### 3. Verify
+### 4. Verify
 
 ```bash
 ./master.sh compliance
 ```
+
+## If a layer genuinely cannot be generated
+
+Custom route shapes, a non-CRUD service, a screen that is not a list/detail —
+write those by hand, and say in your hand-off which layer you authored and
+why the generator could not express it. Do not hand-write a layer the chain
+already covers: it will be overwritten or drift.

@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
-# Copy the add-feature templates into a project, renaming the example entity.
+# Copy the ONE template the generator chain cannot produce — the web screen —
+# renaming the example entity.
 #
-# The templates are the payload; this script exists so an agent never has to
-# READ them. Reading 341 lines of example code into context to retype it as
-# 341 similar lines costs tokens twice and produces different output each run.
-# Copying costs none and is byte-identical.
+# Everything else a feature needs is generated (see SKILL.md): the backend
+# layers, the OpenAPI paths, the client registry and models, and the route
+# registration are all emitted from `database.entities`. This script exists
+# only so an agent never has to READ the screen template to retype it.
 #
 # Usage: paste-entity.sh <entity-singular> <entity-plural> [project-root]
 #   e.g. paste-entity.sh comment comments .
-#
-# Substitutions applied to paths AND contents:
-#   posts -> <plural>    Posts -> <Plural>    post -> <singular>    Post -> <Singular>
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
@@ -29,7 +27,6 @@ cap() { printf '%s%s' "$(printf '%s' "${1:0:1}" | tr '[:lower:]' '[:upper:]')" "
 SINGULAR_CAP="$(cap "$SINGULAR")"; PLURAL_CAP="$(cap "$PLURAL")"
 
 written=0 skipped=0
-# Full files only; snippets/ are merged by hand into existing files.
 while IFS= read -r src; do
   rel="${src#"$TPL"/}"
   case "$rel" in snippets/*) continue ;; esac
@@ -40,13 +37,23 @@ while IFS= read -r src; do
     echo "  skip (exists) $dest_rel"; skipped=$((skipped+1)); continue
   fi
   mkdir -p "$(dirname "$dest")"
-  sed -e "s/posts/$PLURAL/g" -e "s/Posts/$PLURAL_CAP/g" \
-      -e "s/post/$SINGULAR/g" -e "s/Post/$SINGULAR_CAP/g" "$src" > "$dest"
+  # perl, not sed: BSD sed (macOS) silently ignores \b in -E mode, so every
+  # rule matched nothing. Lookahead handles camelCase compounds (postsApi,
+  # PostsPage, PostResponse) while \b protects words that merely CONTAIN the
+  # entity name — postgres, posted, compose.
+  perl -pe "
+    s/\\bposts(?=[A-Z])/$PLURAL/g;
+    s/\\bPosts(?=[A-Z])/$PLURAL_CAP/g;
+    s/\\bPost(?=[A-Z])/$SINGULAR_CAP/g;
+    s/\\bposts\\b/$PLURAL/g;
+    s/\\bPosts\\b/$PLURAL_CAP/g;
+    s/\\bpost\\b/$SINGULAR/g;
+    s/\\bPost\\b/$SINGULAR_CAP/g;
+  " "$src" > "$dest"
   echo "  wrote $dest_rel"; written=$((written+1))
 done < <(find "$TPL" -type f | sort)
 
 echo
 echo "$written written, $skipped skipped."
-echo "Still manual (they merge into existing files — see SKILL.md):"
-echo "  - templates/snippets/system.yaml.entity           -> .auto_system/system.yaml"
-echo "  - templates/snippets/routes-index.registration.ts -> src/routes/index.ts"
+echo "Merge by hand (it is the generator's INPUT, not its output):"
+echo "  - templates/snippets/system.yaml.entity -> .auto_system/system.yaml"
