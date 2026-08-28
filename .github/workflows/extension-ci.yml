@@ -51,3 +51,10 @@ jobs:
 
       - name: Build (bundler)
         run: npm run build
+
+      - name: Render smoke (React runtime)
+        # The unit suite runs on node --test with --experimental-strip-types,
+        # which cannot import a .tsx — so nothing there renders a component and
+        # a React/react-dom break passes every other gate. Runs after build
+        # because it uses the same vite pipeline.
+        run: npm run test:render
