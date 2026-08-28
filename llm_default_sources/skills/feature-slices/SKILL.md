@@ -38,6 +38,21 @@ install, then spend your tokens on what is actually specific to this app.
   upstream; local edits belong in the host's own files.
 - Bumping the engine version itself — that is `upgrade-system`.
 
+## Requires auto-system >= 5.18.0
+
+The `feature:*` commands landed in 5.18.0. Check before you rely on them:
+
+```bash
+./master.sh feature:list --json    # or: node core/dist/index.js --version
+```
+
+If that errors with an unknown command, the engine predates the slice
+library — use `upgrade-system` first, and do NOT hand-write the feature in
+the meantime without saying so.
+
+Note `--version` was itself wrong before 5.18.0 (hardcoded `5.0.0`), so on an
+older engine trust the presence of `feature:list`, not the version string.
+
 ## The catalog (read this first, always)
 
 ```bash
