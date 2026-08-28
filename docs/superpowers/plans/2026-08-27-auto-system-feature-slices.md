@@ -1885,7 +1885,7 @@ git commit -m "feat: slice linter (manifest, paths, placeholders, requires graph
 **Interfaces:**
 - Consumes: `master.sh feature:list --json` (schema 1), `feature:add <id>`, `feature:status`, `feature:upgrade`, per-slice `WIRING.md`.
 
-- [ ] **Step 1: Write the skill** (frontmatter style matches `.skills/skills/configure-auth/SKILL.md`):
+- [x] **Step 1: Write the skill** (frontmatter style matches `.skills/skills/configure-auth/SKILL.md`):
 
 ```markdown
 ---
@@ -1944,9 +1944,9 @@ user's customized file — never discard user code.
   (`master.sh compliance`) to confirm 10/10.
 ```
 
-- [ ] **Step 2: Register if the kit has an index** — check `.skills/registry.yaml` and `CATALOG.md` for per-skill entries (grep `configure-auth`); add `install-feature-slice` in the same places and family if required.
+- [x] **Step 2: Register if the kit has an index** — check `.skills/registry.yaml` and `CATALOG.md` for per-skill entries (grep `configure-auth`); add `install-feature-slice` in the same places and family if required.
 
-- [ ] **Step 3: Commit + push the skills repo**
+- [x] **Step 3: Commit + push the skills repo**
 
 ```bash
 cd .skills && git checkout -b feat/feature-slices
@@ -1955,7 +1955,7 @@ git commit -m "feat: install-feature-slice skill for auto-system slice library"
 git push -u origin feat/feature-slices
 ```
 
-- [ ] **Step 4: llm-ide pin bump + sync** (from llm-ide root, after the skills branch merges to the kit's main — coordinate with the user):
+- [x] **Step 4: llm-ide pin bump + sync** (from llm-ide root, after the skills branch merges to the kit's main — coordinate with the user):
 
 ```bash
 cd .skills && git checkout main && git pull
@@ -1967,9 +1967,9 @@ git commit -m "chore: bump skills kit pin with install-feature-slice; sync agent
 
 Ask the user before pushing to llm-ide main (repo convention).
 
-- [ ] **Step 5: Verify end-to-end** — from a scratch project with `.auto_system/system.yaml` and the engine submodule: `feature:add legal` → files land; llm-ide agent asked to "add legal pages" picks the skill (verify via the chat "/" menu or agent tool listing showing `install-feature-slice`).
+- [x] **Step 5: Verify end-to-end** — from a scratch project with `.auto_system/system.yaml` and the engine submodule: `feature:add legal` → files land; llm-ide agent asked to "add legal pages" picks the skill (verify via the chat "/" menu or agent tool listing showing `install-feature-slice`).
 
-- [ ] **Step 6: Final auto-system commit** — version bump `core/package.json` → `5.18.0`, update root `CHANGELOG.md`, push `feat/feature-slices`, open PR.
+- [x] **Step 6: Final auto-system commit** — version bump `core/package.json` → `5.18.0`, update root `CHANGELOG.md`, push `feat/feature-slices`, open PR.
 
 ---
 
