@@ -259,67 +259,21 @@ settings:
 
 ## Ready-to-paste: composing primitives in a new screen
 
-Every screen looks like this — no raw hex, no raw px/dp:
+Every screen composes primitives and reads tokens — no raw hex, no raw px/dp.
+Compliance (`Web: no hardcoded styles`, orphan-classes, design-token checks)
+fails otherwise.
 
-```tsx
-// apps/web/app/feed/page.tsx
-import { Screen, Surface, Stack, Text, Button } from "../../components/shared";
+The generated `app-shell` slice already contains a conforming screen on every
+platform; read one instead of a snippet here, which would be a snapshot that
+drifts:
 
-export default function Feed() {
-  return (
-    <Screen>
-      <Stack gap="l">
-        <Text variant="h1">Feed</Text>
-        <Surface radius="m" elevation={1}>
-          <Stack gap="s">
-            <Text variant="h3">Welcome back</Text>
-            <Text role="secondary">You have 3 new updates.</Text>
-            <Button variant="primary" onClick={() => {/* … */}}>View all</Button>
-          </Stack>
-        </Surface>
-      </Stack>
-    </Screen>
-  );
-}
-```
+| Platform | Reference screen |
+|---|---|
+| web | `apps/web/app/page.tsx`, primitives in `components/shared/` |
+| iOS | `apps/ios/<App>/Views/Shared/`, e.g. `StandardPage.swift` |
+| Android | `.../ui/components/`, e.g. `Screen.kt`, `AppText.kt` |
 
-iOS equivalent (`apps/ios/AppName/Views/Feed/FeedView.swift`):
-
-```swift
-struct FeedView: View {
-    var body: some View {
-        Screen {
-            AppStack(.column, gap: .l) {
-                AppText("Feed", variant: .h1, weight: .bold)
-                Surface(radius: .m, elevation: 1) {
-                    AppStack(.column, gap: .s) {
-                        AppText("Welcome back", variant: .h3, weight: .semibold)
-                        AppText("You have 3 new updates.", role: .secondary)
-                        AppButton("View all") { /* … */ }
-                    }
-                }
-            }
-        }
-    }
-}
-```
-
-Android equivalent (`apps/android/.../ui/feed/FeedScreen.kt`):
-
-```kotlin
-@Composable
-fun FeedScreen() {
-    Screen {
-        AppStack(direction = StackDirection.Column, gap = StackGap.L) {
-            AppText("Feed", variant = TextVariant.H1, weight = FontWeight.Bold)
-            AppSurface(radius = SurfaceRadius.M, elevation = DesignTokens.Elevation.E1) {
-                AppStack(direction = StackDirection.Column, gap = StackGap.S) {
-                    AppText("Welcome back", variant = TextVariant.H3, weight = FontWeight.SemiBold)
-                    AppText("You have 3 new updates.", role = TextRole.Secondary)
-                    AppButton("View all", onClick = { /* … */ })
-                }
-            }
-        }
-    }
-}
-```
+Tokens come from `theme sync` — `styles/theme.css` (web),
+`Theme/DesignSystem.swift` (iOS), `ui/theme/DesignTokens.kt` (Android). Never
+hand-edit those files; change the `theme:` block and re-run
+`./master.sh theme sync`.

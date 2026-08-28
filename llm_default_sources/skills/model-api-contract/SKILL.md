@@ -123,12 +123,31 @@ components:
 
 ## Steps
 
-1. **Read the route you just added** — method, path, request/response shapes, error modes.
-2. **Add `paths:` entry** under the correct prefix (e.g. `/v1/posts/{id}`). Parameterize path params (`{ in: path, required: true, schema: { type: string, format: uuid } }`).
-3. **Define request/response schemas** in `components/schemas/` — lift any shared shape (User, Post) to a named ref.
-4. **Add to `tags:`** at root level if the route's tag is new (helps generated docs group logically).
-5. **Run compliance:** `./master.sh compliance` — fails reveal missing prefixes or absent auth routes.
-6. **Generate a client (optional):** `openapi-typescript docs/openapi.yaml -o src/generated/api.ts` → typed client stubs that match the server.
+The spec's `paths:` are DERIVED from the backend route graph — do not hand-author
+them, and do not hand-write the typed client either.
+
+1. **Add or change the route** in `services/core-api/src/routes/` (or declare the
+   entity and let `generate:feature` emit the route).
+2. **Derive the contract:**
+   ```bash
+   ./master.sh generate:openapi-from-routes
+   ```
+   This keeps `docs/openapi.yaml` accurate against the code rather than a
+   hand-maintained copy that drifts.
+3. **Regenerate the clients** for every active platform:
+   ```bash
+   ./master.sh generate:api-client     # src/generated/apiEndpoints.ts
+   ./master.sh generate:api-models     # src/generated/models.ts
+   ```
+   Do NOT reach for `openapi-typescript` or any other external generator — the
+   engine already emits per-platform clients, and a second generated client
+   diverges from the one the compliance check knows about.
+4. **Hand-edit the spec only for what the route graph cannot express** —
+   descriptions, examples, and `components/schemas/` shapes that are not
+   inferable. Those survive regeneration; invented `paths:` do not.
+5. **Verify:** `./master.sh compliance` — failures reveal missing prefixes,
+   absent auth routes, or client/model drift.
+
 
 ## Common tasks
 
@@ -161,175 +180,55 @@ components:
 
 ---
 
-## Ready-to-paste: full CRUD OpenAPI block for a new resource
+## What you hand-edit, and what regeneration overwrites
 
-Replace `posts` / `Post` with your resource. Drop under `paths:` and `components/schemas:` of `docs/openapi.yaml`.
+`generate:openapi-from-routes` rewrites `paths:` from the route graph. Anything
+you type there is lost on the next run. These parts persist, so they are where
+hand-editing belongs:
 
 ```yaml
-paths:
-  /v1/posts:
-    get:
-      summary: "List posts for the authenticated user"
-      operationId: "listPosts"
-      tags: [posts]
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { in: query, name: cursor, required: false, schema: { type: string, format: uuid } }
-        - { in: query, name: limit,  required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
-      responses:
-        "200":
-          description: "OK"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/PostListResponse" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "429": { $ref: "#/components/responses/RateLimited" }
-    post:
-      summary: "Create a post"
-      operationId: "createPost"
-      tags: [posts]
-      security: [{ bearerAuth: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/CreatePostRequest" }
-      responses:
-        "201":
-          description: "Created"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/PostResponse" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "429": { $ref: "#/components/responses/RateLimited" }
-
-  /v1/posts/{id}:
-    get:
-      summary: "Get a single post"
-      operationId: "getPost"
-      tags: [posts]
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
-      responses:
-        "200":
-          description: "OK"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/PostResponse" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "404":
-          description: "Not found"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-    patch:
-      summary: "Update a post"
-      operationId: "updatePost"
-      tags: [posts]
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/UpdatePostRequest" }
-      responses:
-        "200":
-          description: "OK"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/PostResponse" }
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403":
-          description: "Forbidden (not the owner)"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-        "404":
-          description: "Not found"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-    delete:
-      summary: "Delete a post"
-      operationId: "deletePost"
-      tags: [posts]
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
-      responses:
-        "204": { description: "Deleted" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403":
-          description: "Forbidden"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-        "404": { description: "Not found" }
-
 components:
   schemas:
-    Post:
+    Post:                        # shapes the route graph cannot infer
       type: object
-      required: [id, userId, title, isPrivate, createdAt]
+      required: [id, title, createdAt]
       properties:
         id:        { type: string, format: uuid }
-        userId:    { type: string, format: uuid }
-        title:     { type: string, minLength: 1, maxLength: 200 }
-        body:      { type: string, nullable: true, maxLength: 10000 }
-        isPrivate: { type: boolean }
+        title:     { type: string, maxLength: 200 }
         createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time }
-    PostResponse:
-      type: object
-      required: [success, data]
-      properties:
-        success: { type: boolean }
-        data:    { $ref: "#/components/schemas/Post" }
-    PostListResponse:
-      type: object
-      required: [success, data, nextCursor]
-      properties:
-        success:    { type: boolean }
-        data:       { type: array, items: { $ref: "#/components/schemas/Post" } }
-        nextCursor: { type: string, nullable: true, description: "Pass back as ?cursor= to fetch the next page" }
-    CreatePostRequest:
-      type: object
-      required: [title]
-      properties:
-        title:     { type: string, minLength: 1, maxLength: 200 }
-        body:      { type: string, nullable: true, maxLength: 10000 }
-        isPrivate: { type: boolean, default: false }
-    UpdatePostRequest:
-      type: object
-      description: "PATCH semantics — only the provided fields are updated"
-      properties:
-        title:     { type: string, minLength: 1, maxLength: 200 }
-        body:      { type: string, nullable: true, maxLength: 10000 }
-        isPrivate: { type: boolean }
+
+tags:
+  - name: posts                  # grouping for generated docs
+    description: Blog posts owned by the authenticated user
 ```
 
-## Ready-to-paste: generate a typed client from this contract
+Per-operation prose also survives — add `summary`, `description` and `examples`
+to an operation the generator created, rather than recreating the operation.
+
+To see the current full shape of the contract, read the generated file:
 
 ```bash
-# One-time:
-npm i -D openapi-typescript
-
-# Every time the contract changes:
-npx openapi-typescript services/core-api/docs/openapi.yaml -o apps/web/src/generated/api.d.ts
+./master.sh generate:openapi-from-routes
+sed -n '1,80p' services/core-api/docs/openapi.yaml
 ```
 
-Use in the web client:
+Reading the generated spec is cheaper and always accurate; a pasted example in
+this skill would be a snapshot that drifts.
 
-```ts
-import type { paths } from "./generated/api";
 
-type ListPostsResponse = paths["/v1/posts"]["get"]["responses"]["200"]["content"]["application/json"];
+## Typed clients: use the engine, not openapi-typescript
+
+```bash
+./master.sh generate:api-client     # ApiEndpoints registry, per active platform
+./master.sh generate:api-models     # typed models from components/schemas
 ```
+
+Emits `src/generated/apiEndpoints.ts` and `src/generated/models.ts` for each
+active client platform, and the compliance check verifies the client uses them
+(`Client: API path drift`, `Client: model drift`). An `openapi-typescript`
+client would pass none of that and adds an npm dependency for work the engine
+already does.
+
 
 ## Ready-to-paste: contract test (vitest + undici, `services/core-api/tests/contract.test.ts`)
 

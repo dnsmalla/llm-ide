@@ -155,73 +155,31 @@ backend:
     scryptN: 32768                    # ~150ms/login on modern hardware
 ```
 
-## Ready-to-paste: Google OAuth wiring (after declaring the provider)
+## OAuth: declare the provider — the handler IS auto-emitted
 
-Declaring `oauth.providers: ["google"]` registers *intent*; the handler isn't auto-emitted yet. Add this route manually in `services/core-api/src/routes/oauth.ts`:
+Declaring providers is all that is required:
 
-```ts
-import type { IncomingMessage, ServerResponse } from "http";
-import crypto from "crypto";
-
-// Env vars expected in production:
-//   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI
-const GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
-const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
-const GOOGLE_USERINFO = "https://www.googleapis.com/oauth2/v3/userinfo";
-
-export const handleGoogleStart = (req: IncomingMessage, res: ServerResponse) => {
-  const state = crypto.randomBytes(16).toString("hex");
-  // persist `state` in a short-lived cookie / session table for CSRF; pseudo:
-  res.setHeader("Set-Cookie", `oauth_state=${state}; Max-Age=600; HttpOnly; SameSite=Lax; Path=/`);
-  const url = new URL(GOOGLE_AUTH);
-  url.searchParams.set("client_id", process.env.GOOGLE_CLIENT_ID ?? "");
-  url.searchParams.set("redirect_uri", process.env.GOOGLE_REDIRECT_URI ?? "");
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "openid email profile");
-  url.searchParams.set("state", state);
-  res.statusCode = 302;
-  res.setHeader("Location", url.toString());
-  res.end();
-};
-
-export const handleGoogleCallback = async (req: IncomingMessage, res: ServerResponse) => {
-  const url = new URL(req.url ?? "/", "http://localhost");
-  const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
-  // verify state against cookie (omitted here — DO implement)
-  if (!code) { res.statusCode = 400; return res.end("missing code"); }
-
-  const tokenRes = await fetch(GOOGLE_TOKEN, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code,
-      client_id: process.env.GOOGLE_CLIENT_ID ?? "",
-      client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-      redirect_uri: process.env.GOOGLE_REDIRECT_URI ?? "",
-      grant_type: "authorization_code",
-    }),
-  });
-  const tokens = await tokenRes.json();
-  const userRes = await fetch(GOOGLE_USERINFO, {
-    headers: { Authorization: `Bearer ${tokens.access_token}` },
-  });
-  const profile = await userRes.json() as { sub: string; email: string; name: string; email_verified: boolean };
-
-  // Upsert user by email; issue your own session token using the same crypto
-  // helpers as routes/auth.ts (import and reuse).
-  // … issue JWT / set Set-Cookie … redirect to /app
-  res.statusCode = 302;
-  res.setHeader("Location", "/app");
-  res.end();
-};
+```yaml
+auth:
+  oauth:
+    providers: ["google"]        # google | apple | github | microsoft | facebook
 ```
 
-Register both in `src/routes/index.ts`:
+`generate:templates` then emits `services/core-api/src/routes/oauth.ts` — the
+full authorization-code flow with a CSRF state cookie, server-side token
+exchange, user upsert with account linking, and session issuance — and wires
+it into `routes/index.ts`. Verified: declaring `google` produces a 125-line
+`oauth.ts` and two references in the route index.
 
-```ts
-if (path === "/v1/auth/oauth/google/start"    && req.method === "GET") return handleGoogleStart(req, res);
-if (path === "/v1/auth/oauth/google/callback" && req.method === "GET") return handleGoogleCallback(req, res);
+**Do not hand-write `routes/oauth.ts`.** It is `[GEN]`; a hand-written copy is
+overwritten or conflicts with the emitted router.
+
+Set the provider's env vars (the emitted router reads them):
+
+```bash
+GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=… GOOGLE_REDIRECT_URI=…
 ```
 
-Add to `docs/openapi.yaml` under `paths:` (use `model-api-contract` skill for the schema).
+Apple is deliberately absent from the emitters: its client secret is a signed
+JWT needing key management, so declaring `apple` registers intent without a
+generated handler — that one you do write by hand.

@@ -246,43 +246,28 @@ npx drizzle-kit migrate
 psql "$DATABASE_URL" < db/seed.sql
 ```
 
-## Ready-to-paste: repository + service layer for a new entity
+## Repository + service layer: generated, not written
 
-For every entity declared, you get a table in `schema.ts`. Repositories read/write that table; services compose repositories with business rules. Drop the following into `services/core-api/src/repositories/postsRepo.ts`:
+Once the entity is declared and the schema emitted, the layered backend comes
+from the generator — do not author it:
 
-```ts
-import { eq, and, desc } from "drizzle-orm";
-import { db } from "../db/client";
-import { posts } from "../db/schema";
-
-export const postsRepo = {
-  async list({ userId, limit = 20, cursor }: { userId?: string; limit?: number; cursor?: string }) {
-    const where = userId ? eq(posts.userId, userId) : undefined;
-    return db.select().from(posts)
-      .where(where)
-      .orderBy(desc(posts.createdAt))
-      .limit(limit);
-  },
-  async create(input: { userId: string; title: string; body?: string }) {
-    const [row] = await db.insert(posts).values(input).returning();
-    return row;
-  },
-  async update(id: string, patch: Partial<{ title: string; body: string }>) {
-    const [row] = await db.update(posts).set({ ...patch, updatedAt: new Date() }).where(eq(posts.id, id)).returning();
-    return row;
-  },
-  async remove(id: string) {
-    await db.delete(posts).where(eq(posts.id, id));
-  },
-};
+```bash
+./master.sh generate:feature      # schema, repo, service, route, integration test
 ```
 
-`db/client.ts` (write once, reuse across all repos):
+For every `database.entities[]` entry that produces:
 
-```ts
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+| File | Note |
+|---|---|
+| `src/schemas/<e>.schema.ts` | validation schema |
+| `src/repositories/<e>Repo.ts` | table reads/writes |
+| `src/services/<e>.service.ts` | business rules over the repo |
+| `src/routes/<e>.ts` | HTTP surface, registered in `routes/index.ts` automatically |
+| `src/__tests__/<e>.integration.test.ts` | integration test |
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const db = drizzle(pool);
-```
+The DB client is **already** generated at `src/db/index.ts` by the `db-core`
+slice. Do not create `db/client.ts` — that path does not exist in a generated
+project and a second client would open a competing connection pool.
+
+Write a repository or service by hand only when the entity needs behaviour the
+generator cannot express, and say so in your hand-off.
