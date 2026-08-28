@@ -5,6 +5,7 @@
 // state.  Save → PUT /kb/agent/persona.  Reset clears the stored
 // flag so the agent falls back to built-in defaults.
 
+import type { JSX } from 'react';
 import React, { useEffect, useState } from 'react';
 import { authFetch, getServerUrl } from '../../lib/config';
 import AgentStatsBadge from './AgentStatsBadge';
