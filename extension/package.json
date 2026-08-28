@@ -28,7 +28,7 @@
     "@anthropic-ai/claude-agent-sdk": "0.3.238",
     "@modelcontextprotocol/sdk": "1.30.0",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "docx": "^9.7.1",
     "imapflow": "^1.7.1",
     "js-yaml": "^5.3.0",
