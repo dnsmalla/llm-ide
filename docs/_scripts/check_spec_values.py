@@ -67,9 +67,22 @@ def build_checks() -> list[tuple[str, object, object, str]]:
     head = migration_head(Path("extension/kb/migrations"))
     api = first_int(server, r"SERVER_API_VERSION\s*=\s*(\d+)")
     body = first_int(config, r"LLMIDE_BODY_LIMIT_MB',\s*(\d+)")
-    # graph-kit dependency version — pin the graph-kit.git line specifically so a
-    # bump shows up as drift (SwiftTerm also uses from: "1.2.0", so anchor on the url).
-    graphkit = first_str(package_swift, r'graph-kit\.git",\s*from:\s*"([\d.]+)"')
+    # graph-kit version. It is VENDORED at mac/LocalPackages/graph-kit (a
+    # .package(path:) dependency), not a versioned git pin, so there is no
+    # `from:` to read: the newest released CHANGELOG heading in the vendored
+    # copy is the only version the tree actually states.
+    graphkit = first_str(
+        _read("mac/LocalPackages/graph-kit/CHANGELOG.md"),
+        # first_str() runs re.search with NO re.M, so anchor on the newline
+        # rather than ^; [Unreleased] cannot match because \d needs digits.
+        r"\n## \[(\d+\.\d+\.\d+)\]",
+    )
+    # Also lock the MECHANISM: if this ever reverts to a git pin, the vendored
+    # CHANGELOG stops being the source of truth and this check would silently
+    # read a stale file.
+    graphkit_vendored = (
+        "vendored" if "LocalPackages/graph-kit" in package_swift else "git-pin"
+    )
     # Prometheus uptime metric name — renamed meetnotes_→llmide_; lock the name.
     uptime_metric = first_str(metrics, r"# TYPE (\w+_uptime_seconds) gauge")
     # Extension's server-version floor (separate value from SERVER_API_VERSION).
@@ -110,7 +123,11 @@ def build_checks() -> list[tuple[str, object, object, str]]:
          adr_head, first_int(_read("AGENTS.md"), r"ADRs 0001[–-]0*(\d+)"),
          "AGENTS.md"),
         ("graph-kit version — macos-app.md dependency table",
-         graphkit, first_str(macos, r"graph-kit \(`GraphKit`\) \| `from: \"([\d.]+)\"`"),
+         graphkit, first_str(macos, r"graph-kit \(`GraphKit`\) \| vendored `([\d.]+)`"),
+         "docs/spec/macos-app.md"),
+        ("graph-kit consumption mechanism — macos-app.md dependency table",
+         graphkit_vendored,
+         first_str(macos, r"graph-kit \(`GraphKit`\) \| vendored `[\d.]+` \((\w+)\)"),
          "docs/spec/macos-app.md"),
         ("uptime metric name — cross-cutting.md Prometheus section",
          uptime_metric, first_str(cross, r"server uptime \(`(\w+_uptime_seconds)`"),
