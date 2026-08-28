@@ -222,7 +222,7 @@ git commit -m "test: capture golden template fixtures locking current generate:t
   - `listSlices(featuresRoot: string): Promise<SliceInfo[]>` — sorted by id
   - `resolveFeaturesRoot(): string` — `process.env.AUTO_SYSTEM_FEATURES_ROOT ?? <repo-root>/features` where repo-root is resolved by walking up from `__dirname` until a dir containing `master.sh` and `core/` is found
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `core/test/feature-library/manifest.test.ts`:
 
@@ -288,12 +288,12 @@ describe('listSlices', () => {
 });
 ```
 
-- [ ] **Step 2: Run — expect FAIL (module missing)**
+- [x] **Step 2: Run — expect FAIL (module missing)**
 
 Run: `cd core && npx vitest run test/feature-library/manifest.test.ts`
 Expected: FAIL — cannot resolve `../../src/feature-library/manifest`.
 
-- [ ] **Step 3: Implement `core/src/feature-library/manifest.ts`**
+- [x] **Step 3: Implement `core/src/feature-library/manifest.ts`**
 
 ```ts
 import { readFile, readdir } from 'node:fs/promises';
@@ -383,12 +383,12 @@ export function resolveFeaturesRoot(): string {
 
 Note: when compiled to `dist/feature-library/manifest.js`, `dirname(__dirname)` is `<root>/core/dist/feature-library` — the walk-up handles both src (via ts-node) and dist.
 
-- [ ] **Step 4: Run — expect PASS**
+- [x] **Step 4: Run — expect PASS**
 
 Run: `cd core && npx vitest run test/feature-library/manifest.test.ts`
 Expected: 5 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add core/src/feature-library/manifest.ts core/test/feature-library/manifest.test.ts
@@ -411,7 +411,7 @@ git commit -m "feat: feature-library manifest model and catalog loader"
   - `buildPlaceholderContext(config: SystemConfig): PlaceholderContext`
   - `applyPlaceholders(content: string, ctx: PlaceholderContext): string` — identical algorithm: global `{{APP_NAME}}` + `{{APP_DOMAIN}}` replace, then `split('{{KEY}}').join(value)` per placeholder.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `core/test/feature-library/substitute.test.ts`:
 
@@ -447,12 +447,12 @@ describe('applyPlaceholders', () => {
 });
 ```
 
-- [ ] **Step 2: Run — expect FAIL**
+- [x] **Step 2: Run — expect FAIL**
 
 Run: `cd core && npx vitest run test/feature-library/substitute.test.ts`
 Expected: FAIL — module missing.
 
-- [ ] **Step 3: Move the code verbatim**
+- [x] **Step 3: Move the code verbatim**
 
 Cut from `core/src/templates/generator.ts` (inside `generateTemplates`, ~5432–5577): the `authPlaceholders` map construction (including `narrative`, `webFont`, hash-algorithm variants, jobs/webhook/backend/db/project blocks) and the `applyPlaceholders` closure. Paste into `core/src/feature-library/substitute.ts` as:
 
@@ -495,12 +495,12 @@ const placeholderCtx = buildPlaceholderContext(config);
 
 Keep `hasOAuth`, `isArgon2` etc. as local re-derivations in `generator.ts` **only if** still used elsewhere in that function (grep before deleting; they are used for OAUTH_MOUNT-style conditionals that remain in template bodies as placeholders — if only the moved map used them, they move too).
 
-- [ ] **Step 4: Run the FULL suite — parity is the real test**
+- [x] **Step 4: Run the FULL suite — parity is the real test**
 
 Run: `cd core && npx vitest run`
 Expected: ALL pass, including `golden-parity.test.ts` (3/3). A golden failure means the move altered substitution — fix until byte-identical.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add core/src/feature-library/substitute.ts core/src/templates/generator.ts core/test/feature-library/substitute.test.ts
@@ -525,7 +525,7 @@ git commit -m "refactor: extract placeholder substitution into feature-library (
   - `sha256(content: string): string`
   - `lockfilePath(projectRoot: string): string`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `core/test/feature-library/lockfile.test.ts`:
 
@@ -573,12 +573,12 @@ describe('lockfile', () => {
 });
 ```
 
-- [ ] **Step 2: Run — expect FAIL**
+- [x] **Step 2: Run — expect FAIL**
 
 Run: `cd core && npx vitest run test/feature-library/lockfile.test.ts`
 Expected: FAIL — module missing.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```ts
 import { createHash } from 'node:crypto';
@@ -624,12 +624,12 @@ export async function writeLockfile(projectRoot: string, lockfile: Lockfile): Pr
 }
 ```
 
-- [ ] **Step 4: Run — expect PASS**
+- [x] **Step 4: Run — expect PASS**
 
 Run: `cd core && npx vitest run test/feature-library/lockfile.test.ts`
 Expected: 3 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add core/src/feature-library/lockfile.ts core/test/feature-library/lockfile.test.ts
@@ -652,7 +652,7 @@ git commit -m "feat: feature-library lockfile with suspect-on-corrupt semantics"
   - `render.ts`: `renderSliceFiles(sliceDir: string, manifest: SliceManifest, ctx: PlaceholderContext, platforms: Platform[]): Promise<RenderedFile[]>` where `interface RenderedFile { platform: Platform; relPath: string; content: string; emitter?: string }` — reads `files/<platform>/**` recursively, substitutes, returns in sorted path order
   - `install.ts`: `installSlice(opts: { projectRoot: string; featuresRoot: string; sliceId: string; config: SystemConfig; force?: boolean }): Promise<InstallResult>` where `interface InstallResult { created: string[]; skipped: string[]; installed: string[] /* slice ids in topo order */ }`. Semantics: topologically resolves `requires` (unknown dep or cycle → throw), renders per *active* platform, applies the same per-platform brownfield skip filters `generateTemplates` uses, validates each target path within workspace, writes via `safeWriteFile` with skip-if-exists (`force` overwrites), records every written file in the lockfile under its slice with placeholder snapshot.
 
-- [ ] **Step 1: Create the fixture slice**
+- [x] **Step 1: Create the fixture slice**
 
 `core/test/feature-library/fixtures/slices/demo-legal/manifest.yaml`:
 
@@ -680,7 +680,7 @@ Legal page for {{APP_NAME}} ({{APP_DOMAIN}})
 No manual steps — fixture slice.
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 `core/test/feature-library/install.test.ts`:
 
@@ -758,12 +758,12 @@ describe('installSlice', () => {
 
 Adjust the `placeholders` assertion to the snapshot's real key set after implementing (the snapshot stores the full resolved `ctx.placeholders`).
 
-- [ ] **Step 3: Run — expect FAIL**
+- [x] **Step 3: Run — expect FAIL**
 
 Run: `cd core && npx vitest run test/feature-library/install.test.ts`
 Expected: FAIL — modules missing.
 
-- [ ] **Step 4: Implement `render.ts`**
+- [x] **Step 4: Implement `render.ts`**
 
 ```ts
 import { readFile, readdir } from 'node:fs/promises';
@@ -802,7 +802,7 @@ export async function renderSliceFiles(
 }
 ```
 
-- [ ] **Step 5: Implement `install.ts`**
+- [x] **Step 5: Implement `install.ts`**
 
 ```ts
 import { join } from 'node:path';
@@ -905,12 +905,12 @@ function engineVersion(): string {
 
 Step 6 note: if `buildSkipFilter` is not exported from `generator.ts`, add `export` to its declaration in this task (one-word change; golden test guards it).
 
-- [ ] **Step 6: Run — expect PASS, then full suite**
+- [x] **Step 6: Run — expect PASS, then full suite**
 
 Run: `cd core && npx vitest run test/feature-library/ && npx vitest run`
 Expected: all pass, golden 3/3.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add core/src/feature-library/ core/test/feature-library/
@@ -933,7 +933,7 @@ git commit -m "feat: slice renderer and installer with lockfile provenance"
   - `feature:add <id> [--force]` → install output (created/skipped lists)
   - `feature:status [--json]` → `{"schema":1,"installed":[{"id","installedVersion","availableVersion","upToDate","fileCount","pendingConflicts"}]}`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `core/test/feature-library/cli.test.ts`:
 
@@ -963,12 +963,12 @@ describe('feature:list', () => {
 
 (`feature:add`/`feature:status` are covered by the install/upgrade unit tests + manual smoke in step 5 — spawning a real install from a test would write outside tmp without careful cwd; keep CLI tests read-only.)
 
-- [ ] **Step 2: Run — expect FAIL**
+- [x] **Step 2: Run — expect FAIL**
 
 Run: `cd core && npx vitest run test/feature-library/cli.test.ts`
 Expected: FAIL — unknown command `feature:list`.
 
-- [ ] **Step 3: Implement the commands in `core/src/index.ts`**
+- [x] **Step 3: Implement the commands in `core/src/index.ts`**
 
 Insert after the `generate:templates` command block, following the file's existing `withCommand`/chalk style:
 
@@ -1045,7 +1045,7 @@ program
     });
 ```
 
-- [ ] **Step 4: Add help lines to `master.sh`** (in the commands echo block after `generate:feature`):
+- [x] **Step 4: Add help lines to `master.sh`** (in the commands echo block after `generate:feature`):
 
 ```bash
     echo "  feature:list       List available feature slices (--json for catalog)"
@@ -1056,7 +1056,7 @@ program
 
 (The `feature:upgrade` line lands with Task 13; adding the help line now is harmless only if you also add it there — otherwise defer that one line to Task 13.)
 
-- [ ] **Step 5: Manual smoke + full suite**
+- [x] **Step 5: Manual smoke + full suite**
 
 Run:
 ```bash
@@ -1068,7 +1068,7 @@ bash master.sh feature:add demo-legal 2>&1 | head -5
 ```
 Expected: list shows catalog from `AUTO_SYSTEM_FEATURES_ROOT` or repo `features/` (empty for now — "no slices" output is fine); add of a missing slice errors cleanly with unknown-slice message.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add core/src/index.ts core/master.sh core/test/feature-library/cli.test.ts 2>/dev/null || git add core/src/index.ts master.sh core/test/feature-library/cli.test.ts
@@ -1104,9 +1104,9 @@ git commit -m "feat: feature:list/add/status CLI commands"
 
 Final slice set (10): `app-shell`, `backend-middleware`, `db-core`, `jobs`, `webhooks`, `legal`, `support`, `settings`, `account`, `auth-core`.
 
-- [ ] **Step 1: Export the records** — in `core/src/templates/generator.ts` change `const WEB_TEMPLATES` / `IOS_TEMPLATES` / `ANDROID_TEMPLATES` / `BACKEND_TEMPLATES` to `export const …` (four one-word edits).
+- [x] **Step 1: Export the records** — in `core/src/templates/generator.ts` change `const WEB_TEMPLATES` / `IOS_TEMPLATES` / `ANDROID_TEMPLATES` / `BACKEND_TEMPLATES` to `export const …` (four one-word edits).
 
-- [ ] **Step 2: Write the dump script**
+- [x] **Step 2: Write the dump script**
 
 `core/scripts/dump-templates.ts`:
 
@@ -1173,19 +1173,19 @@ console.log('dumped to', FEATURES_ROOT);
 
 **Critical parity rule:** the monolith record VALUE is the exact emitted content. The dump appends a trailing newline only if missing — verify with the golden test after each extraction task; if a record's value does NOT end with `\n` and the slice reader adds one, parity breaks. Rule for the reader (Task 8): files are written verbatim, no newline normalization anywhere. (Drop the `.endsWith` normalization here too if unsure — dump byte-exact, `writeFileSync(out, content)`.)
 
-- [ ] **Step 3: Run `--list` first, save the inventory**
+- [x] **Step 3: Run `--list` first, save the inventory**
 
 Run: `cd core && npx ts-node scripts/dump-templates.ts --list > ../docs/feature-slices-inventory.txt && head -50 ../docs/feature-slices-inventory.txt`
 Review the assignment: every record key appears exactly once; spot-check that `legal`, `settings` landed as expected. If a rule misfires (e.g. `help` email templates landing in auth-core via the `email` rule), tighten the rule and re-run — **before** any extraction task depends on it.
 
-- [ ] **Step 4: Dump the trees**
+- [x] **Step 4: Dump the trees**
 
 Run: `cd core && npx ts-node scripts/dump-templates.ts && find ../features -type f | wc -l`
 Expected: total ≈ sum of record sizes across the four maps (count with `node -e` if desired). Trees now exist.
 
-- [ ] **Step 5: Write `docs/feature-slices.md`** — the slice table from the spec (app-shell added as residue slice), membership rules above, and `feature-slices-inventory.txt` referenced. Commit inventory file too.
+- [x] **Step 5: Write `docs/feature-slices.md`** — the slice table from the spec (app-shell added as residue slice), membership rules above, and `feature-slices-inventory.txt` referenced. Commit inventory file too.
 
-- [ ] **Step 6: Full suite + commit**
+- [x] **Step 6: Full suite + commit**
 
 Run: `cd core && npx vitest run` — green (nothing consumes the trees yet).
 
@@ -1219,7 +1219,7 @@ Each task follows the **same recipe** (repeated in full per task; do not skip st
 - Consumes: `renderSliceFiles` (Task 5), `loadManifest` (Task 2), dump trees (Task 7).
 - Produces: three installable slices; `features/` trees for them now authoritative.
 
-- [ ] **Step 1: Manifests**
+- [x] **Step 1: Manifests**
 
 `features/settings/manifest.yaml`:
 
@@ -1257,7 +1257,7 @@ config-keys: [project.name, advisor]
 emitters: []
 ```
 
-- [ ] **Step 2: WIRING.md files** (one per slice, same shape):
+- [x] **Step 2: WIRING.md files** (one per slice, same shape):
 
 `features/settings/WIRING.md`:
 
@@ -1287,14 +1287,14 @@ Fill in real policy text: the generated pages contain placeholder copy,
 not legal advice. Link /legal from signup and settings.
 ```
 
-- [ ] **Step 3: Apply recipe R steps 2–3** for all three slices (settings, support, legal) — cutover their platform entries per the recipe.
+- [x] **Step 3: Apply recipe R steps 2–3** for all three slices (settings, support, legal) — cutover their platform entries per the recipe.
 
-- [ ] **Step 4: Full suite — golden 3/3**
+- [x] **Step 4: Full suite — golden 3/3**
 
 Run: `cd core && npx vitest run`
 Expected: all green. On mismatch, diff the failing file vs `core/test/templates/golden/<case>/snapshot/` to find the content/order divergence.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add features/ core/src/templates/generator.ts
@@ -1310,7 +1310,7 @@ git commit -m "refactor: source settings/support/legal templates from feature sl
 
 **Interfaces:** same as Task 8.
 
-- [ ] **Step 1: Manifests**
+- [x] **Step 1: Manifests**
 
 `features/backend-middleware/manifest.yaml`:
 
@@ -1336,7 +1336,7 @@ config-keys: [database.urlEnvVar, auth.session]
 emitters: []
 ```
 
-- [ ] **Step 2: WIRING.md files**
+- [x] **Step 2: WIRING.md files**
 
 `features/backend-middleware/WIRING.md`:
 
@@ -1358,9 +1358,9 @@ emitters: []
 3. Repositories are import-only; routes register them in later slices.
 ```
 
-- [ ] **Step 3: Apply recipe R steps 2–3** for both slices.
-- [ ] **Step 4: Full suite — golden 3/3.** Run: `cd core && npx vitest run`
-- [ ] **Step 5: Commit**
+- [x] **Step 3: Apply recipe R steps 2–3** for both slices.
+- [x] **Step 4: Full suite — golden 3/3.** Run: `cd core && npx vitest run`
+- [x] **Step 5: Commit**
 
 ```bash
 git add features/ core/src/templates/generator.ts
@@ -1374,7 +1374,7 @@ git commit -m "refactor: source backend-middleware/db-core templates from featur
 - Create: `features/webhooks/manifest.yaml` + `WIRING.md`
 - Modify: `core/src/templates/generator.ts`
 
-- [ ] **Step 1: Manifests**
+- [x] **Step 1: Manifests**
 
 `features/jobs/manifest.yaml`:
 
@@ -1400,7 +1400,7 @@ config-keys: [webhooks.idempotencyCacheSize]
 emitters: []
 ```
 
-- [ ] **Step 2: WIRING.md files**
+- [x] **Step 2: WIRING.md files**
 
 `features/jobs/WIRING.md`:
 
@@ -1423,9 +1423,9 @@ emitters: []
 3. Idempotency cache is in-process; restart replays are safe for 2048 events.
 ```
 
-- [ ] **Step 3: Apply recipe R steps 2–3.**
-- [ ] **Step 4: Full suite — golden 3/3.** Run: `cd core && npx vitest run`
-- [ ] **Step 5: Commit**
+- [x] **Step 3: Apply recipe R steps 2–3.**
+- [x] **Step 4: Full suite — golden 3/3.** Run: `cd core && npx vitest run`
+- [x] **Step 5: Commit**
 
 ```bash
 git add features/ core/src/templates/generator.ts
@@ -1439,7 +1439,7 @@ git commit -m "refactor: source jobs/webhooks templates from feature slices"
 - Create: `features/app-shell/manifest.yaml` + `WIRING.md`
 - Modify: `core/src/templates/generator.ts`
 
-- [ ] **Step 1: Manifests**
+- [x] **Step 1: Manifests**
 
 `features/account/manifest.yaml`:
 
@@ -1465,7 +1465,7 @@ config-keys: [project.name, advisor.quality, theme]
 emitters: []
 ```
 
-- [ ] **Step 2: WIRING.md files**
+- [x] **Step 2: WIRING.md files**
 
 `features/account/WIRING.md`:
 
@@ -1488,9 +1488,9 @@ emitters: []
 3. Theme tokens flow from theme sync; do not hand-edit generated token files.
 ```
 
-- [ ] **Step 3: Apply recipe R steps 2–3.** Note account's `requires: [auth-core]` does NOT block extraction order — requires are an install-time graph, not a code dependency of the cutover.
-- [ ] **Step 4: Full suite — golden 3/3.** Run: `cd core && npx vitest run`
-- [ ] **Step 5: Commit**
+- [x] **Step 3: Apply recipe R steps 2–3.** Note account's `requires: [auth-core]` does NOT block extraction order — requires are an install-time graph, not a code dependency of the cutover.
+- [x] **Step 4: Full suite — golden 3/3.** Run: `cd core && npx vitest run`
+- [x] **Step 5: Commit**
 
 ```bash
 git add features/ core/src/templates/generator.ts
@@ -1509,7 +1509,7 @@ git commit -m "refactor: source account/app-shell templates from feature slices"
 **Interfaces:**
 - Produces: `interface EmitterModule { render(config: SystemConfig, ctx: PlaceholderContext): Array<{ platform: Platform; relPath: string; content: string }> }` — `install.ts` dynamically imports each `emit/<name>.ts` listed in the manifest (relative to slice dir) and appends its output to the rendered set, tagging lockfile records with `emitter: name`.
 
-- [ ] **Step 1: Manifest + WIRING**
+- [x] **Step 1: Manifest + WIRING**
 
 `features/auth-core/manifest.yaml`:
 
@@ -1536,7 +1536,7 @@ upgrade-notes: Password-hash parameter changes re-emit the backend hash module; 
 5. iOS/Android: wire LoginView/SignUpView into your navigation entry point.
 ```
 
-- [ ] **Step 2: Write failing emitter tests**
+- [x] **Step 2: Write failing emitter tests**
 
 `core/test/feature-library/emitters.test.ts`:
 
@@ -1569,9 +1569,9 @@ describe('password-hash emitter', () => {
 
 (If importing TS from `features/` doesn't resolve under vitest, add a path alias or move emitters to `core/src/feature-library/emitters/` with the manifest pointing at `core:` prefixed names — pick one, keep it consistent.)
 
-- [ ] **Step 3: Run — expect FAIL.** Run: `cd core && npx vitest run test/feature-library/emitters.test.ts`
+- [x] **Step 3: Run — expect FAIL.** Run: `cd core && npx vitest run test/feature-library/emitters.test.ts`
 
-- [ ] **Step 4: Move the emitter code.** In `generator.ts`, the hash-algorithm variants (`scryptConsts`, `scryptFuncs`, `argon2Funcs` — Task 3 kept them near the placeholder map) and the OAuth router emission (`generatableOAuthProviders` + `oauthContent` construction, ~5875) move into the two emit modules, each exporting `render(config, ctx)` returning the same file contents the inline code produced. The `OAUTH_IMPORT`/`OAUTH_MOUNT`/`AUTH_HASH_*` placeholders remain exactly as computed today (they live in the ctx map; emitters consume ctx, not raw config, for those).
+- [x] **Step 4: Move the emitter code.** In `generator.ts`, the hash-algorithm variants (`scryptConsts`, `scryptFuncs`, `argon2Funcs` — Task 3 kept them near the placeholder map) and the OAuth router emission (`generatableOAuthProviders` + `oauthContent` construction, ~5875) move into the two emit modules, each exporting `render(config, ctx)` returning the same file contents the inline code produced. The `OAUTH_IMPORT`/`OAUTH_MOUNT`/`AUTH_HASH_*` placeholders remain exactly as computed today (they live in the ctx map; emitters consume ctx, not raw config, for those).
 
 `features/auth-core/emit/password-hash.ts` skeleton (body = moved code):
 
@@ -1593,13 +1593,13 @@ export function render(config: SystemConfig, ctx: PlaceholderContext): Array<{ p
 
 (If today's generator emits the hash functions INLINE inside `routes/auth.ts` rather than a separate file, the emitter instead returns the two AUTH_HASH placeholder values for the template to splice — match whatever the monolith does; golden decides. The invariant: emitter output + template placeholders == today's bytes.)
 
-- [ ] **Step 5: Wire emitters into `install.ts`** — after `renderSliceFiles`, for each `manifest.emitters` name: `const mod = await import(join(sliceDir, 'emit', name + '.ts'))` (use the resolution strategy fixed in Step 2's note); validate `typeof mod.render === 'function'`; append `mod.render(config, ctx)` items (tag `emitter: name` in lockfile FileRecord).
+- [x] **Step 5: Wire emitters into `install.ts`** — after `renderSliceFiles`, for each `manifest.emitters` name: `const mod = await import(join(sliceDir, 'emit', name + '.ts'))` (use the resolution strategy fixed in Step 2's note); validate `typeof mod.render === 'function'`; append `mod.render(config, ctx)` items (tag `emitter: name` in lockfile FileRecord).
 
-- [ ] **Step 6: Apply recipe R steps 2–3 for auth-core's static files** (the largest set: auth pages/views/screens, auth-api, lib/auth, routes/auth).
+- [x] **Step 6: Apply recipe R steps 2–3 for auth-core's static files** (the largest set: auth pages/views/screens, auth-api, lib/auth, routes/auth).
 
-- [ ] **Step 7: Full suite — golden 3/3** (the high-security fixture covers argon2 + OAuth). Run: `cd core && npx vitest run`
+- [x] **Step 7: Full suite — golden 3/3** (the high-security fixture covers argon2 + OAuth). Run: `cd core && npx vitest run`
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add features/auth-core core/src/templates/generator.ts core/src/feature-library/install.ts core/test/feature-library/emitters.test.ts
@@ -1619,7 +1619,7 @@ git commit -m "refactor: extract auth-core with password-hash and oauth emitters
 **Interfaces:**
 - Produces: `generateTemplates(config)` keeps its exact signature and `{created, skipped}` return. Internally: for each slice in install order (app-shell → backend-middleware → db-core → auth-core-dependent chain → …) call the same shared render+write path `installSlice` uses, with the legacy skip-if-exists semantics, and update the lockfile.
 
-- [ ] **Step 1: Rewrite `generateTemplates` as orchestrator**
+- [x] **Step 1: Rewrite `generateTemplates` as orchestrator**
 
 ```ts
 export async function generateTemplates(config: SystemConfig): Promise<{ created: string[]; skipped: string[] }> {
@@ -1645,23 +1645,23 @@ export async function generateTemplates(config: SystemConfig): Promise<{ created
 
 Deviation risk vs legacy: legacy had bespoke write order, OAuth docs baseline, and `.cursorrules`-adjacent extras (`docsDir` baseline writes at ~5837). If golden fails, port those exact bespoke writes into the relevant slice's static files or a tiny dedicated emitter (`features/backend-middleware/emit/docs-baseline.ts`) until parity holds — golden is the contract, not this snippet.
 
-- [ ] **Step 2: Delete the monolith body** — remove the four record consts, `buildSkipFilter` inline copy (now imported from its new home in feature-library or keep in generator.ts but exported — wherever Task 5 put it), and all now-unused helpers. `generator.ts` should be <200 lines.
+- [x] **Step 2: Delete the monolith body** — remove the four record consts, `buildSkipFilter` inline copy (now imported from its new home in feature-library or keep in generator.ts but exported — wherever Task 5 put it), and all now-unused helpers. `generator.ts` should be <200 lines.
 
-- [ ] **Step 3: Delete `core/scripts/dump-templates.ts`** and the temporary record exports.
+- [x] **Step 3: Delete `core/scripts/dump-templates.ts`** and the temporary record exports.
 
-- [ ] **Step 4: Full suite + golden 3/3 + self-check**
+- [x] **Step 4: Full suite + golden 3/3 + self-check**
 
 Run: `cd core && npx vitest run && npx ts-node scripts/capture-golden.ts --check 2>/dev/null; npx vitest run test/templates/golden-parity.test.ts`
 (The capture script stays — it is the tool to create NEW goldens when a template intentionally changes; its snapshots stay frozen.)
 Also run from repo root: `bash master.sh status && bash master.sh feature:list`
 Expected: all green; feature:list shows 10 slices.
 
-- [ ] **Step 5: Regenerate the self-hosted app if a repo config exists**
+- [x] **Step 5: Regenerate the self-hosted app if a repo config exists**
 
 Run: `ls .auto_system/system.yaml 2>/dev/null && bash master.sh generate:templates && git status --short apps services | head`
 Expected: no diffs (skip-if-exists) OR diffs only in newly-added files. If the repo has no `.auto_system/system.yaml`, note that in the commit message and skip.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A core features
@@ -1685,7 +1685,7 @@ git commit -m "refactor: generate:templates orchestrates feature slices; monolit
   - `interface UpgradeReport { sliceId: string; from: string; to: string; updated: string[]; added: string[]; removed: string[]; conflicts: UpgradeConflict[] }`
   - `upgradeSlice(opts: { projectRoot: string; featuresRoot: string; sliceId: string; config: SystemConfig }): Promise<UpgradeReport>` — semantics: render new version with CURRENT config; per file: missing on disk → write + `added`; `sha256(disk) === record.sha256` → write + `updated` + refresh record; differs → `conflicts` (never write); in old record but not new render → `removed` (report only, never delete). Lockfile: bump version, refresh hashes for written files, set `pendingConflicts` to conflicted paths (cleared when a later upgrade finds them resolved). `suspect` lockfile → every file becomes a conflict.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `core/test/feature-library/upgrade.test.ts`:
 
@@ -1745,11 +1745,11 @@ describe('upgradeSlice', () => {
 });
 ```
 
-- [ ] **Step 2: Run — expect FAIL.** Run: `cd core && npx vitest run test/feature-library/upgrade.test.ts`
+- [x] **Step 2: Run — expect FAIL.** Run: `cd core && npx vitest run test/feature-library/upgrade.test.ts`
 
-- [ ] **Step 3: Implement `upgrade.ts`** per the Produces contract above. Structure: read lockfile (suspect → all-conflict mode), load manifest, render, classify each rendered file, write `updated`/`added`, collect conflicts, mutate lockfile record, write lockfile, return report.
+- [x] **Step 3: Implement `upgrade.ts`** per the Produces contract above. Structure: read lockfile (suspect → all-conflict mode), load manifest, render, classify each rendered file, write `updated`/`added`, collect conflicts, mutate lockfile record, write lockfile, return report.
 
-- [ ] **Step 4: CLI command** in `core/src/index.ts` (style of Task 6):
+- [x] **Step 4: CLI command** in `core/src/index.ts` (style of Task 6):
 
 ```ts
 program
@@ -1777,7 +1777,7 @@ program
 
 Add the `feature:upgrade` help line to `master.sh` if not already present (Task 6 step 4 note).
 
-- [ ] **Step 5: Full suite + commit**
+- [x] **Step 5: Full suite + commit**
 
 Run: `cd core && npx vitest run` — all green.
 
@@ -1799,7 +1799,7 @@ git commit -m "feat: feature:upgrade with provenance-checked mechanical updates 
 **Interfaces:**
 - Produces: `lintSlices(featuresRoot: string): Promise<Array<{ slice: string; errors: string[] }>>` — checks per slice: manifest validates (Task 2 rules); every declared platform has ≥1 file under `files/<platform>/`; no file path contains `..` or is absolute; every `{{PLACEHOLDER}}` in every file is either in the substitution ctx key set (validated against a fixture default config's ctx) or `APP_NAME`/`APP_DOMAIN`; requires graph across ALL slices is acyclic and refers to known ids; WIRING.md exists and is non-empty. Exit 1 if any errors.
 
-- [ ] **Step 1: Write the failing test** — `core/test/feature-library/lint-slices.test.ts` calls `lintSlices` against a temp features root with one good slice and three bad ones (missing platform dir, `../escape` path file, unknown `{{BOGUS_X}}` placeholder), asserting the error lists.
+- [x] **Step 1: Write the failing test** — `core/test/feature-library/lint-slices.test.ts` calls `lintSlices` against a temp features root with one good slice and three bad ones (missing platform dir, `../escape` path file, unknown `{{BOGUS_X}}` placeholder), asserting the error lists.
 
 ```ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -1848,23 +1848,23 @@ describe('lintSlices', () => {
 });
 ```
 
-- [ ] **Step 2: Run — expect FAIL.** Run: `cd core && npx vitest run test/feature-library/lint-slices.test.ts`
+- [x] **Step 2: Run — expect FAIL.** Run: `cd core && npx vitest run test/feature-library/lint-slices.test.ts`
 
-- [ ] **Step 3: Implement `core/scripts/lint-slices.ts`** exporting `lintSlices` (same file doubles as CLI via `if (require.main === module)` calling `resolveFeaturesRoot()` and exiting 1 on errors). Placeholder key set: build a ctx from the minimal golden fixture config (load `core/test/templates/golden/minimal/.auto_system/system.yaml` via ConfigManager with cwd override) plus `APP_NAME`/`APP_DOMAIN`.
+- [x] **Step 3: Implement `core/scripts/lint-slices.ts`** exporting `lintSlices` (same file doubles as CLI via `if (require.main === module)` calling `resolveFeaturesRoot()` and exiting 1 on errors). Placeholder key set: build a ctx from the minimal golden fixture config (load `core/test/templates/golden/minimal/.auto_system/system.yaml` via ConfigManager with cwd override) plus `APP_NAME`/`APP_DOMAIN`.
 
-- [ ] **Step 4: Lint the real library**
+- [x] **Step 4: Lint the real library**
 
 Run: `cd core && npm run lint:slices`
 Expected: 0 errors across the 10 slices. Fix any flagged template (usually a typo'd placeholder — fix the *template file*, not the linter).
 
-- [ ] **Step 5: CI** — add to `.github/workflows/ci.yml` after the core-test step:
+- [x] **Step 5: CI** — add to `.github/workflows/ci.yml` after the core-test step:
 
 ```yaml
       - name: Lint feature slices
         run: cd core && npm run lint:slices
 ```
 
-- [ ] **Step 6: Full suite + commit**
+- [x] **Step 6: Full suite + commit**
 
 Run: `cd core && npx vitest run` — green.
 
