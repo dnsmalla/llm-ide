@@ -391,3 +391,90 @@ test('refresh with zero enabled input sources keeps the existing snapshot and re
   assert.ok(fs.existsSync(path.join(dir, 'skills', 'committed-marker', 'SKILL.md')),
     'a no-input refresh must never wipe the existing snapshot');
 });
+
+// ---------------------------------------------------------------------------
+// The curated set is DATA, read per refresh — not a constant baked into the
+// running process. Previously, editing CORE_BUILTIN_SKILLS while a backend was
+// running meant its next refresh rebuilt the snapshot from the OLD set and
+// silently deleted the newly-added skill.
+//
+// These tests re-seed the registry themselves: earlier tests in this file
+// rewrite it, so the module-level fixture is not the state here.
+// ---------------------------------------------------------------------------
+
+/** A lone enabled BUILTIN source shipping exactly `names`. */
+function isolateBuiltin(names) {
+  const repo = fs.mkdtempSync(path.join(tmpRoot, 'curated-repo-'));
+  fs.writeFileSync(path.join(repo, 'registry.yaml'), 'registryVersion: "3.0.0"\n');
+  for (const n of names) {
+    fs.mkdirSync(path.join(repo, 'skills', n), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, 'skills', n, 'SKILL.md'),
+      `---\nname: ${n}\ndescription: d\n---\n\n# ${n}\n`,
+    );
+  }
+  writeRegistry([
+    { id: BUILTIN_ID, name: 'Central Skills', origin: 'builtin', location: repo, builtin: true },
+  ]);
+  setEnabled(USER, BUILTIN_ID, true);
+}
+
+const shippedSkills = () => {
+  const d = path.join(defaultSnapshotDir(), 'skills');
+  return fs.existsSync(d) ? fs.readdirSync(d).sort() : [];
+};
+
+test('curated set is re-read each refresh, so a file edit needs no restart', () => {
+  isolateBuiltin(['code-review']);
+  const listFile = path.join(tmpRoot, 'curated.json');
+  process.env.LLMIDE_CORE_SKILLS_FILE = listFile;
+  try {
+    fs.writeFileSync(listFile, JSON.stringify({ skills: ['code-review'] }));
+    refreshDefaultSnapshot(USER);
+    assert.deepEqual(shippedSkills(), ['code-review'], 'curated skill is shipped');
+
+    // Narrow the list with NO process restart — the refresh must honour it.
+    fs.writeFileSync(listFile, JSON.stringify({ skills: ['something-else'] }));
+    const after = refreshDefaultSnapshot(USER);
+    assert.deepEqual(shippedSkills(), [], 'a same-process refresh reads the NEW list');
+    assert.ok(
+      after.skipped.some((x) => x.skill === 'code-review'),
+      'the drop is recorded, not silent',
+    );
+  } finally {
+    delete process.env.LLMIDE_CORE_SKILLS_FILE;
+  }
+});
+
+test('a malformed curated file falls back and warns instead of wiping the snapshot', () => {
+  isolateBuiltin(['code-review']);
+  const listFile = path.join(tmpRoot, 'curated-bad.json');
+  process.env.LLMIDE_CORE_SKILLS_FILE = listFile;
+  try {
+    fs.writeFileSync(listFile, '{ not json');
+    const result = refreshDefaultSnapshot(USER);
+    // code-review IS in the compiled-in fallback, so it survives. Falling back
+    // to "nothing" would have emptied the shipped folder on a typo.
+    assert.deepEqual(shippedSkills(), ['code-review'], 'compiled-in fallback still ships it');
+    assert.ok(
+      result.skipped.some((x) => x.skill === null && /unreadable/.test(x.reason)),
+      'the fallback is reported',
+    );
+  } finally {
+    delete process.env.LLMIDE_CORE_SKILLS_FILE;
+  }
+});
+
+test('an empty curated list falls back rather than shipping nothing', () => {
+  isolateBuiltin(['code-review']);
+  const listFile = path.join(tmpRoot, 'curated-empty.json');
+  process.env.LLMIDE_CORE_SKILLS_FILE = listFile;
+  try {
+    fs.writeFileSync(listFile, JSON.stringify({ skills: [] }));
+    const result = refreshDefaultSnapshot(USER);
+    assert.deepEqual(shippedSkills(), ['code-review']);
+    assert.ok(result.skipped.some((x) => x.skill === null && /no skills/.test(x.reason)));
+  } finally {
+    delete process.env.LLMIDE_CORE_SKILLS_FILE;
+  }
+});

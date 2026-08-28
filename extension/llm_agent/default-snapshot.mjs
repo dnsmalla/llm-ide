@@ -73,7 +73,8 @@
 //   (see the async-git note atop llm-sources/registry.mjs), so an oversized
 //   third-party source is skipped and recorded in _meta.json.skipped rather
 //   than copied wholesale.
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { basename, dirname, join } from 'node:path';
 import { listSources, listDiscoveryHooks, defaultSourcesDir, defaultSourcesLocation, BUILTIN_ID, DEFAULT_SOURCES_ID } from '../llm-sources/registry.mjs';
 import { listEnabled } from '../llm-sources/state.mjs';
@@ -99,7 +100,7 @@ const SAFE_SOURCE_ID = /^[a-z][a-z0-9-]{1,40}$/;
 // default, not a general content policy. Update deliberately, not via a
 // broad "everything except X" filter, so drift in the upstream repo can't
 // silently balloon the default set back out.
-const CORE_BUILTIN_SKILLS = new Set([
+const CORE_BUILTIN_SKILLS_FALLBACK = new Set([
   'writing-plans', 'executing-plans', 'plan-structure-index', 'plan-director',
   'code-review', 'receiving-code-review', 'requesting-code-review',
   'documentation',
@@ -113,6 +114,41 @@ const CORE_BUILTIN_SKILLS = new Set([
   'verification-before-completion',
   'using-git-worktrees', 'finishing-a-development-branch',
 ]);
+
+/**
+ * The curated set, read from core-builtin-skills.json at CALL time.
+ *
+ * It used to be only the compiled-in Set above, which made every edit a
+ * restart-or-lose-work trap: a running backend keeps the OLD set in memory,
+ * and its next refresh (boot, a UI refresh, a source toggle) rebuilds the
+ * snapshot from scratch and therefore DELETES any skill the new list added.
+ * Reading a data file instead means editing the list takes effect on the next
+ * refresh, with no restart and nothing silently removed.
+ *
+ * A missing or malformed file falls back to the compiled-in set rather than to
+ * "everything" or "nothing" — a bad edit must not be able to wipe the
+ * snapshot — and says so through `skipped`, never silently.
+ */
+function loadCoreBuiltinSkills() {
+    const file = process.env.LLMIDE_CORE_SKILLS_FILE
+        || join(dirname(fileURLToPath(import.meta.url)), 'core-builtin-skills.json');
+    try {
+        const parsed = JSON.parse(readFileSync(file, 'utf8'));
+        const list = Array.isArray(parsed) ? parsed : parsed?.skills;
+        const names = Array.isArray(list)
+            ? list.filter((n) => typeof n === 'string' && n.trim())
+            : [];
+        if (names.length === 0) {
+            return { set: CORE_BUILTIN_SKILLS_FALLBACK, warning: 'core-builtin-skills.json declares no skills — using the compiled-in fallback set' };
+        }
+        return { set: new Set(names), warning: null };
+    } catch (err) {
+        return {
+            set: CORE_BUILTIN_SKILLS_FALLBACK,
+            warning: `core-builtin-skills.json unreadable (${err?.message || err}) — using the compiled-in fallback set`,
+        };
+    }
+}
 
 const DEFAULT_LIMITS = Object.freeze({
   maxSkillBytes: 10 * 1024 * 1024,   // per skill folder
@@ -192,6 +228,9 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
     hookEvents: CLAUDE_CODE_HOOK_EVENTS.length,
   };
   const skipped = [];
+  // Read per refresh, not per process — see loadCoreBuiltinSkills().
+  const { set: coreBuiltinSkills, warning: curatedWarning } = loadCoreBuiltinSkills();
+  if (curatedWarning) skipped.push({ source: BUILTIN_ID, skill: null, reason: curatedWarning });
   // Standard Claude-Code hook-manifest shape ({event: [{matcher, hooks:
   // [{type, command}]}]}) — NOT a custom {sources: {...}} wrapper. This
   // folder is ITSELF the always-on `default-sources` source (see the flat-
@@ -233,7 +272,7 @@ export function refreshDefaultSnapshot(userId, limits = {}) {
     // seenSkillNames above. Dropped copies are recorded, never silent.
     for (const { fam, dir: skillDir } of listSkillDirs(src.location)) {
       const name = basename(skillDir);
-      if (src.id === BUILTIN_ID && !CORE_BUILTIN_SKILLS.has(name)) {
+      if (src.id === BUILTIN_ID && !coreBuiltinSkills.has(name)) {
         skipped.push({ source: src.id, skill: name, reason: 'outside the curated fundamental-skills set for this product' });
         continue;
       }

@@ -1,0 +1,22 @@
+{
+  "_note": "Curated 'fundamental' subset of the central skills repo that THIS product ships by default. Read at every snapshot refresh, so editing it takes effect without restarting the backend. default-snapshot.mjs keeps a compiled-in fallback used only if this file is missing or invalid.",
+  "skills": [
+    "writing-plans",
+    "executing-plans",
+    "plan-structure-index",
+    "plan-director",
+    "code-review",
+    "receiving-code-review",
+    "requesting-code-review",
+    "documentation",
+    "systematic-debugging",
+    "test-driven-development",
+    "feature-slices",
+    "add-feature",
+    "add-code",
+    "brainstorming",
+    "verification-before-completion",
+    "using-git-worktrees",
+    "finishing-a-development-branch"
+  ]
+}
