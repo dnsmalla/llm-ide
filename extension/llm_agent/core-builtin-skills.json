@@ -1,5 +1,5 @@
 {
-  "_note": "Curated 'fundamental' subset of the central skills repo that THIS product ships by default. Read at every snapshot refresh, so editing it takes effect without restarting the backend. default-snapshot.mjs keeps a compiled-in fallback used only if this file is missing or invalid.",
+  "_note": "Curated 'fundamental' subset of the central skills repo that THIS product ships by default. Read at every snapshot refresh, so editing it takes effect without restarting the backend. default-snapshot.mjs keeps a compiled-in fallback used only if this file is missing or invalid. NOTE the curated filter applies ONLY to the builtin kit — skills from other registered sources (e.g. the auto-system engine plugin) are copied in full, which is why the auto-system skills are not listed here.",
   "skills": [
     "writing-plans",
     "executing-plans",
@@ -8,12 +8,8 @@
     "code-review",
     "receiving-code-review",
     "requesting-code-review",
-    "documentation",
     "systematic-debugging",
     "test-driven-development",
-    "feature-slices",
-    "add-feature",
-    "add-code",
     "brainstorming",
     "verification-before-completion",
     "using-git-worktrees",

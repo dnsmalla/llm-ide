@@ -103,13 +103,12 @@ const SAFE_SOURCE_ID = /^[a-z][a-z0-9-]{1,40}$/;
 const CORE_BUILTIN_SKILLS_FALLBACK = new Set([
   'writing-plans', 'executing-plans', 'plan-structure-index', 'plan-director',
   'code-review', 'receiving-code-review', 'requesting-code-review',
-  'documentation',
   'systematic-debugging', 'test-driven-development',
-  // feature-slices sits BEFORE add-feature in the intended flow: it tells an
-  // agent to install a versioned slice rather than author auth/legal/account
-  // code by hand. Shipping add-feature without it makes hand-writing the
-  // default path for features the slice library already covers.
-  'feature-slices', 'add-feature', 'add-code',
+  // The auto-system engine skills (feature-slices, add-feature, add-code,
+  // documentation, configure-*, upgrade-system, …) are NOT here: they moved to
+  // the engine's own plugin repo, because each needs ./master.sh to exist.
+  // They arrive via that source when it is registered, unfiltered — curation
+  // applies only to the builtin kit.
   'brainstorming',
   'verification-before-completion',
   'using-git-worktrees', 'finishing-a-development-branch',
