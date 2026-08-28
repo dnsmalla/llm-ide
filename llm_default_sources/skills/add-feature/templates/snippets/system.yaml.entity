@@ -1,0 +1,15 @@
+database:
+  entities:
+    - name: "posts"
+      description: "User-authored posts in the feed"
+      columns:
+        - { name: "id",         type: "uuid",      primaryKey: true }
+        - { name: "user_id",    type: "uuid",      references: { entity: "users", column: "id", onDelete: "cascade" } }
+        - { name: "title",      type: "text" }
+        - { name: "body",       type: "text",      nullable: true }
+        - { name: "is_private", type: "boolean",   default: false }
+        - { name: "created_at", type: "timestamp", default: "now()" }
+        - { name: "updated_at", type: "timestamp", default: "now()" }
+      indexes:
+        - { name: "posts_user_id_idx",    columns: ["user_id"] }
+        - { name: "posts_created_at_idx", columns: ["created_at"] }

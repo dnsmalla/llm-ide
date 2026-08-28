@@ -1,0 +1,90 @@
+paths:
+  /v1/posts:
+    get:
+      summary: "List posts for the current user"
+      operationId: "listPosts"
+      tags: [posts]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: query, name: cursor, required: false, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: "OK"
+          content: { application/json: { schema: { $ref: "#/components/schemas/PostListResponse" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      summary: "Create a post"
+      operationId: "createPost"
+      tags: [posts]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreatePostRequest" } } }
+      responses:
+        "201": { description: "Created", content: { application/json: { schema: { $ref: "#/components/schemas/PostResponse" } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/posts/{id}:
+    patch:
+      summary: "Update a post"
+      operationId: "updatePost"
+      tags: [posts]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdatePostRequest" } } }
+      responses:
+        "200": { description: "OK", content: { application/json: { schema: { $ref: "#/components/schemas/PostResponse" } } } }
+        "403": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: "Not found", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    delete:
+      summary: "Delete a post"
+      operationId: "deletePost"
+      tags: [posts]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: "Deleted" }
+        "403": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: "Not found" }
+
+components:
+  schemas:
+    Post:
+      type: object
+      required: [id, userId, title, isPrivate, createdAt]
+      properties:
+        id:        { type: string, format: uuid }
+        userId:    { type: string, format: uuid }
+        title:     { type: string, maxLength: 200 }
+        body:      { type: string, nullable: true }
+        isPrivate: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PostResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        data:    { $ref: "#/components/schemas/Post" }
+    PostListResponse:
+      type: object
+      properties:
+        success:    { type: boolean }
+        data:       { type: array, items: { $ref: "#/components/schemas/Post" } }
+        nextCursor: { type: string, nullable: true }
+    CreatePostRequest:
+      type: object
+      required: [title]
+      properties:
+        title:     { type: string, minLength: 1, maxLength: 200 }
+        body:      { type: string, nullable: true }
+        isPrivate: { type: boolean, default: false }
+    UpdatePostRequest:
+      type: object
+      properties:
+        title:     { type: string, minLength: 1, maxLength: 200 }
+        body:      { type: string, nullable: true }
+        isPrivate: { type: boolean }
