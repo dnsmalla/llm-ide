@@ -7,6 +7,7 @@
 // Deliberately minimal — no chart, no per-task drill-down.  The full
 // breakdown shows on hover.
 
+import type { JSX } from 'react';
 import React, { useEffect, useState } from 'react';
 import { authFetch, getServerUrl } from '../../lib/config';
 

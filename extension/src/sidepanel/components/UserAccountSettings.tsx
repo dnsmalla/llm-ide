@@ -8,6 +8,7 @@
 // POST /auth/me/password   → currentPassword + newPassword
 // Sign out                 → useSession().logout()
 
+import type { JSX } from 'react';
 import React, { useEffect, useState } from 'react';
 import { authFetch, getServerUrl } from '../../lib/config';
 import { useSession } from '../hooks/useSession';
