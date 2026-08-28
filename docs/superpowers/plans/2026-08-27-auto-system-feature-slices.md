@@ -53,7 +53,7 @@
 - Consumes: `generateTemplates(config)`, `ConfigManager.getInstance().loadConfig()` (both existing).
 - Produces: `runGoldenCase(name: string, dir: string): Promise<void>` helper exported from the test file's capture sibling; golden trees later tasks diff against. Nothing outside this task imports it.
 
-- [ ] **Step 1: Write the three fixture configs**
+- [x] **Step 1: Write the three fixture configs**
 
 `core/test/templates/golden/default/.auto_system/system.yaml`:
 
@@ -91,17 +91,17 @@ backend:
   passwordHash: { algorithm: argon2id }
 ```
 
-- [ ] **Step 2: Verify fixture YAML keys against the schema**
+- [x] **Step 2: Verify fixture YAML keys against the schema**
 
 Run: `cd core && grep -n "passwordHash\|securityLevel\|lockout" src/config/schema.ts | head -20`
 Expected: the keys above exist in `SystemConfig` schema. Fix fixture keys to match the schema's real names if they differ (the schema is authoritative).
 
-- [ ] **Step 3: Extend the high-security fixture to exercise the OAuth path**
+- [x] **Step 3: Extend the high-security fixture to exercise the OAuth path**
 
 Run: `cd core && grep -n -A 12 "function generatableOAuthProviders" src/templates/generator.ts`
 Read the provider-declaration shape (e.g. `auth.oauth.providers: [google]`), then add the matching block declaring `google` to `high-security/.auto_system/system.yaml`. This ensures the OAuth emitter output is goldened.
 
-- [ ] **Step 4: Write `core/scripts/capture-golden.ts`**
+- [x] **Step 4: Write `core/scripts/capture-golden.ts`**
 
 ```ts
 // One-shot: regenerate golden snapshots from the CURRENT generator.
@@ -135,12 +135,12 @@ async function capture(name: string) {
 
 Adapt to reality: if `ConfigManager.loadConfig()` cannot be pointed at the work dir via cwd, find its config-path override (grep `class ConfigManager` in `core/src/config/`) and pass the case's `system.yaml` explicitly. `generateTemplates` must see `work` as the project root.
 
-- [ ] **Step 5: Capture and commit the snapshots**
+- [x] **Step 5: Capture and commit the snapshots**
 
 Run: `cd core && npx ts-node scripts/capture-golden.ts && git add test/templates/golden && git status`
 Expected: three `snapshot/` trees committed, each containing the generated `apps/`, `services/`, `docs/` files for its fixture. **These snapshots are now frozen — never regenerate them.**
 
-- [ ] **Step 6: Write the parity test**
+- [x] **Step 6: Write the parity test**
 
 `core/test/templates/golden-parity.test.ts`:
 
@@ -193,12 +193,12 @@ describe('golden template parity', () => {
 
 If the `loadConfig()`-via-cwd assumption is wrong, apply the same override found in Step 4 here.
 
-- [ ] **Step 7: Run — expect PASS (it tests today's unchanged behavior)**
+- [x] **Step 7: Run — expect PASS (it tests today's unchanged behavior)**
 
 Run: `cd core && npx vitest run test/templates/golden-parity.test.ts`
 Expected: 3 passed.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add core/scripts/capture-golden.ts core/test/templates/golden core/test/templates/golden-parity.test.ts
