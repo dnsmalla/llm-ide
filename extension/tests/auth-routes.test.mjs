@@ -850,6 +850,14 @@ test('llm-sources management routes are open to every authenticated user (no adm
 
   const remove = await callAuth({ method: 'DELETE', url: '/auth/me/llm-sources/whatever', user: u });
   assert.notEqual(remove.statusCode, 403);
+
+  // Discovery surfaces absolute agent paths + hook/MCP command strings. It is
+  // reachable by any AUTHENTICATED user, exactly like add/update/remove above:
+  // requireAdmin only asserts req.user since the 2026-08-20 no-admin-role
+  // decision, so gating discovery with it would be a no-op. Unauthenticated
+  // access is still refused by authenticate() upstream.
+  const discovery = await callAuth({ method: 'GET', url: '/auth/me/llm-sources/builtin/discovery', user: u });
+  assert.notEqual(discovery.statusCode, 403);
 });
 
 test('DELETE /auth/me/llm-sources/<id> rejects an invalid id and rejects removing builtin', async () => {

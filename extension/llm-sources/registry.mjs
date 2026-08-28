@@ -24,7 +24,7 @@
 // Registry file: <sourcesDir>/../llm-sources.json  (atomic writes)
 // Cloned sources: <sourcesDir>/<id>/  (siblings to plugins/)
 
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -40,6 +40,13 @@ import { listEnabled, pruneOrphans, DEFAULT_SOURCES_ID } from './state.mjs';
 // op takes, up to each call's own timeout below. Mirrors the async pattern
 // `llm_agent/runtime/handlers/run-bash.mjs` already uses.
 const execFileAsync = promisify(execFile);
+// Mutable so tests can simulate a slow/failing clone deterministically
+// without touching the network (see __setGitRunner). Every git op below goes
+// through _runGit rather than the promisified binding directly.
+let _runGit = execFileAsync;
+/** Test-only: override the git runner used by clone/fetch/checkout/submodule.
+ *  Pass `null` to restore the real one. */
+export function __setGitRunner(fn) { _runGit = fn ?? execFileAsync; }
 
 export const BUILTIN_ID = 'builtin';
 // The committed llm_default_sources folder at the repo root — a default,
@@ -63,6 +70,12 @@ export function defaultSourcesLocation() {
 const LIBRARY_FAMILIES = ['skills', 'runtime'];
 const AGENTS_FAMILY = 'agents';
 const MAX_DESC = 200;
+// Bounds so one admin-registered hostile/huge source can't OOM or stall the
+// single-threaded server for every tenant via the list/discovery endpoints
+// (which re-read every source's manifests on each call). A manifest bigger
+// than 1 MB is almost certainly junk; listings cap at 1000 entries per kind.
+const MAX_MANIFEST_BYTES = 1_000_000;
+const MAX_DISCOVERY_ENTRIES = 1000;
 
 // MUST keep identical to Task 1 stub — state.mjs imports and depends on this.
 function dirnameOf(p) { return p.split('/').slice(0, -1).join('/') || '/'; }
@@ -117,17 +130,36 @@ export function isValidLlmSource(dir) {
   } catch { return false; }
 }
 
+// Stat-bounded readers: skip anything larger than MAX_MANIFEST_BYTES before
+// readFileSync/JSON.parse so a giant manifest can't be pulled into memory
+// wholesale on every list/discovery call. Null on miss/oversize/parse error.
+function readBoundedText(p) {
+  try {
+    if (statSync(p).size > MAX_MANIFEST_BYTES) return null;
+  } catch { return null; }
+  try { return readFileSync(p, 'utf8'); } catch { return null; }
+}
+function readBoundedJson(p) {
+  const raw = readBoundedText(p);
+  if (raw == null) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
 // Read version string from registry.yaml or .claude-plugin/plugin.json, if present.
 function readVersion(dir) {
   try {
-    if (existsSync(join(dir, 'registry.yaml'))) {
-      const raw = readFileSync(join(dir, 'registry.yaml'), 'utf8');
-      const m = raw.match(/^registryVersion:\s*"?([^"\n]+)"?/m);
-      if (m) return m[1].trim();
+    const yamlP = join(dir, 'registry.yaml');
+    if (existsSync(yamlP)) {
+      const raw = readBoundedText(yamlP);
+      if (raw != null) {
+        const m = raw.match(/^registryVersion:\s*"?([^"\n]+)"?/m);
+        if (m) return m[1].trim();
+      }
     }
-    if (existsSync(join(dir, '.claude-plugin', 'plugin.json'))) {
-      const j = JSON.parse(readFileSync(join(dir, '.claude-plugin', 'plugin.json'), 'utf8'));
-      if (typeof j.version === 'string') return j.version;
+    const plugP = join(dir, '.claude-plugin', 'plugin.json');
+    if (existsSync(plugP)) {
+      const j = readBoundedJson(plugP);
+      if (j && typeof j.version === 'string') return j.version;
     }
   } catch { /* best-effort */ }
   return undefined;
@@ -139,7 +171,8 @@ function readVersion(dir) {
 // the same way the skill-library reader and the agent-loader do.
 function readFrontmatterNameDesc(file) {
   try {
-    const raw = readFileSync(file, 'utf8');
+    const raw = readBoundedText(file);
+    if (raw == null) return null;
     const m = raw.match(/^---\n([\s\S]*?)\n^---\s*$/m);
     if (!m) return null;
     const fm = yaml.load(m[1]);
@@ -163,6 +196,7 @@ export function countDiscoverySkills(dir) {
     let entries;
     try { entries = readdirSync(d, { withFileTypes: true }); } catch { continue; }
     for (const e of entries) {
+      if (n >= MAX_DISCOVERY_ENTRIES) break;
       if (e.isDirectory() && existsSync(join(d, e.name, 'SKILL.md'))) n += 1;
     }
   }
@@ -204,6 +238,7 @@ export function listDiscoveryAgents(dir) {
   try { entries = readdirSync(d, { withFileTypes: true }); } catch { return []; }
   const agents = [];
   for (const e of entries) {
+    if (agents.length >= MAX_DISCOVERY_ENTRIES) break;
     if (!e.isFile() || !e.name.endsWith('.md')) continue;
     const fm = readFrontmatterNameDesc(join(d, e.name));
     if (!fm) continue;
@@ -266,8 +301,9 @@ export function listDiscoveryHooks(dir) {
   const seen = new Set();
   for (const { path: p, key } of hookManifestCandidates(dir)) {
     if (!existsSync(p)) continue;
-    let doc;
-    try { doc = JSON.parse(readFileSync(p, 'utf8')); } catch { continue; }
+    // Bounded read (#47): a source is third-party content, so cap the bytes
+    // parsed rather than trusting the file's size.
+    const doc = readBoundedJson(p);
     if (!doc || typeof doc !== 'object') continue;
     const manifest = key ? doc[key] : doc;
     if (!manifest || typeof manifest !== 'object') continue;
@@ -280,6 +316,9 @@ export function listDiscoveryHooks(dir) {
         const hooks = Array.isArray(entry?.hooks) ? entry.hooks : [];
         for (const h of hooks) {
           if (typeof h?.command !== 'string') continue;
+          // Entry cap (#47) — bound the RESULT too, not just each file, since
+          // this walks up to five manifests per source.
+          if (out.length >= MAX_DISCOVERY_ENTRIES) return out;
           const command = h.command.slice(0, 200);
           const dedupe = `${event}\u0000${matcher ?? ''}\u0000${command}`;
           if (seen.has(dedupe)) continue;
@@ -317,12 +356,13 @@ function mcpManifestPath(dir) {
 export function listDiscoveryMcpServers(dir) {
   const p = mcpManifestPath(dir);
   if (!p) return [];
-  let manifest;
-  try { manifest = JSON.parse(readFileSync(p, 'utf8')); } catch { return []; }
+  const manifest = readBoundedJson(p);
+  if (!manifest) return [];
   const servers = manifest?.mcpServers;
   if (!servers || typeof servers !== 'object') return [];
   const out = [];
   for (const [name, cfg] of Object.entries(servers)) {
+    if (out.length >= MAX_DISCOVERY_ENTRIES) break;
     if (typeof cfg?.command !== 'string') continue;
     const args = Array.isArray(cfg.args) ? cfg.args.filter((a) => typeof a === 'string').slice(0, 20) : [];
     out.push({ name, command: cfg.command.slice(0, 200), args });
@@ -432,7 +472,7 @@ async function cloneShallow(url, ref, dest) {
   if (ref) args.push('--branch', ref);
   args.push('--', url, dest);
   try {
-    await execFileAsync('git', args, {
+    await _runGit('git', args, {
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
       timeout: 60_000,
     });
@@ -460,14 +500,27 @@ export async function addSource({ url, path, ref, name } = {}) {
     const n = normalizeGitUrl(url);
     if (!n.ok) return { error: n.error, status: 400 };
     if (ref && !isValidRef(ref)) return { error: 'invalid ref', status: 400 };
-    const id = slugify(name || n.url.replace(/\.git$/, '').split('/').pop(), existing);
-    const dest = join(defaultSourcesDir(), id);
+    const nameBase = name || n.url.replace(/\.git$/, '').split('/').pop();
+    const provId = slugify(nameBase, existing);
+    const dest = join(defaultSourcesDir(), provId);
     mkdirSync(defaultSourcesDir(), { recursive: true });
     const cl = await cloneShallow(n.url, ref, dest);
     if (cl.error) { try { rmSync(dest, { recursive: true, force: true }); } catch { /* */ } return { error: cl.error, status: 400 }; }
     if (!isValidLlmSource(dest)) { try { rmSync(dest, { recursive: true, force: true }); } catch { /* best-effort */ } return { error: 'cloned repo is not a valid LLM source', status: 400 }; }
-    const src = { id, name: name || id, origin: 'git', location: dest, ref: ref || 'main', builtin: false, version: readVersion(dest) };
-    list.push(src); writeRegistry(list);
+    // Re-read immediately before writing (no await below) so an add/remove
+    // that landed during the clone isn't clobbered by the snapshot taken
+    // above. Re-dedup the id against the fresh list; if a concurrent add
+    // claimed the provisional id, move the clone into the deduped name.
+    const fresh = readRegistry();
+    const id = slugify(nameBase, new Set(fresh.map((s) => s.id)));
+    let location = dest;
+    if (id !== provId) {
+      location = join(defaultSourcesDir(), id);
+      try { renameSync(dest, location); } catch { location = dest; }
+    }
+    const src = { id, name: name || id, origin: 'git', location, ref: ref || 'main', builtin: false, version: readVersion(location) };
+    fresh.push(src);
+    writeRegistry(fresh);
     return { source: src };
   }
 
@@ -491,17 +544,24 @@ export async function updateSource(id) {
   const ref = src.ref || 'main';
   if (!isValidRef(ref)) return { error: 'invalid ref', status: 400 };
   try {
-    await execFileAsync('git', ['fetch', '--depth', '1', 'origin', ref], {
+    await _runGit('git', ['fetch', '--depth', '1', 'origin', ref], {
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, cwd: src.location, timeout: 60_000,
     });
   } catch { return { error: 'git fetch failed', status: 400 }; }
   try {
-    await execFileAsync('git', ['checkout', ref], {
+    await _runGit('git', ['checkout', ref], {
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, cwd: src.location, timeout: 30_000,
     });
   } catch { return { error: 'git checkout failed', status: 400 }; }
-  list[idx].version = readVersion(src.location);
-  writeRegistry(list);
+  // Re-read immediately before writing (no await below): an add/remove that
+  // landed during fetch+checkout must not be clobbered by the snapshot
+  // captured at the top of updateSource.
+  const fresh = readRegistry();
+  const fidx = fresh.findIndex((s) => s.id === id);
+  if (fidx >= 0) {
+    fresh[fidx].version = readVersion(src.location);
+    writeRegistry(fresh);
+  }
   return { ok: true };
 }
 
@@ -528,7 +588,7 @@ export function removeSource(id) {
 export async function syncBuiltin() {
   let installed;
   try {
-    await execFileAsync('git', ['submodule', 'update', '--init', '.skills'], {
+    await _runGit('git', ['submodule', 'update', '--init', '.skills'], {
       cwd: process.env.LLMIDE_REPO_ROOT || repoRootFallback(),
       env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
       timeout: 120_000,

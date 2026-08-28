@@ -21,6 +21,24 @@ final class LlmSourceDTOTests: XCTestCase {
         XCTAssertEqual(decoded.sources[0].mcpCount, 1)
     }
 
+    /// A v27 server (renamed endpoints, pre-MCP) omits agentCount/hookCount/
+    /// mcpCount. The list must still decode — defaulting the missing counts to
+    /// 0 — instead of throwing keyNotFound and rendering the section empty.
+    func testDecodesListResponseMissingNewCountFields() throws {
+        let json = """
+        {"sources":[{"id":"builtin","name":"Central Skills","origin":"builtin",
+        "location":"/repo/.skills","builtin":true,"version":"3.0.0",
+        "installed":true,"skillCount":57,"enabled":true}]}
+        """.data(using: .utf8)!
+        struct Wrap: Decodable { let sources: [LlmIdeAPIClient.LlmSourceInfo] }
+        let decoded = try JSONDecoder().decode(Wrap.self, from: json)
+        XCTAssertEqual(decoded.sources.count, 1)
+        XCTAssertEqual(decoded.sources[0].skillCount, 57)
+        XCTAssertEqual(decoded.sources[0].agentCount, 0)
+        XCTAssertEqual(decoded.sources[0].hookCount, 0)
+        XCTAssertEqual(decoded.sources[0].mcpCount, 0)
+    }
+
     func testDecodesAddResponseWithoutListOnlyFields() throws {
         let json = """
         {"source":{"id":"other","name":"other","origin":"local",

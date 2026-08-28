@@ -90,6 +90,10 @@ struct LibraryView: View {
     @State private var connectorsError: String?
     @State private var connectorMessage: String?
     @State private var showingConnectorAddSheet = false
+    // Non-nil when the initial LLM-sources fetch failed — distinguishes a real
+    // load error from "user has zero sources" so the section doesn't misleadingly
+    // show the empty placeholder on a network/auth/decode failure.
+    @State private var llmSourcesError: String?
     /// Persisted set of COLLAPSED section ids (comma-joined). Absence ⇒
     /// expanded. One uniform mechanism drives every section's chevron.
     /// Every section is seeded collapsed so the library opens in a clean,
@@ -1044,11 +1048,35 @@ struct LibraryView: View {
 
     // MARK: - LLM Sources section
 
+    /// Inline error row for the LLM Sources section — shown when the fetch
+    /// fails, with a Retry. Mirrors `emptyRow`'s framing so it lines up with
+    /// the "no sources" placeholder it replaces.
+    @ViewBuilder
+    private func llmSourcesErrorRow(_ msg: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+            Text(msg)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer(minLength: 4)
+            Button("Retry") { Task { await loadLlmSources() } }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 12)
+        .listRowSeparator(.hidden)
+    }
+
     @ViewBuilder
     private var llmSourcesSection: some View {
         Section {
             if sectionExpanded("llmSources").wrappedValue {
-                if llmSources.isEmpty {
+                if let err = llmSourcesError {
+                    llmSourcesErrorRow(err)
+                } else if llmSources.isEmpty {
                     emptyRow("No LLM sources registered yet.", icon: "books.vertical")
                 } else {
                     ForEach(llmSources) { s in
@@ -1112,14 +1140,26 @@ struct LibraryView: View {
         }
     }
 
-    /// Load registered LLM sources for the Library section. Errors are
-    /// swallowed — the section stays empty on failure, matching `loadPlugins`.
+    /// Load registered LLM sources for the Library section. A failure sets
+    /// `llmSourcesError` so the section shows the real error (with Retry)
+    /// instead of misleadingly rendering the empty placeholder.
     private func loadLlmSources() async {
-        llmSources = (try? await api.listLlmSources()) ?? []
+        do {
+            llmSources = try await api.listLlmSources()
+            llmSourcesError = nil
+        } catch {
+            llmSources = []
+            llmSourcesError = error.localizedDescription
+        }
     }
 
     private func refreshLlmSources() async {
-        llmSources = (try? await api.listLlmSources()) ?? []
+        do {
+            llmSources = try await api.listLlmSources()
+            llmSourcesError = nil
+        } catch {
+            llmSourcesError = error.localizedDescription
+        }
     }
 
     private func toggleSource(_ id: String, enabled: Bool) async {
