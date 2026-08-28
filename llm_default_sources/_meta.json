@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-08-22T23:24:56.157Z",
+  "generatedAt": "2026-08-28T07:10:56.713Z",
   "userId": "5de135de64804a0f",
   "description": "Effective chat configuration. skills/: copied from ENABLED sources (BUILTIN_ID curated to a fundamental subset). agents/<name>.md: discovery-only copies from a source's agents/ family (for the REAL agent tiers/subagents chat runs, use GET /kb/agent/catalog instead — this folder does not duplicate it). hooks/hooks.json: hooks declared by enabled sources — discovery catalog in the standard hook-manifest shape (never executed); hooks/events.json: Claude Code's hook event vocabulary, reference only. commands/commands.json: Claude Code's own built-in slash commands, reference only. .mcp.json: enabled+consented MCP plugins actually passed to the CLI. Single global folder — the last user to trigger a refresh wins (this userId).",
   "counts": {
     "sources": 1,
-    "skills": 16,
+    "skills": 17,
     "agents": 0,
     "hooks": 2,
     "mcpServers": 2,

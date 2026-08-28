@@ -104,7 +104,11 @@ const CORE_BUILTIN_SKILLS = new Set([
   'code-review', 'receiving-code-review', 'requesting-code-review',
   'documentation',
   'systematic-debugging', 'test-driven-development',
-  'add-feature', 'add-code',
+  // feature-slices sits BEFORE add-feature in the intended flow: it tells an
+  // agent to install a versioned slice rather than author auth/legal/account
+  // code by hand. Shipping add-feature without it makes hand-writing the
+  // default path for features the slice library already covers.
+  'feature-slices', 'add-feature', 'add-code',
   'brainstorming',
   'verification-before-completion',
   'using-git-worktrees', 'finishing-a-development-branch',
