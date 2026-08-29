@@ -19,13 +19,18 @@ jobs:
         working-directory: extension
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - name: Re-sync from central @ .skills-lock and check for drift
         run: |
           set -euo pipefail
           ref="$(cat .skills-lock 2>/dev/null || echo main)"
-          git clone --quiet https://github.com/dnsmalla/skills.git "$RUNNER_TEMP/central"
-          git -C "$RUNNER_TEMP/central" checkout --quiet "$ref"
-          SKILLS_REPO="$RUNNER_TEMP/central" bash scripts/sync-skills.sh
+          # dnsmalla/skills is PRIVATE: an unauthenticated clone fails in CI
+          # (fatal: could not read Username) and this repo GITHUB_TOKEN cannot read
+          # another private repo. The .skills submodule IS central at the pinned
+          # commit, and submodules: recursive above makes checkout authenticate
+          # and materialize it — sync from that, no network clone.
+          SKILLS_REPO="$GITHUB_WORKSPACE/../.skills" bash scripts/sync-skills.sh
           if ! git -C "$GITHUB_WORKSPACE" diff --exit-code -- \
                  extension/llm_agent/internal/skills \
                  extension/llm_agent/global/ask-internal.md \
