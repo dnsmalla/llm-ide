@@ -291,7 +291,12 @@ final class LoopEngineRunner: ObservableObject {
                 await LoopWorktreeManager.finish(lease)
             }
             if error is CancellationError {
-                appendLog(.warn, "Loop not started · cancelled while queued")
+                // An explicit stop while still queued is still an abort — the
+                // user cancelled, same as line ~460 for mid-run cancellation.
+                // Returning nil here made it indistinguishable from "busy".
+                appendLog(.warn, "Loop aborted · cancelled while queued")
+                status = .aborted
+                return .aborted
             } else {
                 appendLog(.warn, "Loop not started · \(error.localizedDescription)")
             }

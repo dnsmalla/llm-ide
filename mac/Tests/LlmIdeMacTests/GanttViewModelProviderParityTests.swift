@@ -194,7 +194,10 @@ final class GanttViewModelProviderParityTests: XCTestCase {
         vm.schedules = [7: schedule(7, start: "2026-03-02", due: "2026-03-10", dependsOn: [3, 99])]
 
         let edges = vm.dependencyEdges(in: vm.issues)
-        XCTAssertEqual(edges, [(3, 7)])
+        // Arrays of labelled tuples do not conform to Equatable, so pull the
+        // pair into Int arrays — asserting content, not just count.
+        XCTAssertEqual(edges.map(\.blocker), [3])
+        XCTAssertEqual(edges.map(\.dependent), [7])
     }
 
     func testDependencyEdgesRespectsTheVisibleIssueList() {

@@ -83,12 +83,19 @@ final class BackendVersionGuardTests: XCTestCase {
     @MainActor
     func testRunningPromotionClearsLastErrorForACompatibleServer() {
         let mgr = BackendManager()
+        // Transition through the real path: too-old server recorded, then a
+        // compatible one takes over (serverVersionTooOld is private(set), so
+        // poke the version guard rather than the property).
+        mgr.recordServerVersion(
+            .init(ok: true, apiVersion: 18, versionTooOld: true), adopted: true)
         mgr.lastError = "stale startup message"
-        mgr.serverVersionTooOld = false
 
+        mgr.recordServerVersion(
+            .init(ok: true, apiVersion: 24, versionTooOld: false), adopted: false)
         mgr.clearLastErrorUnlessVersionTooOld()
 
         XCTAssertNil(mgr.lastError)
+        XCTAssertFalse(mgr.serverVersionTooOld)
     }
 
     func testProbeHealthUsableRejectsTooOldServer() async {

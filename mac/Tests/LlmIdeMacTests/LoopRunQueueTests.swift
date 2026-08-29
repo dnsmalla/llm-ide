@@ -28,7 +28,7 @@ final class LoopRunQueueTests: XCTestCase {
         XCTAssertFalse(LoopRunQueue.isActive(rootKey: root))
     }
 
-    func testCancellationRemovesWaiterWithoutAcquiring() async {
+    func testCancellationRemovesWaiterWithoutAcquiring() async throws {
         let root = "/tmp/loop-queue-\(UUID().uuidString)"
         try await LoopRunQueue.acquire(rootKey: root)
 
