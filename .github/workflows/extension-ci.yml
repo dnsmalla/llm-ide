@@ -4,6 +4,7 @@ name: extension-ci
 # Mirrors mac-ci.yml: a broken extension build or failing test never reaches main.
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
