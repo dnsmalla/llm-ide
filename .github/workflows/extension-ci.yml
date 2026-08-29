@@ -31,7 +31,9 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          # The suite runs `node --test --experimental-strip-types`, which
+          # needs node >= 22.6; on 20 npm test dies with "bad option".
+          node-version: 22
           cache: npm
           cache-dependency-path: extension/package-lock.json
 
