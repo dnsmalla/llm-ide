@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-08-29T02:58:20.925Z",
+  "generatedAt": "2026-08-30T12:54:08.776Z",
   "userId": "5de135de64804a0f",
   "description": "Effective chat configuration. skills/: copied from ENABLED sources (BUILTIN_ID curated to a fundamental subset). agents/<name>.md: discovery-only copies from a source's agents/ family (for the REAL agent tiers/subagents chat runs, use GET /kb/agent/catalog instead — this folder does not duplicate it). hooks/hooks.json: hooks declared by enabled sources — discovery catalog in the standard hook-manifest shape (never executed); hooks/events.json: Claude Code's hook event vocabulary, reference only. commands/commands.json: Claude Code's own built-in slash commands, reference only. .mcp.json: enabled+consented MCP plugins actually passed to the CLI. Single global folder — the last user to trigger a refresh wins (this userId).",
   "counts": {
-    "sources": 1,
-    "skills": 13,
+    "sources": 2,
+    "skills": 31,
     "agents": 0,
     "hooks": 2,
     "mcpServers": 2,
@@ -12,11 +12,6 @@
     "hookEvents": 31
   },
   "skipped": [
-    {
-      "source": "builtin",
-      "skill": "assist-plan",
-      "reason": "outside the curated fundamental-skills set for this product"
-    },
     {
       "source": "builtin",
       "skill": "dispatching-parallel-agents",
@@ -90,11 +85,6 @@
     {
       "source": "builtin",
       "skill": "solve-tuning",
-      "reason": "outside the curated fundamental-skills set for this product"
-    },
-    {
-      "source": "builtin",
-      "skill": "subagent-driven-development",
       "reason": "outside the curated fundamental-skills set for this product"
     },
     {
