@@ -15,7 +15,7 @@
 // will it leave behind? Sections live in LoopEngineView+DetailPane.swift; the
 // @State they read is declared here (a SwiftUI extension cannot own storage),
 // which is why those members are internal rather than private — same split as
-// CodeAssistantPanel / CodeAssistantPanel+LoopEngine.swift.
+// CodeAssistantPanel / CodeAssistantPanel+Session.swift.
 //
 // PROCESS shows every stage as its own editable card, in run order — a
 // generate stage's skill+input picker, a shell stage's command, a regression

@@ -8,7 +8,10 @@ import Foundation
 enum LoopRunTrigger: String, Codable {
     /// `LoopEngineView`'s Run button.
     case manual
-    /// The Code Assistant chat's loop command.
+    /// Historical: the Code Assistant chat header used to carry a "Run Loop"
+    /// button. That button is gone, so nothing writes this any more — the case
+    /// stays because journal records written by earlier builds carry it, and
+    /// removing it would fail their decode.
     case chat
     /// `AutoCodeUpdateService`'s scheduled Loop Engineering sweep.
     case autoTask

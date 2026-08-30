@@ -20,7 +20,6 @@ extension CodeAssistantPanel {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            loopEngineeringButton
             sessionDropdownButton
             clearChatButton
         }

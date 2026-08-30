@@ -129,9 +129,8 @@ extension ChatEngine {
         messages = msgs
     }
 
-    /// Claim the turn slot for a run the PANEL executes itself (today: the
-    /// Loop Engineering run started from the chat header, which streams its
-    /// log into one assistant turn rather than going through `transport`).
+    /// Claim the turn slot for a run the PANEL executes itself — one that
+    /// streams into an assistant turn rather than going through `transport`.
     /// Applies the same start-of-turn resets `runTurn` does, for the same
     /// reasons: a stale action card left interactive under the new "latest
     /// assistant turn" can run its own completion handler and clear `busy`

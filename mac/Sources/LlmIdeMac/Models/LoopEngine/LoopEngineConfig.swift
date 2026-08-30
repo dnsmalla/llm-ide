@@ -137,9 +137,11 @@ struct LoopEngineConfig: Codable, Equatable {
     /// (e.g. a clone-into-code checkout that hasn't finished populating) —
     /// saving that would silently and irreversibly disable the Test stage
     /// for every future run, since nothing re-detects once a config exists.
-    /// Both call sites that may auto-detect and save a config (the Auto Task
-    /// sweep and the chat panel's `runLoopEngineeringFromChat`) must agree on
-    /// this condition — hence one shared helper instead of two inline copies.
+    /// Every call site that may auto-detect and save a config must agree on
+    /// this condition — hence one shared helper instead of inline copies. Today
+    /// that is `LoopEngineConfigStore.loops`, which the Auto Task sweep and the
+    /// Loop page both go through; the chat panel used to be a second one before
+    /// its "Run Loop" header button was removed.
     /// `LoopEngineView.loadConfig()` used to be a third, but it no longer
     /// persists a detection at all: `LoopEngineHomeView` is the only creator
     /// of loops, so a detection there is for display only.

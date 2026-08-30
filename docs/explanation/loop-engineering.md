@@ -31,7 +31,7 @@ The industry framing that matches this system's shape is a nesting of four loops
 |---|---|---|
 | 1 | **Agent loop** — call tools until done | Repair via `AgentLoopStageRepairer`; `.skill` generate stages |
 | 2 | **Verification loop** — a grader gates the output, failures feed back | Every stage is a grader; failures return to the agent with measured evidence |
-| 3 | **Event-driven loop** — cron/webhook, not a human pressing Run | Auto Tasks cron, chat command, manual Run |
+| 3 | **Event-driven loop** — cron/webhook, not a human pressing Run | Auto Tasks cron, manual Run |
 | 4 | **Hill-climbing loop** — analyse traces, improve the harness itself | Not built. The run journal is its prerequisite and exists now |
 
 ## The loop
@@ -98,10 +98,9 @@ project has one:
   created. Before this existed, every new project silently started at
   `LoopEngineConfig`'s hardcoded values and had to be re-tuned by hand.
 
-All three surfaces that can create a fresh config — the Loop page, the chat
-command, and the Auto Task sweep — seed it through
-`LoopEngineDefaults.newConfig(stages:)`. If any one of them built a config
-directly, the defaults would apply or not depending on which surface the user
+Both surfaces that can create a fresh config — the Loop page and the Auto Task
+sweep — seed it through `LoopEngineDefaults.newConfig(stages:)`. If either built
+a config directly, the defaults would apply or not depending on which surface the user
 happened to open a project from first. The defaults store deliberately holds a
 stage-*less* config: a default stage list would override per-project detection,
 and reusable stage lists are what templates are for.
@@ -188,11 +187,10 @@ two jobs apart. Splitting them gives each its own iteration count, its own
   project always keeps a loop of the user's own — "Main Loop", seeded on first
   setup and preserved by the migration below (its built-in stages move out; the
   loop itself stays). It is seeded, not enforced: deleting it later sticks.
-- **Exactly one loop is Primary (★), and never a stage-less one.** The phone and
-  the chat command address that one — the phone's Start runs *that* loop, not
-  the whole sweep, because it only ever shows one loop's stages, log and
-  history. Everything else reaches its own loop from the Loop page or the
-  scheduler.
+- **Exactly one loop is Primary (★), and never a stage-less one.** The phone
+  addresses that one — its Start runs *that* loop, not the whole sweep, because
+  it only ever shows one loop's stages, log and history. Everything else
+  reaches its own loop from the Loop page or the scheduler.
 - **A pre-split project is migrated, not re-detected.** The single "Main Loop"
   has its built-in stages moved into the three loops above — commands, renames,
   `enabled` flags and the project's budgets come with them — and survives as an
@@ -387,14 +385,17 @@ landing and then hidden, `resolveHome` falls back to Library.
 
 ## Triggers
 
-All three construct their own `LoopEngineRunner` and share one `LoopEngineConfig`
+Both construct their own `LoopEngineRunner` and share one `LoopEngineConfig`
 per project (keyed by the stable `Project.id`):
 
 | Trigger | Entry point |
 |---|---|
 | `manual` | `LoopEngineView` Run button |
-| `chat` | `CodeAssistantPanel+LoopEngine` |
 | `autoTask` | `AutoCodeUpdateService+PipelineTasks` (cron) |
+
+`LoopRunTrigger` also has a `chat` case, which nothing writes any more: the Code
+Assistant chat header carried a Run Loop button until it was removed. The case
+stays so journal records written by earlier builds still decode.
 
 A process-wide lock keyed on the symlink-resolved git root rejects a second run
 against the same working tree, whichever trigger starts it.
