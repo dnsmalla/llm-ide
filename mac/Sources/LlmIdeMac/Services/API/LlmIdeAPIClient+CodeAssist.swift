@@ -167,11 +167,32 @@ extension LlmIdeAPIClient {
         var isTool: Bool { phase == "tool" }
     }
 
+    /// Wire tool name reduced to the name a verb can be looked up by.
+    ///
+    /// The v2 engine reports the SDK's own names, which come in two shapes
+    /// the legacy loop never produced: MCP tools are namespaced
+    /// (`mcp__llmide__task-update`) and built-ins are capitalized
+    /// (`Bash`, `Read`). Both fell through `toolVerb`'s default and rendered
+    /// as "Using mcp__llmide__task-update" — a column of wire identifiers
+    /// where the legacy engine showed sentences. Normalizing here rather
+    /// than adding cases keeps ONE verb table for both engines.
+    static func normalizedToolName(_ tool: String) -> String {
+        // mcp__<server>__<tool> → <tool>. The server segment is an install
+        // detail; the tool is the part with a verb.
+        var name = tool
+        if name.hasPrefix("mcp__"), let range = name.range(of: "__", options: .backwards) {
+            name = String(name[range.upperBound...])
+        }
+        // The SDK's built-ins are CapitalizedCamel where every llm-ide tool
+        // is kebab-case; lowercasing lets one table answer both.
+        return name.lowercased()
+    }
+
     /// Verb for a tool, phrased as the action being performed rather than the
     /// tool's wire name. "Using read-file…" tells the user nothing they care
     /// about; "Reading" plus the file does.
     static func toolVerb(_ tool: String?) -> String {
-        switch tool {
+        switch tool.map(normalizedToolName) {
         case "web-search":    return "Searching the web"
         case "fetch-url":     return "Fetching a page"
         case "ask-internal":  return "Checking app context"
@@ -186,6 +207,21 @@ extension LlmIdeAPIClient {
         case "list-issues":   return "Listing issues"
         case "get-issue":     return "Reading issue"
         case "task-create", "task-update", "task-list": return "Planning"
+        // SDK built-ins (v2 engine). Same verbs as their llm-ide analogues
+        // above, so a chat reads identically whichever engine ran the turn.
+        case "read":          return "Reading"
+        case "write":         return "Writing"
+        case "edit", "multiedit", "notebookedit": return "Editing"
+        case "glob":          return "Listing"
+        case "grep":          return "Searching"
+        case "websearch":     return "Searching the web"
+        case "webfetch":      return "Fetching a page"
+        case "task":          return "Delegating to a subagent"
+        case "todowrite":     return "Planning"
+        case "bashoutput":    return "Reading command output"
+        case "killshell":     return "Stopping a command"
+        case "slashcommand":  return "Running a command"
+        case "exitplanmode":  return "Finishing the plan"
         case .some(let name): return "Using \(name)"
         case nil:             return "Working"
         }

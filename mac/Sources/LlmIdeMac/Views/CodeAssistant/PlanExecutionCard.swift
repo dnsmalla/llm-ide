@@ -6,6 +6,12 @@ import SwiftUI
 struct PlanExecutionCard: View {
     let tracker: CodeAssistantAgentState.PlanExecutionTracker
     let liveTasks: [AgentTask]
+    /// The engine's live status line ("Running xcodebuild…"), shown under the
+    /// current step while the turn is working. The step title says WHICH step
+    /// the agent is on; this says what it is doing inside it — without it a
+    /// step that takes four minutes of tool calls looks identical to a stuck
+    /// one. Nil when the turn is idle (between auto-continue hops).
+    let statusLine: String?
     let onReview: () -> Void
     let onCommit: () -> Void
     let onDismiss: () -> Void
@@ -41,6 +47,17 @@ struct PlanExecutionCard: View {
         min(completed + (tasks.contains(where: { $0.status == .inProgress }) ? 1 : 0), total)
     }
 
+    private var fraction: Double {
+        total > 0 ? Double(completed) / Double(total) : 0
+    }
+
+    /// Whether the server has told us anything about task state yet. Before
+    /// the first `tasks_progress` event the bar is honestly at zero of a
+    /// known total — but on a server too old to send them it would STAY
+    /// there for the whole run, so the card says "starting…" rather than
+    /// showing a step counter it cannot advance.
+    private var hasTaskState: Bool { !tasks.isEmpty }
+
     var body: some View {
         switch tracker.phase {
         case .running:
@@ -68,18 +85,38 @@ struct PlanExecutionCard: View {
             }
             ProgressView(value: Double(completed), total: Double(total))
                 .tint(theme.current.accent)
-            Text("Step \(max(currentIndex, 1)) of \(total)")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(theme.current.textMuted)
+            HStack(spacing: 6) {
+                Text(hasTaskState ? "Step \(max(currentIndex, 1)) of \(total)" : "Starting…")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(theme.current.textMuted)
+                if hasTaskState {
+                    Text("·")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.current.textMuted)
+                    Text("\(completed) done · \(Int((fraction * 100).rounded()))%")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(theme.current.textMuted)
+                }
+                Spacer(minLength: 0)
+            }
             if let title = currentTitle {
                 HStack(alignment: .top, spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
                         .frame(width: 14, height: 14)
-                    Text(title)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(theme.current.text)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(theme.current.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let statusLine, !statusLine.isEmpty {
+                            Text(statusLine)
+                                .font(.system(size: 11))
+                                .foregroundStyle(theme.current.textMuted)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
                 }
             }
         }

@@ -202,6 +202,12 @@ enum AgentV2Event: Sendable, Equatable {
     /// `{"type":"tasks","tasks":[…],"continueNeeded":…}` — session task list
     /// after a successful turn (legacy /code-assist parity).
     case tasks(tasks: [AgentTask], continueNeeded: Bool)
+    /// `{"type":"tasks_progress","tasks":[…]}` — the SAME list, re-sent
+    /// mid-turn whenever a tool call changed it (server API v41). Carries no
+    /// `continueNeeded` by design: work is obviously still pending during
+    /// the turn, and a client that auto-chains on that flag would launch a
+    /// second turn on top of the running one. Progress display only.
+    case tasksProgress([AgentTask])
     /// `{"type":"result", …}` — terminal on success.
     case result(AgentV2Result)
     /// `{"type":"error","code":…,"message":…}` — terminal on failure. The
@@ -240,6 +246,8 @@ enum AgentV2Event: Sendable, Equatable {
             return Self.payload(ModeSetWire.self, data).map { .modeSet($0.mode) }
         case "tasks":
             return Self.payload(TasksWire.self, data).map { .tasks(tasks: $0.tasks, continueNeeded: $0.continueNeeded) }
+        case "tasks_progress":
+            return Self.payload(TasksProgressWire.self, data).map { .tasksProgress($0.tasks) }
         case "result":
             return Self.payload(AgentV2Result.self, data).map { .result($0) }
         case "error":
@@ -268,6 +276,7 @@ enum AgentV2Event: Sendable, Equatable {
     private struct ApprovalResolvedWire: Decodable { let requestId: String; let outcome: String }
     private struct ModeSetWire: Decodable { let mode: String }
     private struct TasksWire: Decodable { let tasks: [AgentTask]; let continueNeeded: Bool }
+    private struct TasksProgressWire: Decodable { let tasks: [AgentTask] }
     private struct ErrorWire: Decodable { let code: String?; let message: String }
     /// `sdk` events carry the raw upstream message in `raw` — decoding it
     /// is not required to observe the type, and forcing it would make a

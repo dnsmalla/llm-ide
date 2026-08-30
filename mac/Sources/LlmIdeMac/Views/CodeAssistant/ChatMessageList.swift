@@ -107,88 +107,14 @@ struct ChatMessageList: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.md) {
                         ForEach(history) { turn in
-                            if let pe = planExecution,
-                               pe.phase == .running,
-                               turn.role == .assistant,
-                               turn.id == lastAssistantTurnId {
-                                PlanExecutionCard(
-                                    tracker: pe,
-                                    liveTasks: tasks,
-                                    onReview: onReviewPlanExecution,
-                                    onCommit: onCommitPlanExecution,
-                                    onDismiss: onDismissPlanExecution
-                                )
-                                .padding(.bottom, 4)
-                                .transition(.opacity)
-                            } else if turn.role == .assistant,
-                                      turn.id == lastAssistantTurnId,
-                                      !tasks.isEmpty,
-                                      planExecution == nil {
-                                PlanTimelineCard(tasks: tasks)
-                                    .padding(.bottom, 4)
-                                    .transition(.opacity)
-                            }
+                            planCards(for: turn, lastAssistantTurnId: lastAssistantTurnId)
                             if turn.role == .assistant, !turn.toolSteps.isEmpty {
                                 toolActivityView(turn.toolSteps)
                             }
                             turnView(turn, lastAssistantTurnId: lastAssistantTurnId)
                                 .id(turn.id)
                                 .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .bottom)))
-                            if let pt = pendingTool,
-                               turn.id == history.last?.id,
-                               turn.role == .assistant {
-                                PendingActionCard(
-                                    pendingTool: pt,
-                                    diffPreview: diffPreview,
-                                    onOpen: {
-                                        switch pt.kind {
-                                        case .createIssue:
-                                            sheets.showingIssueSheet = true
-                                        case .commentIssue:
-                                            sheets.showingCommentSheet = true
-                                        case .getIssue:
-                                            sheets.showingGetIssueSheet = true
-                                        case .updateIssue:
-                                            sheets.showingUpdateIssueSheet = true
-                                        case .listIssues:
-                                            sheets.showingListIssuesSheet = true
-                                        case .createBranch:
-                                            sheets.showingCreateBranchSheet = true
-                                            Task { sheets.branchSheetContext = await loadBranchContext() }
-                                        case .createPR:
-                                            sheets.showingCreatePRSheet = true
-                                        case .triggerReviewCode:
-                                            sheets.showingReviewCodeSheet = true
-                                        case .updateFile:
-                                            sheets.showingUpdateFileSheet = true
-                                        case .gitOp:
-                                            if let g = pt.gitOpArgs, g.op.tier == .read {
-                                                Task { await onGitOp(g) }
-                                            } else {
-                                                sheets.showingGitOpSheet = true
-                                            }
-                                        case .bash:
-                                            Task { await onBash(pt.bashArgs) }
-                                        case .savePlan:
-                                            Task { await onSavePlan() }
-                                        case nil:
-                                            break
-                                        }
-                                    },
-                                    editActions: pt.kind == .updateFile
-                                        ? .init(apply: onApplyEdit,
-                                                skip: onSkipEdit,
-                                                // No resolvable diff (or a
-                                                // no-op one) means there is
-                                                // nothing to apply — Review
-                                                // still opens and explains why.
-                                                canApply: (diffPreview?.added ?? 0) > 0
-                                                       || (diffPreview?.removed ?? 0) > 0)
-                                        : nil
-                                )
-                                .padding(.top, 4)
-                                .transition(.opacity)
-                            }
+                            pendingActionCardIfAny(for: turn, isLastTurn: turn.id == history.last?.id)
                             // A parked approval — placed like the
                             // pending-action card above (under the last
                             // assistant message), but driven purely off the
@@ -265,6 +191,9 @@ struct ChatMessageList: View {
                             PlanExecutionCard(
                                 tracker: pe,
                                 liveTasks: tasks,
+                                // The run is over; there is no live activity
+                                // to narrate under the finish card.
+                                statusLine: nil,
                                 onReview: onReviewPlanExecution,
                                 onCommit: onCommitPlanExecution,
                                 onDismiss: onDismissPlanExecution
@@ -485,35 +414,112 @@ struct ChatMessageList: View {
         return ("checkmark.circle.fill", theme.current.success)
     }
 
-    /// The steps the agent took before answering, as compact rows above the
-    /// reply — the professional form of what used to be raw `<<<TOOL_CALL>>>`
-    /// JSON streaming into the bubble. Read-only and non-interactive: it is a
-    /// record of what happened, not a control.
+    /// The confirmation card for a proposed tool action, under the last
+    /// assistant turn. Extracted from `body` for the same reason as
+    /// `planCards`: its `onOpen` closure is a twelve-arm switch, and inline
+    /// it pushed the transcript body past what the type-checker will solve.
+    @ViewBuilder
+    private func pendingActionCardIfAny(for turn: ChatMessage, isLastTurn: Bool) -> some View {
+            if let pt = pendingTool, isLastTurn, turn.role == .assistant {
+                PendingActionCard(
+                    pendingTool: pt,
+                    diffPreview: diffPreview,
+                    onOpen: {
+                        switch pt.kind {
+                        case .createIssue:
+                            sheets.showingIssueSheet = true
+                        case .commentIssue:
+                            sheets.showingCommentSheet = true
+                        case .getIssue:
+                            sheets.showingGetIssueSheet = true
+                        case .updateIssue:
+                            sheets.showingUpdateIssueSheet = true
+                        case .listIssues:
+                            sheets.showingListIssuesSheet = true
+                        case .createBranch:
+                            sheets.showingCreateBranchSheet = true
+                            Task { sheets.branchSheetContext = await loadBranchContext() }
+                        case .createPR:
+                            sheets.showingCreatePRSheet = true
+                        case .triggerReviewCode:
+                            sheets.showingReviewCodeSheet = true
+                        case .updateFile:
+                            sheets.showingUpdateFileSheet = true
+                        case .gitOp:
+                            if let g = pt.gitOpArgs, g.op.tier == .read {
+                                Task { await onGitOp(g) }
+                            } else {
+                                sheets.showingGitOpSheet = true
+                            }
+                        case .bash:
+                            Task { await onBash(pt.bashArgs) }
+                        case .savePlan:
+                            Task { await onSavePlan() }
+                        case nil:
+                            break
+                        }
+                    },
+                    editActions: pt.kind == .updateFile
+                        ? .init(apply: onApplyEdit,
+                                skip: onSkipEdit,
+                                // No resolvable diff (or a
+                                // no-op one) means there is
+                                // nothing to apply — Review
+                                // still opens and explains why.
+                                canApply: (diffPreview?.added ?? 0) > 0
+                                       || (diffPreview?.removed ?? 0) > 0)
+                        : nil
+                )
+                .padding(.top, 4)
+                .transition(.opacity)
+            }
+    }
+
+    /// The plan cards that ride above the LAST assistant turn: the live
+    /// execution card during a plan run, otherwise the task timeline. Both
+    /// were written inline in `body` until the type-checker gave up on it
+    /// ("unable to type-check this expression in reasonable time") — that
+    /// body is one large ForEach with several nested branches, so anything
+    /// with its own argument list belongs out here.
+    @ViewBuilder
+    private func planCards(for turn: ChatMessage, lastAssistantTurnId: UUID?) -> some View {
+        if let pe = planExecution,
+           pe.phase == .running,
+           turn.role == .assistant,
+           turn.id == lastAssistantTurnId {
+            PlanExecutionCard(
+                tracker: pe,
+                liveTasks: tasks,
+                statusLine: planExecutionStatusLine,
+                onReview: onReviewPlanExecution,
+                onCommit: onCommitPlanExecution,
+                onDismiss: onDismissPlanExecution
+            )
+            .padding(.bottom, 4)
+            .transition(.opacity)
+        } else if turn.role == .assistant,
+                  turn.id == lastAssistantTurnId,
+                  !tasks.isEmpty,
+                  planExecution == nil {
+            PlanTimelineCard(tasks: tasks)
+                .padding(.bottom, 4)
+                .transition(.opacity)
+        }
+    }
+
+    /// The engine's live activity line for `PlanExecutionCard`, hoisted out
+    /// of the transcript body: that body is already at the type-checker's
+    /// limit, and a ternary inline in the call site tipped it over ("unable
+    /// to type-check this expression in reasonable time").
+    private var planExecutionStatusLine: String? {
+        engine.busy ? engine.statusText : nil
+    }
+
+    /// The steps the agent took before answering. The rendering (including
+    /// the >5-step scroller) lives in `ToolActivityList`.
     @ViewBuilder
     private func toolActivityView(_ steps: [ChatMessage.ToolStep]) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(steps) { step in
-                HStack(spacing: 6) {
-                    Image(systemName: step.icon)
-                        .font(.system(size: 10))
-                        .foregroundStyle(theme.current.textMuted)
-                        .frame(width: 12, alignment: .center)
-                    // The trailing "…" belongs to the live status line, not to a
-                    // finished step — a completed action reads as "Read X", and
-                    // leaving the ellipsis makes every past step look stuck.
-                    Text(step.label.hasSuffix("…") ? String(step.label.dropLast()) : step.label)
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.current.textMuted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-        .padding(.leading, 2)
-        .padding(.bottom, 2)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Steps taken: \(steps.map(\.label).joined(separator: ", "))")
+        ToolActivityList(steps: steps)
     }
 
     @ViewBuilder

@@ -169,6 +169,15 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
     /// raises its transient notice banner. Wired by `ChatEngine` itself
     /// (init and `setTransport`), so the panel needs no plumbing.
     var onStaleServer: (() -> Void)?
+    /// Live mid-turn task list from the v2 stream (`tasks_progress`).
+    /// Forwarded to `v2.onLiveTasks` so `ChatEngine` wires ONE callback on
+    /// the composite it actually holds, not on the inner transport. Legacy
+    /// turns never fire it — /code-assist reports tasks at turn end only —
+    /// so a legacy chat's progress display simply stays turn-granular.
+    var onLiveTasks: (@MainActor ([AgentTask]) -> Void)? {
+        get { v2.onLiveTasks }
+        set { v2.onLiveTasks = newValue }
+    }
 
     init(v2: AgentV2Transport,
          legacy: ChatTransport,

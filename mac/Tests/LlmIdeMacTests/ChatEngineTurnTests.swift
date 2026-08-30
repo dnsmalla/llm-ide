@@ -193,6 +193,42 @@ struct ChatEngineTurnTests {
         #expect(engine.agent.planExecution?.phase == .failed)
     }
 
+    // The whole point of the mid-turn task feed: one plan-execute turn can
+    // work thirty steps, and until this landed the card said "Step 1 of 30"
+    // for all of them because tasks only arrived with the turn's result.
+    @Test("Live tasks advance the visible list and tracker mid-turn")
+    func liveTasksAdvanceTheTracker() {
+        let (engine, _) = makeEngine()
+        engine.agent.planExecution = runningTracker()
+        engine.applyLiveTasks([AgentTask(id: "1", title: "Add tokens", status: .completed),
+                               AgentTask(id: "2", title: "Wire the toggle", status: .inProgress)])
+        #expect(engine.agent.agentPendingTasks.count == 2)
+        #expect(engine.agent.planExecution?.lastTasks.first?.status == .completed)
+    }
+
+    // Phase transitions belong to the turn's end. A mid-turn "everything
+    // completed" is routine — the agent finishes its list, then keeps
+    // working — and flipping to .finished there would swap the running card
+    // for a Review/Commit card while the turn is still going.
+    @Test("Live tasks never settle the tracker's phase, even when all are done or one failed")
+    func liveTasksLeavePhaseAlone() {
+        let (engine, _) = makeEngine()
+        engine.agent.planExecution = runningTracker()
+        engine.applyLiveTasks([AgentTask(id: "1", title: "Add tokens", status: .completed),
+                               AgentTask(id: "2", title: "Wire the toggle", status: .completed)])
+        #expect(engine.agent.planExecution?.phase == .running)
+        engine.applyLiveTasks([AgentTask(id: "1", title: "Add tokens", status: .failed)])
+        #expect(engine.agent.planExecution?.phase == .running)
+    }
+
+    @Test("An empty live list is ignored rather than blanking the visible tasks")
+    func liveTasksIgnoreEmpty() {
+        let (engine, _) = makeEngine()
+        engine.agent.agentPendingTasks = [AgentTask(id: "1", title: "Add tokens", status: .inProgress)]
+        engine.applyLiveTasks([])
+        #expect(engine.agent.agentPendingTasks.count == 1)
+    }
+
     @Test("Work still pending keeps the plan tracker running")
     func pendingTasksKeepPlanExecutionRunning() async {
         let (engine, t) = makeEngine()

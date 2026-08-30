@@ -137,6 +137,57 @@ struct AgentV2TransportTests {
         #expect(result.tasks?.first?.title == "Step one")
     }
 
+    @Test("tasks_progress fires onLiveTasks mid-turn without touching the result tasks")
+    func liveTasksProgress() async throws {
+        let stream = ScriptedAgentV2Stream()
+        stream.events = [
+            .init_(AgentV2Init(sessionId: "sdk-live", claudeCodeVersion: nil, model: nil,
+                               tools: [], capabilities: [], mcpServers: [])),
+            .tasksProgress([AgentTask(id: "1", title: "Step one", status: .inProgress),
+                            AgentTask(id: "2", title: "Step two", status: .pending)]),
+            .tasksProgress([AgentTask(id: "1", title: "Step one", status: .completed),
+                            AgentTask(id: "2", title: "Step two", status: .inProgress)]),
+            .result(AgentV2Result(subtype: nil, costUsd: nil, numTurns: nil,
+                                  durationMs: nil, sessionId: nil, stopReason: nil)),
+            // No terminal `tasks` event: a mid-turn list must never be
+            // mistaken for the turn's authoritative one, which is what
+            // auto-continue reads.
+        ]
+        var live: [[AgentTask]] = []
+        let transport = AgentV2Transport(streamer: stream)
+        transport.onLiveTasks = { live.append($0) }
+        let result = try await transport.roundTrip(
+            makeInput(),
+            onProgress: { _ in },
+            onChunk: { _ in },
+            onApproval: { _ in }
+        )
+        #expect(live.count == 2)
+        #expect(live.last?.first?.status == .completed)
+        #expect(result.tasks == nil)
+        #expect(result.continueNeeded == false)
+    }
+
+    @Test("tasks_progress after the terminal result still updates the display")
+    func liveTasksSurviveTheTerminalGuard() async throws {
+        let stream = ScriptedAgentV2Stream()
+        stream.events = [
+            .init_(AgentV2Init(sessionId: "sdk-late", claudeCodeVersion: nil, model: nil,
+                               tools: [], capabilities: [], mcpServers: [])),
+            .result(AgentV2Result(subtype: nil, costUsd: nil, numTurns: nil,
+                                  durationMs: nil, sessionId: nil, stopReason: nil)),
+            // The route's post-turn bookkeeping can emit after `result`;
+            // dropping this one would freeze the bar one step short.
+            .tasksProgress([AgentTask(id: "1", title: "Step one", status: .completed)]),
+        ]
+        var live: [[AgentTask]] = []
+        let transport = AgentV2Transport(streamer: stream)
+        transport.onLiveTasks = { live.append($0) }
+        _ = try await transport.roundTrip(
+            makeInput(), onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
+        #expect(live.count == 1)
+    }
+
     @Test("onApproval fires exactly once per approvalRequest, twice for two")
     func approvalFiresOncePerRequest() async throws {
         let stream = ScriptedAgentV2Stream()

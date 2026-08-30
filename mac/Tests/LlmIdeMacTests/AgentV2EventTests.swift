@@ -145,6 +145,24 @@ struct AgentV2EventTests {
                 == .approvalResolved(requestId: "r1", outcome: "answer"))
     }
 
+    // --- tasks / tasks_progress ---------------------------------------------
+
+    @Test("tasks decodes the list plus continueNeeded")
+    func tasksTerminal() {
+        #expect(decode(#"{"type":"tasks","tasks":[{"id":"1","title":"Add the scheme","status":"completed"}],"continueNeeded":true}"#)
+                == .tasks(tasks: [AgentTask(id: "1", title: "Add the scheme", status: .completed)],
+                          continueNeeded: true))
+    }
+
+    @Test("tasks_progress decodes the list; it carries no continueNeeded")
+    func tasksProgress() {
+        #expect(decode(#"{"type":"tasks_progress","tasks":[{"id":"1","title":"Add the scheme","status":"completed"},{"id":"2","title":"Wire the test target","status":"in_progress"}]}"#)
+                == .tasksProgress([
+                    AgentTask(id: "1", title: "Add the scheme", status: .completed),
+                    AgentTask(id: "2", title: "Wire the test target", status: .inProgress),
+                ]))
+    }
+
     // --- mode_set / result / error / sdk ------------------------------------
 
     @Test("mode_set decodes the resolved mode")

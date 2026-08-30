@@ -35,6 +35,37 @@ final class AgentProgressLabelTests: XCTestCase {
         XCTAssertEqual(LlmIdeAPIClient.progressLabel(phase: "tool", tool: nil), "Working…")
     }
 
+    func testSdkBuiltinToolNamesReadAsActionsNotWireNames() {
+        // The v2 engine reports the SDK's capitalized built-ins. Before
+        // normalization these fell through to the default and the transcript
+        // showed a column of "Using Bash" / "Using Read".
+        XCTAssertEqual(
+            LlmIdeAPIClient.progressLabel(phase: "tool", tool: "Bash", detail: "swift build"),
+            "Running swift build…")
+        XCTAssertEqual(
+            LlmIdeAPIClient.progressLabel(phase: "tool", tool: "Read", detail: "App.swift"),
+            "Reading App.swift…")
+        XCTAssertEqual(
+            LlmIdeAPIClient.progressLabel(phase: "tool", tool: "Edit", detail: nil),
+            "Editing…")
+        XCTAssertEqual(
+            LlmIdeAPIClient.progressLabel(phase: "tool", tool: "Write", detail: nil),
+            "Writing…")
+    }
+
+    func testMcpNamespacedToolsResolveToTheirUnderlyingVerb() {
+        // mcp__<server>__<tool>: the server segment is an install detail.
+        XCTAssertEqual(
+            LlmIdeAPIClient.progressLabel(phase: "tool", tool: "mcp__llmide__task-update", detail: nil),
+            "Planning…")
+        XCTAssertEqual(LlmIdeAPIClient.normalizedToolName("mcp__llmide__find-code"), "find-code")
+        // An unknown MCP tool still loses the namespace — "Using search" beats
+        // "Using mcp__acme__search".
+        XCTAssertEqual(
+            LlmIdeAPIClient.progressLabel(phase: "tool", tool: "mcp__acme__search", detail: nil),
+            "Using search…")
+    }
+
     func testNonToolPhasesKeepTheirOwnWording() {
         XCTAssertEqual(LlmIdeAPIClient.progressLabel(phase: "writing", tool: nil),
                        "Writing the answer…")

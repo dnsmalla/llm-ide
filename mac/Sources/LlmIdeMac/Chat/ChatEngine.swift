@@ -361,6 +361,9 @@ final class ChatEngine {
         engineTransport.onStaleServer = { [weak self] in
             self?.agentV2Notice = AgentV2EngineTransport.staleServerBannerText
         }
+        engineTransport.onLiveTasks = { [weak self] tasks in
+            self?.applyLiveTasks(tasks)
+        }
         // D3 clean cut: selection is per-chat, so the composite must see the
         // CURRENT session's engine marker — only this engine knows which
         // chat is loaded. Unwired (nil), the composite stays fail-closed on
@@ -931,6 +934,28 @@ final class ChatEngine {
             agent.lastMemoryTokens = u.memoryApproxTokens
             agent.lastMemoryHasChat = u.memoryHasChatMemory ?? false
         }
+    }
+
+    /// Mid-turn task list from the v2 stream. Display only: it moves the
+    /// task list and the plan-execute progress bar WHILE the turn runs — a
+    /// plan-execute turn can work its way through dozens of steps before it
+    /// ends, and until this arrived the card reported "Step 1 of 30" for all
+    /// of them.
+    ///
+    /// Deliberately NOT routed through `updatePlanExecution`: that function
+    /// owns the tracker's phase transitions, and every one of them is wrong
+    /// mid-turn. `.finished` would fire the moment the last task flips to
+    /// completed, replacing the still-running card with a Review/Commit
+    /// card; `.failed` would do the same on a task the agent marked failed
+    /// and then recovered from. The turn's own end is the only honest place
+    /// to settle the phase, and `finishStreamingTurn` still does that with
+    /// the authoritative list.
+    func applyLiveTasks(_ tasks: [AgentTask]) {
+        guard !tasks.isEmpty else { return }
+        agent.agentPendingTasks = tasks
+        guard var tracker = agent.planExecution, tracker.phase == .running else { return }
+        tracker.lastTasks = tasks
+        agent.planExecution = tracker
     }
 
     /// Advance the plan-execute tracker when server tasks complete or fail.

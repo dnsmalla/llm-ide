@@ -116,6 +116,17 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         sdkSessionId = nil
     }
 
+    /// Live task list, pushed whenever the server reports the session's
+    /// tasks changed mid-turn (`tasks_progress`, server API v41).
+    ///
+    /// Separate from the `tasks` the turn RESULT carries: that one arrives
+    /// after the stream's terminal event, which is far too late for a
+    /// plan-execute run whose single turn works thirty steps — its progress
+    /// bar sat at "Step 1 of 30" until everything had finished. The result
+    /// tasks stay authoritative for auto-continue; this callback is display
+    /// only, so it must never drive a chained turn.
+    var onLiveTasks: (@MainActor ([AgentTask]) -> Void)?
+
     init(streamer: AgentV2Streaming) {
         self.streamer = streamer
     }
@@ -226,12 +237,21 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 resolvedContinueNeeded = continueNeeded
                 return
             }
+            // Mid-turn task progress rides OUTSIDE the terminal guard for
+            // the same reason: it is display state, and dropping it after a
+            // terminal event would only freeze the bar the event exists to
+            // move. It deliberately does not touch `resolvedTasks` — the
+            // turn's own result list is what auto-continue reads.
+            if case .tasksProgress(let tasks) = event {
+                self.onLiveTasks?(tasks)
+                return
+            }
             // `result` and `error` are terminal; the route's post-turn
             // bookkeeping could still emit events (a known server-side
             // wrinkle), and deltas after either would corrupt the reply.
             guard !sawTerminal else { return }
             switch event {
-            case .tasks:
+            case .tasks, .tasksProgress:
                 break // handled above the terminal guard
             case .init_(let payload):
                 if let sid = payload.sessionId { self.sdkSessionId = sid }
