@@ -123,18 +123,67 @@ enum LoopEngineConfigStore {
     /// the same rule as before — an all-unconditional detection can mean "the
     /// tree has not finished populating", and persisting it would silently
     /// disable a Test loop for good. `projectRoot == nil` never writes.
+    ///
+    /// It also runs `normalizeScheduleOptIn` once per project, which switches
+    /// off the schedule flag that older builds set on every loop they created.
     static func loops(projectRoot: URL?, projectId: String, gitRoot: URL?,
                       defaults: UserDefaults = .standard) -> LoopEngineProjectStore {
         let saved = load(projectRoot: projectRoot, projectId: projectId, defaults: defaults)
-        let ensured = LoopStageDetector.ensureDefaultLoops(
+        var ensured = LoopStageDetector.ensureDefaultLoops(
             in: saved ?? LoopEngineProjectStore(loops: []), gitRoot: gitRoot, defaults: defaults)
-        guard ensured != saved else { return ensured }
+        // Only where there is a file to write the result to — see the helper.
+        let unscheduled = projectRoot != nil
+            && normalizeScheduleOptIn(&ensured, projectId: projectId, defaults: defaults)
+        // `unscheduled` implies `ensured != saved` (a flag was flipped on a
+        // loaded loop), so it is belt-and-braces — but a normalization that
+        // silently failed to persist would leave the loops running, which is
+        // the exact thing it exists to stop.
+        guard ensured != saved || unscheduled else { return ensured }
         let worthKeeping = saved != nil
             || LoopEngineConfig.shouldPersist(ensured.loops.flatMap(\.config.stages))
         if worthKeeping {
             save(ensured, projectRoot: projectRoot, projectId: projectId, defaults: defaults)
         }
         return ensured
+    }
+
+    /// UserDefaults flag marking a project as already normalized. Per project,
+    /// not per app: projects are opened at different times, so a single global
+    /// flag would normalize whichever project happened to be opened first and
+    /// leave every other one scheduled.
+    private static func scheduleOptInMigrationKey(_ projectId: String) -> String {
+        "loopScheduleOptInMigrated.\(projectId)"
+    }
+
+    /// Bring a project saved under the old contract in line with the current
+    /// one, exactly once. Returns whether it changed anything.
+    ///
+    /// `LoopDefinition.runsOnSchedule` used to default to `true`, so every loop
+    /// this app has ever created — the four built-in defaults included — was
+    /// written to `system/loop.json` already opted IN to the scheduled
+    /// `.loopEngineering` Auto Task, without the user ever choosing it.
+    /// Flipping the creation default to `false` fixes loops created from now
+    /// on and does nothing for the ones already on disk, which would keep
+    /// running on the cron; this switches those off.
+    ///
+    /// **Once, then never again.** The flag is set on the first call for a
+    /// project whether or not anything changed, so an opt-in the user makes
+    /// afterwards (Loop page → ⋯ → "Run on schedule") is theirs and is never
+    /// reverted. Deliberately not destructive beyond that one flag: stages,
+    /// budgets, goals and Primary are untouched, and re-enabling a loop is one
+    /// menu item.
+    static func normalizeScheduleOptIn(_ store: inout LoopEngineProjectStore, projectId: String,
+                                       defaults: UserDefaults = .standard) -> Bool {
+        let key = scheduleOptInMigrationKey(projectId)
+        guard !defaults.bool(forKey: key) else { return false }
+        defaults.set(true, forKey: key)
+        guard store.loops.contains(where: \.runsOnSchedule) else { return false }
+        store.loops = store.loops.map { loop in
+            var copy = loop
+            copy.runsOnSchedule = false
+            return copy
+        }
+        return true
     }
 
     /// The project's Primary loop — the phone's target, and what a surface

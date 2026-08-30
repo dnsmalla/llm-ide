@@ -264,4 +264,61 @@ final class LoopEngineConfigStoreTests: XCTestCase {
             atPath: LoopEngineConfigStore.fileURL(projectRoot: projectRoot).path),
             "an unconfirmed all-Regression detection must not be committed")
     }
+
+    // MARK: - Schedule opt-in normalization
+
+    /// Loops written by an older build carry `runsOnSchedule: true` — a value
+    /// the user never chose. The first `loops(...)` for a project switches
+    /// them off and persists that, so the cron stops running work nobody
+    /// opted into.
+    func testFirstLoadUnschedulesLoopsSavedUnderTheOldDefault() {
+        var store = makeStore()
+        store.loops[0].runsOnSchedule = true
+        LoopEngineConfigStore.save(store, projectRoot: projectRoot, projectId: projectId, defaults: defaults)
+
+        let ensured = LoopEngineConfigStore.loops(projectRoot: projectRoot, projectId: projectId,
+                                                  gitRoot: nil, defaults: defaults)
+        XCTAssertTrue(ensured.scheduledLoops.isEmpty)
+        XCTAssertEqual(ensured.loops.count, 1, "the loop itself is kept — only its schedule flag changed")
+
+        let reread = LoopEngineConfigStore.load(projectRoot: projectRoot, projectId: projectId,
+                                                defaults: defaults)
+        XCTAssertEqual(reread?.loops.first?.runsOnSchedule, false, "the change is persisted, not per-load")
+    }
+
+    /// Runs once. An opt-in made after the normalization is the user's
+    /// deliberate choice and must survive every later load.
+    func testAnOptInAfterTheNormalizationIsNeverReverted() {
+        var store = makeStore()
+        store.loops[0].runsOnSchedule = true
+        LoopEngineConfigStore.save(store, projectRoot: projectRoot, projectId: projectId, defaults: defaults)
+
+        _ = LoopEngineConfigStore.loops(projectRoot: projectRoot, projectId: projectId,
+                                        gitRoot: nil, defaults: defaults)
+
+        var optedIn = LoopEngineConfigStore.load(projectRoot: projectRoot, projectId: projectId,
+                                                 defaults: defaults)!
+        optedIn.loops[0].runsOnSchedule = true
+        LoopEngineConfigStore.save(optedIn, projectRoot: projectRoot, projectId: projectId, defaults: defaults)
+
+        let ensured = LoopEngineConfigStore.loops(projectRoot: projectRoot, projectId: projectId,
+                                                  gitRoot: nil, defaults: defaults)
+        XCTAssertEqual(ensured.scheduledLoops.count, 1)
+    }
+
+    /// The flag is per project: opening one project must not leave another
+    /// project's old, unchosen schedule flags in place.
+    func testNormalizationIsTrackedPerProject() {
+        var store = makeStore()
+        store.loops[0].runsOnSchedule = true
+        LoopEngineConfigStore.save(store, projectRoot: projectRoot, projectId: projectId, defaults: defaults)
+        _ = LoopEngineConfigStore.loops(projectRoot: projectRoot, projectId: projectId,
+                                        gitRoot: nil, defaults: defaults)
+
+        let otherRoot = projectRoot.appendingPathComponent("other", isDirectory: true)
+        LoopEngineConfigStore.save(store, projectRoot: otherRoot, projectId: "proj-2", defaults: defaults)
+        let other = LoopEngineConfigStore.loops(projectRoot: otherRoot, projectId: "proj-2",
+                                                gitRoot: nil, defaults: defaults)
+        XCTAssertTrue(other.scheduledLoops.isEmpty)
+    }
 }

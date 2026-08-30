@@ -137,8 +137,16 @@ final class AutoCodeUpdateServiceLoopEngineeringTests: XCTestCase {
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        let store = LoopEngineConfigStore.loops(projectRoot: tempDir, projectId: "parked",
+        var store = LoopEngineConfigStore.loops(projectRoot: tempDir, projectId: "parked",
                                                 gitRoot: tempDir, defaults: suite)
+        // The schedule is opt-in (`LoopDefinition.runsOnSchedule` starts
+        // false), so opt every loop in first — what is under test here is
+        // which loops have stages to run, not whether they are scheduled.
+        store.loops = store.loops.map { loop in
+            var copy = loop
+            copy.runsOnSchedule = true
+            return copy
+        }
         XCTAssertEqual(store.scheduledLoops.compactMap(\.defaultKey),
                        [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.plan],
                        "only the unconditional loops (Regression, Plan) have stages to run in a bare tree")

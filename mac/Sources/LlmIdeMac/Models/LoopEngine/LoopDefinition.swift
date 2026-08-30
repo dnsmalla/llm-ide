@@ -44,6 +44,14 @@ struct LoopDefinition: Codable, Equatable, Identifiable {
     var defaultKey: String?
     /// Whether the scheduled `.loopEngineering` Auto Task includes this loop.
     ///
+    /// **Opt-in.** A newly created loop — a built-in default included — starts
+    /// `false`: creating a loop describes work, it does not consent to that
+    /// work running unattended on a cron. The user opts in per loop from the
+    /// Loop page (⋯ → "Run on schedule"). Note the decode default below is
+    /// still `true`, which is the opposite on purpose: an absent key means the
+    /// loop predates this field, back when the single loop WAS the scheduled
+    /// one, and silently unscheduling it on upgrade would be a regression.
+    ///
     /// Each scheduled loop is run as its own INDEPENDENT run — its own
     /// iteration budget, its own journal record, its own goal — not chained
     /// into one long pipeline. They are run one after another only because a
@@ -59,7 +67,7 @@ struct LoopDefinition: Codable, Equatable, Identifiable {
     init(id: String = UUID().uuidString, name: String, isPrimary: Bool = false,
          goal: String? = nil, acceptanceCriteria: String? = nil,
          scopeGlobs: [String] = [], defaultKey: String? = nil,
-         runsOnSchedule: Bool = true, config: LoopEngineConfig) {
+         runsOnSchedule: Bool = false, config: LoopEngineConfig) {
         self.id = id
         self.name = name
         self.isPrimary = isPrimary

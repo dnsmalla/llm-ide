@@ -379,12 +379,31 @@ final class LoopDefaultLoopsTests: XCTestCase {
 
     // MARK: - Scheduling
 
+    /// A default loop is created OPTED OUT of the schedule: creating loops for
+    /// a project must not start running them on a cron by itself.
+    func testFreshDefaultLoopsAreNotScheduledUntilOptedIn() throws {
+        try writeLlmIdeLayout()
+        let store = LoopStageDetector.ensureDefaultLoops(
+            in: LoopEngineProjectStore(loops: []), gitRoot: repo)
+        XCTAssertEqual(store.loops.compactMap(\.defaultKey).sorted(),
+                       LoopDefaultLoopKey.all.sorted(),
+                       "every default loop still exists — it is only unscheduled")
+        XCTAssertTrue(store.scheduledLoops.isEmpty)
+    }
+
     /// Each scheduled loop runs as its own independent run; this is the list
     /// the Auto Task iterates.
     func testScheduledLoopsSkipsOptedOutAndFullyDisabledLoops() throws {
         try writeLlmIdeLayout()
         var store = LoopStageDetector.ensureDefaultLoops(
             in: LoopEngineProjectStore(loops: []), gitRoot: repo)
+        // Opt every loop in, the way the user does from the Loop page — the
+        // schedule is opt-in, so there is nothing to filter until they have.
+        store.loops = store.loops.map { loop in
+            var copy = loop
+            copy.runsOnSchedule = true
+            return copy
+        }
         XCTAssertEqual(store.scheduledLoops.count, 4)
 
         let testIndex = store.loops.firstIndex { $0.defaultKey == LoopDefaultLoopKey.test }!

@@ -175,9 +175,15 @@ two jobs apart. Splitting them gives each its own iteration count, its own
   the pinned stages had. It stays fully editable, and the escape hatches are
   per-stage `enabled` and the loop's own **Runs on schedule**.
 - **`runsOnSchedule`** decides whether the scheduled `.loopEngineering` Auto
-  Task includes the loop. Each scheduled loop is a **separate run** with its own
-  budgets and journal record; they go one at a time only because one working
-  tree cannot host two runs (the runner's per-git-root guard).
+  Task includes the loop, and it is **opt-in**: every loop is created with it
+  off, because creating a loop describes work — it does not consent to that
+  work running unattended on a cron. Turn it on per loop from the Loop page
+  (⋯ → *Run on schedule*). Loops saved before this was opt-in are switched off
+  once per project by `LoopEngineConfigStore.normalizeScheduleOptIn`, which
+  records that it ran so a later opt-in is never reverted. Each scheduled loop
+  is a **separate run** with its own budgets and journal record; they go one at
+  a time only because one working tree cannot host two runs (the runner's
+  per-git-root guard).
 - **One editable loop is guaranteed.** The built-ins cannot be deleted, so a
   project always keeps a loop of the user's own — "Main Loop", seeded on first
   setup and preserved by the migration below (its built-in stages move out; the

@@ -164,7 +164,7 @@ struct LoopEngineView: View {
     /// Mirrors `LoopDefinition.runsOnSchedule`. Toggled from the loop-list
     /// pane, not here, so — exactly like `isPrimaryLoop` — this copy can be
     /// stale and `writeLoop` takes the value from disk instead.
-    @State var runsOnSchedule = true
+    @State var runsOnSchedule = false
     /// Whether the loop this page represents was the project's Primary loop
     /// as of the last `loadConfig()` — i.e. refreshed on a project/loop
     /// switch only, NOT when Primary is reassigned from the loop-list pane
@@ -990,7 +990,7 @@ struct LoopEngineView: View {
         scopeGlobs = []
         isPrimaryLoop = false
         loopDefaultKey = nil
-        runsOnSchedule = true
+        runsOnSchedule = false
         pastRuns = []
         lastSummaryNoteName = nil
         // Nothing is persisted for this loop (that is what "reset to
