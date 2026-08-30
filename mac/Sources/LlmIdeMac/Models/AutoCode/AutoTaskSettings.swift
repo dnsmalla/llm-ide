@@ -327,17 +327,21 @@ final class AutoTaskSettings: ObservableObject {
         self.lookbackDays = defaults.object(forKey: "autoCodeLookbackDays") as? Int ?? 7
         self.autoStash = defaults.object(forKey: "autoCodeAutoStash") as? Bool ?? false
         
-        self.runReviewCode = defaults.object(forKey: "autoCodeRunReviewCode") as? Bool ?? true
-        self.runReviewDoc = defaults.object(forKey: "autoCodeRunReviewDoc") as? Bool ?? true
+        // Every per-task enable defaults to OFF: an Auto Task is opt-in, and
+        // flipping the master switch on must not silently start a handful of
+        // tasks the user never chose. A key is written only when the user
+        // toggles a task, so an explicit choice always survives this default.
+        self.runReviewCode = defaults.object(forKey: "autoCodeRunReviewCode") as? Bool ?? false
+        self.runReviewDoc = defaults.object(forKey: "autoCodeRunReviewDoc") as? Bool ?? false
         self.runReviewConflicts = defaults.object(forKey: "autoCodeRunReviewConflicts") as? Bool ?? false
         self.runRegression = defaults.object(forKey: "autoCodeRunRegression") as? Bool ?? false
-        self.runGenerateKnowledge = defaults.object(forKey: "autoCodeRunGenerateKnowledge") as? Bool ?? true
-        self.runGenerateDoc = defaults.object(forKey: "autoCodeRunGenerateDoc") as? Bool ?? true
+        self.runGenerateKnowledge = defaults.object(forKey: "autoCodeRunGenerateKnowledge") as? Bool ?? false
+        self.runGenerateDoc = defaults.object(forKey: "autoCodeRunGenerateDoc") as? Bool ?? false
         self.runUpdateIssues = defaults.object(forKey: "autoCodeRunUpdateIssues") as? Bool ?? false
         self.runUpdatePlanStatus = defaults.object(forKey: "autoCodeRunUpdatePlanStatus") as? Bool ?? false
         self.runSourceUpdate = defaults.object(forKey: "autoCodeRunSourceUpdate") as? Bool ?? false
-        self.runSourcesToIssue = defaults.object(forKey: "autoCodeRunSourcesToIssue") as? Bool ?? true
-        self.runImplementIssues = defaults.object(forKey: "autoCodeRunImplementIssues") as? Bool ?? true
+        self.runSourcesToIssue = defaults.object(forKey: "autoCodeRunSourcesToIssue") as? Bool ?? false
+        self.runImplementIssues = defaults.object(forKey: "autoCodeRunImplementIssues") as? Bool ?? false
         self.runReviewMerge = defaults.object(forKey: "autoCodeRunReviewMerge") as? Bool ?? false
         self.runLoopEngineering = defaults.object(forKey: "autoCodeRunLoopEngineering") as? Bool ?? false
 
@@ -394,10 +398,10 @@ final class AutoTaskSettings: ObservableObject {
         let newAutoStash = defaults.object(forKey: "autoCodeAutoStash") as? Bool ?? false
         if newAutoStash != autoStash { autoStash = newAutoStash }
         
-        let newRunReviewCode = defaults.object(forKey: "autoCodeRunReviewCode") as? Bool ?? true
+        let newRunReviewCode = defaults.object(forKey: "autoCodeRunReviewCode") as? Bool ?? false
         if newRunReviewCode != runReviewCode { runReviewCode = newRunReviewCode }
         
-        let newRunReviewDoc = defaults.object(forKey: "autoCodeRunReviewDoc") as? Bool ?? true
+        let newRunReviewDoc = defaults.object(forKey: "autoCodeRunReviewDoc") as? Bool ?? false
         if newRunReviewDoc != runReviewDoc { runReviewDoc = newRunReviewDoc }
         
         let newRunReviewConflicts = defaults.object(forKey: "autoCodeRunReviewConflicts") as? Bool ?? false
@@ -406,10 +410,10 @@ final class AutoTaskSettings: ObservableObject {
         let newRunRegression = defaults.object(forKey: "autoCodeRunRegression") as? Bool ?? false
         if newRunRegression != runRegression { runRegression = newRunRegression }
         
-        let newRunGenerateKnowledge = defaults.object(forKey: "autoCodeRunGenerateKnowledge") as? Bool ?? true
+        let newRunGenerateKnowledge = defaults.object(forKey: "autoCodeRunGenerateKnowledge") as? Bool ?? false
         if newRunGenerateKnowledge != runGenerateKnowledge { runGenerateKnowledge = newRunGenerateKnowledge }
         
-        let newRunGenerateDoc = defaults.object(forKey: "autoCodeRunGenerateDoc") as? Bool ?? true
+        let newRunGenerateDoc = defaults.object(forKey: "autoCodeRunGenerateDoc") as? Bool ?? false
         if newRunGenerateDoc != runGenerateDoc { runGenerateDoc = newRunGenerateDoc }
         
         let newRunUpdateIssues = defaults.object(forKey: "autoCodeRunUpdateIssues") as? Bool ?? false
@@ -421,10 +425,10 @@ final class AutoTaskSettings: ObservableObject {
         let newRunSourceUpdate = defaults.object(forKey: "autoCodeRunSourceUpdate") as? Bool ?? false
         if newRunSourceUpdate != runSourceUpdate { runSourceUpdate = newRunSourceUpdate }
 
-        let newRunSourcesToIssue = defaults.object(forKey: "autoCodeRunSourcesToIssue") as? Bool ?? true
+        let newRunSourcesToIssue = defaults.object(forKey: "autoCodeRunSourcesToIssue") as? Bool ?? false
         if newRunSourcesToIssue != runSourcesToIssue { runSourcesToIssue = newRunSourcesToIssue }
 
-        let newRunImplementIssues = defaults.object(forKey: "autoCodeRunImplementIssues") as? Bool ?? true
+        let newRunImplementIssues = defaults.object(forKey: "autoCodeRunImplementIssues") as? Bool ?? false
         if newRunImplementIssues != runImplementIssues { runImplementIssues = newRunImplementIssues }
 
         let newRunReviewMerge = defaults.object(forKey: "autoCodeRunReviewMerge") as? Bool ?? false

@@ -21,6 +21,28 @@ final class AutoTaskSettingsTests: XCTestCase {
         super.tearDown()
     }
 
+    /// Auto Tasks are opt-in: a fresh install has NO task enabled, so turning
+    /// the master switch on cannot start work the user never chose.
+    func testEveryTaskDefaultsDisabled() {
+        let settings = AutoTaskSettings(defaults: suite)
+        XCTAssertFalse(settings.enabled, "the master switch is off too")
+        for task in AutoTask.allCases {
+            XCTAssertFalse(settings.isEnabled(task: task), "\(task.label) should default off")
+        }
+        XCTAssertTrue(settings.enabledTasks.isEmpty)
+    }
+
+    /// A task the user switched on stays on — the default only applies while
+    /// no key has been written for that task.
+    func testExplicitlyEnabledTaskSurvivesTheDefault() {
+        let a = AutoTaskSettings(defaults: suite)
+        a.setEnabled(true, task: .reviewCode)
+
+        let b = AutoTaskSettings(defaults: suite)
+        XCTAssertTrue(b.isEnabled(task: .reviewCode))
+        XCTAssertFalse(b.isEnabled(task: .reviewDoc))
+    }
+
     func testShowOnlyEnabledTasksDefaultsFalse() {
         let settings = AutoTaskSettings(defaults: suite)
         XCTAssertFalse(settings.showOnlyEnabledTasks)
