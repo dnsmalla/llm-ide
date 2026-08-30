@@ -120,7 +120,11 @@ const HOST = config.host;
 //     `continueNeeded`; this one carries the list only, so a client can move
 //     a progress bar during a long turn instead of at the end of it. Purely
 //     additive: an unknown event type is ignored by the v2 wire contract.
-const SERVER_API_VERSION = 41;
+//   v42 — the legacy /code-assist SSE stream emits the same `tasks_progress`
+//     events (shared emitter in task-session-context.mjs), fired from the
+//     loop's phase:'tool' progress hook, so legacy-stamped chats get the
+//     same live progress bar. Additive for the same reason.
+const SERVER_API_VERSION = 42;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

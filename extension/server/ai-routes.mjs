@@ -2,6 +2,7 @@ import { runClaude, runClaudeStream, streamModelReply, resolveLanguage } from '.
 import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
 import { selectAttachments, buildSkillsText } from '../core/prompt-framing.mjs';
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
+import { makeTaskProgressEmitter } from '../llm_agent/runtime/task-session-context.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
 import { runSpikeQuery } from '../llm_agent/sdk/spike-engine.mjs';
 import { selectHistoryTurns } from '../llm_agent/runtime/loop.mjs';
@@ -479,6 +480,13 @@ export async function handleAIRoutes(req, res) {
               res.write(`data: ${JSON.stringify(obj)}\n\n`);
             }
           };
+          // `body.mode` rather than the turn's resolved mode (that only
+          // exists after handleCodeAssist returns): the Mac always sends the
+          // picker's concrete mode, and a plan-like one yields an empty list
+          // — which the emitter skips — so the worst mis-gating is no events.
+          const emitTaskProgress = makeTaskProgressEmitter({
+            userId: req.user?.id, agentContext: enrichedAgentContext, mode: body.mode, send: writeEvent,
+          });
           try {
             const out = await handleCodeAssist({
               message,
@@ -528,7 +536,17 @@ export async function handleAIRoutes(req, res) {
               },
               kb,
               userId: req.user?.id,
-              onProgress: (ev) => writeEvent({ type: 'progress', ...ev }),
+              onProgress: (ev) => {
+                writeEvent({ type: 'progress', ...ev });
+                // Live task progress, mirroring routes/agent-v2.mjs: without
+                // it a legacy plan-execute turn's bar sat at step 1 until the
+                // terminal `tasks` event. The loop emits phase:'tool' BEFORE
+                // the tool executes, so each snapshot lags one tool call —
+                // the list a task-update just changed goes out on the NEXT
+                // tool's event, and the terminal `tasks` lands the final
+                // state either way.
+                if (ev && ev.phase === 'tool') emitTaskProgress();
+              },
               onChunk: (text) => writeEvent({ type: 'chunk', text }),
             });
             mergeMemoryUsage(usage, out);

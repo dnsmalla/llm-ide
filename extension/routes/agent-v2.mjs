@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runAgentV2Turn, agentSdkHomeFor } from '../llm_agent/sdk/engine.mjs';
-import { taskTurnResponse } from '../llm_agent/runtime/task-session-context.mjs';
+import { taskTurnResponse, makeTaskProgressEmitter } from '../llm_agent/runtime/task-session-context.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
 import { classifyCodeAssistMode, MODES } from '../llm_agent/runtime/mode-classify.mjs';
 import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
@@ -218,34 +218,12 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   // whose client sent no `model` would meter model:null — recordUsage skips
   // such rows entirely, blinding the per-model usage caps.
   let resolvedModel = null;
-  // Last task list emitted as a `tasks_progress` event, as a compact
-  // signature. A turn can run dozens of tool calls; recomputing the list is
-  // an in-memory map read, but re-sending an unchanged list on every one of
-  // them would be pure stream noise.
-  let lastTaskSignature = null;
-  // Live task progress. The terminal `tasks` event below is emitted AFTER
-  // the SDK result, so before this a plan-execute run of 30 steps showed a
-  // progress bar frozen at "Step 1 of 30" for the whole turn — the client
-  // only learned what had completed once everything had. A task tool can
-  // only change the list by running, so a tool_result is the exact moment
-  // to re-check it.
-  //
-  // Deliberately a SEPARATE event type from the terminal `tasks`: that one
-  // also carries `continueNeeded`, which the Mac uses to decide whether to
-  // fire an auto-continue turn. Mid-turn that answer is always "yes, work
-  // remains" and acting on it would chain a second turn on top of the one
-  // still running, so this event carries the list only.
-  const emitTaskProgress = () => {
-    let currentTasks;
-    try {
-      ({ tasks: currentTasks } = taskTurnResponse(userId, agentContext, mode));
-    } catch { return; }   // task bookkeeping must never break the turn's stream
-    if (!Array.isArray(currentTasks) || currentTasks.length === 0) return;
-    const signature = currentTasks.map((t) => `${t.id}:${t.status}:${t.title}`).join('|');
-    if (signature === lastTaskSignature) return;
-    lastTaskSignature = signature;
-    send({ type: 'tasks_progress', tasks: currentTasks });
-  };
+  // Live task progress (shared emitter — task-session-context.mjs). The
+  // terminal `tasks` event below is emitted AFTER the SDK result, so before
+  // this a plan-execute run of 30 steps showed a progress bar frozen at
+  // "Step 1 of 30" for the whole turn. A task tool can only change the list
+  // by running, so a tool_result is the exact moment to re-check it.
+  const emitTaskProgress = makeTaskProgressEmitter({ userId, agentContext, mode, send });
   const onEvent = (ev) => {
     if (ev && typeof ev.sessionId === 'string' && ev.sessionId) currentSdkSessionId = ev.sessionId;
     if (typeof ev?.model === 'string' && ev.model) resolvedModel = ev.model;

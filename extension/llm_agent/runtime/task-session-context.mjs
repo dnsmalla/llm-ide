@@ -23,6 +23,38 @@ export function taskTurnResponse(userId, agentContext, mode) {
 }
 
 /**
+ * Live task-progress emitter for one turn's SSE stream, shared by BOTH
+ * engines' routes (routes/agent-v2.mjs and server/ai-routes.mjs's legacy
+ * /code-assist stream) so the wire event and its dedupe rule have exactly
+ * one definition.
+ *
+ * Returns a closure the route calls after each tool event; it re-reads the
+ * session task list and sends `{type:'tasks_progress', tasks}` only when
+ * the list actually changed since the last emission. Deliberately a
+ * SEPARATE event type from the terminal `tasks`: that one also carries
+ * `continueNeeded`, which the Mac auto-chains on — mid-turn that answer is
+ * always "work remains", and acting on it would stack a second turn on the
+ * one still running, so this event carries the list only.
+ *
+ * Task bookkeeping must never break a turn's stream — every failure path
+ * inside returns silently.
+ */
+export function makeTaskProgressEmitter({ userId, agentContext, mode, send }) {
+  let lastSignature = null;
+  return () => {
+    let current;
+    try {
+      ({ tasks: current } = taskTurnResponse(userId, agentContext, mode));
+    } catch { return; }
+    if (!Array.isArray(current) || current.length === 0) return;
+    const signature = current.map((t) => `${t.id}:${t.status}:${t.title}`).join('|');
+    if (signature === lastSignature) return;
+    lastSignature = signature;
+    try { send({ type: 'tasks_progress', tasks: current }); } catch { /* stream over */ }
+  };
+}
+
+/**
  * Prompt block listing session tasks + optional skill guidance for the
  * active task. Returns "" when the mode restricts tools or no tasks exist.
  */
