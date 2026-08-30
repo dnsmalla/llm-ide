@@ -246,6 +246,9 @@ extension ChatEngine {
             guard currentSessionIDString == expectedSessionID.uuidString else {
                 return resp.reply
             }
+            // Same as runTurn's: the final reply supersedes anything still
+            // buffered, so discard rather than flush. See discardPendingChunks.
+            discardPendingChunks()
             if let idx = messages.firstIndex(where: { $0.id == streamingID }) {
                 messages[idx].content = resp.reply
             }

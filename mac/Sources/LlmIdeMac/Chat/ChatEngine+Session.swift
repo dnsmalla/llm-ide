@@ -42,7 +42,42 @@ extension ChatEngine {
     ///
     /// Only the last 50 turns are written — the same cap every caller of the
     /// panel's `persistCurrentChat(history:)` applied at the call site.
+    /// Schedule a session write for `persistDebounceNanos` from now, unless
+    /// one is already pending. Used by the ONE caller on the streaming hot
+    /// path (`announceAndPersist`, driven by `.onChange(of: messages)`); every
+    /// other call site still uses `persistCurrentChat()` and writes at once.
+    ///
+    /// Trailing-edge with a leading schedule: the first mutation starts the
+    /// timer and later mutations ride it, so a burst of streamed text costs
+    /// exactly one write per window rather than one per mutation. Whatever is
+    /// in `messages` when the timer fires is what lands — the debounce holds
+    /// no snapshot, so it can never persist stale content.
+    func schedulePersist() {
+        guard persistDebounceTask == nil else { return }
+        persistDebounceTask = Task { [persistDebounceNanos] in
+            try? await Task.sleep(nanoseconds: persistDebounceNanos)
+            guard !Task.isCancelled else { return }
+            self.persistDebounceTask = nil
+            self.persistCurrentChat()
+        }
+    }
+
+    /// Land a pending debounced write now. Called at every turn boundary so a
+    /// finished conversation is on disk immediately rather than up to
+    /// `persistDebounceNanos` later — the window in which a crash or a quit
+    /// would lose the tail of the reply.
+    func flushPendingPersist() {
+        guard persistDebounceTask != nil else { return }
+        persistCurrentChat()
+    }
+
     func persistCurrentChat() {
+        // An immediate write subsumes any pending debounced one — dropping
+        // the timer here is what keeps every existing (non-streaming) call
+        // site behaving exactly as it did, and stops a stale timer from
+        // firing a redundant write after the turn has already landed.
+        persistDebounceTask?.cancel()
+        persistDebounceTask = nil
         guard let id = UUID(uuidString: currentSessionIDString) else { return }
         let capped = Array(messages.suffix(50))
         var session = ChatSessionStore.load(id: id) ?? ChatSession(id: id, scope: scope)
@@ -154,6 +189,10 @@ extension ChatEngine {
         if let streamingID = revealingTurnID {
             finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
         } else {
+            // No streaming turn to finalize, so nothing will flush for us —
+            // make sure a stray buffer can't land on the INCOMING session's
+            // history after the swap.
+            discardPendingChunks()
             revealedCount = 0
         }
     }
@@ -362,7 +401,17 @@ extension ChatEngine {
     /// silent under test — same as `finishStreamingTurn`.
     func announceAndPersist(oldValue: [ChatMessage],
                             newValue: [ChatMessage]) {
-        persistCurrentChat()
+        // Streamed text mutates `messages` in place many times per turn, and
+        // each of those used to cost a synchronous session-file read + atomic
+        // write on the MainActor. Debounce ONLY that case: every structural
+        // change (a turn appended, a status finalized, a history replaced)
+        // still writes immediately, exactly as before, so the only behavior
+        // that changes is how often a half-streamed reply hits the disk.
+        if revealingTurnID != nil {
+            schedulePersist()
+        } else {
+            persistCurrentChat()
+        }
         guard !suppressHistoryAnnounce else { return }
         if newValue.count > oldValue.count,
            let last = newValue.last,

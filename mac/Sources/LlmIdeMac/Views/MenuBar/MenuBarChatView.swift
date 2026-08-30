@@ -384,9 +384,12 @@ struct MenuBarChatView: View {
         }
     }
 
+    /// Always the full content. `revealedCount` is the streamed length, so
+    /// the prefix was always the whole string — but `String.prefix` is O(n)
+    /// in grapheme clusters and this ran on every render of a growing reply.
+    /// The counter still drives the follow-the-stream scroll below.
     private func displayedContent(for msg: ChatMessage) -> String {
-        guard msg.id == engine.revealingTurnID else { return msg.content }
-        return String(msg.content.prefix(engine.revealedCount))
+        msg.content
     }
 
     // MARK: - Composer

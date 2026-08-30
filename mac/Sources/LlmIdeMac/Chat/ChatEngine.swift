@@ -73,7 +73,55 @@ final class ChatEngine {
     /// `beginStreamingTurn`/`appendStreamedChunk`/`finishStreamingTurn`.
     /// nil once nothing is streaming.
     var revealingTurnID: UUID?
+    /// Characters streamed into the current turn so far. A progress SIGNAL,
+    /// not a truncation length: the views render `content` in full and use
+    /// this only to know that the stream moved (the transcript follows it to
+    /// keep the growing reply on screen). Maintained incrementally — summing
+    /// each flushed batch — because `String.count` is O(n) in grapheme
+    /// clusters, and recomputing it per chunk made a long reply O(n²).
     var revealedCount = 0
+
+    // MARK: - Chunk coalescing
+
+    /// Text that has arrived from the transport but is not yet written into
+    /// `messages`. The server emits one SSE `chunk` per model text delta —
+    /// 5-20 characters — so a normal reply arrives as a thousand-plus
+    /// callbacks. Writing each one straight into `messages` published a
+    /// thousand SwiftUI invalidations, a thousand `WKWebView` document
+    /// reloads, and (via the panel's `.onChange(of: engine.messages)`) a
+    /// thousand synchronous session-file read/write pairs, all on the
+    /// MainActor. Batching them at `chunkCoalesceNanos` cuts every one of
+    /// those to ~20/second without changing what the user ends up seeing.
+    var pendingChunkText = ""
+    /// The turn `pendingChunkText` belongs to. A chunk for a different turn
+    /// flushes the buffer first, so text can never land on the wrong message.
+    var pendingChunkTurnID: UUID?
+    /// The in-flight coalescing delay, if one is scheduled.
+    var chunkFlushTask: Task<Void, Never>?
+    /// How long chunks accumulate before being published. ~50 ms reads as
+    /// continuous typing (20 fps) while collapsing the per-delta storm. A
+    /// knob only so tests can flush deterministically; production never
+    /// changes it.
+    var chunkCoalesceNanos: UInt64 = 50_000_000
+
+    // MARK: - Persistence debounce
+
+    /// The pending debounced session write, if one is scheduled.
+    ///
+    /// `persistCurrentChat()` is a synchronous read-modify-write of the
+    /// session JSON file (`Data(contentsOf:)` plus an atomic `write(to:)`) on
+    /// the MainActor, and the panel drives it from `.onChange(of: messages)`
+    /// — which fires on every mutation, streamed text included. Coalescing
+    /// the chunk storm already cut that from ~1000 writes per reply to
+    /// ~20/second; debouncing takes the streaming path down to about one per
+    /// second. Every non-streaming caller still writes immediately, and
+    /// `flushPendingPersist()` lands the last one at the end of a turn, so
+    /// nothing is ever left only in memory.
+    var persistDebounceTask: Task<Void, Never>?
+    /// How long a streaming-path write waits for further mutations before
+    /// landing. A knob only so tests don't wait a real second.
+    var persistDebounceNanos: UInt64 = 1_000_000_000
+
     /// Handle to the in-flight user turn, so `stop()` can cancel it.
     var runTask: Task<Void, Never>?
     /// Handle to the in-flight EXTERNAL (phone-driven) turn, for the same
@@ -417,6 +465,10 @@ final class ChatEngine {
             // (e.g. its echo-stall guard discards a raw tool-result dump the
             // sniffer already streamed), and this overwrite is what removes
             // that text from the visible chat.
+            // `resp.reply` is the authoritative full text, so anything still
+            // sitting in the coalescing buffer is about to be overwritten by
+            // it — drop it rather than flushing a tail the next line discards.
+            discardPendingChunks()
             if let idx = messages.firstIndex(where: { $0.id == streamingID }) {
                 messages[idx].content = resp.reply
             }
@@ -466,6 +518,14 @@ final class ChatEngine {
         } else {
             busy = false
             runTask = nil
+            // Land any debounced streaming write now the turn is over, so a
+            // finished conversation is on disk immediately instead of up to
+            // `persistDebounceNanos` later. A no-op when nothing is pending —
+            // including for a panel-driven engine, whose `.onChange` has
+            // usually already written through `finishStreamingTurn`'s
+            // mutations. Engines with no panel attached (the mobile bridge)
+            // rely on this call.
+            flushPendingPersist()
             // Clear the completed phone turn's handle HERE, not in
             // runExternalTurn's wrapper: the body reaches this idle branch
             // before the wrapper's await resumes, and by then a second
@@ -543,6 +603,10 @@ final class ChatEngine {
                     handleApprovalArrival(approval, legacySessionId: legacySessionIdForApproval(input))
                 }
             )
+            // `resp.reply` is the authoritative full text, so anything still
+            // sitting in the coalescing buffer is about to be overwritten by
+            // it — drop it rather than flushing a tail the next line discards.
+            discardPendingChunks()
             if let idx = messages.firstIndex(where: { $0.id == streamingID }) {
                 messages[idx].content = resp.reply
             }
@@ -585,6 +649,45 @@ final class ChatEngine {
                 markFailed(streamingID, error)
             }
         }
+    }
+
+    /// Whether the transcript can offer a Retry on the failed reply `id`.
+    ///
+    /// True only for the shape `runTurn` produces: a `.failed` assistant
+    /// placeholder immediately preceded by the user turn it was answering.
+    /// A failure inside `sendFollowup` has no user turn of its own to re-send
+    /// (its prompt is the synthetic "(continue)"), and re-running it would
+    /// mean re-driving a tool chain — so it stays un-retryable rather than
+    /// offering a button that does something subtly different from what it says.
+    func canRetryFailedTurn(_ id: UUID) -> Bool {
+        guard let idx = messages.firstIndex(where: { $0.id == id }),
+              messages[idx].status == .failed,
+              idx > 0, messages[idx - 1].role == .user else { return false }
+        return true
+    }
+
+    /// Re-send the user turn whose reply failed.
+    ///
+    /// Drops the failed placeholder AND the user turn above it, then runs the
+    /// prompt again from scratch — `runTurn` appends its own user turn, so
+    /// leaving the original would double it in both the transcript and the
+    /// replayed history. Refused while another turn is running, for the same
+    /// reason `sendFollowup` guards on `busy`: two concurrent round-trips
+    /// racing one streaming placeholder.
+    ///
+    /// The retry carries no `skillIds`: a turn's selected skills aren't
+    /// recorded on the message, so there is nothing to recover them from. The
+    /// composer's current selection is what a re-send would pick up anyway if
+    /// the user re-typed the prompt, and that's the honest equivalent here.
+    func retryFailedTurn(_ id: UUID) {
+        guard !busy, canRetryFailedTurn(id),
+              let idx = messages.firstIndex(where: { $0.id == id }) else { return }
+        let userTurn = messages[idx - 1]
+        messages.removeSubrange((idx - 1)...idx)
+        // The banner described the failure being retried; a retry that fails
+        // again raises its own.
+        error = nil
+        startTurn(userTurn.content, userMetadata: userTurn.metadata)
     }
 
     /// Tag the placeholder message for a failed round-trip: `.failed` status
@@ -644,16 +747,66 @@ final class ChatEngine {
         return message.id
     }
 
-    /// Append `text` to the streaming turn identified by `id`. `revealedCount`
-    /// tracks the turn's current length so `ChatMessageList.displayedContent`
-    /// (which truncates to `revealedCount` characters for whichever turn
-    /// matches `revealingTurnID`) shows the growing content as it arrives —
-    /// the same read path the old fixed-schedule reveal used, now driven by
-    /// real chunk arrival instead of an artificial timer.
+    /// Buffer `text` for the streaming turn identified by `id`, publishing it
+    /// into `messages` at most once per `chunkCoalesceNanos`.
+    ///
+    /// This is deliberately NOT a straight `messages[idx].content += text`
+    /// anymore: see `pendingChunkText` for what a per-delta write costs. The
+    /// buffer is published by `flushPendingChunks()`, which every exit from a
+    /// turn calls before it reads or overwrites the turn's content — so no
+    /// caller can observe a partially-drained stream.
     func appendStreamedChunk(_ id: UUID, _ text: String) {
-        guard let idx = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[idx].content += text
-        revealedCount = messages[idx].content.count
+        // A chunk for a different turn means the previous turn is done
+        // receiving text; land its buffer before starting a new one rather
+        // than appending across the boundary.
+        if let pending = pendingChunkTurnID, pending != id { flushPendingChunks() }
+        pendingChunkTurnID = id
+        pendingChunkText += text
+        guard chunkFlushTask == nil else { return }
+        chunkFlushTask = Task { [chunkCoalesceNanos] in
+            try? await Task.sleep(nanoseconds: chunkCoalesceNanos)
+            // `Task.sleep` throws on cancellation, so a cancelled flush lands
+            // nothing here — the buffer stays put for whichever exit path
+            // (finishStreamingTurn, the reply overwrite) flushes it next.
+            guard !Task.isCancelled else { return }
+            self.flushPendingChunks()
+        }
+    }
+
+    /// Publish every buffered chunk into its turn and clear the timer.
+    /// Idempotent and cheap when the buffer is empty, so exit paths can call
+    /// it unconditionally.
+    func flushPendingChunks() {
+        chunkFlushTask?.cancel()
+        chunkFlushTask = nil
+        guard !pendingChunkText.isEmpty, let id = pendingChunkTurnID else {
+            pendingChunkText = ""
+            return
+        }
+        let batch = pendingChunkText
+        pendingChunkText = ""
+        guard let idx = messages.firstIndex(where: { $0.id == id }) else {
+            pendingChunkTurnID = nil
+            return
+        }
+        messages[idx].content += batch
+        // Incremental, not `content.count` — see `revealedCount`. Combining
+        // marks at a batch boundary can make this drift a character or two
+        // above the true grapheme count, which is harmless: nothing slices
+        // the content by it, it only has to move when the stream moves.
+        revealedCount += batch.count
+    }
+
+    /// Drop buffered chunks without publishing them. For the one case where
+    /// the buffer is genuinely unwanted: the turn's content is about to be
+    /// replaced wholesale by the server's authoritative final reply, so
+    /// flushing first would append text the overwrite is about to discard
+    /// anyway — and would briefly render a duplicated tail while it did.
+    func discardPendingChunks() {
+        chunkFlushTask?.cancel()
+        chunkFlushTask = nil
+        pendingChunkText = ""
+        pendingChunkTurnID = nil
     }
 
     /// Finalize a streaming turn: fires the VoiceOver announcement exactly
@@ -670,6 +823,13 @@ final class ChatEngine {
         mode: String?,
         stopped: Bool
     ) {
+        // Land any coalesced text before finalizing. This is what preserves
+        // the partial reply on the paths that DON'T overwrite from
+        // `resp.reply` — a user Stop, a mid-stream network failure, a session
+        // switch finalizing the outgoing turn. Without it the last ≤50 ms of
+        // streamed text would be silently dropped on exactly those paths.
+        // A no-op after `discardPendingChunks()`, which the success paths run.
+        flushPendingChunks()
         revealingTurnID = nil
         revealedCount = 0
         if let idx = messages.firstIndex(where: { $0.id == id }) {
