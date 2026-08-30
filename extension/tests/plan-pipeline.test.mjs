@@ -77,6 +77,21 @@ test('plan binding redirects file writes to save-plan and drops git', () => {
   assert.match(binding, /worktree/);
 });
 
+test('plan binding keeps the saved document out of the chat reply', () => {
+  // The card already renders the plan body with the file path and an Execute
+  // action; a model that also writes it out as prose puts the same document
+  // in the chat twice, untruncated. Both plan-like modes must carry the rule.
+  for (const mode of ['plan', 'assist_plan']) {
+    const binding = buildPlanBinding(mode, { skillName: 'brainstorming' });
+    assert.match(binding, /Do not restate the document in your reply/);
+    assert.match(binding, /headings only/);
+    // The upstream writing-plans skill ends by asking the user to choose
+    // subagent vs inline execution; here the server picks it from the
+    // Execute action, so the question would be dead-end UI.
+    assert.match(binding, /Do not ask which execution mode/);
+  }
+});
+
 test('execute binding tells the model which execution skill it got, and why', () => {
   const withAgents = buildExecuteBinding({ skillName: 'subagent-driven-development', hasSubagents: true });
   assert.match(withAgents, /ask-subagent/);

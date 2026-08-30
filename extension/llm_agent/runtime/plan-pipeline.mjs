@@ -139,6 +139,22 @@ const ARTIFACT_CLAUSE =
   + 'document that is actually finished and approved, and say in your reply '
   + 'that you saved it and where.';
 
+// The full plan reaches the user through the saved-plan card (title, file
+// path, collapsible body, Execute/Edit); a model that ALSO writes the plan
+// out as prose before calling save-plan makes the chat carry the same
+// document twice, and the untruncated copy is the one in the bubble. So the
+// document body belongs in the tool call, and the reply is the table of
+// contents for it.
+const REPLY_BREVITY_CLAUSE =
+  '- **Do not restate the document in your reply.** Its full text goes in the '
+  + '`save-plan` call, and the card the user gets back renders that text with '
+  + 'the file path and an Execute action. So the reply lists the task headings '
+  + 'only — one numbered line each, no bodies and no code blocks — then one '
+  + 'line naming the file; under 20 lines in total. Keep writing normally while '
+  + 'you are still discovering: this starts at the turn you call `save-plan`. '
+  + 'Do not ask which execution mode to use either — the app picks inline vs '
+  + 'subagent itself when the user presses Execute.';
+
 /**
  * The mode persona for a plan-like mode: a short binding block that frames
  * the injected stage-1 skill and names the stage transitions. Kept free of
@@ -164,6 +180,7 @@ export function buildPlanBinding(mode, { skillName } = {}) {
     + 'to write the implementation plan. Do not write the plan from memory, and '
     + 'do not load it before there is an approved design to turn into one.\n'
     + `${ARTIFACT_CLAUSE}\n`
+    + `${REPLY_BREVITY_CLAUSE}\n`
     + `${FACTS_CLAUSE}\n`
     + '- **No other write tool.** File edits, shell commands, git operations '
     + 'and issue/PR actions are unavailable in this mode; `save-plan` is the '
