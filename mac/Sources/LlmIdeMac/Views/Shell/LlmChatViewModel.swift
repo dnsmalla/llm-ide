@@ -97,14 +97,18 @@ final class LlmChatViewModel {
     /// every 2s refresh. `seq` is a per-user monotonically increasing
     /// counter (`kb/personas.mjs:appendAgentAskMessage`), so this is
     /// collision-free and stable across reloads within one transcript.
-    func loadHistory(limit: Int = 50) async {
-        guard !engine.busy else { return }
+    /// Returns whether the local transcript actually changed, which is what
+    /// `runHistoryPolling` uses to decide how soon to look again.
+    @discardableResult
+    func loadHistory(limit: Int = 50) async -> Bool {
+        guard !engine.busy else { return false }
         loadingHistory = true
         defer { loadingHistory = false }
         do {
             let items = try await historyAPI.listAgentAskHistory(limit: limit)
-            guard !engine.busy else { return }
+            guard !engine.busy else { return false }
             let mapped = items.map(Self.chatMessage(from:))
+            var changed = false
             if clientStoppedTurnActive {
                 // Server finished a turn the user stopped — same row count,
                 // assistant flips to `.done`. Keep the local `.stopped` tail.
@@ -112,15 +116,88 @@ final class LlmChatViewModel {
                     clientStoppedTurnActive = false
                     if mapped != engine.messages {
                         engine.replaceMessages(mapped)
+                        changed = true
                     }
                 }
             } else if mapped != engine.messages {
                 engine.replaceMessages(mapped)
+                changed = true
             }
             lastError = nil
+            return changed
         } catch {
             lastError = "Could not load shared conversation: \(error.localizedDescription)"
             log.error("Failed to load LLM Chat history: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+    }
+
+    // MARK: - Shared-transcript polling
+
+    /// How long to wait before the next fallback poll of the shared history.
+    ///
+    /// Both surfaces that show this transcript (`LlmChatSheet` and
+    /// `MenuBarChatView`) used to refetch it every 2 seconds for as long as
+    /// they were open — 30 requests a minute each, almost all of them
+    /// returning the identical transcript.
+    ///
+    /// That rate was never load-bearing. Every in-process origin of a change
+    /// already posts `.llmChatTranscriptChanged` and triggers an immediate
+    /// refresh: a turn finishing here (`notifyIfTurnFinished`), a turn
+    /// arriving from the iPhone, and a clear from either side
+    /// (`MobileControlManager`, `clearHistory`). The poll only exists to
+    /// catch changes made OUTSIDE this process entirely — another client
+    /// hitting the same backend — so it is a safety net, and a safety net
+    /// does not need a two-second heartbeat.
+    ///
+    /// Backing off geometrically keeps it responsive where it matters:
+    /// activity resets it to the floor, so a burst converges as quickly as it
+    /// did before, while an idle window settles at the ceiling.
+    struct PollBackoff: Sendable, Equatable {
+        /// Interval right after a change — the old fixed rate.
+        static let floor: Double = 2
+        /// Interval an idle window settles at.
+        static let ceiling: Double = 30
+
+        private(set) var seconds: Double = PollBackoff.floor
+
+        /// Something changed (or the user acted): look again soon.
+        mutating func reset() { seconds = Self.floor }
+
+        /// Nothing changed: wait longer next time, up to the ceiling.
+        mutating func advance() { seconds = min(seconds * 2, Self.ceiling) }
+    }
+
+    private(set) var pollBackoff = PollBackoff()
+
+    /// Force the next poll back to the floor. Called when something told us
+    /// the transcript changed, so the loop re-converges immediately instead
+    /// of sitting out the rest of a long backoff window.
+    func resetPollBackoff() { pollBackoff.reset() }
+
+    /// The fallback poll loop both surfaces run while visible. Cancelled by
+    /// the view's `.onDisappear`; `Task.sleep` throws on cancellation, which
+    /// ends the loop.
+    ///
+    /// `pauseWhile` skips a single tick without ending the loop or touching
+    /// the backoff — the menu-bar surface uses it to keep a poll from racing
+    /// its own in-progress "clear history".
+    func runHistoryPolling(pauseWhile: @escaping @MainActor () -> Bool = { false }) async {
+        while !Task.isCancelled {
+            let delay = pollBackoff.seconds
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            guard !pauseWhile() else { continue }
+            if await loadHistory() {
+                pollBackoff.reset()
+            } else {
+                // Also advances while a turn is in flight (`loadHistory`
+                // returns false without fetching). That's correct: the turn
+                // posts `.llmChatTranscriptChanged` when it lands, which
+                // resets the backoff — polling underneath it would only
+                // duplicate work.
+                pollBackoff.advance()
+            }
         }
     }
 

@@ -85,6 +85,10 @@ struct MenuBarChatView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .llmChatTranscriptChanged)) { _ in
+            // Something changed: refresh now AND pull the backoff back to the
+            // floor, so the loop doesn't sit out the rest of a long window
+            // while a conversation is active.
+            viewModel.resetPollBackoff()
             Task { await viewModel.loadHistory() }
         }
         .alert("Clear the conversation?", isPresented: $confirmingClear) {
@@ -553,12 +557,12 @@ struct MenuBarChatView: View {
 
     private func startHistoryRefresh() {
         historyRefreshTask?.cancel()
+        // Backing-off fallback poll, shared with LlmChatSheet — see
+        // `LlmChatViewModel.PollBackoff`. The pause closure preserves this
+        // surface's own guard against polling over an in-flight clear.
+        viewModel.resetPollBackoff()
         historyRefreshTask = Task {
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                guard !clearingHistory else { continue }
-                await viewModel.loadHistory()
-            }
+            await viewModel.runHistoryPolling(pauseWhile: { clearingHistory })
         }
     }
 

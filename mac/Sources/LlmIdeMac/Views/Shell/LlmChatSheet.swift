@@ -60,12 +60,11 @@ struct LlmChatSheet: View {
         .onAppear {
             inputFocused = true
             Task { await viewModel.loadHistory() }
-            historyRefreshTask = Task {
-                while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    await viewModel.loadHistory()
-                }
-            }
+            // Backing-off fallback poll, shared with MenuBarChatView — see
+            // `LlmChatViewModel.PollBackoff` for why a 2s heartbeat was never
+            // what kept this transcript in sync.
+            viewModel.resetPollBackoff()
+            historyRefreshTask = Task { await viewModel.runHistoryPolling() }
         }
         .onDisappear {
             historyRefreshTask?.cancel()
@@ -86,6 +85,10 @@ struct LlmChatSheet: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .llmChatTranscriptChanged)) { _ in
+            // Something changed: refresh now AND pull the backoff back to the
+            // floor, so the loop doesn't sit out the rest of a long window
+            // while a conversation is active.
+            viewModel.resetPollBackoff()
             Task { await viewModel.loadHistory() }
         }
         .confirmationDialog(
