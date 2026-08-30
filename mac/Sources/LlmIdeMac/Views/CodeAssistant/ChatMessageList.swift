@@ -463,15 +463,10 @@ struct ChatMessageList: View {
 
     /// A short plain-text preview of a markdown reply for the collapsed state —
     /// strips common markdown so the bubble reads cleanly without a web view.
+    /// The implementation moved to `MarkdownRenderer` when the LLM Chat sheet
+    /// needed the same thing; this stays as the local name the view reads with.
     private func markdownPreview(_ content: String) -> String {
-        var s = content
-        // [text](url) -> text
-        s = s.replacingOccurrences(of: "\\[([^\\]]+)\\]\\([^\\)]*\\)", with: "$1", options: .regularExpression)
-        // strip structural markdown chars (leave inline hyphens intact)
-        s = s.replacingOccurrences(of: "[`#*_>~]", with: "", options: .regularExpression)
-        s = s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return s.count > 160 ? String(s.prefix(160)) + "…" : s
+        MarkdownRenderer.plainTextPreview(content)
     }
 
     /// Tool-call acknowledgments (issue created, file updated, git op result,

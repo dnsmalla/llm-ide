@@ -81,6 +81,24 @@ enum MarkdownRenderer {
         markdown.contains("```")
     }
 
+    /// A short plain-text rendering of `markdown`, for a collapsed bubble
+    /// that shows what a reply is about without standing up a web view.
+    ///
+    /// Strips the structural markers rather than interpreting them — inline
+    /// hyphens are left alone so words aren't mangled. Lives here, next to
+    /// the real renderer, because both chat surfaces that collapse old
+    /// replies need it and each had grown (or was about to grow) its own copy.
+    static func plainTextPreview(_ markdown: String, limit: Int = 160) -> String {
+        var s = markdown
+        // [text](url) -> text
+        s = s.replacingOccurrences(of: "\\[([^\\]]+)\\]\\([^\\)]*\\)", with: "$1", options: .regularExpression)
+        // strip structural markdown chars (leave inline hyphens intact)
+        s = s.replacingOccurrences(of: "[`#*_>~]", with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.count > limit ? String(s.prefix(limit)) + "…" : s
+    }
+
     private static let template = """
     <!DOCTYPE html>
     <html>
