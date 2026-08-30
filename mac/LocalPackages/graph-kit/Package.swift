@@ -8,12 +8,10 @@ let package = Package(
         .library(name: "GraphKit", targets: ["GraphKit"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"),
     ],
     targets: [
         .target(
             name: "GraphKit",
-            dependencies: ["Yams"],
             path: "Sources/GraphKit",
             resources: [
                 .copy("Resources/code_ast_scan.py"),

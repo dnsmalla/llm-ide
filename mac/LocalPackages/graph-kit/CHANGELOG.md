@@ -6,6 +6,25 @@ All notable changes to GraphKit. The Swift package and the TypeScript package
 
 ## [Unreleased]
 
+## [1.6.2] — 2026-08-30
+
+### Changed
+- **MemoryGenerator frontmatter parsing is now Yams-free.** A small line
+  parser replaces `Yams.load`: agent skill/tool files often carry long
+  single-line `description:` values with unquoted colons and nested
+  `schema:` mappings, and `Yams.load` can trap (not throw) on non-scalar
+  mapping keys — taking down the host process during background graph
+  builds. The parser keeps the 1.6.1 metadata surface (`type`/`kind`,
+  `tags` in all four spellings, `graph-only`, `related-modules`).
+- The body returned after a frontmatter block is trimmed of the closing
+  fence's trailing newline, so it always starts at its first content
+  character (the two frontmatter tests that pinned this were red in the
+  vendored fork this change reconciles; both are green here).
+- **Yams is no longer a dependency of the Swift package.**
+
+This reconciles the llm-ide vendored fork (`mac/LocalPackages/graph-kit`)
+back upstream: both consumers now share one implementation.
+
 ## [1.6.1] — 2026-08-05
 
 ### Added

@@ -326,7 +326,11 @@ public enum MemoryGenerator {
             return ParsedFrontmatter(text: text, kind: nil, tags: [], graphOnly: false, relatedModules: [])
         }
         let yamlBlock = String(text[afterFirst..<endRange.lowerBound])
+        // The closing fence's trailing newline belongs to the fence, not the
+        // body: trim it so the body always starts at its first content
+        // character (the frontmatter tests pin this contract).
         let remaining = String(text[endRange.upperBound...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let yaml = parseSimpleFrontmatterMapping(yamlBlock)
         let rawType = unquote(yaml["type"] ?? yaml["kind"] ?? "")
         let tags = parseFrontmatterTags(normalizeFrontmatterList(yaml["tags"]))
