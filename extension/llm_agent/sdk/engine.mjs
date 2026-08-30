@@ -37,6 +37,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import {
   personaForMode, PLAN_LIKE_MODES, restrictsTools, allowedToolNames,
 } from '../runtime/mode-personas.mjs';
+import { pipelineSkillIdFor, buildExecuteBinding } from '../runtime/plan-pipeline.mjs';
 import {
   readSkillInstructions, buildPerUserSkillSet, internalSkills, pluginEnabledFor,
   buildUserPluginDelivery,
@@ -50,7 +51,7 @@ import { redactFence } from '../runtime/redaction.mjs';
 import { persistTurnMemory } from '../runtime/memory-persist.mjs';
 import { config } from '../../core/config.mjs';
 import { sanitizeForPrompt } from '../../core/utils.mjs';
-import { selectAttachments, buildSkillsText } from '../../core/prompt-framing.mjs';
+import { selectAttachments, buildSkillsText, buildModeSkillsText } from '../../core/prompt-framing.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { usdCapForModel } from '../../kb/usage.mjs';
 import { nativePluginsEnabled } from '../../kb/user.mjs';
@@ -280,17 +281,35 @@ const MAX_PROMPT_CHARS = 20_000;
  *                                     runner (session bookkeeping + notices)
  */
 export function buildEngineOptions(
-  { userId, mode, model, language, message, skills, agentContext, attachments } = {},
+  { userId, mode, model, language, message, skills, agentContext, attachments, planExecute } = {},
   {
     readSkill = readSkillInstructions,
     roots = buildReadableRoots,
     sessionMemory = listSessionMemory,
     getPersona = getAgentPersona,
+    // Injected for the same reason `readSkill` is: composition must stay
+    // testable without a plugin directory on disk. Only used to decide
+    // inline vs subagent-driven execution (plan-pipeline.mjs).
+    getSubagents = (uid) => buildPerUserSkillSet(uid).subagents,
   } = {},
 ) {
   const resolvedMode = typeof mode === 'string' && mode ? mode : 'execute';
-  const persona = personaForMode(resolvedMode);
   const planLike = PLAN_LIKE_MODES.has(resolvedMode);
+
+  // The planning pipeline's stage skill for this turn — the same resolution
+  // the legacy engine runs (runtime/route.mjs), so a plan started on one
+  // engine reads identically on the other. See runtime/plan-pipeline.mjs.
+  let hasSubagents = false;
+  try { hasSubagents = (getSubagents(userId)?.size ?? 0) > 0; }
+  catch { /* no plugin view (tests, fresh install) — inline execution */ }
+  const pipelineSkillId = pipelineSkillIdFor({ mode: resolvedMode, planExecute, hasSubagents });
+  const { text: pipelineSkillsText, names: pipelineSkillNames } = pipelineSkillId
+    ? buildModeSkillsText([pipelineSkillId], userId, readSkill)
+    : { text: '', names: [] };
+
+  const persona = planExecute && pipelineSkillNames.length
+    ? buildExecuteBinding({ skillName: pipelineSkillNames[0], hasSubagents })
+    : personaForMode(resolvedMode, { skillName: pipelineSkillNames[0] });
   const { allowedTools, disallowedTools } = v2ToolPolicyForMode(resolvedMode);
 
   // The wire convention is home-relative roots ("~/proj" — what the Mac
@@ -343,6 +362,10 @@ export function buildEngineOptions(
       appendParts.push(block.trim());
     }
   } catch { /* persona lookup is best-effort — same as legacy's try/catch */ }
+  // Pipeline skill first: it is the mode's process, and a user-invoked
+  // skill applies WITHIN that process (same order as the legacy engine's
+  // composedUserMessage).
+  if (pipelineSkillsText) appendParts.push(pipelineSkillsText);
   const skillsText = buildSkillsText(skills, userId, readSkill);
   if (skillsText) appendParts.push(skillsText);
   // Session memory (kb/session-memory.mjs): facts extracted from THIS chat's
@@ -509,6 +532,7 @@ export function approvalArgsFor(toolName, input) {
 export async function runAgentV2Turn(
   {
     message, userId, mode, model, language, skills, agentContext, attachments,
+    planExecute,
     resumeSdkSessionId, onEvent, signal, allowAmbientAuth = false,
     queryFactory = sdkQueryFactory,
   } = {},
@@ -738,7 +762,7 @@ export async function runAgentV2Turn(
   };
 
   const { queryOptions, prompt } = buildEngineOptions(
-    { userId, mode, model, language, message, skills, agentContext, attachments },
+    { userId, mode, model, language, message, skills, agentContext, attachments, planExecute },
     { readSkill, roots, sessionMemory },
   );
   // Same validated roots the READ path uses (buildReadableRoots / `roots`) —

@@ -94,7 +94,7 @@ export async function handleAgentV2Routes(
 
 // --- POST /agent/v2/stream ----------------------------------------------------
 //
-// Body: { message, language?, model?, mode?, skills?, agentContext:
+// Body: { message, language?, model?, mode?, skills?, planExecute?, agentContext:
 // { chatSessionId, workspaceRoot, … }, attachments?, fresh? } → SSE stream
 // of engine events with `mode_set` injected right after the first `init`.
 //
@@ -236,6 +236,11 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       model,
       language: body.language,
       skills: body.skills,
+      // Set by the saved-plan card's "Execute plan" action — the one
+      // signal the server can trust that this Execute turn is working an
+      // already-approved plan, so the pipeline injects the execution
+      // skill (llm_agent/runtime/plan-pipeline.mjs).
+      planExecute: body.planExecute === true,
       agentContext,
       attachments: body.attachments,
       resumeSdkSessionId: resumeSdkSessionId ?? undefined,

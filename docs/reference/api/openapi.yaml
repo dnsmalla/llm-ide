@@ -1214,6 +1214,14 @@ paths:
                     activeProject:  { type: string, nullable: true }
                     indexedRepos:   { type: array, items: { type: string } }
                     recentIssues:   { type: array, items: { type: object } }
+                planExecute:
+                  type: boolean
+                  description: >-
+                    Set only by the Mac saved-plan card's "Execute plan" action: this
+                    Execute turn is working an already-approved plan, so the server
+                    injects the plan-execution skill (subagent-driven-development when
+                    the user has subagents, executing-plans otherwise). Omitted on
+                    every other request.
                 provider:     { type: string, description: 'LLM provider override' }
       responses:
         '200':
@@ -2963,6 +2971,14 @@ paths:
                 language: { type: string }
                 model:    { type: string, description: 'Anthropic model id from the picker; omitted = config default' }
                 mode:     { type: string, description: 'Chat mode; plan/assist_plan map to SDK plan permission mode' }
+                planExecute:
+                  type: boolean
+                  description: >-
+                    Set only by the Mac saved-plan card's "Execute plan" action: this
+                    Execute turn is working an already-approved plan, so the server
+                    injects the plan-execution skill (subagent-driven-development when
+                    the user has subagents, executing-plans otherwise). Omitted on
+                    every other request.
                 skills:
                   type: array
                   description: 'Invoked skill ids (max 5); bodies are prompt-injected'

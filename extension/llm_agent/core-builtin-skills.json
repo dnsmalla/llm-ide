@@ -1,8 +1,13 @@
 {
   "_note": "Curated 'fundamental' subset of the central skills repo that THIS product ships by default. Read at every snapshot refresh, so editing it takes effect without restarting the backend. default-snapshot.mjs keeps a compiled-in fallback used only if this file is missing or invalid. NOTE the curated filter applies ONLY to the builtin kit — skills from other registered sources (e.g. the auto-system engine plugin) are copied in full, which is why the auto-system skills are not listed here.",
+  "_pipeline_note": "The first six are the planning pipeline that llm_agent/runtime/plan-pipeline.mjs injects by id (brainstorming for Plan, grilling for Assist Plan, writing-plans on hand-off, executing-plans or subagent-driven-development to execute; assist-plan documents the sequence for the '/' menu). They MUST stay in this list: the pipeline resolves them through the user's enabled sources, and llm_default_sources is the always-on source every user has, so dropping one here silently degrades a planning mode to its bindings with no process attached.",
   "skills": [
+    "brainstorming",
+    "grilling",
+    "assist-plan",
     "writing-plans",
     "executing-plans",
+    "subagent-driven-development",
     "plan-structure-index",
     "plan-director",
     "code-review",
@@ -10,7 +15,6 @@
     "requesting-code-review",
     "systematic-debugging",
     "test-driven-development",
-    "brainstorming",
     "verification-before-completion",
     "using-git-worktrees",
     "finishing-a-development-branch"

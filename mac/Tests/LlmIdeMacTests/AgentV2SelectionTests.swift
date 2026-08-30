@@ -671,15 +671,20 @@ struct AgentV2SelectionTests {
                 == CodeAssistantPanel.executePlanMessage)
     }
 
-    @Test("Execute plan message lists parsed steps and task-create guidance")
+    @Test("Execute plan message lists parsed steps and defers method to the injected skill")
     func executePlanMessageStructured() {
         let msg = CodeAssistantPanel.executePlanMessage(
             forPlanContent: "1. First\n2. Second",
             planTitle: "My plan")
-        #expect(msg.contains("task-create"))
         #expect(msg.contains("1. First"))
         #expect(msg.contains("2. Second"))
         #expect(msg.contains("My plan"))
+        #expect(msg.contains("execution skill"))
+        // The HOW moved server-side (plan-pipeline.mjs injects executing-plans
+        // or subagent-driven-development for a planExecute turn). Restating it
+        // here is what let the two drift before.
+        #expect(!msg.contains("ask-subagent"))
+        #expect(!msg.contains("Edit/Write"))
     }
 
     @Test("Plan title derivation: first non-empty heading line, hashes stripped, capped")

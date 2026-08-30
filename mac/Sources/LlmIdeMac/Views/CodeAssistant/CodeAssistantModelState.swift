@@ -5,11 +5,14 @@ import Foundation
 /// `resolvedMode`) — raw values are wire contracts, not renameable.
 enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption {
     case auto, plan
-    /// Slower, collaborative counterpart to `.plan` — rounds of clarifying
-    /// questions and section-by-section review instead of a one-shot
-    /// proposal. See `superpowers:assist-plan` and the server's
-    /// `mode-personas.mjs` (`PLAN_LIKE_MODES`) for the shared 5-phase
-    /// process both this mode and `.plan` follow.
+    /// The grilling-first counterpart to `.plan`. Both modes run the same
+    /// pipeline (question → write plan → save → execute); they differ only in
+    /// the questioning stage: `.plan` runs superpowers' `brainstorming`
+    /// (explore the design space, propose approaches with trade-offs),
+    /// `.assistPlan` runs mattpocock's `grilling` (take the stated direction
+    /// and hunt for what is unexamined in it, one numbered round per turn).
+    /// The process lives in those skill files, not in the app — see the
+    /// server's `llm_agent/runtime/plan-pipeline.mjs`.
     case assistPlan = "assist_plan"
     case review, document, execute
     var id: String { rawValue }
@@ -42,8 +45,8 @@ enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption
     var help: String {
         switch self {
         case .auto: return "Auto — Claude classifies your request and picks a mode itself"
-        case .plan: return "Plan — propose a step-by-step plan in prose; no file edits or commands"
-        case .assistPlan: return "Assist Plan — build a plan together over several turns, with rounds of clarifying questions and section-by-section review; no file edits or commands except saving the finished plan"
+        case .plan: return "Plan — work up a design together (questions, approaches, your approval), then write and save the plan; no file edits or commands except saving it"
+        case .assistPlan: return "Assist Plan — same pipeline, but it grills your stated plan in rounds of numbered questions instead of exploring approaches; no file edits or commands except saving the finished plan"
         case .review: return "Review — give code-review feedback; no file edits or commands"
         case .document: return "Document — write documentation in the reply; no file edits or commands"
         case .execute: return "Execute — today's full agentic behavior (file edits, commands, tools)"

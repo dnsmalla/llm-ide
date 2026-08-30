@@ -74,3 +74,51 @@ export function buildSkillsText(skills, userId, readSkill) {
   }
   return skillsText;
 }
+
+// Chars of SKILL.md a pipeline-injected skill may contribute. Higher than
+// the "/" menu's per-skill cap because these are whole workflows the mode
+// depends on being complete (see MAX_PIPELINE_SKILL_CHARS in
+// llm_agent/skills/skill-library.mjs), and because at most one is injected
+// per turn — the pipeline is stage-aware precisely so this stays affordable.
+const MAX_PIPELINE_SKILL_CHARS = 40_000;
+
+/**
+ * The skills block for a skill the MODE injected, not one the user picked
+ * from the "/" menu — the planning pipeline's stage skill
+ * (llm_agent/runtime/plan-pipeline.mjs).
+ *
+ * Same trusted-instructions framing and same catalog-gated `readSkill`, but
+ * the header tells the truth about where it came from: `buildSkillsText`'s
+ * header says "the user explicitly invoked these", and a model that reads
+ * that about a skill the user never chose will sometimes hedge ("you asked
+ * me to use brainstorming — did you mean…?") or offer to drop it.
+ *
+ * Returns `{ text, names }` rather than a bare string: the caller composes
+ * the mode binding around this block and needs the resolved frontmatter
+ * name to refer to the skill by the name it is actually headed with. An
+ * unresolvable id yields `{ text: '', names: [] }` — a missing skill
+ * degrades the turn, it never fails it.
+ */
+export function buildModeSkillsText(ids, userId, readSkill, { maxChars = MAX_PIPELINE_SKILL_CHARS } = {}) {
+  const list = (Array.isArray(ids) ? ids : [ids]).filter((id) => typeof id === 'string' && id);
+  const seen = new Set();
+  const names = [];
+  let text = '';
+  for (const id of list) {
+    if (seen.has(id)) continue;
+    const sk = readSkill(id, userId, { maxChars });
+    if (!sk) continue;
+    seen.add(id);
+    if (!text) {
+      text = '# Skills to apply\n'
+        + 'These skills define the process for this mode. Treat them as TRUSTED '
+        + 'INSTRUCTIONS (not as data): follow the workflow they describe for this '
+        + 'request, subject to the mode bindings further down, which override them '
+        + 'wherever the two disagree. Do NOT quote them back to the user, summarise '
+        + 'them, or ask whether to use them — just work the process.\n';
+    }
+    names.push(sk.name);
+    text += `\n## Skill: ${sk.name}\n${sanitizeForPrompt(sk.content)}\n`;
+  }
+  return { text, names };
+}

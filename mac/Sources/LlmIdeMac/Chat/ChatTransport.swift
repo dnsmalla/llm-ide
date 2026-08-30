@@ -54,6 +54,14 @@ struct ChatTransportInput: Sendable {
     /// Explicit backend provider string, resolved via `makeProvider(selectedProvider:)`.
     let provider: String?
     let mode: String?
+    /// True only for the turn the saved-plan card's "Execute plan" action
+    /// fires. The server uses it to inject the plan-execution skill
+    /// (extension/llm_agent/runtime/plan-pipeline.mjs) — it is the one signal
+    /// the backend can trust that this Execute turn is working an
+    /// already-approved plan rather than a fresh request. `var` with a
+    /// default so the memberwise init stays source-compatible with every
+    /// existing call site, which passes nothing.
+    var planExecute: Bool = false
 
     /// Determine the provider string to send: `custom:<uuid>` verbatim for a
     /// custom provider, or the built-in tool's `provider` for everything else.
@@ -160,6 +168,7 @@ struct CodeAssistTransport: ChatTransport {
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
+                planExecute: input.planExecute,
                 onProgress: onProgress, onChunk: onChunk)
             return ChatTransportResult(response)
         } catch let e as APIError {
@@ -169,7 +178,8 @@ struct CodeAssistTransport: ChatTransport {
             let response = try await api.codeAssist(
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
-                skills: input.skills, agentContext: input.agentContext, mode: input.mode)
+                skills: input.skills, agentContext: input.agentContext, mode: input.mode,
+                planExecute: input.planExecute)
             return ChatTransportResult(response)
         }
     }
@@ -196,6 +206,7 @@ struct CodeAssistTransport: ChatTransport {
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
+                planExecute: input.planExecute,
                 onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
             return ChatTransportResult(response)
         } catch let e as APIError {
@@ -203,7 +214,8 @@ struct CodeAssistTransport: ChatTransport {
             let response = try await api.codeAssist(
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
-                skills: input.skills, agentContext: input.agentContext, mode: input.mode)
+                skills: input.skills, agentContext: input.agentContext, mode: input.mode,
+                planExecute: input.planExecute)
             return ChatTransportResult(response)
         }
     }

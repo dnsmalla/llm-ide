@@ -198,6 +198,9 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         if let language = input.language { body["language"] = language }
         if let model = input.model { body["model"] = model }
         if let mode = input.mode { body["mode"] = mode }
+        // Only sent when true — an older server ignores the field, and a
+        // false is indistinguishable from absent to the route.
+        if input.planExecute { body["planExecute"] = true }
         if let agentContext = input.agentContext,
            let data = try? JSONEncoder().encode(agentContext),
            let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {

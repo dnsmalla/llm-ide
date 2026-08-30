@@ -101,7 +101,11 @@ const SAFE_SOURCE_ID = /^[a-z][a-z0-9-]{1,40}$/;
 // broad "everything except X" filter, so drift in the upstream repo can't
 // silently balloon the default set back out.
 const CORE_BUILTIN_SKILLS_FALLBACK = new Set([
-  'writing-plans', 'executing-plans', 'plan-structure-index', 'plan-director',
+  // The planning pipeline (llm_agent/runtime/plan-pipeline.mjs) — injected by
+  // id, so a planning mode loses its process if one of these stops shipping.
+  'brainstorming', 'grilling', 'assist-plan',
+  'writing-plans', 'executing-plans', 'subagent-driven-development',
+  'plan-structure-index', 'plan-director',
   'code-review', 'receiving-code-review', 'requesting-code-review',
   'systematic-debugging', 'test-driven-development',
   // The auto-system engine skills (feature-slices, add-feature, add-code,
@@ -109,7 +113,6 @@ const CORE_BUILTIN_SKILLS_FALLBACK = new Set([
   // the engine's own plugin repo, because each needs ./master.sh to exist.
   // They arrive via that source when it is registered, unfiltered — curation
   // applies only to the builtin kit.
-  'brainstorming',
   'verification-before-completion',
   'using-git-worktrees', 'finishing-a-development-branch',
 ]);

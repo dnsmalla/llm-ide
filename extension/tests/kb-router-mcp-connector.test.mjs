@@ -255,7 +255,13 @@ test('the three endpoints are advertised, versioned and bucketed', async () => {
   for (const p of ['/kb/mcp-connector/fetch', '/kb/mcp-connector/seen', '/kb/mcp-connector/classify']) {
     assert.ok(server.includes(`'${p}',`), `${p} must be in the ENDPOINTS array`);
   }
-  assert.match(server, /const SERVER_API_VERSION = 39;/, 'three new endpoints bump the version');
+  // The version this feature landed on, asserted as a FLOOR rather than an
+  // exact match: pinning the literal made every later unrelated bump fail
+  // here (it did, on the planning-pipeline bump to 40). What this guards is
+  // "adding these endpoints bumped the version", which a floor states just
+  // as well and a successor bump cannot falsify.
+  const version = Number(server.match(/const SERVER_API_VERSION = (\d+);/)?.[1]);
+  assert.ok(version >= 39, `three new endpoints bump the version; got ${version}`);
   assert.match(server, /url === '\/kb\/mcp-connector\/fetch'\) return 'dispatch'/);
   assert.match(server, /url === '\/kb\/mcp-connector\/seen'\) return 'kbWrite'/);
   assert.match(server, /url === '\/kb\/mcp-connector\/classify'\) return 'llm'/);

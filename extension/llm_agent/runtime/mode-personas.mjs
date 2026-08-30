@@ -18,6 +18,7 @@
 // have a tracked plan.
 
 import { entries } from '../tools/registry.mjs';
+import { buildPlanBinding } from './plan-pipeline.mjs';
 
 const READ_ONLY_TOOL_NAMES = new Set(entries().filter((e) => e.kind === 'read' && e.name !== 'task-list').map((e) => e.name));
 
@@ -30,47 +31,18 @@ const READ_ONLY_TOOL_NAMES = new Set(entries().filter((e) => e.kind === 'read' &
 export const PLAN_LIKE_MODES = new Set(['plan', 'assist_plan']);
 const PLAN_LIKE_EXTRA_TOOL_NAMES = new Set(['save-plan']);
 
+// Plan-like personas are NOT written here. Both modes' process is an upstream
+// skill mirrored verbatim into the central skills repo (brainstorming for
+// `plan`, grilling for `assist_plan`), injected into the turn as trusted
+// instructions; the persona is only the LLM-IDE bindings that frame it. That
+// is why these two entries carry no `persona` of their own — see
+// runtime/plan-pipeline.mjs for the full rationale, and `personaForMode`
+// below for how the binding is composed. An earlier version of this file
+// paraphrased those skills into two long persona strings, which is exactly
+// the second copy that had already started drifting from the skill files.
 const MODE_CONFIG = {
-  plan: {
-    persona: 'You are in PLAN mode. Propose a clear, step-by-step plan for the '
-           + "user's request in prose — do NOT call any write tool (file edits, "
-           + 'bash, git operations, issue/PR actions) EXCEPT save-plan, which is '
-           + 'the one write action available in this mode. Read-only tools '
-           + '(find-code, search, list-files, read-file) are fine if they help you '
-           + "scope the plan. End with a short summary of what you'd do and in what "
-           + 'order, then call save-plan with a short title and the full plan as '
-           + 'content — it saves immediately with no confirmation step, so only '
-           + "call it once the plan is actually ready, and say in your reply that "
-           + "you've saved it and where.",
-  },
-  assist_plan: {
-    persona: 'You are in ASSIST_PLAN mode — a slower, collaborative planning '
-           + "process for when the user wants to build a plan WITH you over "
-           + 'several turns, not get a one-shot proposal like PLAN mode. Follow '
-           + 'the 5 phases below, picking up from '
-           + "wherever the conversation already is — re-read the history to work "
-           + "out which phase you're on; there is no separate state, only the "
-           + 'conversation. (1) If the user hasn\'t given a summary of what they '
-           + 'want yet, ask for one — don\'t proceed without it. (2) Extract the '
-           + "claims in that summary, check them yourself against the real "
-           + 'project (find-code, read-file, list-files — never ask the user for '
-           + 'a fact you can look up), then for what\'s genuinely a decision ask '
-           + 'selection-based questions, batched as ONE numbered round per turn, '
-           + 'each with a recommended default: "❓ **Q1** — <question w/ '
-           + 'options>" / "➡️ <recommended answer>" — then use the answers to '
-           + 'rewrite the summary accurately. (3) Turn the grounded summary into '
-           + 'a few scoped paragraphs and ask if it looks right before '
-           + 'continuing. (4) Find a gap (edge cases, testing, rollout, ...), '
-           + 'add it as a new section, run another round of questions if it '
-           + 'raises new decisions — repeat until nothing important is left '
-           + 'unclear. (5) Self-review for placeholders/contradictions/ '
-           + 'ambiguity and fix them, then ask for a final review; only once '
-           + 'the user approves, call save-plan with a short title and the '
-           + 'finalized document — it saves immediately with no further '
-           + 'confirmation, so call it only after real approval, and say in '
-           + "your reply that you've saved it and where. Do NOT call any other "
-           + 'write tool (file edits, bash, git operations, issue/PR actions).',
-  },
+  plan: {},
+  assist_plan: {},
   review: {
     persona: 'You are in REVIEW mode. Read the attached files/context and give '
            + 'structured code-review feedback — bugs, security issues, style, '
@@ -85,8 +57,19 @@ const MODE_CONFIG = {
   },
 };
 
-/** Returns the persona addition for `mode`, or "" for execute/unknown (no change). */
-export function personaForMode(mode) {
+/**
+ * Returns the persona addition for `mode`, or "" for execute/unknown (no
+ * change).
+ *
+ * For the plan-like modes this is the binding block from plan-pipeline.mjs
+ * rather than a stored string, because what it says depends on which skill
+ * the caller injected alongside it: pass `skillName` (the injected skill's
+ * frontmatter name) so the bindings can point at it by name. Callers that
+ * don't inject a skill still get a coherent, if less specific, binding —
+ * the mode's tool contract and save/facts rules hold either way.
+ */
+export function personaForMode(mode, { skillName } = {}) {
+  if (PLAN_LIKE_MODES.has(mode)) return buildPlanBinding(mode, { skillName });
   return MODE_CONFIG[mode]?.persona ?? '';
 }
 

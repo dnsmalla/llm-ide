@@ -120,7 +120,7 @@ extension/tests/llm-sources.json
 extension/tests/llm-sources-state.json
 extension/tests/llm-sources/
 .tmp-llm_default_sources/
-# Runtime snapshot drift. The committed 13-skill baseline stays tracked
+# Runtime snapshot drift. The committed 16-skill baseline stays tracked
 # (portable default for fresh clones); ignore rules never affect tracked
 # files, so only machine-local ADDITIONS from enabled third-party sources
 # (e.g. registered auto-system skills) are hidden here.

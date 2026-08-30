@@ -54,12 +54,18 @@ test('classifyCodeAssistMode accepts assist_plan', async () => {
 // for a given message. This asserts on the prompt text itself, so a future
 // edit that weakens or drops the disambiguating language fails loudly here
 // instead of silently degrading real classification.
-test('buildPrompt draws an explicit line between plan (one-shot) and assist_plan (collaborative)', () => {
+test('buildPrompt splits plan from assist_plan on WHO brings the direction', () => {
   const prompt = buildPrompt('anything');
   assert.match(prompt, /"plan\|assist_plan\|review\|document\|execute"/);
-  assert.match(prompt, /"plan":.*ONE-SHOT/);
-  assert.match(prompt, /"assist_plan":.*TOGETHER/);
-  // The assist_plan bullet must tell the model not to infer it from topic
+  // Both modes are collaborative now (they run brainstorming and grilling
+  // respectively — see runtime/plan-pipeline.mjs), so "one-shot vs
+  // multi-turn" is no longer the distinction and must not be reintroduced:
+  // it would send every "plan this with me" to assist_plan regardless of
+  // whether the user actually has a direction to test.
+  assert.match(prompt, /"plan":.*DESIGN IS STILL OPEN/);
+  assert.match(prompt, /"assist_plan":.*STRESS-TESTED/);
+  assert.match(prompt, /grill/i);
+  // The bullet must still tell the model not to infer it from topic
   // complexity alone — that's the actual collision risk with "plan".
   assert.match(prompt, /don't infer it just because the topic sounds complex/);
 });

@@ -105,7 +105,16 @@ const HOST = config.host;
 //     SourceConnectorClassification). /kb/mcp-connector/test additionally
 //     returns `toolSchemas` — additive, and the only offline-safe way to read
 //     a remote server's real tool argument names.
-const SERVER_API_VERSION = 39;
+// 39→40: planning pipeline. Both chat endpoints (/code-assist and
+//     /agent/v2/stream) accept an optional `planExecute: true` on the request
+//     body — set by the Mac's saved-plan card "Execute plan" action, it tells
+//     the server this Execute turn is working an already-approved plan so it
+//     injects the execution skill (executing-plans or
+//     subagent-driven-development, picked from the user's subagents). Purely
+//     additive: an older client omits it and behaves exactly as before. The
+//     plan-like modes also gained the `load-skill` read tool, which is how a
+//     skill hands over to the next one (llm_agent/runtime/plan-pipeline.mjs).
+const SERVER_API_VERSION = 40;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

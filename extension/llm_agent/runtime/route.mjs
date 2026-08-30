@@ -11,7 +11,8 @@ import path from 'node:path';
 import { runAgentLoop, runNativeAgentLoop } from './loop.mjs';
 import { composeGlobalPrompt } from '../global/compose-prompt.mjs';
 import { expandSlashCommand } from '../../plugins/loader.mjs';
-import { globalSkills, internalSkills, buildPerUserSkillSet, pluginEnabledFor } from '../skills/index.mjs';
+import { globalSkills, internalSkills, buildPerUserSkillSet, pluginEnabledFor, readSkillInstructions } from '../skills/index.mjs';
+import { buildModeSkillsText } from '../../core/prompt-framing.mjs';
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { expandTilde } from '../../graphkit/memory.mjs';
@@ -26,6 +27,7 @@ import { skillsToOpenAITools } from './openai-tools.mjs';
 import { fastModelFor } from '../../kb/usage.mjs';
 import { classifyCodeAssistMode, MODES } from './mode-classify.mjs';
 import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES } from './mode-personas.mjs';
+import { pipelineSkillIdFor, buildExecuteBinding } from './plan-pipeline.mjs';
 import { buildSessionTaskPromptBlock, taskTurnResponse } from './task-session-context.mjs';
 import { buildMcpConfigForUser } from '../../mcp/mcp-config.mjs';
 import { makeSecretReader } from '../../server/vault.mjs';
@@ -107,6 +109,7 @@ export async function handleCodeAssist({
   model,                    // resolved model id (from the client) — routes native vs fence loop
   provider,                 // explicit provider id from the client, if any
   mode: requestedMode,      // NEW — "auto" | "plan" | "assist_plan" | "review" | "document" | "execute" | undefined
+  planExecute,              // client fired the saved-plan card's "Execute plan" — inject the execution skill
   // Test seam only — defaults to the real classifier. ESM named exports
   // can't be redefined by node:test's mock.method (module namespace
   // properties are non-configurable), and mock.module() needs
@@ -182,15 +185,30 @@ export async function handleCodeAssist({
     }
   }
 
+  // The planning pipeline's stage skill (plan-pipeline.mjs): brainstorming /
+  // grilling for a plan-like mode, executing-plans / subagent-driven-
+  // development for an Execute turn fired from the saved-plan card. Exactly
+  // one, chosen server-side — the subagent-vs-inline call in particular
+  // depends on whether this user has any dispatchable subagent, which only
+  // the server knows. Injected as its own block rather than merged into
+  // `skillsText` so the framing stays honest about who chose it.
+  const hasSubagents = (userSubagents?.size ?? 0) > 0;
+  const pipelineSkillId = pipelineSkillIdFor({ mode: resolvedMode, planExecute, hasSubagents });
+  const { text: pipelineSkillsText, names: pipelineSkillNames } = pipelineSkillId
+    ? buildModeSkillsText([pipelineSkillId], userId, readSkillInstructions)
+    : { text: '', names: [] };
+
   // The agent path historically only forwarded `message`, dropping the
   // attachment block + language directive that the legacy non-agent
   // path embedded. Restitch them in front of the user message so the
   // global agent sees the same context the user provided.
   // skillsText goes BEFORE attachmentsText: skills are instructions to follow,
   // attachments are data to act on — the agent should read the workflow first,
-  // then the material it applies to.
+  // then the material it applies to. The pipeline skill leads: it is the
+  // mode's process, and a user-invoked skill applies WITHIN that process.
   const composedUserMessage = [
     languageDirective || '',
+    pipelineSkillsText || '',
     skillsText || '',
     attachmentsText || '',
     effectiveMessage || '',
@@ -292,7 +310,15 @@ export async function handleCodeAssist({
   // Mode persona addition — appended after the task-list/skill-routing
   // blocks above so it reads as the most recent, highest-priority
   // instruction. No-op ("") for execute/unrecognised modes.
-  const modePersona = personaForMode(resolvedMode);
+  //
+  // For a plan-like turn (and for an Execute turn launched from the saved-
+  // plan card) the persona is the BINDING for the pipeline skill injected
+  // into `composedUserMessage` above — so it is built with that skill's
+  // resolved name, and falls back to the generic wording when the skill
+  // couldn't be read (no skills repo on disk, source disabled).
+  const modePersona = planExecute && pipelineSkillNames.length
+    ? buildExecuteBinding({ skillName: pipelineSkillNames[0], hasSubagents })
+    : personaForMode(resolvedMode, { skillName: pipelineSkillNames[0] });
   if (modePersona) personaBase += `\n\n${modePersona}`;
 
   // Restricted modes: append the accurate tool roster. The composed base

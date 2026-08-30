@@ -32,6 +32,7 @@ import { searchKb } from '../runtime/handlers/search-kb.mjs';
 import { tasks } from '../runtime/handlers/session-tasks.mjs';
 import { handleRunBash } from '../runtime/handlers/run-bash.mjs';
 import { handleProjectMemory } from '../runtime/handlers/project-memory.mjs';
+import { handleLoadSkill } from '../runtime/handlers/load-skill.mjs';
 import { runBashGate, autoGate } from './gates.mjs';
 import { registerDecision, abortDecisionsForSession } from '../sdk/decisions.mjs';
 import { hasAlwaysAllow, setAlwaysAllow } from '../../kb/tool-approvals.mjs';
@@ -81,6 +82,13 @@ const ENTRIES = [
   // slightly richer {query, limit} schema and {hits, total} shape). One
   // execute, one name, per the spec's §4 finding.
   { name: 'search-kb', kind: 'read', execute: (args, ctx) => searchKb(args, { kb: ctx.kb, userId: ctx.userId }) },
+  // Reads one SKILL.md out of the user's own library so a skill that ends by
+  // naming another skill can hand over to it (runtime/plan-pipeline.mjs's
+  // stage 2 is the motivating case). kind:'read' by construction — it
+  // resolves the id through the catalog-gated reader and returns text —
+  // which also makes it available in every restricted mode, where the
+  // hand-off matters most.
+  { name: 'load-skill', kind: 'read', execute: (args, ctx) => handleLoadSkill(args, { userId: ctx.userId }) },
   { name: 'task-list', kind: 'read', execute: (args, ctx) => ({ tasks: tasks.listTasks(ctx.userId, ctx.sessionId) }) },
   {
     name: 'task-create',

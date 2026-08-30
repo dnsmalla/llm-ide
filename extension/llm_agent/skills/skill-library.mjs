@@ -111,6 +111,13 @@ export function listSkillLibrary(userId) {
 // prompt budget.
 const MAX_SKILL_CHARS = 24_000;
 
+// Ceiling for a caller that asks for more (the planning pipeline does —
+// subagent-driven-development is ~32 KB upstream, and the default cap would
+// cut it off partway through the task loop, leaving the model with the
+// dispatch instructions but not the review ones). Still bounded: this is a
+// cap on a caller's request, not a licence for an unbounded read.
+const MAX_PIPELINE_SKILL_CHARS = 48_000;
+
 // Resolve a library skill id ("<family>/<dir>") to its followable instructions
 // by reading the SKILL.md from the LOCAL central repo. Returns
 // { id, name, content } or null for an unknown id.
@@ -120,14 +127,15 @@ const MAX_SKILL_CHARS = 24_000;
 // the caller frame the content as TRUSTED, followable instructions: it comes
 // from the user's own on-disk skills repo, not the wire, so a client can't
 // smuggle arbitrary "follow me" text through this channel.
-export function readSkillInstructions(id, userId) {
+export function readSkillInstructions(id, userId, { maxChars = MAX_SKILL_CHARS } = {}) {
   if (typeof id !== 'string' || !id) return null;
   const { skills } = listSkillLibrary(userId);
   const entry = skills.find((s) => s.id === id);
   if (!entry) return null;
   try {
     const raw = readFileSync(entry.path, 'utf8');
-    return { id: entry.id, name: entry.name, content: raw.slice(0, MAX_SKILL_CHARS) };
+    const cap = Number.isFinite(maxChars) && maxChars > 0 ? Math.min(maxChars, MAX_PIPELINE_SKILL_CHARS) : MAX_SKILL_CHARS;
+    return { id: entry.id, name: entry.name, content: raw.slice(0, cap) };
   } catch {
     return null;
   }

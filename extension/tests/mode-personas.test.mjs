@@ -13,11 +13,39 @@ test('personaForMode returns mode-specific text for plan/assist_plan/review/docu
   assert.match(personaForMode('document'), /DOCUMENT mode/);
 });
 
-test('assist_plan persona describes all 5 phases and the round/recommended-answer question format', () => {
-  const persona = personaForMode('assist_plan');
-  assert.match(persona, /the 5 phases below/);
-  assert.match(persona, /ONE numbered round per turn/);
-  assert.match(persona, /recommended default/);
+// The plan-like personas are BINDINGS, not a process: the process is the
+// pipeline skill injected alongside them (plan-pipeline.mjs). These assert
+// the bindings say what only the app can know, and — just as importantly —
+// that they do NOT re-describe the skill's steps. A paraphrase here is the
+// exact second copy that drifted from .skills/skills/assist-plan/SKILL.md
+// before this was reworked.
+for (const mode of ['plan', 'assist_plan']) {
+  test(`${mode} persona binds save-plan, the facts tools and the writing-plans hand-off`, () => {
+    const persona = personaForMode(mode, { skillName: 'grilling' });
+    assert.match(persona, /save-plan/);
+    assert.match(persona, /llm-doc\/plans\//);
+    assert.match(persona, /load-skill/);
+    assert.match(persona, /skills\/writing-plans/);
+    assert.match(persona, /find-code/);
+    assert.match(persona, /search-kb/);
+    assert.match(persona, /project-memory/);
+    // Names the injected skill so the binding and the skills block agree.
+    assert.match(persona, /grilling/);
+  });
+
+  test(`${mode} persona does not paraphrase the skill's own process`, () => {
+    const persona = personaForMode(mode);
+    assert.ok(!/the 5 phases below/.test(persona), 'the old hand-written phase list should be gone');
+    assert.ok(!/❓/.test(persona), 'the question format belongs to the grilling skill, not the persona');
+    // Bindings only — a small fraction of the 15-32 KB skills they frame.
+    // A regression here means someone started re-describing the process.
+    assert.ok(persona.length < 3000, `binding should stay short, was ${persona.length} chars`);
+  });
+}
+
+test('a plan persona without an injected skill still binds the mode coherently', () => {
+  const persona = personaForMode('plan');
+  assert.match(persona, /PLAN mode/);
   assert.match(persona, /save-plan/);
 });
 
@@ -95,7 +123,7 @@ test('READ_ONLY_TOOL_NAMES is derived from the registry, not hand-maintained', a
 
 test('allowedToolNames(execute) includes all kind:read tools except task-list', () => {
   const names = [...allowedToolNames('execute')].sort();
-  assert.deepEqual(names, ['ask-internal', 'ask-subagent', 'fetch-url', 'find-code', 'list-files', 'project_memory', 'read-file', 'search-kb', 'web-search']);
+  assert.deepEqual(names, ['ask-internal', 'ask-subagent', 'fetch-url', 'find-code', 'list-files', 'load-skill', 'project_memory', 'read-file', 'search-kb', 'web-search']);
 });
 
 test('allowedToolNames(execute) explicitly excludes task-list despite it being kind:read', () => {
@@ -103,8 +131,17 @@ test('allowedToolNames(execute) explicitly excludes task-list despite it being k
   assert.equal(names.has('task-list'), false, 'task-list should be excluded even though it is kind:read in the registry');
 });
 
-test('allowedToolNames(plan) adds save-plan on top of the base 9-tool read set', () => {
+test('allowedToolNames(plan) adds save-plan on top of the base 10-tool read set', () => {
   const names = [...allowedToolNames('plan')].sort();
   assert.ok(names.includes('save-plan'));
-  assert.equal(names.length, 10);
+  assert.equal(names.length, 11);
+});
+
+// load-skill is what makes a skill's "now invoke <other skill>" line
+// followable — and every restricted mode is where that matters most, since
+// none of them can reach for a shell or the filesystem to find it themselves.
+test('load-skill is available in every restricted mode', () => {
+  for (const mode of ['plan', 'assist_plan', 'review', 'document']) {
+    assert.equal(allowedToolNames(mode).has('load-skill'), true, `${mode} should expose load-skill`);
+  }
 });

@@ -42,6 +42,11 @@ final class ChatEngine {
         let text: String
         let skillIds: [String]
         var userMetadata: ChatMessage.Metadata?
+        /// Carried per-message rather than as engine state: "Execute plan"
+        /// enqueues when a turn is already running, and a queue can hold
+        /// other messages ahead of it. A flag on the engine would be spent
+        /// by whichever turn drained first.
+        var planExecute: Bool = false
     }
 
     // MARK: - Observable state (moved 1:1 from the panel)
@@ -368,8 +373,10 @@ final class ChatEngine {
     // MARK: - Turn lifecycle
 
     /// Launch a turn as an unstructured Task whose handle Stop can cancel.
-    func startTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil) {
-        runTask = Task { await runTurn(message, skillIds: skillIds, userMetadata: userMetadata) }
+    func startTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil,
+                   planExecute: Bool = false) {
+        runTask = Task { await runTurn(message, skillIds: skillIds, userMetadata: userMetadata,
+                                       planExecute: planExecute) }
     }
 
     /// Cancel the in-flight turn — panel-driven (`runTask`) or phone-driven
@@ -383,14 +390,17 @@ final class ChatEngine {
 
     /// Queue a message the user sent while a turn was running. Drained FIFO,
     /// one per turn, by `runTurn`'s tail.
-    func enqueue(_ text: String, skillIds: [String], userMetadata: ChatMessage.Metadata? = nil) {
-        queued.append(.init(text: text, skillIds: skillIds, userMetadata: userMetadata))
+    func enqueue(_ text: String, skillIds: [String], userMetadata: ChatMessage.Metadata? = nil,
+                 planExecute: Bool = false) {
+        queued.append(.init(text: text, skillIds: skillIds, userMetadata: userMetadata,
+                            planExecute: planExecute))
     }
 
     /// Run one user turn end-to-end. On completion it drains `queued` (if any)
     /// as a FRESH task — an unstructured `Task {}` does NOT inherit the current
     /// task's cancellation, so a stopped turn still lets the queued message run.
-    func runTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil) async {
+    func runTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil,
+                 planExecute: Bool = false) async {
         onTurnStart()
         onRecordPrompt(message)
         onNudge(message)
@@ -434,12 +444,17 @@ final class ChatEngine {
             // historyForRequest); the server applies its own prompt-aware
             // budget on top.
             let recent = packHistory(messages)
-            let input = await resolveTransportInput(
+            var input = await resolveTransportInput(
                 message,
                 Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
                 attachmentsForTurn(),
                 skillIds
             )
+            // Set here rather than inside `resolveTransportInput`: that
+            // closure's signature is shared by every surface that builds a
+            // turn (panel, menu bar, phone), and this flag belongs to one
+            // caller — the saved-plan card's Execute action.
+            input.planExecute = planExecute
             // Stream so the user sees live progress ("Searching the web…",
             // "Writing the answer…") instead of a frozen spinner for the
             // 60–90s an agent turn can take. Falls back to buffered on a
@@ -514,7 +529,8 @@ final class ChatEngine {
     func drainQueueOrRelease() {
         if !queued.isEmpty {
             let next = queued.removeFirst()
-            startTurn(next.text, skillIds: next.skillIds, userMetadata: next.userMetadata)
+            startTurn(next.text, skillIds: next.skillIds, userMetadata: next.userMetadata,
+                      planExecute: next.planExecute)
         } else {
             busy = false
             runTask = nil

@@ -96,9 +96,9 @@ extension CodeAssistantPanel {
             planExecuteDisplay: "Execute plan: \(displayTitle)\(stepSuffix)"
         )
         if engine.busy {
-            engine.enqueue(outgoing, skillIds: skillIds, userMetadata: userMeta)
+            engine.enqueue(outgoing, skillIds: skillIds, userMetadata: userMeta, planExecute: true)
         } else {
-            engine.startTurn(outgoing, skillIds: skillIds, userMetadata: userMeta)
+            engine.startTurn(outgoing, skillIds: skillIds, userMetadata: userMeta, planExecute: true)
         }
     }
 
@@ -121,17 +121,19 @@ extension CodeAssistantPanel {
         if let planTitle, !planTitle.isEmpty {
             parts.append("Plan title: \"\(planTitle)\".")
         }
-        parts.append(
-            "First, call task-create once per step below (exact titles). "
-            + "Then mark step 1 in_progress and implement it. "
-            + "Use Edit/Write for code changes, Bash for builds/tests, "
-            + "and ask-subagent when a step matches an enabled plugin subagent."
-        )
+        // The HOW — dispatching subagents vs implementing inline, reviewing
+        // each task, tracking progress — is no longer spelled out here: the
+        // server injects the execution skill (executing-plans or
+        // subagent-driven-development, chosen from whether this user has
+        // subagents) plus its bindings for a turn sent with `planExecute`.
+        // See extension/llm_agent/runtime/plan-pipeline.mjs. This message
+        // carries only what the server cannot derive: the parsed step list.
+        parts.append("Follow the execution skill in your instructions, starting at step 1.")
         parts.append("Steps:")
         for (index, step) in steps.enumerated() {
             parts.append("\(index + 1). \(step)")
         }
-        parts.append("Track progress with task-update after each step. Report what you completed.")
+        parts.append("Report what you completed.")
         return parts.joined(separator: "\n")
     }
 

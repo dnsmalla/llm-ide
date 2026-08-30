@@ -24,17 +24,29 @@ no confirmation step — this tool takes no `path` argument, so it can
 never write anywhere else, and it always writes to that one
 plan-specific location, so it's safe to fire automatically.
 
-This is the ONLY write action available in PLAN mode. Do not attempt
-`update-file`, `bash`, or any other write tool here — they are not
-available in this mode.
+This is the ONLY write action available in the plan-like modes (PLAN,
+ASSIST_PLAN). Do not attempt `update-file`, `bash`, or any other write
+tool there — they are not available. Wherever the skill you are
+following says to write a file to a path, or to commit, use this
+instead.
 
 ## When to use
 
-Call this after every plan you propose in this mode — right after your
-prose plan, in the same turn. It saves right away with no confirmation
-from the user, so treat it as committed the moment you call it — don't
-call it for a rough draft you're still revising, and mention in your
-reply that you've saved it (and where) so the user knows.
+Only for a document that is FINISHED and that the user has approved.
+The plan-like modes run a multi-turn process (see the skill and mode
+bindings in your prompt): questions first, then a design the user
+signs off on, then the written plan. A save on any earlier turn writes
+a draft the user never agreed to.
+
+It saves right away with no confirmation, so treat it as committed the
+moment you call it — never call it for a draft you are still revising,
+and always say in your reply that you saved it and where.
+
+Two documents can legitimately be saved across one planning session:
+the design/spec the user approved, and the implementation plan written
+from it. Give them distinct titles (ending "Design" and "Plan") — a
+second save with the SAME title on the same day overwrites the first
+file rather than adding one.
 
 ## Call shape
 

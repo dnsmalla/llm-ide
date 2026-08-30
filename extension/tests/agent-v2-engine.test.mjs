@@ -81,7 +81,8 @@ test('allowlist is read-only + llmide; skills inject via append; cwd + dirs from
     'mcp__llmide__ask-internal', 'mcp__llmide__ask-subagent',
     'mcp__llmide__web-search', 'mcp__llmide__fetch-url',
     'mcp__llmide__list-files', 'mcp__llmide__read-file', 'mcp__llmide__find-code',
-    'mcp__llmide__search-kb', 'mcp__llmide__task-list', 'mcp__llmide__project_memory',
+    'mcp__llmide__search-kb', 'mcp__llmide__load-skill',
+    'mcp__llmide__task-list', 'mcp__llmide__project_memory',
   ]);
   for (const act of ['mcp__llmide__run-bash', 'mcp__llmide__task-create', 'mcp__llmide__task-update']) {
     assert.ok(!queryOptions.allowedTools.includes(act), `${act} must NOT be pre-approved — it has to reach canUseTool`);

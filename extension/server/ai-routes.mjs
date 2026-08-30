@@ -490,6 +490,7 @@ export async function handleAIRoutes(req, res) {
               model: tierModel,
               provider: body.provider,
               mode: body.mode,
+              planExecute: body.planExecute === true,
               // Forward the agent loop's per-call opts (maxTokens budget +
               // deadline signal) — without this the loop's AbortSignal.timeout
               // and maxTokens never reach runClaude, so the deadline-abort is
@@ -550,6 +551,7 @@ export async function handleAIRoutes(req, res) {
           model: tierModel,
           provider: body.provider,
           mode: body.mode,
+          planExecute: body.planExecute === true,
           // Forward the loop's per-call opts here too (buffered path): the
           // loop's maxTokens budget + its deadline signal must reach runClaude.
           runClaude: (p, opts = {}) => runClaude(p, {

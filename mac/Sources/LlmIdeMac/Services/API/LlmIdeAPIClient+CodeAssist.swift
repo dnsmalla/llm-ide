@@ -58,6 +58,12 @@ extension LlmIdeAPIClient {
         /// an older client (or a request that doesn't care) omits it —
         /// server treats missing/nil exactly like "execute".
         let mode: String?
+        /// Set only by the saved-plan card's "Execute plan" action: tells the
+        /// server this Execute turn is working an already-approved plan, so it
+        /// injects the plan-execution skill (inline vs subagent-driven is the
+        /// server's call — only it knows this user's subagents). Optional so
+        /// every other request omits it entirely.
+        let planExecute: Bool?
     }
     struct CodeAssistResponse: Codable {
         let reply: String
@@ -104,6 +110,7 @@ extension LlmIdeAPIClient {
         skills: [String] = [],
         agentContext: AgentContext? = nil,
         mode: String? = nil,
+        planExecute: Bool = false,
     ) async throws -> CodeAssistResponse {
         try await post(
             "/code-assist",
@@ -118,6 +125,7 @@ extension LlmIdeAPIClient {
                 skills: skills,
                 agentContext: agentContext,
                 mode: mode,
+                planExecute: planExecute ? true : nil,
             ),
             authenticated: true,
         )
@@ -216,6 +224,7 @@ extension LlmIdeAPIClient {
         skills: [String] = [],
         agentContext: AgentContext? = nil,
         mode: String? = nil,
+        planExecute: Bool = false,
         onProgress: @escaping @MainActor (AgentProgress) -> Void,
         onChunk: @escaping @MainActor (String) -> Void,
         onApproval: (@MainActor (AgentV2Approval) -> Void)? = nil,
@@ -231,7 +240,7 @@ extension LlmIdeAPIClient {
         req.httpBody = try JSONEncoder().encode(CodeAssistRequest(
             message: message, language: language, model: model, provider: provider,
             tier: tier, history: history, attachments: attachments, skills: skills,
-            agentContext: agentContext, mode: mode))
+            agentContext: agentContext, mode: mode, planExecute: planExecute ? true : nil))
 
         let (bytes, response) = try await session(for: "/code-assist").bytes(for: req)
         guard let http = response as? HTTPURLResponse else {
