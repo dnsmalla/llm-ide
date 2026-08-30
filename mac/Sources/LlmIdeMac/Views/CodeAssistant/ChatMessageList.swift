@@ -332,6 +332,18 @@ struct ChatMessageList: View {
                     guard isPinnedToBottom else { return }
                     proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
+                // The end of a streaming turn. `revealedCount` can't cover
+                // this: the final `resp.reply` overwrite replaces the turn's
+                // content without going through the chunk path at all, and on
+                // the buffered-fallback route (no chunk events ever arrived)
+                // the whole reply appears in one go with `revealedCount` still
+                // at zero. Neither moves the counter, and the message count
+                // doesn't change either, so without this the finished answer
+                // could land entirely below the fold.
+                .onChange(of: engine.revealingTurnID) { old, new in
+                    guard old != nil, new == nil, isPinnedToBottom else { return }
+                    withAnimation { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
+                }
                 .onChange(of: engine.busy) { _, b in
                     if b { withAnimation { proxy.scrollTo("typing-indicator", anchor: .bottom) } }
                 }
