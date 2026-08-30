@@ -528,6 +528,11 @@ struct CodeAssistantPanel: View {
     }
 
     func handleActiveRepoChange() {
+        // The memoized git snapshot belongs to the repo we just left. It is
+        // keyed by repo URL so it couldn't be served for the new one anyway,
+        // but dropping it here means switching back inside the TTL re-reads
+        // rather than replaying a snapshot from before the detour.
+        AgentGitSnapshotCache.invalidate()
         session.reset()
         engine.agent.nudgePrompt = nil
         engine.agent.qaSaveError = nil

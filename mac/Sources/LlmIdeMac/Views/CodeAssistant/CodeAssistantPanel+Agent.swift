@@ -1,5 +1,55 @@
 import SwiftUI
 
+/// The repo state `buildAgentContext` sends with each turn.
+struct AgentGitSnapshot: Sendable {
+    var branch: String?
+    var status: AgentContext.GitStatus?
+}
+
+/// Very-short-lived memo of the last `AgentGitSnapshot`, so a burst of turns
+/// doesn't re-spawn the same `git` processes.
+///
+/// `buildAgentContext` runs on the send path of EVERY round-trip, and each
+/// call shells out to `git` up to four times — on a large repo, `git status`
+/// alone is a visible pause between hitting send and anything happening. An
+/// autonomous chain makes that worse: `runTurn`, each `sendFollowup`, and each
+/// auto-continue turn all rebuild the context within seconds of each other,
+/// re-running identical commands against a repo that hasn't changed.
+///
+/// The TTL is deliberately short. Git state genuinely DOES change mid-chain —
+/// the agent commits, branches, pushes — so this is sized to collapse a burst
+/// of near-simultaneous turns, not to hold a snapshot across one.
+@MainActor
+enum AgentGitSnapshotCache {
+    /// Long enough to cover a round-trip's own follow-ups, short enough that
+    /// the agent's own git ops are reflected in the next turn's context.
+    static let ttl: TimeInterval = 3
+
+    private static var cachedRepo: URL?
+    private static var cachedSnapshot: AgentGitSnapshot?
+    private static var cachedAt: Date?
+
+    static func snapshot(for repo: URL, now: Date = Date()) -> AgentGitSnapshot? {
+        guard cachedRepo == repo, let at = cachedAt, let snapshot = cachedSnapshot,
+              now.timeIntervalSince(at) < ttl else { return nil }
+        return snapshot
+    }
+
+    static func store(_ snapshot: AgentGitSnapshot, for repo: URL, now: Date = Date()) {
+        cachedRepo = repo
+        cachedSnapshot = snapshot
+        cachedAt = now
+    }
+
+    /// Drop the memo — used when the active repo changes, so the next turn
+    /// can't be served a snapshot of the repo the user just navigated away from.
+    static func invalidate() {
+        cachedRepo = nil
+        cachedSnapshot = nil
+        cachedAt = nil
+    }
+}
+
 extension CodeAssistantPanel {
 
     /// Candidate repo paths ("~/…") for the project-memory viewer. The server
@@ -104,39 +154,15 @@ extension CodeAssistantPanel {
         var gitBranch: String?
         var gitStatus: AgentContext.GitStatus?
         if let repoURL = config.activeRepoLocalURL, WorkspaceRoot.isGitRepo(repoURL) {
-            let repoManager = RepoManager()
-            // Get current branch
-            if let branch = try? await repoManager.runGit(["rev-parse", "--abbrev-ref", "HEAD"], at: repoURL) {
-                gitBranch = branch.trimmingCharacters(in: .whitespacesAndNewlines)
+            let snapshot: AgentGitSnapshot
+            if let cached = AgentGitSnapshotCache.snapshot(for: repoURL) {
+                snapshot = cached
+            } else {
+                snapshot = await Self.readGitSnapshot(at: repoURL)
+                AgentGitSnapshotCache.store(snapshot, for: repoURL)
             }
-            // Get status counts (porcelain v1: XY filename)
-            if let status = try? await repoManager.runGit(["status", "--porcelain=v1"], at: repoURL) {
-                let lines = status.split(separator: "\n")
-                let staged = lines.filter { $0.prefix(1) != " " && $0.prefix(1) != "?" }.count
-                let unstaged = lines.filter { $0.count >= 2 && $0.dropFirst().prefix(1) != " " }.count
-                // Get ahead/behind from branch tracking
-                var ahead = 0, behind = 0, hasUpstream = false
-                if let branch = gitBranch,
-                   let tracking = try? await repoManager.runGit(["rev-parse", "--abbrev-ref", "\(branch)@{upstream}"], at: repoURL),
-                   !tracking.contains("no upstream") {
-                    hasUpstream = true
-                    let counts = try? await repoManager.runGit(["rev-list", "--left-right", "--count", "\(branch)...@{u}"], at: repoURL)
-                    if let counts = counts {
-                        let parts = counts.split(separator: "\t").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                        if parts.count == 2 {
-                            ahead = Int(parts[0]) ?? 0
-                            behind = Int(parts[1]) ?? 0
-                        }
-                    }
-                }
-                gitStatus = AgentContext.GitStatus(
-                    staged: staged,
-                    unstaged: unstaged,
-                    ahead: ahead,
-                    behind: behind,
-                    hasUpstream: hasUpstream
-                )
-            }
+            gitBranch = snapshot.branch
+            gitStatus = snapshot.status
         }
 
         return AgentContext(
@@ -149,6 +175,52 @@ extension CodeAssistantPanel {
             currentBranch: gitBranch,
             gitStatus: gitStatus
         )
+    }
+
+    /// Read the repo's branch + worktree status for the agent's context.
+    ///
+    /// Branch and status are independent, so they run concurrently rather than
+    /// back to back — `RepoManager` runs each `git` on a background queue, so
+    /// two in flight really do overlap. The upstream lookups have to follow,
+    /// since they need the branch name. Three rounds instead of four, and (via
+    /// `AgentGitSnapshotCache`) usually zero.
+    static func readGitSnapshot(at repoURL: URL) async -> AgentGitSnapshot {
+        let repoManager = RepoManager()
+        async let branchOut = try? repoManager.runGit(["rev-parse", "--abbrev-ref", "HEAD"], at: repoURL)
+        async let statusOut = try? repoManager.runGit(["status", "--porcelain=v1"], at: repoURL)
+
+        let branch = (await branchOut)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let status = await statusOut else {
+            return AgentGitSnapshot(branch: branch, status: nil)
+        }
+
+        // Status counts (porcelain v1: XY filename).
+        let lines = status.split(separator: "\n")
+        let staged = lines.filter { $0.prefix(1) != " " && $0.prefix(1) != "?" }.count
+        let unstaged = lines.filter { $0.count >= 2 && $0.dropFirst().prefix(1) != " " }.count
+
+        // Ahead/behind from branch tracking.
+        var ahead = 0, behind = 0, hasUpstream = false
+        if let branch,
+           let tracking = try? await repoManager.runGit(["rev-parse", "--abbrev-ref", "\(branch)@{upstream}"], at: repoURL),
+           !tracking.contains("no upstream") {
+            hasUpstream = true
+            if let counts = try? await repoManager.runGit(["rev-list", "--left-right", "--count", "\(branch)...@{u}"], at: repoURL) {
+                let parts = counts.split(separator: "\t").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if parts.count == 2 {
+                    ahead = Int(parts[0]) ?? 0
+                    behind = Int(parts[1]) ?? 0
+                }
+            }
+        }
+        return AgentGitSnapshot(
+            branch: branch,
+            status: AgentContext.GitStatus(
+                staged: staged,
+                unstaged: unstaged,
+                ahead: ahead,
+                behind: behind,
+                hasUpstream: hasUpstream))
     }
 
     /// Polls GitLab for the active project's recent issues and updates
