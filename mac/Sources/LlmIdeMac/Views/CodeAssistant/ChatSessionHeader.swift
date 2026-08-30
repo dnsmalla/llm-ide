@@ -97,7 +97,7 @@ extension CodeAssistantPanel {
 
             Button {
                 showingSessionPicker = false
-                engine.createNewSession()
+                newSession()
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "plus")
@@ -129,11 +129,17 @@ extension CodeAssistantPanel {
                             SessionRow(
                                 session: session,
                                 isActive: session.id.uuidString == engine.currentSessionIDString,
+                                isRunningInBackground: backgroundRunningSessions.contains(session.id),
                                 onSelect: {
                                     showingSessionPicker = false
-                                    engine.switchSession(to: session.id)
+                                    switchToSession(session.id)
                                 },
                                 onDelete: {
+                                    // Kill any background turn on this chat
+                                    // FIRST: left running, its turn-end
+                                    // persist would write the session file
+                                    // straight back after the delete.
+                                    ChatEngineRegistry.shared.discardBackground(sessionID: session.id)
                                     Task { await engine.deleteSession(session.id) }
                                 },
                                 onRename: { newTitle in

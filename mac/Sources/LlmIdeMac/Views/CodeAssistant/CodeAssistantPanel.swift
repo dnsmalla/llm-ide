@@ -474,6 +474,58 @@ struct CodeAssistantPanel: View {
         }
     }
 
+    /// Sessions working off-screen right now, for the picker's running
+    /// marker. Read from the registry (an `@Observable`) inside `body`, so
+    /// the marker appears and clears as those turns start and finish.
+    var backgroundRunningSessions: Set<UUID> {
+        ChatEngineRegistry.shared.backgroundRunningSessionIDs
+    }
+
+    /// Switch the visible chat to `id`, keeping a mid-turn chat alive.
+    ///
+    /// The registry decides whether that means switching the session on the
+    /// engine this panel already renders (the ordinary case, when nothing is
+    /// running) or handing back a DIFFERENT engine — the one parked with the
+    /// still-running chat, or a fresh one because the outgoing chat was
+    /// parked. Either way the panel re-points at what it gets back and
+    /// re-wires its hooks onto it: `wireEngine` is idempotent and reassigns
+    /// closures over whatever instance `engine` now holds.
+    ///
+    /// Going through the registry rather than calling
+    /// `engine.switchSession(to:)` directly is the whole fix: that method
+    /// starts with `resetActiveTurnState()`, which cancels the in-flight turn
+    /// and finalizes its reply as `.stopped`.
+    func switchToSession(_ id: UUID) {
+        adoptEngine(ChatEngineRegistry.shared.switchDisplayedSession(scope: scope, to: id, api: api))
+    }
+
+    /// Start a new empty chat. Same reasoning as `switchToSession`: the
+    /// engine's own `createNewSession()` cancels an in-flight turn, so a
+    /// running chat is parked rather than stopped.
+    func newSession() {
+        adoptEngine(ChatEngineRegistry.shared.newDisplayedSession(scope: scope, api: api))
+    }
+
+    /// Re-point this panel at `next` if the registry handed back a different
+    /// instance, re-running the hook wiring onto it. `wireEngine` is
+    /// idempotent — each call just reassigns fresh closures over whatever
+    /// `engine` now holds.
+    private func adoptEngine(_ next: ChatEngine) {
+        guard next !== engine else { return }
+        // Swapping the instance makes `engine.messages` jump wholesale from
+        // one chat's history to another's, which the panel's
+        // `.onChange(of: engine.messages)` sees as "turns were appended" and
+        // would read the incoming chat's last reply aloud. Same suppression
+        // `switchSession` applies around its own history swap.
+        next.suppressHistoryAnnounce = true
+        DispatchQueue.main.async { next.suppressHistoryAnnounce = false }
+        engine = next
+        wireEngine()
+        // A parked engine's `sessions` list was last refreshed when it went
+        // off-screen; anything created or renamed since then is missing.
+        engine.refreshSessions()
+    }
+
     func handleOnAppear() {
         wireEngine()
         modelState.customProviders = CustomProvider.loadAll()

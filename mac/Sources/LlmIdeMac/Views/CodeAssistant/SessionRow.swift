@@ -7,6 +7,11 @@ import SwiftUI
 struct SessionRow: View {
     let session: ChatSession
     let isActive: Bool
+    /// This chat has a turn in flight on an engine that isn't on screen —
+    /// the user switched away from it mid-run and it kept going. Without a
+    /// marker here, a background chat is indistinguishable from a finished
+    /// one until you open it.
+    var isRunningInBackground: Bool = false
     let onSelect: () -> Void
     let onDelete: () -> Void
     let onRename: (String) -> Void
@@ -32,6 +37,14 @@ struct SessionRow: View {
                     .foregroundStyle(theme.current.text)
                     .lineLimit(1)
                     .truncationMode(.tail)
+            }
+            if isRunningInBackground {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.6)
+                    .frame(width: 12, height: 12)
+                    .help("Still working in the background")
+                    .accessibilityLabel("Still working")
             }
             Spacer(minLength: 6)
             if isEditing {

@@ -106,6 +106,18 @@ final class ExplorerMobileEngineResolver {
         if sharedExplorerEngine.currentSessionIDString == sessionID.uuidString {
             return sharedExplorerEngine
         }
+        // A session the Mac user switched away from MID-TURN is still live in
+        // `ChatEngineRegistry`'s background lot, holding the real transcript
+        // in memory and about to persist it. Standing up a second engine for
+        // it here would make two writers for one session file, and whichever
+        // persisted last would erase the other's turns. The registry's live
+        // engine wins over anything this resolver could build or has cached.
+        if let live = ChatEngineRegistry.shared.liveEngine(for: sessionID) {
+            // Drop our own copy if we had one: from here on that session has
+            // exactly one writer again, and it is not this cache.
+            forget(sessionID: sessionID)
+            return live
+        }
         if let cached = offScreen[sessionID] {
             guard !cached.busy else {
                 touch(sessionID)  // mid-turn lookups count as use too

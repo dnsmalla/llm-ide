@@ -143,6 +143,17 @@ final class ChatEngine {
     /// closure no-ops instead of starting a turn against a different chat's
     /// history.
     var sessionEpoch: UInt = 0
+
+    /// True while this engine is running a turn with no view observing it —
+    /// a session the user switched AWAY from while it was mid-turn, kept
+    /// alive by `ChatEngineRegistry` instead of being cancelled.
+    ///
+    /// Persistence normally rides the panel's `.onChange(of: engine.messages)`
+    /// → `announceAndPersist`. An unobserved engine has no such observer, so
+    /// nothing ever calls `schedulePersist` and `flushPendingPersist` at turn
+    /// end is a no-op — the whole background turn would finish in memory and
+    /// never reach disk. With this set, the turn-end funnel writes directly.
+    var persistsUnobserved = false
     /// Measured render height per assistant turn, keyed by MESSAGE id, so each
     /// markdown web-view bubble can be sized to its content in the scroll list.
     /// Written by the VIEW (`ChatMessageList`), so it stays publicly settable
@@ -545,6 +556,12 @@ final class ChatEngine {
             // mutations. Engines with no panel attached (the mobile bridge)
             // rely on this call.
             flushPendingPersist()
+            // A backgrounded session's turn has no `.onChange` observer to
+            // have written anything, so the flush above found nothing
+            // pending. Write it out directly — otherwise the reply the user
+            // switched away from exists only in memory until they come back,
+            // and a quit in between loses it.
+            if persistsUnobserved { persistCurrentChat() }
             // Clear the completed phone turn's handle HERE, not in
             // runExternalTurn's wrapper: the body reaches this idle branch
             // before the wrapper's await resumes, and by then a second
