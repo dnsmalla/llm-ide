@@ -33,6 +33,7 @@ process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
 const { registerUser } = await import('../server/users.mjs');
+const { tasks: sessionTasks } = await import('../llm_agent/runtime/handlers/session-tasks.mjs');
 const { getDb } = await import('../kb/db.mjs');
 const {
   getOrCreateAgentSession,
@@ -86,6 +87,46 @@ const newUser = (email) =>
   registerUser(getDb(), { email, password: 'CorrectHorseBattery', displayName: 't' });
 
 // --- POST /agent/v2/stream ---------------------------------------------------
+
+test('stream: tool_result emits tasks_progress as the list changes, deduped', async () => {
+  const user = newUser('v2route-taskprogress@example.com');
+  // Seed the session's task list, then mutate it BETWEEN tool_result events
+  // the way a real turn does — the route re-reads the store on each one.
+  const sid = 'chat-taskprog';
+  const t1 = sessionTasks.createTask(user.id, sid, 'Add the shared scheme');
+  const t2 = sessionTasks.createTask(user.id, sid, 'Wire the test target');
+  const fakeTurn = async ({ onEvent }) => {
+    onEvent({ type: 'init', sessionId: 'sdk-tp', claudeCodeVersion: '2.1.234', tools: [], capabilities: [] });
+    onEvent({ type: 'tool_result', toolUseId: 'a', content: 'ok' });   // first look: both pending
+    onEvent({ type: 'tool_result', toolUseId: 'b', content: 'ok' });   // unchanged → no second event
+    sessionTasks.updateTask(user.id, sid, t1.id, { status: 'completed' });
+    onEvent({ type: 'tool_result', toolUseId: 'c', content: 'ok' });   // changed → emits
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-tp', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: {} };
+  };
+  const res = makeRes();
+  await handleAgentV2Routes(makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    // NOT a plan-like mode: restrictsTools zeroes the task list, so a plan
+    // turn legitimately reports nothing here.
+    body: { message: 'go', mode: 'execute', agentContext: { chatSessionId: sid, workspaceRoot: WS } },
+    user,
+  }), res, { runTurn: fakeTurn });
+
+  const progress = res.sseEvents().filter((e) => e.type === 'tasks_progress');
+  assert.equal(progress.length, 2, 'an unchanged list between tool results must not re-emit');
+  assert.deepEqual(progress[0].tasks.map((t) => t.status), ['pending', 'pending']);
+  assert.deepEqual(progress[1].tasks.map((t) => t.status), ['completed', 'pending']);
+  // The mid-turn event carries the list ONLY — continueNeeded on it would
+  // read as "start another turn" to a client that auto-chains on it.
+  assert.equal(progress[1].continueNeeded, undefined);
+  assert.equal(progress[1].tasks[1].title, t2.title);
+  // The terminal event is unchanged: still last, still carries continueNeeded.
+  const evs = res.sseEvents();
+  assert.equal(evs.at(-1).type, 'tasks');
+  assert.equal(evs.at(-1).continueNeeded, true);
+});
 
 test('stream: happy path emits init → mode_set → … → result, maps session, records usage', async () => {
   const db = getDb();

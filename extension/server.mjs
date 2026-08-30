@@ -114,7 +114,13 @@ const HOST = config.host;
 //     additive: an older client omits it and behaves exactly as before. The
 //     plan-like modes also gained the `load-skill` read tool, which is how a
 //     skill hands over to the next one (llm_agent/runtime/plan-pipeline.mjs).
-const SERVER_API_VERSION = 40;
+//   v41 — /agent/v2/stream emits `tasks_progress` events mid-turn (the
+//     session task list, re-checked after every tool_result that changed
+//     it). The terminal `tasks` event is unchanged and still carries
+//     `continueNeeded`; this one carries the list only, so a client can move
+//     a progress bar during a long turn instead of at the end of it. Purely
+//     additive: an unknown event type is ignored by the v2 wire contract.
+const SERVER_API_VERSION = 41;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
