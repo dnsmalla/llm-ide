@@ -2,11 +2,19 @@ import SwiftUI
 
 /// Validated cron editor for one Auto Task.
 ///
+/// An **Active** switch arms or disarms the schedule, and starts OFF. The
+/// expression and the arming are separate on purpose: every task carries a
+/// cron string, so without this the only way to stop a task firing was to
+/// destroy a schedule the user had tuned. Disarming keeps the expression and
+/// greys out the whole row — Edit included, since editing a cron that cannot
+/// run only invites the user to tune something inert; activate first, then
+/// edit.
+///
 /// Two modes so it's always clear whether the task is actually scheduled:
 /// - **Display ("set") mode** (default): the committed cron, its human
 ///   description, and an explicit status — `Scheduled · next …`,
-///   `Auto Tasks paused`, or `Task disabled — won't run` — so you can see at
-///   a glance that it will run. Press Edit to change it.
+///   `Schedule off`, `Auto Tasks paused`, or `Task disabled — won't run` —
+///   so you can see at a glance that it will run. Press Edit to change it.
 /// - **Edit mode**: a TextField with live validation, committed via Save
 ///   (or Enter). Invalid input is rejected; Cancel reverts. The previous
 ///   field was always an editable TextField that only committed on Enter, so
@@ -24,9 +32,11 @@ struct CronField: View {
     private var savedCron: String { settings.cron(for: task) }
     private var isValid: Bool { CronExpression.parse(draft) != nil }
     private var isDirty: Bool { draft != savedCron }
-    /// True only when the master switch AND this task's per-task flag are on —
-    /// i.e. the scheduler will actually fire it.
-    private var willRun: Bool { settings.enabled && settings.isEnabled(task: task) }
+    /// Whether this task's cron is armed. Bound to the Active switch.
+    private var isActive: Bool { settings.isScheduleActive(for: task) }
+    /// True only when the schedule is armed AND the master switch AND this
+    /// task's per-task flag are on — i.e. the scheduler will actually fire it.
+    private var willRun: Bool { isActive && settings.enabled && settings.isEnabled(task: task) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -46,6 +56,7 @@ struct CronField: View {
             Image(systemName: "clock")
                 .foregroundStyle(willRun ? theme.current.accent3 : theme.current.textMuted)
                 .padding(.top, 1)
+                .opacity(isActive ? 1 : 0.55)
             VStack(alignment: .leading, spacing: 1) {
                 Text(savedCron)
                     .font(.system(.caption, design: .monospaced))
@@ -57,7 +68,13 @@ struct CronField: View {
                 }
                 statusLine
             }
+            // Dims the EXPRESSION only, never the switch that turns it back
+            // on — greying out the one control the user needs to click would
+            // read as "this row is unavailable" rather than "this schedule is
+            // off".
+            .opacity(isActive ? 1 : 0.55)
             Spacer(minLength: 8)
+            activeToggle
             Button("Edit") {
                 draft = savedCron
                 touched = false
@@ -65,7 +82,27 @@ struct CronField: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            // Editing a disarmed cron would let the user tune a schedule that
+            // cannot run and looks set — activate first, then edit.
+            .disabled(!isActive)
         }
+    }
+
+    /// Arms/disarms this task's cron without touching the expression.
+    private var activeToggle: some View {
+        Toggle("Active", isOn: Binding(
+            get: { isActive },
+            set: { settings.setScheduleActive($0, for: task) }
+        ))
+        .toggleStyle(.switch)
+        .controlSize(.mini)
+        .font(.caption2)
+        .foregroundStyle(theme.current.textMuted)
+        .fixedSize()
+        .help(isActive
+              ? "Scheduled — the cron below fires this task"
+              : "Schedule off — this task runs only when you press Run")
+        .accessibilityLabel("Schedule active")
     }
 
     /// One-line schedule status so the user knows whether the task will run:
@@ -73,7 +110,9 @@ struct CronField: View {
     /// task's flag are on.
     @ViewBuilder
     private var statusLine: some View {
-        if !settings.enabled {
+        if !isActive {
+            statusText("Schedule off — runs only when you press Run", icon: "clock.badge.xmark")
+        } else if !settings.enabled {
             statusText("Auto Tasks paused — master switch off", icon: "pause.circle")
         } else if !settings.isEnabled(task: task) {
             statusText("Task disabled — won't run", icon: "pause.circle")

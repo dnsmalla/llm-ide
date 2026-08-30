@@ -28,6 +28,9 @@ final class AutoTaskSettingsCronTests: XCTestCase {
     func testNextFireAtPersistsAndRecomputes() {
         let now = Date()
         let a = AutoTaskSettings(defaults: suite)
+        // Arming is opt-in: `recomputeNextFire` deliberately refuses to arm a
+        // deactivated schedule, so activate before asserting on the fire.
+        a.setScheduleActive(true, for: .regression)
         a.setCron("0 9 * * *", for: .regression)
         a.recomputeNextFire(for: .regression, now: now)
         let stored = a.nextFireAt(for: .regression)
@@ -79,4 +82,65 @@ extension AutoTaskSettingsCronTests {
         b.setCustomNextFireAt(nil, for: "task-1")
         XCTAssertNil(b.customNextFireAt(for: "task-1"))
     }
+    // MARK: - Schedule active flag
+
+    /// The cron EXPRESSION is seeded on a fresh install, but seeding an
+    /// expression is not arming a schedule: nothing fires until the user flips
+    /// the Active switch.
+    func testScheduleStartsInactiveWithNoUpcomingFire() {
+        let settings = AutoTaskSettings(defaults: suite)
+        for task in AutoTask.allCases {
+            XCTAssertFalse(settings.isScheduleActive(for: task), "\(task.label) should start inactive")
+            XCTAssertNil(settings.nextFireAt(for: task), "\(task.label) must not be armed")
+            XCTAssertFalse(settings.cron(for: task).isEmpty, "the expression is still seeded")
+        }
+    }
+
+    func testActivatingArmsTheNextFireAndDeactivatingClearsIt() {
+        let settings = AutoTaskSettings(defaults: suite)
+        settings.setScheduleActive(true, for: .reviewCode)
+        XCTAssertNotNil(settings.nextFireAt(for: .reviewCode))
+
+        settings.setScheduleActive(false, for: .reviewCode)
+        XCTAssertNil(settings.nextFireAt(for: .reviewCode))
+    }
+
+    /// Deactivating must not destroy a cron the user tuned by hand — that is
+    /// the whole reason arming is a separate flag rather than clearing the
+    /// expression.
+    func testDeactivatingKeepsTheExpressionSoActivatingRestoresIt() {
+        let a = AutoTaskSettings(defaults: suite)
+        a.setScheduleActive(true, for: .reviewCode)
+        a.setCron("*/5 * * * *", for: .reviewCode)
+        a.setScheduleActive(false, for: .reviewCode)
+        XCTAssertEqual(a.cron(for: .reviewCode), "*/5 * * * *")
+
+        let b = AutoTaskSettings(defaults: suite)
+        XCTAssertEqual(b.cron(for: .reviewCode), "*/5 * * * *")
+        b.setScheduleActive(true, for: .reviewCode)
+        XCTAssertNotNil(b.nextFireAt(for: .reviewCode), "the saved expression re-arms as-is")
+    }
+
+    /// Editing the cron of a deactivated task must not arm it behind the
+    /// user's back — `setCron` recomputes the next fire, and that recompute
+    /// has to respect the flag.
+    func testSettingACronOnAnInactiveScheduleDoesNotArmIt() {
+        let settings = AutoTaskSettings(defaults: suite)
+        settings.setCron("*/10 * * * *", for: .reviewDoc)
+        XCTAssertNil(settings.nextFireAt(for: .reviewDoc))
+    }
+
+    /// An install from a build with no Active flag has a `nextFireAt` saved
+    /// for every task. Loading must disarm those rather than inherit 13 live
+    /// crons nobody chose — while leaving the expressions untouched.
+    func testLoadDisarmsFiresLeftBehindByAnOlderBuild() {
+        suite.set("*/2 * * * *", forKey: "autoCodeCron.reviewCode")
+        suite.set(Date().addingTimeInterval(60).timeIntervalSince1970,
+                  forKey: "autoCodeNextFireAt.reviewCode")
+
+        let settings = AutoTaskSettings(defaults: suite)
+        XCTAssertNil(settings.nextFireAt(for: .reviewCode), "the stale fire is cleared")
+        XCTAssertEqual(settings.cron(for: .reviewCode), "*/2 * * * *", "the expression survives")
+    }
+
 }

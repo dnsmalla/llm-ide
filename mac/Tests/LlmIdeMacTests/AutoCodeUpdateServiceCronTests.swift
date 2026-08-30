@@ -30,6 +30,10 @@ final class AutoCodeUpdateServiceCronTests: XCTestCase {
         let settings = AutoTaskSettings(defaults: suite)
         settings.enabled = true
         settings.setEnabled(true, task: .reviewCode)
+        // The schedule is opt-in, so arm it explicitly — without this the
+        // fixture would have a cron and no fire, and every test here would
+        // pass vacuously.
+        settings.setScheduleActive(true, for: .reviewCode)
         settings.setCron("*/30 * * * *", for: .reviewCode)
         let registry = ProcessedActionsRegistry(
             storeURL: URL(fileURLWithPath: "/tmp/llm-ide-test-registry-\(UUID().uuidString).json"))
@@ -74,4 +78,21 @@ final class AutoCodeUpdateServiceCronTests: XCTestCase {
         svc.autoTaskSettings.setNextFireAt(Date().addingTimeInterval(-300), for: .reviewCode)
         XCTAssertTrue(svc.dueTasks(now: Date()).isEmpty)
     }
+    /// A stale fire from a build that had no Active flag must not produce one
+    /// last unwanted run before the realign clears it.
+    func testInactiveScheduleIsNeverDueEvenWithAStaleFire() {
+        let svc = makeService()
+        svc.autoTaskSettings.setScheduleActive(false, for: .reviewCode)
+        svc.autoTaskSettings.setNextFireAt(Date().addingTimeInterval(-300), for: .reviewCode)
+        XCTAssertTrue(svc.dueTasks(now: Date()).isEmpty)
+    }
+
+    /// The post-run realign must not re-arm a task the user deactivated.
+    func testRealignDoesNotReArmAnInactiveSchedule() {
+        let svc = makeService()
+        svc.autoTaskSettings.setScheduleActive(false, for: .reviewCode)
+        svc.realignNextFire(for: .reviewCode, now: Date())
+        XCTAssertNil(svc.autoTaskSettings.nextFireAt(for: .reviewCode))
+    }
+
 }

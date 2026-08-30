@@ -344,7 +344,13 @@ final class AutoCodeUpdateService: ObservableObject {
     func dueTasks(now: Date = Date()) -> [AutoTask] {
         guard autoTaskSettings.enabled else { return [] }
         return AutoTask.allCases.filter { task in
+            // `isScheduleActive` is belt-and-braces next to `nextFireAt` — a
+            // disarmed task has no fire to be due at. It is checked anyway so
+            // a stale fire written by an older build (which had no active
+            // flag) can never produce one last unwanted run before
+            // `realignNextFire` clears it.
             guard autoTaskSettings.isEnabled(task: task),
+                  autoTaskSettings.isScheduleActive(for: task),
                   let next = autoTaskSettings.nextFireAt(for: task) else { return false }
             return now >= next
         }
@@ -353,7 +359,8 @@ final class AutoCodeUpdateService: ObservableObject {
     /// Advance a task's nextFireAt to the first fire strictly after `now`
     /// (catch up once → realign to the future). Testable seam.
     func realignNextFire(for task: AutoTask, now: Date) {
-        guard let expr = CronExpression.parse(autoTaskSettings.cron(for: task)),
+        guard autoTaskSettings.isScheduleActive(for: task),
+              let expr = CronExpression.parse(autoTaskSettings.cron(for: task)),
               let next = expr.nextFire(after: now, now: now) else {
             autoTaskSettings.setNextFireAt(nil, for: task); return
         }

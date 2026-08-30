@@ -19,6 +19,7 @@ final class AutoTaskSettings: ObservableObject {
 
     private static func cronKey(_ task: AutoTask) -> String { "autoCodeCron.\(task.rawValue)" }
     private static func nextFireKey(_ task: AutoTask) -> String { "autoCodeNextFireAt.\(task.rawValue)" }
+    private static func cronActiveKey(_ task: AutoTask) -> String { "autoCodeCronActive.\(task.rawValue)" }
 
     @Published var enabled: Bool {
         didSet(oldValue) {
@@ -252,6 +253,34 @@ final class AutoTaskSettings: ObservableObject {
         recomputeNextFire(for: task, now: Date())
         objectWillChange.send()   // notify the UI
     }
+
+    /// Whether this task's cron is ARMED. Default **off**, and separate from
+    /// the cron expression on purpose: every task carries a cron string —
+    /// seeded hourly on a fresh install, or whatever the user typed — but a
+    /// schedule that exists is not a schedule that runs. Deactivating keeps
+    /// the expression so activating again restores it verbatim, instead of
+    /// making the user retype a cron they had already tuned.
+    ///
+    /// The scheduler's real gate is `nextFireAt`, which `setScheduleActive`
+    /// arms and clears; this flag is what the UI reads and what
+    /// `recomputeNextFire` consults so a disarmed task can never re-arm
+    /// itself on the next tick.
+    func isScheduleActive(for task: AutoTask) -> Bool {
+        defaults.object(forKey: Self.cronActiveKey(task)) as? Bool ?? false
+    }
+
+    /// Arm or disarm this task's cron. Arming computes the next fire from the
+    /// stored expression; disarming clears it, which is what actually stops
+    /// the scheduler — `dueTasks` needs a `nextFireAt` to fire at all.
+    func setScheduleActive(_ active: Bool, for task: AutoTask) {
+        defaults.set(active, forKey: Self.cronActiveKey(task))
+        if active {
+            recomputeNextFire(for: task, now: Date())
+        } else {
+            setNextFireAt(nil, for: task)        // sends objectWillChange
+        }
+        objectWillChange.send()
+    }
     func nextFireAt(for task: AutoTask) -> Date? {
         let t = defaults.double(forKey: Self.nextFireKey(task))
         return t > 0 ? Date(timeIntervalSince1970: t) : nil
@@ -277,9 +306,13 @@ final class AutoTaskSettings: ObservableObject {
         else { defaults.removeObject(forKey: Self.customNextFireKey(id)) }
         objectWillChange.send()
     }
-    /// Recompute the next fire strictly after `now`. No-op if cron is invalid.
+    /// Recompute the next fire strictly after `now`. Clears the fire when the
+    /// schedule is deactivated or the cron is invalid — every caller (init,
+    /// `setCron`, the scheduler's post-run realign) goes through here, so a
+    /// deactivated task cannot be re-armed from any of them.
     func recomputeNextFire(for task: AutoTask, now: Date) {
-        guard let expr = CronExpression.parse(cron(for: task)),
+        guard isScheduleActive(for: task),
+              let expr = CronExpression.parse(cron(for: task)),
               let next = expr.nextFire(after: now, now: now) else {
             setNextFireAt(nil, for: task); return
         }
@@ -359,9 +392,14 @@ final class AutoTaskSettings: ObservableObject {
                 let seeded = Self.cronFromInterval(legacyInterval)
                 defaults.set(seeded, forKey: Self.cronKey(task))
             }
-            if nextFireAt(for: task) == nil {
-                recomputeNextFire(for: task, now: Date())
-            }
+            // Seeding an EXPRESSION is not arming a schedule. Earlier builds
+            // had no active flag and armed every task here, so a fresh install
+            // had 13 live crons nobody chose — and an existing install still
+            // carries those `nextFireAt` values. `isScheduleActive` defaults
+            // off, so this clears them; the cron text is deliberately left
+            // alone, including one the user tuned by hand, so activating the
+            // task restores their schedule exactly.
+            recomputeNextFire(for: task, now: Date())
         }
 
         NotificationCenter.default.addObserver(
