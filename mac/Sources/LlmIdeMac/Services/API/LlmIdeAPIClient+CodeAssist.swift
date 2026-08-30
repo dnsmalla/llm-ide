@@ -422,6 +422,13 @@ extension LlmIdeAPIClient {
         guard http.statusCode == 200 else {
             // Validation failures answer as plain JSON before the SSE
             // headers go out — same shape as the legacy stream's guard.
+            // 409 is the route's per-chat turn lock (TURN_IN_PROGRESS): tell
+            // the user what it means instead of a bare status code.
+            if http.statusCode == 409 {
+                throw APIError.http(status: 409, code: "TURN_IN_PROGRESS",
+                                    message: "This chat is still working on its previous request — wait for it to finish (or stop it), then send again.",
+                                    details: nil)
+            }
             throw APIError.http(status: http.statusCode, code: "HTTP_ERROR",
                                 message: "Agent v2 stream request failed (\(http.statusCode))", details: nil)
         }

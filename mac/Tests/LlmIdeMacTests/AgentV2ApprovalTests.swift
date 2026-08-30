@@ -330,10 +330,16 @@ struct AgentV2ApprovalTests {
                                        toolName: "run-bash", argsSummary: "npm test")
         legacy.approvalToFire = approval
         let engine = ChatEngine(scope: .explorer, transport: legacy)
+        // The engine stamps its OWN agentSessionId over whatever the input
+        // builder supplies (stampOwnIdentity — the 409 cross-chat fix), so
+        // the id under test is set on the engine, not smuggled through the
+        // closure's context. The invariant pinned below is unchanged: the
+        // approval posts back exactly the session id the turn carried.
+        engine.agent.agentSessionId = "legacy-sess-1"
         engine.resolveTransportInput = { message, history, attachments, skills in
             ChatTransportInput(message: message, history: history, attachments: attachments,
                               skills: skills,
-                              agentContext: AgentContext(indexedRepos: [], sessionId: "legacy-sess-1"),
+                              agentContext: AgentContext(indexedRepos: [], sessionId: "ignored-by-stamp"),
                               language: nil, model: nil, provider: nil, mode: nil)
         }
         let v2Poster = ScriptedToolDecisionPoster()
@@ -393,10 +399,14 @@ struct AgentV2ApprovalTests {
         // above — restore the scripted one so this test controls the engine
         // selection without a ChatSessionStore round-trip.
         composite.sessionEngineMarker = { engineSwitch.useLegacy ? nil : AgentV2Selection.sessionEngineV2 }
+        // stampOwnIdentity overwrites the closure-supplied sessionId with the
+        // engine's own on every turn (the 409 cross-chat fix) — the id under
+        // test lives on the engine now.
+        engine.agent.agentSessionId = "legacy-sess-mixed"
         engine.resolveTransportInput = { message, history, attachments, skills in
             ChatTransportInput(message: message, history: history, attachments: attachments,
                                skills: skills,
-                               agentContext: AgentContext(indexedRepos: [], sessionId: "legacy-sess-mixed"),
+                               agentContext: AgentContext(indexedRepos: [], sessionId: "ignored-by-stamp"),
                                language: nil, model: nil,
                                // The composite's selection rule also requires an
                                // Anthropic provider — without it every turn would

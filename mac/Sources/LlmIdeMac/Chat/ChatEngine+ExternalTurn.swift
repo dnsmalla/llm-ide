@@ -198,7 +198,7 @@ extension ChatEngine {
         let streamingID = beginStreamingTurn()
         do {
             let recent = packHistory(messages)
-            let input = ChatTransportInput(
+            var input = ChatTransportInput(
                 message: message,
                 history: Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
                 attachments: attachments,
@@ -209,6 +209,11 @@ extension ChatEngine {
                 provider: provider,
                 mode: nil
             )
+            // Same identity stamp as runTurn/sendFollowup — here the bridge
+            // already targets this engine's session (the resolver guarantees
+            // it), so this is a structural no-op that keeps the rule uniform:
+            // every turn carries the identity of the engine that runs it.
+            stampOwnIdentity(&input)
             let resp = try await transport.roundTrip(
                 input,
                 onProgress: { [self] progress in

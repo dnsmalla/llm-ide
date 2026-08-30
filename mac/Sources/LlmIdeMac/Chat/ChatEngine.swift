@@ -470,9 +470,14 @@ final class ChatEngine {
             var input = await resolveTransportInput(
                 message,
                 Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
-                attachmentsForTurn(),
+                // A background turn (auto-continue on a parked engine) must
+                // not pick up the files staged in the composer of whatever
+                // chat is on screen NOW — those belong to the displayed
+                // chat's next message.
+                persistsUnobserved ? [] : attachmentsForTurn(),
                 skillIds
             )
+            stampOwnIdentity(&input)
             // Set here rather than inside `resolveTransportInput`: that
             // closure's signature is shared by every surface that builds a
             // turn (panel, menu bar, phone), and this flag belongs to one
@@ -639,7 +644,8 @@ final class ChatEngine {
             // pushed before this call IS the signal the agent needs to
             // see. Keep it in `messages`; pass "(continue)" as the user
             // message purely to pass the server's empty-message guard.
-            let input = await resolveTransportInput("(continue)", recent, [], [])
+            var input = await resolveTransportInput("(continue)", recent, [], [])
+            stampOwnIdentity(&input)
             let resp = try await transport.roundTrip(
                 input,
                 onProgress: { [self] progress in recordProgress(progress) },
@@ -960,6 +966,27 @@ final class ChatEngine {
             agent.lastMemoryTokens = u.memoryApproxTokens
             agent.lastMemoryHasChat = u.memoryHasChatMemory ?? false
         }
+    }
+
+    /// Overwrite a turn input's chat identity with THIS engine's own.
+    ///
+    /// `resolveTransportInput` is a panel-wired closure, and the panel's
+    /// `buildAgentContext()` reads identity off the panel's CURRENT `engine`
+    /// state. That was always the same engine — until background sessions: a
+    /// parked engine that starts a turn (auto-continue, a queued drain) runs
+    /// its old closure against a panel now pointing at a DIFFERENT chat, so
+    /// the turn went out under the displayed chat's `chatSessionId`. Server
+    /// side that collided with the displayed chat's own turn (the 409
+    /// TURN_IN_PROGRESS lock) and would have written the continuation into
+    /// the wrong SDK session and task store. Identity is the engine's to
+    /// assert, structurally, on every turn — a nil context (callers with no
+    /// session routing) is left nil rather than fabricated.
+    /// Internal (not private): the external-turn extension file stamps too.
+    func stampOwnIdentity(_ input: inout ChatTransportInput) {
+        guard var ctx = input.agentContext else { return }
+        ctx.sessionId = agent.agentSessionId
+        ctx.chatSessionId = currentSessionIDString.isEmpty ? nil : currentSessionIDString
+        input.agentContext = ctx
     }
 
     /// Mid-turn task list from the v2 stream. Display only: it moves the

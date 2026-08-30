@@ -48,7 +48,10 @@ struct ChatTransportInput: Sendable {
     let history: [LlmIdeAPIClient.CodeAssistTurn]
     let attachments: [LlmIdeAPIClient.CodeAttachment]
     let skills: [String]
-    let agentContext: AgentContext?
+    /// `var`, not `let`: the engine overwrites this context's identity
+    /// fields (`sessionId`/`chatSessionId`) with its own before every round
+    /// trip — see `ChatEngine.stampOwnIdentity`.
+    var agentContext: AgentContext?
     let language: String?
     let model: String?
     /// Explicit backend provider string, resolved via `makeProvider(selectedProvider:)`.

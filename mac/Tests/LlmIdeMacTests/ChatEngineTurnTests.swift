@@ -193,6 +193,64 @@ struct ChatEngineTurnTests {
         #expect(engine.agent.planExecution?.phase == .failed)
     }
 
+    // The 409 TURN_IN_PROGRESS collision: a parked engine's auto-continue ran
+    // its panel-wired resolveTransportInput closure, and the panel's
+    // buildAgentContext read identity off the panel's CURRENT engine — the
+    // displayed chat. The engine now overwrites the context's identity with
+    // its own on every turn, so a lying (stale) closure cannot post a turn
+    // under another chat's session id.
+    @Test("runTurn stamps the engine's own chat identity over a stale context")
+    func runTurnStampsOwnIdentity() async {
+        let (engine, t) = makeEngine()
+        let ownChatID = UUID().uuidString
+        engine.currentSessionIDString = ownChatID
+        engine.resolveTransportInput = { msg, history, _, skills in
+            ChatTransportInput(message: msg, history: history, attachments: [],
+                               skills: skills,
+                               // What the displayed chat's panel would supply.
+                               agentContext: AgentContext(
+                                   activeProject: nil, indexedRepos: [], recentIssues: nil,
+                                   workspaceRoot: nil, sessionId: "someone-elses-session",
+                                   chatSessionId: UUID().uuidString),
+                               language: "en", model: nil, provider: nil, mode: "auto")
+        }
+        await engine.runTurn("continue working")
+        let sent = t.receivedInputs.first?.agentContext
+        #expect(sent?.chatSessionId == ownChatID)
+        #expect(sent?.sessionId == engine.agent.agentSessionId)
+    }
+
+    @Test("A nil context stays nil — identity is stamped, never fabricated")
+    func stampLeavesNilContextAlone() async {
+        let (engine, t) = makeEngine()   // makeEngine's input builder passes agentContext: nil
+        await engine.runTurn("hi")
+        #expect(t.receivedInputs.first?.agentContext == nil)
+    }
+
+    // A background turn must not pick up files staged in the composer of
+    // whatever chat is on screen now.
+    @Test("An unobserved engine's turn drops the panel's composer attachments")
+    func unobservedTurnSkipsComposerAttachments() async {
+        let (engine, t) = makeEngine()
+        // makeEngine's input builder hardcodes attachments: [] — this test
+        // needs one that passes the engine-supplied list through.
+        engine.resolveTransportInput = { msg, history, attachments, skills in
+            ChatTransportInput(message: msg, history: history, attachments: attachments,
+                               skills: skills, agentContext: nil, language: "en",
+                               model: nil, provider: nil, mode: "auto")
+        }
+        engine.attachmentsForTurn = {
+            [LlmIdeAPIClient.CodeAttachment(path: "displayed-chat.swift", content: "let x = 1")]
+        }
+        engine.persistsUnobserved = true
+        await engine.runTurn("continue")
+        #expect(t.receivedInputs.first?.attachments.isEmpty == true)
+        // …and an observed turn keeps them.
+        engine.persistsUnobserved = false
+        await engine.runTurn("hi again")
+        #expect(t.receivedInputs.last?.attachments.count == 1)
+    }
+
     // The whole point of the mid-turn task feed: one plan-execute turn can
     // work thirty steps, and until this landed the card said "Step 1 of 30"
     // for all of them because tasks only arrived with the turn's result.
