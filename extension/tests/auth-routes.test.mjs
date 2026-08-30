@@ -29,12 +29,28 @@ const claudePluginsFixture = path.join(__dirname, '_claude-plugins-fixture');
 process.env.CLAUDE_PLUGINS_DIR = claudePluginsFixture;
 const codexHomeFixture = path.join(__dirname, '_codex-home-fixture');
 process.env.CODEX_HOME_DIR = codexHomeFixture;
-const llmidePluginFixture = path.join(__dirname, '_llmide-plugins-fixture');
+// llm-sources registry state lives at dirname(LLMIDE_PLUGIN_DIR)/llm-sources.json.
+// With a flat fixture dir that lands in extension/tests/ itself — a PERSISTED
+// (gitignored) file carrying machine-specific source paths, so CI (no file)
+// and local (stale file) would exercise different registry states. Nesting
+// the fixture one level puts the registry inside the wiped-per-run directory.
+const llmidePluginFixture = path.join(__dirname, '_llmide-plugins-fixture', 'plugins');
 process.env.LLMIDE_PLUGIN_DIR = llmidePluginFixture;
+// resolveCentralSkillsRepo() prefers SKILLS_REPO, then the repo's .skills
+// submodule, then well-known home-dir locations. CI checks out neither the
+// submodule nor those locations, so the builtin source would seed with
+// location=null and the refresh-default test below would see zero input
+// sources (noSources=true). Pinning the env var to a fixture repo makes
+// builtin resolvable identically in every environment.
+const skillsRepoFixture = path.join(__dirname, '_skills-repo-fixture');
+process.env.SKILLS_REPO = skillsRepoFixture;
 for (const dir of [claudePluginsFixture, codexHomeFixture, llmidePluginFixture]) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
 }
+fs.rmSync(skillsRepoFixture, { recursive: true, force: true });
+fs.mkdirSync(skillsRepoFixture, { recursive: true });
+fs.writeFileSync(path.join(skillsRepoFixture, 'registry.yaml'), 'registryVersion: "3.0.0"\n', 'utf8');
 fs.writeFileSync(path.join(codexHomeFixture, 'config.toml'), '', 'utf8');
 process.env.CODEX_CONFIG_PATH = path.join(codexHomeFixture, 'config.toml');
 // The llm-sources toggle/remove/mcp-consent routes below fire a background
