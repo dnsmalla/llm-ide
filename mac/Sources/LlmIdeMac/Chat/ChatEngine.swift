@@ -368,6 +368,15 @@ final class ChatEngine {
     /// Called from `init` and `setTransport` so a swapped transport is wired
     /// the same way the original was. No-op for legacy transports.
     private func connectTransportObservers() {
+        // A raw legacy transport (factory with useV2 false) still streams
+        // live task progress — wire its one observer and stop; everything
+        // else below is composite-only.
+        if let legacy = transport as? CodeAssistTransport {
+            legacy.onLiveTasks = { [weak self] tasks in
+                self?.applyLiveTasks(tasks)
+            }
+            return
+        }
         guard let engineTransport = transport as? AgentV2EngineTransport else { return }
         engineTransport.onStaleServer = { [weak self] in
             self?.agentV2Notice = AgentV2EngineTransport.staleServerBannerText

@@ -155,8 +155,24 @@ extension ChatTransportResult {
 /// `codeAssistRoundTrip` has always done: a transport-level failure (never a
 /// server-reported application error) retries once on the buffered endpoint
 /// so a streaming/parse bug can't break the feature outright.
-struct CodeAssistTransport: ChatTransport {
+///
+/// A class (not the struct it started as) solely for `onLiveTasks`: the
+/// engine-selection composite holds its legacy transport as a `let`
+/// existential, and a callback wired after construction has to land on the
+/// same instance the round trips run on.
+final class CodeAssistTransport: ChatTransport, @unchecked Sendable {
     let api: LlmIdeAPIClient
+
+    /// Mid-turn task list from the stream's `tasks_progress` events (server
+    /// v42+). Same contract as `AgentV2Transport.onLiveTasks`: display only,
+    /// never drives auto-continue — the terminal `tasks` event stays the
+    /// authoritative list on the returned result. Nil (older servers send no
+    /// such events) simply leaves progress turn-granular, as before.
+    var onLiveTasks: (@MainActor ([AgentTask]) -> Void)?
+
+    init(api: LlmIdeAPIClient) {
+        self.api = api
+    }
 
     func roundTrip(
         _ input: ChatTransportInput,
@@ -169,7 +185,8 @@ struct CodeAssistTransport: ChatTransport {
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
                 planExecute: input.planExecute,
-                onProgress: onProgress, onChunk: onChunk)
+                onProgress: onProgress, onChunk: onChunk,
+                onLiveTasks: onLiveTasks)
             return ChatTransportResult(response)
         } catch let e as APIError {
             // APIError == a server/stream/format failure (cancellations surface
@@ -207,7 +224,8 @@ struct CodeAssistTransport: ChatTransport {
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
                 planExecute: input.planExecute,
-                onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
+                onProgress: onProgress, onChunk: onChunk, onApproval: onApproval,
+                onLiveTasks: onLiveTasks)
             return ChatTransportResult(response)
         } catch let e as APIError {
             guard Self.shouldFallbackBuffered(error: e, sawProgress: false) else { throw e }

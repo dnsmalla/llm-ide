@@ -191,6 +191,23 @@ struct AgentV2SelectionTests {
         #expect(composite.legacy is CodeAssistTransport)
     }
 
+    @Test("Composite onLiveTasks forwards to BOTH inner transports")
+    func onLiveTasksForwardsToBothEngines() throws {
+        // One callback wired on the composite must reach whichever engine
+        // runs the turn: v2 fires it from tool_result events, legacy from
+        // the /code-assist stream's tasks_progress events (server v42+).
+        let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+        let composite = try #require(
+            ChatTransportFactory.makeTransport(api: api, useV2: true) as? AgentV2EngineTransport)
+        var received: [[AgentTask]] = []
+        composite.onLiveTasks = { received.append($0) }
+        let legacy = try #require(composite.legacy as? CodeAssistTransport)
+        #expect(legacy.onLiveTasks != nil)
+        legacy.onLiveTasks?([AgentTask(id: "1", title: "Step", status: .inProgress)])
+        composite.v2.onLiveTasks?([AgentTask(id: "2", title: "Next", status: .pending)])
+        #expect(received.count == 2)
+    }
+
     // MARK: - sessionUnresumable → fresh retry
 
     @Test("sessionUnresumable: retries once with fresh:true, notes, and returns the fresh reply")

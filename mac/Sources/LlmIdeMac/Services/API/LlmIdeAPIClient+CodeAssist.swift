@@ -133,7 +133,7 @@ extension LlmIdeAPIClient {
 
     // One SSE event from the streaming /code-assist endpoint.
     private struct CodeAssistSSEEvent: Decodable {
-        let type: String                 // "progress" | "chunk" | "done" | "error"
+        let type: String                 // "progress" | "chunk" | "done" | "tasks" | "tasks_progress" | "error"
         let phase: String?               // progress: "thinking" | "tool" | "writing" | "approval_request"
         let tool: String?                // progress (phase == "tool"): tool name
         let detail: String?              // progress (phase == "tool"): what it's acting on
@@ -264,6 +264,7 @@ extension LlmIdeAPIClient {
         onProgress: @escaping @MainActor (AgentProgress) -> Void,
         onChunk: @escaping @MainActor (String) -> Void,
         onApproval: (@MainActor (AgentV2Approval) -> Void)? = nil,
+        onLiveTasks: (@MainActor ([AgentTask]) -> Void)? = nil,
     ) async throws -> CodeAssistResponse {
         guard let url = URL(string: baseURL + "/code-assist") else { throw APIError.invalidURL }
         var req = URLRequest(url: url)
@@ -332,6 +333,16 @@ extension LlmIdeAPIClient {
                 // (ai-routes.mjs) emits them on a SEPARATE, later "tasks"
                 // event instead. Reading evt.continueNeeded/evt.tasks here
                 // would always be nil; see the "tasks" case below.
+            case "tasks_progress":
+                // Mid-turn task list (server v42+): the SAME list as the
+                // terminal "tasks" event but WITHOUT continueNeeded, re-sent
+                // whenever a tool changed it, so the plan-execute progress
+                // bar moves during the turn. Display only — deliberately not
+                // written into the `tasks` local, which is what the caller's
+                // auto-continue reads from the returned response.
+                if let live = evt.tasks, !live.isEmpty {
+                    await onLiveTasks?(live)
+                }
             case "tasks":
                 // Server sends this as its own event, right after "done" —
                 // see ai-routes.mjs: writeEvent({ type: 'tasks', tasks, continueNeeded }).
