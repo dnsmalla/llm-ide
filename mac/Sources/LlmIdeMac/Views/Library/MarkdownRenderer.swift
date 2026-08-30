@@ -9,20 +9,8 @@ enum MarkdownRenderer {
     ///
     /// Code blocks are syntax-highlighted via the same vendored highlight.js
     /// + Atom One theme used by `HljsWebView` (file/diff previews) — inlined
-    /// here too so this stays offline-safe, and get a copy button.
-    /// Whether `markdown` contains a fenced code block, and so needs the
-    /// syntax highlighter shipped with the document.
-    ///
-    /// `Hljs.js` is ~122 KB that the web view has to parse and evaluate on
-    /// every document load. Most chat replies are prose with no fences at all,
-    /// and for those the whole payload is dead weight — omitting it takes the
-    /// document from ~128 KB to ~6 KB. Callers that re-render in place
-    /// (`SelfSizingMarkdownView`) must reload the document if text that
-    /// started fence-free later grows one.
-    static func needsHighlighting(_ markdown: String) -> Bool {
-        markdown.contains("```")
-    }
-
+    /// here too so this stays offline-safe, and get a copy button — but only
+    /// when the text actually has a fence; see `needsHighlighting`.
     static func html(for markdown: String, isDark: Bool, compact: Bool = false) -> String {
         let bg             = isDark ? "#1e1e1e" : "#ffffff"
         let fg             = isDark ? "#d4d4d4" : "#1a1a1a"
@@ -78,6 +66,19 @@ enum MarkdownRenderer {
             .replacingOccurrences(of: "{{hljsJS}}",
                                   with: Self.needsHighlighting(markdown) ? Hljs.js : "")
             .replacingOccurrences(of: "{{content}}", with: escaped)
+    }
+
+    /// Whether `markdown` contains a fenced code block, and so needs the
+    /// syntax highlighter shipped with the document.
+    ///
+    /// `Hljs.js` is ~122 KB that the web view has to parse and evaluate on
+    /// every document load. Most chat replies are prose with no fences at all,
+    /// and for those the whole payload is dead weight — omitting it takes the
+    /// document from ~128 KB to ~6 KB. Callers that re-render in place
+    /// (`SelfSizingMarkdownView`) must reload the document if text that
+    /// started fence-free later grows one.
+    static func needsHighlighting(_ markdown: String) -> Bool {
+        markdown.contains("```")
     }
 
     private static let template = """

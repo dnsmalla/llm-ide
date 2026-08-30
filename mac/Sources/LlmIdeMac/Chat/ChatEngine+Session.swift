@@ -42,35 +42,6 @@ extension ChatEngine {
     ///
     /// Only the last 50 turns are written — the same cap every caller of the
     /// panel's `persistCurrentChat(history:)` applied at the call site.
-    /// Schedule a session write for `persistDebounceNanos` from now, unless
-    /// one is already pending. Used by the ONE caller on the streaming hot
-    /// path (`announceAndPersist`, driven by `.onChange(of: messages)`); every
-    /// other call site still uses `persistCurrentChat()` and writes at once.
-    ///
-    /// Trailing-edge with a leading schedule: the first mutation starts the
-    /// timer and later mutations ride it, so a burst of streamed text costs
-    /// exactly one write per window rather than one per mutation. Whatever is
-    /// in `messages` when the timer fires is what lands — the debounce holds
-    /// no snapshot, so it can never persist stale content.
-    func schedulePersist() {
-        guard persistDebounceTask == nil else { return }
-        persistDebounceTask = Task { [persistDebounceNanos] in
-            try? await Task.sleep(nanoseconds: persistDebounceNanos)
-            guard !Task.isCancelled else { return }
-            self.persistDebounceTask = nil
-            self.persistCurrentChat()
-        }
-    }
-
-    /// Land a pending debounced write now. Called at every turn boundary so a
-    /// finished conversation is on disk immediately rather than up to
-    /// `persistDebounceNanos` later — the window in which a crash or a quit
-    /// would lose the tail of the reply.
-    func flushPendingPersist() {
-        guard persistDebounceTask != nil else { return }
-        persistCurrentChat()
-    }
-
     func persistCurrentChat() {
         // An immediate write subsumes any pending debounced one — dropping
         // the timer here is what keeps every existing (non-streaming) call
@@ -105,6 +76,35 @@ extension ChatEngine {
             }
         }
         ChatSessionStore.save(session)
+    }
+
+    /// Schedule a session write for `persistDebounceNanos` from now, unless
+    /// one is already pending. Used by the ONE caller on the streaming hot
+    /// path (`announceAndPersist`, driven by `.onChange(of: messages)`); every
+    /// other call site still uses `persistCurrentChat()` and writes at once.
+    ///
+    /// Trailing-edge with a leading schedule: the first mutation starts the
+    /// timer and later mutations ride it, so a burst of streamed text costs
+    /// exactly one write per window rather than one per mutation. Whatever is
+    /// in `messages` when the timer fires is what lands — the debounce holds
+    /// no snapshot, so it can never persist stale content.
+    func schedulePersist() {
+        guard persistDebounceTask == nil else { return }
+        persistDebounceTask = Task { [persistDebounceNanos] in
+            try? await Task.sleep(nanoseconds: persistDebounceNanos)
+            guard !Task.isCancelled else { return }
+            self.persistDebounceTask = nil
+            self.persistCurrentChat()
+        }
+    }
+
+    /// Land a pending debounced write now. Called at every turn boundary so a
+    /// finished conversation is on disk immediately rather than up to
+    /// `persistDebounceNanos` later — the window in which a crash or a quit
+    /// would lose the tail of the reply.
+    func flushPendingPersist() {
+        guard persistDebounceTask != nil else { return }
+        persistCurrentChat()
     }
 
     /// Reload `sessions` for this scope from disk, newest first.
