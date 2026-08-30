@@ -10,6 +10,19 @@ enum MarkdownRenderer {
     /// Code blocks are syntax-highlighted via the same vendored highlight.js
     /// + Atom One theme used by `HljsWebView` (file/diff previews) — inlined
     /// here too so this stays offline-safe, and get a copy button.
+    /// Whether `markdown` contains a fenced code block, and so needs the
+    /// syntax highlighter shipped with the document.
+    ///
+    /// `Hljs.js` is ~122 KB that the web view has to parse and evaluate on
+    /// every document load. Most chat replies are prose with no fences at all,
+    /// and for those the whole payload is dead weight — omitting it takes the
+    /// document from ~128 KB to ~6 KB. Callers that re-render in place
+    /// (`SelfSizingMarkdownView`) must reload the document if text that
+    /// started fence-free later grows one.
+    static func needsHighlighting(_ markdown: String) -> Bool {
+        markdown.contains("```")
+    }
+
     static func html(for markdown: String, isDark: Bool, compact: Bool = false) -> String {
         let bg             = isDark ? "#1e1e1e" : "#ffffff"
         let fg             = isDark ? "#d4d4d4" : "#1a1a1a"
@@ -28,10 +41,20 @@ enum MarkdownRenderer {
         let bodyMargin    = compact ? "0"            : "0 auto"
         let bodyFontSize  = compact ? "13px"         : "14px"
 
+        // Escaping for the JS template literal the content is spliced into.
+        // Backslashes first, so the escapes added below aren't re-escaped.
+        //
+        // The `</` rule is not cosmetic: HTML's script-data state ends at the
+        // first literal `</script`, regardless of the JavaScript string it
+        // happens to sit inside. Without it, any reply CONTAINING the text
+        // `</script>` — routine for a coding assistant — terminated the
+        // script block mid-string and the whole bubble rendered as garbage.
+        // `<\/` is an identity escape in JS, so the value is unchanged.
         let escaped = markdown
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "`", with: "\\`")
             .replacingOccurrences(of: "$", with: "\\$")
+            .replacingOccurrences(of: "</", with: "<\\/")
 
         return template
             .replacingOccurrences(of: "{{bg}}", with: bg)
@@ -46,8 +69,14 @@ enum MarkdownRenderer {
             .replacingOccurrences(of: "{{bodyMaxWidth}}", with: bodyMaxWidth)
             .replacingOccurrences(of: "{{bodyMargin}}", with: bodyMargin)
             .replacingOccurrences(of: "{{bodyFontSize}}", with: bodyFontSize)
-            .replacingOccurrences(of: "{{hljsCSS}}", with: Hljs.themeCSS(isDark: isDark))
-            .replacingOccurrences(of: "{{hljsJS}}", with: Hljs.js)
+            // Ship the highlighter only when there's something to highlight —
+            // see `needsHighlighting`. The render code guards on
+            // `window.hljs`, so its absence just means unstyled code, and
+            // fence-free text can't have any.
+            .replacingOccurrences(of: "{{hljsCSS}}",
+                                  with: Self.needsHighlighting(markdown) ? Hljs.themeCSS(isDark: isDark) : "")
+            .replacingOccurrences(of: "{{hljsJS}}",
+                                  with: Self.needsHighlighting(markdown) ? Hljs.js : "")
             .replacingOccurrences(of: "{{content}}", with: escaped)
     }
 
@@ -107,7 +136,15 @@ enum MarkdownRenderer {
     <script>
     const raw = `{{content}}`;
     function parseMarkdown(text) {
-      let html = text;
+      // Escape the SOURCE up front, so raw HTML in the text is shown as text
+      // instead of being injected into the document. Everything below builds
+      // markup from markdown SYNTAX (#, *, |, backticks), none of which this
+      // touches — so the transforms are unaffected, but an `<img src=x
+      // onerror=...>` in a model reply can no longer execute in the bubble.
+      // Because the whole string is escaped here, the steps below must not
+      // escape again: code-fence bodies are already safe, and attribute
+      // values use escQuotes (quotes only) rather than escAttr.
+      let html = escHtml(text);
       const codeBlocks = [];
       html = html.replace(/```(\\w*)\\n?([\\s\\S]*?)```/g, (_, lang, code) => {
         const idx = codeBlocks.length;
@@ -117,7 +154,9 @@ enum MarkdownRenderer {
           '<div class="code-block">' +
           '<div class="code-block-header">' + langLabel +
           '<button class="copy-btn" onclick="copyCodeBlock(this)">Copy</button></div>' +
-          '<pre><code' + langAttr + '>' + escHtml(code.trimEnd()) + '</code></pre>' +
+          // Already escaped by parseMarkdown's up-front escHtml — escaping
+          // again here would render "&amp;" where the code said "&".
+          '<pre><code' + langAttr + '>' + code.trimEnd() + '</code></pre>' +
           '</div>'
         );
         return '\\x00CODE' + idx + '\\x00';
@@ -134,14 +173,16 @@ enum MarkdownRenderer {
       html = html.replace(/\\*(.+?)\\*/g, '<em>$1</em>');
       html = html.replace(/_(.+?)_/g, '<em>$1</em>');
       html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-      html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+      // `&gt;`, not `>` — the source went through escHtml above, so a
+      // blockquote marker reaches this line already encoded.
+      html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
       html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
       html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, function(_m, text, url) {
         // Block dangerous URL schemes (javascript:, data:, vbscript:) and
         // escape the href so a crafted link can't break out of the attribute.
         var u = String(url).trim();
         var safe = /^(https?:\\/\\/|mailto:|#|\\/|\\.|[^:]+$)/i.test(u) ? u : '#';
-        return '<a href="' + escAttr(safe) + '">' + text + '</a>';
+        return '<a href="' + escQuotes(safe) + '">' + text + '</a>';
       });
       // GFM tables — extract to placeholders before list/paragraph/<br>
       // transforms (which would otherwise shred the row structure). Inline
@@ -155,8 +196,13 @@ enum MarkdownRenderer {
       html = html.replace(/\\n\\n/g, '</p><p>');
       html = '<p>' + html + '</p>';
       html = html.replace(/\\n/g, '<br>');
-      codeBlocks.forEach((block, i) => { html = html.replace('\\x00CODE' + i + '\\x00', block); });
-      tables.forEach((t, i) => { html = html.replace('\\x00TABLE' + i + '\\x00', t); });
+      // Function replacements, not string ones: String.replace expands the
+      // dollar patterns ($&, $' and the backtick one) inside a STRING
+      // replacement, so a code block containing any of those (shell, awk,
+      // regex snippets) came back mangled. A function's return value is
+      // inserted verbatim.
+      codeBlocks.forEach((block, i) => { html = html.replace('\\x00CODE' + i + '\\x00', () => block); });
+      tables.forEach((t, i) => { html = html.replace('\\x00TABLE' + i + '\\x00', () => t); });
       return html;
     }
     // Scan line-by-line for a header row + `|---|---|` separator, then collect
@@ -190,11 +236,25 @@ enum MarkdownRenderer {
       return res.join('\\n');
     }
     function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-    function escAttr(s) { return escHtml(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-    document.getElementById('content').innerHTML = parseMarkdown(raw);
-    if (window.hljs) {
-      document.querySelectorAll('.code-block pre code').forEach((el) => { try { hljs.highlightElement(el); } catch (e) {} });
+    // Quote-only escape, for values spliced into an attribute out of text
+    // that parseMarkdown has ALREADY run through escHtml. Escaping again
+    // would double-encode — "?a=1&b=2" would become "?a=1&amp;amp;b=2".
+    function escQuotes(s) { return s.replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+    // Render `md` into the document and return its new height. Exposed on
+    // `window` so SelfSizingMarkdownView can re-render a streaming reply in
+    // place — reloading the document per chunk meant re-parsing the inlined
+    // highlight.js (~122 KB) ~20 times a second. Returning the height in the
+    // same call also saves a separate evaluateJavaScript round-trip to
+    // measure it.
+    function renderMarkdown(md) {
+      document.getElementById('content').innerHTML = parseMarkdown(md);
+      if (window.hljs) {
+        document.querySelectorAll('.code-block pre code').forEach((el) => { try { hljs.highlightElement(el); } catch (e) {} });
+      }
+      return document.body.scrollHeight;
     }
+    window.__renderMarkdown = renderMarkdown;
+    renderMarkdown(raw);
     function copyCodeBlock(btn) {
       const block = btn.closest('.code-block');
       const code = block && block.querySelector('code');
