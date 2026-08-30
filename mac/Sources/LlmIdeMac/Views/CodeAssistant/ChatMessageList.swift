@@ -75,6 +75,20 @@ struct ChatMessageList: View {
 
     // MARK: - Chat scroll
 
+    /// Whether the transcript should keep itself pinned to the newest text.
+    ///
+    /// True while the bottom of the list is on screen; the anchor row at the
+    /// end of the stack flips it as it scrolls in and out of the `LazyVStack`'s
+    /// realized range. That's what lets streaming follow the reply without
+    /// yanking the view back down when the user has deliberately scrolled up
+    /// to re-read something mid-turn.
+    @State private var isPinnedToBottom = true
+
+    /// Scroll target for "the very bottom", past the typing indicator and any
+    /// error/notice bubbles — scrolling to the last MESSAGE would stop short
+    /// of them.
+    private static let bottomAnchorID = "chat-bottom-anchor"
+
     @ViewBuilder
     var body: some View {
         let history = engine.messages
@@ -281,6 +295,18 @@ struct ChatMessageList: View {
                             agentV2NoticeBubble(notice)
                                 .transition(.opacity)
                         }
+                        // Bottom sentinel. A zero-height row the LazyVStack
+                        // realizes when the end of the list comes into range
+                        // and releases when it scrolls away — which is
+                        // exactly the "is the user still at the bottom?"
+                        // signal the follow-the-stream behaviour needs, at no
+                        // layout or measurement cost.
+                        Color.clear
+                            .frame(height: 1)
+                            .id(Self.bottomAnchorID)
+                            .onAppear { isPinnedToBottom = true }
+                            .onDisappear { isPinnedToBottom = false }
+                            .accessibilityHidden(true)
                     }
                     .padding(Spacing.md)
                     .animation(.easeOut(duration: 0.22), value: history.count)
@@ -289,16 +315,64 @@ struct ChatMessageList: View {
                     .animation(.easeOut(duration: 0.18), value: engine.busy)
                     .animation(.easeOut(duration: 0.2), value: engine.error)
                 }
+                // A new message is an explicit act (the user sent something,
+                // or a reply landed), so it always re-pins and scrolls —
+                // matching the behaviour this view has always had.
                 .onChange(of: engine.messages.count) { _, _ in
-                    if let last = engine.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                    isPinnedToBottom = true
+                    withAnimation { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
+                }
+                // Follow the reply as it streams. Without this the transcript
+                // only scrolled when the message COUNT changed, so a long
+                // answer grew downward past the bottom of the window and the
+                // user had to chase it by hand. Driven off `revealedCount`
+                // (the engine's streamed-character counter), which the chunk
+                // coalescer moves ~20 times a second rather than per token.
+                .onChange(of: engine.revealedCount) { _, _ in
+                    guard isPinnedToBottom else { return }
+                    proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
                 }
                 .onChange(of: engine.busy) { _, b in
                     if b { withAnimation { proxy.scrollTo("typing-indicator", anchor: .bottom) } }
                 }
+                // "Jump to latest" — only while there is live text to miss,
+                // and only once the user has actually scrolled away from it.
+                // Tapping re-pins, so streaming resumes following.
+                .overlay(alignment: .bottom) {
+                    if !isPinnedToBottom, engine.busy {
+                        jumpToLatestButton {
+                            isPinnedToBottom = true
+                            withAnimation { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+                }
+                .animation(.easeOut(duration: 0.18), value: isPinnedToBottom)
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Chat transcript")
         }
+    }
+
+    /// Floating pill offering to re-pin the transcript to the streaming reply.
+    private func jumpToLatestButton(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 10, weight: .semibold))
+                Text("Jump to latest")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(theme.current.border, lineWidth: 1))
+            .foregroundStyle(theme.current.text)
+            .shadow(color: .black.opacity(0.16), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .padding(.bottom, Spacing.md)
+        .help("Follow the reply as it streams")
     }
 
     /// Refined empty state.  Subtle, centered, no oversized hero cards —
@@ -363,15 +437,16 @@ struct ChatMessageList: View {
         turn.id == lastAssistantTurnId || expandedTurns.contains(turn.id)
     }
 
-    /// The text to actually render for an assistant turn: truncated to
-    /// `revealedCount` while this turn is the one actively streaming (see
-    /// `ChatEngine.appendStreamedChunk`), full content
-    /// otherwise — including once streaming finishes, and always for
-    /// history loaded from a saved session (which never sets
-    /// `revealingTurnID` in the first place).
+    /// The text to actually render for an assistant turn — always the full
+    /// content.
+    ///
+    /// This used to truncate a streaming turn to `engine.revealedCount`, a
+    /// leftover from the fixed-schedule reveal that real chunk streaming
+    /// replaced: `revealedCount` IS the streamed length, so the prefix was
+    /// always the whole string. It wasn't free, though — `String.prefix` is
+    /// O(n) in grapheme clusters and ran on every render of a growing reply.
     private func displayedContent(for turn: ChatMessage) -> String {
-        guard turn.id == engine.revealingTurnID else { return turn.content }
-        return String(turn.content.prefix(engine.revealedCount))
+        turn.content
     }
 
     /// A short plain-text preview of a markdown reply for the collapsed state —
@@ -456,6 +531,63 @@ struct ChatMessageList: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
+    /// Full-bubble treatment for a reply that failed with no text: the reason
+    /// the engine recorded, plus Retry when the turn is re-sendable.
+    private func failedTurnView(_ turn: ChatMessage) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.current.danger)
+                Text(turn.metadata?.failedError ?? "The assistant couldn't answer.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.current.text)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            retryButton(turn)
+        }
+        .frame(maxWidth: 720, alignment: .leading)
+        .padding(10)
+        .background(theme.current.danger.opacity(0.08))
+        .overlay(RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(theme.current.danger.opacity(0.35), lineWidth: 1))
+        .cornerRadius(8)
+    }
+
+    /// Compact version of the above, for a turn that streamed partial text
+    /// before failing — the text is already rendered, so this only has to
+    /// explain and offer the retry.
+    private func failedTurnFooter(_ turn: ChatMessage) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(theme.current.danger)
+            Text(turn.metadata?.failedError ?? "Interrupted")
+                .font(Typography.caption)
+                .foregroundStyle(theme.current.textMuted)
+                .lineLimit(2)
+            retryButton(turn)
+        }
+    }
+
+    @ViewBuilder
+    private func retryButton(_ turn: ChatMessage) -> some View {
+        // Hidden rather than disabled when the turn isn't re-sendable (a
+        // failed follow-up has no user prompt of its own) — a permanently
+        // greyed-out button reads as a bug.
+        if engine.canRetryFailedTurn(turn.id) {
+            Button { engine.retryFailedTurn(turn.id) } label: {
+                Label("Retry", systemImage: "arrow.clockwise")
+                    .font(Typography.caption)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(engine.busy)
+            .help("Send this message again")
+        }
+    }
+
     @ViewBuilder
     private func turnView(_ turn: ChatMessage, lastAssistantTurnId: UUID?) -> some View {
         if turn.role == .toolResult, let payload = turn.toolResult {
@@ -502,6 +634,22 @@ struct ChatMessageList: View {
                             .background(theme.current.accent.opacity(0.14))
                             .cornerRadius(8)
                             .fixedSize(horizontal: false, vertical: true)
+                    } else if turn.content.isEmpty, turn.status == .failed {
+                        // A round-trip that failed before any text arrived.
+                        // This used to fall through to the markdown branch
+                        // below and render an EMPTY web-view bubble — the
+                        // reason was written to `metadata.failedError` and
+                        // never shown, and there was no way to re-send short
+                        // of retyping the prompt.
+                        failedTurnView(turn)
+                    } else if turn.content.isEmpty {
+                        // Nothing to render yet (the streaming placeholder
+                        // before its first chunk). Deliberately NOT the
+                        // markdown branch: that would stand up a WKWebView
+                        // and load the full document to display nothing, once
+                        // per turn. The typing indicator already says what is
+                        // happening.
+                        EmptyView()
                     } else if isAssistantExpanded(turn, lastAssistantTurnId: lastAssistantTurnId) {
                         // Expanded assistant reply — full markdown render (web view).
                         VStack(alignment: .leading, spacing: 4) {
@@ -563,6 +711,14 @@ struct ChatMessageList: View {
                         Text("Stopped")
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
+                    }
+                    // A turn that streamed some text and THEN failed keeps
+                    // the partial reply above and explains itself here, so
+                    // the retry affordance is the same wherever the failure
+                    // landed. (The no-text case renders `failedTurnView` in
+                    // place of the bubble instead.)
+                    if !isUser, turn.status == .failed, !turn.content.isEmpty {
+                        failedTurnFooter(turn)
                     }
                 }
                 if !isUser { Spacer(minLength: 40) }
