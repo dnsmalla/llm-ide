@@ -71,7 +71,20 @@ struct ChatSession: Identifiable, Codable, Equatable {
         if let v2Messages = try? c.decode([ChatMessage].self, forKey: .messages) {
             // Already v2 — decode directly, no migration.
             self.storeVersion = (try? c.decode(Int.self, forKey: .storeVersion)) ?? 2
-            self.messages = v2Messages
+            // Repair interrupted turns: a message can only reach disk as
+            // `.streaming` if the app died mid-turn (streaming persists are
+            // debounced, and quit has no flush). By load time no stream is
+            // live for it, so leaving the status would render a truncated
+            // partial as a FINISHED reply — and `wireTurn()` would replay it
+            // to the model as complete. `.stopped` is the honest state: the
+            // transcript styles it as interrupted, and the wire re-attaches
+            // the "(stopped)" marker (ChatMessage.legacyTurn).
+            self.messages = v2Messages.map { message in
+                guard message.status == .streaming else { return message }
+                var repaired = message
+                repaired.status = .stopped
+                return repaired
+            }
         } else {
             // v1 file: legacy `history` key of `{role, content}` turns. Run
             // each through the shared migration transform, stamping every
