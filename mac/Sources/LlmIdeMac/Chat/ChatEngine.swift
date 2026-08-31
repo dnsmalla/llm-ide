@@ -184,6 +184,15 @@ final class ChatEngine {
     /// UUID string of the chat currently loaded into `messages`. Empty until
     /// `handleOnAppearSessions()` resolves (or mints) one.
     var currentSessionIDString = ""
+    /// Memo for `currentSessionEngineMarker()`: the marker last loaded from
+    /// disk, keyed by the session id it belongs to. The marker is stamped
+    /// exactly once at mint (`AgentV2Selection.engineForNewChat`) and never
+    /// rewritten, so a per-id memo is always fresh — no invalidation hooks
+    /// needed beyond the id mismatch check. Exists because the accessor is
+    /// on hot paths (`usesAgentV2Engine` inside ChatMessageList's per-turn
+    /// body) and a full session-file decode per streamed chunk got 10×
+    /// heavier when the persist cap rose from 50 to 500 messages.
+    var engineMarkerMemo: (sessionID: String, marker: String?)?
 
     /// Agent-turn metadata. The engine owns it; the panel reads the same
     /// object (it is a reference type, so both see one state).

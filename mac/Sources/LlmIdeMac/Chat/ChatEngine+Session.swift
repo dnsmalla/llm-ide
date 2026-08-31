@@ -40,8 +40,16 @@ extension ChatEngine {
     /// when sessions are created/switched/deleted. Reloading the list from
     /// disk on every message was wasted work on the hot path.
     ///
-    /// Only the last 50 turns are written — the same cap every caller of the
-    /// panel's `persistCurrentChat(history:)` applied at the call site.
+    /// Only the last `persistedMessageCap` turns are written. The cap bounds
+    /// the per-turn JSON rewrite on pathological sessions; it is NOT a
+    /// context-window control (wiring decides what the model sees). It was
+    /// 50 for years, which silently discarded older turns of any long chat
+    /// on the next switch/relaunch while the in-memory array looked intact —
+    /// data loss the user only discovered later. 500 keeps the write bounded
+    /// (a few MB worst case, debounced during streaming) without dropping
+    /// any realistic conversation.
+    static let persistedMessageCap = 500
+
     func persistCurrentChat() {
         // An immediate write subsumes any pending debounced one — dropping
         // the timer here is what keeps every existing (non-streaming) call
@@ -50,7 +58,7 @@ extension ChatEngine {
         persistDebounceTask?.cancel()
         persistDebounceTask = nil
         guard let id = UUID(uuidString: currentSessionIDString) else { return }
-        let capped = Array(messages.suffix(50))
+        let capped = Array(messages.suffix(Self.persistedMessageCap))
         var session = ChatSessionStore.load(id: id) ?? ChatSession(id: id, scope: scope)
         session.scope = scope
         // A straight assignment as of Task 9 — `messages` IS the persisted
@@ -256,12 +264,20 @@ extension ChatEngine {
 
     /// The loaded chat's engine marker (`ChatSession.engine`; nil = legacy,
     /// or no session loaded). Read at TURN time by the engine-selection
-    /// transport and by view-level v2 affordances (`usesAgentV2Engine`) —
-    /// a small JSON load on a file `persistCurrentChat` already rewrites
-    /// every turn.
+    /// transport and by view-level v2 affordances (`usesAgentV2Engine`).
+    ///
+    /// Memoized per session id (`engineMarkerMemo`): the marker is written
+    /// once at mint and never changes, but this accessor sits on the
+    /// streaming hot path, and decoding the whole session file per call
+    /// stopped being cheap when the persist cap rose to 500 messages.
     func currentSessionEngineMarker() -> String? {
         guard let id = UUID(uuidString: currentSessionIDString) else { return nil }
-        return ChatSessionStore.load(id: id)?.engine
+        if let memo = engineMarkerMemo, memo.sessionID == currentSessionIDString {
+            return memo.marker
+        }
+        let marker = ChatSessionStore.load(id: id)?.engine
+        engineMarkerMemo = (sessionID: currentSessionIDString, marker: marker)
+        return marker
     }
 
     /// Start a new empty chat for this scope. No-op if the current chat is
