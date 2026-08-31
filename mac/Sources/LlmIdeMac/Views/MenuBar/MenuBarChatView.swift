@@ -91,14 +91,49 @@ struct MenuBarChatView: View {
             viewModel.resetPollBackoff()
             Task { await viewModel.loadHistory() }
         }
-        .alert("Clear the conversation?", isPresented: $confirmingClear) {
-            Button("Clear", role: .destructive) {
-                Task { await performClearHistory() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes the shared transcript from the server. iPhone and Mac will both start fresh.")
+        // The clear confirm is an in-popover overlay, NOT `.alert`: inside a
+        // `MenuBarExtra(.window)` panel the system alert PRESENTS but its
+        // action closures never run on macOS 26 (verified live: the DELETE
+        // never reached the server while the same endpoint cleared fine over
+        // curl) — the same AppKit-presentation fragility that already forced
+        // `confirmationDialog` off this surface. A plain SwiftUI overlay has
+        // no second window to lose the action in.
+        .overlay {
+            if confirmingClear { clearConfirmOverlay }
         }
+    }
+
+    /// In-popover replacement for the clear-confirmation alert.
+    private var clearConfirmOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.25)
+                .ignoresSafeArea()
+                .onTapGesture { confirmingClear = false }
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Clear the conversation?")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("This removes the shared transcript from the server. iPhone and Mac will both start fresh.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { confirmingClear = false }
+                        .keyboardShortcut(.cancelAction)
+                    Button("Clear", role: .destructive) {
+                        confirmingClear = false
+                        Task { await performClearHistory() }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(16)
+            .frame(width: 300)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .windowBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.12)))
+            .shadow(radius: 18)
+        }
+        .transition(.opacity)
     }
 
     // MARK: - Header
