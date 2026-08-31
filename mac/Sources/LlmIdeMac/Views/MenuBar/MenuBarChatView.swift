@@ -685,6 +685,9 @@ struct MenuBarChatView: View {
     }
 
     private func openMainWindow(section: ShellState.Section) {
+        // Leaving the popover floating over the main window it just opened
+        // reads as "the popover won't close" — navigation away IS a dismissal.
+        closePopover()
         openWindow(id: "main")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             if section == .settings {
