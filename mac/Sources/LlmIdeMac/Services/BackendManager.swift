@@ -543,16 +543,26 @@ final class BackendManager {
     }
 
     /// Minimum server `apiVersion` this client knows how to talk to.
-    /// Bumped when a server-side change breaks the wire shape (e.g.
-    /// renamed response fields, removed endpoints) — NOT for a merely
-    /// added endpoint, which an older server answers with a 404 that the
-    /// calling feature already tolerates.
+    ///
+    /// The old policy ("bump only on a wire-shape BREAK, a 404 on a new
+    /// endpoint is tolerated") left this floor at 20 while the server moved
+    /// to 42 — making the guard inert for the failure it exists to catch:
+    /// an ORPHANED old `node server.mjs` still on :3456 that a freshly
+    /// pulled app silently adopts, then fails confusingly (v2 chat 404s
+    /// mid-feature instead of a clear banner). The app and server ship from
+    /// the same checkout, so the honest floor is the version whose chat
+    /// wire this app was actually built against.
+    ///
+    /// Keep in LOCKSTEP: when `SERVER_API_VERSION` (extension/server.mjs)
+    /// bumps for anything the chat path consumes, raise this too.
+    /// 42 = tasks_progress on the legacy /code-assist stream + the
+    /// per-turn chat identity stamp the 409 fix relies on.
     ///
     /// The server reports its version via `/health.apiVersion`; a live server
     /// below this floor sets `serverVersionTooOld` and writes an actionable
     /// `lastError` (see `recordServerVersion`), which Settings → Backend,
     /// LoginView and ReconnectView already render.
-    nonisolated static let minimumServerApiVersion = 20
+    nonisolated static let minimumServerApiVersion = 42
 
     struct HealthProbeResult {
         let ok: Bool
