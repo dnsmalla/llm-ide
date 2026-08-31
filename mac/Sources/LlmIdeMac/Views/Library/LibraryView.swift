@@ -727,9 +727,26 @@ struct LibraryView: View {
     /// The search bar's refresh button: re-run every section's loader, same
     /// set the `.task` modifiers fire on first appearance. Sequential on
     /// purpose — they share the API client and each is fast local I/O.
+    ///
+    /// Unlike first appearance, a manual refresh must also RE-SCAN the
+    /// folders, not just re-read what was indexed before: the loaders below
+    /// only re-query `meetings_index` and the item store's last walk, so
+    /// files added/changed on disk since then stayed invisible — the exact
+    /// gap this button was added to close. The disk scans run first so
+    /// `load()` reads the freshly indexed rows.
     private func refreshAll() async {
         refreshingAll = true
         defer { refreshingAll = false }
+        // Off-main (fullScan blocks on the directory walk); safe —
+        // FolderIndexer is Sendable and fullScan is lock-serialized. Its
+        // completing `.meetingIndexChanged` post is what fans out the
+        // file-tree refresh too: AppShell's handler runs
+        // `itemStore.rescanAsync()`, covering NOTES/MEETINGS/CODE and the
+        // "Add Folder" external references — so no second walk here.
+        let indexer = env.indexer
+        await Task.detached(priority: .userInitiated) {
+            try? indexer.fullScan()
+        }.value
         await load()
         await loadPlugins()
         await loadLlmSources()
