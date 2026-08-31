@@ -22,6 +22,13 @@ final class LlmIdeChatStore: ObservableObject {
     /// cancellation needs a deterministic target.
     private var currentCommandId: String?
     private var streamTimeoutTask: Task<Void, Never>?
+    /// Commands that have shown the Mac's approval pause note — once seen,
+    /// every later idle-timeout restart for that command keeps the LONG
+    /// window until `done`. Sticky on purpose: an answered approval is
+    /// typically followed by an expensive tool run that can be legitimately
+    /// silent for more than the normal window, and timing out sends Cancel,
+    /// killing the very turn the user just approved on the Mac.
+    private var approvalPausedCommandIds: Set<String> = []
 
     weak var connection: ConnectionService?
 
@@ -158,6 +165,17 @@ final class LlmIdeChatStore: ObservableObject {
                 setLastAssistant(&llmIdeMessages, chunk)
             } else {
                 appendToLastAssistant(&llmIdeMessages, chunk)
+                // Every frame proves the Mac is alive and working, so restart
+                // the timeout — it is an IDLE breaker, not a wall clock. The
+                // old fire-once-from-send version cancelled healthy long
+                // turns (and sent Cancel, killing them on the Mac) at 120 s
+                // even while progress was streaming.
+                if let id = commandId {
+                    if chunk.contains(Self.approvalPauseGlyph) {
+                        approvalPausedCommandIds.insert(id)
+                    }
+                    startStreamTimeout(for: id, idleSeconds: idleWindow(for: id))
+                }
             }
         }
         if done {
@@ -165,6 +183,7 @@ final class LlmIdeChatStore: ObservableObject {
             isStreaming = false
             if let id = commandId {
                 llmIdeCommandIds.remove(id)
+                approvalPausedCommandIds.remove(id)
                 if currentCommandId == id { currentCommandId = nil }
             }
             loadSharedHistory()
@@ -176,6 +195,7 @@ final class LlmIdeChatStore: ObservableObject {
         isStreaming = false
         if let commandId {
             llmIdeCommandIds.remove(commandId)
+            approvalPausedCommandIds.remove(commandId)
             if currentCommandId == commandId { currentCommandId = nil }
         } else {
             // No id = the whole connection went down (ConnectionService
@@ -184,6 +204,7 @@ final class LlmIdeChatStore: ObservableObject {
             // no longer exists, a late/replayed frame for that id appends into
             // the live transcript, and the set grows per dropped connection.
             llmIdeCommandIds.removeAll()
+            approvalPausedCommandIds.removeAll()
             currentCommandId = nil
         }
         removeTrailingEmptyAssistant(&llmIdeMessages)
@@ -196,14 +217,30 @@ final class LlmIdeChatStore: ObservableObject {
         streamTimeoutTask = nil
         isStreaming = false
         llmIdeCommandIds.removeAll()
+        approvalPausedCommandIds.removeAll()
         currentCommandId = nil
         llmIdeMessages.removeAll()
     }
 
-    private func startStreamTimeout(for commandId: String) {
+    /// Glyph the Mac's approval pause note carries ("⏸ Question pending on
+    /// Mac…", `ChatEngine.externalApprovalNote`) — forwarded through the
+    /// same stream frames as ordinary progress. After it, the turn
+    /// legitimately goes silent while a human answers the card on the Mac
+    /// (up to the server's 15-minute decision TTL), so the idle breaker
+    /// must outlast that. If the Mac ever changes the glyph, the phone
+    /// merely degrades to the normal window — never worse than before.
+    static let approvalPauseGlyph = "⏸"
+
+    /// Long window once `commandId` has parked on an approval (sticky until
+    /// done — see `approvalPausedCommandIds`), normal window otherwise.
+    func idleWindow(for commandId: String) -> UInt64 {
+        approvalPausedCommandIds.contains(commandId) ? 960 : 120
+    }
+
+    private func startStreamTimeout(for commandId: String, idleSeconds: UInt64 = 120) {
         streamTimeoutTask?.cancel()
         streamTimeoutTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 120_000_000_000)
+            try? await Task.sleep(nanoseconds: idleSeconds * 1_000_000_000)
             guard !Task.isCancelled, let self else { return }
             guard self.llmIdeCommandIds.contains(commandId) else { return }
             self.connection?.errorMessage =

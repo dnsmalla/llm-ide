@@ -76,6 +76,12 @@ extension ChatEngine {
     /// EXTERNAL turn. The pause glyph reads at a glance in the step list;
     /// "on Mac" tells the phone user WHERE the interactive card lives — the
     /// phone mirrors the transcript but cannot render the card itself.
+    ///
+    /// WARNING: the iOS stores key their long idle-timeout window off the
+    /// ⏸ glyph in this string (`LlmIdeChatStore.approvalPauseGlyph`) so an
+    /// approval-parked turn isn't cancelled at the normal 120 s while a
+    /// human answers the card. Changing the glyph degrades the phone back
+    /// to the short window — keep ⏸ or update both sides.
     static let externalApprovalNote = "⏸ Question pending on Mac…"
 
     /// True while an EXTERNAL (phone-driven) turn is executing on this

@@ -46,6 +46,10 @@ final class ExplorerChatStore: ObservableObject {
     private var sessionPrepGeneration: Int = 0
     private var sessionPrepTimeoutTask: Task<Void, Never>?
     private var streamTimeoutTask: Task<Void, Never>?
+    /// Commands that have shown the Mac's approval pause note — sticky long
+    /// idle window until done. Same contract as
+    /// `LlmIdeChatStore.approvalPausedCommandIds` (see its doc comment).
+    private var approvalPausedCommandIds: Set<String> = []
 
     weak var connection: ConnectionService?
 
@@ -265,12 +269,27 @@ final class ExplorerChatStore: ObservableObject {
             guard var current = exploreCurrent else { return }
             setLastAssistant(&current.history, chunk)
             exploreCurrent = current
+            // Every frame proves the Mac is alive and working, so restart
+            // the timeout — an IDLE breaker, not a wall clock (the old
+            // fire-once-from-send version cancelled healthy long turns at
+            // 120 s even while progress was streaming). Same contract as
+            // LlmIdeChatStore.handleOutput: ⏸ latches the long window for
+            // this command until done.
+            if !done, let id = commandId {
+                if chunk.contains(LlmIdeChatStore.approvalPauseGlyph) {
+                    approvalPausedCommandIds.insert(id)
+                }
+                startStreamTimeout(
+                    for: id,
+                    idleSeconds: approvalPausedCommandIds.contains(id) ? 960 : 120)
+            }
         }
         if done {
             streamTimeoutTask?.cancel()
             isStreaming = false
             if let id = commandId {
                 exploreCommandIds.remove(id)
+                approvalPausedCommandIds.remove(id)
                 if currentCommandId == id { currentCommandId = nil }
             }
         }
@@ -281,12 +300,14 @@ final class ExplorerChatStore: ObservableObject {
         isStreaming = false
         if let commandId {
             exploreCommandIds.remove(commandId)
+            approvalPausedCommandIds.remove(commandId)
             if currentCommandId == commandId { currentCommandId = nil }
         } else {
             // Connection-wide failure: every in-flight turn is dead. Orphans
             // left here would make a later Stop cancel a corpse and let a
             // replayed frame append into a live transcript.
             exploreCommandIds.removeAll()
+            approvalPausedCommandIds.removeAll()
             currentCommandId = nil
         }
         if var current = exploreCurrent {
@@ -308,6 +329,7 @@ final class ExplorerChatStore: ObservableObject {
         isPreparingSession = false
         isStreaming = false
         exploreCommandIds.removeAll()
+        approvalPausedCommandIds.removeAll()
         currentCommandId = nil
         pendingSend = nil
         loadingSessionId = nil
@@ -422,10 +444,10 @@ final class ExplorerChatStore: ObservableObject {
         connection?.errorMessage = message
     }
 
-    private func startStreamTimeout(for commandId: String) {
+    private func startStreamTimeout(for commandId: String, idleSeconds: UInt64 = 120) {
         streamTimeoutTask?.cancel()
         streamTimeoutTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 120_000_000_000)
+            try? await Task.sleep(nanoseconds: idleSeconds * 1_000_000_000)
             guard !Task.isCancelled, let self else { return }
             guard self.exploreCommandIds.contains(commandId) else { return }
             self.connection?.errorMessage =
