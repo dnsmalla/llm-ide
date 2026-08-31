@@ -16,7 +16,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-const DEFAULT_TIMEOUT_MS = 300_000;
+const DEFAULT_TIMEOUT_MS = 900_000;
 const EXPIRED_TOMBSTONE_MS = 60_000;
 
 // requestId -> { sdkSessionId, userId, resolve, timer }
@@ -68,6 +68,9 @@ export function registerDecision({ sdkSessionId, userId, kind = 'AskUserQuestion
     settle(requestId, entry, { action: 'expired' });
     rememberExpired(requestId);
   }, timeoutMs);
+  // A parked decision must not pin the event loop for the whole TTL — the
+  // HTTP server keeps the process alive; this timer is only a deadline.
+  entry.timer.unref?.();
   pending.set(requestId, entry);
   return { requestId, promise };
 }

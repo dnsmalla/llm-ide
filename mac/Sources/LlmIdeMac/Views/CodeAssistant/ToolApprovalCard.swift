@@ -179,27 +179,41 @@ struct ToolApprovalCard: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 11))
                 .foregroundStyle(Color.orange)
-            // A failed submit KEEPS the card up (see AgentV2ApprovalState),
-            // so the same three actions are still there to retry.
-            Text("\(message) Choose again to retry.")
+            // `isExpired` means the requestId is permanently gone server-side
+            // (see AgentV2ApprovalState) — the buttons are disabled and no
+            // retry can succeed, so don't promise one. Otherwise a failed
+            // submit KEEPS the card up with the same three actions to retry.
+            Text(state.isExpired ? message : "\(message) Choose again to retry.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
+    /// Buttons lock on `submitted` (answered) AND `isExpired` (the server
+    /// registry entry is gone — `submitToolDecision` would no-op anyway, and
+    /// an enabled button that silently does nothing reads as a frozen app).
+    private var actionsDisabled: Bool {
+        state.submitted || state.isExpired
+    }
+
     private var actionRow: some View {
         HStack(spacing: 8) {
             Button(state.submitted ? "Denied" : "Deny") { Task { await onDecide("deny") } }
                 .controlSize(.small)
-                .disabled(state.submitted)
+                .disabled(actionsDisabled)
             Button(state.submitted ? "Allowed" : "Allow Once") { Task { await onDecide("allow") } }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .disabled(state.submitted)
+                .disabled(actionsDisabled)
             Button(Self.alwaysAllowLabel(toolName: state.approval.toolName)) { Task { await onDecide("always-allow") } }
                 .controlSize(.small)
-                .disabled(state.submitted)
+                .disabled(actionsDisabled)
+            if state.isExpired {
+                Text("Expired")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
             Spacer(minLength: 0)
         }
     }

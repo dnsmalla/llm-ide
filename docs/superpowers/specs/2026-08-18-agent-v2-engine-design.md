@@ -74,7 +74,7 @@ Toggle is **Mac-local** (`UserDefaults`), not server state: the Mac picks the en
 
 Rules:
 - **Tenancy:** the deciding user must own the session (JWT user vs `agent_sessions.user_id`); foreign decisions are 403 + logged.
-- **Timeout:** 5 minutes unanswered → resolve as deny with "the user didn't answer"; the turn ends gracefully with the model informed.
+- **Timeout:** 15 minutes unanswered → resolve as deny with "the user didn't answer"; the turn ends gracefully with the model informed.
 - **Abort:** SSE closes with a decision pending → deny + abort the query signal; the SDK session persists and a later turn resumes cleanly.
 - **Phone turns:** the Mac panel owns the card (it owns the shared engine); the phone receives a "question pending on Mac" note. Phone-side answering is a fast-follow (requires SharedProtocol additions). *(Judgment call ①.)*
 - **Non-question tools in P1:** if the model attempts Bash/Edit/Write/other write tools, `canUseTool` denies with an explanatory message ("file changes arrive in the next engine release") so the model re-plans instead of failing silently.

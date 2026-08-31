@@ -210,6 +210,45 @@ struct AgentV2ApprovalTests {
         #expect(poster.calls.count == 1)
     }
 
+    @Test("DECISION_EXPIRED/UNKNOWN marks the state permanently expired and blocks further POSTs")
+    func expiredDecisionStopsRetrying() async throws {
+        let (engine, stream, poster) = makeEngine()
+        stream.events = approvalTurnEvents(requestId: "req-1", sdkSessionId: "sdk-77")
+        await engine.runTurn("hello")
+
+        poster.result = .failure(APIError.http(status: 404, code: "DECISION_EXPIRED",
+                                                message: "No pending decision for this requestId (expired)",
+                                                details: nil))
+        await engine.submitApproval(answers: ["Which file?": "A.md"])
+        // Unlike a transient failure, this is unrecoverable — the card must
+        // say so and refuse further POSTs against the same dead requestId.
+        #expect(engine.pendingApproval?.isExpired == true)
+        #expect(engine.pendingApproval?.lastError != nil)
+        #expect(poster.calls.count == 1)
+
+        // A further submit attempt (e.g. a stray retry) must not re-POST —
+        // resubmitting the same requestId can never succeed.
+        await engine.submitApproval(answers: ["Which file?": "B.md"])
+        #expect(poster.calls.count == 1)
+        #expect(engine.pendingApproval != nil)
+    }
+
+    @Test("DECISION_FORBIDDEN is permanent too — a stale session id resubmits unchanged, so no retry can succeed")
+    func forbiddenDecisionIsPermanent() async throws {
+        let (engine, stream, poster) = makeEngine()
+        stream.events = approvalTurnEvents(requestId: "req-1", sdkSessionId: "sdk-77")
+        await engine.runTurn("hello")
+
+        poster.result = .failure(APIError.http(status: 403, code: "DECISION_FORBIDDEN",
+                                                message: "Forbidden", details: nil))
+        await engine.submitApproval(answers: ["Which file?": "A.md"])
+        #expect(engine.pendingApproval?.isExpired == true)
+        #expect(poster.calls.count == 1)
+
+        await engine.submitApproval(answers: ["Which file?": "A.md"])
+        #expect(poster.calls.count == 1)
+    }
+
     @Test("No SDK session id (init carried none) → no POST, failure recorded, card kept")
     func missingSessionIdSurfacesFailure() async throws {
         let (engine, stream, poster) = makeEngine()
@@ -296,6 +335,33 @@ struct AgentV2ApprovalTests {
         #expect(engine.pendingApproval != nil)
         #expect(engine.pendingApproval?.lastError != nil)
         #expect(poster.calls.count == 1)
+    }
+
+    @Test("v2 ToolApproval: DECISION_UNKNOWN marks the state expired and further decisions are no-ops")
+    func v2ToolDecisionUnknownStopsRetrying() async throws {
+        let stream = ScriptedAgentV2Stream()
+        let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
+        let poster = ScriptedToolDecisionPoster()
+        engine.postToolDecision = { requestId, sdkSessionId, action in
+            try await poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
+        }
+        stream.events = toolApprovalTurnEvents(requestId: "req-tool-1", sdkSessionId: "sdk-99")
+        await engine.runTurn("run a command")
+
+        // UNKNOWN is the stream-drop shape (abort leaves no tombstone) — as
+        // permanent for this requestId as EXPIRED, on the tool path too.
+        poster.result = .failure(APIError.http(status: 404, code: "DECISION_UNKNOWN",
+                                                message: "No pending decision for this requestId (unknown)",
+                                                details: nil))
+        await engine.submitToolDecision(action: "allow")
+        #expect(engine.pendingApproval?.isExpired == true)
+        #expect(engine.pendingApproval?.lastError != nil)
+        #expect(poster.calls.count == 1)
+
+        // The isExpired guard in submitToolDecision blocks any further POST.
+        await engine.submitToolDecision(action: "deny")
+        #expect(poster.calls.count == 1)
+        #expect(engine.pendingApproval != nil)
     }
 
     @Test("ToolApproval with no session id anywhere (v2 init carried none, no legacy context) → no POST, failure recorded, card kept")

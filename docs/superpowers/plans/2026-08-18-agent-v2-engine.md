@@ -125,10 +125,10 @@ Note: the SDK's `createSdkMcpServer` return exposes `.name` and `.tools` — if 
 
 **Interfaces:**
 - Produces:
-  - `registerDecision({ sdkSessionId, userId, questions, timeoutMs = 300_000 }) -> { requestId, promise }` where `promise` resolves to `{ action: 'answer', answers }` | `{ action: 'expired' }` | `{ action: 'aborted' }`.
+  - `registerDecision({ sdkSessionId, userId, questions, timeoutMs = 900_000 }) -> { requestId, promise }` where `promise` resolves to `{ action: 'answer', answers }` | `{ action: 'expired' }` | `{ action: 'aborted' }`.
   - `answerDecision({ requestId, sdkSessionId, userId, answers }) -> { ok: true } | { ok: false, reason: 'unknown' | 'tenancy' | 'expired' }`
   - `abortDecisionsForSession(sdkSessionId) -> number` (denies all pending for that session).
-  - Internal 5-minute timer per decision auto-resolves `{action:'expired'}` and clears the timer on any resolution.
+  - Internal 15-minute timer per decision auto-resolves `{action:'expired'}` and clears the timer on any resolution.
 
 - [ ] **Step 1: Failing tests**:
 

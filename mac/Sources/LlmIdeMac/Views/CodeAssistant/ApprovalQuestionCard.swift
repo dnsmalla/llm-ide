@@ -30,6 +30,7 @@ struct ApprovalQuestionCard: View {
     /// selected".
     private var canSubmit: Bool {
         !state.submitted
+            && !state.isExpired
             && !state.approval.questions.isEmpty
             && state.approval.questions.indices.allSatisfy { !(selection[$0]?.isEmpty ?? true) }
     }
@@ -37,6 +38,7 @@ struct ApprovalQuestionCard: View {
     /// Why Submit is greyed out, shown next to the buttons.
     private var submitHint: String? {
         if state.submitted { return "Answered" }
+        if state.isExpired { return "Expired" }
         if state.approval.questions.indices.contains(where: { (selection[$0]?.isEmpty ?? true) }) {
             return state.approval.questions.count > 1 ? "Answer each question" : "Select an option"
         }
@@ -171,9 +173,11 @@ struct ApprovalQuestionCard: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 11))
                 .foregroundStyle(Color.orange)
-            // The failure KEPT the card so the answers are still selected and
-            // Submit is a retry — say so, or a transient 503 reads as dead.
-            Text("\(message) Your selection is kept — submit again to retry.")
+            // `isExpired` means the requestId is permanently gone server-side
+            // — resubmitting the SAME request can never succeed, so don't
+            // claim a retry will work. Otherwise the failure KEPT the card so
+            // the answers are still selected and Submit is a real retry.
+            Text(state.isExpired ? message : "\(message) Your selection is kept — submit again to retry.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

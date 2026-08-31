@@ -33,6 +33,14 @@ final class AgentV2ApprovalState {
     /// Cleared implicitly: a state that succeeded is dropped, and a NEW
     /// approval mints a fresh state.
     private(set) var lastError: String?
+    /// True when the server's answer for this `requestId` is PERMANENT:
+    /// `DECISION_EXPIRED` / `DECISION_UNKNOWN` (registry entry gone — timed
+    /// out, already answered, or aborted) or `DECISION_FORBIDDEN` (tenancy
+    /// mismatch a resubmit would repeat unchanged). Unlike a transient
+    /// failure, "submit again" can never work here — the same requestId
+    /// fails forever. The card must say so and stop offering a retry — a
+    /// fresh question needs a new turn, not a resubmit.
+    private(set) var isExpired = false
 
     init(approval: AgentV2Approval, legacySessionId: String? = nil) {
         self.approval = approval
@@ -45,6 +53,13 @@ final class AgentV2ApprovalState {
 
     func recordSubmitFailure(_ message: String) {
         lastError = message
+    }
+
+    /// Same as `recordSubmitFailure`, but for the permanent case: the
+    /// requestId is gone server-side and no retry can succeed.
+    func recordExpired(_ message: String) {
+        lastError = message
+        isExpired = true
     }
 }
 
@@ -151,6 +166,11 @@ extension ChatEngine {
     /// nothing server-side.
     func submitApproval(answers: [String: String]) async {
         guard let state = pendingApproval else { return }
+        // Already known dead server-side (a prior POST got a permanent code —
+        // see recordDecisionFailure) — the card's Submit button is disabled
+        // for this, but guard here too so no caller can hammer a requestId
+        // that can never be accepted again.
+        guard !state.isExpired else { return }
         guard let sdkSessionId = agentV2SessionId else {
             state.recordSubmitFailure("No SDK session id for this engine — cannot post the decision. Try a new turn.")
             return
@@ -169,13 +189,18 @@ extension ChatEngine {
                 pendingApproval = nil
             }
         } catch {
-            state.recordSubmitFailure(error.localizedDescription)
+            recordDecisionFailure(error, on: state)
         }
     }
 
     /// Drops the pending card WITHOUT posting anything. The server expires an
-    /// unanswered approval on its own (the registry timeout / turn abort
-    /// paths deny it), so dismissal is purely client-side teardown.
+    /// unanswered approval on its own (the registry timeout — 15 minutes as
+    /// of the TTL bump — or the turn-abort path), so dismissal is purely
+    /// client-side teardown. Trade-off: until that server-side timeout fires,
+    /// the parked turn still holds its chat lock (a new turn in the same chat
+    /// answers 409 TURN_IN_PROGRESS); posting a deny here would free it
+    /// sooner but changes turn semantics — revisit if abandoned cards become
+    /// a complaint.
     func dismissApproval() {
         pendingApproval = nil
     }
@@ -202,6 +227,7 @@ extension ChatEngine {
     /// records `lastError` and keeps the card up for a retry.
     func submitToolDecision(action: String) async {
         guard let state = pendingApproval else { return }
+        guard !state.isExpired else { return }
         do {
             let ok: Bool
             if let legacySessionId = state.legacySessionId {
@@ -221,6 +247,31 @@ extension ChatEngine {
                 pendingApproval = nil
             }
         } catch {
+            recordDecisionFailure(error, on: state)
+        }
+    }
+
+    /// Shared catch-block logic for `submitApproval`/`submitToolDecision`:
+    /// `DECISION_EXPIRED`/`DECISION_UNKNOWN` mean the requestId is
+    /// permanently gone server-side (registry timeout, or already
+    /// answered/aborted), and `DECISION_FORBIDDEN` means the tenancy check
+    /// (sdkSessionId + user) rejects this caller — a stale session id that a
+    /// resubmit would send again unchanged. All three are permanent for the
+    /// SAME requestId: no retry can ever succeed, so the card must say that
+    /// plainly instead of the generic "submit again to retry" hint, which
+    /// would leave the user stuck resubmitting a dead request forever.
+    private func recordDecisionFailure(_ error: Error, on state: AgentV2ApprovalState) {
+        guard let apiError = error as? APIError,
+              case .http(_, let code, _, _) = apiError else {
+            state.recordSubmitFailure(error.localizedDescription)
+            return
+        }
+        switch code {
+        case "DECISION_EXPIRED", "DECISION_UNKNOWN":
+            state.recordExpired("This question timed out on the server. Ask again in a new message — this card can no longer be answered.")
+        case "DECISION_FORBIDDEN":
+            state.recordExpired("The server no longer accepts an answer for this card (session mismatch). Ask again in a new message.")
+        default:
             state.recordSubmitFailure(error.localizedDescription)
         }
     }
