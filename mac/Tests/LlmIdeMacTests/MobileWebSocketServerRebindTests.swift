@@ -41,6 +41,11 @@ final class MobileWebSocketServerRebindTests: XCTestCase {
                             onBindFailed: @escaping (Error) -> Void) -> MobileWebSocketServer {
         MobileWebSocketServer(
             port: port,
+            // Exact-port mode: this suite pins the release-lag retry and the
+            // genuinely-held failure contracts, both of which port fallback
+            // would otherwise route around (its own coverage lives in
+            // MobileWebSocketServerBindTests).
+            portCandidates: 1,
             deviceName: "test-device",
             validatePin: { _ in false },
             onInbound: { _ in },

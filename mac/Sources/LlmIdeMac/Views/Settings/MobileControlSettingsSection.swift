@@ -12,6 +12,10 @@ struct MobileControlSettingsSection: View {
 
     @State private var autoScroll: Bool = true
     @State private var connection = MobileConnectionInfo.current()
+    /// Editable text for the base-port field. Seeded from the stored value on
+    /// appear; committed (validated) by `applyPortEdit`.
+    @State private var portText: String = String(MobileControlManager.configuredPort)
+    @State private var portError: String?
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -24,7 +28,7 @@ struct MobileControlSettingsSection: View {
                         Text("Enable Mobile Control")
                             .font(Typography.body)
                             .foregroundStyle(theme.current.text)
-                        Text("iPhone companion: chat, explorer, and auto-tasks via native server (:3006)")
+                        Text("iPhone companion: chat, explorer, and auto-tasks via native server (:\(mobile.activePort ?? MobileControlManager.configuredPort))")
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                     }
@@ -48,6 +52,8 @@ struct MobileControlSettingsSection: View {
                     ))
                     .font(Typography.body)
                     .toggleStyle(.checkbox)
+
+                    portRow
 
                     HStack(spacing: Spacing.sm) {
                         statusPill
@@ -82,13 +88,19 @@ struct MobileControlSettingsSection: View {
             }
         }
         .onAppear {
-            connection = MobileConnectionInfo.current()
+            refreshConnection()
             mobile.exploreIndex.bootstrapFromDisk()
         }
         .onChange(of: scenePhase) { _, phase in
             // The user likely just connected Tailscale in another app;
             // re-probe when we regain focus so the IP shows without Refresh.
-            if phase == .active { connection = MobileConnectionInfo.current() }
+            if phase == .active { refreshConnection() }
+        }
+        .onChange(of: mobile.activePort) { _, _ in
+            // The bind resolves asynchronously and may land on a fallback
+            // port after this view already rendered pairing info — re-read so
+            // the Port row and QR always carry the port that actually took.
+            refreshConnection()
         }
         .onChange(of: config.mobileControlEnabled) { _, enabled in
             if enabled {
@@ -97,6 +109,66 @@ struct MobileControlSettingsSection: View {
                 mobile.stop()
             }
         }
+    }
+
+    /// Re-detect addresses AND re-read the live port: the listener may be on
+    /// a fallback candidate, and pairing info must always show the port that
+    /// actually bound.
+    private func refreshConnection() {
+        connection = MobileConnectionInfo.current(
+            port: mobile.activePort ?? MobileControlManager.configuredPort)
+    }
+
+    /// Base-port editor. The number itself carries no security weight — the
+    /// server is PIN + token gated — it exists to dodge conflicts with other
+    /// dev servers. If the chosen port is busy at start, the next free one
+    /// (up to +\(MobileWebSocketServer.defaultPortCandidates - 1)) is used
+    /// automatically and advertised over Bonjour/QR.
+    private var portRow: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: Spacing.sm) {
+                Text("Port")
+                    .font(Typography.body)
+                    .foregroundStyle(theme.current.text)
+                TextField("\(MobileControlManager.defaultAgentPort)", text: $portText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
+                    .onSubmit { applyPortEdit() }
+                Button("Apply") { applyPortEdit() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(portText == String(MobileControlManager.configuredPort))
+                if let active = mobile.activePort, active != MobileControlManager.configuredPort {
+                    Label("busy — using :\(active)", systemImage: "arrow.triangle.branch")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.warning)
+                        .help("Port \(MobileControlManager.configuredPort) was taken by another process; the server bound :\(active) and Bonjour/QR advertise it.")
+                }
+                Spacer(minLength: 0)
+            }
+            Text(portError ?? "1024–65535. If busy, the next free port is used automatically; the iPhone follows via Bonjour or a re-scanned QR.")
+                .font(Typography.caption)
+                .foregroundStyle(portError == nil ? theme.current.textMuted : theme.current.danger)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Validate + persist the edited port; restart the server onto it when
+    /// running so the change takes effect immediately.
+    private func applyPortEdit() {
+        guard let value = Int(portText.trimmingCharacters(in: .whitespaces)),
+              (1024...65535).contains(value) else {
+            portError = "Enter a port between 1024 and 65535."
+            return
+        }
+        portError = nil
+        guard value != MobileControlManager.configuredPort else { return }
+        MobileControlManager.configuredPort = value
+        portText = String(value)
+        if case .running = mobile.status {
+            mobile.restart()
+        }
+        refreshConnection()
     }
 
     // MARK: - Connection info
@@ -113,7 +185,7 @@ struct MobileControlSettingsSection: View {
                     .foregroundStyle(theme.current.textMuted)
                 Spacer()
                 Button {
-                    connection = MobileConnectionInfo.current()
+                    refreshConnection()
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                         .font(Typography.caption)
@@ -167,7 +239,7 @@ struct MobileControlSettingsSection: View {
     private var hintForNotRunning: String {
         switch mobile.status {
         case .crashed:
-            return "The mobile server isn't running. If port \(MobileControlManager.defaultAgentPort) is already in use, run `lsof -i :3006`, quit the other process, then press Start."
+            return "The mobile server isn't running. If port \(MobileControlManager.configuredPort) (and its fallbacks) are in use, run `lsof -i :\(MobileControlManager.configuredPort)`, quit the other process or pick a different port above, then press Start."
         case .starting:
             return "Starting the mobile server — pairing details will appear here once it's ready."
         case .stopped:

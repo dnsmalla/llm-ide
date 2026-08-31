@@ -32,6 +32,32 @@ final class MobileControlManager {
     /// without depending on `SharedProtocol` directly.
     nonisolated static let defaultAgentPort = MobileProtocol.defaultPort
 
+    /// UserDefaults key for the user-configured base port (Settings →
+    /// Mobile Control → Port).
+    nonisolated static let portDefaultsKey = "mobileControl.basePort"
+
+    /// The port the user configured, defaulting to `defaultAgentPort`. Only
+    /// non-privileged, in-range values are honoured — anything else (unset,
+    /// 0, a typo like 99999) falls back to the default rather than producing
+    /// a listener that can never bind. The port number carries no security
+    /// weight (pairing is PIN + token gated); configurability exists to
+    /// dodge conflicts with whatever else a dev machine runs.
+    nonisolated static var configuredPort: Int {
+        get {
+            let stored = UserDefaults.standard.integer(forKey: portDefaultsKey)
+            return (1024...65535).contains(stored) ? stored : defaultAgentPort
+        }
+        set {
+            if (1024...65535).contains(newValue), newValue != defaultAgentPort {
+                UserDefaults.standard.set(newValue, forKey: portDefaultsKey)
+            } else {
+                // The default (or an invalid value) is represented by absence,
+                // so a later change to `defaultAgentPort` follows automatically.
+                UserDefaults.standard.removeObject(forKey: portDefaultsKey)
+            }
+        }
+    }
+
     enum Status: Equatable {
         case stopped
         case starting
@@ -40,6 +66,11 @@ final class MobileControlManager {
     }
 
     private(set) var status: Status = .stopped
+    /// The port the listener ACTUALLY bound — the configured port, or a
+    /// fallback candidate when that was busy. Nil while not listening.
+    /// Everything user-facing (Bonjour, the pairing QR, the settings Port
+    /// row) reads this, never the configured value.
+    private(set) var activePort: Int?
     private(set) var logLines: [MobileLogLine] = []
     var lastError: String?
 
@@ -127,7 +158,7 @@ final class MobileControlManager {
 
         let name = Self.deviceName()
         let server = MobileWebSocketServer(
-            port: MobileProtocol.defaultPort,
+            port: Self.configuredPort,
             deviceName: name,
             validatePin: { candidate in
                 // The PIN is always 6 digits (`%06d`), but a user typing on a
@@ -156,6 +187,9 @@ final class MobileControlManager {
             onClientDisconnected: { [weak self] in
                 Task { @MainActor [weak self] in self?.onMobileClientDisconnected() }
             },
+            onListening: { [weak self] boundPort in
+                Task { @MainActor [weak self] in self?.mobileServerDidBind(port: boundPort, deviceName: name) }
+            },
             onBindFailed: { [weak self] error in
                 Task { @MainActor [weak self] in self?.reportMobileBindFailure(error) }
             }
@@ -172,10 +206,11 @@ final class MobileControlManager {
         }
         self.server = server
 
-        let advertiser = MobileBonjourAdvertiser(name: name, port: MobileProtocol.defaultPort)
-        advertiser.start()
-        self.advertiser = advertiser
-
+        // The Bonjour advertiser deliberately does NOT start here: the bind
+        // resolves asynchronously and may land on a fallback port, and
+        // advertising a port nothing listens on is exactly the phantom the
+        // iPhone then misreads as "Wrong PIN". `mobileServerDidBind` starts
+        // it with the port that actually took.
         status = .running
         startWorkspaceWatcher()
         startSessionDirectoryWatcher()
@@ -233,6 +268,22 @@ final class MobileControlManager {
         }
     }
 
+    /// The listener bound successfully — possibly on a fallback port. Record
+    /// the real port and start (or restart) Bonjour advertising it, so the
+    /// iPhone's discovery resolves whatever port actually took. A rebind
+    /// after the release-lag retry can land here twice; tearing the previous
+    /// advertiser down first keeps exactly one advertisement alive.
+    private func mobileServerDidBind(port: Int, deviceName: String) {
+        activePort = port
+        if port != Self.configuredPort {
+            append(.info, "Port \(Self.configuredPort) was busy — Mobile Control is on :\(port) instead (Bonjour and the pairing QR already point there)")
+        }
+        advertiser?.stop()
+        let advertiser = MobileBonjourAdvertiser(name: deviceName, port: port)
+        advertiser.start()
+        self.advertiser = advertiser
+    }
+
     /// Tear down the native server and Bonjour advertisement. Idempotent —
     /// safe to call from the Quit hook, the Stop button, or a failed restart.
     func stop() {
@@ -246,6 +297,7 @@ final class MobileControlManager {
         server = nil
         advertiser?.stop()
         advertiser = nil
+        activePort = nil
         status = .stopped
     }
 
@@ -273,7 +325,9 @@ final class MobileControlManager {
     /// actionable `lsof -i :3006` hint instead of a silent, phantom `.running`
     /// — the root cause of the "Wrong PIN" misdiagnosis on the phone.
     private func reportMobileBindFailure(_ error: Error) {
-        lastError = "Couldn't start the mobile server on port \(MobileProtocol.defaultPort) — another process may already be using it. Run `lsof -i :3006`, quit the other process, then press Start again. (\(error.localizedDescription))"
+        let base = Self.configuredPort
+        let last = base + MobileWebSocketServer.defaultPortCandidates - 1
+        lastError = "Couldn't start the mobile server — ports \(base)–\(last) all failed to bind. Run `lsof -i :\(base)` to see what's using them, or set a different port in Settings → Mobile Control, then press Start again. (\(error.localizedDescription))"
         append(.stderr, "ERROR: mobile server bind failed: \(error.localizedDescription)")
         stop()                              // idempotent: stops server/advertiser/watchers
         status = .crashed(exitCode: -1)     // stop() sets .stopped; override to .crashed

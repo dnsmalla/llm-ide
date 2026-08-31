@@ -182,18 +182,31 @@ struct ConnectView: View {
                 .foregroundColor(DesignSystem.Colors.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            inputField(label: "IP Address", placeholder: "192.168.0.100",
+            inputField(label: "IP Address", placeholder: "192.168.0.100 or 192.168.0.100:3007",
                        text: $ip, keyboard: .numbersAndPunctuation)
             inputField(label: "PIN", placeholder: "123456",
                        text: $pin, keyboard: .numberPad, isSecure: true)
 
             Button {
-                let host = ip.trimmingCharacters(in: .whitespaces)
+                let raw = ip.trimmingCharacters(in: .whitespaces)
+                // Accept "host:port" — the Mac's server falls back to the
+                // next free port when its configured one is busy, and manual
+                // entry (unlike Bonjour or the QR) has no other way to learn
+                // a non-default port. A lone host keeps the saved/default.
+                var host = raw
+                var enteredPort: Int?
+                if let colon = raw.lastIndex(of: ":"), colon != raw.startIndex {
+                    let suffix = raw[raw.index(after: colon)...]
+                    if let p = Int(suffix), (1...65535).contains(p) {
+                        host = String(raw[..<colon])
+                        enteredPort = p
+                    }
+                }
                 let code = pin.trimmingCharacters(in: .whitespaces)
                 // Same validation as a scanned code — a typo'd host would
                 // otherwise be saved and retried forever.
                 guard PairingInfo.isPrivateHost(host) else {
-                    errorMessage = "Enter your Mac's local address (e.g. 192.168.0.100, a 100.x Tailscale address, or name.local)."
+                    errorMessage = "Enter your Mac's local address (e.g. 192.168.0.100, optionally with :port, a 100.x Tailscale address, or name.local)."
                     return
                 }
                 guard PairingInfo.isWellFormedPin(code) else {
@@ -202,7 +215,8 @@ struct ConnectView: View {
                 }
                 errorMessage = nil
                 connectAttempted = true
-                let port = connectionStore.devicePort > 0 ? connectionStore.devicePort : PairingInfo.defaultPort
+                let port = enteredPort
+                    ?? (connectionStore.devicePort > 0 ? connectionStore.devicePort : PairingInfo.defaultPort)
                 connectionStore.save(ip: host, port: port, pin: code)
                 connection.connectDirect(ip: host, port: port, pin: code)
             } label: {

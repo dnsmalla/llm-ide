@@ -16,7 +16,16 @@ import SharedProtocol
 /// `queue` — Network.framework callbacks run there, and `send`/`stop`/
 /// `reject` hop there via `queue.async` before touching state.
 final class MobileWebSocketServer: @unchecked Sendable {
-    private let port: Int
+    /// The port the caller asked for. What the listener actually binds is
+    /// `currentPort` — the base plus the fallback offset.
+    private let basePort: Int
+    /// How many consecutive ports (base, base+1, …) may be tried before the
+    /// bind is surfaced as failed. 1 = the old exact-port behaviour.
+    private let portCandidates: Int
+    /// Offset of the candidate currently being bound / bound. Serial-queue
+    /// only, like every other mutable field here.
+    private var portIndex = 0
+    private var currentPort: Int { basePort + portIndex }
     private let deviceName: String
     private let validatePin: (String) -> Bool
     private let onInbound: InboundHandler
@@ -24,6 +33,10 @@ final class MobileWebSocketServer: @unchecked Sendable {
     private let onClientPaired: () -> Void
     private let onClientDisconnected: () -> Void
     private let onBindFailed: (Error) -> Void
+    /// Fired once per successful bind with the port that actually took —
+    /// which may be a fallback candidate, so the caller must advertise THIS
+    /// value (Bonjour, pairing QR, the settings Port row), never the base.
+    private let onListening: (Int) -> Void
     private let queue = DispatchQueue(label: "llmide.mobile.ws")
     /// Shared decoder for inbound `Pairing`/`Heartbeat` frames. `JSONDecoder`
     /// is thread-safe for independent `decode(_:)` calls; all access here runs
@@ -56,14 +69,24 @@ final class MobileWebSocketServer: @unchecked Sendable {
 
     typealias InboundHandler = (Data) -> Void
 
-    init(port: Int, deviceName: String,
+    /// How many consecutive ports a default-configured server may try. Ten
+    /// keeps the range small enough to state in an error message while making
+    /// a single squatter (the classic retired-computer-agent-on-:3006 case) a
+    /// log line instead of a dead server.
+    static let defaultPortCandidates = 10
+
+    init(port: Int, portCandidates: Int = MobileWebSocketServer.defaultPortCandidates,
+         deviceName: String,
          validatePin: @escaping (String) -> Bool,
          onInbound: @escaping InboundHandler,
          onLog: @escaping (String) -> Void,
          onClientPaired: @escaping () -> Void = {},
          onClientDisconnected: @escaping () -> Void = {},
+         onListening: @escaping (Int) -> Void = { _ in },
          onBindFailed: @escaping (Error) -> Void = { _ in }) {
-        self.port = port
+        self.basePort = port
+        self.portCandidates = max(1, portCandidates)
+        self.onListening = onListening
         self.deviceName = deviceName
         self.validatePin = validatePin
         self.onInbound = onInbound
@@ -82,6 +105,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
         // times before giving up.
         shouldRun = true
         startAttempts = 0
+        portIndex = 0
         try startListener()
     }
 
@@ -98,7 +122,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
         opts.maximumMessageSize = 8_388_608   // 8 MiB — matches the :3456 body cap; paired-LAN only
         let params = NWParameters.tcp
         params.defaultProtocolStack.applicationProtocols.insert(opts, at: 0)
-        let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: UInt16(port))!)
+        let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: UInt16(currentPort))!)
         listener.newConnectionHandler = { [weak self] conn in self?.handle(conn) }
         listener.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
@@ -108,7 +132,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
                 // after start()) because the socket bind resolves
                 // asynchronously — logging earlier would falsely report up.
                 self.startAttempts = 0   // a clean bind refills the retry budget
-                self.onLog("WebSocket listening on :\(self.port)")
+                self.onLog("WebSocket listening on :\(self.currentPort)")
+                self.onListening(self.currentPort)
             case .failed(let error):
                 // Bind failures arrive HERE asynchronously, not as a throw from
                 // start(). The common one right after a stop() is EADDRINUSE —
@@ -117,16 +142,34 @@ final class MobileWebSocketServer: @unchecked Sendable {
                 // process squatting) is surfaced via onBindFailed so the manager
                 // can show the actionable `lsof -i :3006` hint.
                 self.listener = nil
-                if self.shouldRun, Self.isAddrInUse(error), self.startAttempts < Self.maxStartAttempts {
+                if self.shouldRun, Self.isAddrInUse(error),
+                   self.portIndex == 0, self.startAttempts < Self.maxStartAttempts {
+                    // The BASE port only: right after a stop() it is usually
+                    // this server's own socket mid-release, so a short wait
+                    // wins it back. A fallback candidate was never ours — a
+                    // squatter there won't release, so it gets one try.
                     self.startAttempts += 1
-                    self.onLog("⏳ :\(self.port) still releasing after stop — retrying bind (\(self.startAttempts)/\(Self.maxStartAttempts))…")
+                    self.onLog("⏳ :\(self.currentPort) still releasing after stop — retrying bind (\(self.startAttempts)/\(Self.maxStartAttempts))…")
                     self.queue.asyncAfter(deadline: .now() + 0.6) { [weak self] in
                         guard let self, self.shouldRun else { return }
                         do { try self.startListener() }
                         catch { self.onBindFailed(error) }
                     }
+                } else if self.shouldRun, Self.isAddrInUse(error),
+                          self.portIndex + 1 < self.portCandidates {
+                    // Another process owns this port. Slide to the next
+                    // candidate — Bonjour and the pairing QR advertise the
+                    // port that actually binds (onListening), so the phone
+                    // follows automatically.
+                    self.portIndex += 1
+                    self.onLog("⚠️ :\(self.currentPort - 1) is taken by another process — trying :\(self.currentPort)…")
+                    self.queue.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                        guard let self, self.shouldRun else { return }
+                        do { try self.startListener() }
+                        catch { self.onBindFailed(error) }
+                    }
                 } else {
-                    self.onLog("❌ Listener failed on :\(self.port) — \(error.localizedDescription)")
+                    self.onLog("❌ Listener failed on :\(self.currentPort) — \(error.localizedDescription)")
                     self.onBindFailed(error)
                 }
             case .cancelled:

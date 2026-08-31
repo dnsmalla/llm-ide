@@ -206,7 +206,7 @@ Swift type suffixes communicate role — pick matching suffix when adding new ty
 
 ## Mobile Control System
 
-LLM-IDE includes a native mobile companion: the **Mac app** runs a WebSocket server on `:3006` (Bonjour `_llmide._tcp` + PIN pairing), and the **iOS app** in `ios_app/` connects as a client. Chat requests are proxied to the local backend at `http://127.0.0.1:3456`.
+LLM-IDE includes a native mobile companion: the **Mac app** runs a WebSocket server on `:3006` by default (configurable in Settings → Mobile Control; if busy, the next free port up to +9 binds automatically and Bonjour `_llmide._tcp` + the pairing QR advertise the actual port; PIN pairing), and the **iOS app** in `ios_app/` connects as a client. Chat requests are proxied to the local backend at `http://127.0.0.1:3456`.
 
 > The external Node `computer-agent` (`auto_swift_aicontrol`) is **retired**. Remote desktop / screen streaming / input injection were cancelled; the iPhone is a chat/explorer/auto-tasks companion only.
 
