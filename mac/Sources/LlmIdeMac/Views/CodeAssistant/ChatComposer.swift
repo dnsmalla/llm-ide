@@ -248,11 +248,36 @@ extension CodeAssistantPanel {
                     text: $draft,
                     font: .systemFont(ofSize: 12),
                     textColor: NSColor(theme.current.text),
+                    // Suffix only — the editor paints it after the typed text.
+                    // Same tone as the empty-field placeholder above, so the
+                    // two "not yet real" texts read as one family.
+                    ghostText: promptSuggestion.map { String($0.dropFirst(draft.count)) },
+                    ghostColor: NSColor(theme.current.textMuted.opacity(0.6)),
                     onArrowUp: { arrowUpAction() },
                     onArrowDown: { arrowDownAction() },
                     onReturn: { if completion.isOpen { acceptCompletion(); return true }; return false },
-                    onTab: { if completion.isOpen { acceptCompletion(); return true }; return false },
-                    onEscape: { if completion.isOpen { completion.close(); return true }; return false }
+                    // Tab: completion menu keeps priority; otherwise accept the
+                    // ghost prediction. Assigning the full stored prompt (not
+                    // draft + suffix) keeps the accepted text byte-identical to
+                    // what was actually sent before; updateNSView then parks
+                    // the caret at the end.
+                    onTab: {
+                        if completion.isOpen { acceptCompletion(); return true }
+                        if let suggestion = promptSuggestion { draft = suggestion; return true }
+                        return false
+                    },
+                    // Esc: menu first, then a visible ghost — dismissed until
+                    // the draft changes (onChange(of: draft) re-arms it).
+                    // NOTE: while a turn is running, Esc never reaches here —
+                    // the Stop button's .keyboardShortcut(.cancelAction) is a
+                    // key equivalent, processed before the text view's keyDown.
+                    // Stop deliberately wins; this whole handler (menu close
+                    // AND ghost dismissal) only runs while idle.
+                    onEscape: {
+                        if completion.isOpen { completion.close(); return true }
+                        if promptSuggestion != nil { ghostDismissed = true; return true }
+                        return false
+                    }
                 )
                 .frame(height: composerHeight)
                 .padding(.horizontal, 8)
@@ -827,6 +852,30 @@ extension CodeAssistantPanel {
         sentPrompts = prompts
         historyIndex = nil
         draftStash = ""
+    }
+
+    /// Fish-style prompt prediction for the composer's ghost text: the most
+    /// recently sent prompt that EXTENDS the current draft (case-sensitive
+    /// prefix — predictable, and the accepted text stays byte-identical to
+    /// the history entry). Tab accepts it, Esc dismisses it until the draft
+    /// changes (see the editor's `onTab`/`onEscape`).
+    ///
+    /// Suppressed while the autocomplete menu is open (two completion
+    /// affordances competing for one Tab key would be a coin toss) and while
+    /// the draft IS the ↑-recalled history entry — predicting history from
+    /// history just flickers. The moment an edit diverges the draft from the
+    /// recalled entry, prediction resumes; `historyIndex` deliberately stays
+    /// untouched here because ↑-recall semantics own it (a plain
+    /// `historyIndex == nil` gate would keep the ghost dead for the entire
+    /// edit-after-recall session). `sentPrompts` already dedupes consecutive
+    /// repeats and is seeded from the loaded session (`rebuildSentPrompts`),
+    /// so predictions survive a relaunch.
+    var promptSuggestion: String? {
+        guard !draft.isEmpty, !completion.isOpen, !ghostDismissed else { return nil }
+        if let i = historyIndex, sentPrompts.indices.contains(i), draft == sentPrompts[i] {
+            return nil
+        }
+        return sentPrompts.last(where: { $0.hasPrefix(draft) && $0 != draft })
     }
 
     func historyUp() -> KeyPress.Result {

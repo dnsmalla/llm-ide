@@ -18,6 +18,14 @@ struct HistoryTextEditor: NSViewRepresentable {
     @Binding var text: String
     var font: NSFont
     var textColor: NSColor
+    /// Fish-style inline suggestion: the REMAINDER of a predicted prompt
+    /// (suffix only, not the full string), drawn in `ghostColor` after the
+    /// typed text. Rendered by the text view's own `draw(_:)` — never
+    /// inserted into the text storage, so the binding, undo stack, and
+    /// caret are untouched. nil/empty = no ghost. The caller owns the
+    /// prediction and its acceptance (via `onTab`); this view only paints.
+    var ghostText: String? = nil
+    var ghostColor: NSColor = .placeholderTextColor
     /// Return `true` if history handled the key (consume it); `false` to let
     /// the text view move the caret normally.
     var onArrowUp: () -> Bool
@@ -48,6 +56,8 @@ struct HistoryTextEditor: NSViewRepresentable {
         textView.onReturn = onReturn
         textView.onTab = onTab
         textView.onEscape = onEscape
+        textView.ghostText = ghostText
+        textView.ghostColor = ghostColor
 
         let scroll = NSScrollView()
         scroll.documentView = textView
@@ -79,6 +89,8 @@ struct HistoryTextEditor: NSViewRepresentable {
         textView.onReturn = onReturn
         textView.onTab = onTab
         textView.onEscape = onEscape
+        textView.ghostText = ghostText
+        textView.ghostColor = ghostColor
         textView.font = font
         textView.textColor = textColor
         // Only push the binding into the view when it actually differs — e.g. a
@@ -114,8 +126,115 @@ final class ArrowInterceptingTextView: NSTextView {
     var onReturn: (() -> Bool)?
     var onTab: (() -> Bool)?
     var onEscape: (() -> Bool)?
+    /// Suffix of the predicted prompt, painted after the typed text by
+    /// `draw(_:)` below. Kept OUT of the text storage on purpose.
+    var ghostText: String? {
+        didSet { if ghostText != oldValue { needsDisplay = true } }
+    }
+    var ghostColor: NSColor = .placeholderTextColor {
+        didSet { if ghostColor != oldValue { needsDisplay = true } }
+    }
+
+    /// Paint the ghost suggestion after the last typed character. Using the
+    /// view's own layout manager for the anchor point means the ghost lands
+    /// exactly where the next typed glyph would — same font, same container
+    /// insets, same wrapping — with no overlay view to keep aligned (and no
+    /// sibling insertion, which this editor's history recall is fragile to;
+    /// see the placeholder note in ChatComposer).
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard var ghost = ghostText, !ghost.isEmpty, !string.isEmpty,
+              // Never paint over an IME composition: the draft holds
+              // uncommitted romaji/kana then, so the prediction is noise.
+              !hasMarkedText(),
+              let lm = layoutManager, let tc = textContainer else { return }
+        // A multi-line prediction would need real line layout to render
+        // faithfully; paint just its first line and mark the truncation.
+        if let newline = ghost.firstIndex(of: "\n") {
+            ghost = String(ghost[..<newline]) + " …"
+        }
+        // The tail may sit outside the scroll view's visible region, where
+        // super.draw won't have laid it out — both anchor reads below need
+        // committed layout to be trustworthy.
+        lm.ensureLayout(for: tc)
+        let origin: NSPoint
+        // Character-level check (not hasSuffix("\n")): "\r\n" is ONE Swift
+        // Character, so hasSuffix("\n") is false for CRLF and the else
+        // branch would anchor to the line-terminator glyph, whose rect
+        // extends to the container's right edge.
+        if string.last?.isNewline == true {
+            // The insertion point sits on the empty last line — the layout
+            // manager exposes it as the extra line fragment. USED rect, like
+            // the else branch: the plain fragment rect spans the container
+            // from x=0, which would put the ghost lineFragmentPadding to the
+            // left of where typed text actually starts.
+            let r = lm.extraLineFragmentUsedRect
+            origin = NSPoint(x: r.minX + textContainerOrigin.x,
+                             y: r.minY + textContainerOrigin.y)
+        } else {
+            // Anchor to the last line fragment's USED rect, not the last
+            // glyph's bounding rect: a trailing zero-advance glyph (combining
+            // mark, non-ligated emoji sequence) would report the base
+            // character's position and land the ghost one column short.
+            let glyphCount = lm.numberOfGlyphs
+            guard glyphCount > 0 else { return }
+            let used = lm.lineFragmentUsedRect(forGlyphAt: glyphCount - 1, effectiveRange: nil)
+            origin = NSPoint(x: used.maxX + textContainerOrigin.x,
+                             y: used.minY + textContainerOrigin.y)
+        }
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize),
+            .foregroundColor: ghostColor,
+        ]
+        // NSString.draw neither wraps nor clips, so cut the ghost to the
+        // width left on its line — a past prompt is usually a long sentence,
+        // and an un-elided one would be guillotined mid-glyph at the view
+        // edge. Line fragments end at size.width - lineFragmentPadding, so
+        // subtract the padding too or the ghost overshoots into it.
+        let available = tc.size.width - tc.lineFragmentPadding - (origin.x - textContainerOrigin.x)
+        var fitted = Self.fit(ghost, width: available, attributes: attrs)
+        if fitted.isEmpty {
+            // The prediction exists but the line has no room. At least show
+            // that there IS a continuation — the invariant "prediction
+            // present ⇒ something visible" is what keeps Tab from accepting
+            // a string the user never saw (onTab keys off promptSuggestion,
+            // not off what this method managed to paint).
+            let ellipsis = "…"
+            guard (ellipsis as NSString).size(withAttributes: attrs).width <= available else { return }
+            fitted = ellipsis
+        }
+        (fitted as NSString).draw(at: origin, withAttributes: attrs)
+    }
+
+    /// Longest prefix of `text` that renders within `width`, "…"-elided when
+    /// cut. Binary search on the prefix length keeps it at O(log n) measures
+    /// per draw instead of shave-and-remeasure's O(n).
+    private static func fit(_ text: String, width: CGFloat,
+                            attributes: [NSAttributedString.Key: Any]) -> String {
+        guard width > 8 else { return "" }
+        if (text as NSString).size(withAttributes: attributes).width <= width { return text }
+        let chars = Array(text)
+        var lo = 0
+        var hi = chars.count
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2
+            let candidate = String(chars[..<mid]) + "…"
+            if (candidate as NSString).size(withAttributes: attributes).width <= width {
+                lo = mid
+            } else {
+                hi = mid - 1
+            }
+        }
+        return lo > 0 ? String(chars[..<lo]) + "…" : ""
+    }
 
     override func keyDown(with event: NSEvent) {
+        // Mid-IME-composition, Return/Tab/arrows all belong to the input
+        // method (candidate selection/confirmation). keyDown runs BEFORE
+        // interpretKeyEvents hands the event to the IME, so intercepting
+        // here would steal the key AND mutate the string under a live
+        // marked range — which corrupts the composition IME-independently.
+        if hasMarkedText() { super.keyDown(with: event); return }
         // Only plain arrows (no ⌘/⌥/⌃/⇧) drive history; modified arrows keep
         // their normal selection/word-movement behaviour.
         //

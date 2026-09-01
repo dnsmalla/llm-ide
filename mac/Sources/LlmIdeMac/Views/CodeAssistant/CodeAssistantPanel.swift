@@ -93,6 +93,12 @@ struct CodeAssistantPanel: View {
     @State var sentPrompts: [String] = []
     @State var historyIndex: Int? = nil
     @State var draftStash: String = ""
+    /// Esc pressed on a visible ghost prediction — suppresses it until the
+    /// draft next changes (see `promptSuggestion` / the composer's onEscape).
+    /// Without this the only way to get rid of a ghost is to type a
+    /// character that breaks the prefix, and Tab can never insert a literal
+    /// tab while any prediction is showing.
+    @State var ghostDismissed = false
     @State var showingSessionPicker = false
     // NOTE: the per-turn `ToolStep` struct that used to live here moved to
     // `ChatMessage.ToolStep` in Task 9 — a tool step belongs to the message
@@ -235,6 +241,9 @@ struct CodeAssistantPanel: View {
                 await completion.loadMetaIfNeeded()
             }
             .onChange(of: draft) { _, newValue in
+                // An Esc-dismissed ghost stays dismissed only for the draft
+                // it was dismissed on; any edit re-arms prediction.
+                ghostDismissed = false
                 if historyIndex == nil {
                     completion.update(draft: newValue)
                 } else {
