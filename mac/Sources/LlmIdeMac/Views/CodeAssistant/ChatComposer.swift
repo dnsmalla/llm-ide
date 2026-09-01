@@ -715,36 +715,26 @@ extension CodeAssistantPanel {
         return min(max(approx, 40), 120)
     }
 
-    /// Compact text-button for the composer footer.  Borderless,
-    /// hover-only highlight — quieter than the previous pill style so
-    /// the composer feels like one cohesive element instead of a row
-    /// of competing controls.
+    /// Icon-only footer button (currently just "Add from Library").
+    /// Borderless and unbezelled — quieter than a pill so the composer
+    /// feels like one cohesive element instead of a row of competing
+    /// controls. Always icon-only, with the label carried by the tooltip
+    /// and the accessibility label: that keeps the row's lowest-priority
+    /// control at the same 24×24 footprint as its `sendButton` /
+    /// `voiceControlButton` siblings at every panel width, so the single-row
+    /// toolbar layout fits without falling back to the stacked one.
     @ViewBuilder
     func contextButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .medium))
-                // These are the lowest-priority controls, so drop them to
-                // icon-only as soon as the panel isn't comfortably wide —
-                // keeping room for the model picker rather than clipping it.
-                // `lineLimit(1)` + `fixedSize` are essential: without them a
-                // narrow row squeezes the label to 1-character width and
-                // SwiftUI renders it vertically (one glyph per line).
-                if panelWidth >= 320 {
-                    Text(label)
-                        .font(.system(size: 11))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .foregroundStyle(theme.current.textMuted)
-            .contentShape(Rectangle())
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 24, height: 24)
+                .foregroundStyle(theme.current.textMuted)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(label)
+        .accessibilityLabel(label)
     }
 
     func formatBytes(_ chars: Int) -> String {

@@ -4,27 +4,32 @@ import SwiftUI
 /// Adds voice button, keyboard shortcuts, and voice-to-text integration.
 extension CodeAssistantPanel {
 
-    /// Voice control button for input bar — microphone icon when idle, waveform when recording.
+    /// Voice control button for input bar — microphone icon when idle,
+    /// pulsing waveform when recording. Icon-only at the same 24×24 footprint
+    /// as its `sendButton`/`contextButton` row siblings — no text label and
+    /// no oversized tap target, so it reads as one more inline control
+    /// instead of a separate block sitting below the row.
     @ViewBuilder
     var voiceControlButton: some View {
         Button(action: { toggleVoiceInput() }) {
-            HStack(spacing: 4) {
-                if voiceState.isRecording {
-                    // Recording state: animated waveform
-                    Label("Recording", systemImage: "waveform")
-                        .symbolEffect(.pulse, options: .speed(1.5))
-                        .foregroundColor(theme.current.danger)
-                } else {
-                    // Idle state: microphone icon
-                    Image(systemName: "mic.fill")
-                        .foregroundColor(theme.current.textMuted)
-                }
-            }
-            .frame(minWidth: 44, minHeight: 44)
-            .help("Start voice input (Cmd+M)")
+            Image(systemName: voiceState.isRecording ? "waveform" : "mic.fill")
+                .font(.system(size: 12, weight: .medium))
+                .symbolEffect(.pulse, options: .speed(1.5), isActive: voiceState.isRecording)
+                // Dim explicitly while disabled: `.plain` conveys disabled state
+                // only by desaturating an INHERITED foreground style, and the
+                // explicit color below wins over it — so without this the mic
+                // reads fully live mid-turn while click and ⌘M both no-op.
+                .foregroundColor(engine.busy
+                    ? theme.current.textMuted.opacity(0.4)
+                    : (voiceState.isRecording ? theme.current.danger : theme.current.textMuted))
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .disabled(engine.busy)
         .keyboardShortcut("m", modifiers: .command)
+        .help(voiceState.isRecording ? "Stop voice input (Cmd+M)" : "Start voice input (Cmd+M)")
+        .accessibilityLabel(voiceState.isRecording ? "Recording" : "Start voice input")
     }
 
     /// Voice recording indicator bar — slides in when actively recording.
