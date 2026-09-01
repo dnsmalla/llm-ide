@@ -30,6 +30,26 @@ struct PreferencesSettingsSection: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
 
+                // Extra top padding so the uniform VStack spacing doesn't leave
+                // this heading equidistant between the theme picker above and
+                // its own toggle below — it must read as opening this group.
+                Text("Menu bar")
+                    .font(Typography.captionStrong)
+                    .foregroundStyle(theme.current.textMuted)
+                    .padding(.top, Spacing.xs)
+                Toggle(isOn: $config.menuBarChatEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show menu-bar chat icon")
+                            .font(Typography.body)
+                            .foregroundStyle(theme.current.text)
+                        Text("Shows or hides the chat bubble in the menu bar. Its popover's \"Quit \(L.App.name)\" button closes the whole app — use this to hide just the icon, and to bring it back without restarting.")
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.switch)
+
                 Divider().padding(.vertical, Spacing.xs)
 
                 Text("Preferences (synced)")

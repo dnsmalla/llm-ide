@@ -590,6 +590,20 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(mobileControlAutoStart, forKey: "mobileControlAutoStart") }
     }
 
+    // MARK: - Menu Bar Chat
+
+    /// Show the menu-bar chat icon (`MenuBarExtra`, bound to this via
+    /// `isInserted:` in LlmIdeMacApp). The popover's own Quit button
+    /// terminates the whole app, not just this icon — this toggle is the
+    /// way to hide the icon, and to bring it back, without restarting.
+    /// Safe to turn off: the app is not an accessory (`LSUIElement` is
+    /// false) and Settings lives inside the main window, so the Dock icon
+    /// always leads back here. Defaults true — the icon's old
+    /// unconditional presence before this toggle existed.
+    @Published var menuBarChatEnabled: Bool {
+        didSet { defaults.set(menuBarChatEnabled, forKey: "menuBarChatEnabled") }
+    }
+
     // Default prompt templates for each auto task type. Review tasks are
     // READ-ONLY: they must not modify the repo (the loop reverts any stray
     // edits) — their findings are captured from stdout in the task log.
@@ -817,6 +831,7 @@ final class AppConfig: ObservableObject {
         }
         self.mobileControlEnabled = defaults.object(forKey: "mobileControlEnabled") as? Bool ?? false
         self.mobileControlAutoStart = defaults.object(forKey: "mobileControlAutoStart") as? Bool ?? true
+        self.menuBarChatEnabled = defaults.object(forKey: "menuBarChatEnabled") as? Bool ?? true
         self.autoTaskTemplateReviewCode = defaults.string(forKey: "autoTaskTemplateReviewCode") ?? Self.defaultTemplateReviewCode
         self.autoTaskTemplateReviewDoc = defaults.string(forKey: "autoTaskTemplateReviewDoc") ?? Self.defaultTemplateReviewDoc
         self.autoTaskTemplateReviewConflicts = defaults.string(forKey: "autoTaskTemplateReviewConflicts") ?? Self.defaultTemplateReviewConflicts

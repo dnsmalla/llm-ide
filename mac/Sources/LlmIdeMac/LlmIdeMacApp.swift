@@ -452,7 +452,10 @@ public struct LlmIdeMacApp: App {
         }
 
         // Menu-bar chat — Gemini-style llm-agent surface (same transcript as iPhone).
-        MenuBarExtra {
+        // `isInserted` binds to Settings → menuBarChatEnabled: the popover's own
+        // "Quit" button kills the whole app, so this toggle is the only way to
+        // bring the icon back (or hide it) without a relaunch.
+        MenuBarExtra(isInserted: $config.menuBarChatEnabled) {
             MenuBarChatView(api: api)
                 .environmentObject(theme)
                 .environmentObject(session)
