@@ -528,7 +528,7 @@ extension AutoCodeUpdateService {
     /// review it. Reads disk only — never generates, never blocks.
     func reportKnowledge(projectRoot: String) {
         let key = AutoTask.generateKnowledge.rawValue
-        guard let repo = GraphAutoUpdater.repoToGraph(projectRoot: URL(fileURLWithPath: projectRoot)) else {
+        guard let repo = RepoGraphLocator.repoToGraph(projectRoot: URL(fileURLWithPath: projectRoot)) else {
             logStore.append(.generateKnowledge, "No code to graph in this project yet.")
             taskErrors.removeValue(forKey: key)
             return
