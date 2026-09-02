@@ -23,7 +23,16 @@ struct FeatureProfileSettingsSection: View {
                             registry.applyPreset(newPreset)
                         }
                     )) {
-                        ForEach(ProfilePreset.allCases) { preset in
+                        // A preset whose entire feature set is compiled out
+                        // (e.g. Minimal Code Editor — fileExplorer + terminal —
+                        // in a lite build without either) would zero out the
+                        // active set if applied; FeatureRegistry.applyPreset
+                        // already refuses that, but offering it in the menu is
+                        // still noise, so it's dropped here too. Custom always
+                        // stays — it has no fixed feature set to intersect.
+                        ForEach(ProfilePreset.allCases.filter { preset in
+                            preset == .custom || !preset.features.isDisjoint(with: registry.compiledFeatures)
+                        }) { preset in
                             Text(preset.rawValue).tag(preset)
                         }
                     }
@@ -71,7 +80,13 @@ struct FeatureProfileSettingsSection: View {
                 .pickerStyle(.menu)
                 .padding(.bottom, Spacing.xs)
 
-                let hideable = ShellState.Section.userHideable
+                // Drop rows for a section whose backingFeature isn't compiled
+                // into this build — a hide/show switch for a button that can
+                // never appear (compiled out entirely) is noise, unlike a
+                // merely-disabled feature which the user might re-enable.
+                let hideable = ShellState.Section.userHideable.filter { section in
+                    section.backingFeature.map { registry.compiledFeatures.contains($0) } ?? true
+                }
                 let lastSection = hideable.last
                 ForEach(hideable, id: \.self) { section in
                     menuBarRow(for: section)

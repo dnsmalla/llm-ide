@@ -340,6 +340,21 @@ struct AppShell: View {
             bindLibraryStore()
             seedLocalCodeFolders()
             redirectIfSectionHidden()
+            // Seed the landing section from the resolved Home now that a
+            // project is active — ShellState() itself can't do this at init
+            // (no environment reachable yet), so the .explorer default would
+            // otherwise stick, landing a lite build on a compiled-out
+            // section's "not installed" placeholder instead of Library.
+            // Skip when a deep link that targets a real section is already
+            // pending at this same launch — .onAppear ordering between this
+            // Group and the outer applyDeepLink(deepLink.pendingEvent) call
+            // isn't guaranteed, so this guard (not ordering) is what keeps a
+            // cold-launch deep link from being clobbered by the Home seed.
+            let pendingDeepLinkSection = deepLink.pendingEvent
+                .flatMap { ShellState.Section(deepLinkTabName: $0.tab) }
+            if pendingDeepLinkSection == nil {
+                shell.section = effectiveHome()
+            }
         }
         .onChange(of: config.localCodeFolders)        { _, _ in seedLocalCodeFolders() }
         .onChange(of: config.hiddenSidebarSections)   { _, _ in redirectIfSectionHidden() }
@@ -461,7 +476,8 @@ struct AppShell: View {
     /// landing, falling back to Library if that section is hidden.
     private func effectiveHome() -> ShellState.Section {
         if projectStore.activeProject == nil { return .explorer }
-        return .resolveHome(config.homeSection, hidden: config.hiddenSidebarSections)
+        return .resolveHome(config.homeSection, hidden: config.hiddenSidebarSections,
+                             compiled: registry.compiledFeatures)
     }
 
     @ViewBuilder
@@ -578,9 +594,23 @@ struct AppShell: View {
                     featureName: "File Explorer",
                     isCompiled: registry.compiledFeatures.contains(.fileExplorer))
             }
-        case .search:    SearchView(api: api)
+        case .search:
+            if registry.isEnabled(.fileExplorer) {
+                FeatureCatalog.searchPane(api: api)
+            } else {
+                DisabledFeaturePlaceholderView(
+                    featureName: "Search",
+                    isCompiled: registry.compiledFeatures.contains(.fileExplorer))
+            }
         case .conflicts: ReviewView(api: api, config: .conflicts)
-        case .sourceControl: SourceControlView(api: api)
+        case .sourceControl:
+            if registry.isEnabled(.fileExplorer) {
+                FeatureCatalog.sourceControlPane(api: api)
+            } else {
+                DisabledFeaturePlaceholderView(
+                    featureName: "Source Control",
+                    isCompiled: registry.compiledFeatures.contains(.fileExplorer))
+            }
         case .issues:
             if registry.isEnabled(.ganttIssues) {
                 issuesRoute

@@ -83,11 +83,23 @@ final class FeatureRegistry: ObservableObject {
         }
     }
 
+    /// Apply a preset's feature set, intersected with `compiledFeatures`. A
+    /// preset built for the full app (e.g. Minimal Code Editor = fileExplorer
+    /// + terminal) can name only features a lite build excluded entirely; if
+    /// the intersection is empty, applying it would zero out the active set
+    /// with no module able to start, so this leaves `activeFeatures` (and
+    /// `currentPreset`) untouched instead. Can't happen for the Full Power
+    /// preset, whose feature set is `AppFeature.allCases` — its intersection
+    /// with any non-empty `compiledFeatures` is always non-empty.
     func applyPreset(_ preset: ProfilePreset) {
-        currentPreset = preset
-        if preset != .custom {
-            updateFeatureSet(preset.features, markCustom: false)
+        guard preset != .custom else {
+            currentPreset = preset
+            return
         }
+        let applicable = preset.features.intersection(compiledFeatures)
+        guard !applicable.isEmpty else { return }
+        currentPreset = preset
+        updateFeatureSet(applicable, markCustom: false)
     }
 
     func updateFeatureSet(_ newFeatures: Set<AppFeature>, markCustom: Bool = true) {

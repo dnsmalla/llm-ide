@@ -5,8 +5,8 @@ import SwiftUI
 /// Panel-level state: open/closed and height. Created as `@State` in
 /// `AppShell`, propagated via `.environment()`.
 ///
-/// This type stays in Views/Shell (core, always compiled) because AppShell,
-/// StatusBar, and ExplorerView all reference `isOpen`/`toggle(projectDirectory:)`
+/// This type stays in Views/Shell (core, always compiled) because AppShell
+/// and StatusBar reference `isOpen`/`toggle(projectDirectory:)`
 /// unconditionally, regardless of whether the Terminal feature is selected.
 ///
 /// Session management — the tab list, the active dock tab, and the concrete

@@ -120,6 +120,26 @@ enum FeatureCatalog {
         #endif
     }
 
+    /// Search over the active project's files. Excluded together with the
+    /// Explorer (`file_explorer`) — see Package.swift's `libExcludes`.
+    static func searchPane(api: LlmIdeAPIClient) -> AnyView {
+        #if FEATURE_EXPLORER
+        return AnyView(SearchView(api: api))
+        #else
+        return AnyView(EmptyView())
+        #endif
+    }
+
+    /// Git status / staging / diff view. Excluded together with the Explorer
+    /// (`file_explorer`) — see Package.swift's `libExcludes`.
+    static func sourceControlPane(api: LlmIdeAPIClient) -> AnyView {
+        #if FEATURE_EXPLORER
+        return AnyView(SourceControlView(api: api))
+        #else
+        return AnyView(EmptyView())
+        #endif
+    }
+
     // MARK: - Gantt / Issues
 
     static func issuesPane(api: LlmIdeAPIClient) -> AnyView {

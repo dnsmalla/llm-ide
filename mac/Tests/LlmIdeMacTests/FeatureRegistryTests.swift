@@ -112,6 +112,21 @@ final class FeatureRegistryTests: XCTestCase {
         XCTAssertTrue(registry.isEnabled(.fileExplorer))
     }
 
+    /// Important 4 — a preset built for the full app (Minimal Code Editor =
+    /// fileExplorer + terminal) must not zero out an unrelated lite build's
+    /// active set just because neither of its features is compiled in.
+    func testApplyPresetWithEmptyCompiledIntersectionLeavesActiveFeaturesUnchanged() {
+        let registry = makeRegistry()
+        registry.compiledFeatures = Set(AppFeature.allCases).subtracting([.fileExplorer, .terminal])
+        let before = registry.activeFeatures
+
+        registry.applyPreset(.minimalEditor) // features == exactly [.fileExplorer, .terminal]
+        XCTAssertEqual(registry.activeFeatures, before)
+
+        registry.applyPreset(.fullPower)
+        XCTAssertTrue(registry.isEnabled(.agentChat))
+    }
+
     func testEveryFeatureHasAModuleRegisteredInComposition() {
         // Mirror of the registration list in LlmIdeMacApp.init(). If this
         // fails after adding an AppFeature case, add a module there AND here.

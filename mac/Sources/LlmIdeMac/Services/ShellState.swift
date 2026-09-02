@@ -67,12 +67,22 @@ final class ShellState {
         ]
 
         /// Resolve the effective Home landing: the chosen section if it's a real
-        /// case and not currently hidden, else `.library` (always visible —
-        /// Library isn't in `userHideable`). Pure so the shell and tests share
-        /// one definition of "where Home goes."
-        static func resolveHome(_ rawValue: String, hidden: Set<String>) -> Section {
+        /// case, not currently hidden, and its `backingFeature` (if any) is
+        /// compiled into this build, else `.library` (always visible — Library
+        /// isn't in `userHideable` and carries no `backingFeature`). Pure so the
+        /// shell and tests share one definition of "where Home goes." `compiled`
+        /// is a parameter rather than a `FeatureRegistry.shared` read so this
+        /// stays trivially testable — callers pass
+        /// `FeatureRegistry.shared.compiledFeatures`. Without this check, a
+        /// lite build whose home section names a compiled-out feature (e.g.
+        /// `.explorer` with Explorer excluded) would land on the "not
+        /// installed" placeholder instead of a usable page.
+        static func resolveHome(_ rawValue: String, hidden: Set<String>, compiled: Set<AppFeature>) -> Section {
             guard let chosen = Section(rawValue: rawValue),
                   !hidden.contains(chosen.rawValue) else { return .library }
+            if let feature = chosen.backingFeature, !compiled.contains(feature) {
+                return .library
+            }
             return chosen
         }
     }
@@ -91,6 +101,12 @@ final class ShellState {
         case connector(String)
     }
 
+    /// Pre-seed value only — `ShellState()` is created as `@State` before any
+    /// environment (config, registry) is reachable, so it can't resolve the
+    /// real landing at init time. `AppShell` overwrites this with
+    /// `Section.resolveHome(...)` right after a project becomes active (see
+    /// `existingShellContent`'s `onAppear`), so this default never actually
+    /// renders once a project is open.
     var section: Section = .explorer
     var librarySelection: LibrarySelection?
 

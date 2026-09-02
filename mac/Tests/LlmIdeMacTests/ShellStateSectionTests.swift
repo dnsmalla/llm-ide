@@ -36,10 +36,11 @@ final class ShellStateSectionTests: XCTestCase {
     /// Home falls back to Library when the chosen landing is hidden — so picking
     /// Loop as Home and then hiding it lands somewhere real instead of nowhere.
     func testHomeFallsBackToLibraryWhenLoopIsHiddenAndWasHome() {
+        let allCompiled = Set(AppFeature.allCases)
         XCTAssertEqual(
-            ShellState.Section.resolveHome("loopEngine", hidden: ["loopEngine"]), .library)
+            ShellState.Section.resolveHome("loopEngine", hidden: ["loopEngine"], compiled: allCompiled), .library)
         XCTAssertEqual(
-            ShellState.Section.resolveHome("loopEngine", hidden: []), .loopEngine)
+            ShellState.Section.resolveHome("loopEngine", hidden: [], compiled: allCompiled), .loopEngine)
     }
 
     /// The standalone Regression page is gone; the enum must no longer

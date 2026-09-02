@@ -9,13 +9,21 @@ struct PanelSectionTabs: View {
     @Environment(ShellState.self) private var shell
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var config: AppConfig
+    @ObservedObject private var registry = FeatureRegistry.shared
 
     private static let tabs: [ShellState.Section] = [.explorer, .sourceControl, .search]
 
     /// The panel switcher respects the sidebar hide list, so Explorer / Source
-    /// Control / Search can each be hidden from here too.
+    /// Control / Search can each be hidden from here too. Also drops a tab
+    /// whose `backingFeature` isn't enabled (toggled off, or compiled out) —
+    /// `isEnabled` already intersects compiled + active — so it never offers
+    /// a switch into a section that would just render the "not installed"
+    /// placeholder.
     private var visibleTabs: [ShellState.Section] {
-        Self.tabs.filter { !config.hiddenSidebarSections.contains($0.rawValue) }
+        Self.tabs.filter { section in
+            !config.hiddenSidebarSections.contains(section.rawValue)
+                && (section.backingFeature.map { registry.isEnabled($0) } ?? true)
+        }
     }
 
     var body: some View {

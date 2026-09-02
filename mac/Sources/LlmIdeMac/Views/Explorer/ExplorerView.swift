@@ -40,10 +40,6 @@ struct ExplorerView: View {
     @State private var decorations = GitStatusStore()
     @Environment(\.controlActiveState) private var controlActiveState
 
-    // Bottom terminal dock (shared, rendered at AppShell level) — toggled
-    // from this view's toolbar.
-    @Environment(TerminalPanelState.self) private var terminalState
-
     // Cursor/VSCode-style panel visibility. Tree shows by default; the AI
     // chat panel's open-state is persisted (default open) so the chat reads
     // as the primary surface everywhere — same pattern as Review / Visual /
