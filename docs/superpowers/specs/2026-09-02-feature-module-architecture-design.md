@@ -124,16 +124,23 @@ Thin modules are still created: uniformity is what makes Phase 2 mechanical.
 - A feature compiled out is absent from Settings toggles (the catalog
   reports the compiled set; compiled-out features show as "not installed").
 
-### Extraction order (revised, one shippable slice each)
+### Extraction order (re-revised 2026-09-02 after Phase 2a shipped)
 
-1. **Graph** — weakest inbound coupling; proves the whole mechanism
-   end-to-end (exclude + define + catalog + view factory + re-seamed edges).
-   `FaultReport`/fault memory and generic helpers like `RepoFileWatcher`
-   move to core first: they are consumed by core services and Mobile.
-2. **AutoTask + LoopEngine as ONE excludable unit** (the cycle stays
-   internal to the unit).
-3. **View-only features** (Explorer, Gantt, DocGen, Terminal, Chat views).
-4. **Mobile** — last, because it depends on all of the above; when a
+1. **Graph** (2a, DONE) — proved the mechanism end-to-end.
+2. **View-only features** (2b): Explorer, Gantt & Issues, DocGen, Terminal
+   UI. Moved ahead of AutoTask because it directly serves the product's
+   stated persona (non-engineers drop Explorer/Gantt/Issues/Terminal) and
+   its inbound coupling is small (audited: view construction in AppShell,
+   two feature-owned ViewModels, `TerminalPanelState` promoted to core).
+   Excluding `terminal` also drops the SwiftTerm product.
+3. **Apply & Rebuild (Phase 3, brought forward)** — the one-click rebuild
+   only needs the mechanism plus whatever is excludable so far; features
+   not yet excludable simply stay compiled and keep their Phase 1 runtime
+   stop behavior.
+4. **AutoTask + LoopEngine as ONE excludable unit** — requires seaming
+   `MobileControlManager`'s deep AutoTask/Loop coupling through core
+   protocols; the cycle stays internal to the unit.
+5. **Mobile** — last, because it depends on everything above; when a
    feature it needs is compiled out, the mobile surface for it degrades
    per capability flags.
 
