@@ -380,37 +380,46 @@ final class FeatureRebuildService: ObservableObject {
 
 /// Buffers undecoded bytes across `FileHandle.readabilityHandler` callbacks
 /// so a chunk boundary that lands mid-line — or mid-UTF-8-character — never
-/// produces a dropped or garbled line. Not thread-safe by design: each
-/// instance is fed only from one pipe's readability callbacks, which GCD
-/// serializes against themselves, plus one final synchronous call at drain
-/// time after that pipe's handler has been nil'd out.
+/// produces a dropped or garbled line. Thread-safe via a private serial
+/// `DispatchQueue`: setting `readabilityHandler = nil` cancels the dispatch
+/// source but is NOT a barrier against an already-in-flight invocation of
+/// the handler, so the drain-time `feed`/`flush` calls (made from the
+/// detached rebuild `Task`) can race a handler callback still running on
+/// its own GCD queue. Funneling both `feed` and `flush` through
+/// `queue.sync` serializes every access to `residual` regardless of which
+/// thread calls in, making that race impossible rather than merely unlikely.
 private final class LineSplitter {
+    private let queue = DispatchQueue(label: "com.llmide.macapp.linesplitter")
     private var residual = Data()
 
     /// Appends `data`, then returns every complete line (split on the
     /// newline BYTE, 0x0A, not a decoded `\n`) found so far. Undecoded bytes
     /// after the last newline stay buffered for the next call.
     func feed(_ data: Data) -> [String] {
-        guard !data.isEmpty else { return [] }
-        residual.append(data)
-        var lines: [String] = []
-        while let newlineIndex = residual.firstIndex(of: 0x0A) {
-            let lineData = residual[residual.startIndex..<newlineIndex]
-            if let text = String(data: lineData, encoding: .utf8) {
-                lines.append(text)
+        queue.sync {
+            guard !data.isEmpty else { return [] }
+            residual.append(data)
+            var lines: [String] = []
+            while let newlineIndex = residual.firstIndex(of: 0x0A) {
+                let lineData = residual[residual.startIndex..<newlineIndex]
+                if let text = String(data: lineData, encoding: .utf8) {
+                    lines.append(text)
+                }
+                residual.removeSubrange(residual.startIndex...newlineIndex)
             }
-            residual.removeSubrange(residual.startIndex...newlineIndex)
+            return lines
         }
-        return lines
     }
 
     /// Flushes any trailing bytes with no terminating newline — call once,
     /// only when no more data is coming (the process has exited and the
     /// pipe has been fully drained).
     func flush() -> [String] {
-        guard !residual.isEmpty else { return [] }
-        defer { residual.removeAll() }
-        guard let text = String(data: residual, encoding: .utf8) else { return [] }
-        return [text]
+        queue.sync {
+            guard !residual.isEmpty else { return [] }
+            defer { residual.removeAll() }
+            guard let text = String(data: residual, encoding: .utf8) else { return [] }
+            return [text]
+        }
     }
 }
