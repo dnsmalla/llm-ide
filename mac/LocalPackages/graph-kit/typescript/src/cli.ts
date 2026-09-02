@@ -31,9 +31,18 @@ function cmdMemory(args: string[]): void {
   if (!dir || dir.startsWith("--")) fail("usage: graph-kit memory <dir> [--out f] [--index f]");
   const result = generateFromDir(dir);
   const doc = toDocument(result.graph);
+  // Emit the chunks and the doc count alongside the canonical document.
+  //
+  // They were computed and then dropped, so a consumer got the graph but no
+  // chunk bodies — and doc→code cross-linking needs the chunks (it resolves
+  // inline code mentions inside chunk bodies), as does any UI that shows a
+  // section's text. The extra keys are additive: a reader that only knows the
+  // canonical graph schema ignores them.
+  const payload = { ...doc, chunks: result.chunks, docCount: result.docCount };
+  const json = JSON.stringify(payload, null, 2) + "\n";
   const outPath = optValue(args, "--out");
-  if (outPath) writeFileSync(outPath, serializeDocument(doc));
-  else process.stdout.write(serializeDocument(doc));
+  if (outPath) writeFileSync(outPath, json);
+  else process.stdout.write(json);
   const indexPath = optValue(args, "--index");
   if (indexPath) writeFileSync(indexPath, generateIndex(result.graph, { title: "Memory Index" }));
   process.stderr.write(
