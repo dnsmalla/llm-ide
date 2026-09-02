@@ -43,7 +43,11 @@ fi
 
 if [ "${LLMIDE_SKIP_KILL:-0}" != "1" ]; then
   echo -e "${BLUE}[build]${NC} stopping any running $APP_NAME..."
-  pkill -9 -f "$APP_NAME" 2>/dev/null || true
+  # Match the running binary's full path, not just the app name — a bare
+  # "-f $APP_NAME" pattern also matches other processes whose argv merely
+  # mentions the name (rebuild-swap.sh's own argv, this swift build
+  # invocation's --product flag), killing things it shouldn't.
+  pkill -9 -f "LlmIdeMac.app/Contents/MacOS/LlmIdeMac" 2>/dev/null || true
 else
   echo -e "${BLUE}[build]${NC} LLMIDE_SKIP_KILL=1 — leaving any running $APP_NAME alone"
 fi

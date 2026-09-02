@@ -1,19 +1,19 @@
 #!/bin/bash
 # ============================================
 # Feature-selected rebuild into a staging directory. Safe to run while
-# the app is running: nothing outside --stage-dir is touched. The swap
-# into place is rebuild-swap.sh's job (spawned by the app on success).
-# Usage: rebuild-features.sh --features <csv> --stage-dir <dir> [--stage-only]
+# the app is running: nothing outside --stage-dir is touched. Staging is
+# the ONLY mode this script has — the swap into place is always
+# rebuild-swap.sh's job (spawned by the app itself on success), never this
+# script's.
+# Usage: rebuild-features.sh --features <csv> --stage-dir <dir>
 # ============================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJ_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-FEATURES="" ; STAGE_DIR="" ; STAGE_ONLY=0
+FEATURES="" ; STAGE_DIR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --features) FEATURES="$2"; shift 2 ;;
     --stage-dir) STAGE_DIR="$2"; shift 2 ;;
-    --stage-only) STAGE_ONLY=1; shift ;;
     *) echo "[rebuild] unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -25,5 +25,4 @@ LLMIDE_FEATURES="$FEATURES" LLMIDE_APP_DIR="$APP_DIR" LLMIDE_SKIP_KILL=1 "$SCRIP
 echo "[rebuild] signing staged bundle"
 LLMIDE_APP_DIR="$APP_DIR" "$SCRIPT_DIR/sign.sh"
 echo "[rebuild] staged OK: $APP_DIR"
-# --stage-only stops here; the app spawns rebuild-swap.sh itself.
 exit 0

@@ -4,6 +4,7 @@
 # Build artifacts
 .build/
 LlmIdeMac.app/
+LlmIdeMac.app.bak/
 *.dmg
 dmg_temp/
 

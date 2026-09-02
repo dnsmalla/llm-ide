@@ -236,9 +236,10 @@ struct BuildRebuildSettingsCard: View {
                 let compiled = rebuild.compiledSet
                 statusRow("Compiled into this binary",
                           compiled.map(\.displayName).sorted().joined(separator: ", "))
+                statusRow("Built with", rebuild.builtFeaturesRaw ?? "all")
 
                 if FeatureRebuildService.hasDrift(compiled: compiled, active: FeatureRegistry.shared.activeFeatures) {
-                    SettingsHint("Disabled features are still compiled into this binary.")
+                    SettingsHint("This binary's compiled feature set differs from your current selection — rebuild to apply.")
                 }
 
                 Divider().padding(.vertical, Spacing.xs)
@@ -252,8 +253,16 @@ struct BuildRebuildSettingsCard: View {
         ) {
             Button("Apply & Rebuild") { rebuild.startRebuild() }
         } message: {
-            Text("This rebuilds \(L.App.name) from source with the enabled feature set above, then replaces the running app and relaunches it. The previous version is kept as a .bak file for rollback.")
+            Text(confirmationMessage)
         }
+    }
+
+    private var confirmationMessage: String {
+        var message = "This rebuilds \(L.App.name) from source with the enabled feature set above, then replaces the running app and relaunches it. The previous version is kept as a .bak file for rollback."
+        if !rebuild.hasStableSignIdentity {
+            message += " Ad-hoc signing changes the app's code identity — macOS will re-prompt for keychain access and you may need to sign in again; run Scripts/make-dev-cert.sh once to avoid this."
+        }
+        return message
     }
 
     @ViewBuilder

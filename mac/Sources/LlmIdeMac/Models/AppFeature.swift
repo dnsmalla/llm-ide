@@ -54,6 +54,16 @@ public enum AppFeature: String, CaseIterable, Codable, Identifiable {
         $0 != .mobileSync
     }
 
+    /// Features whose build-time inclusion is switchable at all — every
+    /// other feature is always compiled in. NOTE: `mac/Package.swift`'s
+    /// `includedFeatures` key list (the env-gated `LLMIDE_FEATURES` set)
+    /// must mirror this set — it is the single source of truth for which
+    /// features `FeatureRebuildService` can ever detect drift on or stage a
+    /// smaller rebuild for.
+    public static let buildTimeExcludable: Set<AppFeature> = [
+        .codeGraph3D, .fileExplorer, .ganttIssues, .docGen, .terminal,
+    ]
+
     /// Drop features whose dependencies are not satisfied (e.g. disabling File
     /// Explorer also disables Code Graph, Gantt, and DocGen).
     static func validated(_ features: Set<AppFeature>) -> Set<AppFeature> {
