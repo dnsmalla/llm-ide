@@ -50,12 +50,13 @@ build-mac: ## Build the full mac app
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build
 
 # LLMIDE_FEATURES lists the INCLUDED features by AppFeature rawValue; this
-# selection excludes Graph (code_graph_3d), the only excludable feature so
-# far. --manifest-cache none is required: SwiftPM does not key its manifest
-# cache on env vars, so a stale cache would silently keep the previous
-# selection's target graph.
-build-mac-lite: ## Build the mac app without excludable features (currently: Graph)
-	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=file_explorer,agent_chat,gantt_issues,terminal,doc_gen,mobile_sync,auto_tasks swift build --manifest-cache none
+# selection excludes every excludable feature (code_graph_3d, file_explorer,
+# gantt_issues, doc_gen, terminal), keeping only the three that have no
+# source-exclusion switch. --manifest-cache none is required: SwiftPM does
+# not key its manifest cache on env vars, so a stale cache would silently
+# keep the previous selection's target graph.
+build-mac-lite: ## non-engineer build: no Explorer/Gantt/DocGen/Terminal/Graph
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat,auto_tasks,mobile_sync swift build --manifest-cache none
 
 test-mac:
 	cd mac && swift build --product LlmIdeMac

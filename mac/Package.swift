@@ -8,12 +8,25 @@ import PackageDescription
 // their defines omitted, so FeatureCatalog compiles the inert branches.
 // SwiftPM does not key its manifest cache on env vars — selection changes
 // must build with `--manifest-cache none` (the Makefile targets do).
+//
+// NOTE: the dependency closure over `AppFeature.requiredDependencies` (e.g.
+// disabling `file_explorer` also disables `code_graph_3d`/`gantt_issues`/
+// `doc_gen`) is NOT applied here — this manifest trusts whatever set it is
+// given. Callers (the Phase 3 selection script, Makefile targets) are
+// responsible for passing an already-validated set, e.g. via
+// `AppFeature.validated(_:)`.
 let envFeatures = ProcessInfo.processInfo.environment["LLMIDE_FEATURES"]
 let includedFeatures: Set<String> = envFeatures.map {
     Set($0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
-} ?? ["code_graph_3d"]   // unset → everything (list each excludable key here)
+} ?? [   // unset → everything (list each excludable key here)
+    "code_graph_3d", "file_explorer", "gantt_issues", "doc_gen", "terminal",
+]
 
 let graphIncluded = includedFeatures.contains("code_graph_3d")
+let explorerIncluded = includedFeatures.contains("file_explorer")
+let ganttIncluded = includedFeatures.contains("gantt_issues")
+let docGenIncluded = includedFeatures.contains("doc_gen")
+let terminalIncluded = includedFeatures.contains("terminal")
 
 var libExcludes: [String] = []
 var testExcludes: [String] = ["README-truncated-tests.md"]
@@ -31,6 +44,27 @@ if graphIncluded {
         "GraphModuleTests.swift",
     ])
 }
+if explorerIncluded {
+    featureDefines.append(.define("FEATURE_EXPLORER"))
+} else {
+    libExcludes.append("Views/Explorer")
+}
+if ganttIncluded {
+    featureDefines.append(.define("FEATURE_GANTT"))
+} else {
+    libExcludes.append(contentsOf: ["Views/Gantt", "Views/Issues"])
+    testExcludes.append("GanttViewModelProviderParityTests.swift")
+}
+if docGenIncluded {
+    featureDefines.append(.define("FEATURE_DOCGEN"))
+} else {
+    libExcludes.append("Views/DocGen")
+}
+if terminalIncluded {
+    featureDefines.append(.define("FEATURE_TERMINAL"))
+} else {
+    libExcludes.append("Views/Terminal")
+}
 
 // GraphCore/GraphKit are only imported from within Sources/LlmIdeMac/Graph/
 // (verified in Task 1 Step 1: Services/Memory has zero GraphCore imports, and
@@ -41,9 +75,11 @@ if graphIncluded {
 var libDependencies: [Target.Dependency] = [
     "Yams",
     .product(name: "Sparkle", package: "Sparkle"),
-    .product(name: "SwiftTerm", package: "SwiftTerm"),
     .product(name: "SharedProtocol", package: "SharedProtocol"),
 ]
+if terminalIncluded {
+    libDependencies.append(.product(name: "SwiftTerm", package: "SwiftTerm"))
+}
 if graphIncluded {
     libDependencies.append(.product(name: "GraphCore", package: "graph-kit"))
     libDependencies.append(.product(name: "GraphKit", package: "graph-kit"))   // UNPLUG: remove
@@ -102,14 +138,6 @@ let package = Package(
                 // builtin engine in and then failed at link time instead of
                 // degrading cleanly.
                 .define("GRAPHKIT_BUILTIN"),   // UNPLUG: remove
-                // TEMP(Phase2b-Task3): replaced by env-driven selection
-                .define("FEATURE_EXPLORER"),
-                // TEMP(Phase2b-Task3): replaced by env-driven selection
-                .define("FEATURE_GANTT"),
-                // TEMP(Phase2b-Task3): replaced by env-driven selection
-                .define("FEATURE_DOCGEN"),
-                // TEMP(Phase2b-Task3): replaced by env-driven selection
-                .define("FEATURE_TERMINAL"),
             ] + featureDefines,
             linkerSettings: [
                 .linkedLibrary("sqlite3")

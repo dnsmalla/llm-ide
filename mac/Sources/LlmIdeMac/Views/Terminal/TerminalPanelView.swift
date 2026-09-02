@@ -126,14 +126,3 @@ struct TerminalPanelView: View {
             )
     }
 }
-
-// MARK: - Window Height Preference Key
-
-/// Lets AppShell broadcast its height down to TerminalPanelView without
-/// polluting TerminalPanelView's own layout.
-struct WindowHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
