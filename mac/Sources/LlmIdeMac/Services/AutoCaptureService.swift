@@ -24,6 +24,10 @@ final class AutoCaptureService {
     }
 
     func start() {
+        // Idempotent like every FeatureService: a second start() must not
+        // register a duplicate observer pair.
+        guard observers.isEmpty else { return }
+
         let nc = NSWorkspace.shared.notificationCenter
 
         // App activated — may need to start capture.
