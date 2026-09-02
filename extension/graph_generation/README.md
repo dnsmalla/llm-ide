@@ -14,18 +14,19 @@ How LLM-IDE gets its graphs, and how to supply a different engine.
 
 | レイヤ | 場所 | 着脱 |
 |---|---|---|
-| 正規モデル + JSON 契約 | `mac/LocalPackages/graph-core/Sources/GraphCore/Model/` | 常在 |
-| レイアウトエンジン | `mac/LocalPackages/graph-core/Sources/GraphCore/Layout/` | 常在 |
-| 描画（Canvas / 3D / パレット） | `mac/Sources/LlmIdeMac/Views/CodeGraph/` | 常在 |
-| エンジン境界 | `mac/Sources/LlmIdeMac/GraphGeneration/` | 常在 |
+| 正規モデル + JSON 契約 + 成果物レンダリング | `mac/LocalPackages/graph-kit/Sources/GraphCore/Model/` | 常在 |
+| レイアウトエンジン | `mac/LocalPackages/graph-kit/Sources/GraphCore/Layout/` | 常在 |
+| 描画（Canvas / 3D / パレット） | `mac/Sources/LlmIdeMac/Graph/Views/` | 常在 |
+| エンジン境界 | `mac/Sources/LlmIdeMac/Graph/Engine/` | 常在 |
+| merge / InfiniteBrain 生成 | `mac/LocalPackages/graph-kit/Sources/GraphKit/` | **着脱可** |
 | **生成器（スキャナ・抽出器）** | `mac/LocalPackages/graph-kit/` | **着脱可** |
 
-レイアウトを `graph-core` に置いているのが要点です。エンジン側に置くと、外した瞬間に
+レイアウトを常在の `GraphCore` プロダクトに置いているのが要点です。エンジン側に置くと、外した瞬間に
 Graph ビューが真っ白になり「不要なら外す」が成立しません。
 
 ## 契約
 
-アプリが期待するのは、`mac/Sources/LlmIdeMac/GraphGeneration/GraphEngine.swift` の
+アプリが期待するのは、`mac/Sources/LlmIdeMac/Graph/Engine/GraphEngine.swift` の
 `GraphEngine` プロトコルだけです。
 
 ```swift
@@ -116,11 +117,13 @@ skills やドキュメントを届ける用途には使えますが、生成は�
 
 ## コンパイル時エンジンを外す
 
-`mac/Package.swift` の3箇所をコメントアウトします（すべて `// UNPLUG:` 印付き）。
+`mac/Package.swift` の2箇所をコメントアウトします（`// UNPLUG:` 印付き）。
 
-1. `.package(path: "LocalPackages/graph-kit")`
-2. `.product(name: "GraphKit", package: "graph-kit")`
-3. `.define("GRAPHKIT_BUILTIN")`
+1. `.product(name: "GraphKit", package: "graph-kit")`
+2. `.define("GRAPHKIT_BUILTIN")`
+
+`.package(path: "LocalPackages/graph-kit")` の行は**残します** — 常在の
+`GraphCore` プロダクト（モデル + レイアウト）がこのパッケージから来るためです。
 
 `#if canImport(GraphKit)` ではなく明示的な define を使っています。`canImport` は
 `.build` に残った古いモジュールに対しても真を返すため、ビルトインエンジンを

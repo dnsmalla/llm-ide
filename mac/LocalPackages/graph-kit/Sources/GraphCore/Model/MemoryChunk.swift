@@ -28,8 +28,9 @@ public struct MemoryChunk: Identifiable, Sendable, Hashable, Codable {
     /// Frontmatter `graph-only: true` — consumers keep this doc out of agent
     /// memory artifacts while still graphing it.
     public let graphOnly: Bool
-    /// Frontmatter `related-modules:` — declared code-module affinity, case
-    /// preserved because these are paths.
+    /// Frontmatter `related-modules:` — declared code-module affinity. Case is
+    /// preserved for display, but consumers MATCH case-insensitively (mirroring
+    /// the code inventory, and APFS's default case-insensitivity).
     public let relatedModules: [String]
 
     public init(id: String, docURL: URL, docTitle: String, headingPath: [String],

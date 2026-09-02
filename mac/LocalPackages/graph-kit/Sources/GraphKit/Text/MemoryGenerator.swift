@@ -28,6 +28,52 @@ public enum MemoryGenerator {
         return generate(docs: docs)
     }
 
+    /// Walk several roots and union the results.
+    ///
+    /// Every part of the union is deduplicated, not just nodes. The first
+    /// version deduped nodes only, so passing the same root twice — or two
+    /// overlapping roots, a parent directory and its child — kept the node set
+    /// correct while silently doubling every `.contains` edge (double spring
+    /// weight, doubled degree and PageRank), every `MemoryChunk` record, and
+    /// the reported `docCount`. Roots are deduped by standardised path first;
+    /// edges and chunks are deduped by key as the backstop for the overlap
+    /// case, where the walks genuinely revisit the same documents.
+    public static func generate(roots: [URL]) -> GeneratedMemory {
+        var nodes: [CGNode] = []
+        var edges: [CGEdge] = []
+        var chunks: [MemoryChunk] = []
+        var docCount = 0
+        var seenNodes = Set<String>()
+        var seenEdges = Set<String>()
+        var seenChunks = Set<String>()
+        var seenRoots = Set<String>()
+        let fm = FileManager.default
+        for root in roots {
+            guard seenRoots.insert(root.standardizedFileURL.path).inserted else { continue }
+            var isDirectory: ObjCBool = false
+            guard fm.fileExists(atPath: root.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { continue }
+            let memory = generate(from: root)
+            var newDocs = 0
+            for node in memory.graph.nodes where seenNodes.insert(node.id).inserted {
+                nodes.append(node)
+                if node.kind == .memoryDoc { newDocs += 1 }
+            }
+            for edge in memory.graph.edges {
+                let key = "\(edge.fromId)\u{1}\(edge.toId)\u{1}\(edge.kind.rawValue)"
+                if seenEdges.insert(key).inserted { edges.append(edge) }
+            }
+            for chunk in memory.chunks where seenChunks.insert(chunk.id).inserted {
+                chunks.append(chunk)
+            }
+            // Count only documents this root newly contributed, so overlapping
+            // roots do not inflate the total.
+            docCount += newDocs
+        }
+        return GeneratedMemory(graph: CGData(nodes: nodes, edges: edges),
+                               chunks: chunks, docCount: docCount)
+    }
+
     /// Convenience: walk a folder and build a memory graph.
     /// File-system traversal is bounded; binary/large files are skipped.
     public static func generate(from root: URL,
@@ -92,11 +138,13 @@ public enum MemoryGenerator {
         //      that aren't yet wiki-linked but still co-reference.
         let chunksByLowerTitle = Dictionary(grouping: allChunks) { $0.title.lowercased() }
         var emittedEdgeKeys = Set<String>()   // "from→to:kind", de-dupes
-        func emit(from: String, to: String, kind: CGEdgeKind) {
+        func emit(from: String, to: String, kind: CGEdgeKind,
+                  confidence: CGEdgeConfidence = .extracted) {
             let key = "\(from)→\(to):\(kind.rawValue)"
             guard !emittedEdgeKeys.contains(key), from != to else { return }
             emittedEdgeKeys.insert(key)
-            edges.append(CGEdge(fromId: from, toId: to, kind: kind))
+            edges.append(CGEdge(fromId: from, toId: to, kind: kind,
+                                confidence: confidence))
         }
 
         // (1) Wiki-links
@@ -129,7 +177,8 @@ public enum MemoryGenerator {
             let head = Array(ids.prefix(tagCap))
             for i in 0..<head.count {
                 for j in (i+1)..<head.count {
-                    emit(from: head[i], to: head[j], kind: .relatedTo)
+                    emit(from: head[i], to: head[j], kind: .relatedTo,
+                         confidence: .inferred)
                 }
             }
         }
@@ -167,7 +216,8 @@ public enum MemoryGenerator {
                 guard let candidates = titlesByFirstWord[word] else { continue }
                 for cand in candidates where cand.id != chunk.id {
                     if Self.containsWholeWord(body, needle: cand.needle) {
-                        emit(from: chunk.id, to: cand.id, kind: .relatedTo)
+                        emit(from: chunk.id, to: cand.id, kind: .relatedTo,
+                             confidence: .ambiguous)
                     }
                 }
             }

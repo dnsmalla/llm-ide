@@ -115,12 +115,22 @@ llm-ide/
 │   └── server.mjs       # Server entry point
 ├── mac/                 # Native macOS app
 │   ├── LocalPackages/
-│   │   ├── graph-core/  # ALWAYS PRESENT: canonical graph model + JSON contract +
-│   │   │                #   layout engine (Layout/) + graph-layout-lab verification gate
-│   │   └── graph-kit/   # PLUGGABLE: the graph producers (scanners, extractors,
-│   │                    #   MemoryGenerator) + the TypeScript CLI
+│   │   └── graph-kit/   # THE graph repo — one folder, two products:
+│   │       ├── Sources/GraphCore/   # ALWAYS LINKED: canonical model + JSON contract
+│   │       │                        #   + layout (2D/3D) + memory-artifact rendering
+│   │       ├── Sources/GraphKit/    # PLUGGABLE ENGINE: scanners, extractors,
+│   │       │                        #   MemoryGenerator (InfiniteBrain), GraphMerger
+│   │       ├── Sources/Graph*Lab/   # graph-layout-lab + graph-engine-lab gates
+│   │       ├── typescript/          # TS implementation + CLI (plugin runtime)
+│   │       ├── schema/              # canonical JSON schema + conformance fixtures
+│   │       └── graph-engine.json    # plugin manifest
 │   ├── Sources/LlmIdeMac/
-│   │   ├── GraphGeneration/ # Engine boundary (GraphEngine protocol, builtin + plugin impls)
+│   │   ├── Graph/       # ALL app-side graph code, one folder:
+│   │   │   ├── Engine/  #   GraphEngine protocol + builtin/plugin impls
+│   │   │   ├── Services/#   KnowledgeGraphService, GraphAutoUpdater, upload, watcher
+│   │   │   ├── Notes/   #   Code-notes writer (CodeNoteService/Generator, Analyze)
+│   │   │   ├── Memory/  #   faults/ + q&a/ store, fault reports
+│   │   │   └── Views/   #   UAGraphView, canvas, 3D view, palette, session store
 │   │   ├── Models/      # Data models
 │   │   ├── Services/    # Long-lived work (*Service, *Store, *Client, *Manager, *Router)
 │   │   ├── Views/       # SwiftUI views
@@ -307,8 +317,8 @@ ios_app/MyApp/Services/
 - **Server internals** — `extension/server.mjs` → follow router into `extension/routes/router.mjs`
 - **Claude linker** — [`docs/explanation/claude-linker.md`](docs/explanation/claude-linker.md): the two layers (`extension/llm_agent/sdk/` + `extension/providers/`, `mac/…/ClaudeLink/`) that own ALL Claude SDK/CLI knowledge; SDK updates edit only these
 - **KB operations** — `extension/kb/db.mjs` (every state-mutating helper takes `userId` first)
-- **Graph generation** — [`extension/graph_generation/README.md`](extension/graph_generation/README.md): the engine contract, how a plugin supplies one, and how to unplug the compiled-in engine. Producers live in `mac/LocalPackages/graph-kit/`; the model + layout that must never be unplugged live in `mac/LocalPackages/graph-core/`
-- **Graph layout** — `mac/LocalPackages/graph-core/Sources/GraphCore/Layout/GraphLayoutEngine.swift` is the single entry point. Verify any change with `cd mac/LocalPackages/graph-core && swift run -c release graph-layout-lab --compare` (this toolchain has no XCTest, so the gate is an executable). **Never prune edges to make a dense graph legible** — weight them (`EdgeWeight`) and filter at render; the previous `capDegree(6)` deleted 82–100% of dependency edges
+- **Graph generation** — [`extension/graph_generation/README.md`](extension/graph_generation/README.md): the engine contract, how a plugin supplies one, and how to unplug the compiled-in engine. Everything graph lives in `mac/LocalPackages/graph-kit/` (one folder, two products: `GraphCore` always linked, `GraphKit` unpluggable) and `mac/Sources/LlmIdeMac/Graph/` (app side)
+- **Graph layout** — `mac/LocalPackages/graph-kit/Sources/GraphCore/Layout/GraphLayoutEngine.swift` is the single entry point. Verify any change with `cd mac/LocalPackages/graph-kit && swift run -c release graph-layout-lab --compare` (this toolchain has no XCTest, so the gate is an executable). **Never prune edges to make a dense graph legible** — weight them (`EdgeWeight`) and filter at render; the previous `capDegree(6)` deleted 82–100% of dependency edges
 - **Caption capture** — `extension/src/content/caption-scraper.ts` → `extension/src/sidepanel/hooks/useTranscript.ts`
 - **Central skills kit** — `.skills/` submodule + `docs/how-to/install-central-skills.md`
 - **Agent-loop tool defs** — `extension/llm_agent/{global,internal/skills}/` (mirrors of central)
