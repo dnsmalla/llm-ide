@@ -104,7 +104,7 @@ struct ExplorerView: View {
                                 .transition(.move(edge: .trailing))
                         }
                     }
-                    TerminalPanelView(projectDirectory: projectDirectory)
+                    FeatureCatalog.terminalPanel(projectDirectory: projectDirectory)
                 }
             }
         // Reset all per-project state when the active project changes, so the

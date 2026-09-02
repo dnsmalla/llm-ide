@@ -14,6 +14,18 @@ enum FeatureCatalog {
         #if !FEATURE_GRAPH
         set.remove(.codeGraph3D)
         #endif
+        #if !FEATURE_EXPLORER
+        set.remove(.fileExplorer)
+        #endif
+        #if !FEATURE_GANTT
+        set.remove(.ganttIssues)
+        #endif
+        #if !FEATURE_DOCGEN
+        set.remove(.docGen)
+        #endif
+        #if !FEATURE_TERMINAL
+        set.remove(.terminal)
+        #endif
         return set
     }
 
@@ -93,6 +105,58 @@ enum FeatureCatalog {
     static func invalidateGraphEngineCache() {
         #if FEATURE_GRAPH
         GraphEngines.invalidate()
+        #endif
+    }
+
+    // MARK: - Explorer
+
+    /// Project file browser. No module-owned services — construction happens
+    /// per-render, same as AppShell did before this seam existed.
+    static func explorerPane(api: LlmIdeAPIClient) -> AnyView {
+        #if FEATURE_EXPLORER
+        return AnyView(ExplorerView(api: api))
+        #else
+        return AnyView(EmptyView())
+        #endif
+    }
+
+    // MARK: - Gantt / Issues
+
+    static func issuesPane(api: LlmIdeAPIClient) -> AnyView {
+        #if FEATURE_GANTT
+        return AnyView(RepoIssuesView(api: api))
+        #else
+        return AnyView(EmptyView())
+        #endif
+    }
+
+    static func ganttPane(api: LlmIdeAPIClient) -> AnyView {
+        #if FEATURE_GANTT
+        return AnyView(GanttContainerView(api: api))
+        #else
+        return AnyView(EmptyView())
+        #endif
+    }
+
+    // MARK: - Doc Gen
+
+    static func docGenPane(api: LlmIdeAPIClient) -> AnyView {
+        #if FEATURE_DOCGEN
+        return AnyView(DocGenView(api: api))
+        #else
+        return AnyView(EmptyView())
+        #endif
+    }
+
+    // MARK: - Terminal
+
+    /// Used by both AppShell call sites (the shared bottom dock) and
+    /// ExplorerView (its embedded editor-column dock).
+    static func terminalPanel(projectDirectory: URL) -> AnyView {
+        #if FEATURE_TERMINAL
+        return AnyView(TerminalPanelView(projectDirectory: projectDirectory))
+        #else
+        return AnyView(EmptyView())
         #endif
     }
 }

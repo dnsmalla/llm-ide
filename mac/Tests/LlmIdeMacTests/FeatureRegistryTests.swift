@@ -102,6 +102,16 @@ final class FeatureRegistryTests: XCTestCase {
         XCTAssertEqual(graph.startCount, 0)
     }
 
+    func testCompiledOutViewFeatureIsHiddenFromEnabledSet() {
+        let registry = makeRegistry()
+        registry.compiledFeatures = Set(AppFeature.allCases)
+            .subtracting([.terminal, .ganttIssues])
+        registry.updateFeatureSet(Set(AppFeature.allCases), markCustom: false)
+        XCTAssertFalse(registry.isEnabled(.terminal))
+        XCTAssertFalse(registry.isEnabled(.ganttIssues))
+        XCTAssertTrue(registry.isEnabled(.fileExplorer))
+    }
+
     func testEveryFeatureHasAModuleRegisteredInComposition() {
         // Mirror of the registration list in LlmIdeMacApp.init(). If this
         // fails after adding an AppFeature case, add a module there AND here.

@@ -102,6 +102,14 @@ let package = Package(
                 // builtin engine in and then failed at link time instead of
                 // degrading cleanly.
                 .define("GRAPHKIT_BUILTIN"),   // UNPLUG: remove
+                // TEMP(Phase2b-Task3): replaced by env-driven selection
+                .define("FEATURE_EXPLORER"),
+                // TEMP(Phase2b-Task3): replaced by env-driven selection
+                .define("FEATURE_GANTT"),
+                // TEMP(Phase2b-Task3): replaced by env-driven selection
+                .define("FEATURE_DOCGEN"),
+                // TEMP(Phase2b-Task3): replaced by env-driven selection
+                .define("FEATURE_TERMINAL"),
             ] + featureDefines,
             linkerSettings: [
                 .linkedLibrary("sqlite3")

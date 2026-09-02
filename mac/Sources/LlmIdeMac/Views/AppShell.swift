@@ -435,36 +435,14 @@ struct AppShell: View {
     private var toolSections: [ShellState.Section] {
         Self.toolOrder.filter { section in
             if section == .live { return liveActive }
-            
-            // Map ShellState section to AppFeature
-            switch section {
-            case .codeGraph:  if !registry.isEnabled(.codeGraph3D) { return false }
-            case .autoCode:    if !registry.isEnabled(.autoTasks)   { return false }
-            case .issues, .gantt: if !registry.isEnabled(.ganttIssues) { return false }
-            case .docGen:      if !registry.isEnabled(.docGen)      { return false }
-            case .explorer:    if !registry.isEnabled(.fileExplorer) { return false }
-            default: break
-            }
-            
+            if let feature = section.backingFeature, !registry.isEnabled(feature) { return false }
             return !config.hiddenSidebarSections.contains(section.rawValue)
-        }
-    }
-
-    /// Maps a shell section to the feature flag that gates it, if any.
-    private func featureForSection(_ section: ShellState.Section) -> AppFeature? {
-        switch section {
-        case .codeGraph: return .codeGraph3D
-        case .autoCode: return .autoTasks
-        case .issues, .gantt: return .ganttIssues
-        case .docGen: return .docGen
-        case .explorer, .sourceControl, .search: return .fileExplorer
-        default: return nil
         }
     }
 
     /// If the user disables the feature for the current section, navigate away.
     private func reconcileSectionAfterFeatureChange() {
-        guard let feature = featureForSection(shell.section),
+        guard let feature = shell.section.backingFeature,
               !registry.isEnabled(feature) else { return }
         // Library is always available and not feature-gated.
         shell.section = .library
@@ -546,7 +524,7 @@ struct AppShell: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if registry.isEnabled(.terminal) {
-                    TerminalPanelView(projectDirectory: projectDirectory)
+                    FeatureCatalog.terminalPanel(projectDirectory: projectDirectory)
                 }
             }
         } else {
@@ -557,7 +535,7 @@ struct AppShell: View {
                 // of the file tree), so skip the shared full-width dock there.
                 // Every other section gets the dock here, spanning the section.
                 if shell.section != .explorer && registry.isEnabled(.terminal) {
-                    TerminalPanelView(projectDirectory: projectDirectory)
+                    FeatureCatalog.terminalPanel(projectDirectory: projectDirectory)
                 }
             }
         }
@@ -586,9 +564,11 @@ struct AppShell: View {
         case .live:      TranscriptView(api: api)
         case .explorer:
             if registry.isEnabled(.fileExplorer) {
-                ExplorerView(api: api)
+                FeatureCatalog.explorerPane(api: api)
             } else {
-                DisabledFeaturePlaceholderView(featureName: "File Explorer")
+                DisabledFeaturePlaceholderView(
+                    featureName: "File Explorer",
+                    isCompiled: registry.compiledFeatures.contains(.fileExplorer))
             }
         case .search:    SearchView(api: api)
         case .conflicts: ReviewView(api: api, config: .conflicts)
@@ -597,20 +577,26 @@ struct AppShell: View {
             if registry.isEnabled(.ganttIssues) {
                 issuesRoute
             } else {
-                DisabledFeaturePlaceholderView(featureName: "Issue Board")
+                DisabledFeaturePlaceholderView(
+                    featureName: "Issue Board",
+                    isCompiled: registry.compiledFeatures.contains(.ganttIssues))
             }
         case .gantt:
             if registry.isEnabled(.ganttIssues) {
                 ganttRoute
             } else {
-                DisabledFeaturePlaceholderView(featureName: "Gantt Timeline")
+                DisabledFeaturePlaceholderView(
+                    featureName: "Gantt Timeline",
+                    isCompiled: registry.compiledFeatures.contains(.ganttIssues))
             }
         case .visual:    VisualView(api: api)
         case .docGen:
             if registry.isEnabled(.docGen) {
-                DocGenView(api: api)
+                FeatureCatalog.docGenPane(api: api)
             } else {
-                DisabledFeaturePlaceholderView(featureName: "Document Generator")
+                DisabledFeaturePlaceholderView(
+                    featureName: "Document Generator",
+                    isCompiled: registry.compiledFeatures.contains(.docGen))
             }
         case .autoCode:
             if registry.isEnabled(.autoTasks) {
@@ -638,10 +624,11 @@ struct AppShell: View {
     // pick a different Gantt per provider, which is why the two surfaces could
     // look nothing alike.
 
-    /// Issues — unified RepoIssuesView for both providers (GitHub + GitLab).
+    /// Issues — unified RepoIssuesView for both providers (GitHub + GitLab),
+    /// via FeatureCatalog so a lite build without FEATURE_GANTT compiles inert.
     @ViewBuilder
     private var issuesRoute: some View {
-        RepoIssuesView(api: api)
+        FeatureCatalog.issuesPane(api: api)
     }
 
     /// Gantt — one view for both providers, same as Issues. GanttContainerView
@@ -650,7 +637,7 @@ struct AppShell: View {
     /// scheduling overlay that supplies GitHub's missing issue dates.
     @ViewBuilder
     private var ganttRoute: some View {
-        GanttContainerView(api: api)
+        FeatureCatalog.ganttPane(api: api)
     }
 
     private func initEnv() {

@@ -9,11 +9,21 @@ struct HelpGuideView: View {
 
     @State private var selected: HelpTopic = .gettingStarted
 
-    /// Every help topic except Code Graph when it isn't compiled into this
-    /// build — no #if needed, `FeatureRegistry` already knows.
+    /// Topics tied to an excludable feature — omitted from the list when
+    /// that feature isn't compiled into this build. No #if needed here,
+    /// `FeatureRegistry.compiledFeatures` already knows.
+    private static let topicFeature: [HelpTopic: AppFeature] = [
+        .explorer: .fileExplorer,
+        .issues: .ganttIssues,
+        .gantt: .ganttIssues,
+        .docGen: .docGen,
+        .codeGraph: .codeGraph3D,
+    ]
+
     private var visibleTopics: [HelpTopic] {
-        HelpTopic.allCases.filter {
-            $0 != .codeGraph || FeatureRegistry.shared.compiledFeatures.contains(.codeGraph3D)
+        HelpTopic.allCases.filter { topic in
+            guard let feature = Self.topicFeature[topic] else { return true }
+            return FeatureRegistry.shared.compiledFeatures.contains(feature)
         }
     }
 

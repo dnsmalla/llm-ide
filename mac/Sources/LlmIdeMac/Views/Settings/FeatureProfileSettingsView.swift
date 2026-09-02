@@ -55,12 +55,15 @@ struct FeatureProfileSettingsSection: View {
                     get: { config.homeSection },
                     set: { config.homeSection = $0 }
                 )) {
-                    // .codeGraph must not be offered when Code Graph isn't
-                    // compiled into this build — it would open onto the
-                    // "not installed" placeholder every launch.
-                    ForEach(ShellState.Section.allCases.filter {
-                        $0 != .settings && $0 != .live
-                            && ($0 != .codeGraph || registry.compiledFeatures.contains(.codeGraph3D))
+                    // A section backed by a feature that isn't compiled into
+                    // this build must not be offered — it would open onto the
+                    // "not installed" placeholder every launch. Same
+                    // section → feature mapping AppShell's toolbar filter
+                    // uses (ShellState.Section.backingFeature).
+                    ForEach(ShellState.Section.allCases.filter { section in
+                        guard section != .settings, section != .live else { return false }
+                        guard let feature = section.backingFeature else { return true }
+                        return registry.compiledFeatures.contains(feature)
                     }, id: \.self) { section in
                         Text(section.label).tag(section.rawValue)
                     }

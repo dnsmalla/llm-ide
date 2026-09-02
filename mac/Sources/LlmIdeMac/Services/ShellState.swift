@@ -117,6 +117,22 @@ final class ShellState {
 }
 
 extension ShellState.Section {
+    /// The excludable `AppFeature` that gates this section, if any. Single
+    /// source of truth for "which build-time/runtime feature does this
+    /// section need" — AppShell's toolbar filter, its feature-change
+    /// reconciliation, and the Settings "Home opens" picker all read this
+    /// instead of keeping three copies of the same switch in sync.
+    var backingFeature: AppFeature? {
+        switch self {
+        case .codeGraph: return .codeGraph3D
+        case .autoCode: return .autoTasks
+        case .issues, .gantt: return .ganttIssues
+        case .docGen: return .docGen
+        case .explorer, .sourceControl, .search: return .fileExplorer
+        default: return nil
+        }
+    }
+
     /// Map a deep-link tab name (as published by `DeepLinkRouter`) to a
     /// section, without modifying the router.  Returns `nil` for
     /// unknown tabs so callers can fall back to the default landing.
