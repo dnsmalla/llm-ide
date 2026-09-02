@@ -156,6 +156,10 @@ final class DocTemplateStore: ObservableObject {
                 continue
             }
             let folderName = entry.lastPathComponent
+            // `templates/auto_task/` is a flat bag of Auto Task prompts, not a
+            // Doc Gen template folder — scanning it would surface whichever
+            // prompt sorted first as a bogus document template.
+            if folderName == ProjectLayout.autoTaskTemplatesFolderName { continue }
             guard let mdURL = templateMarkdownURL(in: entry),
                   let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
                 continue

@@ -47,6 +47,19 @@ struct ProjectLayout {
         templatesDir.appendingPathComponent(folderName, isDirectory: true)
     }
 
+    /// Auto Task prompt templates — a FLAT folder of `<slug>.md` files, not
+    /// the one-folder-per-template shape Doc Gen uses next door. A different
+    /// product with a different unit (a single prompt, not a sectioned
+    /// document), so it gets its own reserved subfolder rather than competing
+    /// for slugs in `templates/`. `DocTemplateStore` skips this name when it
+    /// scans, which is the one place the two conventions touch.
+    var autoTaskTemplatesDir: URL {
+        templatesDir.appendingPathComponent(Self.autoTaskTemplatesFolderName, isDirectory: true)
+    }
+
+    /// Reserved subfolder name inside `templates/` — see `autoTaskTemplatesDir`.
+    static let autoTaskTemplatesFolderName = "auto_task"
+
     // System / generated data — one visible container.
     var systemDir:   URL { root.appendingPathComponent("system", isDirectory: true) }
     var projectJSON: URL { systemDir.appendingPathComponent("project.json") }
