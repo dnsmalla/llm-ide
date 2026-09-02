@@ -72,4 +72,14 @@ enum FeatureCatalog {
         return nil
         #endif
     }
+
+    /// Drop the cached graph-engine resolution (e.g. after a plugin
+    /// install/uninstall may have added or removed one). No-op when the
+    /// feature is compiled out — callers outside Graph/ (auth/plugin routes)
+    /// go through this seam instead of naming `GraphEngines` directly.
+    static func invalidateGraphEngineCache() {
+        #if FEATURE_GRAPH
+        GraphEngines.invalidate()
+        #endif
+    }
 }

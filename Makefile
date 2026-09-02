@@ -19,7 +19,7 @@ clean:
 
 # --- mac app -----------------------------------------------------------------
 
-.PHONY: test-mac regression test-shared-protocol
+.PHONY: build-mac build-mac-lite test-mac regression test-shared-protocol
 
 # Pin the Xcode toolchain for every Swift build/test below. git invokes the
 # pre-push hook with an environment that can resolve the CommandLineTools swift
@@ -40,6 +40,17 @@ export SDKROOT := $(shell DEVELOPER_DIR='$(shell env -u DEVELOPER_DIR xcode-sele
 # Full Swift test suite for the desktop app (ChatSessionStore, etc.).
 # Requires full Xcode — Command Line Tools alone lack the XCTest module.
 HAS_XCTEST := $(shell test -d "$(DEVELOPER_DIR)/Platforms/MacOSX.platform/Developer/Library/Frameworks/XCTest.framework" && echo 1)
+
+build-mac: ## Build the full mac app
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build
+
+# LLMIDE_FEATURES lists the INCLUDED features by AppFeature rawValue; this
+# selection excludes Graph (code_graph_3d), the only excludable feature so
+# far. --manifest-cache none is required: SwiftPM does not key its manifest
+# cache on env vars, so a stale cache would silently keep the previous
+# selection's target graph.
+build-mac-lite: ## Build the mac app without excludable features (currently: Graph)
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=file_explorer,agent_chat,gantt_issues,terminal,doc_gen,mobile_sync,auto_tasks swift build --manifest-cache none
 
 test-mac:
 	cd mac && swift build --product LlmIdeMac

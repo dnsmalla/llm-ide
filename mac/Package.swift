@@ -1,5 +1,53 @@
 // swift-tools-version: 6.0
+import Foundation
 import PackageDescription
+
+// Build-time feature selection (Phase 2): LLMIDE_FEATURES lists the
+// INCLUDED features by AppFeature rawValue, comma-separated; unset = all.
+// Deselected features' source folders are excluded from compilation and
+// their defines omitted, so FeatureCatalog compiles the inert branches.
+// SwiftPM does not key its manifest cache on env vars — selection changes
+// must build with `--manifest-cache none` (the Makefile targets do).
+let envFeatures = ProcessInfo.processInfo.environment["LLMIDE_FEATURES"]
+let includedFeatures: Set<String> = envFeatures.map {
+    Set($0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+} ?? ["code_graph_3d"]   // unset → everything (list each excludable key here)
+
+let graphIncluded = includedFeatures.contains("code_graph_3d")
+
+var libExcludes: [String] = []
+var testExcludes: [String] = ["README-truncated-tests.md"]
+var featureDefines: [SwiftSetting] = []
+if graphIncluded {
+    featureDefines.append(.define("FEATURE_GRAPH"))
+} else {
+    libExcludes.append("Graph")
+    testExcludes.append(contentsOf: [
+        "CodeGraphUploadServiceTests.swift",
+        "CodeNotePruneTests.swift",
+        "GraphAutoUpdaterRepoResolutionTests.swift",
+        "KnowledgeGraphEndToEndTests.swift",
+        "KnowledgeGraphServiceTests.swift",
+        "GraphModuleTests.swift",
+    ])
+}
+
+// GraphCore/GraphKit are only imported from within Sources/LlmIdeMac/Graph/
+// (verified in Task 1 Step 1: Services/Memory has zero GraphCore imports, and
+// the only non-Graph-folder importer, LlmIdeAPIClient+CodeGraph.swift, was
+// moved INTO Graph/ by Task 1). So when Graph is excluded, neither product is
+// referenced anywhere in the target and both can be dropped from the
+// dependency list.
+var libDependencies: [Target.Dependency] = [
+    "Yams",
+    .product(name: "Sparkle", package: "Sparkle"),
+    .product(name: "SwiftTerm", package: "SwiftTerm"),
+    .product(name: "SharedProtocol", package: "SharedProtocol"),
+]
+if graphIncluded {
+    libDependencies.append(.product(name: "GraphCore", package: "graph-kit"))
+    libDependencies.append(.product(name: "GraphKit", package: "graph-kit"))   // UNPLUG: remove
+}
 
 let package = Package(
     name: "LlmIdeMac",
@@ -29,15 +77,9 @@ let package = Package(
     targets: [
         .target(
             name: "LlmIdeMacLib",
-            dependencies: [
-                "Yams",
-                .product(name: "Sparkle", package: "Sparkle"),
-                .product(name: "SwiftTerm", package: "SwiftTerm"),
-                .product(name: "GraphCore", package: "graph-kit"),
-                .product(name: "GraphKit", package: "graph-kit"),   // UNPLUG: remove
-                .product(name: "SharedProtocol", package: "SharedProtocol"),
-            ],
+            dependencies: libDependencies,
             path: "Sources/LlmIdeMac",
+            exclude: libExcludes,
             resources: [
                 .copy("Resources/note_template.docx"),
                 .copy("Resources/generate_meeting_note.py"),
@@ -60,9 +102,7 @@ let package = Package(
                 // builtin engine in and then failed at link time instead of
                 // degrading cleanly.
                 .define("GRAPHKIT_BUILTIN"),   // UNPLUG: remove
-                // TEMP(Phase2a-Task3): replaced by env-driven selection
-                .define("FEATURE_GRAPH"),
-            ],
+            ] + featureDefines,
             linkerSettings: [
                 .linkedLibrary("sqlite3")
             ]
@@ -76,7 +116,7 @@ let package = Package(
             name: "LlmIdeMacTests",
             dependencies: ["LlmIdeMacLib"],
             path: "Tests/LlmIdeMacTests",
-            exclude: ["README-truncated-tests.md"]
+            exclude: testExcludes
         ),
     ],
     swiftLanguageModes: [.v5]

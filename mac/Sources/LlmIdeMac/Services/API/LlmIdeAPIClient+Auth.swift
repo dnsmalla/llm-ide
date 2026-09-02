@@ -121,7 +121,7 @@ extension LlmIdeAPIClient {
         // engine is cached for the process. Without this the app kept reporting
         // "No graph engine installed" — pointing the user at the very screen
         // they had just used — until a relaunch.
-        await MainActor.run { GraphEngines.invalidate() }
+        await MainActor.run { FeatureCatalog.invalidateGraphEngineCache() }
         return response
     }
 
@@ -135,7 +135,7 @@ extension LlmIdeAPIClient {
         // Drop a cached engine that may now point at a deleted directory —
         // otherwise generation failed with "wrote no graph" instead of the
         // clean "no engine installed" message.
-        await MainActor.run { GraphEngines.invalidate() }
+        await MainActor.run { FeatureCatalog.invalidateGraphEngineCache() }
         return response
     }
 
