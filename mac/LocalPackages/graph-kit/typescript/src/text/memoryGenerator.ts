@@ -141,11 +141,16 @@ export function assembleGraph(docs: DocMeta[]): { graph: CGData; chunks: MemoryC
     (byLowerTitle.get(key) ?? byLowerTitle.set(key, []).get(key)!).push(c);
   }
   const emitted = new Set<string>();
-  const emit = (from: string, to: string, kind: CGEdge["kind"]) => {
+  const emit = (
+    from: string,
+    to: string,
+    kind: CGEdge["kind"],
+    confidence: CGEdge["confidence"] = "EXTRACTED",
+  ) => {
     const key = `${from}→${to}:${kind}`;
     if (from === to || emitted.has(key)) return;
     emitted.add(key);
-    edges.push({ fromId: from, toId: to, kind, confidence: "EXTRACTED" });
+    edges.push({ fromId: from, toId: to, kind, confidence });
   };
 
   // (1) Wiki-links → references
@@ -166,7 +171,8 @@ export function assembleGraph(docs: DocMeta[]): { graph: CGData; chunks: MemoryC
     if (ids.length < 2) continue;
     const head = ids.slice(0, TAG_CAP);
     for (let i = 0; i < head.length; i++) {
-      for (let j = i + 1; j < head.length; j++) emit(head[i]!, head[j]!, "relatedTo");
+      for (let j = i + 1; j < head.length; j++)
+        emit(head[i]!, head[j]!, "relatedTo", "INFERRED");
     }
   }
 
@@ -179,7 +185,7 @@ export function assembleGraph(docs: DocMeta[]): { graph: CGData; chunks: MemoryC
       if (otherID === c.id) continue;
       const needle = otherTitle.toLowerCase();
       if (needle.length < 5) continue;
-      if (containsWholeWord(body, needle)) emit(c.id, otherID, "relatedTo");
+      if (containsWholeWord(body, needle)) emit(c.id, otherID, "relatedTo", "AMBIGUOUS");
     }
   }
 

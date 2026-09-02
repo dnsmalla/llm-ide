@@ -497,7 +497,7 @@ Design rationale lives in [Loop Engineering](loop-engineering.md); this is the o
 
 ---
 
-## Code Graph layout (`mac/LocalPackages/graph-core/Sources/GraphCore/Layout/`)
+## Code Graph layout (`mac/LocalPackages/graph-kit/Sources/GraphCore/Layout/`)
 
 The Graph view showed "sometimes a circle, sometimes a round blob" for a long
 time. Three independent causes, each of which is now an invariant.
@@ -514,8 +514,9 @@ time. Three independent causes, each of which is now an invariant.
 - **Layout is deterministic.** Same graph in, same picture out — no RNG, no
   wall-clock dependence, sorted iteration. Otherwise the user's mental map of
   their codebase changes on every launch.
-- **Layout lives in `graph-core`, never in `graph-kit`.** `graph-core` is always
-  present; `graph-kit` is pluggable. With layout in the engine, uninstalling the
+- **Layout lives in the `GraphCore` product, never in the `GraphKit` product.**
+  Both live in the `graph-kit` folder, but `GraphCore` is always linked while
+  `GraphKit` is pluggable. With layout in the engine, uninstalling the
   engine would black out the Graph view instead of merely stopping generation.
 - **Anything drawn inside the zoomed `Canvas` is scale-corrected.** Node radius
   was the one thing that was not, while every line width and glow divided by
@@ -556,7 +557,7 @@ time. Three independent causes, each of which is now an invariant.
 executable:
 
 ```bash
-cd mac/LocalPackages/graph-core
+cd mac/LocalPackages/graph-kit
 swift run -c release graph-layout-lab --compare       # exits non-zero on regression
 swift run -c release graph-layout-lab --svg <dir>     # SVG previews for visual check
 ```
@@ -582,6 +583,6 @@ layout's — a real repo graph genuinely arrives fragmented.
 | Persist a new piece of UI state | `chrome.storage.local` via the hook that owns it; do NOT add a new store |
 | Add a new tab | `TABS` array in `extension/src/sidepanel/App.tsx` + a new panel block + ensure `.tabs` still scrolls at narrow width |
 | Persist new meeting data alongside the transcript | Extend `SavedTranscript` in `extension/src/lib/storage.ts`; write in `stopRecording()`; read in `HistoryView` |
-| Change how the graph is laid out | `mac/LocalPackages/graph-core/Sources/GraphCore/Layout/` only — then re-run `graph-layout-lab --compare`. Never touch the renderer to compensate for a layout problem |
+| Change how the graph is laid out | `mac/LocalPackages/graph-kit/Sources/GraphCore/Layout/` only — then re-run `graph-layout-lab --compare`. Never touch the renderer to compensate for a layout problem |
 | Add a visual encoding to the graph canvas | Add the signal to `GraphLayout` (`GraphLayoutEngine.swift`) so it is computed once, then read it in `CodeGraphCanvas`; do NOT recompute adjacency in the draw loop |
-| Swap or remove the graph engine | `extension/graph_generation/README.md`. Unplug = comment the three `// UNPLUG:` lines in `mac/Package.swift`; add an engine = drop a `graph-engine.json` in a plugin |
+| Swap or remove the graph engine | `extension/graph_generation/README.md`. Unplug = comment the two `// UNPLUG:` lines in `mac/Package.swift` (the `.package` line stays — GraphCore comes from it); add an engine = drop a `graph-engine.json` in a plugin |

@@ -63,7 +63,20 @@ endif
 # view (re-checks every `status: fixed` fault against the current agent and
 # refreshes `<project>/system/faults.csv`) before shipping an upgrade — the
 # CSV's `status` column is the release checklist.
-regression: test-mac
+regression: test-mac graph-gates
+
+# The graph verification gates. These are plain executables precisely so they
+# run where `swift test` cannot (a Command-Line-Tools-only toolchain has no
+# XCTest): graph-layout-lab asserts the layout engine against exact N² ground
+# truth and Louvain reference values; graph-engine-lab asserts generation
+# invariants (containment direction, cross-link precedence, related-modules
+# linking, fingerprint stability). Wired into `regression` because a gate
+# nothing runs is a gate in name only — the layout gate passed a 1094%-wrong
+# force calculation for exactly as long as nobody executed it.
+.PHONY: graph-gates
+graph-gates:
+	cd mac/LocalPackages/graph-kit && swift run -c release graph-layout-lab
+	cd mac/LocalPackages/graph-kit && swift run -c release graph-engine-lab
 
 # Enable the repo's git hooks (.githooks/). The pre-push hook runs the
 # regression gate before any push that touches mac/. Run once per clone.

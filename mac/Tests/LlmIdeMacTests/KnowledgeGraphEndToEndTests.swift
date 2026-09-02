@@ -1,6 +1,5 @@
 import XCTest
 import GraphCore
-import GraphKit
 @testable import LlmIdeMacLib
 
 /// Full-pipeline test: builds a REAL git repo on disk, runs the actual

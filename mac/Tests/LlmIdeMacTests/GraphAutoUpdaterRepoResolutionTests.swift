@@ -1,6 +1,5 @@
 import XCTest
 import GraphCore
-import GraphKit
 @testable import LlmIdeMacLib
 
 /// `repoToGraph` decides WHICH directory the whole knowledge pipeline runs

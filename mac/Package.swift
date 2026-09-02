@@ -14,17 +14,15 @@ let package = Package(
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
-        // Always present: the canonical graph model, its JSON contract, and the
-        // layout engine — everything needed to READ and DRAW a graph.
-        .package(path: "LocalPackages/graph-core"),
-        // The graph PRODUCERS (scanners, extractors, memory generators).
-        // An installable plugin can supply these instead — see
-        // Sources/LlmIdeMac/GraphGeneration/. To UNPLUG the compiled-in engine,
-        // comment out this line, the matching `.product(name: "GraphKit", …)`
-        // below, and the `GRAPHKIT_BUILTIN` define. The app still builds: the
-        // Graph view reports that no engine is installed and keeps rendering
-        // any graph.json already on disk, because the model and the layout
-        // engine live in graph-core.
+        // The graph system — one repository, two products with different
+        // lifetimes. GraphCore (model + JSON contract + layout: everything
+        // needed to READ and DRAW a graph) is always linked. GraphKit (the
+        // producers: scanners, extractors, memory generators) is the engine —
+        // to UNPLUG it, comment out the `.product(name: "GraphKit", …)` line
+        // and the `GRAPHKIT_BUILTIN` define below (this `.package` line stays:
+        // GraphCore comes from it). The app still builds: the Graph view
+        // reports that no engine is installed and keeps rendering any
+        // graph.json already on disk. See Sources/LlmIdeMac/Graph/Engine/.
         .package(path: "LocalPackages/graph-kit"),
         .package(path: "../ios_app/SharedProtocol"),
     ],
@@ -35,7 +33,7 @@ let package = Package(
                 "Yams",
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
-                .product(name: "GraphCore", package: "graph-core"),
+                .product(name: "GraphCore", package: "graph-kit"),
                 .product(name: "GraphKit", package: "graph-kit"),   // UNPLUG: remove
                 .product(name: "SharedProtocol", package: "SharedProtocol"),
             ],

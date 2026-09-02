@@ -1,6 +1,5 @@
 import XCTest
 import GraphCore
-import GraphKit
 @testable import LlmIdeMacLib
 
 /// Batching and change-detection for the code-graph upload. Both are pure and

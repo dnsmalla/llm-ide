@@ -105,33 +105,9 @@ public struct PluginGraphEngine: GraphEngine {
     public func docSetFingerprint(roots: [URL]) -> String {
         // Computed locally rather than by asking the plugin: it must be cheap
         // enough to run on a timer tick, and spawning a process for it would
-        // defeat the point. It mirrors the engine's declared doc extensions and
-        // the shared exclusion list, which is the same rule the builtin uses.
-        let fm = FileManager.default
-        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey,
-                                      .isRegularFileKey]
-        var entries: [String] = []
-        outer: for root in roots {
-            guard let walker = fm.enumerator(
-                at: root, includingPropertiesForKeys: keys,
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
-            for case let url as URL in walker {
-                if let name = url.pathComponents.last, ExcludedDirs.names.contains(name) {
-                    walker.skipDescendants(); continue
-                }
-                guard supportedDocExtensions.contains(url.pathExtension.lowercased())
-                else { continue }
-                let values = try? url.resourceValues(forKeys: Set(keys))
-                guard values?.isRegularFile == true else { continue }
-                let size = values?.fileSize ?? 0
-                guard size <= 2_000_000 else { continue }
-                let modified = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
-                entries.append("\(url.path)|\(size)|\(modified)")
-                if entries.count >= 500 { break outer }
-            }
-        }
-        entries.sort()
-        return Fingerprint.hash(of: Data(entries.joined(separator: "\n").utf8))
+        // defeat the point. The shared walk honours this engine's declared
+        // document extensions, which is the same rule the builtin follows.
+        DocSetFingerprint.compute(roots: roots, extensions: supportedDocExtensions)
     }
 
     /// Join the two tracks.

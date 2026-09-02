@@ -1,6 +1,5 @@
 import XCTest
 import GraphCore
-import GraphKit
 @testable import LlmIdeMacLib
 
 /// Covers the pure, `nonisolated static` half of the knowledge-graph pipeline:
@@ -167,7 +166,7 @@ final class KnowledgeGraphServiceTests: XCTestCase {
             CGEdge(fromId: "file:a.mjs", toId: "file:hub.mjs", kind: .imports),
             CGEdge(fromId: "file:b.mjs", toId: "file:hub.mjs", kind: .imports),
         ])
-        let out = KnowledgeGraphService.renderGraphNotes(code: code, doc: .empty,
+        let out = MemoryArtifactRenderer.renderGraphNotes(code: code, doc: .empty,
                                                          merged: code, chunks: [])
         XCTAssertTrue(out.contains("## Dependency hubs"))
         XCTAssertTrue(out.contains("hub.mjs — imported by 2"))
@@ -181,7 +180,7 @@ final class KnowledgeGraphServiceTests: XCTestCase {
         let meeting = chunk(id: "skip2", title: "Standup", body: "x", kind: .noteEvent)
         let chunks = [keep, optOut, meeting]
 
-        let docNotes = KnowledgeGraphService.renderDocNotes(docCount: 3, chunks: chunks)
+        let docNotes = MemoryArtifactRenderer.renderDocNotes(docCount: 3, chunks: chunks)
         XCTAssertTrue(docNotes.contains("Architecture"))
         XCTAssertFalse(docNotes.contains("Scratch"))
         XCTAssertFalse(docNotes.contains("Standup"))
@@ -195,7 +194,7 @@ final class KnowledgeGraphServiceTests: XCTestCase {
             CGEdge(fromId: "skip1", toId: "file:kb/db.mjs", kind: .references, confidence: .inferred),
             CGEdge(fromId: "keep", toId: "file:kb/db.mjs", kind: .references, confidence: .inferred),
         ])
-        let graphNotes = KnowledgeGraphService.renderGraphNotes(code: codeGraph(), doc: doc,
+        let graphNotes = MemoryArtifactRenderer.renderGraphNotes(code: codeGraph(), doc: doc,
                                                                 merged: merged, chunks: chunks)
         XCTAssertTrue(graphNotes.contains("Architecture → db.mjs"))
         XCTAssertFalse(graphNotes.contains("Scratch"))
@@ -213,7 +212,7 @@ final class KnowledgeGraphServiceTests: XCTestCase {
             edges.append(CGEdge(fromId: "file:src\(i).mjs", toId: "file:hub\(i).mjs", kind: .imports))
         }
         let code = CGData(nodes: nodes, edges: edges)
-        let out = KnowledgeGraphService.renderGraphNotes(code: code, doc: .empty,
+        let out = MemoryArtifactRenderer.renderGraphNotes(code: code, doc: .empty,
                                                          merged: code, chunks: [])
         XCTAssertTrue(out.contains("top 10 of \(hubCount) imported modules"), out)
 
@@ -228,14 +227,14 @@ final class KnowledgeGraphServiceTests: XCTestCase {
         }
         let doc = CGData(nodes: docNodes, edges: [])
         let merged = CGData(nodes: codeGraph().nodes + docNodes, edges: crossEdges)
-        let linked = KnowledgeGraphService.renderGraphNotes(code: codeGraph(), doc: doc,
+        let linked = MemoryArtifactRenderer.renderGraphNotes(code: codeGraph(), doc: doc,
                                                             merged: merged, chunks: [])
         XCTAssertTrue(linked.contains("…and \(linkCount - 50) more (list truncated)"), linked)
     }
 
     func testDocNotesRendersDeclaredModuleAffinity() {
         let c = chunk(id: "c1", title: "Capture", body: "x", relatedModules: ["src/content"])
-        let out = KnowledgeGraphService.renderDocNotes(docCount: 1, chunks: [c])
+        let out = MemoryArtifactRenderer.renderDocNotes(docCount: 1, chunks: [c])
         XCTAssertTrue(out.contains("## Doc ↔ module affinity"))
         XCTAssertTrue(out.contains("Capture → src/content"))
     }
