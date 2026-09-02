@@ -55,7 +55,7 @@ fileprivate func installCrashHandlers() {
 
 // FeatureService conformances — the methods already exist on each type;
 // these declarations let feature modules hold them behind one protocol.
-extension GraphAutoUpdater: FeatureService {}
+// GraphAutoUpdater's conformance lives in Graph/Services/GraphModule.swift.
 extension LiveSessionMirror: FeatureService {}
 extension AutoCodeUpdateService: FeatureService {}
 extension AutoCaptureService: FeatureService {}
@@ -87,8 +87,6 @@ public struct LlmIdeMacApp: App {
     @StateObject private var logStore: TaskLogStore
     @StateObject private var updateService = UpdateService()
     @StateObject private var projectStore: ProjectStore
-    @StateObject private var graphAutoUpdater: GraphAutoUpdater
-    @StateObject private var graphSessionStore: GraphSessionStore
     @StateObject private var sourceLinkStore = SourceLinkStore()
     @State private var backend = BackendManager()
     @State private var mobileControl = MobileControlManager()
@@ -203,26 +201,12 @@ public struct LlmIdeMacApp: App {
         self._autoTaskTemplates = StateObject(wrappedValue: autoTaskTemplateStore)
         self._logStore = StateObject(wrappedValue: taskLogStore)
         self._projectStore = StateObject(wrappedValue: projectStoreInstance)
-        let autoUpdater = GraphAutoUpdater(projectStore: projectStoreInstance,
-                                           intervalMinutes: cfg.graphAutoUpdateMinutes)
-        self._graphAutoUpdater = StateObject(wrappedValue: autoUpdater)
-        let graphSessionStoreInstance = GraphSessionStore()
-        self._graphSessionStore = StateObject(wrappedValue: graphSessionStoreInstance)
         let activity = ActivityStore(api: client)
         activity.start()
         self._activityStore = State(wrappedValue: activity)
         // Wire activity store weak refs on app-level services so they can
         // report events without a global singleton. Mirrors weak var config
         // on RegressionRunner.
-        autoUpdater.activity = activity
-        // Lets the auto-updater ship each generated code graph to the backend
-        // (/kb/ingest-code-graph) — the server's only source of symbol-graph
-        // data for agent grounding.
-        autoUpdater.uploader.api = client
-        // Wire the session store so background runs surface in the Code
-        // Graph view. Previously assigned in AppShell's `.task`; moved here
-        // so registration + refresh() own the updater's whole lifecycle.
-        autoUpdater.sessionStore = graphSessionStoreInstance
         autoCode.activity = activity
         self._autoTaskSettings = StateObject(wrappedValue: autoTaskSettingsInstance)
         self.api = client
@@ -250,13 +234,25 @@ public struct LlmIdeMacApp: App {
         // Named `featureRegistry` (not `registry`) — that name is already
         // taken above by the on-disk ProcessedActionsRegistry.
         let featureRegistry = FeatureRegistry.shared
+        // Set BEFORE any module is registered: `compiledFeatures` has a
+        // `didSet` that calls `refresh()`, and with `modules` still empty
+        // that refresh() is a true no-op. Assigning it after registrations
+        // began would have refresh() start whatever was registered so far
+        // (e.g. AutoTaskModule) synchronously inside init() — before the
+        // window exists — breaking the "registry starts nothing here"
+        // contract the comment above documents.
+        featureRegistry.compiledFeatures = FeatureCatalog.compiledFeatures
         featureRegistry.register(module: AutoTaskModule(
             scheduler: autoCode,
             capture: self.autoCapture,
             schedulerEnabled: { autoTaskSettingsInstance.enabled }))
-        featureRegistry.register(module: GraphModule(
-            updater: autoUpdater,
-            isAuthenticated: { store.isAuthenticated }))
+        FeatureCatalog.bootGraph(
+            projectStore: projectStoreInstance,
+            config: cfg,
+            api: client,
+            activity: activity,
+            registry: featureRegistry,
+            isAuthenticated: { store.isAuthenticated })
         featureRegistry.register(module: ChatModule(
             mirror: mirror,
             isAuthenticated: { store.isAuthenticated }))
@@ -282,27 +278,33 @@ public struct LlmIdeMacApp: App {
         // we need to programmatically reopen the window after the
         // user closes it via Cmd-W.
         Window(L.App.name, id: "main") {
-            ContentView(api: api)
-                .environmentObject(theme)
-                .environmentObject(templateStore)
-                .environmentObject(session)
-                .environmentObject(config)
-                .environmentObject(autoTaskSettings)
-                .environmentObject(capture)
-                .environmentObject(deepLink)
-                .environmentObject(liveMirror)
-                .environmentObject(autoCodeUpdate)
-                .environmentObject(autoTaskTemplates)
-                .environmentObject(autoTaskSkills)
-                .environmentObject(logStore)
-                .environmentObject(updateService)
-                .environmentObject(projectStore)
-                .environmentObject(graphAutoUpdater)
-                .environmentObject(graphSessionStore)
-                .environmentObject(sourceLinkStore)
-                .environment(backend)
-                .environment(mobileControl)
-                .environment(activityStore)
+            // Graph environment objects (GraphAutoUpdater/GraphSessionStore)
+            // are installed by FeatureCatalog, not injected directly here —
+            // identity (no-op) when the feature is compiled out. Order among
+            // different-type environmentObject calls doesn't affect which
+            // object a descendant view resolves, so appending the graph pair
+            // last is equivalent to their old inline position.
+            FeatureCatalog.installGraphEnvironment(AnyView(
+                ContentView(api: api)
+                    .environmentObject(theme)
+                    .environmentObject(templateStore)
+                    .environmentObject(session)
+                    .environmentObject(config)
+                    .environmentObject(autoTaskSettings)
+                    .environmentObject(capture)
+                    .environmentObject(deepLink)
+                    .environmentObject(liveMirror)
+                    .environmentObject(autoCodeUpdate)
+                    .environmentObject(autoTaskTemplates)
+                    .environmentObject(autoTaskSkills)
+                    .environmentObject(logStore)
+                    .environmentObject(updateService)
+                    .environmentObject(projectStore)
+                    .environmentObject(sourceLinkStore)
+                    .environment(backend)
+                    .environment(mobileControl)
+                    .environment(activityStore)
+            ))
                 // 1000 gives the 3-pane Review layout breathing room
                 // (sidebar ~240 + code ~380 + assistant ~280 = 900,
                 // plus toolbar + dividers + comfort).  Users can still

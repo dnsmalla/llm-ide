@@ -84,6 +84,10 @@ struct FeatureProfileSettingsSection: View {
     @ViewBuilder
     private func featureRow(_ feature: AppFeature) -> some View {
         let t = theme.current
+        // Kept in the list (not filtered out) even when not compiled in, so
+        // users on a slimmer edition can see the feature exists rather than
+        // silently missing from Workspace.
+        let installed = registry.compiledFeatures.contains(feature)
         let binding = Binding<Bool>(
             get: { registry.isEnabled(feature) },
             set: { isEnabled in
@@ -99,12 +103,12 @@ struct FeatureProfileSettingsSection: View {
         HStack(spacing: Spacing.md) {
             Image(systemName: feature.systemImage)
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(t.accent2)
+                .foregroundStyle(installed ? t.accent2 : t.textMuted)
                 .frame(width: 22, height: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(feature.displayName)
                     .font(Typography.body)
-                    .foregroundStyle(t.text)
+                    .foregroundStyle(installed ? t.text : t.textMuted)
                 if !feature.requiredDependencies.isEmpty {
                     Text("Requires \(feature.requiredDependencies.map(\.displayName).joined(separator: ", "))")
                         .font(Typography.caption)
@@ -112,11 +116,17 @@ struct FeatureProfileSettingsSection: View {
                 }
             }
             Spacer()
-            Toggle("", isOn: binding)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .labelsHidden()
-                .help(binding.wrappedValue ? "Disable \(feature.displayName)" : "Enable \(feature.displayName)")
+            if installed {
+                Toggle("", isOn: binding)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .help(binding.wrappedValue ? "Disable \(feature.displayName)" : "Enable \(feature.displayName)")
+            } else {
+                Text("Not installed")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+            }
         }
         .padding(.vertical, 2)
     }

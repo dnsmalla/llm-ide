@@ -3,20 +3,18 @@ import SwiftUI
 /// Project-scoped Settings card surfacing the graph + memory state that the app
 /// generates but never showed anywhere: whether a graph exists, its node counts,
 /// when it was last generated, and which agent-facing memory files are present.
-/// Status of the graph + memory the app generates (whether a graph exists, its
-/// node counts, when it was last generated, which agent-facing memory files are
-/// present), plus the auto-update cadence control — the interval the background
-/// GraphAutoUpdater regenerates on. Generation itself happens in the Code Graph view.
-struct GraphMemorySettingsSection: View {
+/// Graph-specific controls (auto-update cadence, upload-truncation banner) live
+/// in `Graph/Views/GraphSettingsSection.swift` instead — this file stays free of
+/// any graph type so it (and `GraphMemoryState`) keep working when the Code
+/// Graph feature is compiled out.
+struct MemorySettingsSection: View {
     @EnvironmentObject private var projectStore: ProjectStore
     @EnvironmentObject var theme: ThemeStore
-    @EnvironmentObject var config: AppConfig
-    @EnvironmentObject var graphAutoUpdater: GraphAutoUpdater
 
     @State private var state: GraphMemoryState = .empty
 
     var body: some View {
-        SettingsSectionCard(icon: "brain", title: "Graph & Memory") {
+        SettingsSectionCard(icon: "brain", title: "Memory") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 if !state.hasGraph && !state.anyMemoryFile {
                     Text("No graph or memory generated for this project yet. Open the Code Graph view and generate a Code Graph / InfiniteBrain to populate it.")
@@ -41,26 +39,6 @@ struct GraphMemorySettingsSection: View {
                 }
                 Divider().padding(.vertical, 2)
                 HStack {
-                    Text("Auto-update every")
-                        .font(Typography.caption)
-                        .foregroundStyle(theme.current.textMuted)
-                    Spacer()
-                    Stepper(value: Binding(
-                        get: { config.graphAutoUpdateMinutes },
-                        set: { v in
-                            let m = max(5, v)
-                            config.graphAutoUpdateMinutes = m
-                            graphAutoUpdater.setIntervalMinutes(m)   // live reschedule
-                        }
-                    ), in: 5...120, step: 5) {
-                        Text("\(config.graphAutoUpdateMinutes) min")
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(theme.current.text)
-                    }
-                    .frame(maxWidth: 170)
-                }
-
-                HStack {
                     Text(state.repoLabel)
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
@@ -71,12 +49,6 @@ struct GraphMemorySettingsSection: View {
                         .controlSize(.small)
                 }
                 .padding(.top, 2)
-
-                if let truncation = graphAutoUpdater.lastUploadTruncation,
-                   truncation.repoPath == state.repoPath,
-                   truncation.didTruncate {
-                    StatusBanner(severity: .warning, message: truncation.summary)
-                }
             }
         }
         .task(id: projectStore.activeProject?.bundle.id) { refresh() }

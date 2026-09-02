@@ -59,7 +59,9 @@ let package = Package(
                 // for a module left behind in `.build`, so it compiled the
                 // builtin engine in and then failed at link time instead of
                 // degrading cleanly.
-                .define("GRAPHKIT_BUILTIN")   // UNPLUG: remove
+                .define("GRAPHKIT_BUILTIN"),   // UNPLUG: remove
+                // TEMP(Phase2a-Task3): replaced by env-driven selection
+                .define("FEATURE_GRAPH"),
             ],
             linkerSettings: [
                 .linkedLibrary("sqlite3")

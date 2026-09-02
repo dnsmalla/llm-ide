@@ -55,8 +55,16 @@ final class FeatureRegistry: ObservableObject {
         modules[module.feature] = module
     }
 
+    /// Features present in this binary. LlmIdeMacApp sets this from
+    /// FeatureCatalog at boot; a compiled-out feature can never be enabled,
+    /// started, or shown as available. Kept as a settable property (not a
+    /// FeatureCatalog reference) so this core type stays catalog-agnostic.
+    var compiledFeatures: Set<AppFeature> = Set(AppFeature.allCases) {
+        didSet { refresh() }
+    }
+
     func isEnabled(_ feature: AppFeature) -> Bool {
-        activeFeatures.contains(feature)
+        activeFeatures.contains(feature) && compiledFeatures.contains(feature)
     }
 
     /// Reconcile running modules with `activeFeatures` × `runtimeReady`.
@@ -64,7 +72,7 @@ final class FeatureRegistry: ObservableObject {
     func refresh() {
         for feature in AppFeature.allCases {
             guard let module = modules[feature] else { continue }
-            let shouldRun = activeFeatures.contains(feature) && module.runtimeReady
+            let shouldRun = isEnabled(feature) && module.runtimeReady
             if shouldRun && !running.contains(feature) {
                 module.start()
                 running.insert(feature)

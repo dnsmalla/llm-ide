@@ -19,3 +19,9 @@ final class GraphModule: AppModule {
     func start() { updater.start() }
     func stop() { updater.stop() }
 }
+
+// FeatureService conformance — the methods already exist on GraphAutoUpdater;
+// this declaration lets it be held behind FeatureService by FeatureCatalog
+// without the rest of the app needing to know the concrete type. Moved here
+// (out of LlmIdeMacApp.swift) so it lives beside the module it backs.
+extension GraphAutoUpdater: FeatureService {}

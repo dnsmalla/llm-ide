@@ -92,6 +92,16 @@ final class FeatureRegistryTests: XCTestCase {
         XCTAssertEqual(reloaded.activeFeatures, [.fileExplorer, .terminal])
     }
 
+    func testCompiledOutFeatureIsNeverEnabledOrStarted() {
+        let registry = makeRegistry()
+        let graph = SpyModule(.codeGraph3D)
+        registry.register(module: graph)
+        registry.compiledFeatures = Set(AppFeature.allCases).subtracting([.codeGraph3D])
+        registry.updateFeatureSet(Set(AppFeature.allCases), markCustom: false)
+        XCTAssertFalse(registry.isEnabled(.codeGraph3D))
+        XCTAssertEqual(graph.startCount, 0)
+    }
+
     func testEveryFeatureHasAModuleRegisteredInComposition() {
         // Mirror of the registration list in LlmIdeMacApp.init(). If this
         // fails after adding an AppFeature case, add a module there AND here.

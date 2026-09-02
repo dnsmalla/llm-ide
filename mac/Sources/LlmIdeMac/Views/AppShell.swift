@@ -14,8 +14,6 @@ struct AppShell: View {
     @EnvironmentObject var templateStore: DocTemplateStore
     @EnvironmentObject var autoTaskTemplates: AutoTaskTemplateStore
     @EnvironmentObject var autoTaskSkills: AutoTaskSkillCatalog
-    @EnvironmentObject var graphAutoUpdater: GraphAutoUpdater
-    @EnvironmentObject var graphSessionStore: GraphSessionStore
     @EnvironmentObject var autoCodeUpdate: AutoCodeUpdateService
     @State private var shell = ShellState()
     @State private var itemStore = LibraryItemStore()
@@ -622,7 +620,7 @@ struct AppShell: View {
             }
         case .codeGraph:
             if registry.isEnabled(.codeGraph3D) {
-                UAGraphView()
+                FeatureCatalog.graphMainPane()
             } else {
                 DisabledFeaturePlaceholderView(featureName: "3D Code Graph")
             }

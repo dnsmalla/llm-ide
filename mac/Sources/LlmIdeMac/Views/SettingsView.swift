@@ -41,11 +41,17 @@ struct SettingsView: View {
                                     .foregroundStyle(theme.current.textMuted)
                                 PathsSettingsSection()
                                 RepoSettingsSection(api: api)
-                                // Still here (not on a feature page) because its
-                                // auto-update cadence Stepper has no other home —
-                                // dropping it from Settings orphaned the only UI
-                                // for GraphAutoUpdater's interval.
-                                GraphMemorySettingsSection()
+                                // Memory listing stays here (not on a feature
+                                // page) because it has no other home. The
+                                // graph-specific card (auto-update cadence,
+                                // upload-truncation banner) is nil when Code
+                                // Graph is compiled out — dropping it from
+                                // Settings would orphan the only UI for
+                                // GraphAutoUpdater's interval when it IS built.
+                                MemorySettingsSection()
+                                if let graphSettings = FeatureCatalog.graphSettingsSection() {
+                                    graphSettings
+                                }
                             }
                         }
                         .id(activeId)
