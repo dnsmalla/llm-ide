@@ -125,13 +125,12 @@ The Library section gets a 3-column layout (sidebar | list | detail). All other 
 
 The app's lifecycle can exclude features at compile time via `LLMIDE_FEATURES` environment variable, reducing binary size and startup overhead for non-engineers. `Package.swift` reads `LLMIDE_FEATURES` (comma-separated feature names; unset defaults to all enabled) via `ProcessInfo` and appends excluded features' source folders to the `LlmIdeMacLib` target's `exclude:` list, while defining `.define("FEATURE_<NAME>")` for each included feature. **Only one file uses `#if` preprocessor conditionals: `FeatureCatalog.swift`**, which registers compiled-in feature modules and exposes their view factories. All other code accesses features through catalog-provided protocols or notifications, decoupling the main codebase from feature presence. A feature compiled out still gets a row in Settings → Workspace, but shows "Not installed" in place of its toggle.
 
-Six features are excludable at build time:
+Five features are excludable at build time:
 - **`codeGraph3D`** — Code graph layout, rendering, memory/Q&A stores (Phase 2a)
 - **`fileExplorer`** — File navigator, source control view, search; omits help topics for search and source control (Phase 2b)
 - **`ganttIssues`** — Issues board and Gantt timeline (Phase 2b)
 - **`docGen`** — Document generator view (Phase 2b)
 - **`terminal`** — Terminal panel and **drops the SwiftTerm product dependency** (Phase 2b, independent of Explorer)
-- **`agentChat`** — Chat/conversation interface; part of full builds but excluded from lite
 
 A "lite" non-engineer build (the `LLMIDE_FEATURES=agent_chat,auto_tasks,mobile_sync` preset used by `make build-mac-lite`) excludes codeGraph3D, fileExplorer, ganttIssues, docGen, and terminal, leaving only Agent Chat, Auto Tasks, Mobile Sync, Live Capture, and Library.
 
