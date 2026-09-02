@@ -1,46 +1,88 @@
 import SwiftUI
 import Combine
 
-protocol AppModule {
+/// Anything a feature module can switch on and off. The concrete services
+/// (GraphAutoUpdater, LiveSessionMirror, …) already have these methods;
+/// conformance is declared where each module is defined.
+@MainActor
+protocol FeatureService: AnyObject {
+    func start()
+    func stop()
+}
+
+/// One per toggleable feature. Owns the mapping feature → services and is
+/// the only place that starts/stops them. Rule: init is free, `start()`
+/// does the work, `stop()` undoes it; both idempotent.
+@MainActor
+protocol AppModule: AnyObject {
     var feature: AppFeature { get }
-    func start(environment: AppEnvironment)
-    func stop(environment: AppEnvironment)
+    /// Runtime preconditions beyond the feature flag (auth, sub-settings).
+    /// `refresh()` re-reads this, so call sites signal changes (login,
+    /// logout) by calling `FeatureRegistry.refresh()`.
+    var runtimeReady: Bool { get }
+    func start()
+    func stop()
+}
+
+extension AppModule {
+    var runtimeReady: Bool { true }
 }
 
 @MainActor
 final class FeatureRegistry: ObservableObject {
     static let shared = FeatureRegistry()
-    
-    @AppStorage("active_features_json") private var activeFeaturesJSON: String = ""
+
+    /// Same key + format the old @AppStorage code used, so existing users'
+    /// saved feature sets survive this rewrite.
+    static let defaultsKey = "active_features_json"
+
     @Published private(set) var activeFeatures: Set<AppFeature> = Set(AppFeature.allCases)
     @Published private(set) var currentPreset: ProfilePreset = .fullPower
-    
+
+    private let defaults: UserDefaults
     private var modules: [AppFeature: AppModule] = [:]
-    
-    private init() {
+    /// Features whose module is currently started. Registry-level guard so
+    /// a module's start/stop is called once per transition even if the
+    /// underlying service forgot its own guard.
+    private var running: Set<AppFeature> = []
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         loadSavedFeatures()
     }
-    
+
     func register(module: AppModule) {
         modules[module.feature] = module
     }
-    
+
     func isEnabled(_ feature: AppFeature) -> Bool {
-        return activeFeatures.contains(feature)
+        activeFeatures.contains(feature)
     }
-    
-    func applyPreset(_ preset: ProfilePreset, environment: AppEnvironment) {
-        currentPreset = preset
-        if preset != .custom {
-            updateFeatureSet(preset.features, environment: environment, markCustom: false)
+
+    /// Reconcile running modules with `activeFeatures` × `runtimeReady`.
+    /// Idempotent; call after login/logout and any feature-set change.
+    func refresh() {
+        for feature in AppFeature.allCases {
+            guard let module = modules[feature] else { continue }
+            let shouldRun = activeFeatures.contains(feature) && module.runtimeReady
+            if shouldRun && !running.contains(feature) {
+                module.start()
+                running.insert(feature)
+            } else if !shouldRun && running.contains(feature) {
+                module.stop()
+                running.remove(feature)
+            }
         }
     }
-    
-    func updateFeatureSet(
-        _ newFeatures: Set<AppFeature>,
-        environment: AppEnvironment,
-        markCustom: Bool = true
-    ) {
+
+    func applyPreset(_ preset: ProfilePreset) {
+        currentPreset = preset
+        if preset != .custom {
+            updateFeatureSet(preset.features, markCustom: false)
+        }
+    }
+
+    func updateFeatureSet(_ newFeatures: Set<AppFeature>, markCustom: Bool = true) {
         var validated = newFeatures
         for feature in newFeatures {
             validated.formUnion(feature.requiredDependencies)
@@ -50,37 +92,25 @@ final class FeatureRegistry: ObservableObject {
         if markCustom, currentPreset != .custom {
             currentPreset = .custom
         }
-
-        guard validated != activeFeatures else { return }
-        
-        let disabled = activeFeatures.subtracting(validated)
-        let enabled = validated.subtracting(activeFeatures)
-        
-        // 1. Gracefully stop background services for disabled features
-        for feature in disabled {
-            modules[feature]?.stop(environment: environment)
-        }
-        
-        // 2. Commit active state
-        self.activeFeatures = validated
+        // Unchanged set still refreshes: a preset re-apply must reconcile
+        // modules registered after the set was first persisted.
+        guard validated != activeFeatures else { refresh(); return }
+        activeFeatures = validated
         saveFeatures()
-        
-        // 3. Start background services for newly enabled features
-        for feature in enabled {
-            modules[feature]?.start(environment: environment)
-        }
+        refresh()
     }
-    
+
     private func saveFeatures() {
-        let array = Array(activeFeatures).map { $0.rawValue }
-        if let data = try? JSONEncoder().encode(array), let json = String(data: data, encoding: .utf8) {
-            activeFeaturesJSON = json
+        let array = activeFeatures.map { $0.rawValue }
+        if let data = try? JSONEncoder().encode(array),
+           let json = String(data: data, encoding: .utf8) {
+            defaults.set(json, forKey: Self.defaultsKey)
         }
     }
-    
+
     private func loadSavedFeatures() {
-        guard !activeFeaturesJSON.isEmpty,
-              let data = activeFeaturesJSON.data(using: .utf8),
+        guard let json = defaults.string(forKey: Self.defaultsKey),
+              let data = json.data(using: .utf8),
               let decoded = try? JSONDecoder().decode([String].self, from: data) else {
             activeFeatures = Set(AppFeature.allCases)
             return

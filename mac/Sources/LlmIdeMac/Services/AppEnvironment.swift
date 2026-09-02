@@ -113,9 +113,4 @@ final class AppEnvironment {
             onChange()
         }
     }
-
-    /// Sync feature-gated background services with `FeatureRegistry` state.
-    func syncServiceLifecycles() {
-        // No-op until AppModule implementations are wired for each feature.
-    }
 }

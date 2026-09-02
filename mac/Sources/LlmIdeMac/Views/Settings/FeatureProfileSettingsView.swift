@@ -3,7 +3,6 @@ import SwiftUI
 /// Workspace presets, feature gates, and top-bar visibility in one card.
 struct FeatureProfileSettingsSection: View {
     @ObservedObject var registry = FeatureRegistry.shared
-    @Environment(AppEnvironment.self) private var environment
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
 
@@ -21,8 +20,7 @@ struct FeatureProfileSettingsSection: View {
                     Picker("", selection: Binding(
                         get: { registry.currentPreset },
                         set: { newPreset in
-                            registry.applyPreset(newPreset, environment: environment)
-                            environment.syncServiceLifecycles()
+                            registry.applyPreset(newPreset)
                         }
                     )) {
                         ForEach(ProfilePreset.allCases) { preset in
@@ -95,8 +93,7 @@ struct FeatureProfileSettingsSection: View {
                 } else {
                     updated.remove(feature)
                 }
-                registry.updateFeatureSet(updated, environment: environment)
-                environment.syncServiceLifecycles()
+                registry.updateFeatureSet(updated)
             }
         )
         HStack(spacing: Spacing.md) {
