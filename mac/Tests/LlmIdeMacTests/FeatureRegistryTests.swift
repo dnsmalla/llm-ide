@@ -91,4 +91,17 @@ final class FeatureRegistryTests: XCTestCase {
         let reloaded = FeatureRegistry(defaults: suite)
         XCTAssertEqual(reloaded.activeFeatures, [.fileExplorer, .terminal])
     }
+
+    func testEveryFeatureHasAModuleRegisteredInComposition() {
+        // Mirror of the registration list in LlmIdeMacApp.init(). If this
+        // fails after adding an AppFeature case, add a module there AND here.
+        let covered: Set<AppFeature> = [
+            .autoTasks,      // AutoTaskModule
+            .codeGraph3D,    // GraphModule
+            .agentChat,      // ChatModule
+            .mobileSync,     // MobileModule
+            .fileExplorer, .ganttIssues, .docGen, .terminal,  // PassiveModule
+        ]
+        XCTAssertEqual(covered, Set(AppFeature.allCases))
+    }
 }

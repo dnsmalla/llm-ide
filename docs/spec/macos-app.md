@@ -138,6 +138,17 @@ The Library section gets a 3-column layout (sidebar | list | detail). All other 
 | `*Mirror` | Live-sync / polling from another source | `LiveSessionMirror` |
 | `*Router` | Navigation / deep-link dispatch | `DeepLinkRouter` |
 
+### Feature toggles and lifecycle (`FeatureRegistry`)
+
+Feature toggles are wired to `FeatureRegistry.refresh()`: each feature has
+an `AppModule` (`AutoTaskModule`, `GraphModule`, `ChatModule`,
+`MobileModule`, `PassiveModule` for the view-only four) owning its
+services' `start()`/`stop()`. Disabling a feature stops its timers,
+watchers, and listeners; presets do the same in bulk. Rule: init is free,
+`start()` does the work, `stop()` undoes it, both idempotent. Auth changes
+call `refresh()`, so auth-scoped modules (graph, chat mirror) stop on
+logout via `runtimeReady`.
+
 ### Key service contracts
 
 #### `SessionStore` (`Services/SessionStore.swift`)

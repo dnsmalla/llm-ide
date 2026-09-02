@@ -1,7 +1,7 @@
 # Feature Module Architecture — Design
 
 **Date:** 2026-09-02
-**Status:** Proposed
+**Status:** Phase 1 implemented (feature/feature-runtime-modules branch); Phases 2–3 pending
 **Goal:** The Workspace settings toggles (Settings → Workspace) currently hide
 menus and views only. This design makes a disabled feature actually leave the
 system: first its background work stops entirely (Phase 1), then its code is
@@ -50,10 +50,15 @@ feature → services and is the only place that starts/stops them:
 | `codeGraph3D` | `GraphAutoUpdater` (interval + watcher + backend upload) | timers, FS watchers, uploads |
 | `mobileSync` | `MobileControlManager` (`MobileWebSocketServer` on :3006, `MobileBonjourAdvertiser`) | network listener, Bonjour |
 | `agentChat` | `LiveSessionMirror` polling | polling |
-| `fileExplorer` | `LibraryItemStore` scans + `AppEnvironment` index watching | FS scans/watchers |
+| `fileExplorer` | none in Phase 1 (PassiveModule) | - |
 | `ganttIssues` | issue/Gantt refresh work (view-driven today; module is a thin no-op until background work exists) | ~0 |
 | `docGen` | `DocTemplateStore` project reload (thin) | ~0 |
 | `terminal` | none (sessions are user-opened) | ~0 |
+
+`fileExplorer` is passive in Phase 1: `LibraryItemStore` scanning and index
+watching are project-lifecycle-driven and shared by Library/meetings
+surfaces, so feature-gating them would break non-explorer consumers.
+Revisit when Phase 2 separates those consumers.
 
 Thin modules are still created: uniformity is what makes Phase 2 mechanical.
 
