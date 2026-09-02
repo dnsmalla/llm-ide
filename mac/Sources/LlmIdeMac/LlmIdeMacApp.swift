@@ -69,6 +69,10 @@ public struct LlmIdeMacApp: App {
     @StateObject private var deepLink: DeepLinkRouter
     @StateObject private var liveMirror: LiveSessionMirror
     @StateObject private var autoCodeUpdate: AutoCodeUpdateService
+    /// Auto Task prompt templates for the open project (`templates/auto_task/`).
+    @StateObject private var autoTaskTemplates: AutoTaskTemplateStore
+    /// The open project's `.claude/skills/` — what an Auto Task can run under.
+    @StateObject private var autoTaskSkills = AutoTaskSkillCatalog()
     @StateObject private var logStore: TaskLogStore
     @StateObject private var updateService = UpdateService()
     @StateObject private var projectStore: ProjectStore
@@ -176,6 +180,16 @@ public struct LlmIdeMacApp: App {
         self._deepLink = StateObject(wrappedValue: router)
         self._liveMirror = StateObject(wrappedValue: mirror)
         self._autoCodeUpdate = StateObject(wrappedValue: autoCode)
+        // The runner resolves a task's selected template at run time, and the
+        // store repoints task configs when a template is renamed or deleted —
+        // otherwise a rename would silently drop every task back to its own
+        // prompt.
+        let autoTaskTemplateStore = AutoTaskTemplateStore()
+        autoTaskTemplateStore.onTemplateIdChanged = { [weak autoCode] oldId, newId in
+            autoCode?.taskConfigs.retargetTemplate(from: oldId, to: newId)
+        }
+        autoCode.autoTaskTemplates = autoTaskTemplateStore
+        self._autoTaskTemplates = StateObject(wrappedValue: autoTaskTemplateStore)
         self._logStore = StateObject(wrappedValue: taskLogStore)
         self._projectStore = StateObject(wrappedValue: projectStoreInstance)
         let autoUpdater = GraphAutoUpdater(projectStore: projectStoreInstance,
@@ -238,6 +252,8 @@ public struct LlmIdeMacApp: App {
                 .environmentObject(deepLink)
                 .environmentObject(liveMirror)
                 .environmentObject(autoCodeUpdate)
+                .environmentObject(autoTaskTemplates)
+                .environmentObject(autoTaskSkills)
                 .environmentObject(logStore)
                 .environmentObject(updateService)
                 .environmentObject(projectStore)

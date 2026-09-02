@@ -72,7 +72,17 @@ final class AutoCodeUpdateService: ObservableObject {
     /// callers/tests that omit it still compile; the app injects the shared
     /// instance the UI observes.
     let logStore: TaskLogStore
+    /// Per-task input/output/skill/template selections, keyed by task id. Owned
+    /// here (not injected) because the runner is the one thing every surface —
+    /// the page, the scheduler, the mobile bridge — already has a handle on.
+    let taskConfigs: AutoTaskConfigStore
     let log = Logger(subsystem: "com.llmide.macapp", category: "AutoCodeUpdateService")
+
+    /// The project's saved Auto Task prompt templates. `weak` for the same
+    /// reason as `activity`: the store is owned by the app's `@StateObject`.
+    /// nil (no project open, older callers, tests) means every task falls back
+    /// to its own prompt.
+    weak var autoTaskTemplates: AutoTaskTemplateStore?
 
     /// Activity feed store. Set once by the app entry after construction.
     /// `weak` because the store is owned by the app's `@State`. Mirrors the
@@ -131,6 +141,9 @@ final class AutoCodeUpdateService: ObservableObject {
         self.projectStore = projectStore
         self.api = api
         self.logStore = logStore
+        // Same defaults suite the rest of the service uses, so a test that
+        // injects an isolated suite gets isolated task settings too.
+        self.taskConfigs = AutoTaskConfigStore(defaults: config.userDefaults)
         isEnabled = autoTaskSettings.enabled
         
         // Arm/disarm the scheduler from the single source of truth. Every
@@ -277,6 +290,32 @@ final class AutoCodeUpdateService: ObservableObject {
         statusMessage = "\(AutoTask.loopEngineering.label) — done"
     }
 
+    /// The prompt a task actually runs: its selected `AutoTaskTemplate` when it
+    /// has one, otherwise its own prompt (the built-in `AppConfig` template, or
+    /// a custom task's inline text), with the task's input/output paths and
+    /// skill folded in by `AutoTaskPromptComposer`.
+    ///
+    /// A task with no saved settings and no template composes to exactly its
+    /// own prompt, unchanged — which is what every task did before templates
+    /// existed, so the feature is inert until someone configures it.
+    ///
+    /// A `templateId` pointing at a template that is gone (deleted on disk,
+    /// project closed) falls back to the own prompt rather than running an
+    /// empty one: an unreadable template must not turn a scheduled task into a
+    /// no-op the user only discovers in the log.
+    ///
+    /// `writesFiles` must match the `persistChanges:` the caller passes to
+    /// `runCLI` — it is what stops a review task being told to write files its
+    /// own post-run revert will delete.
+    func composedPrompt(taskId: String, ownPrompt: String, projectRoot: String?,
+                        writesFiles: Bool) -> String {
+        let taskConfig = taskConfigs.config(for: taskId)
+        let body = autoTaskTemplates?.template(id: taskConfig.templateId)?.body ?? ownPrompt
+        let root = projectRoot.map { URL(fileURLWithPath: $0) }
+        return AutoTaskPromptComposer.compose(body: body, config: taskConfig,
+                                              projectRoot: root, writesFiles: writesFiles)
+    }
+
     /// Custom-task counterpart to `runSingle(_:)` — shares the same
     /// `runTask` re-entrancy guard, so a built-in run and a custom run
     /// can't overlap either.
@@ -324,9 +363,16 @@ final class AutoCodeUpdateService: ObservableObject {
         }
         currentStep = "Running \(task.name)"
         logStore.append(task.id, "Running \(task.name)…")
-        let ok = await runCLI(prompt: task.template, localPath: resolved.gitRoot,
+        // `.implement` keeps its edits on an isolated branch; `.review` has them
+        // reverted afterwards, so the two must describe the output path
+        // differently — one value drives both the prompt and the enforcement.
+        let persistChanges = task.mode == .implement
+        let ok = await runCLI(prompt: composedPrompt(taskId: task.id, ownPrompt: task.template,
+                                                     projectRoot: resolved.projectRoot,
+                                                     writesFiles: persistChanges),
+                              localPath: resolved.gitRoot,
                               logSuffix: task.id, logDir: logDir, logStoreId: task.id,
-                              persistChanges: task.mode == .implement)
+                              persistChanges: persistChanges)
         if ok {
             taskErrors.removeValue(forKey: task.id)
             logStore.append(task.id, "— run finished —")
@@ -507,31 +553,46 @@ final class AutoCodeUpdateService: ObservableObject {
                 await runReviewMerge(resolved: resolved)
             case .reviewCode:
                 currentStep = "Running Review Code"
-                let ok = await runCLI(prompt: config.autoTaskTemplateReviewCode,
+                let ok = await runCLI(prompt: composedPrompt(taskId: task.rawValue,
+                                                             ownPrompt: config.autoTaskTemplateReviewCode,
+                                                             projectRoot: resolved.projectRoot,
+                                                             writesFiles: false),
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
                                       logDir: logDir, logStoreId: task.rawValue)
                 finishPromptTask(task, ok: ok)
             case .reviewDoc:
                 currentStep = "Running Review Doc"
-                let ok = await runCLI(prompt: config.autoTaskTemplateReviewDoc,
+                let ok = await runCLI(prompt: composedPrompt(taskId: task.rawValue,
+                                                             ownPrompt: config.autoTaskTemplateReviewDoc,
+                                                             projectRoot: resolved.projectRoot,
+                                                             writesFiles: false),
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
                                       logDir: logDir, logStoreId: task.rawValue)
                 finishPromptTask(task, ok: ok)
             case .reviewConflicts:
                 currentStep = "Running Review Conflicts"
-                let ok = await runCLI(prompt: config.autoTaskTemplateReviewConflicts,
+                let ok = await runCLI(prompt: composedPrompt(taskId: task.rawValue,
+                                                             ownPrompt: config.autoTaskTemplateReviewConflicts,
+                                                             projectRoot: resolved.projectRoot,
+                                                             writesFiles: false),
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
                                       logDir: logDir, logStoreId: task.rawValue)
                 finishPromptTask(task, ok: ok)
             case .generateDoc:
                 currentStep = "Generating Documentation"
-                let ok = await runCLI(prompt: config.autoTaskTemplateGenerateDoc,
+                let ok = await runCLI(prompt: composedPrompt(taskId: task.rawValue,
+                                                             ownPrompt: config.autoTaskTemplateGenerateDoc,
+                                                             projectRoot: resolved.projectRoot,
+                                                             writesFiles: false),
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
                                       logDir: logDir, logStoreId: task.rawValue)
                 finishPromptTask(task, ok: ok)
             case .updateIssues:
                 currentStep = "Updating Issues"
-                let ok = await runCLI(prompt: config.autoTaskTemplateUpdateIssues,
+                let ok = await runCLI(prompt: composedPrompt(taskId: task.rawValue,
+                                                             ownPrompt: config.autoTaskTemplateUpdateIssues,
+                                                             projectRoot: resolved.projectRoot,
+                                                             writesFiles: false),
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
                                       logDir: logDir, logStoreId: task.rawValue)
                 finishPromptTask(task, ok: ok)

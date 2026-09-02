@@ -12,6 +12,8 @@ struct AppShell: View {
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var templateStore: DocTemplateStore
+    @EnvironmentObject var autoTaskTemplates: AutoTaskTemplateStore
+    @EnvironmentObject var autoTaskSkills: AutoTaskSkillCatalog
     @EnvironmentObject var graphAutoUpdater: GraphAutoUpdater
     @EnvironmentObject var graphSessionStore: GraphSessionStore
     @EnvironmentObject var autoCodeUpdate: AutoCodeUpdateService
@@ -879,6 +881,15 @@ struct AppShell: View {
     private func reloadDocTemplatesForActiveProject() {
         let root = projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
         templateStore.reloadProjectTemplates(at: root)
+        // Auto Task prompts live in the same project (`templates/auto_task/`)
+        // and follow the same open/close/switch moments, so they rebind here
+        // rather than needing their own observer of the same notification.
+        autoTaskTemplates.bindProject(root: root)
+        autoTaskSkills.reload(projectRoot: root, force: true)
+        // Per-task settings are project-scoped for the same reason: a config's
+        // templateId names a file in THIS project's templates/auto_task/, and
+        // every project is seeded with the same starter slugs.
+        autoCodeUpdate.taskConfigs.bindProject(id: projectStore.activeProject?.bundle.id)
     }
 
     /// Ensures every path in `config.localCodeFolders` is referenced by the
