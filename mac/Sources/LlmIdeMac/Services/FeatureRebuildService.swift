@@ -15,6 +15,12 @@ final class FeatureRebuildService: ObservableObject {
         case idle
         case building
         case readyToSwap
+        /// Entered the instant `swapAndRelaunch()` spawns the helper, before
+        /// `NSApp.terminate` actually tears the process down — closes the
+        /// window between "staged, ready" and "gone" during which a second
+        /// tap on the same button must be a no-op, not a second
+        /// `rebuild-swap.sh` racing the first.
+        case swapping
         case failed(String)
     }
 
@@ -102,7 +108,7 @@ final class FeatureRebuildService: ObservableObject {
         guard isEligible, let sourceRoot else { return }
         switch phase {
         case .idle, .failed: break
-        case .building, .readyToSwap: return
+        case .building, .readyToSwap, .swapping: return
         }
 
         phase = .building
@@ -175,11 +181,29 @@ final class FeatureRebuildService: ObservableObject {
             }
 
             proc.waitUntilExit()
+
+            // A readability handler is edge-triggered via GCD and can race
+            // waitUntilExit(): the final chunk — often exactly the failure's
+            // causal error line — can still be sitting in the pipe's kernel
+            // buffer with no further callback ever firing once the process
+            // has already exited. Stop async notifications FIRST, then drain
+            // synchronously so nothing written right before exit is lost,
+            // and do it before classifying the phase so a failure message
+            // built from `logTail` includes that tail.
             stdoutPipe.fileHandleForReading.readabilityHandler = nil
             stderrPipe.fileHandleForReading.readabilityHandler = nil
+            let remainingStdout = try? stdoutPipe.fileHandleForReading.readToEnd()
+            let remainingStderr = try? stderrPipe.fileHandleForReading.readToEnd()
             let status = proc.terminationStatus
 
             await MainActor.run {
+                for data in [remainingStdout, remainingStderr] {
+                    guard let data, !data.isEmpty,
+                          let text = String(data: data, encoding: .utf8) else { continue }
+                    for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+                        self.appendLogLine(String(line))
+                    }
+                }
                 if status == 0 {
                     self.stagedAppURL = stageDir.appendingPathComponent("LlmIdeMac.app")
                     self.phase = .readyToSwap
@@ -196,12 +220,19 @@ final class FeatureRebuildService: ObservableObject {
     /// Spawns `rebuild-swap.sh` detached (survives this process exiting),
     /// then quits — the swap helper waits for this pid, installs the staged
     /// bundle over `installTarget`, and relaunches it.
+    ///
+    /// Guarded against reentrancy: only fires from `.readyToSwap`, and flips
+    /// to `.swapping` before spawning anything, so a second tap (e.g. a
+    /// double-click, or `NSApp.terminate` taking a moment to actually quit)
+    /// can never spawn a second `rebuild-swap.sh` racing the first.
     func swapAndRelaunch() {
-        guard case .readyToSwap = phase,
+        guard phase == .readyToSwap,
               let stagedAppURL,
               let installTarget,
               let sourceRoot
         else { return }
+
+        phase = .swapping
 
         let scriptPath = sourceRoot.appendingPathComponent("Scripts/rebuild-swap.sh").path
         let pid = String(ProcessInfo.processInfo.processIdentifier)
