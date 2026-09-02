@@ -1,4 +1,5 @@
 import Foundation
+import GraphCore
 
 /// Generates per-file notes, a repo index, and a machine-readable graph JSON.
 /// All output lives under `repoRoot/.code-notes/`.

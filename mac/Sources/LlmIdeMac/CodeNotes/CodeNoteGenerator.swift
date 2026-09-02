@@ -1,5 +1,5 @@
 import Foundation
-import GraphKit
+import GraphCore
 import os
 
 /// Generates deterministic, human-readable code notes from a ScanResult.

@@ -1,4 +1,5 @@
 import Foundation
+import GraphCore
 import CoreGraphics
 
 public enum UAParser {

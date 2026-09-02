@@ -6,47 +6,13 @@
 // an InfiniteBrain-style memory layer. v1: no LLM, no embeddings.
 
 import Foundation
+import GraphCore
 import CryptoKit
 
-public struct GeneratedMemory: Sendable {
-    public let graph: CGData
-    public let chunks: [MemoryChunk]   // flat, ordered (doc → its chunks)
-    public let docCount: Int
-}
-
-public struct MemoryChunk: Identifiable, Sendable, Hashable {
-    public let id: String              // stable: <sha256 short of path + heading-path>
-    public let docURL: URL
-    public let docTitle: String        // file name minus extension
-    public let headingPath: [String]   // ["Section", "Subsection"]
-    public let body: String            // accumulated lines until next heading at <= level
-    public let kind: CGNodeKind        // typed via frontmatter or heading heuristics
-    public let tags: [String]          // lowercased, from #hashtags + frontmatter `tags:`
-    public let wikiLinks: [String]     // raw target titles from [[Title]] (case as-written)
-    public let graphOnly: Bool         // frontmatter `graph-only: true` — consumers keep
-                                       // this doc out of agent memory artifacts
-    public let relatedModules: [String] // frontmatter `related-modules:` — declared code
-                                        // module affinity, case preserved (paths)
-
-    public init(id: String, docURL: URL, docTitle: String, headingPath: [String],
-                body: String, kind: CGNodeKind, tags: [String], wikiLinks: [String],
-                graphOnly: Bool = false, relatedModules: [String] = []) {
-        self.id = id; self.docURL = docURL; self.docTitle = docTitle
-        self.headingPath = headingPath; self.body = body; self.kind = kind
-        self.tags = tags; self.wikiLinks = wikiLinks
-        self.graphOnly = graphOnly; self.relatedModules = relatedModules
-    }
-
-    public var title: String {
-        headingPath.last ?? docTitle
-    }
-    public var displayHeading: String {
-        headingPath.isEmpty ? "(preamble)" : headingPath.joined(separator: " › ")
-    }
-}
-
 public enum MemoryGenerator {
-    public static let supportedExtensions: Set<String> = ["md", "mdx", "markdown", "txt"]
+    /// Sourced from `GraphCore` so the app's file routing, this generator, and
+    /// any change-detection fingerprint cover exactly the same set.
+    public static let supportedExtensions: Set<String> = DocExtensions.markdownAndText
     public static let maxChunkBodyChars = 4000
 
     /// Generate from an explicit list of files. The caller (usually backed
@@ -98,7 +64,7 @@ public enum MemoryGenerator {
                         "type": chunk.kind.displayName
                     ]
                 ))
-                edges.append(CGEdge(fromId: chunk.id, toId: docID, kind: .relatedTo))
+edges.append(CGEdge(fromId: chunk.id, toId: docID, kind: .relatedTo))
             }
         }
 

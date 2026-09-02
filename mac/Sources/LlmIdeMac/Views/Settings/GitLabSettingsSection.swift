@@ -1,5 +1,4 @@
 import SwiftUI
-import GraphKit
 
 struct GitLabSettingsSection: View {
     /// When true, renders only the inner controls (for `RepoSettingsSection` tabs).

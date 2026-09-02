@@ -1,5 +1,5 @@
 import Foundation
-import GraphKit
+import GraphCore
 
 /// Routes a project's files to the right graph generator by file extension —
 /// the first stage of the unified knowledge graph (see
@@ -14,8 +14,10 @@ import GraphKit
 /// supported doc extensions).
 enum FileClassifier {
 
-    /// Doc extensions handled by InfiniteBrain's memory generator.
-    static let docExtensions: Set<String> = MemoryGenerator.supportedExtensions
+    /// Doc extensions — the shared convention from `GraphCore`, not the
+    /// engine's copy, so this type carries no dependency on a graph engine and
+    /// keeps working when one is not installed.
+    static let docExtensions: Set<String> = DocExtensions.markdownAndText
 
     /// Remove code-track markdown from a code graph.
     ///

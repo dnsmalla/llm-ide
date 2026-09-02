@@ -1,5 +1,5 @@
 import Foundation
-import GraphKit
+import GraphCore
 
 /// Runs the note-enrichment phase for one ``CodeBatch``: builds a prompt that
 /// describes the batch's files, their symbols, and their import neighbors, then

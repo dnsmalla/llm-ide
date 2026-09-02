@@ -1,5 +1,5 @@
 import Foundation
-import GraphKit
+import GraphCore
 import CryptoKit
 import os
 
@@ -44,6 +44,9 @@ final class KnowledgeGraphService: ObservableObject {
     @Published private(set) var docFingerprint: String?
 
     private let codeNotes: CodeNoteService
+    /// Produces the doc track and performs the join. Injected so this
+    /// orchestrator never names a producer type — see `GraphEngine`.
+    private let engine: GraphEngine?
     /// Re-entrancy guard — the auto-updater (Stage 5) and a manual run must not
     /// overlap. `CodeNoteService` has its own guard too; this covers the doc
     /// track and the orchestration as a whole.
@@ -69,8 +72,9 @@ final class KnowledgeGraphService: ObservableObject {
     // No default-arg `CodeNoteService()` — a default argument is evaluated in a
     // nonisolated context, but CodeNoteService's init is @MainActor-isolated.
     // Construct it inside this @MainActor init instead.
-    init() {
-        self.codeNotes = CodeNoteService()
+    init(engine: GraphEngine? = GraphEngines.resolveDefault()) {
+        self.engine = engine
+        self.codeNotes = CodeNoteService(engine: engine)
     }
 
     /// Run both tracks for a project.
@@ -105,11 +109,32 @@ final class KnowledgeGraphService: ObservableObject {
         // Code track — StructureScanner filters to code extensions internally
         // and is incremental (scan-cache), so this is cheap on re-runs.
         if let codeRepoRoot {
-            _ = await codeNotes.generate(repoRoot: codeRepoRoot)
-            // "md is doc": the scanner emits markdown as code `.docPage` nodes;
-            // strip them so markdown lives only in the doc track and isn't
-            // double-counted when merged below.
-            codeGraph = FileClassifier.strippingDocNodes(from: codeNotes.graph)
+            // The result MUST be inspected. Discarding it (`_ = await …`) meant
+            // a run that returned early — the scan lock was held by the
+            // background auto-updater, or a plugin engine exited non-zero —
+            // published an empty graph that fell straight through to the
+            // artifact write below, rewriting `graph-notes.md` as
+            // "Code nodes: 0" with no dependency hubs. Exactly the regression
+            // the doc track was already hardened against.
+            switch await codeNotes.generate(repoRoot: codeRepoRoot) {
+            case .success:
+                // "md is doc": the scanner emits markdown as code `.docPage`
+                // nodes; strip them so markdown lives only in the doc track and
+                // is not double-counted when merged below.
+                codeGraph = FileClassifier.strippingDocNodes(from: codeNotes.graph)
+            case .failure(.busy):
+                // Expected, not a failure: the background updater and a manual
+                // generate both run on timers and contend for the same repo's
+                // scan lock. Keep whatever code graph this instance already
+                // holds and carry on with the doc track — abandoning the whole
+                // refresh over routine contention traded a data bug for a UX
+                // one.
+                Self.log.info("code track busy — reusing the retained code graph")
+            case .failure(let error):
+                Self.log.error("code track unavailable: \(error.localizedDescription, privacy: .public)")
+                phase = .failed(error.localizedDescription)
+                return
+            }
         }
 
         // Doc track — MemoryGenerator walks each root (bounded) and filters to
@@ -117,46 +142,72 @@ final class KnowledgeGraphService: ObservableObject {
         let roots = docRoots
         // Recompute the doc graph only when the doc set changed (stat-only
         // fingerprint); otherwise reuse the cached result.
-        let fingerprint = await Task.detached(priority: .utility) { Self.docSetFingerprint(roots: roots) }.value
+        let fingerprint = await Task.detached(priority: .utility) { [engine] in
+            engine?.docSetFingerprint(roots: roots) ?? ""
+        }.value
         docFingerprint = fingerprint
         let doc: (graph: CGData, chunks: [MemoryChunk], docCount: Int)
         if let last = lastDocFingerprint, last == fingerprint {
             doc = (cachedDocGraph, cachedChunks, cachedDocCount)
-        } else {
-            doc = await Task.detached(priority: .userInitiated) { () -> (graph: CGData, chunks: [MemoryChunk], docCount: Int) in
-                var nodes: [CGNode] = []
-                var edges: [CGEdge] = []
-                var chunks: [MemoryChunk] = []
-                var docCount = 0
-                var seenNode = Set<String>()
-                let fm = FileManager.default
-                for root in roots {
-                    var isDir: ObjCBool = false
-                    guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { continue }
-                    let mem = MemoryGenerator.generate(from: root)
-                    for n in mem.graph.nodes where seenNode.insert(n.id).inserted { nodes.append(n) }
-                    // CGEdge has no id; doc graphs from distinct roots have disjoint
-                    // (path-hashed) node ids, so their edges can't collide — append.
-                    edges.append(contentsOf: mem.graph.edges)
-                    chunks.append(contentsOf: mem.chunks)
-                    docCount += mem.docCount
+        } else if let engine {
+            do {
+                let generated = try await engine.generateDocMemory(roots: roots)
+                doc = (generated.graph, generated.chunks, generated.docCount)
+                // Cache ONLY a non-empty result. Caching an empty one under the
+                // fresh fingerprint pinned it for the rest of the session:
+                // every later run saw a fingerprint hit and never retried. An
+                // engine can return empty without throwing, so checking for a
+                // thrown error was not enough.
+                if !doc.graph.nodes.isEmpty {
+                    lastDocFingerprint = fingerprint
+                    cachedDocGraph = doc.graph
+                    cachedChunks = doc.chunks
+                    cachedDocCount = doc.docCount
                 }
-                return (CGData(nodes: nodes, edges: edges), chunks, docCount)
-            }.value
-            lastDocFingerprint = fingerprint
-            cachedDocGraph = doc.graph
-            cachedChunks = doc.chunks
-            cachedDocCount = doc.docCount
+            } catch {
+                Self.log.error("doc track failed: \(error.localizedDescription, privacy: .public)")
+                phase = .failed(error.localizedDescription)
+                return
+            }
+        } else {
+            phase = .failed("no graph engine installed")
+            return
         }
         docGraph = doc.graph
         docChunks = doc.chunks
         docCount = doc.docCount
 
         // Stage 2 — unify code + doc into one graph, with doc→code cross-links.
-        mergedGraph = Self.merge(code: codeGraph, doc: doc.graph, chunks: doc.chunks)
+        guard let engine else {
+            phase = .failed("no graph engine installed")
+            return
+        }
+        do {
+            mergedGraph = try await engine.merge(code: codeGraph, doc: doc.graph,
+                                                 chunks: doc.chunks)
+        } catch {
+            Self.log.error("merge failed: \(error.localizedDescription, privacy: .public)")
+            phase = .failed(error.localizedDescription)
+            return
+        }
 
         // Stage 4 — write the agent-facing memory artifacts where the extension
-        // reads them (system/memory/), fixing the previously-empty memory.
+        // reads them (system/memory/).
+        //
+        // Guarded on a non-empty merged graph, mirroring
+        // `CodeGraphUploadService`'s refusal to upload an empty one. Returning
+        // early on *thrown* failures was not enough: both tracks can succeed
+        // while producing nothing — a Go or Rust repository yields no code
+        // files at all (the scanner handles ts/js/swift/kt/py/md only) and no
+        // docs, and a plugin can exit 0 with `{"nodes":[],"edges":[]}`. Either
+        // way the write would replace `graph-notes.md` with
+        // "Code nodes: 0 / Doc nodes: 0 / Edges: 0".
+        if mergedGraph.nodes.isEmpty {
+            Self.log.info("merged graph is empty — leaving existing memory artifacts alone")
+            phase = .complete(codeNodes: codeGraph.nodes.count,
+                              docNodes: docGraph.nodes.count)
+            return
+        }
         if let memoryRoot {
             let code = codeGraph, docData = docGraph, mg = mergedGraph
             let chunks = doc.chunks, dCount = doc.docCount
@@ -376,73 +427,6 @@ final class KnowledgeGraphService: ObservableObject {
         return out
     }
 
-    /// Merge the code and doc graphs into one and add doc→code cross-links via
-    /// two mechanisms:
-    ///   1. Wikilinks — a doc chunk that EXPLICITLY references a code symbol
-    ///      via a `[[wikilink]]` gets a `references` edge to that code node.
-    ///      A chunk's (heading-derived) title is NOT matched here, because
-    ///      generic headings like "Config"/"Setup"/"main" collide with code
-    ///      symbol names and would manufacture false edges.
-    ///   2. Mentions — inline backtick spans (`` `kb/db.mjs` ``, `` `backupTo` ``)
-    ///      resolved against a code-entity inventory (title + source-file path)
-    ///      via `DocCodeLinker`. Real-world docs almost never use wikilinks, so
-    ///      this is the mechanism that actually produces cross-links in
-    ///      practice; wikilinks are kept for the rare doc that does use them.
-    /// Node ids are namespaced (code paths/symbols vs `doc:`/chunk hashes) so
-    /// the union can't collide; chunk graph-node ids equal `MemoryChunk.id`,
-    /// so the cross-link `fromId` resolves to a real node.
-    nonisolated static func merge(code: CGData, doc: CGData, chunks: [MemoryChunk]) -> CGData {
-        var nodes: [CGNode] = []
-        var seen = Set<String>()
-        for n in code.nodes + doc.nodes where seen.insert(n.id).inserted { nodes.append(n) }
-        var edges = code.edges + doc.edges
-
-        // Index code nodes by lowercased title for name matching.
-        var codeIdsByTitle: [String: [String]] = [:]
-        for n in code.nodes { codeIdsByTitle[n.title.lowercased(), default: []].append(n.id) }
-        guard !codeIdsByTitle.isEmpty else { return CGData(nodes: nodes, edges: edges) }
-
-        var crossSeen = Set<String>()
-        for chunk in chunks {
-            for name in chunk.wikiLinks.map({ $0.lowercased() }) {
-                guard let targets = codeIdsByTitle[name] else { continue }
-                for codeId in targets {
-                    let key = "\(chunk.id)->\(codeId)"
-                    guard crossSeen.insert(key).inserted else { continue }
-                    edges.append(CGEdge(fromId: chunk.id, toId: codeId,
-                                        kind: .references, confidence: .inferred))
-                }
-            }
-        }
-
-        // Mention links: shape-qualified backtick mentions (`kb/db.mjs`,
-        // `backupTo`) resolved against the code inventory — the deterministic
-        // replacement for wikilink-only linking (which real docs never use).
-        // Inventory keys: node title (symbols, file titles) plus any explicit
-        // relative-path metadata, all lowercased. No separate basename key —
-        // relies on StructureGraphBuilder always titling .file nodes with the
-        // path's basename, so basename mentions already hit codeIdsByTitle.
-        var inventory: [String: [String]] = codeIdsByTitle
-        for n in code.nodes {
-            if let p = n.metadata["source_file"]?.lowercased(), inventory[p] == nil {
-                inventory[p, default: []].append(n.id)
-            }
-        }
-        for link in DocCodeLinker.links(chunks: chunks, inventory: inventory) {
-            let key = "\(link.chunkID)->\(link.codeNodeID)"
-            guard crossSeen.insert(key).inserted else { continue }
-            // NOTE: mention links carry a graduated confidence score
-            // (link.confidence: 0.9 path-shaped / 0.7 symbol-shaped) that
-            // we currently collapse into the same .inferred tier used for
-            // 100%-certain wikilinks, losing that distinction downstream.
-            // Deliberate deferral: CGEdgeConfidence has no tier that maps
-            // cleanly to "heuristically scored, not author-asserted" —
-            // revisit if confidence-sensitive consumers need it.
-            edges.append(CGEdge(fromId: link.chunkID, toId: link.codeNodeID,
-                                kind: .references, confidence: .inferred))
-        }
-        return CGData(nodes: nodes, edges: edges)
-    }
 
     /// Clear the doc-track cache — call on project switch so a new project
     /// doesn't reuse the previous project's doc graph.
@@ -454,57 +438,4 @@ final class KnowledgeGraphService: ObservableObject {
         docFingerprint = nil
     }
 
-    /// Cheap change signal for the doc set: sorted `path|size|mtime` over every
-    /// doc-extension file under the roots, hashed. Stat-only (no file reads),
-    /// so re-running when nothing changed is near-free; the doc track recomputes
-    /// only when a doc is added, removed, or edited.
-    ///
-    /// The walk MUST mirror `MemoryGenerator.collectDocs` — same extension set,
-    /// same size cap, same file cap, and crucially the same `ExcludedDirs`
-    /// pruning. Omitting the exclusions made the fingerprint cover files the
-    /// generator never ingests, which broke the cache in both directions:
-    ///
-    ///   • every regen rewrites `graphify-out/memory/*.md` and one
-    ///     `system/graph/<path>.md` per code file — all doc-extension files —
-    ///     so the fingerprint changed on EVERY run and the cache never hit
-    ///     (nor did the view's manual-regenerate skip);
-    ///   • those generated notes (plus `node_modules` READMEs) could fill the
-    ///     500-entry cap before the walk reached a real doc, so an actual doc
-    ///     edit left the fingerprint unchanged and the doc graph went stale.
-    nonisolated static func docSetFingerprint(roots: [URL]) -> String {
-        // Bound the walk to the same window MemoryGenerator actually ingests
-        // (maxFiles 500 / 2 MB per file) so the fingerprint covers exactly the
-        // set that affects output — avoids unbounded stat walks and false-
-        // positive recomputes from files the generator never reads.
-        let maxFiles = 500
-        let maxFileBytes = 2_000_000
-        let fm = FileManager.default
-        let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]
-        var entries: [String] = []
-        outer: for root in roots {
-            // Mirror MemoryGenerator.collectDocs options so the fingerprint
-            // covers exactly the set the generator ingests (it skips package
-            // descendants too — otherwise a doc inside a .bundle would flip the
-            // fingerprint without ever changing output).
-            guard let en = fm.enumerator(at: root, includingPropertiesForKeys: keys,
-                                         options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
-            for case let url as URL in en {
-                // Same vendor/build/generated-output pruning collectDocs applies.
-                if let name = url.pathComponents.last, ExcludedDirs.names.contains(name) {
-                    en.skipDescendants(); continue
-                }
-                guard FileClassifier.docExtensions.contains(url.pathExtension.lowercased()) else { continue }
-                let vals = try? url.resourceValues(forKeys: Set(keys))
-                guard vals?.isRegularFile == true else { continue }
-                let size = vals?.fileSize ?? 0
-                guard size <= maxFileBytes else { continue }
-                let mtime = vals?.contentModificationDate?.timeIntervalSince1970 ?? 0
-                entries.append("\(url.path)|\(size)|\(mtime)")
-                if entries.count >= maxFiles { break outer }
-            }
-        }
-        entries.sort()
-        let digest = SHA256.hash(data: Data(entries.joined(separator: "\n").utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
-    }
 }

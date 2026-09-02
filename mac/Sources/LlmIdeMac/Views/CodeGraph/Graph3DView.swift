@@ -1,7 +1,7 @@
 import SwiftUI
 import SceneKit
 import simd
-import GraphKit
+import GraphCore
 
 /// SceneKit 3D renderer for the graph. Visual-exploration scope: orbit/zoom/pan
 /// (SceneKit's built-in camera), click-to-select (drives the shared

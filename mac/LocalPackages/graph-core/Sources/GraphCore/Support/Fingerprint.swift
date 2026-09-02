@@ -34,9 +34,16 @@ public struct FingerprintStore: Codable, Equatable, Sendable {
     public var hashes: [String: String]
     public init(hashes: [String: String] = [:]) { self.hashes = hashes }
 
-    public func encoded() throws -> Data { try AppJSON.encoder.encode(self) }
+    // Own coder instances rather than GraphKit's internal `AppJSON`: this type
+    // moved into GraphCore so the app can keep using it with no engine
+    // installed, and reaching back into the engine for a convenience would
+    // reinstate exactly the dependency the split removes.
+    private static let encoder = JSONEncoder()
+    private static let decoder = JSONDecoder()
+
+    public func encoded() throws -> Data { try Self.encoder.encode(self) }
     public static func decode(_ data: Data) throws -> FingerprintStore {
-        try AppJSON.decoder.decode(FingerprintStore.self, from: data)
+        try decoder.decode(FingerprintStore.self, from: data)
     }
 
     public static func load(from url: URL) -> FingerprintStore {

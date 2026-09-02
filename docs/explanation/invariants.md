@@ -497,6 +497,76 @@ Design rationale lives in [Loop Engineering](loop-engineering.md); this is the o
 
 ---
 
+## Code Graph layout (`mac/LocalPackages/graph-core/Sources/GraphCore/Layout/`)
+
+The Graph view showed "sometimes a circle, sometimes a round blob" for a long
+time. Three independent causes, each of which is now an invariant.
+
+### ✅ MUST preserve
+
+- **One layout entry point, publishing only a finished result.** `UAGraphView.applyLayout`
+  is the single path. The old pipeline published a pie-slice circle immediately
+  and cached it through `cacheGraph`, whose `laidOut` flag defaults to `true` —
+  so the circle was recorded as a finished layout, and the force-directed result
+  that followed was dropped by a node-count guard, a mode switch, or the
+  background auto-updater re-storing a raw graph mid-settle. Which one the user
+  saw came down to timing.
+- **Layout is deterministic.** Same graph in, same picture out — no RNG, no
+  wall-clock dependence, sorted iteration. Otherwise the user's mental map of
+  their codebase changes on every launch.
+- **Layout lives in `graph-core`, never in `graph-kit`.** `graph-core` is always
+  present; `graph-kit` is pluggable. With layout in the engine, uninstalling the
+  engine would black out the Graph view instead of merely stopping generation.
+- **Anything drawn inside the zoomed `Canvas` is scale-corrected.** Node radius
+  was the one thing that was not, while every line width and glow divided by
+  `scale`. At a fitted scale of 0.05–0.2 a radius-6 node rendered sub-pixel: the
+  graph *was* a fuzzy round cloud of dots. `nodeR` now floors apparent size.
+
+### ❌ DO NOT do these (caused regressions)
+
+- **Do NOT prune edges to make a dense graph legible.** `GraphPrune.capDegree(6)`
+  kept edges in *emission order* while both endpoints were under the cap, and
+  `StructureGraphBuilder` emits every `contains` edge before the first `imports`
+  edge — so any file with more than six symbols spent its whole budget on
+  containment and lost all of its dependencies. Measured: **import edges 529 → 94
+  on a real repo, 0 of 684 on a synthetic one, graph shattered into 867
+  components.** Its doc comment claimed it was "a no-op for the sparse code
+  graph"; it was the opposite. Weight edges (`EdgeWeight`) and filter at render.
+- **Do NOT emit containment as `relatedTo`.** `MemoryGenerator` (both the Swift
+  and TypeScript implementations) emitted `chunk → doc` as `.relatedTo`, which
+  made a document's backbone indistinguishable from its title-match noise — so
+  any consumer ranking edges by strength left every chunk isolated. It is
+  `doc → chunk` with kind `.contains`, parent→child, matching the code track.
+- **Do NOT give the force simulation a single global attractor.** A lone
+  hardcoded `(600, 400)` pulled every disconnected component into one pile — and
+  the pile *is* the round blob. Each node is drawn toward its own community's
+  anchor.
+- **Do NOT seed a force layout from a symmetric ring.** The pie-slice seed used
+  exactly three concentric radii regardless of node count, which both guaranteed
+  overlap and left the disc's centre empty; the simulation could not escape it.
+  Seed with phyllotaxis around cluster anchors.
+- **Do NOT trust `#if canImport(GraphKit)` to gate the compiled-in engine.**
+  `canImport` still answers yes for a module left behind in `.build`, so the
+  builtin engine compiled in and then failed at *link* time instead of degrading.
+  Use the explicit `GRAPHKIT_BUILTIN` define.
+
+### How to verify
+
+`swift test` cannot run in a Command-Line-Tools-only toolchain, so the gate is an
+executable:
+
+```bash
+cd mac/LocalPackages/graph-core
+swift run -c release graph-layout-lab --compare       # exits non-zero on regression
+swift run -c release graph-layout-lab --svg <dir>     # SVG previews for visual check
+```
+
+`ring` above 0.20 means concentric rings are back. `overlap` must stay ~0.
+Connectivity (`comps`/`largest`) is the *producer's* responsibility, not the
+layout's — a real repo graph genuinely arrives fragmented.
+
+---
+
 ## Quick reference: where to add X
 
 | I want to… | Touch these files |
@@ -512,3 +582,6 @@ Design rationale lives in [Loop Engineering](loop-engineering.md); this is the o
 | Persist a new piece of UI state | `chrome.storage.local` via the hook that owns it; do NOT add a new store |
 | Add a new tab | `TABS` array in `extension/src/sidepanel/App.tsx` + a new panel block + ensure `.tabs` still scrolls at narrow width |
 | Persist new meeting data alongside the transcript | Extend `SavedTranscript` in `extension/src/lib/storage.ts`; write in `stopRecording()`; read in `HistoryView` |
+| Change how the graph is laid out | `mac/LocalPackages/graph-core/Sources/GraphCore/Layout/` only — then re-run `graph-layout-lab --compare`. Never touch the renderer to compensate for a layout problem |
+| Add a visual encoding to the graph canvas | Add the signal to `GraphLayout` (`GraphLayoutEngine.swift`) so it is computed once, then read it in `CodeGraphCanvas`; do NOT recompute adjacency in the draw loop |
+| Swap or remove the graph engine | `extension/graph_generation/README.md`. Unplug = comment the three `// UNPLUG:` lines in `mac/Package.swift`; add an engine = drop a `graph-engine.json` in a plugin |

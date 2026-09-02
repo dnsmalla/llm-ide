@@ -1,4 +1,5 @@
 import Foundation
+import GraphCore
 
 /// Runs the bundled code_graph_scan.py (tree-sitter, multi-language) or falls
 /// back to code_ast_scan.py (Python stdlib ast, Python-only) when tree-sitter

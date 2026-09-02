@@ -1,5 +1,5 @@
 import Foundation
-import GraphKit
+import GraphCore
 
 /// Uploads the structural code graph to the backend so server-side agents can
 /// traverse it (`findRelatedSymbols` → code-sync grounding). The Mac app is the

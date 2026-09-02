@@ -1,4 +1,5 @@
 import XCTest
+import GraphCore
 import GraphKit
 @testable import LlmIdeMacLib
 
@@ -27,6 +28,12 @@ final class KnowledgeGraphServiceTests: XCTestCase {
         try contents.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    /// `docSetFingerprint` and `merge` moved out of `KnowledgeGraphService` and
+    /// into the graph engine, which is where their rules belong: the
+    /// fingerprint has to mirror the engine's own document walk, and the merge
+    /// resolves doc→code links with the engine's linker.
+    private let engine = BuiltinGraphEngine()
+
     // MARK: - docSetFingerprint
 
     /// The regression this guards: the fingerprint walked the generator's OWN
@@ -35,7 +42,7 @@ final class KnowledgeGraphServiceTests: XCTestCase {
     /// run and the doc-track cache could never hit.
     func testFingerprintIgnoresGeneratedAndVendorDirs() throws {
         try write("docs/guide.md", "# Guide\n")
-        let baseline = KnowledgeGraphService.docSetFingerprint(roots: [root])
+        let baseline = engine.docSetFingerprint(roots: [root])
 
         // Exactly the files a regeneration writes back into the repo.
         try write("graphify-out/memory/repo.md")
@@ -47,20 +54,20 @@ final class KnowledgeGraphServiceTests: XCTestCase {
         try write("node_modules/some-pkg/README.md")
         try write(".build/checkouts/dep/README.md")
 
-        XCTAssertEqual(KnowledgeGraphService.docSetFingerprint(roots: [root]), baseline,
+        XCTAssertEqual(engine.docSetFingerprint(roots: [root]), baseline,
                        "regen output and vendor docs must not move the doc-set fingerprint")
     }
 
     func testFingerprintTracksRealDocChanges() throws {
         try write("docs/guide.md", "# Guide\n")
-        let baseline = KnowledgeGraphService.docSetFingerprint(roots: [root])
+        let baseline = engine.docSetFingerprint(roots: [root])
 
         try write("docs/guide.md", "# Guide\n\nNow with more content.\n")
-        let edited = KnowledgeGraphService.docSetFingerprint(roots: [root])
+        let edited = engine.docSetFingerprint(roots: [root])
         XCTAssertNotEqual(edited, baseline, "editing a real doc must move the fingerprint")
 
         try write("docs/second.md", "# Second\n")
-        XCTAssertNotEqual(KnowledgeGraphService.docSetFingerprint(roots: [root]), edited,
+        XCTAssertNotEqual(engine.docSetFingerprint(roots: [root]), edited,
                           "adding a real doc must move the fingerprint")
     }
 
@@ -68,16 +75,16 @@ final class KnowledgeGraphServiceTests: XCTestCase {
     /// dir — the walk prunes the whole subtree, not just its direct children.
     func testFingerprintPrunesEntireExcludedSubtree() throws {
         try write("docs/guide.md", "# Guide\n")
-        let baseline = KnowledgeGraphService.docSetFingerprint(roots: [root])
+        let baseline = engine.docSetFingerprint(roots: [root])
         try write("system/graph/nested/deeper/note.md", "# Deep\n")
-        XCTAssertEqual(KnowledgeGraphService.docSetFingerprint(roots: [root]), baseline)
+        XCTAssertEqual(engine.docSetFingerprint(roots: [root]), baseline)
     }
 
     func testFingerprintIsStableAcrossRepeatedCalls() throws {
         try write("docs/a.md")
         try write("docs/b.md")
-        let first = KnowledgeGraphService.docSetFingerprint(roots: [root])
-        XCTAssertEqual(KnowledgeGraphService.docSetFingerprint(roots: [root]), first)
+        let first = engine.docSetFingerprint(roots: [root])
+        XCTAssertEqual(engine.docSetFingerprint(roots: [root]), first)
     }
 
     // MARK: - merge
@@ -102,49 +109,49 @@ final class KnowledgeGraphServiceTests: XCTestCase {
         ])
     }
 
-    func testMergeLinksBacktickMentionsToCodeNodes() {
+    func testMergeLinksBacktickMentionsToCodeNodes() async throws {
         let c = chunk(id: "chunk1", title: "Storage", body: "Backups run through `backupTo`.")
-        let merged = KnowledgeGraphService.merge(code: codeGraph(),
-                                                 doc: CGData(nodes: [], edges: []),
-                                                 chunks: [c])
+        let merged = try await engine.merge(code: codeGraph(),
+                                            doc: CGData(nodes: [], edges: []),
+                                            chunks: [c])
         XCTAssertTrue(merged.edges.contains {
             $0.fromId == "chunk1" && $0.toId == "function:kb/db.mjs:backupTo" && $0.kind == .references
         }, "a backtick mention of a known symbol must produce a doc→code reference edge")
     }
 
-    func testMergeLinksPathMentionsAndWikilinks() {
+    func testMergeLinksPathMentionsAndWikilinks() async throws {
         let mention = chunk(id: "c1", title: "Ops", body: "See `kb/db.mjs` for details.")
         let wiki = chunk(id: "c2", title: "Design", body: "text", wikiLinks: ["backupTo"])
-        let merged = KnowledgeGraphService.merge(code: codeGraph(),
-                                                 doc: CGData(nodes: [], edges: []),
-                                                 chunks: [mention, wiki])
+        let merged = try await engine.merge(code: codeGraph(),
+                                            doc: CGData(nodes: [], edges: []),
+                                            chunks: [mention, wiki])
         XCTAssertTrue(merged.edges.contains { $0.fromId == "c1" && $0.toId == "file:kb/db.mjs" })
         XCTAssertTrue(merged.edges.contains { $0.fromId == "c2" && $0.toId == "function:kb/db.mjs:backupTo" })
     }
 
     /// Generic prose must not manufacture edges — only explicitly marked
     /// mentions (backticks) and wikilinks count.
-    func testMergeIgnoresUnmarkedProse() {
+    func testMergeIgnoresUnmarkedProse() async throws {
         let c = chunk(id: "c1", title: "Prose", body: "The backupTo routine runs nightly.")
-        let merged = KnowledgeGraphService.merge(code: codeGraph(),
-                                                 doc: CGData(nodes: [], edges: []),
-                                                 chunks: [c])
+        let merged = try await engine.merge(code: codeGraph(),
+                                            doc: CGData(nodes: [], edges: []),
+                                            chunks: [c])
         XCTAssertFalse(merged.edges.contains { $0.fromId == "c1" })
     }
 
-    func testMergeDeduplicatesCrossLinks() {
+    func testMergeDeduplicatesCrossLinks() async throws {
         // Same symbol reached by BOTH a wikilink and a backtick mention.
         let c = chunk(id: "c1", title: "Both", body: "Call `backupTo` now.", wikiLinks: ["backupTo"])
-        let merged = KnowledgeGraphService.merge(code: codeGraph(),
-                                                 doc: CGData(nodes: [], edges: []),
-                                                 chunks: [c])
+        let merged = try await engine.merge(code: codeGraph(),
+                                            doc: CGData(nodes: [], edges: []),
+                                            chunks: [c])
         let hits = merged.edges.filter { $0.fromId == "c1" && $0.toId == "function:kb/db.mjs:backupTo" }
         XCTAssertEqual(hits.count, 1)
     }
 
-    func testMergeUnionsNodesWithoutDuplicating() {
+    func testMergeUnionsNodesWithoutDuplicating() async throws {
         let doc = CGData(nodes: [CGNode(id: "doc:one", title: "One", kind: .memoryDoc)], edges: [])
-        let merged = KnowledgeGraphService.merge(code: codeGraph(), doc: doc, chunks: [])
+        let merged = try await engine.merge(code: codeGraph(), doc: doc, chunks: [])
         XCTAssertEqual(merged.nodes.count, 3)
         XCTAssertEqual(Set(merged.nodes.map(\.id)).count, 3)
     }

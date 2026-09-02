@@ -13,6 +13,7 @@
 // writer) so a graph rebuild can't clobber them.
 
 import Foundation
+import GraphCore
 
 public enum MemoryNotesWriter {
 

@@ -115,9 +115,14 @@ extension LlmIdeAPIClient {
     func installPlugin(zipURL: URL, replace: Bool = false) async throws -> PluginInstallResponse {
         let data = try Data(contentsOf: zipURL)
         let path = "/auth/me/plugins/install" + (replace ? "?replace=1" : "")
-        return try await postRawBytes(path, bytes: data,
-                                      contentType: "application/zip",
-                                      authenticated: true)
+        let response: PluginInstallResponse = try await postRawBytes(
+            path, bytes: data, contentType: "application/zip", authenticated: true)
+        // A newly installed plugin may declare a graph engine, and the resolved
+        // engine is cached for the process. Without this the app kept reporting
+        // "No graph engine installed" — pointing the user at the very screen
+        // they had just used — until a relaunch.
+        await MainActor.run { GraphEngines.invalidate() }
+        return response
     }
 
     /// Remove an installed plugin by slug. Idempotent — removing
@@ -125,7 +130,13 @@ extension LlmIdeAPIClient {
     func uninstallPlugin(name: String) async throws -> PluginUninstallResponse {
         guard let slug = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
         else { throw APIError.invalidURL }
-        return try await delete("/auth/me/plugins/uninstall/\(slug)", authenticated: true)
+        let response: PluginUninstallResponse = try await delete(
+            "/auth/me/plugins/uninstall/\(slug)", authenticated: true)
+        // Drop a cached engine that may now point at a deleted directory —
+        // otherwise generation failed with "wrote no graph" instead of the
+        // clean "no engine installed" message.
+        await MainActor.run { GraphEngines.invalidate() }
+        return response
     }
 
     // MARK: - Claude Plugin Bridge

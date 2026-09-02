@@ -8,10 +8,18 @@ let package = Package(
         .library(name: "GraphKit", targets: ["GraphKit"]),
     ],
     dependencies: [
+        // The canonical model + JSON contract. GraphKit is the *producer* side
+        // of the graph system and is destined to become an installable plugin;
+        // the model and the layout engine live in GraphCore because the app
+        // must still be able to read and draw a graph with no engine installed.
+        .package(path: "../graph-core"),
     ],
     targets: [
         .target(
             name: "GraphKit",
+            dependencies: [
+                .product(name: "GraphCore", package: "graph-core"),
+            ],
             path: "Sources/GraphKit",
             resources: [
                 .copy("Resources/code_ast_scan.py"),

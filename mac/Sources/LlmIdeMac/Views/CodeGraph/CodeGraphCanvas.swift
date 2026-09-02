@@ -10,11 +10,23 @@
 // • Clear-focus button in floating toolbar
 
 import SwiftUI
-import GraphKit
+import GraphCore
 
 @MainActor
 struct CodeGraphCanvas: View {
     let data: CGData
+    /// Structural signals from `GraphLayoutEngine` — cluster, importance,
+    /// radius, per-edge weight. Empty is valid and falls back to degree-based
+    /// sizing and kind-based colour, so a graph with no layout still draws.
+    var layout: GraphLayout = .empty
+    /// Colour nodes by detected cluster rather than by `CGNodeKind`.
+    ///
+    /// Kind gives at most a handful of usable hues — this repo's generators
+    /// emit only four code kinds, and `CGPalette` maps several kind pairs to
+    /// the same SwiftUI colour (`.file`/`.notePlaybook` are both `.blue`), so
+    /// in "All" mode code files and doc notes were indistinguishable. Cluster
+    /// colour scales with the graph and shows actual subsystems.
+    var colorByCluster: Bool = true
     @Binding var selected:    CGNode?
     /// Double-click sets focus; double-click same node or empty space clears it.
     @Binding var focusedNode: CGNode?
@@ -49,6 +61,9 @@ struct CodeGraphCanvas: View {
     /// (the All graph has ~6k edges; hover redraws were O(edges) × several).
     @State private var adjacency:     [String: Set<String>] = [:]
     @State private var nodeKindById:  [String: CGNodeKind]  = [:]
+    /// Nodes in paint order — least important first, so a hub is never covered
+    /// by a leaf drawn after it.
+    @State private var drawOrder:     [CGNode]              = []
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -79,6 +94,9 @@ struct CodeGraphCanvas: View {
                     rebuildCaches()
                     fitIfNewGraph(in: canvasSize)
                 }
+                // `drawOrder` and the radii come from `layout`, which arrives
+                // separately from `data` on the cache-recovery path.
+                .onChange(of: layout.importance.count) { _, _ in rebuildCaches() }
                 .onChange(of: selected) { _, new in
                     centerOnSelected(new, canvas: geo.size)
                 }
@@ -113,7 +131,14 @@ struct CodeGraphCanvas: View {
         for e in data.edges {
             guard let p1 = effectivePos(e.fromId),
                   let p2 = effectivePos(e.toId) else { continue }
-            if !visible.contains(p1) && !visible.contains(p2) { continue }
+            // Cull by the segment's bounding box, not by its endpoints. Testing
+            // only the endpoints dropped any edge that crosses the viewport
+            // while both of its ends sit outside it, so at high zoom long edges
+            // visibly vanished.
+            if !visible.intersects(CGRect(x: min(p1.x, p2.x), y: min(p1.y, p2.y),
+                                          width: abs(p2.x - p1.x),
+                                          height: abs(p2.y - p1.y))
+                                   .insetBy(dx: -0.5, dy: -0.5)) { continue }
 
             var alpha = edgeAlpha(e, focused: focused, focusNbrs: focusNbrs,
                                   hovered: hovered, hoverNbrs: hoverNbrs, selId: selId)
@@ -128,16 +153,34 @@ struct CodeGraphCanvas: View {
                 || (e.fromId == hovered || e.toId == hovered)
 
             var path = Path(); path.move(to: p1); path.addLine(to: p2)
+            let weight = edgeWeight(e)
             let colour: Color = isHighlighted
                 ? t.accent.opacity(alpha)
-                : t.textMuted.opacity(alpha * 0.5)
+                // Weight drives prominence: a `contains`/`imports` edge reads
+                // clearly, a weak reference stays faint.
+                : t.textMuted.opacity(alpha * (0.30 + 0.55 * weight))
+            let width = isHighlighted ? 1.9 : (0.45 + 1.0 * weight)
             ctx.stroke(path, with: .color(colour),
-                       lineWidth: (isHighlighted ? 1.6 : 0.6) / max(scale, 0.4))
+                       lineWidth: width / max(scale, 0.4))
         }
 
         // --- Nodes + labels ---
-        for n in data.nodes {
-            guard let pos = effectivePos(n.id), visible.contains(pos) else { continue }
+        // `drawOrder` is precomputed in `rebuildCaches`. Sorting here meant a
+        // full sort with two hashed string lookups per comparison INSIDE the
+        // draw closure — around 400k lookups per frame at 15k nodes, during
+        // every pinch and pan.
+        for n in drawOrder {
+            guard let pos = effectivePos(n.id) else { continue }
+            // Cull by the node's extent, not its centre — the same class of bug
+            // the edge cull above was fixed for. `nodeR`'s apparent-size floor
+            // makes the world radius grow to ~52 at a fitted scale of 0.05, so
+            // a node centred just outside `visible` still overlaps the viewport.
+            // Include the halo a selected/hovered node draws, or one at the
+            // viewport edge is culled despite being visibly larger.
+            let isProminentNow = n.id == selId || n.id == focused?.id || n.id == hovered
+            let cullRadius = nodeR(id: n.id, prominent: isProminentNow) + 12 / max(scale, 0.05)
+            guard visible.insetBy(dx: -cullRadius, dy: -cullRadius).contains(pos)
+            else { continue }
 
             let isSel     = n.id == selId
             let isFocused = n.id == focused?.id
@@ -151,7 +194,7 @@ struct CodeGraphCanvas: View {
             let prominent = isSel || isFocused || isHovered
             let r    = nodeR(id: n.id, prominent: prominent)
             let rect = CGRect(x: pos.x - r, y: pos.y - r, width: r * 2, height: r * 2)
-            let kindColor = CGPalette.color(for: n.kind)
+            let kindColor = nodeColor(n)
 
             // Soft glow halo on hover / selection / focus (a larger, low-opacity
             // disc of the node's own colour) — the "professional" emphasis.
@@ -183,12 +226,27 @@ struct CodeGraphCanvas: View {
             // node + its neighbours).
             let activeLabel = prominent
                 || focusNbrs.contains(n.id) || hoverNbrs.contains(n.id) || selNbrs.contains(n.id)
+            // Importance-gated level of detail. The old rule faded ALL labels
+            // out below scale 0.9, so a fitted graph — the view the user
+            // actually lands on — was completely unlabelled, and above that
+            // threshold every label appeared at once with no collision
+            // avoidance. Now the graph's most important nodes stay labelled at
+            // any zoom, and the rest fade in as room appears, so there is
+            // always something to read and never everything at once.
+            let importance = layout.importance[n.id] ?? 0
+            let alwaysLabel = importance > 0.42
+            let zoomFade = max(0, min(1, Double((scale - 0.55) / 0.7)))
             let labelOpacity: Double = activeLabel
                 ? min(1.0, Double(alpha) * 1.3)
-                : max(0, min(1, Double((scale - 0.9) / 0.6))) * Double(alpha)
+                : (alwaysLabel ? max(zoomFade, 0.85) : zoomFade) * Double(alpha)
             if showLabels && labelOpacity > 0.06 {
                 let fontSize = max(CGFloat(7), CGFloat(11) / scale)
-                let labelX   = pos.x + (r + 4) / scale
+                // `r` is a WORLD radius but this context is scaled, so the gap
+                // has to be converted, not the radius: `(r + 4) / scale` gave a
+                // screen offset of `r + 4` px regardless of how big the node
+                // actually drew — 9 px beside a 30 px node at scale 6 (label
+                // buried inside it), 56 px beside a 2.6 px dot at scale 0.05.
+                let labelX   = pos.x + r + 4 / scale
                 let labelY   = pos.y - fontSize * 0.5
                 ctx.draw(
                     Text(n.title)
@@ -264,18 +322,60 @@ struct CodeGraphCanvas: View {
         nodeDegree = deg
         adjacency = adj
         nodeKindById = Dictionary(data.nodes.map { ($0.id, $0.kind) }, uniquingKeysWith: { a, _ in a })
+        let importance = layout.importance
+        drawOrder = importance.isEmpty
+            ? data.nodes
+            : data.nodes.sorted { (importance[$0.id] ?? 0) < (importance[$1.id] ?? 0) }
     }
 
     private func effectivePos(_ id: String) -> CGPoint? {
         positionOverrides[id] ?? nodePositions[id]
     }
 
+    /// Drawn radius in WORLD units, with a floor on APPARENT size.
+    ///
+    /// The world radius alone was the single worst legibility defect: it was
+    /// never divided by `scale`, unlike every line width and glow in this file.
+    /// A large graph fits at scale 0.05–0.2, so a radius-6 node rendered at
+    /// well under a pixel — the graph was literally a fuzzy round cloud of dots,
+    /// which is what "sometimes it is in round" describes. Zoomed to scale 6 the
+    /// same node became a 170 px disc.
+    ///
+    /// Taking the max against `minApparent / scale` guarantees a node is always
+    /// at least a few pixels on screen while letting real size differences show
+    /// once there is room for them.
     private func nodeR(id: String, prominent: Bool) -> CGFloat {
-        let deg  = CGFloat(nodeDegree[id] ?? 0)
-        let base: CGFloat = prominent ? 10 : 5
-        // Cap the degree contribution so a hub node (e.g. a doc-graph root linked
-        // to hundreds of pages) can't balloon into a screen-filling circle.
-        return base + min(sqrt(deg) * 1.4, 24)
+        let world: CGFloat
+        if let laidOut = layout.radius[id] {
+            world = CGFloat(laidOut)
+        } else {
+            // No layout: fall back to the old degree heuristic.
+            let degree = CGFloat(nodeDegree[id] ?? 0)
+            world = 5 + min(sqrt(degree) * 1.4, 24)
+        }
+        let minApparent: CGFloat = prominent ? 7 : 2.6
+        let floored = max(world, minApparent / max(scale, 0.02))
+        return prominent ? floored * 1.25 : floored
+    }
+
+    /// Fill colour for a node — cluster hue when a layout supplied one,
+    /// otherwise the kind palette.
+    private func nodeColor(_ node: CGNode) -> Color {
+        guard colorByCluster, let cluster = layout.community[node.id] else {
+            return CGPalette.color(for: node.kind)
+        }
+        return CGPalette.clusterColor(cluster)
+    }
+
+    /// Per-edge prominence from its semantic weight.
+    ///
+    /// Every edge used to draw as the same grey hairline at roughly 11% opacity,
+    /// which is a large part of why a dense graph read as an undifferentiated
+    /// wash rather than as structure. Weighting means containment and imports
+    /// carry the picture while weak references recede.
+    private func edgeWeight(_ edge: CGEdge) -> Double {
+        layout.edgeWeight[GraphLayout.edgeKey(edge.fromId, edge.toId)]
+            ?? EdgeWeight.weight(of: edge)
     }
 
     private func neighbourIds(of id: String?) -> Set<String> {
@@ -447,11 +547,25 @@ struct CodeGraphCanvas: View {
         }
     }
 
+    /// Identity of a laid-out graph, for deciding whether to re-fit.
+    ///
+    /// Counts plus the first/last id alone were not enough: they are identical
+    /// before and after a re-layout, so the viewport transform fitted to one
+    /// set of positions was kept for a completely different set — which is how
+    /// a settled graph ended up off-screen and needing a manual "Fit". Sampling
+    /// positions makes a moved graph a new graph.
     private func fingerprint(of d: CGData) -> Int {
         var h = Hasher()
         h.combine(d.nodes.count); h.combine(d.edges.count)
         if let f = d.nodes.first?.id { h.combine(f) }
         if let l = d.nodes.last?.id  { h.combine(l) }
+        // Sample rather than hash every node: enough to notice a re-layout
+        // without an O(n) hash on a 15k-node graph each time data changes.
+        let step = max(1, d.nodes.count / 24)
+        for index in stride(from: 0, to: d.nodes.count, by: step) {
+            h.combine(d.nodes[index].position.x.rounded())
+            h.combine(d.nodes[index].position.y.rounded())
+        }
         return h.finalize()
     }
 
@@ -461,12 +575,16 @@ struct CodeGraphCanvas: View {
     }
 
     private func hitTest(_ point: CGPoint) -> CGNode? {
+        // Floor only. The per-node radius below is what actually decides a hit,
+        // so the outer ring of a large node is no longer unclickable — a hub
+        // draws at 26 world units (×1.25 when prominent) against this 18.
         let radius: CGFloat = max(18, 18 / max(scale, 0.3))
         var best: (CGNode, CGFloat)?
         for n in data.nodes {
             guard let pos = effectivePos(n.id) else { continue }
             let d = hypot(pos.x - point.x, pos.y - point.y)
-            if d < radius, d < (best?.1 ?? .infinity) { best = (n, d) }
+            let reach = max(radius, nodeR(id: n.id, prominent: false))
+            if d < reach, d < (best?.1 ?? .infinity) { best = (n, d) }
         }
         return best?.0
     }

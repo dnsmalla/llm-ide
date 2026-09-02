@@ -1,4 +1,5 @@
 import XCTest
+import GraphCore
 import GraphKit
 @testable import LlmIdeMacLib
 

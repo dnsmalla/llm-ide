@@ -1,4 +1,5 @@
 import Foundation
+import GraphCore
 
 public struct RawFileStructure: Codable, Equatable, Sendable {
     public let path: String

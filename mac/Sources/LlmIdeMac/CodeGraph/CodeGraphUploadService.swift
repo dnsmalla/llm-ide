@@ -1,5 +1,5 @@
 import Foundation
-import GraphKit
+import GraphCore
 import CryptoKit
 import os
 
