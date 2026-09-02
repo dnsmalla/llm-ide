@@ -656,9 +656,200 @@ final class MobileControlManager {
             } else {
                 replyNotConfigured(commandId: "auto_task_logs", logLabel: "auto_task_logs_list")
             }
+        case MobileProtocol.Tag.autoTaskSetupList,
+             MobileProtocol.Tag.autoTaskConfigSet,
+             MobileProtocol.Tag.autoTaskTemplateSave,
+             MobileProtocol.Tag.autoTaskTemplateRename,
+             MobileProtocol.Tag.autoTaskTemplateDelete:
+            handleAutoTaskSetup(type: type, data: data)
         default:
             append(.info, "Unhandled auto-task type: \(type)")
         }
+    }
+
+    // MARK: - Auto-task setup (per-task settings + prompt templates)
+
+    /// Handle the `auto_task_setup_*` / `auto_task_config_*` /
+    /// `auto_task_template_*` messages — the phone's half of the Mac's Auto
+    /// Task Settings and Template cards.
+    ///
+    /// Every mutation ends by replying with a fresh `AutoTaskSetupReply` rather
+    /// than an ack: a template rename can CHANGE the template's id (the id is
+    /// the filename stem) and repoint other tasks' configs, so an ack would
+    /// leave the phone holding state the Mac has already moved past.
+    private func handleAutoTaskSetup(type: String, data: Data) {
+        guard let autoCode, let templates = autoCode.autoTaskTemplates else {
+            replyNotConfigured(commandId: "auto_task_setup", logLabel: type)
+            return
+        }
+
+        switch type {
+        case MobileProtocol.Tag.autoTaskSetupList:
+            break   // snapshot only — fall through to the reply below
+
+        case MobileProtocol.Tag.autoTaskConfigSet:
+            guard let m = try? decoder.decode(AutoTaskConfigSet.self, from: data) else {
+                replyAutoTaskSetupDecodeFailure(type: type, data: data)
+                return
+            }
+            // The phone is a second writer into the Mac's settings, so its
+            // input is validated rather than trusted. An unknown task id would
+            // create a record no Mac surface can reach or delete, and the paths
+            // end up in a prompt that a `.implement` task acts on — so both are
+            // checked before anything is stored.
+            guard isKnownAutoTaskId(m.taskId) else {
+                append(.stderr, "auto_task_config_set: unknown task id \(m.taskId)")
+                reply(CommandError(commandId: "auto_task_config_set",
+                                   message: "That task no longer exists on your Mac. Refresh the task list."))
+                return
+            }
+            guard let inputPath = validatedProjectPath(m.inputPath),
+                  let outputPath = validatedProjectPath(m.outputPath) else {
+                append(.stderr, "auto_task_config_set: rejected a path outside the project")
+                reply(CommandError(commandId: "auto_task_config_set",
+                                   message: "Paths must be folders inside the open project."))
+                return
+            }
+            // Routed through the same store the Mac page writes to, so the
+            // desktop UI updates live and the value persists identically.
+            autoCode.taskConfigs.update(
+                AutoTaskConfig(inputPath: inputPath, outputPath: outputPath,
+                               skillName: m.skillName,
+                               skillDirective: m.skillName.map { AutoTaskSkillCatalog.directive(for: $0) },
+                               templateId: m.templateId),
+                for: m.taskId)
+            append(.info, "Auto-task config set for \(m.taskId)")
+
+        case MobileProtocol.Tag.autoTaskTemplateSave:
+            guard let m = try? decoder.decode(AutoTaskTemplateSave.self, from: data) else {
+                replyAutoTaskSetupDecodeFailure(type: type, data: data)
+                return
+            }
+            guard let id = m.id else {
+                guard templates.create(name: m.name, body: m.body) != nil else {
+                    reply(CommandError(commandId: "auto_task_template_save",
+                                       message: "Could not create “\(m.name)” — is a project open on your Mac?"))
+                    return
+                }
+                append(.info, "Auto-task template created: \(m.name)")
+                break
+            }
+            // Body and name are applied HERE, in one message, because a rename
+            // moves the file and changes the id: two frames would race, and a
+            // rename serviced first would make the body write target a file
+            // that no longer exists.
+            guard templates.update(id: id, body: m.body) else {
+                reply(CommandError(commandId: "auto_task_template_save",
+                                   message: "Could not save “\(m.name)” on your Mac."))
+                return
+            }
+            let trimmedName = m.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedName.isEmpty, templates.template(id: id)?.name != trimmedName,
+               templates.rename(id: id, to: trimmedName) == nil {
+                reply(CommandError(commandId: "auto_task_template_save",
+                                   message: "Saved “\(m.name)”, but could not rename it."))
+                return
+            }
+            append(.info, "Auto-task template saved: \(id)")
+
+        case MobileProtocol.Tag.autoTaskTemplateRename:
+            guard let m = try? decoder.decode(AutoTaskTemplateRename.self, from: data) else {
+                replyAutoTaskSetupDecodeFailure(type: type, data: data)
+                return
+            }
+            guard templates.rename(id: m.id, to: m.name) != nil else {
+                reply(CommandError(commandId: "auto_task_template_rename",
+                                   message: "Could not rename that template on your Mac."))
+                return
+            }
+            append(.info, "Auto-task template renamed: \(m.id) → \(m.name)")
+
+        case MobileProtocol.Tag.autoTaskTemplateDelete:
+            guard let m = try? decoder.decode(AutoTaskTemplateDelete.self, from: data) else {
+                replyAutoTaskSetupDecodeFailure(type: type, data: data)
+                return
+            }
+            guard templates.delete(id: m.id) else {
+                reply(CommandError(commandId: "auto_task_template_delete",
+                                   message: "Could not delete that template on your Mac."))
+                return
+            }
+            append(.info, "Auto-task template deleted: \(m.id)")
+
+        default:
+            append(.info, "Unhandled auto-task setup type: \(type)")
+            return
+        }
+
+        replyAutoTaskSetup(autoCode: autoCode, templates: templates)
+    }
+
+    /// True for a built-in task or a custom task that currently exists.
+    private func isKnownAutoTaskId(_ id: String) -> Bool {
+        AutoTask(rawValue: id) != nil || CustomAutoTask.loadAll().contains { $0.id == id }
+    }
+
+    /// `.some(path)` when the value is a project-relative folder inside the
+    /// open project (or nil, meaning "not set"); `.none` when it escapes.
+    ///
+    /// Double optional by design: the caller must distinguish "cleared" from
+    /// "rejected", and collapsing them would silently accept a traversal as a
+    /// clear.
+    private func validatedProjectPath(_ value: String?) -> String?? {
+        guard let trimmed = AutoTaskConfig.normalized(value) else { return .some(nil) }
+        guard let root = projectStore?.activeProject.map({ URL(fileURLWithPath: $0.localPath) })
+        else { return nil }
+        guard AutoTaskPromptComposer.absolutePath(trimmed, root: root) != nil else { return nil }
+        return .some(trimmed)
+    }
+
+    private func replyAutoTaskSetupDecodeFailure(type: String, data: Data) {
+        let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
+        append(.stderr, "\(type) decode failed: \(preview)")
+        reply(CommandError(commandId: type,
+                           message: "Invalid auto-task setup request from phone."))
+    }
+
+    /// Build and send the setup snapshot.
+    ///
+    /// The two catalog scans walk the project's directories, so they run off
+    /// the main actor — this is reached after EVERY setup message, not just the
+    /// list request, and a 400-directory enumeration on the main thread would
+    /// stutter the Mac UI on each tap of the phone's picker.
+    private func replyAutoTaskSetup(autoCode: AutoCodeUpdateService,
+                                    templates: AutoTaskTemplateStore) {
+        let root = projectStore?.activeProject.map { URL(fileURLWithPath: $0.localPath) }
+        Task { [weak self] in
+            let scanned = await Task.detached(priority: .userInitiated) {
+                (skills: root.map { AutoTaskSkillCatalog.scan(projectRoot: $0) } ?? [],
+                 folders: AutoTaskFolderCatalog.scan(projectRoot: root))
+            }.value
+            guard let self else { return }
+            self.reply(self.buildAutoTaskSetupReply(
+                autoCode: autoCode, templates: templates, root: root,
+                skills: scanned.skills, folders: scanned.folders))
+        }
+    }
+
+    private func buildAutoTaskSetupReply(autoCode: AutoCodeUpdateService,
+                                         templates: AutoTaskTemplateStore,
+                                         root: URL?,
+                                         skills: [AutoTaskSkillCatalog.Entry],
+                                         folders: [AutoTaskFolderCatalog.Folder]) -> AutoTaskSetupReply {
+        AutoTaskSetupReply(
+            hasProject: root != nil,
+            projectName: projectStore?.activeProject?.bundle.displayName,
+            templates: templates.templates.map {
+                AutoTaskTemplateInfo(id: $0.id, name: $0.name, body: $0.body)
+            },
+            configs: autoCode.taskConfigs.configs.map { taskId, config in
+                AutoTaskConfigInfo(taskId: taskId, inputPath: config.inputPath,
+                                   outputPath: config.outputPath,
+                                   skillName: config.skillName,
+                                   templateId: config.templateId)
+            }.sorted { $0.taskId < $1.taskId },
+            skills: skills.map { AutoTaskSkillInfo(name: $0.name, description: $0.description) },
+            folders: folders.map(\.path))
     }
 
     /// Proxy an llm-ide chat turn through the backend agent. The reply is sent
@@ -1238,6 +1429,25 @@ final class MobileControlManager {
             .sink { [weak self] _ in self?.pushAutoTaskLogsIfPaired() }
             .store(in: &mobilePushCancellables)
 
+        // Per-task settings and the template library are edited on BOTH sides.
+        // `AutoTaskConfigSet` replaces a task's whole config, so a phone
+        // holding a snapshot taken before a desktop edit would silently undo
+        // it on its next write. Pushing on change keeps that window to the
+        // debounce interval instead of "until the user pulls to refresh".
+        autoCode?.taskConfigs.objectWillChange
+            .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.pushAutoTaskSetupIfPaired() }
+            .store(in: &mobilePushCancellables)
+
+        // `templatesDidChange`, NOT `objectWillChange`: the store also publishes
+        // the unsaved editor draft, so subscribing to the object would run two
+        // directory scans and push a snapshot on every pause while someone
+        // types a prompt on the Mac — for a payload that had not changed.
+        autoCode?.autoTaskTemplates?.templatesDidChange
+            .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
+            .sink { [weak self] _ in self?.pushAutoTaskSetupIfPaired() }
+            .store(in: &mobilePushCancellables)
+
         projectStore?.objectWillChange
             .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
             .sink { [weak self] _ in
@@ -1269,6 +1479,15 @@ final class MobileControlManager {
     private func pushAutoTaskStateIfPaired() {
         guard mobileClientPaired, let state = buildAutoTaskState() else { return }
         reply(state)
+    }
+
+    /// Push the per-task settings + template snapshot after a desktop-side
+    /// change, so the phone's next `AutoTaskConfigSet` (a whole-config
+    /// replace) is built on current state rather than a stale one.
+    private func pushAutoTaskSetupIfPaired() {
+        guard mobileClientPaired, let autoCode,
+              let templates = autoCode.autoTaskTemplates else { return }
+        replyAutoTaskSetup(autoCode: autoCode, templates: templates)
     }
 
     /// Explicit "push now" for the Auto Tasks page's Refresh button, and for

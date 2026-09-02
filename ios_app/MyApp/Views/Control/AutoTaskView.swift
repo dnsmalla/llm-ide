@@ -57,9 +57,15 @@ struct AutoTaskView: View {
             }
             .onAppear {
                 autoTaskStore.refreshAll()
+                // Pre-fetch so tapping a task's ⚙ opens on real settings
+                // instead of a spinner.
+                autoTaskStore.autoTaskSetupList()
             }
             .onChange(of: connection.connectionStatus) { status in
-                if status == .connected { autoTaskStore.refreshAll() }
+                if status == .connected {
+                    autoTaskStore.refreshAll()
+                    autoTaskStore.autoTaskSetupList()
+                }
             }
             .navigationDestination(isPresented: $autoTaskStore.isRunLogPresented) {
                 AutoTaskRunLogView()
@@ -282,6 +288,22 @@ struct AutoTaskView: View {
                         .foregroundColor(DesignSystem.Colors.textPrimary)
                 }
                 .toggleStyle(.switch)
+
+                NavigationLink {
+                    AutoTaskSetupView(taskId: task.id, taskLabel: task.label)
+                        .environmentObject(connection)
+                        .environmentObject(autoTaskStore)
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 17))
+                        .foregroundColor(isConnected
+                            ? DesignSystem.Colors.primary
+                            : DesignSystem.Colors.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 24)
+                .accessibilityLabel("Configure \(task.label)")
+                .disabled(!isConnected)
 
                 Button {
                     autoTaskStore.autoTaskRun(task.id)

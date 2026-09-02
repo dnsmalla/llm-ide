@@ -73,6 +73,14 @@ public enum MobileProtocol {
         public static let autoTaskLogsList = "auto_task_logs_list"
         public static let autoTaskLogsReply = "auto_task_logs_reply"
 
+        // MARK: Auto-task setup channel — per-task settings + prompt templates
+        public static let autoTaskSetupList = "auto_task_setup_list"
+        public static let autoTaskSetupReply = "auto_task_setup_reply"
+        public static let autoTaskConfigSet = "auto_task_config_set"
+        public static let autoTaskTemplateSave = "auto_task_template_save"
+        public static let autoTaskTemplateRename = "auto_task_template_rename"
+        public static let autoTaskTemplateDelete = "auto_task_template_delete"
+
         // MARK: Loop channel — remote control only; see LoopMessages.swift
         public static let loopStatusList = "loop_status_list"
         public static let loopState = "loop_state"

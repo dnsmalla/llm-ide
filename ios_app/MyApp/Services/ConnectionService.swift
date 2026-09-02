@@ -475,7 +475,8 @@ final class ConnectionService: ObservableObject {
             if let reply = try? JSONDecoder().decode(ExploreSkillListReply.self, from: data) {
                 explorerStore?.handleSkillSearchReply(reply)
             }
-        case "auto_task_state", "auto_task_history_reply", "auto_task_ack", "auto_task_logs_reply":
+        case "auto_task_state", "auto_task_history_reply", "auto_task_ack",
+             "auto_task_logs_reply", "auto_task_setup_reply":
             autoTaskStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "loop_state", "loop_ack", "loop_history_reply":
             loopStore?.handleInbound(type: json["type"] as? String ?? "", data: data)

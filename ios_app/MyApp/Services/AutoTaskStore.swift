@@ -26,6 +26,10 @@ final class AutoTaskStore: ObservableObject {
     @Published var actionStatus: String?
     /// Last auto-task wire error (e.g. Mac not configured).
     @Published var lastError: String?
+    /// Per-task settings + prompt templates from the Mac (`auto_task_setup_reply`).
+    /// nil until the first snapshot arrives, so the editor can tell "not asked
+    /// yet" from "asked, and the Mac has no project open".
+    @Published var setup: AutoTaskSetupReply?
 
     private var actionStatusTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
@@ -125,6 +129,60 @@ final class AutoTaskStore: ObservableObject {
         autoTaskLogsList()
     }
 
+    // MARK: — Setup (per-task settings + prompt templates)
+
+    /// Ask the Mac for templates, per-task settings, skills, and folders. The
+    /// Mac replies with `auto_task_setup_reply`, which lands in `setup`.
+    func autoTaskSetupList() {
+        connection?.sendEncodable(AutoTaskSetupList())
+    }
+
+    /// This task's saved settings, or an all-nil one when it has none.
+    func config(for taskId: String) -> AutoTaskConfigInfo {
+        setup?.configs.first { $0.taskId == taskId }
+            ?? AutoTaskConfigInfo(taskId: taskId, inputPath: nil, outputPath: nil,
+                                  skillName: nil, templateId: nil)
+    }
+
+    /// Replace one task's settings on the Mac. Carries the whole config, so a
+    /// nil field clears that setting.
+    func setConfig(_ config: AutoTaskConfigInfo) {
+        send(AutoTaskConfigSet(taskId: config.taskId,
+                               inputPath: config.inputPath,
+                               outputPath: config.outputPath,
+                               skillName: config.skillName,
+                               templateId: config.templateId))
+    }
+
+    /// Create a template (`id == nil`) or overwrite an existing one's body.
+    func saveTemplate(id: String?, name: String, body: String) {
+        send(AutoTaskTemplateSave(id: id, name: name, body: body))
+    }
+
+    /// Rename a template. The Mac may return a different id in the reply — the
+    /// id is the filename stem — and repoints the tasks that referenced it.
+    func renameTemplate(id: String, name: String) {
+        send(AutoTaskTemplateRename(id: id, name: name))
+    }
+
+    func deleteTemplate(id: String) {
+        send(AutoTaskTemplateDelete(id: id))
+    }
+
+    /// Send a setup mutation. Every one of them is answered with a fresh
+    /// snapshot by the Mac, so there is nothing to apply optimistically here.
+    private func send<T: Encodable>(_ message: T) {
+        lastError = nil
+        guard connection?.sendEncodable(
+            message,
+            userFacing: true,
+            onSendFailure: { [weak self] message in self?.handleSendFailure(message) }
+        ) == true else {
+            lastError = connection?.errorMessage ?? "Not connected to your Mac."
+            return
+        }
+    }
+
     /// Open the run-log screen for an in-progress Mac run (e.g. from home card).
     func openRunLog(focusTask: String? = nil) {
         focusedLogTaskId = focusTask
@@ -175,6 +233,12 @@ final class AutoTaskStore: ObservableObject {
         case "auto_task_history_reply":
             if let reply = try? JSONDecoder().decode(AutoTaskHistoryReply.self, from: data) {
                 autoTaskHistoryEntries = reply.entries
+            }
+        case "auto_task_setup_reply":
+            if let reply = try? JSONDecoder().decode(AutoTaskSetupReply.self, from: data) {
+                setup = reply
+            } else {
+                lastError = "Couldn't read the task setup from your Mac — tap refresh."
             }
         case "auto_task_ack":
             if let ack = try? JSONDecoder().decode(AutoTaskAck.self, from: data) {
@@ -227,6 +291,7 @@ final class AutoTaskStore: ObservableObject {
         autoTaskState = nil
         autoTaskLogGroups = []
         autoTaskHistoryEntries = []
+        setup = nil
         actionStatus = nil
         lastError = nil
     }
