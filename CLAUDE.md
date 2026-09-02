@@ -131,6 +131,14 @@ llm-ide/
 │   │   │   ├── Notes/   #   Code-notes writer (CodeNoteService/Generator, Analyze)
 │   │   │   ├── Memory/  #   faults/ + q&a/ store, fault reports
 │   │   │   └── Views/   #   UAGraphView, canvas, 3D view, palette, session store
+│   │   ├── AutoTask/    # ALL Auto Task code, one folder:
+│   │   │   ├── Models/  #   AutoTask, AutoTaskConfig/Settings, templates, run history
+│   │   │   ├── Services/#   AutoCodeUpdateService(+ext), config/template stores, catalogs
+│   │   │   └── Views/   #   AutoCodeView, settings/template sections, cron field
+│   │   ├── LoopEngine/  # ALL Loop Engine code, one folder (same shape as AutoTask/):
+│   │   │   ├── Models/  #   LoopDefinition, stages, config store, templates, status
+│   │   │   ├── Services/#   LoopEngineRunner, journal, repairers, guards, parsers
+│   │   │   └── Views/   #   LoopEngineView(+panes), wizard, budget editors
 │   │   ├── Models/      # Data models
 │   │   ├── Services/    # Long-lived work (*Service, *Store, *Client, *Manager, *Router)
 │   │   ├── Views/       # SwiftUI views

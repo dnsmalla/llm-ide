@@ -64,7 +64,10 @@ public struct LlmIdeMacApp: App {
     @StateObject private var templateStore: DocTemplateStore
     @StateObject private var session: SessionStore
     @StateObject private var config: AppConfig
-    @StateObject private var autoTaskSettings = AutoTaskSettings()
+    // NOTE: no inline default — init() builds the single instance shared with
+    // AutoCodeUpdateService and MobileControlManager; a default here would be a
+    // second, dead instance.
+    @StateObject private var autoTaskSettings: AutoTaskSettings
     @StateObject private var capture: CaptionOrchestrator
     @StateObject private var deepLink: DeepLinkRouter
     @StateObject private var liveMirror: LiveSessionMirror
