@@ -16,7 +16,10 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJ_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_NAME="LlmIdeMac"
-APP_DIR="$PROJ_DIR/$APP_NAME.app"
+# LLMIDE_APP_DIR lets a staging rebuild assemble the bundle somewhere other
+# than the project root, without touching the installed app. Unset = today's
+# default location.
+APP_DIR="${LLMIDE_APP_DIR:-$PROJ_DIR/$APP_NAME.app}"
 # Single source of truth: mac/VERSION. Bump there, both build.sh and
 # dmg.sh pick it up automatically.
 VERSION=$(cat "$PROJ_DIR/VERSION" 2>/dev/null | tr -d '[:space:]')
@@ -38,8 +41,12 @@ if [ "$CLEAN_ALL" = "--clean-all" ]; then
   echo -e "${GREEN}[build]${NC} all caches cleaned"
 fi
 
-echo -e "${BLUE}[build]${NC} stopping any running $APP_NAME..."
-pkill -9 -f "$APP_NAME" 2>/dev/null || true
+if [ "${LLMIDE_SKIP_KILL:-0}" != "1" ]; then
+  echo -e "${BLUE}[build]${NC} stopping any running $APP_NAME..."
+  pkill -9 -f "$APP_NAME" 2>/dev/null || true
+else
+  echo -e "${BLUE}[build]${NC} LLMIDE_SKIP_KILL=1 — leaving any running $APP_NAME alone"
+fi
 
 echo -e "${BLUE}[build]${NC} cleaning old bundle at $APP_DIR..."
 rm -rf "$APP_DIR"
@@ -111,6 +118,10 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <string>$VERSION</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>LLMIDESourceRoot</key>
+    <string>$PROJ_DIR</string>
+    <key>LLMIDEFeatures</key>
+    <string>${LLMIDE_FEATURES:-all}</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSPrincipalClass</key>
@@ -202,7 +213,15 @@ else
 fi
 
 echo -e "${BLUE}[build]${NC} compiling via swift build (release)..."
-if ! swift build -c release --product "$APP_NAME" $SPM_OFFLINE; then
+# LLMIDE_FEATURES selects a feature-flagged rebuild (staging path). Manifest
+# caching can pin the *un*flagged manifest evaluation across invocations, so
+# skip it whenever a feature selection is in play — the flag is already
+# exported to this process's environment and swift build inherits it as-is.
+FEATURE_BUILD_FLAGS=""
+if [ -n "${LLMIDE_FEATURES:-}" ]; then
+  FEATURE_BUILD_FLAGS="--manifest-cache none"
+fi
+if ! swift build -c release --product "$APP_NAME" $SPM_OFFLINE $FEATURE_BUILD_FLAGS; then
   echo -e "${RED}[build] swift build failed.${NC}" >&2
   echo -e "${RED}[build] If the error mentions 'could not read Username for https://github.com',${NC}" >&2
   echo -e "${RED}[build] the private graph-kit dependency needs to be fetched once with git${NC}" >&2

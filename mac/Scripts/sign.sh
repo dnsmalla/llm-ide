@@ -14,7 +14,9 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJ_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_NAME="LlmIdeMac"
-APP_DIR="$PROJ_DIR/$APP_NAME.app"
+# LLMIDE_APP_DIR mirrors build.sh's override so sign.sh can sign a staged
+# bundle in place. Unset = today's default location.
+APP_DIR="${LLMIDE_APP_DIR:-$PROJ_DIR/$APP_NAME.app}"
 # Ad-hoc signing (identity "-") re-signs with a fresh, content-derived cdhash
 # every build; macOS's keychain ACL matches on code-signature identity, so
 # every ad-hoc rebuild looks like a new app and re-prompts for keychain
