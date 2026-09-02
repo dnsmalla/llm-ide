@@ -18,7 +18,7 @@ struct ModelLimitsPanel: View {
     /// Custom Providers (`custom:<uuid>`) meter under "custom".
     private static var providerOptions: [(id: String, label: String)] { ProviderCatalog.limitProviders }
 
-    @State private var providerKey: String = "anthropic"
+    @State private var providerKey: String = ClaudeCLI.provider
     @State private var limits: [LlmIdeAPIClient.ModelLimit] = []
     @State private var usage: LlmIdeAPIClient.ProviderUsage?
     @State private var rateLimits: LlmIdeAPIClient.RateLimits?

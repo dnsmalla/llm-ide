@@ -298,6 +298,7 @@ ios_app/MyApp/Services/
 ### Starting Points for Reading
 
 - **Server internals** — `extension/server.mjs` → follow router into `extension/routes/router.mjs`
+- **Claude linker** — [`docs/explanation/claude-linker.md`](docs/explanation/claude-linker.md): the two layers (`extension/llm_agent/sdk/` + `extension/providers/`, `mac/…/ClaudeLink/`) that own ALL Claude SDK/CLI knowledge; SDK updates edit only these
 - **KB operations** — `extension/kb/db.mjs` (every state-mutating helper takes `userId` first)
 - **Caption capture** — `extension/src/content/caption-scraper.ts` → `extension/src/sidepanel/hooks/useTranscript.ts`
 - **Central skills kit** — `.skills/` submodule + `docs/how-to/install-central-skills.md`

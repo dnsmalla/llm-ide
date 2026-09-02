@@ -40,28 +40,16 @@ struct ToolApprovalCard: View {
         }
     }
 
-    /// "Edit file" / "Write file" for the two write tools, "Run <name>" for
-    /// everything else (Bash and any future gated tool), "Run tool" when the
-    /// server didn't send a `toolName` at all. Pure so it is unit-testable
-    /// without standing up the view.
+    /// Delegating shims: the per-SDK-tool wording (which names exist, what
+    /// they mean to a user) is Claude-linker knowledge — see
+    /// `ClaudeLink/ClaudeToolPresentation.swift`. Pure so they stay
+    /// unit-testable without standing up the view.
     static func title(toolName: String?) -> String {
-        switch toolName {
-        case "Edit": return "Edit file"
-        case "Write": return "Write file"
-        case .some(let name): return "Run \(name)"
-        case nil: return "Run tool"
-        }
+        ClaudeToolPresentation.approvalTitle(toolName: toolName)
     }
 
-    /// SF Symbol matching `title(toolName:)` — a pencil for Edit, a
-    /// pencil-on-page for Write, a terminal glyph for everything else
-    /// (Bash included, since a shell command IS what "terminal" reads as).
     static func icon(toolName: String?) -> String {
-        switch toolName {
-        case "Edit": return "pencil"
-        case "Write": return "square.and.pencil"
-        default: return "terminal.fill"
-        }
+        ClaudeToolPresentation.approvalIcon(toolName: toolName)
     }
 
     /// Per-tool rendering of `state.approval.args` (Task 5's structured
@@ -218,15 +206,10 @@ struct ToolApprovalCard: View {
         }
     }
 
-    /// "Always Allow Edit" / "Always Allow Write" / "Always Allow Bash" — this
-    /// is now a permanent, irrevocable grant for a native write/shell tool
-    /// (previously only run-bash), so the button must say which tool it
-    /// always-allows rather than a bare "Always Allow" (final whole-branch
-    /// review, I2). Falls back to the bare label (no trailing space) when the
-    /// server didn't send a `toolName`. Pure, matching `title`/`icon`'s
-    /// unit-testable style.
+    /// Delegating shim, same reasoning as `title`/`icon` above — a
+    /// permanent grant must name the tool it always-allows, and which tools
+    /// exist is linker knowledge.
     static func alwaysAllowLabel(toolName: String?) -> String {
-        guard let name = toolName, !name.isEmpty else { return "Always Allow" }
-        return "Always Allow \(name)"
+        ClaudeToolPresentation.alwaysAllowLabel(toolName: toolName)
     }
 }

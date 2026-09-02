@@ -17,8 +17,9 @@ enum AgentV2Selection {
 
     /// The backend provider id the v2 engine runs on (the built-in Claude
     /// CLI tool's `AICliTool.provider`; the server-side engine always drives
-    /// the Claude Agent SDK, so no other provider can take it).
-    static let anthropicProvider = "anthropic"
+    /// the Claude Agent SDK, so no other provider can take it). Sourced from
+    /// the Claude linker so the id has exactly one definition on the Mac.
+    static let anthropicProvider = ClaudeCLI.provider
 
     /// True when `resolvedProvider` is the backend's Anthropic id. Takes the
     /// RESOLVED wire string (`ChatTransportInput.makeProvider(selectedProvider:)`

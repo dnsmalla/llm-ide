@@ -369,11 +369,9 @@ extension AutoCodeUpdateService {
             args.append(executable)
         }
         args += components.dropFirst()    // subcommand parts, e.g. ["copilot"] for "gh copilot"
-        // --permission-mode acceptEdits so the CLI never blocks on
-        // interactive permission prompts (we have no stdin to feed).
-        if cliTool == .claudeCode {
-            args += ["--permission-mode", "acceptEdits"]
-        }
+        // Unattended permission mode (Claude: --permission-mode acceptEdits)
+        // so the CLI never blocks on interactive prompts (no stdin to feed).
+        args += cliTool.unattendedPermissionArgs
         args += modelArgs(for: cliTool, resolvedModel: resolvedModel)
         // Per-tool prompt + unattended-approval args (claude: -p; codex: exec --yolo;
         // gemini: --yolo -p). nil ⇒ this CLI can't run unattended (interactive editors).
@@ -511,12 +509,8 @@ extension AutoCodeUpdateService {
             args.append(executable)
         }
         args += components.dropFirst()
-        // --permission-mode acceptEdits so the CLI never blocks on
-        // interactive permission prompts (we have no stdin to feed).
-        // Matches the issue-variant of runCLI above.
-        if cliTool == .claudeCode {
-            args += ["--permission-mode", "acceptEdits"]
-        }
+        // Unattended permission mode — matches the issue-variant of runCLI above.
+        args += cliTool.unattendedPermissionArgs
         args += modelArgs(for: cliTool, resolvedModel: resolvedModel)
         // Per-tool prompt + unattended-approval args (claude: -p; codex: exec --yolo;
         // gemini: --yolo -p). nil ⇒ this CLI can't run unattended (interactive editors).

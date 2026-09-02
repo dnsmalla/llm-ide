@@ -68,6 +68,11 @@ import { hasAlwaysAllow, setAlwaysAllow } from '../../kb/tool-approvals.mjs';
 import { runBashGate, writePathGate } from '../tools/gates.mjs';
 import { effectiveMcpServers } from '../../mcp/mcp-config.mjs';
 
+// The provider id every SDK-engine turn runs on — the usage ledger and the
+// route layer meter against this instead of hardcoding the string, so "which
+// provider the Agent SDK is" stays linker knowledge.
+export const AGENT_SDK_PROVIDER = 'anthropic';
+
 // --- Auth: per-user vault key first, operator env as fallback -------------
 // (Moved here from spike-engine.mjs, which re-exports it for compatibility —
 // the v2 runner and the spike share one auth ladder.)
@@ -448,7 +453,7 @@ const MAX_TURNS = 40;
 // by the usage ledger: every result is metered via recordUsage in the route,
 // so resolveModel's window caps and auto-fallback keep working unchanged.
 export function resolveMaxBudgetUsd(userId, model, { usdCap = usdCapForModel } = {}) {
-  return usdCap(getDb(), userId, 'anthropic', typeof model === 'string' && model ? model : null);
+  return usdCap(getDb(), userId, AGENT_SDK_PROVIDER, typeof model === 'string' && model ? model : null);
 }
 
 // Native tools outside the gated roster (and any unknown tool) stay denied —

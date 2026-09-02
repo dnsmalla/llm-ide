@@ -672,17 +672,16 @@ final class AppConfig: ObservableObject {
     /// current equivalent. Only same-family successors belong here — anything
     /// unrecognised falls back to the Claude default, which is the safe
     /// outcome for an id we can't reason about.
-    static let retiredModelIds: [String: String] = [
-        "claude-opus-4-7": "claude-opus-4-8",
-        "claude-sonnet-4-6": "claude-sonnet-5",
-        "claude-haiku-4-5-20251001": "claude-haiku-4-5",   // date-suffixed form
+    /// Claude rows live in the linker (`ClaudeCLI.retiredModelIds`) so a
+    /// Claude model-line refresh stays a linker-only edit.
+    static let retiredModelIds: [String: String] = ClaudeCLI.retiredModelIds.merging([
         "gpt-4o": "gpt-5.6-sol",
         "gpt-4o-mini": "gpt-5.4-mini",
         "o3-mini": "gpt-5.4-mini",
         "gemini-2.0-flash": "gemini-3.6-flash",            // shut down 2026-06-01
         "gemini-1.5-flash": "gemini-3.6-flash",
         "gemini-1.5-pro": "gemini-3.5-flash",
-    ]
+    ]) { current, _ in current }
 
     init(userDefaults defaults: UserDefaults = .standard) {
         self.defaults = defaults

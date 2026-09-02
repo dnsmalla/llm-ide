@@ -43,9 +43,9 @@ enum ProviderCatalog {
 
     /// Every row Settings → Model Providers renders, in display order.
     static let all: [Entry] = [
-        Entry(id: "anthropic", tool: .claudeCode,
+        Entry(id: ClaudeCLI.provider, tool: .claudeCode,
               label: "Anthropic (Claude)", shortLabel: "Claude",
-              vaultKey: "claude.apiKey", placeholder: "sk-ant-…",
+              vaultKey: ClaudeCLI.vaultKey, placeholder: "sk-ant-…",
               hint: "claude-* models. Also works with no key via your logged-in `claude` CLI (subscription). The only provider the Claude Agent engine can run."),
         Entry(id: "openai", tool: .openai,
               label: "OpenAI (GPT / Codex)", shortLabel: "OpenAI",

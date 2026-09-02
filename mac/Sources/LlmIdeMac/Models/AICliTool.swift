@@ -39,20 +39,20 @@ enum AICliTool: String, CaseIterable, Identifiable {
     /// Backend provider id this tool's models route to.
     var provider: String {
         switch self {
-        case .claudeCode:            return "anthropic"
+        case .claudeCode:            return ClaudeCLI.provider
         case .openai, .copilot:      return "openai"
         case .gemini:                return "google"
         case .deepseek:              return "deepseek"
         case .glm:                   return "glm"
         case .custom:                return "custom"
-        case .cursor:                return "anthropic" // mixed; not selectable
+        case .cursor:                return ClaudeCLI.provider // mixed; not selectable
         }
     }
 
     /// Vault key for this provider's API credential (nil for non-providers).
     var vaultKey: String? {
         switch provider {
-        case "anthropic": return "claude.apiKey"
+        case ClaudeCLI.provider: return ClaudeCLI.vaultKey
         case "openai":    return "openai.apiKey"
         case "google":    return "google.apiKey"
         case "deepseek":  return "deepseek.apiKey"
@@ -97,16 +97,9 @@ enum AICliTool: String, CaseIterable, Identifiable {
         // when nothing has been chosen. That is why retired ids here were not
         // harmless: they were the default.
         case .claudeCode:
-            // Model ids carry no date suffix — the undated id tracks the
-            // current snapshot. `claude-haiku-4-5-20251001` used to be listed
-            // in the date-suffixed form.
-            return [
-                AIModel(id: "claude-opus-5",              displayName: "Opus 5"),
-                AIModel(id: "claude-sonnet-5",            displayName: "Sonnet 5"),
-                AIModel(id: "claude-haiku-4-5",           displayName: "Haiku 4.5"),
-                AIModel(id: "claude-fable-5",             displayName: "Fable 5"),
-                AIModel(id: "claude-opus-4-8",            displayName: "Opus 4.8"),
-            ]
+            // Claude model ids live in the linker (ClaudeLink/ClaudeCLI.swift)
+            // so a model-line refresh is a linker-only edit.
+            return ClaudeCLI.fallbackModels
         case .openai:
             return [
                 AIModel(id: "gpt-5.6-sol",                displayName: "GPT-5.6 Sol"),
@@ -163,7 +156,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
     /// The executable name used to invoke this tool from the command line.
     var cliExecutable: String {
         switch self {
-        case .claudeCode: return "claude"
+        case .claudeCode: return ClaudeCLI.executable
         case .openai:     return "codex"
         case .cursor:     return "cursor"
         case .copilot:    return "gh copilot"
@@ -180,8 +173,8 @@ enum AICliTool: String, CaseIterable, Identifiable {
     ///
     /// Includes each tool's unattended/auto-approve mode so the CLI never
     /// hangs on an interactive permission prompt (there's no stdin to feed).
-    /// `--permission-mode acceptEdits` for Claude is added separately by the
-    /// caller (AutoCodeUpdateService.runCLI).
+    /// Claude's permission mode is separate (`unattendedPermissionArgs`) —
+    /// callers prepend it before these args.
     ///
     /// Trade-off: non-Claude unattended modes are broader than Claude's
     /// `acceptEdits` — Codex `--yolo` (= `--dangerously-bypass-approvals-and-
@@ -190,11 +183,27 @@ enum AICliTool: String, CaseIterable, Identifiable {
     /// that broader permission surface.
     func nonInteractivePromptArgs(_ prompt: String) -> [String]? {
         switch self {
-        case .claudeCode:      return ["-p", prompt]
+        case .claudeCode:      return ClaudeCLI.promptArgs(prompt)
         case .openai:          return ["exec", "--yolo", prompt]   // codex exec --yolo <prompt>
         case .gemini:          return ["--yolo", "-p", prompt]     // --yolo auto-approves; -p passes the prompt
         case .copilot, .cursor: return nil                        // interactive editors — not suited to unattended auto tasks
         case .deepseek, .glm, .custom: return nil                 // no CLI executable (caller early-returns before this)
+        }
+    }
+
+    /// Whether this tool can run unattended at all — callers should check
+    /// this BEFORE any side effects (log files, start records), not only at
+    /// the moment they build the prompt args.
+    var supportsUnattendedRuns: Bool { nonInteractivePromptArgs("") != nil }
+
+    /// Permission-mode args for unattended runs, prepended before
+    /// `nonInteractivePromptArgs` by every CLI-spawning caller. Only Claude
+    /// separates permission mode from its prompt args (the other CLIs bundle
+    /// auto-approval into theirs), so this is empty everywhere else.
+    var unattendedPermissionArgs: [String] {
+        switch self {
+        case .claudeCode: return ClaudeCLI.unattendedPermissionArgs
+        default:          return []
         }
     }
 }

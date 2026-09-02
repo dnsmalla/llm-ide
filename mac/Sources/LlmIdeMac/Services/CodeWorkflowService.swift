@@ -247,6 +247,13 @@ final class CodeWorkflowService: ObservableObject {
             stepError = "No AI CLI configured. Set one in Settings → AI."
             return
         }
+        // Capability check BEFORE any side effects — the later prompt-args
+        // guard would otherwise leave an orphan zero-byte log file and an
+        // unmatched workflow_generate_start log line.
+        guard cliTool.supportsUnattendedRuns else {
+            stepError = "\(cliTool.displayName) can't run unattended. Pick a CLI that supports non-interactive runs in Settings → AI."
+            return
+        }
 
         // 2. Set up log file under Application Support
         let logDir: URL
@@ -276,13 +283,11 @@ final class CodeWorkflowService: ObservableObject {
             args.append(executable)
         }
         args += components.dropFirst()
-        // --permission-mode acceptEdits: never block on interactive
-        // permission prompts (the CLI would otherwise wait forever on
-        // stdin we never feed). Pair with /dev/null stdin so even an
-        // unexpected prompt can't hang the workflow.
-        if cliTool == .claudeCode {
-            args += ["--permission-mode", "acceptEdits"]
-        }
+        // Unattended permission mode (Claude: --permission-mode acceptEdits):
+        // never block on interactive permission prompts (the CLI would
+        // otherwise wait forever on stdin we never feed). Pair with
+        // /dev/null stdin so even an unexpected prompt can't hang the run.
+        args += cliTool.unattendedPermissionArgs
         // Wrap the user's plan with an imperative preamble so the CLI
         // doesn't slip into chat / planning mode (asking what to do,
         // offering /loop or brainstorming workflows). The CLI sees a
@@ -302,7 +307,14 @@ final class CodeWorkflowService: ObservableObject {
         --- PLAN ---
         \(aiPrompt)
         """
-        args += ["-p", wrapped]
+        // Per-tool prompt args (claude: -p; codex: exec --yolo; gemini:
+        // --yolo -p) — this previously hardcoded `-p`, which only Claude
+        // understands, so a non-Claude CLI selection silently misfired.
+        guard let promptArgs = cliTool.nonInteractivePromptArgs(wrapped) else {
+            stepError = "\(cliTool.displayName) can't run unattended. Pick a CLI that supports non-interactive runs in Settings → AI."
+            return
+        }
+        args += promptArgs
         process.arguments = args
         process.currentDirectoryURL = repoURL
 

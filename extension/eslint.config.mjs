@@ -27,7 +27,15 @@ const ROUTE_MODULES = {
   message: 'Route modules are the top layer — nothing imports them. Move the shared helper into a library module.',
 };
 
-const forbidLayers = (layers) => ({
+// Claude-linker boundary: the Agent SDK package is imported ONLY inside
+// llm_agent/sdk/ (the server-side Claude linker), so an SDK update touches
+// the linker and nothing else. See docs/explanation/claude-linker.md.
+const CLAUDE_SDK_IMPORT = {
+  regex: '^@anthropic-ai/claude-agent-sdk',
+  message: 'The Claude Agent SDK may only be imported inside llm_agent/sdk/ (the Claude linker) — call its exports instead. See docs/explanation/claude-linker.md.',
+};
+
+const forbidLayers = (layers, { allowClaudeSdk = false } = {}) => ({
   'no-restricted-imports': ['error', {
     patterns: [
       {
@@ -35,6 +43,7 @@ const forbidLayers = (layers) => ({
         message: `This layer must not import from: ${layers.join(', ')} (see CLAUDE.md "Module Boundaries").`,
       },
       ROUTE_MODULES,
+      ...(allowClaudeSdk ? [] : [CLAUDE_SDK_IMPORT]),
     ],
   }],
 });
@@ -44,6 +53,10 @@ const forbidLayers = (layers) => ({
 // newly added layer directory is forbidden everywhere until explicitly
 // allowed — additions to LAYERS ratchet automatically.
 const allowOnly = (...allowed) => forbidLayers(LAYERS.filter((l) => !allowed.includes(l)));
+
+// llm_agent's allow-list, shared by the llm_agent block and its llm_agent/sdk
+// override so the two can never drift apart.
+const LLM_AGENT_ALLOWED = ['core', 'kb', 'server', 'providers', 'graphkit', 'plugins', 'llm-sources', 'mcp'];
 
 export default tseslint.config(
   js.configs.recommended,
@@ -85,6 +98,18 @@ export default tseslint.config(
   },
 
   // --- Layering boundaries (see header comment) ----------------------------
+  // Claude-linker catch-all FIRST: files no layer block matches (server.mjs,
+  // scripts/, root-level .mjs) still must not import the Agent SDK. The layer
+  // blocks below override this rule wholesale for their files — each carries
+  // CLAUDE_SDK_IMPORT itself, and llm_agent/sdk/ deliberately drops it. Tests
+  // are the one exemption (they pin SDK behavior directly).
+  {
+    files: ['**/*.mjs'],
+    ignores: ['tests/**'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [CLAUDE_SDK_IMPORT] }],
+    },
+  },
   // L0–L2
   { files: ['core/**/*.mjs'],      rules: allowOnly('core') },
   { files: ['kb/**/*.mjs'],        rules: allowOnly('core', 'kb') },
@@ -99,7 +124,16 @@ export default tseslint.config(
   { files: ['connectors/**/*.mjs'], rules: allowOnly('core', 'kb', 'server', 'providers') },
   // …and the two agent systems orchestrate designated L3 peers.
   { files: ['agents/**/*.mjs'],    rules: allowOnly('core', 'kb', 'server', 'providers', 'connectors', 'graphkit', 'guardrails') },
-  { files: ['llm_agent/**/*.mjs'], rules: allowOnly('core', 'kb', 'server', 'providers', 'graphkit', 'plugins', 'llm-sources', 'mcp') },
+  { files: ['llm_agent/**/*.mjs'], rules: allowOnly(...LLM_AGENT_ALLOWED) },
+  // …of which llm_agent/sdk/ is the Claude linker — the ONE place allowed to
+  // import the Agent SDK package (same layer allowances otherwise).
+  {
+    files: ['llm_agent/sdk/**/*.mjs'],
+    rules: forbidLayers(
+      LAYERS.filter((l) => !LLM_AGENT_ALLOWED.includes(l)),
+      { allowClaudeSdk: true },
+    ),
+  },
   // Browser code must stay browser-only — no Node-side layer may leak in.
   { files: ['src/**/*.{ts,tsx}'],  rules: allowOnly('src') },
   {
@@ -113,7 +147,7 @@ export default tseslint.config(
         patterns: [{
           regex: `${REL}(.*/)?src/`,
           message: 'Server-side code must not import browser code (src/).',
-        }],
+        }, CLAUDE_SDK_IMPORT],
       }],
     },
   },
