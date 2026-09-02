@@ -97,6 +97,21 @@ SPARKLE_KEYS+="
     <key>SUScheduledCheckInterval</key>
     <integer>86400</integer>"
 
+# Dev + staged rebuilds need LLMIDESourceRoot/LLMIDEFeatures — the running
+# app reads LLMIDESourceRoot back out of its own bundle to detect rebuild
+# eligibility. A *distributed* release bundle must NOT carry the build
+# machine's local absolute path, so release.sh opts out via
+# LLMIDE_OMIT_SOURCE_ROOT=1; build_app.sh (dev) and rebuild-features.sh
+# (staged) leave it unset and keep the keys.
+SOURCE_ROOT_KEYS=""
+if [ "${LLMIDE_OMIT_SOURCE_ROOT:-0}" != "1" ]; then
+  SOURCE_ROOT_KEYS="
+    <key>LLMIDESourceRoot</key>
+    <string>$PROJ_DIR</string>
+    <key>LLMIDEFeatures</key>
+    <string>${LLMIDE_FEATURES:-all}</string>"
+fi
+
 cat > "$APP_DIR/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -117,11 +132,7 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <key>CFBundleShortVersionString</key>
     <string>$VERSION</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>LLMIDESourceRoot</key>
-    <string>$PROJ_DIR</string>
-    <key>LLMIDEFeatures</key>
-    <string>${LLMIDE_FEATURES:-all}</string>
+    <string>1</string>$SOURCE_ROOT_KEYS
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSPrincipalClass</key>

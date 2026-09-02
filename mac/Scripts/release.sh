@@ -39,6 +39,8 @@ fi
 
 echo -e "${BLUE}[release]${NC} build → sign → notarize → dmg"
 
+# Distributed bundles must not carry the build machine's local paths.
+export LLMIDE_OMIT_SOURCE_ROOT=1
 "$SCRIPT_DIR/build.sh"
 "$SCRIPT_DIR/sign.sh"
 "$SCRIPT_DIR/notarize.sh"
