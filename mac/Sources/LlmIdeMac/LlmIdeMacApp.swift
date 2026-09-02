@@ -53,6 +53,14 @@ fileprivate func installCrashHandlers() {
     }
 }
 
+// FeatureService conformances — the methods already exist on each type;
+// these declarations let feature modules hold them behind one protocol.
+extension GraphAutoUpdater: FeatureService {}
+extension LiveSessionMirror: FeatureService {}
+extension AutoCodeUpdateService: FeatureService {}
+extension AutoCaptureService: FeatureService {}
+extension MobileControlManager: FeatureService {}
+
 public struct LlmIdeMacApp: App {
     // Adopt an NSApplicationDelegate to handle reopen and "should-quit"
     // events SwiftUI alone can't express on macOS.  Without this,
@@ -80,7 +88,7 @@ public struct LlmIdeMacApp: App {
     @StateObject private var updateService = UpdateService()
     @StateObject private var projectStore: ProjectStore
     @StateObject private var graphAutoUpdater: GraphAutoUpdater
-    @StateObject private var graphSessionStore = GraphSessionStore()
+    @StateObject private var graphSessionStore: GraphSessionStore
     @StateObject private var sourceLinkStore = SourceLinkStore()
     @State private var backend = BackendManager()
     @State private var mobileControl = MobileControlManager()
@@ -198,6 +206,8 @@ public struct LlmIdeMacApp: App {
         let autoUpdater = GraphAutoUpdater(projectStore: projectStoreInstance,
                                            intervalMinutes: cfg.graphAutoUpdateMinutes)
         self._graphAutoUpdater = StateObject(wrappedValue: autoUpdater)
+        let graphSessionStoreInstance = GraphSessionStore()
+        self._graphSessionStore = StateObject(wrappedValue: graphSessionStoreInstance)
         let activity = ActivityStore(api: client)
         activity.start()
         self._activityStore = State(wrappedValue: activity)
@@ -209,6 +219,10 @@ public struct LlmIdeMacApp: App {
         // (/kb/ingest-code-graph) — the server's only source of symbol-graph
         // data for agent grounding.
         autoUpdater.uploader.api = client
+        // Wire the session store so background runs surface in the Code
+        // Graph view. Previously assigned in AppShell's `.task`; moved here
+        // so registration + refresh() own the updater's whole lifecycle.
+        autoUpdater.sessionStore = graphSessionStoreInstance
         autoCode.activity = activity
         self._autoTaskSettings = StateObject(wrappedValue: autoTaskSettingsInstance)
         self.api = client
@@ -230,6 +244,29 @@ public struct LlmIdeMacApp: App {
         mobileControl.projectStore = projectStoreInstance
         mobileControl.backendManager = backend
         mobileControl.installMobilePushObservers()
+
+        // Register one module per feature. The registry starts nothing here;
+        // the launch `.task` below calls refresh() once shells are mounted.
+        // Named `featureRegistry` (not `registry`) — that name is already
+        // taken above by the on-disk ProcessedActionsRegistry.
+        let featureRegistry = FeatureRegistry.shared
+        featureRegistry.register(module: AutoTaskModule(
+            scheduler: autoCode,
+            capture: self.autoCapture,
+            schedulerEnabled: { autoTaskSettingsInstance.enabled }))
+        featureRegistry.register(module: GraphModule(
+            updater: autoUpdater,
+            isAuthenticated: { store.isAuthenticated }))
+        featureRegistry.register(module: ChatModule(
+            mirror: mirror,
+            isAuthenticated: { store.isAuthenticated }))
+        featureRegistry.register(module: MobileModule(
+            manager: mobileControl,
+            controlEnabled: { cfg.mobileControlEnabled },
+            autoStart: { cfg.mobileControlAutoStart }))
+        for feature in [AppFeature.fileExplorer, .ganttIssues, .docGen, .terminal] {
+            featureRegistry.register(module: PassiveModule(feature: feature))
+        }
     }
 
     public var body: some Scene {
@@ -337,21 +374,22 @@ public struct LlmIdeMacApp: App {
                             await Self.awaitBackendReady(timeoutSec: 8)
                         }
                     }
-                    if config.mobileControlEnabled, config.mobileControlAutoStart {
-                        autoStartMobileControl()
-                    }
                     // Restore persisted session on launch, if any.
                     await session.bootstrap(api: api)
-                    autoCapture.start()
-                    if autoTaskSettings.enabled { autoCodeUpdate.start() }
+                    // Single lifecycle entry point: start every enabled
+                    // feature whose runtime conditions hold.
+                    FeatureRegistry.shared.refresh()
                 }
                 // Start / stop the live caption mirror in lockstep
                 // with authentication.  When signed out, polling
                 // would just 401 in a loop; when signed in, we want
                 // immediate visibility of any active extension session.
                 .onChange(of: session.isAuthenticated) { _, authed in
+                    // Single lifecycle entry point: reconciles liveMirror and
+                    // the graph updater (both auth-scoped modules) on login
+                    // AND logout, replacing the old direct start()/stop().
+                    FeatureRegistry.shared.refresh()
                     if authed {
-                        liveMirror.start()
                         Task { await sourceLinkStore.refresh(api: api) }
                         if case .running = backend.status {
                             CustomProvider.syncAllToBackend(api: api)
@@ -362,8 +400,6 @@ public struct LlmIdeMacApp: App {
                         // never visited it scaffolded every project with the
                         // fallback language instead of their real one.
                         Task { await refreshPreferredLanguage() }
-                    } else {
-                        liveMirror.stop()
                     }
                 }
                 // Keep the active project's `linkedRepo` bound to the
@@ -402,7 +438,9 @@ public struct LlmIdeMacApp: App {
                     mobileControl.stop()
                 }
                 .task {
-                    if session.isAuthenticated { liveMirror.start() }
+                    // Idempotent — a harmless double-refresh alongside the
+                    // launch `.task` above.
+                    FeatureRegistry.shared.refresh()
                 }
                 // Custom URL scheme handler.  Fired by macOS when any
                 // app (the Chrome extension, Spotlight, `open
@@ -500,15 +538,6 @@ public struct LlmIdeMacApp: App {
         BackendManager.resolveLaunchPaths(config: config)
         guard !config.backendNodePath.isEmpty, !config.backendWorkingDir.isEmpty else { return }
         backend.start(nodePath: config.backendNodePath, workingDirectory: config.backendWorkingDir)
-    }
-
-    /// Start the native mobile control server when Mobile Control is enabled.
-    /// (The caller additionally gates on `mobileControlAutoStart`.)
-    @MainActor
-    private func autoStartMobileControl() {
-        if config.mobileControlEnabled {
-            mobileControl.start()
-        }
     }
 
     /// Poll `/health` briefly so session restore — which talks to the

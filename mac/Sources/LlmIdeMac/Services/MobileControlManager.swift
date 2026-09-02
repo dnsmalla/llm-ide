@@ -565,6 +565,11 @@ final class MobileControlManager {
                     NotificationCenter.default.post(name: .customAutoTasksChanged, object: nil)
                     append(.info, "Custom auto-task toggle \(custom.name)=\(m.enabled)")
                 } else if m.task == nil {
+                    guard FeatureRegistry.shared.isEnabled(.autoTasks) else {
+                        append(.info, "Auto-task master toggle ignored: feature disabled on Mac")
+                        replyAutoTaskStateOrAck()
+                        return
+                    }
                     autoTaskSettings?.enabled = m.enabled
                     append(.info, "Auto-task master=\(m.enabled)")
                 } else {

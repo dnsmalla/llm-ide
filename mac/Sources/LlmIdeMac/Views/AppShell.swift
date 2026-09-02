@@ -339,23 +339,6 @@ struct AppShell: View {
         .onChange(of: config.hiddenSidebarSections)   { _, _ in redirectIfSectionHidden() }
         .task { await checkRecovery() }
         .task { await checkLegacyPrompt() }
-        // Auto-maintain the knowledge graph + memory for any project that
-        // already has a generated graph (first generation stays manual).
-        // Idempotent; re-runs on project open/switch + a periodic timer.
-        .task {
-            if registry.isEnabled(.codeGraph3D) {
-                // Wire the session store so background runs surface in the Code
-                // Graph view, then begin auto-maintaining the graph.
-                graphAutoUpdater.sessionStore = graphSessionStore
-                graphAutoUpdater.start()
-            }
-        }
-        // Tie the auto-updater to the auth/session lifecycle: AppShell is only
-        // mounted while signed in (ContentView swaps in LoginView on logout), so
-        // its teardown is the logout signal. Without this the 15-min timer keeps
-        // scanning the last project after logout, since GraphAutoUpdater is an
-        // app-level object that outlives this view.
-        .onDisappear { graphAutoUpdater.stop() }
         .task {
             // Phase D — arm the regression-run button when the app
             // version changes between launches. We record the new
