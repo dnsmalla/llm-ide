@@ -14,6 +14,8 @@ struct HelpGuideView: View {
     /// `FeatureRegistry.compiledFeatures` already knows.
     private static let topicFeature: [HelpTopic: AppFeature] = [
         .explorer: .fileExplorer,
+        .search: .fileExplorer,
+        .sourceControl: .fileExplorer,
         .issues: .ganttIssues,
         .gantt: .ganttIssues,
         .docGen: .docGen,

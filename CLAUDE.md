@@ -23,7 +23,7 @@ npm run server        # Start the local Node server (127.0.0.1:3456)
 cd mac
 swift build           # Build the app
 swift test            # Run XCTest suite
-make build-mac-lite   # Build with Graph feature excluded (reduced binary size)
+make build-mac-lite   # Build lite app: excludes Explorer, Gantt, Issues, DocGen, Terminal (non-engineer profile with Chat, Auto Tasks, Mobile Sync, Live Capture, Library only)
 ./build_app.sh        # Legacy build script (use `swift build` instead)
 
 # Testing
