@@ -10,15 +10,19 @@ struct AutoCodeView: View {
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var logStore: TaskLogStore
     @EnvironmentObject private var autoTaskSettings: AutoTaskSettings
+    @EnvironmentObject private var autoTaskTemplates: AutoTaskTemplateStore
+    @EnvironmentObject private var autoTaskSkills: AutoTaskSkillCatalog
+    @EnvironmentObject private var projectStore: ProjectStore
     @Environment(ShellState.self) private var shell
 
     @State private var selectedTask: AutoTask? = .reviewCode
     @State private var taskToReset: AutoTask? = nil
     /// When true the right pane shows the usage-limits panel instead of a task.
     @State private var showModelLimits = false
-    private enum EditPreviewMode { case edit, preview }
-    /// Which pane the per-task page shows for prompt tasks. Default Edit.
-    @State private var editPreview: EditPreviewMode = .edit
+    /// Whether the "Effective prompt" card is expanded. Collapsed by default —
+    /// it is the answer to "what will this actually send", not something to
+    /// read on every visit.
+    @State private var showEffectivePrompt = false
     @State private var customTasks: [CustomAutoTask] = []
     @State private var showingAddCustomTask = false
     @State private var selectedCustomTaskId: String? = nil
@@ -572,6 +576,9 @@ struct AutoCodeView: View {
                 if let task = customTaskPendingDelete, autoCode.currentCustomTaskId != task.id {
                     task.delete()
                     logStore.clear(task.id)
+                    // Its input/output/skill/template settings are keyed by
+                    // this id and nothing can reach them again.
+                    autoCode.taskConfigs.remove(taskId: task.id)
                     persistCustomTasksChange()
                     if selectedCustomTaskId == task.id { selectedCustomTaskId = nil }
                 }
@@ -602,14 +609,6 @@ struct AutoCodeView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(autoCode.isRunning)
-                if task.templateBinding(config: config) != nil {
-                    Button("Restore Default") {
-                        taskToReset = task
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(theme.current.textMuted)
-                    .font(Typography.caption)
-                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
@@ -625,22 +624,31 @@ struct AutoCodeView: View {
 
             Divider()
 
-            // Edit | Preview toggle (prompt tasks), or structural config.
+            // Settings + Template for prompt tasks; the About doc and its
+            // knobs for structural ones (which run no prompt, so an input path
+            // or a template would be a control that does nothing).
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    if let template = task.templateBinding(config: config) {
-                        Picker("", selection: $editPreview) {
-                            Text("Edit").tag(EditPreviewMode.edit)
-                            Text("Preview").tag(EditPreviewMode.preview)
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        if editPreview == .edit {
-                            editSection(template: template)
-                        } else {
-                            previewSection(task)
-                        }
+                    if let ownPrompt = task.templateBinding(config: config) {
+                        AutoTaskSettingsSection(taskId: task.rawValue,
+                                                configs: autoCode.taskConfigs,
+                                                skills: autoTaskSkills,
+                                                projectRoot: activeProjectRoot,
+                                                writesFiles: false)
+                        AutoTaskTemplateSection(taskId: task.rawValue,
+                                                ownPrompt: ownPrompt,
+                                                ownPromptLabel: "Built-in prompt",
+                                                onRestoreDefault: { taskToReset = task },
+                                                configs: autoCode.taskConfigs,
+                                                templates: autoTaskTemplates)
+                        // Every built-in prompt task runs read-only — runCLI
+                        // reverts the tree afterwards — so the preview must
+                        // show the read-only wording the run will really use.
+                        effectivePromptSection(taskId: task.rawValue,
+                                               ownPrompt: ownPrompt.wrappedValue,
+                                               writesFiles: false)
                     } else {
+                        aboutSection(task)
                         structuralConfigSection(task)
                     }
                 }
@@ -728,26 +736,27 @@ struct AutoCodeView: View {
             Divider()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Edit template")
-                        .font(Typography.section)
-                        .foregroundStyle(theme.current.textMuted)
-                    TextEditor(text: Binding(
-                        get: { task.template },
-                        set: { newValue in
-                            var updated = task
-                            updated.template = newValue
-                            updated.save()
-                            customTasks = CustomAutoTask.loadAll()
-                        }
-                    ))
-                    .font(Typography.mono)
-                    .foregroundStyle(theme.current.text)
-                    .scrollContentBackground(.hidden)
-                    .background(theme.current.surface)
-                    .frame(minHeight: 180)
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(theme.current.border, lineWidth: 1))
-                    .cornerRadius(6)
+                VStack(alignment: .leading, spacing: 16) {
+                    AutoTaskSettingsSection(taskId: task.id,
+                                            configs: autoCode.taskConfigs,
+                                            skills: autoTaskSkills,
+                                            projectRoot: activeProjectRoot,
+                                            writesFiles: task.mode == .implement)
+                    AutoTaskTemplateSection(taskId: task.id,
+                                            ownPrompt: Binding(
+                                                get: { task.template },
+                                                set: { newValue in
+                                                    var updated = task
+                                                    updated.template = newValue
+                                                    updated.save()
+                                                    customTasks = CustomAutoTask.loadAll()
+                                                }
+                                            ),
+                                            ownPromptLabel: "This task's prompt",
+                                            configs: autoCode.taskConfigs,
+                                            templates: autoTaskTemplates)
+                    effectivePromptSection(taskId: task.id, ownPrompt: task.template,
+                                           writesFiles: task.mode == .implement)
                 }
                 .padding(20)
             }
@@ -823,40 +832,62 @@ struct AutoCodeView: View {
         }
     }
 
+    /// The active project's root, which the Settings pickers resolve their
+    /// relative paths against. nil when no project is open — the pickers then
+    /// disable rather than storing paths with nothing to be relative to.
+    private var activeProjectRoot: URL? {
+        projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
+    }
+
+    /// Static "what this task does" doc for a structural task.
     @ViewBuilder
-    private func previewSection(_ task: AutoTask) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Preview")
-                .font(Typography.section)
-                .foregroundStyle(theme.current.textMuted)
-            MarkdownPreview(markdown: previewMarkdown(for: task))
+    private func aboutSection(_ task: AutoTask) -> some View {
+        AutoTaskSectionCard("About", systemImage: "info.circle") {
+            MarkdownPreview(markdown: aboutMarkdown(for: task))
                 .frame(maxWidth: .infinity)
-                .background(theme.current.surface)
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(theme.current.border, lineWidth: 1))
-                .cornerRadius(6)
         }
     }
 
-    /// Markdown shown in the preview: the editable template for prompt tasks,
-    /// a static About doc for structural tasks.
-    private func previewMarkdown(for task: AutoTask) -> String {
-        task.templateBinding(config: config)?.wrappedValue ?? aboutMarkdown(for: task)
-    }
-
+    /// Exactly what the CLI will receive — the selected template (or the task's
+    /// own prompt) with the skill directive and resolved paths folded in.
+    ///
+    /// Composed by the same `composedPrompt` the runner calls, so this is the
+    /// real thing rather than a re-implementation that can drift from it. It is
+    /// the only place the interaction between the Settings and Template cards
+    /// becomes visible before a run.
     @ViewBuilder
-    private func editSection(template: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Edit template")
-                .font(Typography.section)
-                .foregroundStyle(theme.current.textMuted)
-            TextEditor(text: template)
-                .font(Typography.mono)
-                .foregroundStyle(theme.current.text)
-                .scrollContentBackground(.hidden)
-                .background(theme.current.surface)
-                .frame(minHeight: 180)
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(theme.current.border, lineWidth: 1))
-                .cornerRadius(6)
+    private func effectivePromptSection(taskId: String, ownPrompt: String,
+                                        writesFiles: Bool) -> some View {
+        AutoTaskSectionCard("Effective prompt", systemImage: "text.viewfinder",
+                            accessory: AnyView(
+                                Button(showEffectivePrompt ? "Hide" : "Show") {
+                                    showEffectivePrompt.toggle()
+                                }
+                                .buttonStyle(.borderless)
+                                .font(Typography.caption)
+                            )) {
+            if showEffectivePrompt {
+                ScrollView {
+                    Text(autoCode.composedPrompt(taskId: taskId, ownPrompt: ownPrompt,
+                                                 projectRoot: activeProjectRoot?.path,
+                                                 writesFiles: writesFiles))
+                        .font(Typography.mono)
+                        .foregroundStyle(theme.current.text)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+                .frame(maxHeight: 220)
+                .background(theme.current.body)
+                .overlay(RoundedRectangle(cornerRadius: Radius.sm)
+                    .strokeBorder(theme.current.border, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
+            } else {
+                Text("What this task will send to the CLI, with the skill and paths above applied.")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
