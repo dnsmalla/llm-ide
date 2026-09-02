@@ -1,5 +1,5 @@
 import Foundation
-import GraphKit
+import GraphCore
 import Combine
 import os
 
@@ -30,6 +30,11 @@ public final class CodeNoteService: ObservableObject {
     @Published public private(set) var graph: CGData = .empty
 
     private let launcher: ProcessLauncher
+    /// Produces the scan this service turns into notes. Injected rather than
+    /// constructed so the app never names a producer type outside
+    /// `GraphGeneration/` — see `GraphEngine`. nil means no engine is installed,
+    /// in which case generation reports that rather than scanning nothing.
+    private let engine: GraphEngine?
     /// CLI used to enrich notes in the background after the structural skeleton
     /// is built. When nil (the default), generation stops at the deterministic
     /// skeleton and no agent is invoked.
@@ -49,9 +54,15 @@ public final class CodeNoteService: ObservableObject {
 
     nonisolated private static let log = Logger(subsystem: "com.llmide.macapp", category: "CodeNoteService")
 
+    /// `launcher` drives the note-enrichment CLI only. The scan's launcher is
+    /// the engine's own business — a plugin engine is a subprocess and has no
+    /// `ProcessLauncher` to inject. Keeping the parameter would imply the scan
+    /// is still injectable when it is not.
     public init(launcher: ProcessLauncher = SystemProcessLauncher(),
+                engine: GraphEngine? = GraphEngines.resolveDefault(),
                 cliExecutable: URL? = nil) {
         self.launcher = launcher
+        self.engine = engine
         self.cliExecutable = cliExecutable
     }
 
@@ -62,7 +73,14 @@ public final class CodeNoteService: ObservableObject {
         // double-click) — returning the current graph avoids a concurrent write
         // to the same scan-cache / notes dir.
         let pathKey = repoRoot.standardizedFileURL.path
-        if isRunning || Self.inFlightPaths.contains(pathKey) { return .success(graph) }
+        if isRunning || Self.inFlightPaths.contains(pathKey) {
+            // Report contention rather than success. Returning `.success` with
+            // the current (often empty) graph made every caller believe it had
+            // a real scan: `KnowledgeGraphService` then wrote an all-zero
+            // `graph-notes.md`, and the Graph view's spinner never cleared
+            // because `$graph` never republished.
+            return .failure(.busy)
+        }
         isRunning = true
         Self.inFlightPaths.insert(pathKey)
         defer { isRunning = false; Self.inFlightPaths.remove(pathKey) }
@@ -71,35 +89,61 @@ public final class CodeNoteService: ObservableObject {
             return .failure(.folderNotWritable(path: repoRoot.path))
         }
         let launcher = self.launcher
+        guard let engine else {
+            progress = .failed("no graph engine installed")
+            return .failure(.noEngine)
+        }
 
-        // Phase 1 — scan (off the main actor).
+        // Phase 1 — scan. The engine already runs this off the main actor and
+        // already excludes markdown from the graph it returns.
         progress = .scanning
-        let inc = await Task.detached(priority: .userInitiated) {
-            await StructureScanner(launcher: launcher).scanIncremental(repoRoot: repoRoot)
-        }.value
+        let scanned: CodeScan
+        do {
+            scanned = try await engine.scanCode(repoRoot: repoRoot)
+        } catch {
+            progress = .failed(error.localizedDescription)
+            return .failure(.engineFailed(error.localizedDescription))
+        }
         if Task.isCancelled { progress = .idle; return .failure(.cancelled) }
 
-        // Phase 2 — build graph + write notes (off the main actor).
+        // Phase 2 — write the deterministic notes (off the main actor).
+        //
+        // An engine that reports no symbol scan (a plugin may emit only a
+        // graph) writes no notes rather than writing empty ones.
         progress = .buildingGraph
-        let result = inc.result
-        let graph = await Task.detached(priority: .userInitiated) { () -> CGData in
-            let g = StructureGraphBuilder.build(result, repoRoot: repoRoot)
-            CodeNoteGenerator.generate(scan: result, repoRoot: repoRoot,
-                                       changedPaths: inc.changedPaths)
-            return g
-        }.value
+        let result = scanned.scan
+        let graph = scanned.graph
+        // Write notes and prune orphans ONLY from an authoritative scan.
+        //
+        // `CodeNoteGenerator.generate`'s tail calls `pruneOrphanNotes` with the
+        // scanned paths as its keep-set, so calling it with an empty scan
+        // deletes every per-file note under `system/graph/` and empties
+        // `index.md` and `graph.json`. That is correct when the repository
+        // really has no code files — those notes are stale — and catastrophic
+        // when the engine simply does not report symbols, which is what a
+        // plugin engine does. `reportsSymbols` separates the two; without it,
+        // installing a plugin deleted every note on the next generate.
+        if scanned.reportsSymbols {
+            let changedPaths = scanned.changedPaths
+            await Task.detached(priority: .userInitiated) {
+                CodeNoteGenerator.generate(scan: result, repoRoot: repoRoot,
+                                           changedPaths: changedPaths)
+            }.value
+        } else {
+            Self.log.info("engine reports no symbol scan — keeping existing notes rather than pruning")
+        }
         if Task.isCancelled { progress = .idle; return .failure(.cancelled) }
 
         // Publish on the main actor.
         self.graph = graph
         progress = .complete(files: result.files.count,
                              edges: graph.edges.count,
-                             reused: inc.reusedFiles)
+                             reused: scanned.reusedFiles)
 
         // Background enrichment: only when a CLI is configured and files changed.
         // Fire-and-forget — the skeleton above is already the returned result.
-        if let cli = cliExecutable, !inc.changedPaths.isEmpty {
-            let changed = inc.changedPaths
+        if let cli = cliExecutable, !scanned.changedPaths.isEmpty {
+            let changed = scanned.changedPaths
             Task.detached(priority: .utility) {
                 let files = result.files.map(\.path).filter { changed.contains($0) }
                 let batches = BatchPlanner.plan(files: files, imports: result.imports,

@@ -1,4 +1,5 @@
 import Foundation
+import GraphCore
 
 public final class StructureScanner {
     private let launcher:        ProcessLauncher

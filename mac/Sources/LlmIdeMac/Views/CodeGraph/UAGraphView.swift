@@ -20,7 +20,7 @@
 // Library, Review Code, Review Doc, DocGen, etc. No NSOpenPanel here.
 
 import SwiftUI
-import GraphKit
+import GraphCore
 import AppKit
 import os
 import simd
@@ -129,12 +129,39 @@ struct UAGraphView: View {
     /// based on `showSymbols` so the canvas doesn't have to draw 1k+ nodes
     /// when the user just wants the file-level view.
     @State private var fullData: CGData = .empty
+    /// The structural signals `GraphLayoutEngine` derived alongside the
+    /// positions — cluster, importance, radius and per-edge weight.
+    ///
+    /// The canvas needs these to encode anything beyond node kind. Without
+    /// them it recomputed adjacency on every redraw just to size a node, and
+    /// the importance signals the app already computed in three other places
+    /// (upload truncation, dependency-hub notes, high-impact files) never
+    /// reached the drawing code at all.
+    @State private var layout: GraphLayout = .empty
+    /// Monotonic token identifying the most recent layout request.
+    ///
+    /// `mode == expectedMode` alone let the OLDER of two same-mode requests win
+    /// whenever it happened to finish second: a manual generate of a small
+    /// graph (~0.1s) racing a background hydrate of a large one (~3s)
+    /// overwrote `fullData`, `layout` AND the session cache with the stale
+    /// result.
+    @State private var layoutGeneration: Int = 0
     @State private var selectedNode: CGNode?
     /// 3D rendering toggle + per-mode cache of settled 3D positions, so
     /// flipping 2D⇄3D (or revisiting a mode) doesn't re-run the 3D settle.
     @State private var render3D = false
     @State private var positions3DByMode: [Mode: [String: SIMD3<Float>]] = [:]
     @State private var runTask: Task<Void, Never>?
+    /// The layout task, distinct from the generate task so Cancel can stop the
+    /// right one and a new layout supersedes the previous one.
+    @State private var layoutTask: Task<Void, Never>?
+    /// Guards against `hydrateFromStore` launching several identical layouts.
+    ///
+    /// `GraphAutoUpdater.publishToSession` stores three modes, so
+    /// `objectWillChange` fires three times; with only an `isEmpty` check on
+    /// `fullData`, all three passed and started concurrent multi-second layouts
+    /// of the same graph.
+    @State private var hydrating = false
     @State private var showSymbols: Bool = false
     /// Double-click on canvas sets focus; dims non-neighbours.
     @State private var focusedNode: CGNode? = nil
@@ -160,6 +187,11 @@ struct UAGraphView: View {
 
     @StateObject private var codeNoteService = CodeNoteService(
         launcher: SystemProcessLauncher())
+
+    /// Produces graphs. nil when no engine is installed, in which case the view
+    /// still renders whatever is already cached or on disk — the model and the
+    /// layout engine are always present — but cannot generate anything new.
+    private let engine: GraphEngine? = GraphEngines.resolveDefault()
 
     /// Process-lifetime graph cache (per repo+mode). Lives above the view so a
     /// generated graph survives this view being torn down and rebuilt on
@@ -215,7 +247,8 @@ struct UAGraphView: View {
     /// re-appears after navigation — so a once-generated graph shows instantly
     /// instead of requiring a regenerate.
     private func hydrateFromStore() {
-        guard fullData.nodes.isEmpty,
+        guard !hydrating,
+              fullData.nodes.isEmpty,
               let entry = graphSessionStore.entry(repo: graphRepoRoot, mode: mode.rawValue),
               !entry.graph.nodes.isEmpty
         else { return }
@@ -224,39 +257,30 @@ struct UAGraphView: View {
         if mode == .code { codeArtifacts = UAHelpers.collectCodeArtifacts(entry.graph) }
 
         if entry.laidOut {
-            // The view's own generate stored a positioned graph — show it as-is.
+            // The view's own generate stored a positioned graph — show it as-is,
+            // then recover the derived signals for THIS graph.
             fullData = entry.graph
             status = .loaded(nodeCount: entry.graph.nodes.count, edgeCount: entry.graph.edges.count)
-            recomputeDisplayData()
+            adoptLayout(for: entry.graph, mode: mode)
         } else {
             // The background GraphAutoUpdater stored a RAW graph (no positions).
-            // Lay it out with the same pipeline a manual generate uses, then let
-            // physics settle — settlePhysics re-caches the positioned result
-            // (laidOut == true) so a later re-appear skips this step.
+            // Lay it out with the same single entry point a manual generate
+            // uses, which re-caches the finished result (`laidOut == true`) so a
+            // later re-appear skips this step.
             //
-            // The auto-updater caches the doc / All graphs UNPRUNED, so this
-            // hydrate path must apply the same per-node edge cap the manual
-            // generate paths do — otherwise the dense doc graph (avg degree
-            // ~40, hubs >200) collapses into a single overlapping blob. The
-            // sparse code graph is below the cap, so capDegree is a no-op there.
-            let rawGraph = (mode == .data || mode == .all)
-                ? GraphPrune.capDegree(entry.graph, maxDegree: Self.docGraphMaxDegree)
-                : GraphPrune.capDegree(entry.graph, maxDegree: Self.codeGraphMaxDegree)
-            // Lay out on the SAME canvas the generate paths use so a hydrated
-            // ("saved") graph renders identically to a fresh generate: the
-            // doc-bearing graphs (InfiniteBrain / All) use a fixed 1200×800
-            // (see generateMemory / generateAll), while the sparse code graph
-            // scales with node count. Using layoutSize here for doc/All made the
-            // saved view spread differently from a normal generate.
-            let canvas: CGSize = (mode == .data || mode == .all)
-                ? CGSize(width: 1200, height: 800)
-                : UAHelpers.layoutSize(for: rawGraph.nodes.count)
-            let initial = CodeGraphLayout.compute(rawGraph, canvasSize: canvas)
-            fullData = initial
-            cacheGraph(mode, initial, chunks: entry.chunks, docCount: entry.docCount)
-            status = .loaded(nodeCount: initial.nodes.count, edgeCount: initial.edges.count)
-            recomputeDisplayData()
-            settlePhysics(from: initial, expectedMode: mode)
+            // There is no longer a per-mode canvas size to match. Layout is
+            // canvas-independent: the engine places clusters in its own
+            // coordinate space and the canvas fits the result. Previously the
+            // code path sized its canvas by node count (up to 8000×5600) while
+            // the simulation pulled everything to a hardcoded (600, 400) — so
+            // the settled code graph landed far off-screen, and the doc graph
+            // only looked right because its fixed 1200×800 canvas happened to
+            // centre near that point.
+            status = .running
+            // Cleared by `applyLayout`'s completion, whichever way it exits.
+            hydrating = true
+            applyLayout(entry.graph, for: mode,
+                        chunks: entry.chunks, docCount: entry.docCount)
         }
     }
 
@@ -271,35 +295,77 @@ struct UAGraphView: View {
         .noteEvent, .noteSource,
     ]
 
-    /// Max edges kept per node in the doc / All graph before layout. The doc
-    /// graph's title-match + tag rules over-generate links (measured ~700k
-    /// edges on a real repo); capping to each node's strongest few keeps the
-    /// layout legible. 6 was chosen by rendering the settled result headlessly.
-    private static let docGraphMaxDegree = 6
-
-    /// Max edges kept per node in the CODE graph before layout. Once Python
-    /// imports resolve properly a real repo produces tens of thousands of edges
-    /// (e.g. 25k across 15k nodes, with import hubs in the hundreds), which traps
-    /// the force layout in its initial type-clustered rings instead of settling
-    /// into a legible cluster. Capping each node to its strongest few links lets
-    /// it settle into the same organic spread the InfiniteBrain (doc) graph
-    /// shows. Kept equal to the doc cap so both graphs read the same.
-    private static let codeGraphMaxDegree = 6
-
     /// Recompute `displayData` from `fullData` based on `showSymbols`
     /// and `mode`. Cheap when fullData is small; cached so the view
     /// body doesn't re-run it on every redraw.
     private func recomputeDisplayData() {
-        // The files-only filter applies to modes that HAVE code symbols
-        // (.code and .all); .data has no symbols so it's always full.
-        if showSymbols || mode == .data {
-            displayData = fullData
-            return
+        // Draw exactly the edges the LAYOUT used.
+        //
+        // Two reasons, both real. Correctness: a sub-threshold edge drawn over
+        // positions computed without it connects two nodes placed with no
+        // regard for each other, so the hairball comes back as pure noise.
+        // Cost: removing `GraphPrune.capDegree(6)` left the canvas walking the
+        // full edge set every frame, and the doc graph reaches ~700k edges at
+        // average degree 124 — the cap was the only thing bounding that, so
+        // dropping it without a draw-side filter traded a bad picture for a
+        // frozen one.
+        //
+        // `layout.edgeWeight` holds the links that survived weight filtering,
+        // in both orientations, so this tracks the layout rather than
+        // re-deriving a threshold. With no layout yet — the hydrate path —
+        // fall back to the same threshold the engine applies.
+        //
+        // Two known divergences, both deliberate: the key is per COLLAPSED
+        // PAIR, so once any strong edge exists between A and B every parallel
+        // edge of that pair is drawn (the dozens of per-call-site `calls`
+        // segments included); and a self-edge is never in the map at all
+        // (`GraphTopology` skips `source == target`), so it is drawn during the
+        // hydrate window and then disappears. Neither draws an edge between
+        // nodes the layout ignored, which is the property that matters.
+        // The map must actually belong to THIS graph. `layout` is written only
+        // when a layout or a signal recovery lands, so between assigning
+        // `fullData` for a new mode and those signals arriving it still holds
+        // the previous mode's map — and code and doc node ids are disjoint by
+        // construction, so filtering doc edges through the code map dropped
+        // every single one. The canvas drew the graph as a field of
+        // unconnected dots for a second or more.
+        //
+        // Sampling a few ids is enough to tell a foreign map from a current
+        // one, and is O(1) where comparing key sets would not be.
+        let survives: (CGEdge) -> Bool
+        // ALL, not ANY. `merge` emits code nodes before doc nodes, so the
+        // first 8 ids of the merged graph are all code ids — and a stale Code
+        // layout does contain those, so an any-match claimed coverage of the
+        // All graph and filtered it through the code map, dropping every
+        // doc–doc edge. `layout.positions` is built from `topology.idByIndex`,
+        // which covers every unique id of the graph it was computed for, so a
+        // genuinely matching layout always satisfies all 8.
+        let sample = fullData.nodes.prefix(8)
+        let layoutCoversGraph = !layout.positions.isEmpty
+            && sample.allSatisfy { layout.positions[$0.id] != nil }
+        if layout.edgeWeight.isEmpty || !layoutCoversGraph {
+            // Same rule the engine applies, so the interim frame is right
+            // rather than merely non-empty.
+            survives = { EdgeWeight.weight(of: $0) >= EdgeWeight.defaultMinWeight }
+        } else {
+            let weights = layout.edgeWeight
+            survives = { weights[GraphLayout.edgeKey($0.fromId, $0.toId)] != nil }
         }
-        let kept = fullData.nodes.filter { Self.filesOnlyKinds.contains($0.kind) }
-        let keptIds = Set(kept.map(\.id))
-        let edges = fullData.edges.filter { keptIds.contains($0.fromId) && keptIds.contains($0.toId) }
-        displayData = CGData(nodes: kept, edges: edges)
+
+        // The files-only filter applies to modes that HAVE code symbols
+        // (.code and .all); .data has no symbols so every node is kept.
+        let keptNodes = (showSymbols || mode == .data)
+            ? fullData.nodes
+            : fullData.nodes.filter { Self.filesOnlyKinds.contains($0.kind) }
+        let keptIds = Set(keptNodes.map(\.id))
+        let edges = fullData.edges.filter {
+            keptIds.contains($0.fromId) && keptIds.contains($0.toId) && survives($0)
+        }
+        // Carry layers/tour through. Every transform in this pipeline used to
+        // drop them by constructing `CGData(nodes:edges:)`, so a producer that
+        // populated either found them erased before anything could render them.
+        displayData = CGData(nodes: keptNodes, edges: edges,
+                             layers: fullData.layers, tour: fullData.tour)
     }
 
     /// Rebuild memory-chunk index after a generate run.
@@ -437,7 +503,7 @@ struct UAGraphView: View {
             // page and never clobbers a graph the user is already viewing.
             DispatchQueue.main.async { hydrateFromStore() }
         }
-        .onDisappear { runTask?.cancel() }
+        .onDisappear { runTask?.cancel(); layoutTask?.cancel() }
         .onChange(of: library.items) { _, _ in rebuildLibraryIndex() }
         .onChange(of: fullData)      { _, _ in
             recomputeDisplayData()
@@ -456,27 +522,16 @@ struct UAGraphView: View {
             let newGraph = FileClassifier.strippingDocNodes(from: rawGraph)
             guard !newGraph.nodes.isEmpty else { return }
             self.selectedNode = self.selectedNode  // keep selection
-            // Cap per-node edges before layout (same as the doc graph) so the
-            // now-dense resolved-import graph settles into a legible organic
-            // cluster instead of staying trapped in the type-clustered rings.
-            let capped = GraphPrune.capDegree(newGraph, maxDegree: Self.codeGraphMaxDegree)
-            // Phase 1: type-clustered circular layout — publish immediately so
-            // the canvas isn't blank while physics runs.
-            let initial = CodeGraphLayout.compute(
-                capped, canvasSize: UAHelpers.layoutSize(for: capped.nodes.count))
-            self.fullData = initial
-            self.cacheGraph(.code, initial)
             self.codeArtifacts = UAHelpers.collectCodeArtifacts(newGraph)
-            // Flip to .loaded straight from the published graph — don't gate
-            // on `progress == .complete`. `@Published` emits `graph` (in
-            // CodeNoteService) before `progress` is set, so reading progress
-            // here races and leaves the spinner stuck. The graph carries the
-            // counts we need.
-            self.status = .loaded(nodeCount: capped.nodes.count,
-                                  edgeCount: capped.edges.count)
-            // Phase 2: force-directed settle in the background, then republish
-            // the organic layout — matches InfiniteBrain's Code Graph look.
-            self.settlePhysics(from: initial, expectedMode: .code)
+            // No edge pruning. `GraphPrune.capDegree(6)` used to run here, and
+            // because `StructureGraphBuilder` emits every `contains` edge before
+            // the first `imports` edge, any file with more than six symbols
+            // spent its whole budget on containment — measured against a real
+            // repo it kept 0 of 684 import edges and shattered the graph into
+            // 867 components. The layout engine filters by edge *weight*
+            // instead, which removes title-match noise without touching a
+            // single extracted dependency, and nothing is deleted.
+            self.applyLayout(newGraph, for: .code)
         }
         .onChange(of: memoryChunks)  { _, _ in rebuildMemoryIndex() }
         .onChange(of: selectedURL) { _, _ in
@@ -503,18 +558,17 @@ struct UAGraphView: View {
         // wipe it (the cache holds the latest result).
         //
         // Only reuse a LAID-OUT entry directly. A raw entry (the auto-updater
-        // stores doc/All graphs unpositioned AND unpruned) must go through
-        // hydrateFromStore so it gets the same capDegree + force layout a
-        // manual generate applies — otherwise it renders as a collapsed,
-        // overly dense blob (1k nodes at the origin, every edge) instead of the
-        // clean spread the generate path produces. This is what made "saved"
-        // data look different from a fresh generate.
+        // stores doc/All graphs unpositioned) must go through
+        // hydrateFromStore so it gets the same layout a manual generate
+        // applies — otherwise it renders as a collapsed pile of nodes at the
+        // origin instead of the clean spread the generate path produces. This
+        // is what made "saved" data look different from a fresh generate.
         let entry = graphSessionStore.entry(repo: graphRepoRoot, mode: mode.rawValue)
         if let entry, entry.laidOut, !entry.graph.nodes.isEmpty {
             fullData = entry.graph
             memoryChunks = entry.chunks
             status = .loaded(nodeCount: entry.graph.nodes.count, edgeCount: entry.graph.edges.count)
-            recomputeDisplayData()
+            adoptLayout(for: entry.graph, mode: mode)
         } else {
             fullData = .empty
             codeArtifacts = []
@@ -835,7 +889,8 @@ struct UAGraphView: View {
                                 positions: positions3DByMode[mode] ?? [:],
                                 selected: $selectedNode)
                 } else {
-                    CodeGraphCanvas(data: displayData, selected: $selectedNode,
+                    CodeGraphCanvas(data: displayData, layout: layout,
+                                    selected: $selectedNode,
                                     focusedNode: $focusedNode,
                                     showLabels: showLabels,
                                     highlightKind: filterKind,
@@ -1195,7 +1250,8 @@ struct UAGraphView: View {
                             positions: positions3DByMode[mode] ?? [:],
                             selected: $selectedNode)
             } else {
-                CodeGraphCanvas(data: displayData, selected: $selectedNode,
+                CodeGraphCanvas(data: displayData, layout: layout,
+                                selected: $selectedNode,
                                 focusedNode: $focusedNode,
                                 showLabels: showLabels,
                                 highlightKind: filterKind,
@@ -1270,13 +1326,16 @@ struct UAGraphView: View {
            let entry = graphSessionStore.entry(repo: activeRepoRoot, mode: Mode.data.rawValue),
            entry.laidOut, !entry.graph.nodes.isEmpty,
            let cachedFp = entry.docFingerprint,
-           cachedFp == KnowledgeGraphService.docSetFingerprint(roots: [repo]) {
+           cachedFp == (engine?.docSetFingerprint(roots: [repo]) ?? cachedFp) {
             selectedNode = nil
             memoryChunks = entry.chunks
             memoryDocCount = entry.docCount
             fullData = entry.graph
             status = .loaded(nodeCount: entry.graph.nodes.count, edgeCount: entry.graph.edges.count)
-            recomputeDisplayData()
+            // The third `fullData =` site. Without this, `layout` could stay
+            // empty permanently on this path, so nothing was ever labelled at
+            // fit zoom — the defect the importance gating exists to fix.
+            adoptLayout(for: entry.graph, mode: .data)
             return
         }
 
@@ -1284,58 +1343,89 @@ struct UAGraphView: View {
         // Fingerprint only the repo-walk case so an unchanged re-generate can be
         // skipped next time; nil for file-scoped generates.
         let fingerprintRepo = selectedFiles == nil ? repo : nil
-        // Capture main actor value before entering Task.detached to avoid Swift 6 warning
-        let maxDegree = Self.docGraphMaxDegree
         runTask = Task.detached(priority: .userInitiated) {
-            let mem: GeneratedMemory
-            if let files = selectedFiles {
-                mem = MemoryGenerator.generate(files: files)
-            } else if let repo {
-                mem = MemoryGenerator.generate(from: repo)
-            } else {
+            guard let engine else {
+                await MainActor.run { self.status = .error(Self.noEngineMessage) }
                 return
             }
-            if Task.isCancelled { return }
-            let fp = fingerprintRepo.map { KnowledgeGraphService.docSetFingerprint(roots: [$0]) }
-            // Cap per-node edges before layout: the doc graph over-generates
-            // links (a real repo hit ~700k edges / avg degree 124), which no
-            // force layout can untangle — it collapses into a hairball line.
-            let docGraph = GraphPrune.capDegree(mem.graph, maxDegree: maxDegree)
-            let initial = CodeGraphLayout.compute(docGraph,
-                                                  canvasSize: CGSize(width: 1200, height: 800))
-            if Task.isCancelled { return }
+            let mem: GeneratedMemory
+            do {
+                if let files = selectedFiles {
+                    mem = try await engine.generateDocMemory(files: files)
+                } else if let repo {
+                    mem = try await engine.generateDocMemory(roots: [repo])
+                } else {
+                    await MainActor.run { self.status = .idle }
+                    return
+                }
+            } catch {
+                // Never swallow this. `status` is already `.running`, so an
+                // ignored failure left the spinner turning forever — and
+                // `applyLayout`'s empty-graph guard meant even an empty success
+                // did the same.
+                await MainActor.run { self.status = .error(error.localizedDescription) }
+                return
+            }
+            guard !mem.graph.nodes.isEmpty else {
+                await MainActor.run {
+                    self.status = .error("the graph engine produced no nodes")
+                }
+                return
+            }
+            if Task.isCancelled { await MainActor.run { self.status = .idle }; return }
+            let fp = fingerprintRepo.map { engine.docSetFingerprint(roots: [$0]) }
+            if Task.isCancelled { await MainActor.run { self.status = .idle }; return }
             await MainActor.run {
                 self.selectedNode = nil
                 self.memoryChunks = mem.chunks
                 self.memoryDocCount = mem.docCount
-                self.fullData = initial
-                self.cacheGraph(.data, initial, chunks: mem.chunks, docCount: mem.docCount, fingerprint: fp)
-                self.status = .loaded(nodeCount: docGraph.nodes.count,
-                                      edgeCount: docGraph.edges.count)
-                // Settle into the same organic layout as the code graph.
-                self.settlePhysics(from: initial, expectedMode: .data)
+                // The doc graph's edge volume (a real repo produced ~700k edges
+                // at average degree 124) is handled by weight filtering, not by
+                // pruning: `MemoryGenerator`'s title-match fallback emits
+                // `relatedTo`/`AMBIGUOUS` edges that weigh 0.11 against a
+                // structural edge's 1.0, so they fall below the layout
+                // threshold while every authored reference survives.
+                self.applyLayout(mem.graph, for: .data,
+                                 chunks: mem.chunks, docCount: mem.docCount,
+                                 fingerprint: fp)
             }
         }
     }
 
     /// "All" mode — generate the code graph + the InfiniteBrain doc graph for
-    /// the active repo and merge them into one (via KnowledgeGraphService.merge,
-    /// adding doc→code cross-links), then render the unified graph.
+    /// the active repo and merge them into one (via the engine's `merge`,
+    /// which adds doc→code cross-links), then render the unified graph.
     private func generateAll() {
         guard let repo = activeRepoRoot else { return }
         status = .running
         // Reuse the cached doc index when its fingerprint is unchanged, so "All"
         // combines the already-built code + doc indexes instead of re-scanning
         // the docs. (Code reuse is handled below via the cache fallback.)
-        let docFp = KnowledgeGraphService.docSetFingerprint(roots: [repo])
+        guard let engine else {
+            status = .error(Self.noEngineMessage)
+            return
+        }
+        let docFp = engine.docSetFingerprint(roots: [repo])
         let cachedDoc = graphSessionStore.entry(repo: activeRepoRoot, mode: Mode.data.rawValue)
         let reusedDoc: (graph: CGData, chunks: [MemoryChunk], docs: Int)? =
             (cachedDoc?.docFingerprint == docFp && !(cachedDoc?.graph.nodes.isEmpty ?? true))
             ? (cachedDoc!.graph, cachedDoc!.chunks, cachedDoc!.docCount)
             : nil
         runTask = Task {
-            _ = await codeNoteService.generate(repoRoot: repo)
-            if Task.isCancelled { return }
+            // Inspect the result. Discarding it meant a contended or failed
+            // scan silently produced a doc-only "All" graph that looked like a
+            // legitimate result, then got cached as such for the session.
+            switch await codeNoteService.generate(repoRoot: repo) {
+            case .success, .failure(.busy):
+                break   // `.busy` falls back to the cached code graph below
+            case .failure(.cancelled):
+                self.status = .idle
+                return
+            case .failure(let error):
+                self.status = .error(error.localizedDescription)
+                return
+            }
+            if Task.isCancelled { await MainActor.run { self.status = .idle }; return }
             // "md is doc": strip code-track markdown so it isn't merged twice.
             var code = FileClassifier.strippingDocNodes(from: codeNoteService.graph)
             var codeFromCache = false
@@ -1347,25 +1437,32 @@ struct UAGraphView: View {
                 code = cachedCode   // already markdown-free (stripped when cached)
                 codeFromCache = true
             }
-            // Capture main actor value before entering Task.detached to avoid Swift 6 warning
-            let maxDegree = Self.docGraphMaxDegree
-            let result = await Task.detached(priority: .userInitiated) { () -> (data: CGData, chunks: [MemoryChunk], docs: Int) in
+            let result: (data: CGData, chunks: [MemoryChunk], docs: Int)
+            do {
+                result = try await Task.detached(priority: .userInitiated) { () -> (data: CGData, chunks: [MemoryChunk], docs: Int) in
                 let doc: (graph: CGData, chunks: [MemoryChunk], docs: Int)
                 if let reusedDoc {
                     doc = reusedDoc                                   // combine the cached doc index
                 } else {
-                    let docMem = MemoryGenerator.generate(from: repo) // build it if not fresh
+                    // Build it if the cached index is not fresh. A failure is
+                    // rethrown rather than turned into an empty graph, so the
+                    // caller can report it instead of hanging.
+                    let docMem = try await engine.generateDocMemory(roots: [repo])
                     doc = (docMem.graph, docMem.chunks, docMem.docCount)
                 }
-                // Cap the doc side's per-node edges (the code side is already
-                // sparse and meaningful) before merging — otherwise the doc
-                // graph's edge explosion collapses the combined layout too.
-                let prunedDoc = GraphPrune.capDegree(doc.graph, maxDegree: maxDegree)
-                let merged = KnowledgeGraphService.merge(code: code, doc: prunedDoc, chunks: doc.chunks)
-                let laid = CodeGraphLayout.compute(merged, canvasSize: CGSize(width: 1200, height: 800))
-                return (laid, doc.chunks, doc.docs)
-            }.value
-            if Task.isCancelled { return }
+                // Merge only — no pruning, and no layout here. Layout is a
+                // single step applied to the merged graph below, so the code and
+                // doc sides are positioned relative to each other by the same
+                // clustering rather than being laid out under different rules.
+                let merged = try await engine.merge(code: code, doc: doc.graph,
+                                                    chunks: doc.chunks)
+                return (merged, doc.chunks, doc.docs)
+                }.value
+            } catch {
+                self.status = .error(error.localizedDescription)
+                return
+            }
+            if Task.isCancelled { await MainActor.run { self.status = .idle }; return }
             // Generation telemetry (mirrors KnowledgeGraphService's count log):
             // records the code/doc contributions to the merged "All" graph, which
             // also pinpoints a code-vs-doc shortfall if the graph ever looks short.
@@ -1373,43 +1470,139 @@ struct UAGraphView: View {
             self.selectedNode = nil
             self.memoryChunks = result.chunks
             self.memoryDocCount = result.docs
-            self.fullData = result.data
-            self.cacheGraph(.all, result.data, chunks: result.chunks, docCount: result.docs)
-            self.status = .loaded(nodeCount: result.data.nodes.count, edgeCount: result.data.edges.count)
-            self.settlePhysics(from: result.data, expectedMode: .all)
+            self.applyLayout(result.data, for: .all,
+                             chunks: result.chunks, docCount: result.docs)
         }
     }
 
-    /// Phase 2 of layout: run the force-directed `CGSimulation` off the main
-    /// actor, then republish the settled positions so both graphs show an
-    /// organic cluster instead of the raw circular rings. No-op for trivially
-    /// small graphs. The `expectedMode` guard drops the result if the user
-    /// switched tabs mid-settle.
-    private func settlePhysics(from initial: CGData, expectedMode: Mode) {
-        let count = initial.nodes.count
-        guard count > 2 else { return }
-        // Each tick is O(n log n) (Barnes-Hut). Scale iterations down for large
-        // graphs so a 1k-node settle doesn't run hundreds of heavy ticks — the
-        // early-exit on low velocity usually stops sooner anyway.
-        let maxIterations: Int
-        switch count {
-        case ..<300:   maxIterations = 220
-        case ..<700:   maxIterations = 180
-        case ..<1200:  maxIterations = 150
-        default:       maxIterations = 120
-        }
+    /// Lay out `graph` and publish the finished result — the single layout
+    /// entry point for every mode.
+    ///
+    /// This replaces a two-phase pipeline that was the direct cause of the
+    /// reported "sometimes a circle, sometimes a round blob". Phase 1 published
+    /// a pie-slice **circle** to the screen immediately and cached it via
+    /// `cacheGraph`, whose `laidOut` flag defaults to `true` — so the circle was
+    /// recorded as a finished layout. Phase 2's force-directed result was then
+    /// dropped whenever the user switched tabs, whenever a concurrent publish
+    /// changed the node count, or whenever the background auto-updater
+    /// re-stored a raw graph mid-settle. Which of the two the user ended up
+    /// looking at came down to timing.
+    ///
+    /// Now nothing partial is ever published or cached: the canvas shows the
+    /// running state until one finished, deterministic layout arrives. The same
+    /// graph therefore always produces the same picture, so the user's mental
+    /// map survives a reload.
+    ///
+    /// Runs off the main actor — a 4k-node graph takes ~1.8s and an 8k-node
+    /// graph ~2.9s in the release build the app ships (`Scripts/build.sh` uses
+    /// `-c release`).
+    /// Recover the derived layout signals for an already-positioned graph.
+    ///
+    /// `layout` is only written by `applyLayout`, so every path that assigned
+    /// `fullData` from the cache left the PREVIOUS mode's clusters, radii and
+    /// importance in place. Switching Code → Data then coloured any id present
+    /// in both graphs (guaranteed in All mode, which merges them) by the wrong
+    /// cluster and sized it by the wrong importance. Worse, on a hydrate the
+    /// map was empty, so `alwaysLabel` was never true and a fitted graph came
+    /// up completely unlabelled — exactly the defect the importance-gated
+    /// labelling was added to fix, on the commonest path there is: navigate
+    /// away and back.
+    ///
+    /// The positions are kept as cached; only the signals are recomputed, so
+    /// the picture does not move.
+    private func adoptLayout(for graph: CGData, mode expectedMode: Mode) {
+        // Same monotonic token `applyLayout` uses. Without it a stale recovery
+        // could land after a fresh layout and overwrite it whenever the node
+        // counts happened to match — a rescan that only added an `import`, or
+        // two modes whose cached graphs are the same size. Because
+        // `recomputeDisplayData` filters edges by `layout.edgeWeight`, that did
+        // not merely mis-colour: the newly added edge stopped being drawn.
+        layoutGeneration += 1
+        let generation = layoutGeneration
+        // Deliberately does NOT clear `layout` first: blanking it triggered a
+        // second `recomputeDisplayData` with a different edge count, which
+        // changed the canvas fingerprint and re-fitted the viewport, throwing
+        // away the user's zoom and popping the labels in a beat later.
         Task.detached(priority: .userInitiated) {
-            let sim = CGSimulation(data: initial)
-            sim.settle(maxIterations: maxIterations)
-            if Task.isCancelled { return }
-            let settled = sim.appliedData(to: initial)
+            let recovered = GraphLayoutEngine.signals(of: graph)
             await MainActor.run {
-                // Only cache what we'd also display — guard first so a late
-                // settle from a superseded run can't overwrite a newer cache.
                 guard self.mode == expectedMode,
-                      self.fullData.nodes.count == settled.nodes.count else { return }
-                self.fullData = settled
-                self.cacheGraph(expectedMode, settled)
+                      self.layoutGeneration == generation else { return }
+                self.layout = recovered
+                self.recomputeDisplayData()
+            }
+        }
+    }
+
+    /// Shown when no engine is installed. Existing graphs still render — only
+    /// generation is unavailable — which is what the split exists to guarantee.
+    private static let noEngineMessage =
+        "No graph engine installed. Add one from Library → Plugins. "
+        + "Graphs already generated still open."
+
+    private func applyLayout(_ graph: CGData, for expectedMode: Mode,
+                             chunks: [MemoryChunk]? = nil,
+                             docCount: Int? = nil,
+                             fingerprint: String? = nil) {
+        guard !graph.nodes.isEmpty else {
+            // Reaching here with `status == .running` used to leave the spinner
+            // turning with no explanation.
+            hydrating = false
+            status = .error("nothing to lay out — the graph has no nodes")
+            return
+        }
+        layoutGeneration += 1
+        let generation = layoutGeneration
+        // Held SEPARATELY from `runTask`. Sharing one handle meant whichever
+        // ran last won it: a doc scan started by Generate was orphaned the
+        // moment a layout replaced the handle, so Cancel stopped the layout
+        // while the scan carried on and published its result anyway.
+        layoutTask?.cancel()
+        layoutTask = Task.detached(priority: .userInitiated) {
+            let computed = GraphLayoutEngine.layout(graph)
+            if Task.isCancelled {
+                await MainActor.run {
+                    self.hydrating = false
+                    // Only if nothing newer has already finished. A cancelled
+                    // 8k-node layout landing 1.5s late used to overwrite the
+                    // `.loaded` status of the small graph that replaced it.
+                    if case .running = self.status { self.status = .idle }
+                }
+                return
+            }
+            let positioned = GraphLayoutEngine.applying(computed, to: graph)
+            await MainActor.run {
+                self.hydrating = false
+                // Drop the result if the user moved to another mode, or if a
+                // newer request has since been made. The old code instead
+                // required the node count to match what was already on screen,
+                // which silently discarded a correct layout whenever anything
+                // else had published in the meantime — and left the circle
+                // standing.
+                guard self.mode == expectedMode,
+                      self.layoutGeneration == generation else {
+                    // Never return with `status` still `.running`. This exit
+                    // was only rescued by the undocumented invariant that
+                    // every mode change also runs `resetDerivedState`, which
+                    // writes a terminal status; any future early return there
+                    // would have reopened the hang.
+                    if case .running = self.status { self.status = .idle }
+                    return
+                }
+                self.layout = computed
+                self.fullData = positioned
+                self.cacheGraph(expectedMode, positioned, chunks: chunks,
+                                docCount: docCount, fingerprint: fingerprint)
+                self.status = .loaded(nodeCount: positioned.nodes.count,
+                                      edgeCount: positioned.edges.count)
+                if let quality = computed.quality {
+                    Self.log.info("""
+                        layout[\(expectedMode.rawValue, privacy: .public)]: \
+                        \(positioned.nodes.count, privacy: .public) nodes, \
+                        \(computed.communityCount, privacy: .public) clusters — \
+                        \(quality.summary, privacy: .public)
+                        """)
+                }
             }
         }
     }
@@ -1435,7 +1628,7 @@ struct UAGraphView: View {
         Task.detached(priority: .userInitiated) {
             let sim = CGSimulation3D(data: data)
             sim.settle(maxIterations: iterations)
-            if Task.isCancelled { return }
+            if Task.isCancelled { await MainActor.run { self.status = .idle }; return }
             let pos = sim.positions()
             await MainActor.run {
                 guard self.mode == expectedMode,
@@ -1452,11 +1645,42 @@ struct UAGraphView: View {
         // Task that leaked past view dismissal and ignored Cancel.
         runTask = Task {
             let result = await codeNoteService.generate(repoRoot: target)
-            if case .failure(let err) = result {
-                await MainActor.run { self.status = .error("\(err)") }
+            await MainActor.run {
+                switch result {
+                case .success(let graph) where graph.nodes.isEmpty:
+                    // MUST be handled here. Success rendering is driven by the
+                    // `codeNoteService.$graph` observer, which returns silently
+                    // on an empty graph — so this path span forever. It is not
+                    // an edge case: the scanner only handles
+                    // ts/tsx/js/jsx/mjs/cjs/swift/kt/py/md, and markdown is
+                    // stripped from the code graph, so a docs-only repository
+                    // or any Go, Rust, Java, C++ or Ruby repository lands here.
+                    self.status = .error(
+                        "No code found. The scanner handles TypeScript, JavaScript, "
+                        + "Swift, Kotlin and Python; other languages need a graph "
+                        + "engine plugin that supports them.")
+                case .success:
+                    // The observer publishes and lays out; it also carries the
+                    // later background-enrichment updates.
+                    break
+                case .failure(.cancelled):
+                    // User-initiated. Every other path lands on `.idle`; this
+                    // one used to render a red error for a deliberate action.
+                    self.status = .idle
+                case .failure(.busy):
+                    // Routine contention with the background updater, not a
+                    // fault. Keep whatever is on screen rather than shouting.
+                    self.status = self.fullData.nodes.isEmpty
+                        ? .idle
+                        : .loaded(nodeCount: self.fullData.nodes.count,
+                                  edgeCount: self.fullData.edges.count)
+                case .failure(let error):
+                    // `localizedDescription`, not `"\(error)"` — raw enum
+                    // interpolation surfaced `busy` and
+                    // `engineFailed("exit 1")` to the user.
+                    self.status = .error(error.localizedDescription)
+                }
             }
-            // Success rendering is driven by the codeNoteService.$graph observer
-            // (set up in Step 2), so the background enrichment updates also flow in.
         }
     }
 

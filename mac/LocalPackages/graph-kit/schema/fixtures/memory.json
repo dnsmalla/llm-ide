@@ -1,14 +1,54 @@
 {
   "schemaVersion": 1,
   "nodes": [
-    { "id": "doc:0a1b2c3d4e5f6071", "title": "architecture", "kind": "memoryDoc", "metadata": { "fileURL": "file:///vault/architecture.md" } },
-    { "id": "doc:0a1b2c3d4e5f6071::aabbccddeeff0011:0", "title": "Use Postgres", "kind": "noteDecision", "metadata": { "doc": "architecture", "heading": "Use Postgres", "type": "Decision" } },
-    { "id": "doc:0a1b2c3d4e5f6071::aabbccddeeff0011:1", "title": "Drizzle ORM", "kind": "noteConcept", "metadata": { "doc": "architecture", "heading": "Drizzle ORM", "type": "Concept" } }
+    {
+      "id": "doc:0a1b2c3d4e5f6071",
+      "title": "architecture",
+      "kind": "memoryDoc",
+      "metadata": {
+        "fileURL": "file:///vault/architecture.md"
+      }
+    },
+    {
+      "id": "doc:0a1b2c3d4e5f6071::aabbccddeeff0011:0",
+      "title": "Use Postgres",
+      "kind": "noteDecision",
+      "metadata": {
+        "doc": "architecture",
+        "heading": "Use Postgres",
+        "type": "Decision"
+      }
+    },
+    {
+      "id": "doc:0a1b2c3d4e5f6071::aabbccddeeff0011:1",
+      "title": "Drizzle ORM",
+      "kind": "noteConcept",
+      "metadata": {
+        "doc": "architecture",
+        "heading": "Drizzle ORM",
+        "type": "Concept"
+      }
+    }
   ],
   "edges": [
-    { "fromId": "doc:0a1b2c3d4e5f6071::aabbccddeeff0011:0", "toId": "doc:0a1b2c3d4e5f6071", "kind": "relatedTo", "confidence": "EXTRACTED" },
-    { "fromId": "doc:0a1b2c3d4e5f6071::aabbccddeeff0011:1", "toId": "doc:0a1b2c3d4e5f6071", "kind": "relatedTo", "confidence": "EXTRACTED" },
-    { "fromId": "doc:0a1b2c3d4e5f6071::aabbccddeeff0011:0", "toId": "doc:0a1b2c3d4e5f6071::aabbccddeeff0011:1", "kind": "references", "confidence": "EXTRACTED" }
+    {
+      "fromId": "doc:0a1b2c3d4e5f6071",
+      "toId": "doc:0a1b2c3d4e5f6071::aabbccddeeff0011:0",
+      "kind": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "fromId": "doc:0a1b2c3d4e5f6071",
+      "toId": "doc:0a1b2c3d4e5f6071::aabbccddeeff0011:1",
+      "kind": "contains",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "fromId": "doc:0a1b2c3d4e5f6071::aabbccddeeff0011:0",
+      "toId": "doc:0a1b2c3d4e5f6071::aabbccddeeff0011:1",
+      "kind": "references",
+      "confidence": "EXTRACTED"
+    }
   ],
   "layers": [],
   "tour": []

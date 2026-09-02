@@ -1,4 +1,5 @@
 import Foundation
+import GraphCore
 
 /// Resolves shape-qualified code mentions in doc chunks against a code
 /// symbol inventory, producing doc→code link candidates. This is the

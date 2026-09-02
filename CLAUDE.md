@@ -106,14 +106,21 @@ llm-ide/
 │   ├── connectors/      # Inbound source adapters (box, git, issues, qa, scip, email, slack + OAuth)
 │   ├── llm-sources/     # LLM source registry + state (feeds kb/sources.mjs hub)
 │   ├── mcp/             # MCP server config + Claude MCP source adapter
-│   ├── graphkit/        # Code-graph engine (graph.mjs, layouts, 2D/3D renderers, memory-writer)
+│   ├── graphkit/        # Server-side graph access (graph.mjs seeds/neighbors, memory reader/writer)
+│   ├── graph_generation/ # Graph-engine contract: how an engine is supplied + swapped (README)
 │   ├── guardrails/      # Secret/PII/destructive-op pattern scanners
 │   ├── plugins/         # Extension plugin loader/installer (claude-adapter, loader, installer, state)
 │   ├── src/             # React UI (side panel, popup, content scripts)
 │   ├── tests/           # Node test runner (tests/**/*.test.{ts,mjs})
 │   └── server.mjs       # Server entry point
 ├── mac/                 # Native macOS app
+│   ├── LocalPackages/
+│   │   ├── graph-core/  # ALWAYS PRESENT: canonical graph model + JSON contract +
+│   │   │                #   layout engine (Layout/) + graph-layout-lab verification gate
+│   │   └── graph-kit/   # PLUGGABLE: the graph producers (scanners, extractors,
+│   │                    #   MemoryGenerator) + the TypeScript CLI
 │   ├── Sources/LlmIdeMac/
+│   │   ├── GraphGeneration/ # Engine boundary (GraphEngine protocol, builtin + plugin impls)
 │   │   ├── Models/      # Data models
 │   │   ├── Services/    # Long-lived work (*Service, *Store, *Client, *Manager, *Router)
 │   │   ├── Views/       # SwiftUI views
@@ -300,6 +307,8 @@ ios_app/MyApp/Services/
 - **Server internals** — `extension/server.mjs` → follow router into `extension/routes/router.mjs`
 - **Claude linker** — [`docs/explanation/claude-linker.md`](docs/explanation/claude-linker.md): the two layers (`extension/llm_agent/sdk/` + `extension/providers/`, `mac/…/ClaudeLink/`) that own ALL Claude SDK/CLI knowledge; SDK updates edit only these
 - **KB operations** — `extension/kb/db.mjs` (every state-mutating helper takes `userId` first)
+- **Graph generation** — [`extension/graph_generation/README.md`](extension/graph_generation/README.md): the engine contract, how a plugin supplies one, and how to unplug the compiled-in engine. Producers live in `mac/LocalPackages/graph-kit/`; the model + layout that must never be unplugged live in `mac/LocalPackages/graph-core/`
+- **Graph layout** — `mac/LocalPackages/graph-core/Sources/GraphCore/Layout/GraphLayoutEngine.swift` is the single entry point. Verify any change with `cd mac/LocalPackages/graph-core && swift run -c release graph-layout-lab --compare` (this toolchain has no XCTest, so the gate is an executable). **Never prune edges to make a dense graph legible** — weight them (`EdgeWeight`) and filter at render; the previous `capDegree(6)` deleted 82–100% of dependency edges
 - **Caption capture** — `extension/src/content/caption-scraper.ts` → `extension/src/sidepanel/hooks/useTranscript.ts`
 - **Central skills kit** — `.skills/` submodule + `docs/how-to/install-central-skills.md`
 - **Agent-loop tool defs** — `extension/llm_agent/{global,internal/skills}/` (mirrors of central)

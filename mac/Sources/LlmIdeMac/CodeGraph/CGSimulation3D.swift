@@ -1,6 +1,6 @@
 import Foundation
 import simd
-import GraphKit
+import GraphCore
 
 /// 3D force-directed layout — the SIMD3 analogue of `CGSimulation`. Carries
 /// over the exact tuning validated for the 2D sim, including the per-node

@@ -38,9 +38,21 @@ test("chunks by heading and links chunks to their doc", () => {
       assert.equal(graph.nodes.filter((n) => n.kind === "memoryDoc").length, 1);
       assert.equal(chunks.length, 2);
       assert.deepEqual(chunks.map((c) => c.title).sort(), ["Alpha", "Beta"]);
-      // each chunk → doc via relatedTo
+      // The doc `contains` each of its chunks — parent→child, matching the
+      // code track's file→symbol convention and the Swift implementation.
+      // This used to be `chunk → doc` as `relatedTo`, which made a document's
+      // backbone indistinguishable from title-match noise, so any consumer
+      // filtering edges by strength left every chunk isolated.
       const docId = graph.nodes.find((n) => n.kind === "memoryDoc")!.id;
-      assert.equal(graph.edges.filter((e) => e.toId === docId && e.kind === "relatedTo").length, 2);
+      assert.equal(
+        graph.edges.filter((e) => e.fromId === docId && e.kind === "contains").length,
+        2,
+      );
+      assert.equal(
+        graph.edges.filter((e) => e.toId === docId && e.kind === "relatedTo").length,
+        0,
+        "containment must not be emitted as relatedTo",
+      );
     },
   );
 });

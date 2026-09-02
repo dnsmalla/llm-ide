@@ -1,5 +1,5 @@
 import Foundation
-import GraphKit
+import GraphCore
 import CoreGraphics
 
 // Pure helpers for the Code Graph view's "Files & Symbols" panel and
@@ -139,22 +139,6 @@ enum UAHelpers {
         guard node.kind == .docPage || node.kind == .memoryChunk else { return false }
         guard let line = node.metadata["line"] else { return false }
         return line != "L1"
-    }
-
-    /// Layout canvas that scales with node count so 1k+ nodes don't
-    /// end up overlapping into illegible arcs. Each ring of the
-    /// type-clustered circular layout gets ~16pt of breathing room
-    /// per node.
-    static func layoutSize(for nodeCount: Int) -> CGSize {
-        // Base canvas for small graphs; widen as the node count grows
-        // so CodeGraphLayout's concentric rings have room to breathe.
-        // The canvas works for the CodeGraphCanvas auto-fit which
-        // scales the resulting layout into whatever the actual
-        // viewport is.
-        let base: CGFloat = 1200
-        let extra = CGFloat(max(0, nodeCount - 100)) * 4
-        let side = min(base + extra, 8000)
-        return CGSize(width: side, height: side * 0.7)
     }
 
     /// Longest leading path components shared by every input. Used

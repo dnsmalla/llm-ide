@@ -1,5 +1,5 @@
 import Foundation
-import GraphKit
+import GraphCore
 
 /// Process-lifetime cache for the Code Graph view's generated graphs.
 ///
@@ -50,6 +50,19 @@ final class GraphSessionStore: ObservableObject {
                docFingerprint: String? = nil) {
         let k = key(repo: repo, mode: mode)
         if var existing = entries[k] {
+            // Refuse to replace a real graph with an empty one.
+            //
+            // `GraphAutoUpdater.publishToSession` runs after every tick
+            // regardless of outcome, so a run that bailed early — scan-lock
+            // contention with a manual generate is the common case, since both
+            // are on timers — published `.empty` for all three modes and
+            // destroyed the graph the user had just generated. The view's
+            // `!entry.graph.nodes.isEmpty` guards then reported "No code graph
+            // yet" for a graph that existed seconds earlier.
+            //
+            // Guarded here rather than only at the caller because this is the
+            // last point where the good value still exists.
+            guard !graph.nodes.isEmpty || existing.graph.nodes.isEmpty else { return }
             existing.graph = graph
             if let chunks { existing.chunks = chunks }
             if let docCount { existing.docCount = docCount }

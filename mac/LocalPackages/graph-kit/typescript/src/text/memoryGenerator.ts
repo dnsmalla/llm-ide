@@ -1,6 +1,6 @@
 // Walks .md / .mdx / .markdown / .txt files and generates "memory chunks" —
 // heading-bounded sections of text. Each chunk is a graph node; chunks link to
-// their doc via `relatedTo`, and to each other via wiki-links (`references`),
+// their doc via `contains` (doc → chunk), and to each other via wiki-links (`references`),
 // shared tags (`relatedTo`, capped), and whole-word title mentions (`relatedTo`).
 // Faithful port of the Swift `MemoryGenerator`. v1: no LLM, no embeddings.
 
@@ -121,7 +121,16 @@ export function assembleGraph(docs: DocMeta[]): { graph: CGData; chunks: MemoryC
           type: displayName(chunk.kind),
         },
       });
-      edges.push({ fromId: chunk.id, toId: d.docID, kind: "relatedTo", confidence: "EXTRACTED" });
+      // Containment, typed as containment and pointing parent→child — mirroring
+      // the Swift implementation and the code track's file→symbol convention.
+      //
+      // This was `chunk → doc` with kind `relatedTo`, which made a document's
+      // backbone indistinguishable from the noisy title-match guesses that
+      // share that kind. Any consumer that ranks or filters edges by strength
+      // therefore dropped the one edge saying which document a section belongs
+      // to, leaving every chunk isolated: a real 13-doc folder produced 209
+      // nodes in 209 separate components.
+      edges.push({ fromId: d.docID, toId: chunk.id, kind: "contains", confidence: "EXTRACTED" });
     }
   }
 

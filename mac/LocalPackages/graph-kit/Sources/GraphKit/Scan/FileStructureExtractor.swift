@@ -1,4 +1,5 @@
 import Foundation
+import GraphCore
 
 /// Enumerates Swift / TypeScript / JavaScript files via `git ls-files`
 /// and extracts imports + symbols by reading each file line-by-line.

@@ -171,7 +171,15 @@ final class GraphAutoUpdater: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             await self.graph.generate(codeRepoRoot: repoRoot, docRoots: docRoots, memoryRoot: repoRoot)
-            self.publishToSession(repoRoot: repoRoot)
+            // Publish only a run that actually completed. A failed or
+            // contended run leaves the graphs `.empty`, and publishing those
+            // overwrote the view's session cache — see the guard in
+            // `GraphSessionStore.store`, which is the backstop for this.
+            if case .complete = self.graph.phase {
+                self.publishToSession(repoRoot: repoRoot)
+            } else {
+                Self.log.info("skipping session publish — run did not complete")
+            }
             // Ship the symbol graph to the backend. Awaited inside this task
             // (not spawned separately) so two ticks can't upload concurrently;
             // the service no-ops when the graph is unchanged, which is the
