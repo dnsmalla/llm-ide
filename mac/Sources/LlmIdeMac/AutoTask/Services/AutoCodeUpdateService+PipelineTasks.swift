@@ -534,6 +534,7 @@ extension AutoCodeUpdateService {
         // already excludes this task when Graph isn't compiled, but a manual
         // run via `runSingle` bypasses that list, so guard here too.
         guard FeatureCatalog.isGraphCompiled else {
+            taskErrors[key] = "Code Graph is not installed in this build — skipped."
             logStore.append(.generateKnowledge, "Code Graph is not installed in this build — skipping.")
             return
         }
