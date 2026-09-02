@@ -130,7 +130,6 @@ llm-ide/
 │   │   │   ├── Engine/  #   GraphEngine protocol + builtin/plugin impls
 │   │   │   ├── Services/#   KnowledgeGraphService, GraphAutoUpdater, upload, watcher
 │   │   │   ├── Notes/   #   Code-notes writer (CodeNoteService/Generator, Analyze)
-│   │   │   ├── Memory/  #   faults/ + q&a/ store, fault reports
 │   │   │   └── Views/   #   UAGraphView, canvas, 3D view, palette, session store
 │   │   ├── AutoTask/    # ALL Auto Task code, one folder:
 │   │   │   ├── Models/  #   AutoTask, AutoTaskConfig/Settings, templates, run history
@@ -141,7 +140,9 @@ llm-ide/
 │   │   │   ├── Services/#   LoopEngineRunner, journal, repairers, guards, parsers
 │   │   │   └── Views/   #   LoopEngineView(+panes), wizard, budget editors
 │   │   ├── Models/      # Data models
-│   │   ├── Services/    # Long-lived work (*Service, *Store, *Client, *Manager, *Router)
+│   │   ├── Services/    # Long-lived work (*Service, *Store, *Client, *Manager, *Router);
+│   │   │                #   also RepoFileWatcher, RepoGraphLocator, and Memory/ (core-owned
+│   │   │                #   faults/ + q&a/ store, fault reports — works with Graph compiled out)
 │   │   ├── Views/       # SwiftUI views
 │   │   └── ViewModels/  # View models
 │   └── Tests/           # XCTest suite

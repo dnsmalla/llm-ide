@@ -55,7 +55,13 @@ struct FeatureProfileSettingsSection: View {
                     get: { config.homeSection },
                     set: { config.homeSection = $0 }
                 )) {
-                    ForEach(ShellState.Section.allCases.filter { $0 != .settings && $0 != .live }, id: \.self) { section in
+                    // .codeGraph must not be offered when Code Graph isn't
+                    // compiled into this build — it would open onto the
+                    // "not installed" placeholder every launch.
+                    ForEach(ShellState.Section.allCases.filter {
+                        $0 != .settings && $0 != .live
+                            && ($0 != .codeGraph || registry.compiledFeatures.contains(.codeGraph3D))
+                    }, id: \.self) { section in
                         Text(section.label).tag(section.rawValue)
                     }
                 }

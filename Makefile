@@ -41,6 +41,11 @@ export SDKROOT := $(shell DEVELOPER_DIR='$(shell env -u DEVELOPER_DIR xcode-sele
 # Requires full Xcode — Command Line Tools alone lack the XCTest module.
 HAS_XCTEST := $(shell test -d "$(DEVELOPER_DIR)/Platforms/MacOSX.platform/Developer/Library/Frameworks/XCTest.framework" && echo 1)
 
+# Builds the full app only when LLMIDE_FEATURES is unset in the invoking
+# shell (SwiftPM inherits it from the environment). A raw command line that
+# runs a lite selection WITHOUT --manifest-cache none can poison the
+# manifest cache for every build after it, including this target — the
+# provided targets here are safe, but keep the flag on any hand-run command.
 build-mac: ## Build the full mac app
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build
 

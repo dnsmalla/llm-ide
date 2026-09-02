@@ -17,6 +17,13 @@ enum FeatureCatalog {
         return set
     }
 
+    /// True when this build was compiled with the Graph feature — i.e. a
+    /// lite build (`FEATURE_GRAPH` off) reports `false`. Callers outside
+    /// this file use this instead of naming `#if FEATURE_GRAPH` directly, so
+    /// a single seam decides "is Graph in this build" (`compiledFeatures`
+    /// already encodes it — no new `#if` needed here).
+    static var isGraphCompiled: Bool { compiledFeatures.contains(.codeGraph3D) }
+
     // MARK: - Graph
 
     #if FEATURE_GRAPH
@@ -50,7 +57,13 @@ enum FeatureCatalog {
     /// Inject the graph environment objects (identity when compiled out).
     static func installGraphEnvironment(_ view: AnyView) -> AnyView {
         #if FEATURE_GRAPH
-        guard let updater = graphAutoUpdater, let store = graphSessionStore else { return view }
+        guard let updater = graphAutoUpdater, let store = graphSessionStore else {
+            // bootGraph() wires graphAutoUpdater/graphSessionStore before any
+            // view can call this — reaching here means the environment was
+            // installed before boot, not that Graph is absent.
+            assertionFailure("installGraphEnvironment called before bootGraph")
+            return view
+        }
         return AnyView(view.environmentObject(updater).environmentObject(store))
         #else
         return view

@@ -9,10 +9,18 @@ struct HelpGuideView: View {
 
     @State private var selected: HelpTopic = .gettingStarted
 
+    /// Every help topic except Code Graph when it isn't compiled into this
+    /// build — no #if needed, `FeatureRegistry` already knows.
+    private var visibleTopics: [HelpTopic] {
+        HelpTopic.allCases.filter {
+            $0 != .codeGraph || FeatureRegistry.shared.compiledFeatures.contains(.codeGraph3D)
+        }
+    }
+
     var body: some View {
         let t = theme.current
         NavigationSplitView {
-            List(HelpTopic.allCases, id: \.self, selection: $selected) { topic in
+            List(visibleTopics, id: \.self, selection: $selected) { topic in
                 Label {
                     Text(topic.title)
                 } icon: {

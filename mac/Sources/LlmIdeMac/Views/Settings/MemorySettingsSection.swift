@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Project-scoped Settings card surfacing the graph + memory state that the app
-/// generates but never showed anywhere: whether a graph exists, its node counts,
-/// when it was last generated, and which agent-facing memory files are present.
-/// Graph-specific controls (auto-update cadence, upload-truncation banner) live
+/// Project-scoped Settings card surfacing graph + memory state: whether a
+/// graph exists, its node counts, when it was last generated, and which
+/// agent-facing memory files are present. Graph-specific controls
+/// (auto-update cadence, upload-truncation banner) live
 /// in `Graph/Views/GraphSettingsSection.swift` instead — this file stays free of
 /// any graph type so it (and `GraphMemoryState`) keep working when the Code
 /// Graph feature is compiled out.
@@ -17,7 +17,7 @@ struct MemorySettingsSection: View {
         SettingsSectionCard(icon: "brain", title: "Memory") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 if !state.hasGraph && !state.anyMemoryFile {
-                    Text("No graph or memory generated for this project yet. Open the Code Graph view and generate a Code Graph / InfiniteBrain to populate it.")
+                    Text("No graph or memory generated for this project yet. In builds that include Code Graph, open that view and generate a Code Graph / InfiniteBrain to populate it.")
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
                         .fixedSize(horizontal: false, vertical: true)

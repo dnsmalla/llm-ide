@@ -697,12 +697,18 @@ final class AutoCodeUpdateService: ObservableObject {
             }
         }
 
+        // .generateKnowledge only reports on the Graph/memory artifacts —
+        // there's nothing to report in a build with Graph compiled out, so
+        // it's dropped from the pipeline order (the row reads skipped rather
+        // than a false green). `reportKnowledge` itself still guards on
+        // `FeatureCatalog.isGraphCompiled` for the manual `runSingle` path,
+        // which bypasses this list.
         let enabledOrder: [AutoTask] = [
             .sourceUpdate, .sourcesToIssue, .implementIssues, .reviewMerge,
             .reviewCode, .reviewDoc, .reviewConflicts,
             .updateIssues, .updatePlanStatus, .generateDoc,
             .regression, .generateKnowledge,
-        ]
+        ].filter { $0 != .generateKnowledge || FeatureCatalog.isGraphCompiled }
 
         let needsRepo = enabledOrder.contains { isTaskEnabled($0) && $0.requiresLinkedRepo }
         let resolved: ResolvedRepo? = needsRepo ? resolveBackendAndProject() : nil

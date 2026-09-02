@@ -18,12 +18,13 @@ final class GraphAutoUpdater: ObservableObject {
     /// Exposed so the UI can observe the generated graphs.
     let graph = KnowledgeGraphService()
 
-    /// The Code Graph view's session store. Set once by `AppShell` (both are
-    /// app-level objects). After each background run we publish the generated
-    /// graphs here so the view shows the auto-maintained graph on its next
-    /// appearance instead of recomputing the same scan — closing the previous
-    /// "two disjoint graph instances" gap where auto-run results were invisible
-    /// to the UI. `weak` because the store is owned by the app's `@StateObject`.
+    /// The Code Graph view's session store. Set once by `FeatureCatalog.bootGraph`.
+    /// After each background run we publish the generated graphs here so the
+    /// view shows the auto-maintained graph on its next appearance instead of
+    /// recomputing the same scan — closing the previous "two disjoint graph
+    /// instances" gap where auto-run results were invisible to the UI. `weak`
+    /// because the store is owned by `FeatureCatalog`'s static storage, not
+    /// this updater.
     weak var sessionStore: GraphSessionStore?
 
     /// Activity feed store. Set once by the app entry after construction.

@@ -622,7 +622,9 @@ struct AppShell: View {
             if registry.isEnabled(.codeGraph3D) {
                 FeatureCatalog.graphMainPane()
             } else {
-                DisabledFeaturePlaceholderView(featureName: "3D Code Graph")
+                DisabledFeaturePlaceholderView(
+                    featureName: "3D Code Graph",
+                    isCompiled: registry.compiledFeatures.contains(.codeGraph3D))
             }
         case .loopEngine: LoopEngineHomeView(api: api)
         case .settings:  SettingsView(api: api)
@@ -1049,7 +1051,13 @@ struct AppShell: View {
 
 struct DisabledFeaturePlaceholderView: View {
     let featureName: String
-    
+    /// False when the feature is missing from this build entirely (e.g. a
+    /// lite build with Graph compiled out) — as opposed to merely toggled
+    /// off in Settings → Workspace, which the user CAN undo. Defaults to
+    /// `true` so existing call sites (all currently-toggleable features are
+    /// compiled into every build) keep today's copy unchanged.
+    var isCompiled: Bool = true
+
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "slider.horizontal.3")
@@ -1057,7 +1065,9 @@ struct DisabledFeaturePlaceholderView: View {
                 .foregroundColor(.secondary)
             Text("\(featureName) is currently disabled")
                 .font(.headline)
-            Text("You can re-enable this feature in Settings → Workspace.")
+            Text(isCompiled
+                 ? "You can re-enable this feature in Settings → Workspace."
+                 : "\(featureName) is not included in this build.")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }

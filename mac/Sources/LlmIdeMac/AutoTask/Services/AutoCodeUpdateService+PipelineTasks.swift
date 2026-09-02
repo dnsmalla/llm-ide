@@ -528,6 +528,15 @@ extension AutoCodeUpdateService {
     /// review it. Reads disk only — never generates, never blocks.
     func reportKnowledge(projectRoot: String) {
         let key = AutoTask.generateKnowledge.rawValue
+        // Lite build (Graph compiled out): there is no graph/memory to ever
+        // report, so "not generated yet — auto-generates on open" below would
+        // be a promise nothing in this build can fulfill. `enabledOrder`
+        // already excludes this task when Graph isn't compiled, but a manual
+        // run via `runSingle` bypasses that list, so guard here too.
+        guard FeatureCatalog.isGraphCompiled else {
+            logStore.append(.generateKnowledge, "Code Graph is not installed in this build — skipping.")
+            return
+        }
         guard let repo = RepoGraphLocator.repoToGraph(projectRoot: URL(fileURLWithPath: projectRoot)) else {
             logStore.append(.generateKnowledge, "No code to graph in this project yet.")
             taskErrors.removeValue(forKey: key)
