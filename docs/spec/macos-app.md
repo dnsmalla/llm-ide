@@ -121,6 +121,10 @@ A `MenuBarExtra` is declared at lines 272–285. Its icon (`record.circle.fill` 
 
 The Library section gets a 3-column layout (sidebar | list | detail). All other sections use a 2-column layout (AppShell sidebar rail | content). A `TerminalPanelView` docks at the bottom of the content area for most sections. `ShellState.section` defaults to `.explorer`, so a fresh launch lands on the Explorer. The "tool" sections render as named buttons (`ToolbarToolButton`) in a `ToolbarItemGroup` inside the unified title bar (AppKit collapses overflow into the native `»` menu); `explorer`, `sourceControl`, and `search` are instead a panel-header switcher (`PanelSectionTabs`) shown in those three sections' headers, Cursor-style.
 
+### Build-time feature selection
+
+The app's lifecycle can exclude features at compile time via `LLMIDE_FEATURES` environment variable, reducing binary size and startup overhead for non-engineers. `Package.swift` reads `LLMIDE_FEATURES` (comma-separated feature names; unset defaults to all enabled) via `ProcessInfo` and appends excluded features' source folders to the `LlmIdeMacLib` target's `exclude:` list, while defining `.define("FEATURE_<NAME>")` for each included feature. **Only one file uses `#if` preprocessor conditionals: `FeatureCatalog.swift`**, which registers compiled-in feature modules and exposes their view factories. All other code accesses features through catalog-provided protocols or notifications, decoupling the main codebase from feature presence. A feature compiled out does not appear in Settings toggles; toggles report it as "Not installed". When building with a subset of features, pass `--manifest-cache none` to `swift build` to avoid manifest caching stale includes (this is automatic in `make build-mac-lite` for convenience; a bare `swift build` always builds the full app with all features enabled).
+
 ---
 
 ## §3 Service taxonomy + key contracts

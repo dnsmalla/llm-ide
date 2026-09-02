@@ -1,7 +1,7 @@
 # Feature Module Architecture — Design
 
 **Date:** 2026-09-02
-**Status:** Phase 1 implemented (feature/feature-runtime-modules branch); Phases 2–3 pending
+**Status:** Phase 1 implemented; Phase 2a (Graph exclusion) implemented; Phase 2b–d, 3 pending
 **Goal:** The Workspace settings toggles (Settings → Workspace) currently hide
 menus and views only. This design makes a disabled feature actually leave the
 system: first its background work stops entirely (Phase 1), then its code is
