@@ -27,13 +27,15 @@
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
     "cli": "node dist/src/cli.js",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "bundle": "esbuild src/cli.ts --bundle --platform=node --target=node18 --format=cjs --minify --outfile=../bin/graph-kit.js"
   },
   "dependencies": {
-    "zod": "^3.23.8",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0"
+    "@types/node": "^20.11.0",
+    "esbuild": "^0.28.2"
   }
 }

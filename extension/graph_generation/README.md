@@ -131,12 +131,11 @@ skills やドキュメントを届ける用途には使えますが、生成は�
 
 ## 既知の未完了事項
 
-- **graph-kit をインストール可能なバンドルとして配布する経路が未整備。**
-  `graph-engine.json` のコマンドは `typescript/dist/` を参照しますが、これは
-  `npm install && npm run build` の成果物で、リポジトリにコミットされていません。
-  プラグイン機構にビルドフックもありません。よってプラグイン*経路*は実装・検証済みですが、
-  graph-kit 自体をそのまま git URL から入れて動かすには、`dist/` の事前コミットか
-  インストールフックのどちらかが必要です。
+- ~~graph-kit を配布可能なバンドルにする経路~~ — **解決済み**。依存込みの
+  単一ファイル `bin/graph-kit.js`（esbuild バンドル、コミット済み）を
+  `graph-engine.json` が参照するため、**インストール手順ゼロ**で動きます
+  （node_modules も dist も無い新規クローン相当で manifest gate PASS を確認）。
+  `typescript/src` を変更したら `cd typescript && npm run bundle` で再生成すること。
 - **`merge` コマンドが TypeScript CLI に存在しません。** よって現状プラグイン経由では
   doc→code クロスリンクが付きません（上記の縮退動作）。
 - **プラグイン経由では `CodeScan.scan` が空になります。** TypeScript CLI はグラフしか

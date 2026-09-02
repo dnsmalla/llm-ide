@@ -2,16 +2,33 @@
   "schemaVersion": 1,
   "name": "graph-kit",
   "displayName": "GraphKit",
-  "docExtensions": ["md", "mdx", "markdown", "txt"],
+  "docExtensions": [
+    "md",
+    "mdx",
+    "markdown",
+    "txt"
+  ],
   "commands": {
     "scanCode": {
       "command": "node",
-      "args": ["typescript/dist/src/cli.js", "code", "{repo}", "--out", "{out}"],
+      "args": [
+        "bin/graph-kit.js",
+        "code",
+        "{repo}",
+        "--out",
+        "{out}"
+      ],
       "timeoutSeconds": 600
     },
     "docMemory": {
       "command": "node",
-      "args": ["typescript/dist/src/cli.js", "memory", "{root}", "--out", "{out}"],
+      "args": [
+        "bin/graph-kit.js",
+        "memory",
+        "{root}",
+        "--out",
+        "{out}"
+      ],
       "timeoutSeconds": 600
     }
   }

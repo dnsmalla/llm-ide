@@ -6,6 +6,14 @@ All notable changes to GraphKit. The Swift package and the TypeScript package
 
 ## [Unreleased]
 
+### Added
+- **Committed single-file CLI bundle** at `bin/graph-kit.js` (esbuild, minified,
+  dependencies included — the TypeScript compiler API accounts for most of its
+  size). `graph-engine.json` points at it, so the repository is installable as a
+  graph-engine plugin with **no install step**: a fresh clone with neither
+  `node_modules/` nor `dist/` passes the manifest gate. Regenerate after any
+  `typescript/src` change with `cd typescript && npm run bundle`.
+
 ## [1.7.0] - 2026-09-02
 
 One repository, two products. The package now exports **GraphCore** (canonical
