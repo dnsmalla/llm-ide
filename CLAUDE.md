@@ -231,6 +231,10 @@ Swift type suffixes communicate role — pick matching suffix when adding new ty
 - **`*Mirror`** — Passive shadow of remote state, never mutates (e.g., `LiveSessionMirror`)
 - **`*Router`** — Request/event dispatch, pure wiring (e.g., `DeepLinkRouter`)
 
+### Apply & Rebuild (Settings → Workspace)
+
+On a source checkout with a Swift toolchain, Settings → Workspace shows a **Build** card with **"Apply & Rebuild (remove disabled code)"** — an in-app rebuild that actually excludes disabled features from the compiled binary, not just hides them. Owned by `FeatureRebuildService` (`mac/Sources/LlmIdeMac/Services/FeatureRebuildService.swift`); the card (`BuildRebuildSettingsCard` in `mac/Sources/LlmIdeMac/Views/Settings/FeatureProfileSettingsView.swift`) renders nothing when `isEligible` is false, so it never appears on a non-engineer machine or a distributed release build (`Scripts/release.sh` sets `LLMIDE_OMIT_SOURCE_ROOT=1`, which omits the `LLMIDESourceRoot` Info.plist key eligibility depends on). Flow: confirmation dialog → `mac/Scripts/rebuild-features.sh` stages a release build + `mac/Scripts/sign.sh` off to the side (running app untouched) → "Restart & Install" spawns `mac/Scripts/rebuild-swap.sh` detached, which waits for this process to exit, keeps the previous `.app` as `<name>.app.bak` (one rollback slot), installs the staged bundle, and relaunches — logging to `<install-target-minus-.app>.rebuild.log`. See `docs/spec/macos-app.md` ("Apply & Rebuild") and `docs/superpowers/specs/2026-09-02-feature-module-architecture-design.md` (Phase 3) for the full contract.
+
 ## Mobile Control System
 
 LLM-IDE includes a native mobile companion: the **Mac app** runs a WebSocket server on `:3006` by default (configurable in Settings → Mobile Control; if busy, the next free port up to +9 binds automatically and Bonjour `_llmide._tcp` + the pairing QR advertise the actual port; PIN pairing), and the **iOS app** in `ios_app/` connects as a client. Chat requests are proxied to the local backend at `http://127.0.0.1:3456`.

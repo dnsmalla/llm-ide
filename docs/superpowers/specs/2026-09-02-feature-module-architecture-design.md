@@ -1,7 +1,7 @@
 # Feature Module Architecture — Design
 
 **Date:** 2026-09-02
-**Status:** Phase 1 implemented; Phase 2a (Graph exclusion) implemented; Phase 2b (view features) implemented; Phase 3, 2c–d pending
+**Status:** Phase 1 implemented; Phase 2a (Graph exclusion) implemented; Phase 2b (view features) implemented; Phase 3 (Apply & Rebuild) implemented; 2c–d pending
 **Goal:** The Workspace settings toggles (Settings → Workspace) currently hide
 menus and views only. This design makes a disabled feature actually leave the
 system: first its background work stops entirely (Phase 1), then its code is
@@ -152,20 +152,42 @@ Thin modules are still created: uniformity is what makes Phase 2 mechanical.
 - Conformance test: every `AppFeature` case has a registered module or is
   explicitly listed as compiled-out by the catalog.
 
-## Phase 3 — Apply & Rebuild from Settings
+## Phase 3 — Apply & Rebuild from Settings (implemented)
 
-- Settings → Workspace gains **"Apply & Rebuild (remove disabled code)"**,
-  shown only when both are detected: a source checkout (running binary lives
-  under a git worktree with `mac/Package.swift`) and a Swift toolchain.
-- The button runs `scripts/mac/rebuild-app.sh --features <enabled csv>`:
-  1. `LLMIDE_FEATURES=<csv> swift build -c release`
-  2. bundle the .app (reuse existing packaging from `build_app.sh`)
-  3. move the current .app to `<name>.app.bak` (one rollback slot)
-  4. install the new .app at the same path, relaunch
-- Failure at any step leaves the running app untouched and surfaces the log.
-- Machines without a toolchain (non-engineers) never see the button; Phase 1
-  runtime stopping is the automatic fallback. Prebuilt Full/Lite editions
-  later are the same script run in CI — out of scope here.
+- Settings → Workspace gains a **"Build"** card (`BuildRebuildSettingsCard`,
+  bottom of `FeatureProfileSettingsView.swift`) with **"Apply & Rebuild
+  (remove disabled code)"**, rendered only when
+  `FeatureRebuildService.isEligible` — a source checkout is detected (this
+  binary's `Info.plist` carries `LLMIDESourceRoot`, and `Package.swift`
+  exists there) *and* the running bundle has an installable `.app` target.
+  Not eligible ⇒ the card renders nothing (no dead UI); this is also why a
+  distributed release build never shows it — `release.sh` sets
+  `LLMIDE_OMIT_SOURCE_ROOT=1` before calling `build.sh`, which omits the
+  `LLMIDESourceRoot` Info.plist key entirely.
+- The button opens a confirmation dialog (rebuild-from-source, replaces the
+  running app, relaunches, previous version kept as `.bak`), then
+  `FeatureRebuildService.startRebuild()` runs `mac/Scripts/rebuild-features.sh
+  --features <enabled csv> --stage-dir <Application Support>/rebuild-staging
+  --stage-only`:
+  1. `LLMIDE_FEATURES=<csv> mac/Scripts/build.sh` (release build into the
+     stage dir, `LLMIDE_SKIP_KILL=1` so it doesn't kill the running app)
+  2. `mac/Scripts/sign.sh` on the staged bundle
+  3. stops — no swap yet (`--stage-only`)
+- On success (`.readyToSwap`), the card's **"Restart & Install"** button
+  calls `swapAndRelaunch()`, which spawns `mac/Scripts/rebuild-swap.sh
+  <staged_app> <target_app> <pid>` detached (`nohup`) and then
+  `NSApp.terminate(nil)`. `rebuild-swap.sh` waits for the pid to exit, moves
+  the current `.app` to `<name>.app.bak` (one rollback slot), installs the
+  staged bundle in its place, and relaunches it. Its own log goes to
+  `<install-target-minus-.app>.rebuild.log` next to the app bundle.
+- Failure at any step (staging or swap) leaves the running/installed app
+  untouched; the Settings card shows the log tail and a **Retry** button
+  (which re-confirms before calling `startRebuild()` again, same as a fresh
+  attempt).
+- Machines without a toolchain or without a source checkout (non-engineers,
+  and every distributed release) never see the card; Phase 1 runtime
+  stopping is the automatic fallback there. Prebuilt Full/Lite editions
+  later are the same scripts run in CI — out of scope here.
 
 ## Scope and sequencing
 

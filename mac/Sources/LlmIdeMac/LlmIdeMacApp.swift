@@ -88,6 +88,10 @@ public struct LlmIdeMacApp: App {
     @StateObject private var updateService = UpdateService()
     @StateObject private var projectStore: ProjectStore
     @StateObject private var sourceLinkStore = SourceLinkStore()
+    /// Detects its own eligibility from `Bundle.main` at init — no
+    /// constructor deps to thread through, so it's built inline like
+    /// `updateService`/`sourceLinkStore` rather than in `init()` below.
+    @StateObject private var featureRebuild = FeatureRebuildService()
     @State private var backend = BackendManager()
     @State private var mobileControl = MobileControlManager()
     @State private var quickSwitcherShown = false
@@ -301,6 +305,7 @@ public struct LlmIdeMacApp: App {
                     .environmentObject(updateService)
                     .environmentObject(projectStore)
                     .environmentObject(sourceLinkStore)
+                    .environmentObject(featureRebuild)
                     .environment(backend)
                     .environment(mobileControl)
                     .environment(activityStore)

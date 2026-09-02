@@ -1,12 +1,27 @@
 import SwiftUI
 
-/// Workspace presets, feature gates, and top-bar visibility in one card.
+/// Workspace presets, feature gates, top-bar visibility, and (when eligible)
+/// the Apply & Rebuild card, all grouped under Settings → Workspace.
 struct FeatureProfileSettingsSection: View {
     @ObservedObject var registry = FeatureRegistry.shared
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
+    @EnvironmentObject var rebuild: FeatureRebuildService
 
     var body: some View {
+        Group {
+            workspaceCard
+            // Nil on a distributed build (no LLMIDESourceRoot in Info.plist —
+            // release.sh sets LLMIDE_OMIT_SOURCE_ROOT=1) and on a bare
+            // executable (no installTarget). Render nothing rather than a
+            // disabled button nobody on those machines could ever use.
+            if rebuild.isEligible {
+                BuildRebuildSettingsCard()
+            }
+        }
+    }
+
+    private var workspaceCard: some View {
         SettingsSectionCard(icon: "slider.horizontal.3", title: "Workspace") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 SettingsHint(
@@ -196,6 +211,142 @@ struct FeatureProfileSettingsSection: View {
             return "Distraction-free editor with Terminal and File Explorer."
         case .custom:
             return "Custom selection — toggling any component switches here automatically."
+        }
+    }
+}
+
+/// "Apply & Rebuild" — only ever mounted (by `FeatureProfileSettingsSection`)
+/// when `FeatureRebuildService.isEligible`, so every path in this view can
+/// assume a real `sourceRoot`/`installTarget` exist. Drives the full
+/// stage → confirm → swap-and-relaunch flow described in
+/// `docs/superpowers/specs/2026-09-02-feature-module-architecture-design.md`
+/// (Phase 3).
+struct BuildRebuildSettingsCard: View {
+    @EnvironmentObject var rebuild: FeatureRebuildService
+    @EnvironmentObject var theme: ThemeStore
+    @State private var showConfirmation = false
+
+    var body: some View {
+        SettingsSectionCard(icon: "hammer", title: "Build") {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                SettingsHint(
+                    "Rebuild this app from source with only the enabled features above compiled in — a genuinely lighter binary, not just hidden menus."
+                )
+
+                let compiled = rebuild.compiledSet
+                statusRow("Compiled into this binary",
+                          compiled.map(\.displayName).sorted().joined(separator: ", "))
+
+                if FeatureRebuildService.hasDrift(compiled: compiled, active: FeatureRegistry.shared.activeFeatures) {
+                    SettingsHint("Disabled features are still compiled into this binary.")
+                }
+
+                Divider().padding(.vertical, Spacing.xs)
+
+                phaseContent
+            }
+        }
+        .confirmationDialog(
+            "Rebuild and replace this app?",
+            isPresented: $showConfirmation
+        ) {
+            Button("Apply & Rebuild") { rebuild.startRebuild() }
+        } message: {
+            Text("This rebuilds \(L.App.name) from source with the enabled feature set above, then replaces the running app and relaunches it. The previous version is kept as a .bak file for rollback.")
+        }
+    }
+
+    @ViewBuilder
+    private var phaseContent: some View {
+        switch rebuild.phase {
+        case .idle:
+            applyButton
+
+        case .building, .swapping:
+            // .swapping is the instant between "spawn rebuild-swap.sh" and
+            // this process actually dying under NSApp.terminate — treated
+            // identically to .building (progress, no readyToSwap
+            // affordance): there is no further phase transition to react to
+            // on success since the app quits.
+            HStack(spacing: Spacing.sm) {
+                ProgressView().controlSize(.small)
+                Text(rebuild.phase == .swapping ? "Restarting…" : "Rebuilding…")
+                    .font(Typography.body)
+                    .foregroundStyle(theme.current.textMuted)
+            }
+            if !rebuild.logTail.isEmpty {
+                logTailView
+            }
+
+        case .readyToSwap:
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                statusRow("Status", "Build ready", ok: true)
+                HStack {
+                    Spacer()
+                    Button("Restart & Install") { rebuild.swapAndRelaunch() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                }
+            }
+
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Text(message)
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                HStack {
+                    Spacer()
+                    // Retry goes through the same confirmation as a fresh
+                    // Apply — the constraint that startRebuild() is never
+                    // reached without it holds for every entry point, not
+                    // just the first attempt.
+                    Button("Retry") { showConfirmation = true }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+            }
+        }
+    }
+
+    private var applyButton: some View {
+        HStack {
+            Spacer()
+            Button("Apply & Rebuild (remove disabled code)") { showConfirmation = true }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        }
+    }
+
+    private var logTailView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(rebuild.logTail.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(theme.current.textMuted)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxHeight: 120)
+        .padding(Spacing.xs)
+        .background(theme.current.body.opacity(0.5))
+        .cornerRadius(4)
+    }
+
+    private func statusRow(_ label: String, _ value: String, ok: Bool = true) -> some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            Text(label)
+                .font(Typography.body)
+                .foregroundStyle(theme.current.textMuted)
+            Spacer()
+            Text(value)
+                .font(Typography.body)
+                .foregroundStyle(theme.current.text)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

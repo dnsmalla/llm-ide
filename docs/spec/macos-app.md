@@ -80,6 +80,7 @@ Most objects are constructed once in `init()` and injected at lines 142–156. T
 | `graphAutoUpdater` | `GraphAutoUpdater` | Auto-maintains the per-project knowledge graph + memory (see §3) |
 | `graphSessionStore` | `GraphSessionStore` | Process-lifetime cache of generated Code Graph results, keyed `repo#mode` |
 | `activityStore` | `ActivityStore` | Activity feed state: bell badge count, poll loop, mark-seen cursor (see §8). Uses `@State` wrapper — injected via `.environment(activityStore)` at line 156. |
+| `featureRebuild` | `FeatureRebuildService` | Apply & Rebuild orchestration (stage → confirm → swap-and-relaunch); see "Apply & Rebuild" below |
 
 `BackendManager` is held as `@State private var backend` (line 49, using `@Observable`, not `ObservableObject`), injected via `.environment(backend)` at line 155. `LlmIdeAPIClient` and `AutoCaptureService` are stored as plain `let` properties (lines 52–53) and passed directly to views that need them.
 
@@ -137,6 +138,20 @@ A "lite" non-engineer build (the `LLMIDE_FEATURES=agent_chat,auto_tasks,mobile_s
 **Mechanism notes:** Views/Shell/WindowHeightKey (Terminal Panel content height broadcasting) was promoted to core (`Views/Shell/` rather than `Views/Terminal/`) so AppShell can publish window sizing unconditionally — the `.preference(key: WindowHeightKey.self, …)` call in AppShell has no terminal gate. The Terminal Panel itself is *not* always mounted: `TerminalPanelView` renders only while `state.isOpen` or a session is still alive (`dock.sessions` non-empty), and only where AppShell/ExplorerView choose to place it when the Terminal feature is enabled; once mounted it collapses to zero height (rather than unmounting) while `state.isOpen` is false but a session persists, which is what keeps PTYs and scrollback alive across toggle cycles. The terminal session state (`activeDockTab`, `sessions`, `activeIndex`, `nextTabNumber`) moved into a feature-owned store (`Views/Terminal/TerminalDockSessions.swift`), while the core panel state (`TerminalPanelState`, responsible for isOpen/height tracking and a FeatureCatalog-wired onToggleRequested hook) lives in `Views/Shell/TerminalPanelState.swift`.
 
 When building with a subset of features, pass `--manifest-cache none` to `swift build` to avoid manifest caching stale includes (this is automatic in `make build-mac-lite` for convenience; a bare `swift build` builds the full app with all features enabled, unless `LLMIDE_FEATURES` is already exported in the shell — in which case it picks up that selection too, so use an unset/empty shell for a guaranteed full build).
+
+### Apply & Rebuild (Settings → Workspace)
+
+`FeatureRebuildService` (`Services/FeatureRebuildService.swift`) drives an in-place, feature-selected rebuild of the running app from Settings, without a terminal. It is core chrome — never registered with `FeatureRegistry`, always constructed (`@StateObject private var featureRebuild = FeatureRebuildService()` in `LlmIdeMacApp`).
+
+**Eligibility** (`isEligible`): both a `sourceRoot` (this bundle's `Info.plist` carries an `LLMIDESourceRoot` key pointing at a directory with `Package.swift`) and an `installTarget` (`Bundle.main.bundleURL` ends in `.app`, not a bare `swift run` executable) must be non-nil. **Distributed release builds never qualify**: `Scripts/release.sh` exports `LLMIDE_OMIT_SOURCE_ROOT=1` before calling `build.sh`, which omits the `LLMIDESourceRoot` Info.plist key entirely — no local build machine path ever ships in a release bundle. Dev builds (`build_app.sh`) and staged rebuilds (`rebuild-features.sh`) call `build.sh` without that flag, so they carry it.
+
+The UI (`Views/Settings/FeatureProfileSettingsView.swift`, `BuildRebuildSettingsCard`) renders nothing when `isEligible` is false — no dead button on machines that can't use it. When eligible:
+
+1. **Idle** — "Apply & Rebuild (remove disabled code)" → a confirmation dialog (rebuild-from-source, replaces the app, relaunches, previous version kept as `.bak`) → `startRebuild()`.
+2. **`startRebuild()`** runs `mac/Scripts/rebuild-features.sh --features <active-features csv> --stage-dir <Application Support>/rebuild-staging --stage-only` in a detached `Task`, streaming stdout/stderr into a capped 20-line `logTail`. This calls `build.sh` (release, `LLMIDE_SKIP_KILL=1`) then `sign.sh` into the stage dir; the running app is untouched.
+3. **Building / Swapping** — the card shows a `ProgressView` + the log tail; both phases disable the apply affordance (`.swapping` is the instant between spawning the swap helper and the process actually dying, treated identically to `.building`).
+4. **Ready to swap** — "Restart & Install" → `swapAndRelaunch()` spawns `mac/Scripts/rebuild-swap.sh <staged_app> <target_app> <pid>` detached (`nohup`), then `NSApp.terminate(nil)`. The swap script waits for the pid to exit, moves the current `.app` to `<name>.app.bak` (one rollback slot), installs the staged bundle, and relaunches it — logging to `<install-target-minus-.app>.rebuild.log` beside the app bundle.
+5. **Failed** — the card shows the log tail and a Retry button, which re-confirms before calling `startRebuild()` again (the confirmation dialog gates every path into `startRebuild()`, not just the first attempt). Failure at any step leaves the running/installed app untouched.
 
 ---
 
@@ -561,6 +576,8 @@ All five are declared `.copy(...)` so SwiftPM copies them verbatim into `Content
 **`Scripts/sign.sh`:** calls `codesign -s "$IDENTITY" --force --deep --options runtime --entitlements LlmIdeMac.entitlements` (line 30). `LLMIDE_SIGN_IDENTITY` defaults to `"-"` (ad-hoc) for dev builds; set to a Developer ID for distribution.
 
 **`Scripts/dmg.sh`:** creates a UDZO-compressed DMG (`hdiutil create -format UDZO`, line 37) named `LlmIdeMac_v<VERSION>.dmg` with a symlink to `/Applications` for drag-install.
+
+**`Scripts/rebuild-features.sh`** and **`Scripts/rebuild-swap.sh`** are not part of this pipeline — they back the in-app "Apply & Rebuild" flow (`FeatureRebuildService`, see "Apply & Rebuild" above) and are invoked by the running app itself, not by a developer.
 
 ### Entitlements (`mac/LlmIdeMac.entitlements`)
 
