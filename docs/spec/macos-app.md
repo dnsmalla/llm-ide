@@ -125,14 +125,17 @@ The Library section gets a 3-column layout (sidebar | list | detail). All other 
 
 The app's lifecycle can exclude features at compile time via `LLMIDE_FEATURES` environment variable, reducing binary size and startup overhead for non-engineers. `Package.swift` reads `LLMIDE_FEATURES` (comma-separated feature names; unset defaults to all enabled) via `ProcessInfo` and appends excluded features' source folders to the `LlmIdeMacLib` target's `exclude:` list, while defining `.define("FEATURE_<NAME>")` for each included feature. **Only one file uses `#if` preprocessor conditionals: `FeatureCatalog.swift`**, which registers compiled-in feature modules and exposes their view factories. All other code accesses features through catalog-provided protocols or notifications, decoupling the main codebase from feature presence. A feature compiled out still gets a row in Settings → Workspace, but shows "Not installed" in place of its toggle.
 
-Five features are excludable at build time:
+Six features are excludable at build time:
 - **`codeGraph3D`** — Code graph layout, rendering, memory/Q&A stores (Phase 2a)
-- **`fileExplorer`** — File navigator, source control view, search; **excludes the SwiftTerm terminal** (no Terminal Panel without Explorer; Phase 2b)
+- **`fileExplorer`** — File navigator, source control view, search; omits help topics for search and source control (Phase 2b)
 - **`ganttIssues`** — Issues board and Gantt timeline (Phase 2b)
 - **`docGen`** — Document generator view (Phase 2b)
-- **`terminal`** — Terminal panel (Phase 2b, gated via `terminal` feature but swapped out via `fileExplorer` when excluded)
+- **`terminal`** — Terminal panel and **drops the SwiftTerm product dependency** (Phase 2b, independent of Explorer)
+- **`agentChat`** — Chat/conversation interface; part of full builds but excluded from lite
 
-A "lite" non-engineer build excludes Explorer, Gantt/Issues, DocGen, and Terminal, leaving only Chat, Auto Tasks, Mobile Sync, Live Capture, and Library. Graph is excluded when performance/space is paramount.
+A "lite" non-engineer build (the `LLMIDE_FEATURES=agent_chat,auto_tasks,mobile_sync` preset used by `make build-mac-lite`) excludes codeGraph3D, fileExplorer, ganttIssues, docGen, and terminal, leaving only Agent Chat, Auto Tasks, Mobile Sync, Live Capture, and Library.
+
+**Mechanism notes:** Views/Shell/WindowHeightKey (Terminal Panel content height broadcasting) was promoted to core (`Views/Shell/` rather than `Views/Terminal/`) so AppShell can publish window sizing unconditionally—the Terminal Panel is always mounted but zero-height when closed. The terminal session state (list of open sessions, session directory, last-used) moved into a feature-owned store (`Views/Terminal/TerminalDockSessions.swift`), while the core panel state (`TerminalPanelState`, responsible for isOpen/height tracking and a FeatureCatalog-wired onToggleRequested hook) lives in `Views/Shell/TerminalPanelState.swift`.
 
 When building with a subset of features, pass `--manifest-cache none` to `swift build` to avoid manifest caching stale includes (this is automatic in `make build-mac-lite` for convenience; a bare `swift build` builds the full app with all features enabled, unless `LLMIDE_FEATURES` is already exported in the shell — in which case it picks up that selection too, so use an unset/empty shell for a guaranteed full build).
 
