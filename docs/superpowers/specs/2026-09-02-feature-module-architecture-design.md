@@ -87,54 +87,63 @@ Thin modules are still created: uniformity is what makes Phase 2 mechanical.
 - `AutoCodeUpdateService`: after `stop`, no scheduled run fires (existing
   cron tests extended).
 
-## Phase 2 — SPM targets per feature (build-time exclusion)
+## Phase 2 — build-time exclusion via env-driven source exclusion
 
-### Target layout
+> **Revised 2026-09-02 (post-Phase-1 dependency audit).** The original
+> per-feature SPM target split is deferred: a target split forces `public`
+> on every cross-target symbol (hundreds of sites) for no additional
+> user-visible benefit, and the audit found (a) AutoTask ↔ LoopEngine is a
+> genuine dependency **cycle** (`AutoCodeUpdateService+PipelineTasks` drives
+> `LoopEngineRunner`; `LoopEngineView` renders `AutoCodeView`/`AutoTask`),
+> and (b) `MobileControlManager` depends on AutoTask, LoopEngine, Chat, and
+> Graph — Mobile must be extracted **last**, not first. The same outcome —
+> disabled feature code physically absent from the binary — is reached with
+> one target and `exclude:` lists.
 
-```
-mac/Sources/
-├── LlmIdeCore/        # config, session, API client, ProjectStore, theme,
-│                      # AppFeature, FeatureRegistry, shared UI primitives
-├── FeatureAutoTask/   # today's AutoTask/ folder
-├── FeatureLoopEngine/ # today's LoopEngine/ (dependency of FeatureAutoTask)
-├── FeatureGraph/      # today's Graph/
-├── FeatureExplorer/
-├── FeatureGantt/
-├── FeatureDocGen/
-├── FeatureTerminal/
-├── FeatureChat/
-├── FeatureMobile/
-└── LlmIdeMacApp/      # composition root: FeatureCatalog + AppShell chrome
-```
-
-The 2026-09-02 folder consolidation (AutoTask/, LoopEngine/, Graph/) defined
-these boundaries; remaining features get the same folder consolidation as
-they are promoted to targets — promotion order: Mobile, Graph, AutoTask
-(largest wins first), then the view-only features.
-
-### Selection mechanism
+### Selection mechanism (revised)
 
 - `Package.swift` reads `LLMIDE_FEATURES` (comma-separated rawValues;
-  unset = all) via `ProcessInfo` and includes only the selected feature
-  targets as dependencies of the app target, adding a
-  `.define("FEATURE_<NAME>")` swift setting per included feature.
-- Exactly **one** file uses those defines: `FeatureCatalog.swift` in the
-  composition root — it registers the compiled-in modules and exposes their
-  view factories. `#if` never spreads beyond it.
-- `AppShell` stops referencing feature view types directly; it renders
-  through the module's view factory (`AppModule` gains
-  `func makeSidebarSections() -> …` / `func makeMainPane(section:) -> …`
-  as needed per feature). This is the bulk of Phase 2's work.
-- A feature compiled out is also absent from `AppFeature.settingsToggleable`
-  surfaces at runtime (the catalog reports the compiled set; Settings shows
-  compiled-out features as "not installed" rather than a dead toggle).
+  unset = all) via `ProcessInfo` and appends the deselected features'
+  source folders to the `LlmIdeMacLib` target's `exclude:` list (and their
+  test files to the test target's), adding `.define("FEATURE_<NAME>")` for
+  each **included** feature.
+- Manifest caching: SwiftPM does not reliably key the manifest cache on
+  env vars, so every build that changes the selection goes through the
+  rebuild script, which passes `--manifest-cache none` (and the CI matrix
+  does the same). A bare `swift build` without the env var always builds
+  the full app.
+- Exactly **one** file uses the defines: `FeatureCatalog.swift` next to the
+  composition root — it registers the compiled-in modules, exposes their
+  view factories, and reports the compiled feature set. `#if` never spreads
+  beyond it.
+- `AppShell`/Settings stop referencing excludable feature types directly;
+  they render through catalog-provided factories, and remainder→feature
+  service edges are re-seamed through core protocols or notifications.
+  This decoupling is the bulk of Phase 2's work and is what would make a
+  later true target split mechanical.
+- A feature compiled out is absent from Settings toggles (the catalog
+  reports the compiled set; compiled-out features show as "not installed").
+
+### Extraction order (revised, one shippable slice each)
+
+1. **Graph** — weakest inbound coupling; proves the whole mechanism
+   end-to-end (exclude + define + catalog + view factory + re-seamed edges).
+   `FaultReport`/fault memory and generic helpers like `RepoFileWatcher`
+   move to core first: they are consumed by core services and Mobile.
+2. **AutoTask + LoopEngine as ONE excludable unit** (the cycle stays
+   internal to the unit).
+3. **View-only features** (Explorer, Gantt, DocGen, Terminal, Chat views).
+4. **Mobile** — last, because it depends on all of the above; when a
+   feature it needs is compiled out, the mobile surface for it degrades
+   per capability flags.
 
 ### Tests (Phase 2)
 
 - CI matrix builds two configurations: full (`LLMIDE_FEATURES` unset) and
-  lite (`core + chat + docGen`), both must compile and boot to WelcomeView.
+  lite (all excludable features off), both must compile; full must pass
+  the test suite.
 - Conformance test: every `AppFeature` case has a registered module or is
-  explicitly listed as compiled-out.
+  explicitly listed as compiled-out by the catalog.
 
 ## Phase 3 — Apply & Rebuild from Settings
 
