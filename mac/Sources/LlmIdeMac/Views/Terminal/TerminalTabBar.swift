@@ -5,6 +5,7 @@ import SwiftUI
 /// Right side: `+` to open a new tab.
 struct TerminalTabBar: View {
     @Environment(TerminalPanelState.self) private var state
+    @Environment(TerminalDockSessions.self) private var dock
     @EnvironmentObject var theme: ThemeStore
     let projectDirectory: URL
 
@@ -12,7 +13,7 @@ struct TerminalTabBar: View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 2) {
-                    ForEach(Array(state.sessions.enumerated()), id: \.element.id) { idx, session in
+                    ForEach(Array(dock.sessions.enumerated()), id: \.element.id) { idx, session in
                         tabPill(session: session, index: idx)
                     }
                 }
@@ -22,7 +23,7 @@ struct TerminalTabBar: View {
             Spacer(minLength: 0)
 
             Button {
-                state.addTab(in: projectDirectory)
+                dock.addTab(state, in: projectDirectory)
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 11, weight: .medium))
@@ -39,7 +40,7 @@ struct TerminalTabBar: View {
 
     @ViewBuilder
     private func tabPill(session: TerminalSession, index: Int) -> some View {
-        let isActive = index == state.activeIndex
+        let isActive = index == dock.activeIndex
         let isDead = session.status == .dead
 
         HStack(spacing: 4) {
@@ -53,7 +54,7 @@ struct TerminalTabBar: View {
                 .frame(maxWidth: 120, alignment: .leading)
 
             Button {
-                state.closeTab(at: index)
+                dock.closeTab(state, at: index)
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .medium))
@@ -77,7 +78,7 @@ struct TerminalTabBar: View {
         .clipShape(RoundedRectangle(cornerRadius: 3))
         .contentShape(Rectangle())
         .onTapGesture {
-            state.activeIndex = index
+            dock.activeIndex = index
         }
     }
 }

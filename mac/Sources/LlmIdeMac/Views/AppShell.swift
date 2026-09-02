@@ -36,7 +36,15 @@ struct AppShell: View {
     /// the capture-started transition if we've never loaded it.
     /// Nil = "not loaded yet" so the observer knows to fetch once.
     @State private var autoDispatchEnabled: Bool?
-    @State private var terminalPanelState = TerminalPanelState()
+    /// Wire the Terminal feature's session hook once at state creation via
+    /// `FeatureCatalog.installTerminalHooks` — the only place that names the
+    /// Terminal build flag for this state (see TerminalPanelState's doc
+    /// comment). No-op when Terminal is compiled out.
+    @State private var terminalPanelState: TerminalPanelState = {
+        let state = TerminalPanelState()
+        FeatureCatalog.installTerminalHooks(on: state)
+        return state
+    }()
     @State private var keyMonitor: Any?
 
     var body: some View {

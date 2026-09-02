@@ -150,11 +150,36 @@ enum FeatureCatalog {
 
     // MARK: - Terminal
 
+    #if FEATURE_TERMINAL
+    /// Backing store for the Terminal feature's tab sessions — mirrors the
+    /// Graph section's `graphAutoUpdater`/`graphSessionStore` pattern
+    /// (module-owned state kept in the catalog, not in core). Shared by
+    /// `installTerminalHooks(on:)` and `terminalPanel(projectDirectory:)` so
+    /// both see the same session list.
+    private static let terminalSessions = TerminalDockSessions()
+    #endif
+
+    /// Wires `TerminalPanelState.onToggleRequested` to
+    /// `TerminalDockSessions.handleToggle(_:projectDirectory:)`. Called once
+    /// from AppShell right after constructing its `TerminalPanelState` —
+    /// unconditionally; this function (and `terminalPanel` below) are the
+    /// ONLY places `#if FEATURE_TERMINAL` appears for this feature. No-op
+    /// when the feature is compiled out, leaving `onToggleRequested` nil so
+    /// `TerminalPanelState.toggle()` falls back to a plain open/close flip.
+    static func installTerminalHooks(on state: TerminalPanelState) {
+        #if FEATURE_TERMINAL
+        state.onToggleRequested = { state, directory in
+            terminalSessions.handleToggle(state, projectDirectory: directory)
+        }
+        #endif
+    }
+
     /// Used by both AppShell call sites (the shared bottom dock) and
     /// ExplorerView (its embedded editor-column dock).
     static func terminalPanel(projectDirectory: URL) -> AnyView {
         #if FEATURE_TERMINAL
-        return AnyView(TerminalPanelView(projectDirectory: projectDirectory))
+        return AnyView(TerminalPanelView(projectDirectory: projectDirectory)
+            .environment(terminalSessions))
         #else
         return AnyView(EmptyView())
         #endif

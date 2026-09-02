@@ -9,6 +9,7 @@ import SwiftUI
 /// like Cursor's behaviour.
 struct TerminalPanelView: View {
     @Environment(TerminalPanelState.self) private var state
+    @Environment(TerminalDockSessions.self) private var dock
     @EnvironmentObject var theme: ThemeStore
 
     let projectDirectory: URL
@@ -38,7 +39,7 @@ struct TerminalPanelView: View {
         // and scrollback across open/close toggles (Ctrl+`). The dock renders
         // even with no sessions so the placeholder tabs (Problems/Output/…)
         // can show.
-        if state.isOpen || !state.sessions.isEmpty {
+        if state.isOpen || !dock.sessions.isEmpty {
             VStack(spacing: 0) {
                 if state.isOpen {
                     resizeHandle
@@ -46,7 +47,7 @@ struct TerminalPanelView: View {
                     BottomDockTabBar(projectDirectory: projectDirectory)
                     Divider()
                     // Terminal's own session pills, only under the Terminal tab.
-                    if state.activeDockTab == .terminal {
+                    if dock.activeDockTab == .terminal {
                         TerminalTabBar(projectDirectory: projectDirectory)
                         Divider()
                     }
@@ -68,18 +69,18 @@ struct TerminalPanelView: View {
     private var dockContent: some View {
         ZStack {
             ZStack {
-                ForEach(Array(state.sessions.enumerated()), id: \.element.id) { idx, session in
+                ForEach(Array(dock.sessions.enumerated()), id: \.element.id) { idx, session in
                     TerminalSessionView(session: session)
-                        .opacity(idx == state.activeIndex ? 1 : 0)
+                        .opacity(idx == dock.activeIndex ? 1 : 0)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(theme.current.body)   // follow the theme (was hardcoded black)
-            .opacity(state.activeDockTab == .terminal ? 1 : 0)
-            .allowsHitTesting(state.activeDockTab == .terminal)
+            .opacity(dock.activeDockTab == .terminal ? 1 : 0)
+            .allowsHitTesting(dock.activeDockTab == .terminal)
 
-            if state.activeDockTab != .terminal {
-                BottomDockPlaceholder(tab: state.activeDockTab)
+            if dock.activeDockTab != .terminal {
+                BottomDockPlaceholder(tab: dock.activeDockTab)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

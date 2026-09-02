@@ -4,7 +4,7 @@ import SwiftTerm
 import AppKit
 
 /// One PTY-backed shell session — owns a `LocalProcessTerminalView` for
-/// the lifetime of the tab.  Created by `TerminalPanelState.addTab()`.
+/// the lifetime of the tab.  Created by `TerminalDockSessions.addTab(_:in:)`.
 @Observable
 @MainActor
 final class TerminalSession: NSObject {
@@ -75,7 +75,7 @@ final class TerminalSession: NSObject {
     }
 
     /// Send SIGHUP to cleanly stop the shell.
-    /// Call before removing the session from `TerminalPanelState.sessions`.
+    /// Call before removing the session from `TerminalDockSessions.sessions`.
     func terminate() {
         guard status == .running else { return }
         termView?.terminate()

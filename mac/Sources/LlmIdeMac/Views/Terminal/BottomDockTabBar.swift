@@ -7,6 +7,7 @@ import AppKit
 /// "new session" control (when active) and a close-panel button.
 struct BottomDockTabBar: View {
     @Environment(TerminalPanelState.self) private var state
+    @Environment(TerminalDockSessions.self) private var dock
     @EnvironmentObject var theme: ThemeStore
     let projectDirectory: URL
 
@@ -24,9 +25,9 @@ struct BottomDockTabBar: View {
             Spacer(minLength: 0)
 
             HStack(spacing: 2) {
-                if state.activeDockTab == .terminal {
+                if dock.activeDockTab == .terminal {
                     iconButton("plus", help: "New Terminal") {
-                        state.addTab(in: projectDirectory)
+                        dock.addTab(state, in: projectDirectory)
                     }
                 }
                 iconButton("xmark", help: "Close Panel") {
@@ -40,9 +41,9 @@ struct BottomDockTabBar: View {
     }
 
     private func tabButton(_ tab: BottomDockTab) -> some View {
-        let isActive = state.activeDockTab == tab
+        let isActive = dock.activeDockTab == tab
         return Button {
-            state.activeDockTab = tab
+            dock.activeDockTab = tab
         } label: {
             // Title-case, normal-weight labels (VS Code / Cursor style) — not
             // the old uppercased + letter-spaced chips. Active tab is darker
