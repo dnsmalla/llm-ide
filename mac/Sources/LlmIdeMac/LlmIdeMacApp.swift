@@ -438,8 +438,12 @@ public struct LlmIdeMacApp: App {
                     mobileControl.stop()
                 }
                 .task {
-                    // Idempotent — a harmless double-refresh alongside the
-                    // launch `.task` above.
+                    // Idempotent. This task usually fires FIRST — before the
+                    // launch `.task` above finishes awaiting backend
+                    // readiness + session.bootstrap — so it starts
+                    // non-auth-gated modules early. The launch task's
+                    // post-bootstrap refresh then reconciles auth-scoped
+                    // modules once the session state is known.
                     FeatureRegistry.shared.refresh()
                 }
                 // Custom URL scheme handler.  Fired by macOS when any

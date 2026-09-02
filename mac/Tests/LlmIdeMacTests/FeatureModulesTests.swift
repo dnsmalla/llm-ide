@@ -58,11 +58,17 @@ final class FeatureModulesTests: XCTestCase {
         let spy = SpyService()
         let module = MobileModule(
             manager: spy, controlEnabled: { true }, autoStart: { false })
-        XCTAssertTrue(module.runtimeReady)
+        XCTAssertTrue(module.runtimeReady)  // default: registry tracks the feature flag alone
         module.start()
         XCTAssertEqual(spy.startCount, 0)   // autoStart off → no server launch
         module.stop()
         XCTAssertEqual(spy.stopCount, 1)    // stop always stops the server
+
+        let disabled = MobileModule(
+            manager: spy, controlEnabled: { false }, autoStart: { true })
+        XCTAssertTrue(disabled.runtimeReady)
+        disabled.start()
+        XCTAssertEqual(spy.startCount, 0)   // control disabled → no server launch
     }
 
     func testPassiveModuleCoversViewOnlyFeatures() {

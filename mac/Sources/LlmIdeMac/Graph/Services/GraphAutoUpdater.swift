@@ -106,6 +106,9 @@ final class GraphAutoUpdater: ObservableObject {
         observer = nil
         watcher?.stop()
         watcher = nil
+        // stop() must undo start()'s effects so a later start() re-arms the
+        // watcher via ensureWatcher's `target == watchedRoot` early-return.
+        watchedRoot = nil
         started = false
     }
 
