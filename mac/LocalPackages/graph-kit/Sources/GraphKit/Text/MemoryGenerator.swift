@@ -1,6 +1,7 @@
 // Walks a folder of .md / .txt / .mdx files and generates "memory chunks"
 // — heading-bounded sections of text. Each chunk becomes a graph node;
-// chunks within the same doc are linked via `partOf` to a doc node;
+// a doc node `contains` each of its chunks (parent→child, as the code
+// track does file→symbol);
 // chunks that whole-word mention another chunk's title are linked via
 // `references`. Intended as a lightweight, dependency-free first pass at
 // an InfiniteBrain-style memory layer. v1: no LLM, no embeddings.
@@ -64,7 +65,21 @@ public enum MemoryGenerator {
                         "type": chunk.kind.displayName
                     ]
                 ))
-edges.append(CGEdge(fromId: chunk.id, toId: docID, kind: .relatedTo))
+                // Containment, typed as containment and pointing parent→child —
+                // matching `StructureGraphBuilder`'s file→symbol convention (and
+                // the direction `FileClassifier.strippingDocNodes` assumes).
+                //
+                // This was `chunk → doc` with kind `.relatedTo`, which was wrong
+                // three ways: it inverted the hierarchy relative to the code
+                // track, and it made a document's backbone indistinguishable
+                // from the noisy title-match guesses that share that kind — so
+                // any consumer ranking or filtering edges by strength dropped
+                // the one edge that says which document a section belongs to,
+                // shattering the doc graph into isolated chunks. The header
+                // comment always claimed `partOf`; nothing consumed the old
+                // kind or direction.
+                edges.append(CGEdge(fromId: docID, toId: chunk.id,
+                                    kind: .contains, confidence: .extracted))
             }
         }
 
