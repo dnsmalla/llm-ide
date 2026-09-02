@@ -497,6 +497,32 @@ Design rationale lives in [Loop Engineering](loop-engineering.md); this is the o
 
 ---
 
+## Auto Task settings + prompt templates (`mac/Sources/LlmIdeMac/{Models,Services,Views}/AutoCode/`)
+
+### ✅ MUST preserve
+
+- **An unconfigured task composes to its own prompt with nothing added.** `AutoTaskPromptComposer.compose` adds a skill directive or a `--- PATHS ---` block only for settings that are actually set, and `AutoCodeUpdateService.composedPrompt` falls back to the task's own prompt when no template is selected. (It does whitespace-trim the body and substitute `{{PROJECT_ROOT}}`, neither of which changes any shipped prompt.) Every task ran an unmodified prompt before this feature existed; anything unconditionally prepended changes the behaviour of every scheduled run for users who never opened the Settings card.
+- **A `templateId` that no longer resolves falls back to the own prompt.** A template deleted on disk, or a project closed mid-schedule, must not compose to an empty prompt — a scheduled task would then silently become a no-op the user only discovers in a log.
+- **Task settings are scoped BY PROJECT, and so are template drafts.** A config's `templateId` is a filename stem in that project's `templates/auto_task/`, and every project is seeded with the SAME starter slugs (`review-code`, …). A global bucket would resolve `review-code` against whichever project is open — running a prompt written for a different repo, silently. The project-relative input/output paths have the same problem. `AutoTaskConfigStore.bindProject(id:)` and `AutoTaskTemplateStore.bindProject(root:)` are what keep the two in step; `retargetTemplate` is likewise scoped, so renaming one project's template cannot repoint another's tasks.
+- **`AppShell.reloadDocTemplatesForActiveProject` is the ONLY caller of either `bindProject`.** Both the config store and the template store are bound there, from the same `.onReceive(.activeProjectChanged)` + `.task(id:)` pair, which is what guarantees they never disagree about which project is open. Nothing in the runner or the mobile bridge binds a scope of its own, so an Auto Task surface hosted outside `AppShell` would silently read the `__no_project__` bucket. Safe today (the scheduler's first tick is a minute after `start()`, called from the same phase), but it is an implicit coupling: a new host must bind, not assume.
+- **The unsaved template draft lives in the store, not in the editor's `@State`.** The Auto Task detail pane reuses ONE view tree across tasks, so view state does not survive a sidebar click: a half-written prompt was discarded on task switch, and leaked into the next task's card when both used the same template. A draft belongs to the template and is cleared only by a save or an explicit Revert — including across a rename, which carries it to the new id.
+- **`AutoTaskTemplate.normalizedBody` is the one canonical body form, applied by BOTH `render` and `parse`.** Editors must compare against it. Pressing Return at the end of a prompt is an ordinary `TextEditor` habit; with a one-sided trim the save succeeds but the draft stays one newline longer than the stored body, so the card reads "Unsaved" and Save stays lit forever.
+- **Input/output paths are validated to be inside the project, in the composer.** `AutoTaskPromptComposer.absolutePath` returns nil for an absolute path, a `~`, or a `..` that escapes the root. The Mac picker cannot produce those, but the paired iPhone can send any string, and a `.implement` task is told to write to whatever comes back — outside the `fix/custom-…` branch nothing is recoverable through git.
+- **Renaming a template repoints the configs that referenced it.** The id IS the filename stem, so a rename moves the file and changes the id; `AutoTaskTemplateStore.rename` fires `onTemplateIdChanged`, wired in `LlmIdeMacApp` to `AutoTaskConfigStore.retargetTemplate`. Without that wiring every task using the template silently drops back to its built-in prompt.
+- **Seeding happens only when `templates/auto_task/` does not exist.** An empty folder is a user who deleted every prompt; re-seeding on the next project open would resurrect them. This is not the `LoopTemplate` rule above — these seeds are *meant* to be edited, and the un-frozen built-in prompts stay reachable through the picker's "Built-in prompt" row plus Restore Default, so an improved default still reaches everyone.
+- **Saving a template body is explicit, not per-keystroke.** The file is shared by every task that selects it; a half-typed prompt must not become what tonight's scheduled runs execute.
+- **The skill list comes from the project's `.claude/skills/`, not the server catalog.** An Auto Task runs the AI CLI as a subprocess, so the only skills it can invoke are the ones the CLI discovers on disk. The server's `/kb/agent/catalog` lists the agent loop's own tools, which that subprocess never sees.
+- **Paths are stored project-relative and resolved at run time.** A project can move on disk; an absolute path stored in UserDefaults cannot follow it.
+- **Every mobile setup mutation replies with a whole fresh `AutoTaskSetupReply`, never an ack.** A rename changes ids and repoints other tasks' configs, so an ack would leave the phone holding state the Mac has already moved past.
+
+### ❌ DO NOT do these
+
+- **Do NOT tell a read-only task to write files.** `compose(writesFiles:)` must match the `persistChanges:` its caller passes to `runCLI`. A review task's tree is reverted afterwards, so a write directive both wastes the run and — for an output path outside the git root, which the clone-into-project layout produces whenever `projectRoot != gitRoot` — leaves files the revert never reaches.
+- **Do NOT surface `templates/auto_task/` in the Doc Gen template scan.** `DocTemplateStore.scanProjectTemplates` skips the folder by name; without it, whichever prompt sorts first appears as a bogus document template.
+- **Do NOT offer Settings/Template cards on structural tasks.** Regression, Knowledge, Update Plan Status, and the pipeline tasks run no prompt, so every control there would be one that does nothing.
+
+---
+
 ## Code Graph layout (`mac/LocalPackages/graph-kit/Sources/GraphCore/Layout/`)
 
 The Graph view showed "sometimes a circle, sometimes a round blob" for a long

@@ -7,6 +7,20 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Added
 
+- Auto Task per-task settings and prompt templates. Each prompt-driven task's
+  detail pane now has a **Settings** card (input path, output path, agent skill
+  — paths picked from the project's Library folders and stored project-relative)
+  and a **Template** card that selects, edits, renames, duplicates, and deletes
+  reusable prompts stored as markdown in `<project>/templates/auto_task/`. An
+  **Effective prompt** card shows exactly what the run will send. Cron and log
+  sections are unchanged. Templates support `{{INPUT_PATH}}`, `{{OUTPUT_PATH}}`,
+  and `{{PROJECT_ROOT}}`. An unconfigured task composes to exactly its previous
+  prompt, so the feature is inert until used.
+- iPhone control of the above: the Auto Tasks screen's per-task ⚙ opens the same
+  settings, and templates can be created, edited, renamed, and deleted from the
+  phone. New `auto_task_setup_*` / `auto_task_config_set` /
+  `auto_task_template_*` wire messages; the Mac stays the source of truth and
+  answers every mutation with a fresh snapshot.
 - SCIP code-graph ingestion: `POST /kb/ingest-scip` consumes a Sourcegraph `.scip`
   index (via the local `scip` CLI) into per-user symbol FTS rows + a node/edge graph,
   giving code-sync compiler-derived relationship grounding. Server API version 21.

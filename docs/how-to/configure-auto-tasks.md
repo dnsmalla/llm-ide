@@ -100,6 +100,101 @@ In **Settings → Auto Tasks → Run automatically**, enable the tasks you want:
 - **Auto-reopen regressed faults** — Flag issues that re-broke
 - **Verify timeout (seconds)** — Max time per test verification (default 120s)
 
+## Per-Task Settings
+
+Selecting a task on the Auto Tasks page opens its detail pane, which is divided
+into four cards: **Settings**, **Template**, **Effective prompt**, and the live
+**Log**. The schedule (cron) sits next to the Run button at the top.
+
+Settings and Template appear only for tasks that run a prompt (Review Code,
+Review Doc, Review Conflicts, Generate Documentation, Update Issues, and any
+custom task). Structural tasks such as Regression and Knowledge run fixed
+pipelines rather than a prompt, so they show their own configuration instead.
+
+### Input and output paths
+
+| Field | Meaning |
+|:--|:--|
+| **Input path** | The folder the task should read. Empty means the whole project. |
+| **Output path** | The folder the task should write into. Empty leaves the choice to the task. |
+
+Both are chosen from the project's Library folders (`source/`, `code/`,
+`data/`, `llm-doc/` and their subfolders) via **Choose…**, or typed by hand —
+useful for an output folder that does not exist yet. They are stored relative
+to the project, so moving the project on disk does not break them, and a path
+that points outside the project is rejected.
+
+Review tasks are read-only by design: their working-tree changes are reverted
+after the run and their findings go to the log. For those tasks the output path
+is passed as the *intended destination* — the run describes what it would write
+there rather than creating files that would be deleted seconds later. Only a
+custom task in **Implement** mode actually writes, on its own `fix/custom-*`
+branch.
+
+Settings are per project. The same task in two projects keeps two independent
+sets of paths, skills, and template choices.
+
+### Skill
+
+Picks an agent skill from the open project's `.claude/skills/` — the same
+central kit `install-skills.sh` installs. The prompt is then prefixed with
+`Use the <name> skill:`, which is how the AI CLI invokes a skill. If the list is
+empty, the project has no skills installed yet; rebuild the project or see
+[Install central skills](install-central-skills.md).
+
+### Templates
+
+A template is a reusable prompt — what the task should actually do — saved as a
+markdown file in `<project>/templates/auto_task/<slug>.md`:
+
+```markdown
+---
+name: "Nightly API Review"
+---
+
+Audit every endpoint in {{INPUT_PATH}} for missing authentication checks
+and write one report per endpoint into {{OUTPUT_PATH}}.
+```
+
+The Template card's picker chooses between the task's own prompt (the built-in
+one, or a custom task's inline text) and any saved template. Because a template
+is a file, several tasks can share one and it travels with the repo.
+
+From the card you can create (**New…**), edit and **Save**, **Rename**,
+**Duplicate**, and **Delete** templates. Renaming moves the file, and every task
+that referenced the old name is repointed automatically.
+
+The first time a project opens, `templates/auto_task/` is seeded with the five
+built-in review prompts so there is something to start from. If you delete them
+all, they stay deleted.
+
+#### Placeholders
+
+| Placeholder | Replaced with |
+|:--|:--|
+| `{{INPUT_PATH}}` | The absolute input path |
+| `{{OUTPUT_PATH}}` | The absolute output path |
+| `{{PROJECT_ROOT}}` | The project's absolute root |
+
+A path referenced through a placeholder is not repeated in the prompt's header
+block; a path that is configured but never referenced is announced there, so it
+still reaches the model.
+
+### Effective prompt
+
+Expanding this card shows exactly what the task will send to the CLI — the
+selected template with the skill directive and resolved paths applied. It is
+composed by the same code the runner uses, so it cannot drift from the real
+thing.
+
+### From the iPhone
+
+The companion app mirrors this surface. On the **Auto Tasks** screen, tap the
+slider icon on any task row to set its paths, skill, and template, and to
+create, edit, rename, or delete templates. The Mac remains the executor and the
+source of truth: every change is a request, and the Mac's reply is what the
+phone displays.
+
 ## Understanding Lookback Modes
 
 Auto Tasks need to know which meetings to scan for action items.
