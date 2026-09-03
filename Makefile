@@ -58,12 +58,13 @@ build-mac: ## Build the full mac app
 build-mac-lite: ## non-engineer build: no Explorer/Gantt/DocGen/Terminal/Graph
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat,auto_tasks,mobile_sync swift build --manifest-cache none
 
-# Same rationale as build-mac-lite, one step further: drops auto_tasks too
-# (excludes the AutoTask/ and LoopEngine/ source folders — see Package.swift's
-# `auto_tasks` key), keeping only the two features with no source-exclusion
-# switch. --manifest-cache none for the same reason as build-mac-lite.
-build-mac-min: ## Non-engineer minimum: Chat + Mobile only (no AutoTask/Loop/Graph/view features)
-	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat,mobile_sync swift build --manifest-cache none
+# Same rationale as build-mac-lite, two steps further: drops auto_tasks AND
+# mobile_sync too (excludes AutoTask/, LoopEngine/, and the Mobile Control
+# file-level unit — see Package.swift's `auto_tasks`/`mobile_sync` keys),
+# keeping only the one feature with no source-exclusion switch (agent_chat) —
+# the true minimum. --manifest-cache none for the same reason as build-mac-lite.
+build-mac-min: ## Non-engineer minimum: Chat only (no Mobile/AutoTask/Loop/Graph/view features)
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat swift build --manifest-cache none
 
 test-mac:
 	cd mac && swift build --product LlmIdeMac

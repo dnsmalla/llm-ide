@@ -20,6 +20,7 @@ let includedFeatures: Set<String> = envFeatures.map {
     Set($0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
 } ?? [   // unset → everything (list each excludable key here)
     "code_graph_3d", "file_explorer", "gantt_issues", "doc_gen", "terminal", "auto_tasks",
+    "mobile_sync",
 ]
 
 let graphIncluded = includedFeatures.contains("code_graph_3d")
@@ -28,6 +29,7 @@ let ganttIncluded = includedFeatures.contains("gantt_issues")
 let docGenIncluded = includedFeatures.contains("doc_gen")
 let terminalIncluded = includedFeatures.contains("terminal")
 let autoTasksIncluded = includedFeatures.contains("auto_tasks")
+let mobileIncluded = includedFeatures.contains("mobile_sync")
 
 var libExcludes: [String] = []
 var testExcludes: [String] = ["README-truncated-tests.md"]
@@ -119,12 +121,59 @@ if autoTasksIncluded {
         "TaskLogStoreTests.swift",
     ])
 }
-// TEMP(Phase2d-Task3): unconditional until `mobile_sync` gets its own
-// LLMIDE_FEATURES key + libExcludes/testExcludes entries (Task 3). For now
-// FEATURE_MOBILE is always defined so FeatureCatalog's `#if FEATURE_MOBILE`
-// seams (Task 1) compile and behave exactly like today's always-on Mobile
-// Control, with no build-time exclusion yet.
-featureDefines.append(.define("FEATURE_MOBILE"))
+if mobileIncluded {
+    featureDefines.append(.define("FEATURE_MOBILE"))
+} else {
+    // File-level excludes (not a single folder): Mobile Control's 15-file
+    // unit is scattered across Services/, Views/Settings/, Chat/,
+    // AutoTask/Services/, and LoopEngine/Services/ (see the plan's Verified
+    // facts — the 16th file counted in the audit, Services/MobileFeatureBridge.swift,
+    // is the seam PROTOCOL and stays core). The two bridge files below live
+    // inside folders `auto_tasks` already excludes wholesale (AutoTask/,
+    // LoopEngine/) when it is off — only append them here when auto_tasks
+    // IS included, so a file-level exclude never overlaps an already-excluded
+    // parent folder.
+    libExcludes.append(contentsOf: [
+        "Services/MobileControlManager.swift",
+        "Services/MobileWebSocketServer.swift",
+        "Services/MobileBonjourAdvertiser.swift",
+        "Services/MobilePin.swift",
+        "Services/MobileConnectionInfo.swift",
+        "Services/MobileModule.swift",
+        "Services/MobileExploreBridge.swift",
+        "Services/MobileExploreIndexStore.swift",
+        "Services/MobileSkillCatalog.swift",
+        "Services/MobileWorkspaceSearch.swift",
+        "Services/PairingThrottle.swift",
+        "Views/Settings/MobileControlSettingsSection.swift",
+        "Chat/ExplorerMobileEngineResolver.swift",
+    ])
+    if autoTasksIncluded {
+        libExcludes.append(contentsOf: [
+            "AutoTask/Services/MobileAutoTaskBridge.swift",
+            "LoopEngine/Services/MobileLoopBridge.swift",
+        ])
+    }
+    let mobileTestExcludes: Set<String> = [
+        "MobilePairingFrameTests.swift",
+        "MobileWebSocketServerBindTests.swift",
+        "MobileWebSocketServerRebindTests.swift",
+        "MobileWebSocketServerRoutingTests.swift",
+        "MobileControlPortTests.swift",
+        "MobileFeatureBridgeTests.swift",
+        "PairingThrottleTests.swift",
+        "MobileExploreIndexStoreTests.swift",
+        "MobileLoopStateTests.swift",   // also in auto_tasks's list — dedupe below
+        "ExplorerMobileEngineResolverTests.swift",
+        "MobileModuleTests.swift",
+    ]
+    // Dedupe against auto_tasks's testExcludes (MobileLoopStateTests can
+    // appear in both when auto_tasks is also excluded) — SwiftPM does not
+    // tolerate duplicate exclude entries.
+    for name in mobileTestExcludes where !testExcludes.contains(name) {
+        testExcludes.append(name)
+    }
+}
 
 // GraphCore/GraphKit are only imported from within Sources/LlmIdeMac/Graph/
 // (verified in Task 1 Step 1: Services/Memory has zero GraphCore imports, and
@@ -132,11 +181,23 @@ featureDefines.append(.define("FEATURE_MOBILE"))
 // moved INTO Graph/ by Task 1). So when Graph is excluded, neither product is
 // referenced anywhere in the target and both can be dropped from the
 // dependency list.
+// SharedProtocol (the mac↔iOS wire-format package) is imported ONLY from
+// within the Mobile Control unit (verified: `grep -rln "import SharedProtocol"
+// mac/Sources/LlmIdeMac --include="*.swift"` — every hit is one of the 15
+// mobile_sync unit files: LoopEngine/Services/MobileLoopBridge.swift,
+// Services/MobileBonjourAdvertiser.swift, Services/MobileExploreBridge.swift,
+// Services/MobileSkillCatalog.swift, Services/MobileControlManager.swift,
+// Services/MobileExploreIndexStore.swift, Services/MobileWorkspaceSearch.swift,
+// Services/MobileWebSocketServer.swift, AutoTask/Services/MobileAutoTaskBridge.swift).
+// So the product can be dropped from the dependency list entirely when
+// mobile_sync is excluded, same UNPLUG-style gating as GraphCore/GraphKit below.
 var libDependencies: [Target.Dependency] = [
     "Yams",
     .product(name: "Sparkle", package: "Sparkle"),
-    .product(name: "SharedProtocol", package: "SharedProtocol"),
 ]
+if mobileIncluded {
+    libDependencies.append(.product(name: "SharedProtocol", package: "SharedProtocol"))
+}
 if terminalIncluded {
     libDependencies.append(.product(name: "SwiftTerm", package: "SwiftTerm"))
 }
