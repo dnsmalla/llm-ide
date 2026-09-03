@@ -289,18 +289,6 @@ final class SourceControlService {
         return GitLog.parse(out)
     }
 
-    /// Unified diff for a single commit. `--format=` suppresses the commit
-    /// header so only the diff body is parsed. Returns [] on error.
-    ///
-    /// Currently has NO caller: History mode browses a commit one file at a
-    /// time (`commitFiles` + `commitFileHunks`) instead of rendering a whole
-    /// multi-file commit as one blob. Kept as the whole-commit primitive.
-    func commitDiff(root: URL, sha: String) async -> [DiffHunk] {
-        guard let raw = try? await repo.runGit(["show", "--format=", sha], at: root)
-        else { return [] }
-        return UnifiedDiffParser.parse(raw)
-    }
-
     /// Repo-relative paths touched by `sha`, for History mode's per-file
     /// browse — replaces trying to render an entire multi-file commit
     /// through a single-file diff view.
