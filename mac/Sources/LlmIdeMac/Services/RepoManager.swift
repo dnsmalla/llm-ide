@@ -430,7 +430,7 @@ final class RepoManager {
                 // credential-prompt hole from the other side.
                 proc.environment = Self.gitEnv(token: token, backend: backend)
                 let stdinPipe = Pipe()
-                if let stdin {
+                if stdin != nil {
                     proc.standardInput = stdinPipe
                 } else {
                     proc.standardInput = FileHandle.nullDevice
