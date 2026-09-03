@@ -135,6 +135,32 @@ extension Theme {
         case .data:             return categoryPurple
         }
     }
+
+    // MARK: - Diff / git / editor tokens
+    //
+    // Derived from the existing semantic aliases, not new literals: this is
+    // what keeps them theme-correct (Dark/Light/Midnight all agree with the
+    // rest of the app's palette) without touching the three `static let`
+    // palette definitions above. Views must read these — never raw
+    // `Color.green`/`.red`/`.orange` — the rule `Theme.swift`'s own header
+    // comment already states for `success`/`warning`/`info`.
+
+    var diffAddedFg: Color { success }
+    var diffAddedBg: Color { success.opacity(0.16) }
+    var diffDeletedFg: Color { danger }
+    var diffDeletedBg: Color { danger.opacity(0.16) }
+    var diffModifiedBg: Color { info.opacity(0.16) }
+    /// Word-level (intra-line) diff highlight, used by the Monaco diff editor.
+    var diffWordHighlight: Color { warning.opacity(0.35) }
+
+    // Editor gutter marks (added/modified/deleted line markers).
+    var gutterAddedMark: Color { success }
+    var gutterModifiedMark: Color { info }
+    var gutterDeletedMark: Color { danger }
+
+    // Monaco theme base colors.
+    var editorBackground: Color { body }
+    var editorLineNumber: Color { textMuted }
 }
 
 /// Convenience wrapper so views can read the active theme via
