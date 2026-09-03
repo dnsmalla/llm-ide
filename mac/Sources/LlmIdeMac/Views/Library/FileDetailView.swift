@@ -191,6 +191,7 @@ struct CodeDetailView: View {
     @EnvironmentObject private var projectStore: ProjectStore
 
     @State private var changedLines: [Int: GitGutter.Mark] = [:]
+    @State private var gitTruthStore = GitTruthStore()
 
     var body: some View {
         EditableTextDetailView(
@@ -206,7 +207,10 @@ struct CodeDetailView: View {
         .task(id: url) { await refreshGutter() }
     }
 
-    /// Compute git change markers for `url`'s containing repo. No-op (empty
+    /// Compute git change markers for `url`'s containing repo via
+    /// `GitTruthStore` (design §7's data flow: `refresh` populates
+    /// `byPath` so `lineMarks` can tell an untracked/new file — which has
+    /// no HEAD blob to diff — from a normally-diffable one). No-op (empty
     /// map) when the file isn't inside a git repo — never blocks the editor.
     @MainActor
     private func refreshGutter() async {
@@ -216,11 +220,8 @@ struct CodeDetailView: View {
             return
         }
         let relPath = Self.relativePath(of: url, inside: repo)
-        let manager = RepoManager()
-        let marks = await GitGutter.changedLines(repo: repo, filePath: relPath) { args, cwd in
-            try await manager.runGit(args, at: cwd)
-        }
-        changedLines = marks
+        await gitTruthStore.refresh(root: repo)
+        changedLines = await gitTruthStore.lineMarks(root: repo, path: relPath)
     }
 
     /// Resolve the git repo that contains `url`: prefer `preferred` when the
