@@ -19,7 +19,18 @@ struct SourceControlView: View {
     /// not through `SourceControlService` — the service only knows whole-file
     /// `add`/`restore`.
     @State private var gitTruthStore = GitTruthStore()
+    /// Every file the user has selected, for BULK actions on the list
+    /// (context-menu stage/unstage). Multi-select never means "show several
+    /// diffs" — the right pane still shows exactly one file, per Task 7's
+    /// `MonacoDiffView` design.
+    @State private var selectedFiles: Set<FileChange> = []
+    /// The single file whose diff the right pane shows: the most recently
+    /// clicked one, independent of how many are in `selectedFiles`.
     @State private var selected: FileChange?
+    /// Focus for the changes list, so ↑/↓ move the file selection ONLY while
+    /// the list itself has focus — arrowing inside the commit-message field
+    /// must not walk the list.
+    @FocusState private var fileListFocused: Bool
     @State private var hunks: [DiffHunk] = []
     /// Full old/new text behind the right pane's `MonacoDiffView`. Monaco's
     /// diff editor computes its own word-level diff from full text and never
@@ -322,6 +333,7 @@ struct SourceControlView: View {
             // Clear any selection carried over from a previous repo.
             selectedCommit = nil
             selected = nil
+            selectedFiles = []
             commitFilesTask?.cancel()
             commitFiles = []
             selectedCommitFile = nil
@@ -348,6 +360,10 @@ struct SourceControlView: View {
             // In History mode the right pane shows a commit diff; don't let a
             // status refresh clobber it.
             guard mode == .changes else { return }
+            // Staging a file moves its row between the two groups, producing
+            // a DIFFERENT `FileChange`; drop members that no longer exist so
+            // a ghost can't linger as an invisible bulk-action target.
+            selectedFiles.formIntersection(files)
             guard let sel = selected else { clearDiff(); return }
             guard let root else { return }
             // Prefer the unstaged copy; fall back to staged (e.g. freshly staged file)
@@ -371,6 +387,7 @@ struct SourceControlView: View {
             clearDiff()
             if new == .history {
                 selected = nil
+                selectedFiles = []
                 if let root { Task { commits = await scm.log(root: root) } }
             } else {
                 selectedCommit = nil
@@ -504,6 +521,20 @@ struct SourceControlView: View {
                     errorBanner()
                     fileGroup("Staged Changes", scm.stagedFiles, root, showUnstageAll: true)
                     fileGroup("Changes", scm.unstagedFiles, root, showStageAll: true)
+                }
+                // The changes list is a hand-built ScrollView + ForEach, not
+                // a `List(selection:)`, so arrow keys have to be wired
+                // explicitly. `onMoveCommand` is the AppKit-backed hook and
+                // fires only while this view holds focus, so it cannot
+                // swallow arrows meant for the commit-message field below.
+                .focusable()
+                .focused($fileListFocused)
+                .onMoveCommand { direction in
+                    switch direction {
+                    case .up:   moveSelection(-1)
+                    case .down: moveSelection(1)
+                    default:    break        // ←/→ have no meaning in a flat list
+                    }
                 }
                 Divider().background(theme.current.border)
                 commitBox(root)
@@ -773,6 +804,114 @@ struct SourceControlView: View {
         }
     }
 
+    // MARK: - Changes-list selection
+
+    /// Every file in the order the two `fileGroup`s render them — staged
+    /// first, then unstaged — so ↑/↓ walk the list the way it looks on
+    /// screen, crossing the group boundary.
+    private var filesInDisplayOrder: [FileChange] {
+        scm.stagedFiles + scm.unstagedFiles
+    }
+
+    /// Resolves a ⇧-click range between `file` and `anchor`, scoped to
+    /// whichever single group (staged or unstaged) both belong to. nil when
+    /// they're in DIFFERENT groups: those render as two separate lists, so a
+    /// range spanning both has no meaning on screen.
+    private func fileGroupFiles(containing file: FileChange, and anchor: FileChange) -> [FileChange]? {
+        for list in [scm.stagedFiles, scm.unstagedFiles] {
+            guard let iFile = list.firstIndex(of: file),
+                  let iAnchor = list.firstIndex(of: anchor) else { continue }
+            let range = iFile < iAnchor ? iFile...iAnchor : iAnchor...iFile
+            return Array(list[range])
+        }
+        return nil
+    }
+
+    /// Handle a click on `file`: ⌘ toggles membership, ⇧ extends from the
+    /// last-clicked anchor within one group, a plain click replaces the
+    /// selection. The clicked file always becomes the diff-pane selection,
+    /// and the click takes focus so ↑/↓ work immediately afterwards.
+    private func selectFile(_ file: FileChange) {
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.command) {
+            if selectedFiles.contains(file) { selectedFiles.remove(file) }
+            else { selectedFiles.insert(file) }
+        } else if flags.contains(.shift), let anchor = selected,
+                  let range = fileGroupFiles(containing: file, and: anchor) {
+            selectedFiles.formUnion(range)
+        } else {
+            selectedFiles = [file]
+        }
+        selected = file
+        fileListFocused = true
+    }
+
+    /// Move the diff-pane selection one row up (-1) or down (+1). Clamps at
+    /// both ends rather than wrapping, matching Finder/Xcode list behavior.
+    private func moveSelection(_ delta: Int) {
+        let files = filesInDisplayOrder
+        guard !files.isEmpty else { return }
+        guard let current = selected, let idx = files.firstIndex(of: current) else {
+            // Nothing selected yet: either arrow key lands on the first row.
+            selected = files[0]
+            selectedFiles = [files[0]]
+            return
+        }
+        let file = files[min(max(idx + delta, 0), files.count - 1)]
+        selected = file
+        selectedFiles = [file]
+    }
+
+    /// Row background. The diff-shown file keeps EXACTLY the wash it had
+    /// before multi-select existed; the rest of a multi-selection gets a
+    /// lighter one so a ⌘/⇧-click is visible at all — without that,
+    /// multi-select would be invisible on screen and the context menu's
+    /// "Stage 3 Files" would appear out of nowhere.
+    private func rowBackground(_ file: FileChange) -> Color {
+        if selected == file { return theme.current.accent.opacity(0.12) }
+        if selectedFiles.contains(file) { return theme.current.accent.opacity(0.06) }
+        return .clear
+    }
+
+    /// Right-click menu for a file row: a second entry point to the actions
+    /// the row's own buttons already offer, plus the two path utilities.
+    ///
+    /// Bulk stage/unstage applies to the whole selection when the clicked row
+    /// is part of it, filtered to the rows the action actually fits — a
+    /// selection spanning both groups would otherwise let "Unstage 3 Files"
+    /// run `unstage` over files that were never staged.
+    ///
+    /// Discard stays SINGLE-file: `confirmDiscard` presents a dialog naming
+    /// one file, and this task does not extend it. A "Discard (3 Files)"
+    /// label over a one-file dialog would misdescribe a destructive action.
+    @ViewBuilder
+    private func contextMenuItems(for file: FileChange) -> some View {
+        let selection = selectedFiles.contains(file) ? Array(selectedFiles) : [file]
+        let targets = selection.filter { $0.staged == file.staged }
+        let suffix = targets.count > 1 ? " \(targets.count) Files" : ""
+        if file.staged {
+            Button("Unstage\(suffix)") {
+                guard let root else { return }
+                Task { for target in targets { await scm.unstage(root: root, path: target.path) } }
+            }
+        } else {
+            Button("Stage\(suffix)") {
+                guard let root else { return }
+                Task { for target in targets { await scm.stage(root: root, path: target.path) } }
+            }
+            Button("Discard Changes", role: .destructive) { confirmDiscard = file }
+        }
+        Divider()
+        Button("Copy Path") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(file.path, forType: .string)
+        }
+        Button("Reveal in Finder") {
+            guard let root else { return }
+            NSWorkspace.shared.activateFileViewerSelecting([root.appendingPathComponent(file.path)])
+        }
+    }
+
     private func fileRow(_ file: FileChange, _ root: URL) -> some View {
         HStack(spacing: Spacing.xs) {
             Text(badge(file.status)).font(.system(size: 11, weight: .bold, design: .monospaced))
@@ -793,9 +932,10 @@ struct SourceControlView: View {
             }
         }
         .padding(.horizontal, Spacing.md).padding(.vertical, 3)
-        .background(selected == file ? theme.current.accent.opacity(0.12) : .clear)
+        .background(rowBackground(file))
         .contentShape(Rectangle())
-        .onTapGesture { selected = file }
+        .onTapGesture { selectFile(file) }
+        .contextMenu { contextMenuItems(for: file) }
     }
 
     private func commitBox(_ root: URL) -> some View {
