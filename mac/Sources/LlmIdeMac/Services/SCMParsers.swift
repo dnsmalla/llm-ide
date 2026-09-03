@@ -12,8 +12,16 @@ enum StatusParser {
             let chars = Array(line)
             let x = chars[0], y = chars[1]
             var pathPart = String(chars[3...]).trimmingCharacters(in: .whitespaces)
-            // Rename: "old -> new" — keep the new path.
+            // Rename: "old -> new". Keep the new path as `pathPart` and, no
+            // longer discarding the old one, feed `FileChange.renamedFrom`
+            // below so the changes list can show "old → new".
+            //
+            // Each side is quoted INDEPENDENTLY by git (`R  norm.txt ->
+            // "plain new.txt"` is real output), so both go through
+            // `unquote` separately rather than unquoting the joined string.
+            var oldPathPart: String?
             if let r = pathPart.range(of: " -> ") {
+                oldPathPart = unquote(String(pathPart[..<r.lowerBound]))
                 pathPart = String(pathPart[r.upperBound...])
             }
             pathPart = unquote(pathPart)
@@ -26,8 +34,19 @@ enum StatusParser {
                 out.append(FileChange(path: pathPart, status: .conflicted, staged: false))
                 continue
             }
-            if x != " " { out.append(FileChange(path: pathPart, status: status(for: x), staged: true)) }
-            if y != " " { out.append(FileChange(path: pathPart, status: status(for: y), staged: false)) }
+            // `renamedFrom` rides only on the side whose status is actually
+            // `.renamed`. A "RM" line means renamed in the index AND
+            // modified in the worktree: the staged row is the rename, the
+            // unstaged row is an ordinary modification OF THE NEW PATH, and
+            // tagging it "old → new" too would claim a rename that side
+            // doesn't describe.
+            func change(_ code: Character, staged: Bool) -> FileChange {
+                let status = status(for: code)
+                return FileChange(path: pathPart, status: status, staged: staged,
+                                  renamedFrom: status == .renamed ? oldPathPart : nil)
+            }
+            if x != " " { out.append(change(x, staged: true)) }
+            if y != " " { out.append(change(y, staged: false)) }
         }
         return out
     }

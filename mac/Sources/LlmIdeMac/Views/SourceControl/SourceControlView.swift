@@ -777,7 +777,10 @@ struct SourceControlView: View {
         HStack(spacing: Spacing.xs) {
             Text(badge(file.status)).font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(color(file.status)).frame(width: 14)
-            Text(file.displayPath).font(Typography.caption).lineLimit(1).truncationMode(.middle)
+            // A rename shows where the file CAME FROM as well as where it
+            // is now; every other status has nothing to prepend.
+            Text(file.renamedFrom.map { "\($0) → \(file.displayPath)" } ?? file.displayPath)
+                .font(Typography.caption).lineLimit(1).truncationMode(.middle)
             Spacer()
             if file.staged {
                 Button { Task { await scm.unstage(root: root, path: file.path) } } label: {

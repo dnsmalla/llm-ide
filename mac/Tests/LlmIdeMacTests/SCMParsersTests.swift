@@ -51,9 +51,46 @@ final class SCMParsersTests: XCTestCase {
         XCTAssertEqual(changes, [FileChange(path: "link.txt", status: .modified, staged: true)])
     }
 
-    func testRenameKeepsNewPath() {
+    /// `path` is the NEW path, and the old one is retained in
+    /// `renamedFrom` rather than discarded — the changes list renders
+    /// "old → new" from it.
+    func testRenameKeepsNewPathAndRetainsTheOldOne() {
         let changes = StatusParser.parse(porcelain: "R  old.txt -> new.txt")
-        XCTAssertEqual(changes, [FileChange(path: "new.txt", status: .renamed, staged: true)])
+        XCTAssertEqual(changes, [FileChange(path: "new.txt", status: .renamed, staged: true,
+                                            renamedFrom: "old.txt")])
+    }
+
+    func testNonRenameHasNilRenamedFrom() {
+        XCTAssertNil(StatusParser.parse(porcelain: " M path.txt").first?.renamedFrom)
+    }
+
+    /// git quotes each side of the arrow INDEPENDENTLY — `R  norm.txt ->
+    /// "plain new.txt"` is verbatim real output — so both sides have to be
+    /// unquoted separately, not as one joined string.
+    func testRenameUnquotesEachSideIndependently() {
+        let changes = StatusParser.parse(porcelain: "R  norm.txt -> \"plain new.txt\"")
+        XCTAssertEqual(changes, [FileChange(path: "plain new.txt", status: .renamed, staged: true,
+                                            renamedFrom: "norm.txt")])
+    }
+
+    /// A rename of a Japanese-named file: both sides arrive octal-escaped
+    /// and both must decode, or the row reads "\346… → \346…".
+    func testRenameOfNonASCIIPathsDecodesBothSides() {
+        let porcelain = "R  \"\\350\\250\\255\\350\\250\\210.txt\" -> \"\\346\\226\\260\\350\\250\\255\\350\\250\\210.txt\""
+        XCTAssertEqual(StatusParser.parse(porcelain: porcelain),
+                       [FileChange(path: "新設計.txt", status: .renamed, staged: true,
+                                   renamedFrom: "設計.txt")])
+    }
+
+    /// "RM" = renamed in the index, modified in the worktree. Only the
+    /// staged row describes the rename; the unstaged row is an ordinary
+    /// modification of the NEW path and must not claim `renamedFrom`.
+    func testRenamePlusWorktreeModificationTagsOnlyTheStagedSide() {
+        let changes = StatusParser.parse(porcelain: "RM old.txt -> new.txt")
+        XCTAssertEqual(changes, [
+            FileChange(path: "new.txt", status: .renamed, staged: true, renamedFrom: "old.txt"),
+            FileChange(path: "new.txt", status: .modified, staged: false),
+        ])
     }
 
     func testQuotedPathIsUnquoted() {

@@ -5,7 +5,21 @@ struct FileChange: Identifiable, Hashable {
     var path: String          // repo-relative; for renames, the new path
     var status: Status
     var staged: Bool
+    /// The pre-rename path, when `status == .renamed`; nil for every other
+    /// status. `StatusParser.parse` fills this from the porcelain line's
+    /// "old -> new" segment instead of discarding the old side, so the
+    /// changes list can show "old → new" rather than just the new name.
+    ///
+    /// Trailing property WITH a default so the synthesized memberwise init
+    /// still accepts the 3-argument `FileChange(path:status:staged:)` form
+    /// used across the codebase.
+    var renamedFrom: String? = nil
     var displayPath: String { path }
+    /// Identity stays keyed on staged+path only. `renamedFrom` is derived
+    /// from the same porcelain line as `path`, so it can never distinguish
+    /// two rows that `path` doesn't already distinguish — and including it
+    /// would make the id change when a rename is staged, breaking
+    /// `ForEach`'s row identity mid-animation.
     var id: String { (staged ? "S:" : "U:") + path }
 }
 
