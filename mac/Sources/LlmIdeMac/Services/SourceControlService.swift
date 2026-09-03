@@ -113,6 +113,27 @@ final class SourceControlService {
         return UnifiedDiffParser.parse(raw)
     }
 
+    /// Full old/new file content for `MonacoDiffView`'s visual (distinct
+    /// from `diff(root:file:)`'s parsed `[DiffHunk]`, which `HunkStagingList`
+    /// uses for staging — Monaco's diff editor computes its OWN word-level
+    /// diff from full text, it never consumes `DiffHunk`). `original` is
+    /// always the last-committed blob; `modified` is the STAGED blob when
+    /// `file.staged`, else the current working-tree content — matching
+    /// which diff `diff(root:file:)` itself would show for the same file.
+    func diffContent(root: URL, file: FileChange) async -> (original: String, modified: String) {
+        let original = (try? await repo.runGit(["show", "HEAD:\(file.path)"], at: root)) ?? ""
+        if file.status == .untracked {
+            let modified = (try? String(contentsOf: root.appendingPathComponent(file.path), encoding: .utf8)) ?? ""
+            return (original: "", modified: modified)
+        }
+        if file.staged {
+            let staged = (try? await repo.runGit(["show", ":\(file.path)"], at: root)) ?? ""
+            return (original: original, modified: staged)
+        }
+        let workingTree = (try? String(contentsOf: root.appendingPathComponent(file.path), encoding: .utf8)) ?? ""
+        return (original: original, modified: workingTree)
+    }
+
     func stage(root: URL, path: String) async { await run(["add", "--", path], root) }
     func unstage(root: URL, path: String) async { await run(["restore", "--staged", "--", path], root) }
 
@@ -265,6 +286,35 @@ final class SourceControlService {
     func commitDiff(root: URL, sha: String) async -> [DiffHunk] {
         guard let raw = try? await repo.runGit(["show", "--format=", sha], at: root)
         else { return [] }
+        return UnifiedDiffParser.parse(raw)
+    }
+
+    /// Repo-relative paths touched by `sha`, for History mode's per-file
+    /// browse (Task 9) — replaces trying to render an entire multi-file
+    /// commit through a single-file diff view.
+    func commitFiles(root: URL, sha: String) async -> [String] {
+        guard let raw = try? await repo.runGit(["show", "--format=", "--name-only", sha], at: root) else { return [] }
+        return raw.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+    }
+
+    /// One file's old/new content AT a specific commit — `sha^` (the parent)
+    /// for `original`, `sha` itself for `modified`. A commit with no parent
+    /// (the repo's first commit) has no `sha^`; `git show` on a missing ref
+    /// fails, and the `try?` below degrades to an empty original, correctly
+    /// rendering the whole file as added.
+    func commitFileContent(root: URL, sha: String, path: String) async -> (original: String, modified: String) {
+        let original = (try? await repo.runGit(["show", "\(sha)^:\(path)"], at: root)) ?? ""
+        let modified = (try? await repo.runGit(["show", "\(sha):\(path)"], at: root)) ?? ""
+        return (original: original, modified: modified)
+    }
+
+    /// Parsed hunks for ONE file at a specific commit — History mode's hunk
+    /// list. Deliberately a real `git show` diff parsed by
+    /// `UnifiedDiffParser` rather than a whole-file line diff: git gives
+    /// compact hunks with ±3 lines of context, so a 3-line change in a
+    /// 2000-line file renders as a few rows instead of two thousand.
+    func commitFileHunks(root: URL, sha: String, path: String) async -> [DiffHunk] {
+        guard let raw = try? await repo.runGit(["show", "--format=", sha, "--", path], at: root) else { return [] }
         return UnifiedDiffParser.parse(raw)
     }
 
