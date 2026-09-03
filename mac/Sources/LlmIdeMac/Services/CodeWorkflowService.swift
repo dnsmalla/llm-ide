@@ -801,6 +801,11 @@ final class CodeWorkflowService: ObservableObject {
         let isNew: Bool
         let newContent: String
         let rawDiff: String
+        /// Parsed via `UnifiedDiffParser.parse(rawDiff)` — the real parser
+        /// every other diff consumer in the app uses, replacing this type's
+        /// former `+`-line-grep reconstruction of `newContent` as the ONLY
+        /// way this file's change was represented.
+        let hunks: [DiffHunk]
     }
 
     private static func parseDiffFiles(_ diff: String) -> [DiffFile] {
@@ -820,7 +825,9 @@ final class CodeWorkflowService: ObservableObject {
                 .map { String($0.dropFirst()) }
             let content = contentLines.joined(separator: "\n")
 
-            files.append(DiffFile(path: path, isNew: isNew, newContent: content, rawDiff: "--- \(chunk)"))
+            let rawDiff = "--- \(chunk)"
+            files.append(DiffFile(path: path, isNew: isNew, newContent: content, rawDiff: rawDiff,
+                                   hunks: UnifiedDiffParser.parse(rawDiff)))
         }
         return files
     }

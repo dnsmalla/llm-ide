@@ -287,16 +287,10 @@ struct CodeWorkflowSheet: View {
                 .font(.subheadline.weight(.medium))
             ForEach(svc.diffFiles) { file in
                 DisclosureGroup {
-                    ScrollView {
-                        Text(file.rawDiff)
-                            .font(.system(size: 11, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
-                    }
-                    .frame(maxHeight: 200)
-                    .background(Color(.textBackgroundColor))
-                    .cornerRadius(4)
+                    HunkStagingList(hunks: file.hunks)
+                        .frame(maxHeight: 200)
+                        .background(Color(.textBackgroundColor))
+                        .cornerRadius(4)
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: file.isNew ? "plus.circle.fill" : "pencil.circle.fill")
