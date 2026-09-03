@@ -36,7 +36,7 @@ final class MobileLoopStateTests: XCTestCase {
         // The state the bug produced: a project whose loop had never been saved
         // from the Mac page. The Mac detects stages from the repo and runs;
         // the phone said "not set up".
-        let resolved = MobileControlManager.resolveLoopConfig(
+        let resolved = MobileLoopBridge.resolveLoopConfig(
             projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot)
         let config = try XCTUnwrap(resolved, "a git root is enough to run a loop — this must not be nil")
         XCTAssertFalse(config.stages.isEmpty)
@@ -49,7 +49,7 @@ final class MobileLoopStateTests: XCTestCase {
         // A phone asking for a snapshot must never be what writes a project's
         // contract — deciding to persist detected stages is the Mac page's job
         // (LoopEngineConfig.shouldPersist).
-        _ = MobileControlManager.resolveLoopConfig(
+        _ = MobileLoopBridge.resolveLoopConfig(
             projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot)
         let configFile = LoopEngineConfigStore.fileURL(projectRoot: projectRoot)
         XCTAssertFalse(FileManager.default.fileExists(atPath: configFile.path),
@@ -59,7 +59,7 @@ final class MobileLoopStateTests: XCTestCase {
     func testNilWithoutAConfigOrAGitRoot() {
         // Nothing saved and nothing to detect from — the honest answer is "not
         // configured", which is what the phone renders as "set this up on the Mac".
-        XCTAssertNil(MobileControlManager.resolveLoopConfig(
+        XCTAssertNil(MobileLoopBridge.resolveLoopConfig(
             projectRoot: projectRoot, projectId: projectId, gitRoot: nil))
     }
 
@@ -78,7 +78,7 @@ final class MobileLoopStateTests: XCTestCase {
             LoopEngineProjectStore(loops: [LoopDefinition(name: "Main Loop", isPrimary: true, config: saved)]),
             projectRoot: projectRoot, projectId: projectId)
 
-        let resolved = try XCTUnwrap(MobileControlManager.resolveLoopConfig(
+        let resolved = try XCTUnwrap(MobileLoopBridge.resolveLoopConfig(
             projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot))
 
         XCTAssertEqual(resolved.stages.map(\.name), ["My check"],
@@ -116,7 +116,7 @@ final class MobileLoopStateTests: XCTestCase {
         LoopEngineConfigStore.save(
             LoopEngineProjectStore(loops: [LoopDefinition(name: "Main Loop", isPrimary: true, config: saved)]),
             projectRoot: projectRoot, projectId: projectId)
-        let resolved = try XCTUnwrap(MobileControlManager.resolveLoopConfig(
+        let resolved = try XCTUnwrap(MobileLoopBridge.resolveLoopConfig(
             projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot))
         XCTAssertEqual(resolved.maxIterations, 3, "the saved budget must not be replaced by a default")
     }

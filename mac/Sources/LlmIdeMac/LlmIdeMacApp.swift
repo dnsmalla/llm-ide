@@ -220,14 +220,19 @@ public struct LlmIdeMacApp: App {
         // Done last so all stored properties (incl. autoCapture) are set
         // before `self.mobileControl` is read.
         mobileControl.api = client
-        // Wire the Auto Task stack so the phone can query scheduler state
-        // (`auto_task_list`) and toggle master / per-task enables
-        // (`auto_task_toggle`). Both locals are constructed above and share
-        // the same @StateObject instances the UI observes — mutating through
+        // Wire the Auto Task + Loop feature bridges so the phone can query
+        // scheduler state (`auto_task_list`), toggle master / per-task
+        // enables (`auto_task_toggle`), and control the active project's
+        // Loop (`loop_*`). Both locals are constructed above and share the
+        // same @StateObject instances the UI observes — mutating through
         // them keeps Settings, the Menu bar, and the scheduler in sync.
-        mobileControl.autoCode = autoCode
-        mobileControl.autoTaskSettings = autoTaskSettingsInstance
-        mobileControl.logStore = taskLogStore
+        // TEMP(Phase2c-Task2): bridge construction moves into
+        // FeatureCatalog.bootAutoTask in the next task.
+        mobileControl.autoTaskBridge = MobileAutoTaskBridge(
+            manager: mobileControl, autoCode: autoCode,
+            settings: autoTaskSettingsInstance, logStore: taskLogStore)
+        mobileControl.loopBridge = MobileLoopBridge(
+            manager: mobileControl, autoCode: autoCode)
         mobileControl.config = cfg
         mobileControl.projectStore = projectStoreInstance
         mobileControl.backendManager = backend
