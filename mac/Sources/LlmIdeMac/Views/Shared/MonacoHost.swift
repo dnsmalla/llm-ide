@@ -182,16 +182,57 @@ struct MonacoHost: NSViewRepresentable {
         //
         // Private: `applyPendingChanges` above is their only caller.
         // `MonacoHost`'s declarative properties are the public surface, not
-        // these methods. Stubbed as no-ops here so this task's own tests
-        // (resource resolution) don't depend on Task 13 landing first; Task
-        // 13 replaces every body with a real `callAsyncJavaScript` call.
+        // these methods.
 
-        private func setContent(_ text: String, language: String) {}
-        private func setDecorations(_ marks: [Int: GitGutter.Mark]) {}
-        private func setTheme(_ theme: Theme) {}
-        private func reveal(line: Int) {}
-        private func showDiff(original: String, modified: String, language: String) {}
-        private func setReadOnly(_ readOnly: Bool) {}
+        private func setContent(_ text: String, language: String) {
+            webView?.callAsyncJavaScript(
+                "window.__llmide.setContent(text, language);",
+                arguments: ["text": text, "language": language],
+                in: nil, in: .page, completionHandler: nil)
+        }
+
+        private func setDecorations(_ marks: [Int: GitGutter.Mark]) {
+            // MonacoDecoration.decorations(from:) does the typed, tested
+            // Mark -> wire-kind mapping (Task 10); this just reshapes that
+            // into the plist-compatible [String: Any] array
+            // callAsyncJavaScript's `arguments` requires (a custom Codable
+            // struct can't cross that boundary directly).
+            let decorations = MonacoDecoration.decorations(from: marks).map {
+                ["line": $0.line, "kind": $0.kind] as [String: Any]
+            }
+            webView?.callAsyncJavaScript(
+                "window.__llmide.setDecorations(decorations);",
+                arguments: ["decorations": decorations],
+                in: nil, in: .page, completionHandler: nil)
+        }
+
+        private func setTheme(_ theme: Theme) {
+            webView?.callAsyncJavaScript(
+                "window.__llmide.setTheme(themeJSON);",
+                arguments: ["themeJSON": theme.monacoThemeJSON()],
+                in: nil, in: .page, completionHandler: nil)
+        }
+
+        private func reveal(line: Int) {
+            webView?.callAsyncJavaScript(
+                "window.__llmide.reveal(line);",
+                arguments: ["line": line],
+                in: nil, in: .page, completionHandler: nil)
+        }
+
+        private func showDiff(original: String, modified: String, language: String) {
+            webView?.callAsyncJavaScript(
+                "window.__llmide.showDiff(original, modified, language);",
+                arguments: ["original": original, "modified": modified, "language": language],
+                in: nil, in: .page, completionHandler: nil)
+        }
+
+        private func setReadOnly(_ readOnly: Bool) {
+            webView?.callAsyncJavaScript(
+                "window.__llmide.setReadOnly(readOnly);",
+                arguments: ["readOnly": readOnly],
+                in: nil, in: .page, completionHandler: nil)
+        }
     }
 }
 
