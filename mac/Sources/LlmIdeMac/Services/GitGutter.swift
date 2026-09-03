@@ -1,7 +1,7 @@
 import Foundation
 
 enum GitGutter {
-    enum Mark { case added, modified, deleted }
+    enum Mark { case added, modified }
 
     /// New-side line number → change mark, derived from a unified diff.
     /// A run of inserts adjacent to deletes is "modified"; pure inserts are "added".
