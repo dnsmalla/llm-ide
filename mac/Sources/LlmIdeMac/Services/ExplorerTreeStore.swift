@@ -126,4 +126,50 @@ final class ExplorerTreeStore {
         if kids.count == 1, kids[0].isDirectory { return kids[0].url }
         return root
     }
+
+    // MARK: - Flattening
+
+    /// One rendered line of the tree. `id` is the `URL` so
+    /// `List(selection: Set<URL>)` selects rows directly, with no separate
+    /// id-to-url lookup table to keep in sync.
+    struct Row: Identifiable, Hashable {
+        let url: URL
+        let name: String
+        let isDirectory: Bool
+        /// Indent level; 0 for a top-level row under `displayRoot`.
+        let depth: Int
+        var id: URL { url }
+    }
+
+    /// The currently VISIBLE tree, depth-first, as a flat array — the exact
+    /// shape `List` wants.
+    ///
+    /// Recursion is bounded by `expanded`: a collapsed folder contributes one
+    /// row and stops, and an expanded-but-not-yet-loaded folder also
+    /// contributes one row (its children arrive on the next render after
+    /// `loadChildren` completes). So this walks only what is on screen, never
+    /// the whole filesystem.
+    ///
+    /// Pure, like the other `body`-safe accessors — it reads the cache and the
+    /// expansion set and writes neither. That matters twice over: it runs on
+    /// EVERY render, and every `Row.id` it emits is a `URL` copied straight
+    /// out of the cached `FileSystemTree.Node`. Since expand/collapse touch
+    /// only `expanded`, a surviving row's id is byte-identical across the
+    /// cycle, so `List(selection:)` keeps the user's selection and animations
+    /// don't tear.
+    func flatten(from displayRoot: URL) -> [Row] {
+        var rows: [Row] = []
+        appendRows(of: displayRoot, depth: 0, into: &rows)
+        return rows
+    }
+
+    private func appendRows(of dir: URL, depth: Int, into rows: inout [Row]) {
+        for node in children(of: dir) {
+            rows.append(Row(url: node.url, name: node.name,
+                            isDirectory: node.isDirectory, depth: depth))
+            guard node.isDirectory,
+                  expanded.contains(ExplorerPaths.key(node.url)) else { continue }
+            appendRows(of: node.url, depth: depth + 1, into: &rows)
+        }
+    }
 }

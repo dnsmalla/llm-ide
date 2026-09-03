@@ -193,4 +193,96 @@ final class ExplorerTreeStoreTests: XCTestCase {
         XCTAssertEqual(ExplorerPaths.key(store.displayRoot(for: root)), ExplorerPaths.key(root),
                        "displayRoot must be pure — it may not trigger a load")
     }
+
+    // MARK: - flatten
+
+    func testFlattenOfACollapsedTreeIsOnlyTheTopLevel() async {
+        makeFile("a.txt")
+        makeDir("sub")
+        makeFile("sub/b.txt")
+        let store = ExplorerTreeStore()
+        await store.loadChildren(of: root)
+
+        let rows = store.flatten(from: root)
+
+        XCTAssertEqual(rows.map(\.name), ["sub", "a.txt"])
+        XCTAssertEqual(rows.map(\.depth), [0, 0])
+        XCTAssertEqual(rows.map(\.isDirectory), [true, false])
+    }
+
+    func testFlattenIncludesChildrenOfExpandedFoldersWithIncreasingDepth() async {
+        makeFile("a.txt")
+        let sub = makeDir("sub")
+        makeFile("sub/b.txt")
+        let deep = makeDir("sub/deep")
+        makeFile("sub/deep/c.txt")
+        let store = ExplorerTreeStore()
+        await store.loadChildren(of: root)
+        await store.expand(sub)
+        await store.expand(deep)
+
+        let rows = store.flatten(from: root)
+
+        XCTAssertEqual(rows.map(\.name), ["sub", "deep", "c.txt", "b.txt", "a.txt"])
+        XCTAssertEqual(rows.map(\.depth), [0, 1, 2, 1, 0])
+    }
+
+    func testFlattenRowIdIsTheURL() async {
+        let file = makeFile("a.txt")
+        let store = ExplorerTreeStore()
+        await store.loadChildren(of: root)
+        let rows = store.flatten(from: root)
+        XCTAssertEqual(rows.first?.id, rows.first?.url)
+        XCTAssertEqual(ExplorerPaths.key(rows[0].url), ExplorerPaths.key(file))
+    }
+
+    /// An expanded folder whose children have not loaded yet contributes no
+    /// child rows rather than crashing or blocking — the load lands later and
+    /// the list re-renders.
+    func testFlattenSkipsExpandedButUnloadedFolders() async {
+        let sub = makeDir("sub")
+        makeFile("sub/b.txt")
+        let store = ExplorerTreeStore()
+        await store.loadChildren(of: root)
+        store.expanded.insert(ExplorerPaths.key(sub))   // expanded WITHOUT loading
+
+        let rows = store.flatten(from: root)
+
+        XCTAssertEqual(rows.map(\.name), ["sub"])
+    }
+
+    func testFlattenFromAnUnloadedDisplayRootIsEmpty() {
+        makeFile("a.txt")
+        let store = ExplorerTreeStore()
+        XCTAssertTrue(store.flatten(from: root).isEmpty)
+    }
+
+    /// `Row.id` is the row's `URL`, and `List(selection:)` drops a selection
+    /// whose id it no longer recognises. So an expand/collapse round trip —
+    /// which touches only `expanded`, never the children cache — must hand
+    /// back byte-identical ids for every row that stayed visible, or the
+    /// user's selection would silently clear when they open a folder.
+    func testFlattenRowIdentityIsStableAcrossAnExpandCollapseCycle() async {
+        makeFile("a.txt")
+        makeFile("設計.txt")
+        let sub = makeDir("my docs")
+        makeFile("my docs/メモ 1.md")
+        let store = ExplorerTreeStore()
+        await store.loadChildren(of: root)
+
+        let before = store.flatten(from: root)
+        await store.expand(sub)
+        let expandedRows = store.flatten(from: root)
+        store.collapse(sub)
+        let after = store.flatten(from: root)
+
+        XCTAssertEqual(before.map(\.id), after.map(\.id), "ids must not churn")
+        XCTAssertEqual(before, after, "whole rows must be identical, not merely equal by name")
+        // The rows that stayed visible keep their exact ids while expanded too.
+        let stillVisible = expandedRows.filter { $0.depth == 0 }.map(\.id)
+        XCTAssertEqual(before.map(\.id), stillVisible)
+        // Re-expanding reuses the cache, so it produces the same rows again.
+        await store.expand(sub)
+        XCTAssertEqual(expandedRows, store.flatten(from: root))
+    }
 }
