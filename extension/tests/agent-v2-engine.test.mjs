@@ -593,8 +593,29 @@ test('gateway turn: ANTHROPIC_BASE_URL + the provider key ride the SDK env; the 
       assert.equal(env.ANTHROPIC_BASE_URL, 'https://api.z.ai/api/anthropic');
       assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'glm-key-1', 'Z.AI/Ollama shape');
       assert.equal(env.ANTHROPIC_API_KEY, 'glm-key-1', 'DeepSeek shape');
-      assert.equal(env.CLAUDE_CONFIG_DIR, agentSdkHomeFor(user.id), 'a gateway turn is a keyed turn: per-user home');
       assert.equal(capture.options.model, 'glm-4.7');
+      // The engine home follows the USER's first-party auth, not the turn's
+      // key: this user has no Claude key, so their Claude turns run ambient
+      // in the operator home — and their gateway turn must live there too,
+      // or a Claude ↔ GLM switch would change homes and lose the transcript.
+      assert.equal(env.CLAUDE_CONFIG_DIR, process.env.CLAUDE_CONFIG_DIR,
+        'an ambient user\'s gateway turn shares the operator home with their Claude turns');
+
+      // Same gateway, a user WITH a vault Claude key: every turn of theirs is
+      // isolated in the per-user home — gateway turns included.
+      const keyedUser = registerUser(getDb(), { email: 'v2gw-turn-keyed@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+      setSecret(getDb(), keyedUser.id, 'claude.apiKey', 'sk-ant-vault-key');
+      const keyedGateway = registerGatewayProvider(keyedUser.id);
+      const keyedCapture = {};
+      await runAgentV2Turn({
+        message: 'm', userId: keyedUser.id, mode: 'execute', provider: keyedGateway, model: 'glm-4.7',
+        agentContext: { workspaceRoot: WS },
+        onEvent: () => {}, queryFactory: (p, o) => { keyedCapture.options = o; return (async function* () {})(); },
+      }, turnInjectable);
+      assert.equal(keyedCapture.options.env.CLAUDE_CONFIG_DIR, agentSdkHomeFor(keyedUser.id));
+      assert.equal(keyedCapture.options.env.ANTHROPIC_AUTH_TOKEN, 'glm-key-1',
+        'the gateway token, not the vault Claude key, authenticates the gateway turn');
+      assert.equal(keyedCapture.options.env.ANTHROPIC_BASE_URL, 'https://api.z.ai/api/anthropic');
 
       // Refused before the SDK spawns — the factory is never reached.
       const plain = registerGatewayProvider(user.id, { id: 'glm-plain', anthropicBaseURL: null });

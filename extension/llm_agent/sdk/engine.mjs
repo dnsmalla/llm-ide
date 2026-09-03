@@ -659,14 +659,31 @@ export async function runAgentV2Turn(
     throw new Error('No Anthropic API key available (set vault claude.apiKey or ANTHROPIC_API_KEY)');
   }
 
-  // Per-user engine home (spec §6): every KEYED v2 turn runs with its own
-  // CLAUDE_CONFIG_DIR so transcripts and credentials never cross tenants.
-  // Ambient turns skip the override — the operator's login lives under the
-  // default config dir, and redirecting it breaks their auth (see the env
-  // composition below). Created up front (best-effort): the CLI would create
-  // it too, but if it ever fell back to ~/.claude on a missing dir,
-  // isolation would be silently gone — an empty dir is cheap insurance.
-  const sdkHome = key ? agentSdkHomeFor(userId) : null;
+  // Per-user engine home (spec §6): a user with a FIRST-PARTY key (vault
+  // claude.apiKey / ANTHROPIC_API_KEY) runs every v2 turn under their own
+  // CLAUDE_CONFIG_DIR so transcripts and credentials never cross tenants;
+  // an ambient-auth user skips the override — the operator's login lives
+  // under the default config dir, and redirecting it breaks their auth (see
+  // the env composition below).
+  //
+  // The home is a property of the USER's Claude auth, not of the turn: a
+  // gateway turn (Anthropic-compatible custom provider, always keyed with the
+  // provider's own token) lives wherever that user's Claude turns live. The
+  // SDK transcript can only be resumed from the home it was written in, so
+  // deciding per turn ("keyed → per-user home") made an ambient user's chat
+  // change homes on every Claude ↔ GLM switch: resume missed, the client's
+  // fresh-session retry started over, and the route's fresh-turn cleanup
+  // deleted the old transcript — the conversation's memory was gone for good.
+  // One home per user keeps Claude and gateway turns on one transcript (the
+  // SDK resumes across model changes). The gateway token rides in env, which
+  // the CLI honors ahead of any login stored in the home — the same premise
+  // as running `claude` against a gateway on a logged-in machine.
+  //
+  // Created up front (best-effort): the CLI would create it too, but if it
+  // ever fell back to ~/.claude on a missing dir, isolation would be silently
+  // gone — an empty dir is cheap insurance.
+  const firstPartyKeyed = gatewayBaseUrl ? Boolean(resolveAnthropicKey(userId).key) : Boolean(key);
+  const sdkHome = firstPartyKeyed ? agentSdkHomeFor(userId) : null;
   if (sdkHome) {
     try { fs.mkdirSync(sdkHome, { recursive: true }); } catch { /* SDK may still create it; best-effort */ }
   }
@@ -890,22 +907,23 @@ export async function runAgentV2Turn(
     ...(maxBudgetUsd ? { maxBudgetUsd } : {}),
     // `env` REPLACES the subprocess environment — always spread process.env.
     // The key (when one resolved) and the per-user engine home ride along in
-    // the SAME composed env. The engine home rides ONLY on keyed turns: an
-    // ambient-auth turn depends on the operator's `claude login`, whose
-    // credentials/onboarding state live under the operator's DEFAULT config
-    // dir — redirecting CLAUDE_CONFIG_DIR to the (empty) per-user home makes
-    // the subprocess "Not logged in" and fails every ambient turn. Tenant
-    // isolation of transcripts is therefore a keyed-turn property; ambient
-    // turns all run as the operator anyway, so there is no cross-tenant
+    // the SAME composed env. The engine home rides ONLY for users with a
+    // first-party key (see sdkHome above): an ambient-auth user depends on
+    // the operator's `claude login`, whose credentials/onboarding state live
+    // under the operator's DEFAULT config dir — redirecting CLAUDE_CONFIG_DIR
+    // to the (empty) per-user home makes the subprocess "Not logged in" and
+    // fails every ambient turn. Tenant isolation of transcripts is therefore
+    // a property of first-party-keyed users; ambient users all run as the
+    // operator anyway (their gateway turns included — the gateway token is
+    // in env, the home only holds transcripts), so there is no cross-tenant
     // credential exposure to isolate against. Two accepted consequences:
     // ambient turns can discover operator-level agents/skills/plugins/MCP
     // config from the default config dir (settingSources: [] only isolates
     // SETTINGS), and all ambient tenants' transcripts share that dir — the
     // same exposure class as the filesystem itself, which this never
-    // sandboxed. A user who later removes their vault key flips to ambient
-    // and their next resume misses (transcripts stayed in the per-user
-    // home) — SESSION_UNRESUMABLE, which the client recovers from with a
-    // fresh-session retry.
+    // sandboxed. A user who later adds or removes their vault key changes
+    // homes and their next resume misses — SESSION_UNRESUMABLE, which the
+    // client recovers from with a fresh-session retry.
     ...(key
       ? {
           env: {
