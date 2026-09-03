@@ -1,7 +1,6 @@
-
 /// Shared source of truth for mapping a file extension to a vendored Monaco
 /// `basic-languages` id (`MonacoEditorView`'s `language` parameter). Separate
-/// from `HljsLanguageMap` deliberately: Monaco's vendored bundle (P0,
+/// from `HljsLanguage` deliberately: Monaco's vendored bundle (P0,
 /// `Scripts/build-monaco-bundle.mjs`) covers exactly 10 languages, a
 /// different set than highlight.js's — most notably no `json`, since
 /// monaco-editor has never shipped a standalone Monarch tokenizer for it
@@ -27,7 +26,7 @@ enum MonacoLanguageMap {
 
     /// Look up the Monaco language id for a file extension (case-insensitive,
     /// leading-dot tolerant). Falls back to `"plaintext"` for anything not in
-    /// `map` — never an empty string, unlike `HljsLanguageMap.id(for:)`.
+    /// `map` — never an empty string, unlike `HljsLanguage.id(for:)`.
     static func id(for extension: String) -> String {
         let key = `extension`.hasPrefix(".") ? String(`extension`.dropFirst()) : `extension`
         return map[key.lowercased()] ?? "plaintext"

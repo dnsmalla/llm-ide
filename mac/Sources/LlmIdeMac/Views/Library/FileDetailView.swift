@@ -189,7 +189,7 @@ struct ImageDetailView: View {
     }
 }
 
-// MARK: - Code / plain text  (WKWebView — same engine as MarkdownDetailView)
+// MARK: - Code / plain text (Monaco-backed)
 
 struct CodeDetailView: View {
     let url: URL

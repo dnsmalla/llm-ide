@@ -66,6 +66,7 @@ struct MonacoEditorView: View {
 
     @EnvironmentObject private var theme: ThemeStore
     @State private var loadFailed = false
+    @State private var didBecomeReady = false
     @State private var readyTimeoutTask: Task<Void, Never>?
 
     var body: some View {
@@ -103,16 +104,24 @@ struct MonacoEditorView: View {
             .disabled(readOnly)
     }
 
+    /// Only ever starts a fresh timeout for a load that hasn't already
+    /// succeeded — `onAppear` can re-fire after Monaco is already ready
+    /// (navigation, tab switching, SwiftUI re-composition), and since
+    /// `.ready` is a one-time event (`MonacoHost` loads its WKWebView once
+    /// and never reloads it), a naive restart here would eventually flip
+    /// `loadFailed` on a perfectly working editor with no way to recover.
     private func startReadyTimeout() {
+        guard !didBecomeReady else { return }
         readyTimeoutTask?.cancel()
         readyTimeoutTask = Task {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, !didBecomeReady else { return }
             loadFailed = true
         }
     }
 
     private func handleReady() {
+        didBecomeReady = true
         readyTimeoutTask?.cancel()
     }
 
