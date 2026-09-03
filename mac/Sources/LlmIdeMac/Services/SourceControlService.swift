@@ -116,22 +116,30 @@ final class SourceControlService {
     /// Full old/new file content for `MonacoDiffView`'s visual (distinct
     /// from `diff(root:file:)`'s parsed `[DiffHunk]`, which `HunkStagingList`
     /// uses for staging — Monaco's diff editor computes its OWN word-level
-    /// diff from full text, it never consumes `DiffHunk`). `original` is
-    /// always the last-committed blob; `modified` is the STAGED blob when
-    /// `file.staged`, else the current working-tree content — matching
-    /// which diff `diff(root:file:)` itself would show for the same file.
+    /// diff from full text, it never consumes `DiffHunk`). The baseline
+    /// MUST match what `diff(root:file:)` itself diffs against for the same
+    /// row, or the Monaco view and the hunk list beside it disagree:
+    /// untracked rows diff `""` -> working tree; staged rows diff HEAD ->
+    /// index (the `--cached` blob); unstaged rows diff the INDEX blob ->
+    /// working tree, NOT HEAD -> working tree — `diff(root:file:)` runs
+    /// plain `git diff` for unstaged files, which is index-vs-worktree, so
+    /// using HEAD here would show already-staged lines as if they were
+    /// still unstaged for any partially-staged file (porcelain "MM": stage
+    /// a fix, keep working).
     func diffContent(root: URL, file: FileChange) async -> (original: String, modified: String) {
-        let original = (try? await repo.runGit(["show", "HEAD:\(file.path)"], at: root)) ?? ""
         if file.status == .untracked {
             let modified = (try? String(contentsOf: root.appendingPathComponent(file.path), encoding: .utf8)) ?? ""
             return (original: "", modified: modified)
         }
         if file.staged {
+            let head = (try? await repo.runGit(["show", "HEAD:\(file.path)"], at: root)) ?? ""
             let staged = (try? await repo.runGit(["show", ":\(file.path)"], at: root)) ?? ""
-            return (original: original, modified: staged)
+            return (original: head, modified: staged)
         }
+        // Unstaged: baseline is the INDEX blob, not HEAD — see doc comment above.
+        let indexBlob = (try? await repo.runGit(["show", ":\(file.path)"], at: root)) ?? ""
         let workingTree = (try? String(contentsOf: root.appendingPathComponent(file.path), encoding: .utf8)) ?? ""
-        return (original: original, modified: workingTree)
+        return (original: indexBlob, modified: workingTree)
     }
 
     func stage(root: URL, path: String) async { await run(["add", "--", path], root) }
