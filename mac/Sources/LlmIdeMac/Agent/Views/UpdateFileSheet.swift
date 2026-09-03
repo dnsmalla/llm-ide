@@ -106,60 +106,8 @@ struct UpdateFileSheet: View {
 
     // MARK: - Diff
 
-    /// One row of the unified diff with both side line numbers, like
-    /// VSCode/Cursor. `oldNum`/`newNum` are nil when the line doesn't
-    /// exist on that side (removed-only / added-only respectively).
-    private struct DiffRow: Identifiable {
-        enum Kind { case equal, insert, remove }
-        let id = UUID()
-        let kind: Kind
-        let oldNum: Int?
-        let newNum: Int?
-        let text: String
-    }
-
-    /// Build a line-level diff between `originalContent` and the
-    /// currently-edited `proposedContent`. Foundation's
-    /// `CollectionDifference` gives us LCS-quality offsets cheaply.
-    private var diffRows: [DiffRow] {
-        let oldLines = originalContent.components(separatedBy: "\n")
-        let newLines = proposedContent.components(separatedBy: "\n")
-
-        let diff = newLines.difference(from: oldLines)
-        var removedFromOld = Set<Int>()
-        var insertedInNew = Set<Int>()
-        for change in diff {
-            switch change {
-            case .remove(let off, _, _): removedFromOld.insert(off)
-            case .insert(let off, _, _): insertedInNew.insert(off)
-            }
-        }
-
-        var rows: [DiffRow] = []
-        var i = 0
-        var j = 0
-        while i < oldLines.count || j < newLines.count {
-            let iRemoved = i < oldLines.count && removedFromOld.contains(i)
-            let jInserted = j < newLines.count && insertedInNew.contains(j)
-            if iRemoved {
-                rows.append(.init(kind: .remove, oldNum: i + 1, newNum: nil, text: oldLines[i]))
-                i += 1
-            } else if jInserted {
-                rows.append(.init(kind: .insert, oldNum: nil, newNum: j + 1, text: newLines[j]))
-                j += 1
-            } else if i < oldLines.count && j < newLines.count {
-                rows.append(.init(kind: .equal, oldNum: i + 1, newNum: j + 1, text: newLines[j]))
-                i += 1
-                j += 1
-            } else if j < newLines.count {
-                rows.append(.init(kind: .insert, oldNum: nil, newNum: j + 1, text: newLines[j]))
-                j += 1
-            } else if i < oldLines.count {
-                rows.append(.init(kind: .remove, oldNum: i + 1, newNum: nil, text: oldLines[i]))
-                i += 1
-            }
-        }
-        return rows
+    private var diffLanguage: String {
+        MonacoLanguageMap.id(for: (displayPath as NSString).pathExtension)
     }
 
     @ViewBuilder
@@ -168,91 +116,20 @@ struct UpdateFileSheet: View {
             Text("Diff vs current file")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
-            // Outer vertical scroll — rows.
-            // Inner horizontal scroll — long lines don't wrap, they
-            // scroll right (the VSCode/Cursor pattern).
-            ScrollView(.vertical) {
-                ScrollView(.horizontal, showsIndicators: true) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(diffRows) { row in
-                            diffRowView(row)
-                        }
-                    }
-                }
-            }
-            .frame(minHeight: 240, maxHeight: 380)
-            .background(Color(nsColor: .textBackgroundColor))
-            .overlay(RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color.secondary.opacity(0.3)))
+            MonacoDiffView(original: originalContent, modified: proposedContent, language: diffLanguage)
+                .frame(minHeight: 240, maxHeight: 380)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.3)))
         }
-    }
-
-    /// Width reserved for each line-number gutter. Roughly 4 digits +
-    /// padding at 11pt monospaced — comfortably fits files up to 9999
-    /// lines without jitter.
-    private let lineNumWidth: CGFloat = 38
-
-    @ViewBuilder
-    private func diffRowView(_ row: DiffRow) -> some View {
-        let (sign, bg): (String, Color) = {
-            switch row.kind {
-            case .insert: return ("+", Color.green.opacity(0.16))
-            case .remove: return ("−", Color.red.opacity(0.16))
-            case .equal:  return (" ", Color.clear)
-            }
-        }()
-        let fg: Color = row.kind == .equal ? .secondary : .primary
-
-        HStack(spacing: 0) {
-            // Old-side gutter
-            Text(row.oldNum.map(String.init) ?? "")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Color.secondary.opacity(0.7))
-                .frame(width: lineNumWidth, alignment: .trailing)
-                .padding(.trailing, 6)
-            // New-side gutter
-            Text(row.newNum.map(String.init) ?? "")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(Color.secondary.opacity(0.7))
-                .frame(width: lineNumWidth, alignment: .trailing)
-                .padding(.trailing, 8)
-            // Sign column. The raw "+"/"−" glyphs read as punctuation
-            // to VoiceOver, so we replace them with descriptive labels
-            // (and hide the column entirely for equal/context rows).
-            Text(sign)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(fg.opacity(0.7))
-                .frame(width: 14, alignment: .center)
-                .accessibilityLabel({
-                    switch row.kind {
-                    case .insert: return "Added line"
-                    case .remove: return "Removed line"
-                    case .equal:  return ""
-                    }
-                }())
-                .accessibilityHidden(row.kind == .equal)
-            // Code text — fixedSize horizontally so long lines extend
-            // beyond the viewport and the horizontal scroll handles
-            // them, no wrapping mid-token.
-            Text(row.text.isEmpty ? " " : row.text)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(fg)
-                .fixedSize(horizontal: true, vertical: false)
-                .padding(.leading, 2)
-                .padding(.trailing, 12)
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 1)
-        .background(bg)
     }
 
     /// "+12 −3" summary chip. Drives nothing functional but gives the
-    /// user a quick at-a-glance read of the size of the change.
+    /// user a quick at-a-glance read of the size of the change. Reuses
+    /// `DiffStats.compute` (the SAME `CollectionDifference` technique this
+    /// file's own diff used to compute independently) rather than keeping
+    /// a second copy of the same line-diffing logic.
     private var changeSummary: String {
-        let rows = diffRows
-        let added = rows.filter { $0.kind == .insert }.count
-        let removed = rows.filter { $0.kind == .remove }.count
-        return "+\(added) −\(removed) lines"
+        let stats = DiffStats.compute(old: originalContent, new: proposedContent)
+        return "+\(stats.added) −\(stats.removed) lines"
     }
 
     private func submit() {
