@@ -40,11 +40,14 @@ enum MonacoEditorMessageHandler {
 /// which updates `$content` directly. The updated value then round-trips
 /// back into `MonacoHost(content: content, ...)` on the next render, but
 /// `MonacoHost.Coordinator.applyPendingChanges` only calls `setContent` when
-/// its own `lastContent` differs from the incoming value (`MonacoHost.swift`,
-/// `applyPendingChanges`) — since the round-tripped value already equals
-/// what `Coordinator` just recorded as `lastContent`, the diff is a no-op.
-/// The bridge only ever pushes a full `setContent` for a genuine external
-/// change, never as an echo of what Monaco itself just reported.
+/// its own `lastContent` differs from the incoming value. That no-op
+/// guarantee depends on `Coordinator` tracking `lastContent` for BOTH
+/// directions, not just outbound pushes: `userContentController(_:didReceive:)`
+/// also records `lastContent = text` the moment a `.contentChanged` message
+/// arrives (`MonacoHost.swift`), so by the time the round-tripped value comes
+/// back through here, `lastContent` already matches it and the diff is a
+/// no-op. The bridge only ever pushes a full `setContent` for a genuine
+/// external change, never as an echo of what Monaco itself just reported.
 ///
 /// Per design §8: if Monaco doesn't signal `.ready` within 2 seconds
 /// (WebView init failure, missing bundled assets), this view falls back to

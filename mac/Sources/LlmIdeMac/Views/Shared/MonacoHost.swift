@@ -196,6 +196,15 @@ struct MonacoHost: NSViewRepresentable {
                 applyPendingChanges()   // apply whatever `parent` already held before load finished
                 parent.onReady?()
             }
+            // Monaco already holds `text` at this point (it just reported it), so record it as
+            // `lastContent` here too — mirroring the bookkeeping `applyPendingChanges` does after
+            // an outbound `setContent` push. Without this, a caller that round-trips this text
+            // straight back into `content` (the expected pattern — see `MonacoEditorView`) would
+            // see the next `applyPendingChanges` diff it against a stale `lastContent` and fire a
+            // redundant `setContent`, resetting Monaco's cursor/selection on every keystroke.
+            if case .contentChanged(let text) = decoded {
+                lastContent = text
+            }
             parent.onMessage?(decoded)
         }
 
