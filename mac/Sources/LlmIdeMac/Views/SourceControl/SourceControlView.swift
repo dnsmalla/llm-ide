@@ -113,9 +113,23 @@ struct SourceControlView: View {
     /// an edit they didn't make. A matching key means the same path AND the
     /// same index side, so the hunks already on screen still belong to this
     /// selection and the safety invariant holds.
+    ///
+    /// **Monaco's text is blanked on the same condition**, so the two halves
+    /// of the pane never describe different files: `hunkPane` renders
+    /// "Loading…" while `loadedKey` is nil, and without this the diff editor
+    /// beside it went on showing the PREVIOUS file's content under the new
+    /// file's header for the whole load window. Blanking the strings rather
+    /// than gating `MonacoDiffView` on `loadedKey` is deliberate — a gate
+    /// would unmount and rebuild the WKWebView on every selection change,
+    /// which is exactly what mounting exactly one Monaco instance is meant to
+    /// avoid; an empty diff is the same view with nothing in it.
     private func loadDiff(key: String, _ produce: @escaping () async -> DiffPayload) {
         diffTask?.cancel()
-        if loadedKey != key { loadedKey = nil }
+        if loadedKey != key {
+            loadedKey = nil
+            diffOriginal = ""
+            diffModified = ""
+        }
         diffTask = Task {
             let payload = await produce()
             if Task.isCancelled { return }
@@ -212,18 +226,30 @@ struct SourceControlView: View {
     ///
     /// NOTE: `git apply --cached` legitimately REJECTS some hunks, and the
     /// user sees git's own wording ("patch does not apply") on the sticky
-    /// banner. Two ordinary causes:
+    /// banner. Three ordinary causes:
     ///   1. **The file has no trailing newline.** `UnifiedDiffParser` drops
     ///      the `\ No newline at end of file` marker, so the patch
     ///      `GitTruthStore.stagePatch` synthesizes cannot reproduce it and
     ///      git refuses to apply it. Stage the whole file (the file row's
     ///      `+` button) instead.
-    ///   2. The file changed on disk after the hunk was parsed.
-    /// A third message comes from `GitTruthStore.assertPatchable` REFUSING
+    ///   2. **The file uses CRLF line endings.** `UnifiedDiffParser` splits
+    ///      on `\.isNewline`, which consumes `\r\n` as one grapheme, so
+    ///      `DiffRow.text` has already lost its `\r` and `synthesizePatch`
+    ///      re-joins with plain `\n`. The resulting LF patch cannot match a
+    ///      CRLF blob and git rejects it with "patch does not apply" —
+    ///      wording that gives the user no hint what the real cause is,
+    ///      which is why `hunkFailureHint` names it explicitly. Same remedy:
+    ///      stage the whole file. (Making per-hunk staging work on CRLF
+    ///      needs the raw diff bytes, not this lossy row model — a P2.1
+    ///      follow-up, deliberately out of scope here.)
+    ///   3. The file changed on disk after the hunk was parsed.
+    ///
+    /// A fourth message comes from `GitTruthStore.assertPatchable` REFUSING
     /// the hunk before git is spawned at all (a whole-file add/delete, or a
     /// hunk with no usable `@@` header). `canStageHunks`/`canUnstageHunks`
     /// normally keep those off screen, so it is a backstop rather than an
-    /// expected path — but it is the one that must never be a `try?`.
+    /// expected path — and it already carries its own actionable wording.
+    ///
     /// A rejected `git apply --cached` is a no-op on the index, so there is
     /// no partial state to unwind — an error message is the whole remedy.
     /// This must NEVER be a `try?`: swallowing it means the user clicks
@@ -241,10 +267,24 @@ struct SourceControlView: View {
             defer { isStagingHunk = false }
             do { try await gitTruthStore.stagePatch(root: root, path: file.path, hunk: hunk) }
             catch {
-                scm.setOpError("Couldn't stage that hunk in \(file.displayPath): \(error.localizedDescription)")
+                scm.setOpError("Couldn't stage that hunk in \(file.displayPath): "
+                               + error.localizedDescription + hunkFailureHint())
             }
             await scm.refresh(root: root)
         }
+    }
+
+    /// Extra sentence appended to a failed per-hunk apply, naming a cause git
+    /// cannot name itself.
+    ///
+    /// git rejects a CRLF file's hunk with "patch does not apply" and nothing
+    /// else — true, useless, and indistinguishable from a genuinely stale
+    /// hunk. `diffOriginal` is the exact text this pane's hunks were parsed
+    /// from, so a `\r\n` in it is direct evidence rather than a guess. See
+    /// cause 2 on `stageHunk`.
+    private func hunkFailureHint() -> String {
+        guard diffOriginal.contains("\r\n") || diffModified.contains("\r\n") else { return "" }
+        return " — this file uses CRLF line endings, which per-hunk staging can't reproduce; stage the whole file instead."
     }
 
     /// Unstage exactly one already-staged hunk, then refresh. Same failure
@@ -257,7 +297,8 @@ struct SourceControlView: View {
             defer { isStagingHunk = false }
             do { try await gitTruthStore.unstagePatch(root: root, path: file.path, hunk: hunk) }
             catch {
-                scm.setOpError("Couldn't unstage that hunk in \(file.displayPath): \(error.localizedDescription)")
+                scm.setOpError("Couldn't unstage that hunk in \(file.displayPath): "
+                               + error.localizedDescription + hunkFailureHint())
             }
             await scm.refresh(root: root)
         }

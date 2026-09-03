@@ -162,53 +162,123 @@ enum UnifiedDiffParser {
         var text = diff
         if let last = text.last, last.isNewline { text.removeLast() }
 
+        // How many old-side / new-side lines the open hunk's "@@" header
+        // still promises. This is what separates a FILE HEADER from a ROW
+        // whose content merely looks like one — see the skip rules below.
+        var remainingOld = 0, remainingNew = 0
+
         for raw in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
             let line = String(raw)
+
+            // "\ No newline at end of file" is hunk METADATA: it sits inside
+            // the body but counts toward neither side's budget. Unambiguous,
+            // because every real row carries a prefix character, so a row
+            // whose content starts with a backslash reads as "-\…" / "+\…".
+            if line.hasPrefix("\\") { continue }
+
+            // A bare "@@" line can only be a hunk header, for the same
+            // reason — so this stays unconditional even mid-body, and a
+            // header whose counts overran its body still ends the hunk here.
             if line.hasPrefix("@@") {
                 if let c = current { hunks.append(c) }
-                (oldLine, newLine) = Self.hunkStarts(line)
+                let ranges = Self.hunkRanges(line) ?? (oldStart: 0, oldCount: 0, newStart: 0, newCount: 0)
+                (oldLine, newLine) = (ranges.oldStart, ranges.newStart)
+                (remainingOld, remainingNew) = (ranges.oldCount, ranges.newCount)
                 current = DiffHunk(header: line, rows: [])
                 continue
             }
-            // Skip file headers / metadata.
-            if current == nil { continue }
-            if line.hasPrefix("diff --git") || line.hasPrefix("index ")
-                || line.hasPrefix("--- ") || line.hasPrefix("+++ ")
-                || line.hasPrefix("\\") { continue }
+            guard current != nil else { continue }   // preamble, before any hunk
+
+            // **The header-skip rules apply only OUTSIDE the body the "@@"
+            // counts declare.** Applying them inside an open hunk dropped any
+            // DELETED line whose content began with "-- " (it renders as
+            // "--- …") and any INSERTED line beginning with "++" — that is
+            // ordinary comment syntax in SQL, Lua, Haskell, Ada, Elm and
+            // VHDL, and idiomatic C-family increment. Two things broke:
+            // the hunk list claimed "no change" for a line Monaco showed as
+            // deleted, and — since P2 rebuilds patches from these rows —
+            // `git apply` rejected the synthesized hunk with "corrupt patch"
+            // (status 128), because the body no longer matched the counts its
+            // own header promised.
+            //
+            // Once the budget is spent the lenient rules resume, so a
+            // multi-file diff still finds the next file's headers, and a
+            // hand-written or model-generated diff that UNDERSTATES its
+            // counts keeps the tolerance it has always had.
+            let insideBody = remainingOld > 0 || remainingNew > 0
+            func isFileHeader(_ line: String) -> Bool {
+                line.hasPrefix("diff --git") || line.hasPrefix("index ")
+                    || line.hasPrefix("--- ") || line.hasPrefix("+++ ")
+            }
+            if !insideBody, isFileHeader(line) { continue }
 
             guard let first = line.first else {
                 // blank line within a hunk = an empty context line
                 current?.rows.append(DiffRow(kind: .context, oldLine: oldLine, newLine: newLine, text: ""))
                 oldLine += 1; newLine += 1
+                remainingOld -= 1; remainingNew -= 1
                 continue
+            }
+            // A row ALWAYS carries a prefix character, so a line inside the
+            // declared body that has none means the header OVERSTATED its
+            // counts. Stop trusting them rather than swallowing the next
+            // file's metadata as rows.
+            if insideBody, first != " ", first != "+", first != "-" {
+                remainingOld = 0; remainingNew = 0
+                if isFileHeader(line) { continue }
             }
             let body = String(line.dropFirst())
             switch first {
             case "+":
                 current?.rows.append(DiffRow(kind: .insert, oldLine: nil, newLine: newLine, text: body))
-                newLine += 1
+                newLine += 1; remainingNew -= 1
             case "-":
                 current?.rows.append(DiffRow(kind: .delete, oldLine: oldLine, newLine: nil, text: body))
-                oldLine += 1
+                oldLine += 1; remainingOld -= 1
             default: // context (leading space)
                 current?.rows.append(DiffRow(kind: .context, oldLine: oldLine, newLine: newLine, text: body))
                 oldLine += 1; newLine += 1
+                remainingOld -= 1; remainingNew -= 1
             }
         }
         if let c = current { hunks.append(c) }
         return hunks
     }
 
-    /// Parse "@@ -a,b +c,d @@" → (a, c).
-    private static func hunkStarts(_ header: String) -> (Int, Int) {
-        // parts[0]=="@@", parts[1]=="-a[,b]", parts[2]=="+c[,d]", parts[3...]=="@@" + optional context
-        // Only read the two fixed-position range tokens; the trailing function-context text
-        // (e.g. "func add() -> Int {") can contain "-" / "+" tokens that would otherwise
-        // clobber oldStart / newStart when iterating over all parts.
+    /// Parse `@@ -oldStart[,oldCount] +newStart[,newCount] @@` into its four
+    /// numbers, or nil when `header` is not a unified-diff hunk header.
+    ///
+    /// Only the two fixed-position range tokens are read; the trailing
+    /// function-context text (e.g. `func add() -> Int {`) can contain "-" and
+    /// "+" tokens that would otherwise clobber the ranges if every part were
+    /// scanned.
+    ///
+    /// A range with no comma is git's shorthand for exactly ONE line
+    /// (`@@ -1 +1 @@`), not zero — getting that wrong would make a
+    /// single-line hunk look like a whole-file add or delete.
+    ///
+    /// **Strict on purpose: it returns nil rather than guessing.** The two
+    /// callers want opposite things from a header they can't read, and each
+    /// picks its own policy at the call site: `parse` falls back to zeros and
+    /// keeps collecting rows leniently (its job is to render something), while
+    /// `GitTruthStore.assertPatchable` refuses outright (its job is to keep a
+    /// patch git would misapply away from the index). A combined diff's
+    /// `@@@ -1,3 -1,3 +1,4 @@@` is nil here — its second range is another
+    /// old side, not a new one — so a conflicted file renders from line 0
+    /// instead of a fabricated 1, and cannot be hunk-staged at all.
+    static func hunkRanges(_ header: String)
+        -> (oldStart: Int, oldCount: Int, newStart: Int, newCount: Int)? {
         let parts = header.split(separator: " ")
-        guard parts.count >= 3 else { return (0, 0) }
-        let old = Int(parts[1].dropFirst().split(separator: ",").first ?? "0") ?? 0
-        let new = Int(parts[2].dropFirst().split(separator: ",").first ?? "0") ?? 0
-        return (old, new)
+        guard parts.count >= 3, parts[0].hasPrefix("@@"),
+              parts[1].hasPrefix("-"), parts[2].hasPrefix("+") else { return nil }
+        func range(_ token: Substring) -> (start: Int, count: Int)? {
+            let fields = token.dropFirst().split(separator: ",", omittingEmptySubsequences: false)
+            guard let first = fields.first, let start = Int(first) else { return nil }
+            if fields.count == 1 { return (start, 1) }
+            guard fields.count == 2, let count = Int(fields[1]) else { return nil }
+            return (start, count)
+        }
+        guard let old = range(parts[1]), let new = range(parts[2]) else { return nil }
+        return (old.start, old.count, new.start, new.count)
     }
 }

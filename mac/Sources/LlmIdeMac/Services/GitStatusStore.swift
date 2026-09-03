@@ -3,6 +3,24 @@ import Observation
 
 /// Repo-relative path → effective git status, for file-tree decorations.
 /// Reuses StatusParser (no parsing duplication). Refreshed by the Explorer.
+///
+/// **Superseded by `GitTruthStore`, and a deliberate duplicate of it until
+/// P3 lands.** `refresh`, `decoration(forAbsolute:root:isDirectory:)` and
+/// `decoration(for:existing:)` below are byte-identical to `GitTruthStore`'s;
+/// that store adds line marks and per-hunk patching on top and is the one new
+/// code should use. This file survives only because `ExplorerView` and
+/// `TreeRowLabel.gitStatus` still name `GitStatusStore.Decoration`, and P3's
+/// Explorer rewiring deletes it outright — the type swap IS the
+/// consolidation.
+///
+/// It is left duplicated rather than delegated on purpose: forwarding to
+/// `GitTruthStore` would add an observation-forwarding layer to a file that
+/// is about to be deleted, and there is no XCTest or live-view harness in
+/// this toolchain to prove the forwarding still notifies SwiftUI. **Until
+/// then, a fix to either `refresh` must be made to BOTH** — the two are
+/// downstream of the same `StatusParser.unquote`, so a parsing fix that lands
+/// in one and not the other shows up as "Explorer and Source Control disagree
+/// about the same file".
 @MainActor @Observable
 final class GitStatusStore {
     enum Decoration { case modified, added, untracked, deleted, conflicted }
@@ -10,6 +28,7 @@ final class GitStatusStore {
     private(set) var dirsWithChanges: Set<String> = []     // repo-relative dir paths
     private let repo = RepoManager()
 
+    /// Identical to `GitTruthStore.refresh(root:)` — see the type's note.
     func refresh(root: URL?) async {
         guard let root,
               FileManager.default.fileExists(atPath: root.appendingPathComponent(".git").path) else {

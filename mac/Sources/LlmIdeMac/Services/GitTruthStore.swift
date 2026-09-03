@@ -64,6 +64,9 @@ final class GitTruthStore {
         self.repo = repo ?? RepoManager()
     }
 
+    /// Byte-identical to `GitStatusStore.refresh(root:)`, deliberately — see
+    /// that type's note for why the duplicate survives until P3 deletes it,
+    /// and fix BOTH when you fix either.
     func refresh(root: URL?) async {
         guard let root,
               FileManager.default.fileExists(atPath: root.appendingPathComponent(".git").path) else {
@@ -184,23 +187,15 @@ final class GitTruthStore {
     /// header git wouldn't recognise cannot produce a patch worth applying.
     /// (`DiffHunk.fromLineDiff` builds hunks with an EMPTY header for the
     /// agent-diff views — those must never reach `git apply`.)
+    /// Header parsing is shared with `UnifiedDiffParser` — one strict reader,
+    /// two policies. `hunkRanges` returns nil rather than guessing, and the
+    /// STRICT half of the contract lives here: an unreadable header is a
+    /// refusal, where the parser's own fallback is to keep rendering.
     static func assertPatchable(path: String, hunk: DiffHunk) throws {
-        /// "-a,b" / "+c,d" → b / d. A range with no comma ("-5") is git's
-        /// shorthand for exactly one line.
-        func lineCount(_ token: Substring) -> Int? {
-            let fields = token.dropFirst().split(separator: ",", omittingEmptySubsequences: false)
-            guard let first = fields.first, Int(first) != nil else { return nil }
-            if fields.count == 1 { return 1 }
-            guard fields.count == 2, let count = Int(fields[1]) else { return nil }
-            return count
-        }
-        let parts = hunk.header.split(separator: " ")
-        guard parts.count >= 3, parts[0] == "@@",
-              parts[1].hasPrefix("-"), parts[2].hasPrefix("+"),
-              let oldCount = lineCount(parts[1]), let newCount = lineCount(parts[2]) else {
+        guard let ranges = UnifiedDiffParser.hunkRanges(hunk.header) else {
             throw HunkPatchError.unparsableHeader(path: path, header: hunk.header)
         }
-        guard oldCount > 0, newCount > 0 else {
+        guard ranges.oldCount > 0, ranges.newCount > 0 else {
             throw HunkPatchError.wholeFileHunk(path: path)
         }
     }

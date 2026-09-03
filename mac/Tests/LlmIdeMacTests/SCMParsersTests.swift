@@ -290,9 +290,151 @@ final class SCMParsersTests: XCTestCase {
         XCTAssertEqual(hunks[1].header, "@@ -10,1 +10,1 @@")
     }
 
-    /// UnifiedDiffParser.hunkStarts is private; parse a single-line hunk
-    /// header through a synthetic one-row diff and read back the first
-    /// row's line numbers to exercise it indirectly.
+    // MARK: - Header skipping must not reach inside an open hunk
+    //
+    // Every row inside a hunk carries a prefix character, so a DELETED line
+    // whose content starts with "-- " renders as "--- …" and an INSERTED one
+    // starting with "++" renders as "+++ …". Skipping those as file headers
+    // dropped the row entirely: the hunk list claimed "no change" for a line
+    // Monaco showed as deleted, and — since P2 rebuilds patches from these
+    // rows — `git apply` rejected the synthesized hunk with "corrupt patch"
+    // (status 128) because the body no longer matched its own "@@" counts.
+    // "-- comment" is idiomatic SQL, Lua, Haskell, Ada, Elm and VHDL.
+
+    func testDeletedSQLCommentIsNotMistakenForAFileHeader() {
+        let diff = """
+        diff --git a/q.sql b/q.sql
+        index 1111111..2222222 100644
+        --- a/q.sql
+        +++ b/q.sql
+        @@ -1,5 +1,4 @@
+         select 1;
+        --- drop me
+         select 2;
+         select 3;
+         select 4;
+        """
+        let hunks = UnifiedDiffParser.parse(diff)
+        XCTAssertEqual(hunks.count, 1)
+        XCTAssertEqual(hunks[0].rows, [
+            DiffRow(kind: .context, oldLine: 1, newLine: 1, text: "select 1;"),
+            DiffRow(kind: .delete, oldLine: 2, newLine: nil, text: "-- drop me"),
+            DiffRow(kind: .context, oldLine: 3, newLine: 2, text: "select 2;"),
+            DiffRow(kind: .context, oldLine: 4, newLine: 3, text: "select 3;"),
+            DiffRow(kind: .context, oldLine: 5, newLine: 4, text: "select 4;"),
+        ])
+    }
+
+    func testInsertedDoublePlusLineIsNotMistakenForAFileHeader() {
+        let hunks = UnifiedDiffParser.parse("@@ -1,1 +1,2 @@\n int a;\n+++counter;\n")
+        XCTAssertEqual(hunks[0].rows, [
+            DiffRow(kind: .context, oldLine: 1, newLine: 1, text: "int a;"),
+            DiffRow(kind: .insert, oldLine: nil, newLine: 2, text: "++counter;"),
+        ])
+    }
+
+    /// The adversarial case: the deleted lines are VERBATIM file headers.
+    /// Only the "@@" counts can tell them apart from real ones, which is
+    /// exactly why the parser now tracks them.
+    func testDeletedLinesThatAreLiterallyFileHeadersSurvive() {
+        let diff = """
+        @@ -1,4 +1,2 @@
+         intro
+        ---- a/fake.txt
+        -+++ b/fake.txt
+         outro
+        """
+        let hunks = UnifiedDiffParser.parse(diff)
+        XCTAssertEqual(hunks[0].rows, [
+            DiffRow(kind: .context, oldLine: 1, newLine: 1, text: "intro"),
+            DiffRow(kind: .delete, oldLine: 2, newLine: nil, text: "--- a/fake.txt"),
+            DiffRow(kind: .delete, oldLine: 3, newLine: nil, text: "+++ b/fake.txt"),
+            DiffRow(kind: .context, oldLine: 4, newLine: 2, text: "outro"),
+        ])
+    }
+
+    /// A multi-file diff still finds the SECOND file's headers, because the
+    /// first hunk's budget is spent by then. Without this the fix would trade
+    /// one dropped-row bug for a merged-hunks bug.
+    func testMultiFileDiffStillSplitsOnceTheHunkBudgetIsSpent() {
+        let diff = """
+        diff --git a/x.txt b/x.txt
+        --- a/x.txt
+        +++ b/x.txt
+        @@ -1,3 +1,3 @@
+         1
+        -2
+        +X
+         3
+        diff --git a/y.txt b/y.txt
+        --- a/y.txt
+        +++ b/y.txt
+        @@ -1,3 +1,3 @@
+         a
+        -b
+        +Y
+         c
+        """
+        let hunks = UnifiedDiffParser.parse(diff)
+        XCTAssertEqual(hunks.count, 2)
+        XCTAssertEqual(hunks[0].rows.map(\.text), ["1", "2", "X", "3"])
+        XCTAssertEqual(hunks[1].rows.map(\.text), ["a", "b", "Y", "c"])
+    }
+
+    /// `\ No newline at end of file` is hunk metadata: skipped, and counting
+    /// toward NEITHER side's budget — otherwise it would end the hunk one row
+    /// early and drop the last real line.
+    func testNoNewlineMarkerIsSkippedWithoutSpendingTheBudget() {
+        let diff = "@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n\\ No newline at end of file\n"
+        XCTAssertEqual(UnifiedDiffParser.parse(diff)[0].rows, [
+            DiffRow(kind: .context, oldLine: 1, newLine: 1, text: "one"),
+            DiffRow(kind: .delete, oldLine: 2, newLine: nil, text: "two"),
+            DiffRow(kind: .insert, oldLine: nil, newLine: 2, text: "TWO"),
+            DiffRow(kind: .context, oldLine: 3, newLine: 3, text: "three"),
+        ])
+    }
+
+    /// A hunk whose header UNDERSTATES its counts (hand-written or
+    /// model-generated) keeps the leniency it has always had: rows past the
+    /// budget are still collected, they just resume being header-skippable.
+    func testRowsPastAnUnderstatedBudgetAreStillCollected() {
+        let hunks = UnifiedDiffParser.parse("@@ -1,1 +1,1 @@\n-old\n+new\n extra\n")
+        XCTAssertEqual(hunks[0].rows.map(\.text), ["old", "new", "extra"])
+    }
+
+    // MARK: - hunkRanges
+
+    func testHunkRangesReadsBothRanges() {
+        let r = UnifiedDiffParser.hunkRanges("@@ -10,5 +12,6 @@ func add() -> Int {")
+        XCTAssertEqual(r?.oldStart, 10); XCTAssertEqual(r?.oldCount, 5)
+        XCTAssertEqual(r?.newStart, 12); XCTAssertEqual(r?.newCount, 6)
+    }
+
+    /// git's comma-less shorthand means exactly ONE line, not zero — reading
+    /// it as zero would make a single-line hunk look like a whole-file add or
+    /// delete and get it refused by `GitTruthStore.assertPatchable`.
+    func testHunkRangesTreatsACommalessRangeAsOneLine() {
+        let r = UnifiedDiffParser.hunkRanges("@@ -1 +1 @@")
+        XCTAssertEqual(r?.oldCount, 1); XCTAssertEqual(r?.newCount, 1)
+    }
+
+    func testHunkRangesKeepsZeroCountsForWholeFileAddsAndDeletes() {
+        XCTAssertEqual(UnifiedDiffParser.hunkRanges("@@ -0,0 +1,5 @@")?.oldCount, 0)
+        XCTAssertEqual(UnifiedDiffParser.hunkRanges("@@ -1,5 +0,0 @@")?.newCount, 0)
+    }
+
+    /// nil, not a guess. A combined diff's second range is another OLD side,
+    /// not a new one, so there is no honest answer to give.
+    func testHunkRangesRejectsWhatItCannotRead() {
+        XCTAssertNil(UnifiedDiffParser.hunkRanges(""))
+        XCTAssertNil(UnifiedDiffParser.hunkRanges("@@ -1,3 @@"))
+        XCTAssertNil(UnifiedDiffParser.hunkRanges("@@@ -1,3 -1,3 +1,4 @@@"))
+        XCTAssertNil(UnifiedDiffParser.hunkRanges("@@ -x,y +1,2 @@"))
+    }
+
+    /// UnifiedDiffParser.hunkRanges is exercised directly above; this keeps
+    /// the original indirect check that a trailing function context can't
+    /// clobber the two range tokens.
     private func privateHunkStarts(_ header: String) -> (Int, Int) {
         let hunks = UnifiedDiffParser.parse(header + "\n context")
         return (hunks[0].rows.first?.oldLine ?? -1, hunks[0].rows.first?.newLine ?? -1)
