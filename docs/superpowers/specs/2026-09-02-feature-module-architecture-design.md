@@ -1,7 +1,7 @@
 # Feature Module Architecture — Design
 
 **Date:** 2026-09-02
-**Status:** Phase 1 implemented; Phase 2a (Graph exclusion) implemented; Phase 2b (view features) implemented; Phase 2c (AutoTask+LoopEngine) implemented; Phase 3 (Apply & Rebuild) implemented; 2d pending
+**Status:** Phase 1 implemented; Phase 2a (Graph exclusion) implemented; Phase 2b (view features) implemented; Phase 2c (AutoTask+LoopEngine) implemented; Phase 2d (Mobile Control) implemented — Phase 2 complete; Phase 3 (Apply & Rebuild) implemented
 **Goal:** The Workspace settings toggles (Settings → Workspace) currently hide
 menus and views only. This design makes a disabled feature actually leave the
 system: first its background work stops entirely (Phase 1), then its code is

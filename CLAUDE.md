@@ -24,7 +24,7 @@ cd mac
 swift build           # Build the app
 swift test            # Run XCTest suite
 make build-mac-lite   # Build lite app: excludes Graph, Explorer, Gantt, Issues, DocGen, Terminal; leaves Chat, Auto Tasks, Mobile Sync, Live Capture, Library
-make build-mac-min    # Build minimum app: excludes all above plus Auto Tasks/Loop; leaves Chat, Mobile Sync, Live Capture, Library only
+make build-mac-min    # Build minimum app: Chat only (excludes all 7 excludable features: Graph, Explorer, Gantt, Issues, DocGen, Terminal, Auto Tasks, Mobile Sync)
 ./build_app.sh        # Legacy build script (use `swift build` instead)
 
 # Testing
@@ -261,6 +261,8 @@ LLM-IDE Server (Node.js @ :3456)
 ```
 
 `MobileControlManager` dispatches Auto Tasks and Loop requests through `MobileFeatureBridge` protocol — when either feature is compiled out (via `LLMIDE_FEATURES`), the phone receives a degrade reply instead of routing to the feature's service.
+
+**Build-time exclusion:** Mobile Control is excludable at build time via the `mobile_sync` feature (settings key `LLMIDE_FEATURES=…`). When excluded, the 15-file mobile unit (MobileControlManager, WebSocket server, Bonjour advertiser, PIN cache, bridges, and iPhone pairing UI) is removed entirely, along with the SharedProtocol product dependency (iOS wire types). The core `MobileFeatureBridge` protocol stays in-tree to support dynamic downgrades when other features are excluded (Phase 2d).
 
 ### Quick Start
 

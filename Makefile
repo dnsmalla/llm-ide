@@ -50,20 +50,20 @@ build-mac: ## Build the full mac app
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build
 
 # LLMIDE_FEATURES lists the INCLUDED features by AppFeature rawValue; this
-# selection excludes every excludable feature (code_graph_3d, file_explorer,
-# gantt_issues, doc_gen, terminal), keeping only the three that have no
-# source-exclusion switch. --manifest-cache none is required: SwiftPM does
-# not key its manifest cache on env vars, so a stale cache would silently
-# keep the previous selection's target graph.
+# selection includes only agent_chat, auto_tasks, and mobile_sync, excluding
+# code_graph_3d, file_explorer, gantt_issues, doc_gen, and terminal.
+# --manifest-cache none is required: SwiftPM does not key its manifest cache
+# on env vars, so a stale cache would silently keep the previous selection's
+# target graph.
 build-mac-lite: ## non-engineer build: no Explorer/Gantt/DocGen/Terminal/Graph
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat,auto_tasks,mobile_sync swift build --manifest-cache none
 
 # Same rationale as build-mac-lite, two steps further: drops auto_tasks AND
 # mobile_sync too (excludes AutoTask/, LoopEngine/, and the Mobile Control
 # file-level unit — see Package.swift's `auto_tasks`/`mobile_sync` keys),
-# keeping only the one feature with no source-exclusion switch (agent_chat) —
-# the true minimum. --manifest-cache none for the same reason as build-mac-lite.
-build-mac-min: ## Non-engineer minimum: Chat only (no Mobile/AutoTask/Loop/Graph/view features)
+# keeping only agent_chat. The true minimum. --manifest-cache none for the
+# same reason as build-mac-lite.
+build-mac-min: ## Chat only: excludes all 7 excludable features
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat swift build --manifest-cache none
 
 test-mac:
