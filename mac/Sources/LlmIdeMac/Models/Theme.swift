@@ -278,3 +278,77 @@ extension View {
         modifier(CardModifier(padding: padding, radius: radius))
     }
 }
+
+// MARK: - Monaco theme bridge
+
+import AppKit
+
+extension Color {
+    /// "#RRGGBB", best-effort. Used only for embedding into Monaco's theme
+    /// JSON — Theme's `Color` values remain the actual source of truth for
+    /// every SwiftUI view; this is a one-way, lossy export for the WebView.
+    func hexRGB() -> String {
+        guard let rgb = NSColor(self).usingColorSpace(.deviceRGB) else { return "#000000" }
+        let r = Int((rgb.redComponent * 255).rounded())
+        let g = Int((rgb.greenComponent * 255).rounded())
+        let b = Int((rgb.blueComponent * 255).rounded())
+        return String(format: "#%02X%02X%02X", r, g, b)
+    }
+}
+
+/// One entry of Monaco's `IStandaloneThemeData.rules` — a token-type →
+/// color mapping for syntax highlighting. Kept minimal (foreground only,
+/// no fontStyle) since only line/diff decoration colors are theme-critical
+/// here; Monaco's bundled default-dark/default-light token colors are fine
+/// for syntax highlighting itself.
+struct MonacoThemeRule: Codable, Equatable {
+    let token: String
+    let foreground: String?
+}
+
+/// Mirrors Monaco's `monaco.editor.defineTheme(name, data)` `data` shape
+/// (`IStandaloneThemeData`). `base` must be one of Monaco's four built-in
+/// base themes; `inherit: true` means unset `colors` keys fall back to that
+/// base theme's own values.
+struct MonacoTheme: Codable, Equatable {
+    let base: String
+    let inherit: Bool
+    let rules: [MonacoThemeRule]
+    let colors: [String: String]
+}
+
+extension Theme {
+    /// The `IStandaloneThemeData` Monaco needs to render in this app's
+    /// palette. `base` selects Monaco's built-in dark/light base (Midnight
+    /// is a dark palette, so it inherits "vs-dark" too — `Theme.isDark`
+    /// already models exactly this distinction for every other consumer).
+    func monacoTheme() -> MonacoTheme {
+        MonacoTheme(
+            base: isDark ? "vs-dark" : "vs",
+            inherit: true,
+            rules: [],
+            colors: [
+                "editor.background": editorBackground.hexRGB(),
+                "editor.foreground": text.hexRGB(),
+                "editorLineNumber.foreground": editorLineNumber.hexRGB(),
+                "editorLineNumber.activeForeground": text.hexRGB(),
+                "editorGutter.addedBackground": gutterAddedMark.hexRGB(),
+                "editorGutter.modifiedBackground": gutterModifiedMark.hexRGB(),
+                "editorGutter.deletedBackground": gutterDeletedMark.hexRGB(),
+                "diffEditor.insertedTextBackground": diffAddedBg.hexRGB(),
+                "diffEditor.removedTextBackground": diffDeletedBg.hexRGB(),
+            ]
+        )
+    }
+
+    /// `monacoTheme()` as a JSON string, ready to cross the JS bridge as a
+    /// `callAsyncJavaScript` argument (never spliced into JS source — see
+    /// `MonacoBridge.setTheme`). Falls back to an empty object rather than
+    /// throwing: a failed encode should degrade to Monaco's own default
+    /// theme, not crash the host.
+    func monacoThemeJSON() -> String {
+        guard let data = try? JSONEncoder().encode(monacoTheme()),
+              let json = String(data: data, encoding: .utf8) else { return "{}" }
+        return json
+    }
+}
