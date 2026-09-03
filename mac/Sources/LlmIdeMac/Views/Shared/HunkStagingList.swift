@@ -1,4 +1,4 @@
-// mac/Sources/LlmIdeMac/Views/SourceControl/HunkStagingList.swift
+// mac/Sources/LlmIdeMac/Views/Shared/HunkStagingList.swift
 import SwiftUI
 
 /// Native SwiftUI hunk list — the "act" half of Source Control's diff
@@ -7,6 +7,13 @@ import SwiftUI
 /// decorations inside Monaco's rendered diff editor is real JS/DOM work
 /// this environment cannot visually verify before shipping; a native list
 /// needs none of that and is directly testable.
+///
+/// Lives in `Views/Shared/`, NOT `Views/SourceControl/`, because
+/// `CodeWorkflowSheet` consumes it in read-only mode — and `Package.swift`
+/// excludes `Views/SourceControl` wholesale from the lite/min builds
+/// (`Package.swift:56`). Keeping it here is what lets a build with
+/// `file_explorer` off still compile. `MonacoDiffView` sits here for the
+/// same reason.
 struct HunkStagingList: View {
     let hunks: [DiffHunk]
     var onStage: ((DiffHunk) -> Void)? = nil
