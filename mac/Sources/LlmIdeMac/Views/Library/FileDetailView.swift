@@ -262,6 +262,13 @@ struct CodeDetailView: View {
 struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     let url: URL
     var onSaved: (() async -> Void)? = nil
+    /// Monaco language id for the editor (Task 1's `MonacoLanguageMap`, or a
+    /// literal like `"markdown"`). Callers own this decision — the shared
+    /// editor doesn't infer a language from `url` itself.
+    var language: String = "plaintext"
+    /// Git gutter marks for the editor, keyed by line number. Empty for
+    /// content types (markdown) that don't track a git gutter.
+    var decorations: [Int: GitGutter.Mark] = [:]
     /// Optional toolbar accessory rendered just left of Revert/Save.
     let accessory: () -> Accessory
     let preview: (String) -> Preview
@@ -269,10 +276,14 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     init(url: URL,
          onSaved: (() async -> Void)? = nil,
          startInPreview: Bool = false,
+         language: String = "plaintext",
+         decorations: [Int: GitGutter.Mark] = [:],
          @ViewBuilder accessory: @escaping () -> Accessory,
          @ViewBuilder preview: @escaping (String) -> Preview) {
         self.url = url
         self.onSaved = onSaved
+        self.language = language
+        self.decorations = decorations
         self.accessory = accessory
         self.preview = preview
         // Code/markdown open in the rendered/highlighted Preview by default
@@ -398,16 +409,16 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     }
 
     private var editor: some View {
-        TextEditor(text: $content)
-            .font(.system(size: 13, design: .monospaced))
-            .textEditorStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(Color(nsColor: .textBackgroundColor))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onChange(of: content) { _, _ in
-                // Clear stale save-errors when the user resumes editing.
-                saveError = nil
-            }
+        MonacoEditorView(
+            content: $content,
+            language: language,
+            decorations: decorations,
+            onRequestSave: { Task { await saveWithToast() } }
+        )
+        .onChange(of: content) { _, _ in
+            // Clear stale save-errors when the user resumes editing.
+            saveError = nil
+        }
     }
 
     @MainActor
@@ -470,8 +481,11 @@ extension EditableTextDetailView where Accessory == EmptyView {
     init(url: URL,
          onSaved: (() async -> Void)? = nil,
          startInPreview: Bool = false,
+         language: String = "plaintext",
+         decorations: [Int: GitGutter.Mark] = [:],
          @ViewBuilder preview: @escaping (String) -> Preview) {
         self.init(url: url, onSaved: onSaved, startInPreview: startInPreview,
+                  language: language, decorations: decorations,
                   accessory: { EmptyView() }, preview: preview)
     }
 }
