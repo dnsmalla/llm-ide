@@ -479,10 +479,15 @@ final class RepoManager {
                 // large patch could otherwise fill the stdin pipe buffer
                 // while this thread is blocked writing it, with nothing
                 // yet reading stdout to unblock the child.
+                // A broken pipe is an ordinary outcome here — git rejecting a
+                // malformed hunk and exiting early before reading all of
+                // stdin — so this uses the throwing `write(contentsOf:)`,
+                // not the legacy `write(_:)`, which raises an uncaught
+                // exception on SIGPIPE and would crash the process.
                 if let stdin {
                     readGroup.enter()
                     DispatchQueue.global(qos: .userInitiated).async {
-                        stdinPipe.fileHandleForWriting.write(stdin)
+                        try? stdinPipe.fileHandleForWriting.write(contentsOf: stdin)
                         try? stdinPipe.fileHandleForWriting.close()
                         readGroup.leave()
                     }
