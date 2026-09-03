@@ -10,6 +10,7 @@ private final class SpyBridge: MobileFeatureBridge {
         handled.append(type); return accepts
     }
     func installPushObservers() { installs += 1 }
+    func removePushObservers() {}
 }
 
 @MainActor
