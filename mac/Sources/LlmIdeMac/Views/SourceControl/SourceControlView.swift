@@ -106,9 +106,16 @@ struct SourceControlView: View {
     /// first and discarding the result if this load was superseded. Clears
     /// `loadedKey` for the duration, so the pane cannot offer actions over
     /// the PREVIOUS selection's hunks while the new ones are still loading.
+    ///
+    /// The clear is conditional because a status poll re-runs this for the
+    /// SAME selection whenever any *other* file changes; blanking the pane to
+    /// "Loading…" every time would throw away the user's scroll position for
+    /// an edit they didn't make. A matching key means the same path AND the
+    /// same index side, so the hunks already on screen still belong to this
+    /// selection and the safety invariant holds.
     private func loadDiff(key: String, _ produce: @escaping () async -> DiffPayload) {
         diffTask?.cancel()
-        loadedKey = nil
+        if loadedKey != key { loadedKey = nil }
         diffTask = Task {
             let payload = await produce()
             if Task.isCancelled { return }
