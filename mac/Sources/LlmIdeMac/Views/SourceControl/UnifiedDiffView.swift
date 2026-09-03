@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// Read-only unified diff renderer backed by a `WKWebView` + vendored
-/// highlight.js — the same offline highlighter scaffold `CodeWebView`
-/// uses (Resources/highlight.min.js + atom-one-dark/light CSS). Each
-/// `DiffRow` becomes a table row with old/new line gutters, a +/−/space
+/// highlight.js — the same offline highlighter scaffold pattern
+/// `Resources/highlight.min.js` + atom-one-dark/light CSS already use
+/// elsewhere in this app. Each `DiffRow` becomes a table row with old/new
+/// line gutters, a +/−/space
 /// sign cell, and a syntax-highlighted code cell. Insert rows get a green
 /// background, delete rows red, context none; only the code cell is run
 /// through hljs so the row backgrounds survive highlighting. No wrap +
@@ -37,9 +38,9 @@ struct UnifiedDiffView: View {
 
 // MARK: - WKWebView diff renderer
 
-/// Renders a parsed unified diff as a highlighted HTML table. Mirrors
-/// `CodeWebView`'s vendored highlight.js loading: the JS + theme CSS are
-/// inlined from `Bundle.main` Resources (no remote CDN — offline + no MITM).
+/// Renders a parsed unified diff as a highlighted HTML table. Vendored
+/// highlight.js loading: the JS + theme CSS are inlined from `Bundle.main`
+/// Resources (no remote CDN — offline + no MITM).
 private struct DiffWebView: View {
     let hunks: [DiffHunk]
     let language: String

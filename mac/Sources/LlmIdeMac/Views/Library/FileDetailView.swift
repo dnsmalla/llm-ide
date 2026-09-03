@@ -93,7 +93,7 @@ struct MarkdownDetailView: View {
     @EnvironmentObject private var theme: ThemeStore
 
     var body: some View {
-        EditableTextDetailView(url: url, startInPreview: true) { content in
+        EditableTextDetailView(url: url, startInPreview: true, language: "markdown") { content in
             MarkdownWebView(markdown: content, isDark: theme.current.isDark)
         }
     }
@@ -197,12 +197,16 @@ struct CodeDetailView: View {
         EditableTextDetailView(
             url: url,
             onSaved: { await refreshGutter() },
-            startInPreview: true   // open code highlighted (read-only); Edit is one toggle away
+            startInPreview: true,   // open code highlighted (read-only); Edit is one toggle away
+            language: MonacoLanguageMap.id(for: url.pathExtension),
+            decorations: changedLines
         ) { content in
-            CodeWebView(code: content,
-                        language: url.pathExtension,
-                        isDark: theme.current.isDark,
-                        changedLines: changedLines)
+            MonacoEditorView(
+                content: .constant(content),
+                language: MonacoLanguageMap.id(for: url.pathExtension),
+                decorations: changedLines,
+                readOnly: true
+            )
         }
         .task(id: url) { await refreshGutter() }
     }
@@ -488,174 +492,6 @@ extension EditableTextDetailView where Accessory == EmptyView {
         self.init(url: url, onSaved: onSaved, startInPreview: startInPreview,
                   language: language, decorations: decorations,
                   accessory: { EmptyView() }, preview: preview)
-    }
-}
-
-struct CodeWebView: View {
-    let code: String
-    let language: String
-    let isDark: Bool
-    var changedLines: [Int: GitGutter.Mark] = [:]
-
-    var body: some View {
-        HljsWebView(html: html())
-    }
-
-    private var hljsLanguage: String {
-        HljsLanguage.id(for: language)
-    }
-
-    // Internal (not private) so CodeWebViewGutterTests can assert the
-    // gutter/code row-height invariant on the generated CSS directly —
-    // the misalignment it guards is invisible to any non-rendering test
-    // that can't see the stylesheet.
-    func html() -> String {
-        // Inlined, locally-bundled theme + highlighter (atom-one-dark/light)
-        // from the shared single-load `Hljs` cache.
-        let themeCSS = Hljs.themeCSS(isDark: isDark)
-        let hljsJS   = Hljs.js
-        let p        = Hljs.Palette(isDark: isDark)
-
-        let bg     = p.bg
-        let fg     = p.fg
-        let gutBg  = p.gutterBg
-        let gutFg  = p.gutterFg
-        let border = p.border
-        let hoverBg = isDark ? "#2c313a" : "#f0f0f0"
-
-        // HTML-escape the body once; the <pre><code class="language-X">
-        // wrapper lets highlight.js process it after DOMContentLoaded.
-        let escaped = Hljs.escape(code)
-
-        let classAttr = hljsLanguage.isEmpty ? "" : " class=\"language-\(hljsLanguage)\""
-
-        // Serialize the change map into a JS object literal: { lineNo: "g-add"|"g-mod"|"g-del" }.
-        let markEntries = changedLines
-            .sorted { $0.key < $1.key }
-            .map { entry -> String in
-                let cls: String
-                switch entry.value {
-                case .added:    cls = "g-add"
-                case .modified: cls = "g-mod"
-                case .deleted:  cls = "g-del"
-                }
-                return "\(entry.key):\"\(cls)\""
-            }
-            .joined(separator: ",")
-        let marksLiteral = "{\(markEntries)}"
-
-        return """
-        <!DOCTYPE html>
-        <html>
-        <head>
-        <meta charset="utf-8">
-        <style>\(themeCSS)</style>
-        <style>
-          * { margin:0; padding:0; box-sizing:border-box; }
-          html, body { height:100%; background:\(bg); }
-          /* One row height for BOTH columns. 20px == the old 1.6 × 12.5px, so
-             nothing moves visually; it just stops being font-dependent. */
-          :root { --row: 20px; }
-          body {
-            font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-            font-size: 12.5px;
-            /* ABSOLUTE row height, not a 1.6 multiplier. The gutter and the
-               code are two independent stacks of line boxes that only line up
-               while both rows are EXACTLY the same height, and a unitless
-               line-height resolves against each element's OWN font-size — so
-               any font-size difference between the two columns compounds one
-               fractional pixel per row into a full row of drift. A px value
-               pins both stacks to the same grid no matter what font resolves. */
-            line-height: var(--row);
-            color: \(fg);
-          }
-          /* Grid: [line-number] [code] — line numbers stay aligned even after
-             hljs wraps tokens in nested spans. */
-          .editor {
-            display: grid;
-            grid-template-columns: auto 1fr;
-            min-width: 100%;
-          }
-          /* `pre` and `code` MUST be included here, not just the two column
-             divs. Both carry a UA `font-family: monospace`, which in WebKit
-             also switches them to the *default fixed font size* (13px) rather
-             than inheriting the body's 12.5px — the exact mismatch that used
-             to walk the code out of step with its line numbers. */
-          .ln-col, .code-col, .code-col pre, .code-col code {
-            white-space: pre;
-            padding: 0;
-            font: inherit;
-            line-height: inherit;
-            tab-size: 4;
-          }
-          .ln-col {
-            position: sticky;
-            left: 0;
-            padding: 0 14px 0 10px;
-            text-align: right;
-            color: \(gutFg);
-            background: \(gutBg);
-            border-right: 1px solid \(border);
-            user-select: none;
-            -webkit-user-select: none;
-            min-width: 56px;
-          }
-          .code-col { padding: 0 24px 0 14px; overflow-x: auto; }
-          /* Pinned to the same absolute row height as the code lines so a
-             number can never occupy a taller/shorter box than its line. */
-          .ln, .row { display: block; height: var(--row); }
-          .row:hover, .ln:hover { background: \(hoverBg); }
-          /* Cursor-style change bars on the line-number cell. A transparent
-             baseline border keeps every row's text alignment identical so
-             marked lines don't shift horizontally. */
-          .ln { border-left: 3px solid transparent; }
-          .ln.g-add { border-left-color: #2ea043; }
-          .ln.g-mod { border-left-color: #2f81f7; }
-          .ln.g-del { border-left-color: #f85149; }
-          /* hljs adds .hljs to <code>; reset its own background so the
-             page background shows through cleanly. */
-          .code-col code, .code-col code.hljs { background: transparent !important; padding: 0; }
-        </style>
-        </head>
-        <body>
-        <div class="editor">
-          <div class="ln-col" id="ln"></div>
-          <div class="code-col"><pre><code\(classAttr) id="code">\(escaped)</code></pre></div>
-        </div>
-        <script>\(hljsJS)</script>
-        <script>
-          (function() {
-            var code = document.getElementById('code');
-            try {
-              if (window.hljs) { window.hljs.highlightElement(code); }
-            } catch (e) { /* leave plain text on failure */ }
-            // Build the line-number column from the FINAL line count
-            // (post-highlight html may still preserve line breaks).
-            var text = code.textContent || '';
-            var lines = text.split('\\n');
-            // Trailing blank line from a final \\n: drop it so the
-            // gutter doesn't show a phantom number.
-            if (lines.length && lines[lines.length - 1] === '') lines.pop();
-            var ln = document.getElementById('ln');
-            var marks = \(marksLiteral);
-            var out = '';
-            for (var i = 0; i < lines.length; i++) {
-              var n = i + 1;
-              var cls = marks[n] ? ('ln ' + marks[n]) : 'ln';
-              // NO newline between the spans. `.ln-col` is `white-space: pre`,
-              // where a newline is NOT collapsible whitespace — between two
-              // block-level spans it gets wrapped in an anonymous block and
-              // renders as its own empty row, spacing the gutter out to twice
-              // the code's pitch. The spans are `display: block`, so they
-              // already stack one per row on their own.
-              out += '<span class="' + cls + '">' + n + '</span>';
-            }
-            ln.innerHTML = out || '<span class="ln">1</span>';
-          })();
-        </script>
-        </body>
-        </html>
-        """
     }
 }
 
