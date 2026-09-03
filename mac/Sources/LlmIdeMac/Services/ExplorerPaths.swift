@@ -53,4 +53,36 @@ enum ExplorerPaths {
         if rel.isEmpty { return "" }   // the root itself → search everything
         return rel.hasSuffix("/") ? rel : rel + "/"
     }
+
+    /// A single, filesystem-resolved form of `url` that two different-looking
+    /// spellings of the same file — e.g. macOS's `/tmp` vs. `/private/tmp`,
+    /// or `/var` vs. `/private/var` — both collapse to (verified by probe:
+    /// `URL.standardizedFileURL` actually folds toward the shorter symlinked
+    /// spelling here, not the other way around — `stringByStandardizingPath`
+    /// special-cases exactly this — so treat the EQUALITY across spellings as
+    /// the contract, never a specific winning literal). Unlike every other
+    /// function in this type, this one touches the filesystem
+    /// (`resolvingSymlinksInPath()` is a syscall), so it is for BOUNDARY use
+    /// only — normalizing a URL once as it *enters* the store (a path typed
+    /// by the user, a persisted bookmark being restored, a reveal-a-file
+    /// request) — never for per-render work in a hot path.
+    ///
+    /// This exists because `FileManager.contentsOfDirectory` returns
+    /// symlink-resolved URLs while building a child URL with
+    /// `appendingPathComponent` does not, so the same logical file can arrive
+    /// as two `URL`s that are `==`- and hash-unequal even though `key(_:)`
+    /// (a plain string on `standardizedFileURL.path`, no symlink resolution)
+    /// says they're the same place. `List(selection:)` matches by raw `URL`
+    /// hashing, so a selection URL that didn't come straight from a `Row`
+    /// would silently fail to select without this.
+    ///
+    /// Deliberately NOT folded into `key(_:)`: `key(_:)` is the identity that
+    /// `flatten` and Task 5's persistence are built against today, and this
+    /// function's filesystem I/O would also make every `key(_:)` call sites'
+    /// "no I/O" assumption false. Use `canonical(_:)` at the boundary, then
+    /// pass the result through `key(_:)`/`relativePath`/`isDescendant` as
+    /// usual.
+    static func canonical(_ url: URL) -> URL {
+        url.resolvingSymlinksInPath().standardizedFileURL
+    }
 }

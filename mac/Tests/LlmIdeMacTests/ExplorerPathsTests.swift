@@ -67,4 +67,47 @@ final class ExplorerPathsTests: XCTestCase {
         let root = URL(fileURLWithPath: "/tmp/proj")
         XCTAssertNil(ExplorerPaths.includeGlob(for: URL(fileURLWithPath: "/tmp/elsewhere"), root: root))
     }
+
+    // MARK: - canonical
+
+    /// `/var` is a symlink to `/private/var` on every macOS install — the
+    /// exact real-world case that defeats raw `URL` equality/hashing for
+    /// `List(selection:)`: `FileManager.contentsOfDirectory` returns
+    /// symlink-resolved URLs while `appendingPathComponent` does not, so a
+    /// selection URL built the second way never `==`s one built the first.
+    ///
+    /// This pins EQUALITY only, not a specific winning spelling: verified by
+    /// probe, `URL.standardizedFileURL` folds `/private/var`/`/private/tmp`
+    /// back to their shorter symlinked form (a documented
+    /// `stringByStandardizingPath` special case) rather than the other way
+    /// around, so `canonical(_:)` on this toolchain actually normalizes
+    /// toward `/var/...`, not `/private/var/...`. Either direction satisfies
+    /// this type's actual contract — "both spellings collapse to one key" —
+    /// so do not tighten this into a literal-path assertion.
+    func testCanonicalUnifiesVarAndPrivateVarSpellings() {
+        let viaVar = URL(fileURLWithPath: "/var/tmp")
+        let viaPrivateVar = URL(fileURLWithPath: "/private/var/tmp")
+        XCTAssertEqual(ExplorerPaths.canonical(viaVar), ExplorerPaths.canonical(viaPrivateVar))
+    }
+
+    /// Reproduces the actual bug end-to-end against a real directory: a URL
+    /// built with `appendingPathComponent` (what a caller constructs) and the
+    /// URL `FileManager` hands back for the same file via
+    /// `contentsOfDirectory` (what a `Row` is built from) can be `URL`-unequal
+    /// even though they name the same file — `canonical(_:)` unifies them.
+    func testCanonicalUnifiesAppendingPathComponentAndContentsOfDirectoryForms() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("explorer-paths-canonical-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let name = "a.txt"
+        FileManager.default.createFile(atPath: root.appendingPathComponent(name).path, contents: nil)
+
+        let viaAppend = root.appendingPathComponent(name)
+        let viaListing = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+                .first { $0.lastPathComponent == name })
+
+        XCTAssertEqual(ExplorerPaths.canonical(viaAppend), ExplorerPaths.canonical(viaListing))
+    }
 }

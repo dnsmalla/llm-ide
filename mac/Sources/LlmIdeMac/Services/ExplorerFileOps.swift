@@ -77,14 +77,79 @@ enum ExplorerFileOps {
         try FileManager.default.trashItem(at: url, resultingItemURL: &result)
     }
 
+    /// True when the volume containing `url` cannot tell two differently-cased
+    /// names apart — the default for every macOS/APFS system volume. Fails
+    /// SAFE (returns `true`, the more paranoid answer) when the resource
+    /// value can't be read, e.g. `url` doesn't exist yet: folding case
+    /// unnecessarily costs nothing here, but failing to fold it on an
+    /// actually-case-insensitive volume is how F2 (below) slips through.
+    private static func isCaseInsensitiveVolume(_ url: URL) -> Bool {
+        guard let supportsCaseSensitiveNames = try? url.resourceValues(
+            forKeys: [.volumeSupportsCaseSensitiveNamesKey]
+        ).volumeSupportsCaseSensitiveNames else {
+            return true
+        }
+        return !supportsCaseSensitiveNames
+    }
+
+    /// A filesystem-AWARE identity key, used ONLY by the move/copy
+    /// destructive-operation guards below — deliberately separate from
+    /// `ExplorerPaths.key`, which stays a pure string on purpose:
+    /// `ExplorerTreeStore`'s caches and Task 5's on-disk persistence are keyed
+    /// on `ExplorerPaths.key`'s exact current semantics, and changing what it
+    /// considers "the same path" would silently reshuffle that state out from
+    /// under code being built against it right now.
+    ///
+    /// This key resolves symlinks (`.resolvingSymlinksInPath()`) and, on a
+    /// case-insensitive volume, folds case — two real ways a destination that
+    /// *looks* different from the source is actually the very same directory
+    /// or one of its descendants on disk. Do not merge this back into
+    /// `ExplorerPaths.key`: the two answer different questions ("same string
+    /// identity for cache/persistence purposes" vs. "same real place on disk
+    /// for a destructive-operation safety check") and conflating them would
+    /// re-open the gap this fixes.
+    private static func realWorldKey(_ url: URL, caseInsensitive: Bool) -> String {
+        let resolved = url.resolvingSymlinksInPath().standardizedFileURL.path
+        return caseInsensitive ? resolved.lowercased() : resolved
+    }
+
+    /// `isDescendant`, but on `realWorldKey`s — see that function's doc for
+    /// why this can't just call `ExplorerPaths.isDescendant`. Strict like its
+    /// counterpart: a directory is not its own descendant.
+    private static func isReallyDescendant(_ url: URL, of ancestor: URL, caseInsensitive: Bool) -> Bool {
+        let ancestorKey = realWorldKey(ancestor, caseInsensitive: caseInsensitive)
+        let urlKey = realWorldKey(url, caseInsensitive: caseInsensitive)
+        if urlKey == ancestorKey { return false }
+        return urlKey.hasPrefix(ancestorKey + "/")
+    }
+
     /// Guard shared by `move` and `copy`: rejects "into itself" and "into my
-    /// own descendant" before any filesystem call. `isDescendant` is strict,
-    /// so the equality case is checked separately.
+    /// own descendant" before any filesystem call.
+    ///
+    /// Compares `realWorldKey`s, not `ExplorerPaths.key`s: a naive string
+    /// comparison is bypassed by a symlinked `destinationDir` that resolves
+    /// inside `source`, or by a differently-cased path to the same directory
+    /// on the default case-insensitive APFS volume — both let a self-nesting
+    /// move/copy slip past this check and reach `FileManager`, which either
+    /// surfaces a raw `EINVAL` (same-volume `rename(2)`) instead of this
+    /// type's friendly error, or — cross-volume, where `FileManager` falls
+    /// back to a recursive copy+delete instead of `rename(2)` — has no kernel
+    /// backstop at all, so the copy can recurse straight into the very
+    /// subtree it's deleting out from under itself.
+    ///
+    /// Folds case whenever EITHER `source`'s or `destinationDir`'s volume is
+    /// case-insensitive, not just one — a paranoid-but-correct choice: two
+    /// paths can only be a containment risk for each other if they name the
+    /// same underlying location, and case-folding when either side *could*
+    /// treat that case difference as identical is strictly safer than
+    /// case-folding only when both agree.
     private static func assertNotSelfNesting(source: URL, destinationDir: URL) throws {
-        if ExplorerPaths.key(source) == ExplorerPaths.key(destinationDir) {
+        let caseInsensitive = isCaseInsensitiveVolume(source) || isCaseInsensitiveVolume(destinationDir)
+        if realWorldKey(source, caseInsensitive: caseInsensitive)
+            == realWorldKey(destinationDir, caseInsensitive: caseInsensitive) {
             throw ExplorerFileError.cannotMoveIntoSelf
         }
-        if ExplorerPaths.isDescendant(destinationDir, of: source) {
+        if isReallyDescendant(destinationDir, of: source, caseInsensitive: caseInsensitive) {
             throw ExplorerFileError.cannotMoveIntoSelf
         }
     }
@@ -99,12 +164,19 @@ enum ExplorerFileOps {
     ///
     /// Moving into the directory the item already lives in is a no-op that
     /// returns the original URL — a drag that lands where it started must not
-    /// throw at the user.
+    /// throw at the user. Compared via `realWorldKey`, same as the
+    /// self-nesting guard above: without that, referencing the same parent
+    /// through a differently-cased path falls through to the `fileExists`
+    /// check below and throws `.alreadyExists` for what is really a no-op.
     @discardableResult
     static func move(from source: URL, to destinationDir: URL) throws -> URL {
         try assertNotSelfNesting(source: source, destinationDir: destinationDir)
         let dest = destinationDir.appendingPathComponent(source.lastPathComponent)
-        if ExplorerPaths.key(dest) == ExplorerPaths.key(source) { return source }
+        let caseInsensitive = isCaseInsensitiveVolume(source) || isCaseInsensitiveVolume(destinationDir)
+        if realWorldKey(dest, caseInsensitive: caseInsensitive)
+            == realWorldKey(source, caseInsensitive: caseInsensitive) {
+            return source
+        }
         guard !FileManager.default.fileExists(atPath: dest.path) else {
             throw ExplorerFileError.alreadyExists
         }

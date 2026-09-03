@@ -152,4 +152,68 @@ final class ExplorerFileOpsTests: XCTestCase {
             XCTAssertEqual(err as? ExplorerFileError, .cannotMoveIntoSelf)
         }
     }
+
+    // MARK: - self-nesting guard: symlink and case-insensitivity bypasses (fix round 1)
+
+    /// A `destinationDir` that LOOKS unrelated as a string but resolves,
+    /// through a symlink, to a descendant of `source` — the guard must
+    /// resolve symlinks before comparing, or this reaches `FileManager` and
+    /// surfaces a raw Cocoa/EINVAL error instead of `.cannotMoveIntoSelf`.
+    func testMoveIntoSymlinkedDescendantThrows() throws {
+        let parent = try ExplorerFileOps.createFolder(in: root, name: "parent")
+        let child = try ExplorerFileOps.createFolder(in: parent, name: "child")
+        let link = root.appendingPathComponent("link-to-child")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: child)
+        XCTAssertThrowsError(try ExplorerFileOps.move(from: parent, to: link)) { err in
+            XCTAssertEqual(err as? ExplorerFileError, .cannotMoveIntoSelf)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: child.path),
+                      "a rejected symlink-descendant move must not have disturbed the tree")
+    }
+
+    /// Same bypass class for `copy`.
+    func testCopyIntoSymlinkedDescendantThrows() throws {
+        let parent = try ExplorerFileOps.createFolder(in: root, name: "parent")
+        let child = try ExplorerFileOps.createFolder(in: parent, name: "child")
+        let link = root.appendingPathComponent("link-to-child")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: child)
+        XCTAssertThrowsError(try ExplorerFileOps.copy(from: parent, to: link)) { err in
+            XCTAssertEqual(err as? ExplorerFileError, .cannotMoveIntoSelf)
+        }
+    }
+
+    /// `CaseParent` vs. `caseparent/child` name the same directory on the
+    /// default case-insensitive APFS volume; skipped on the rare
+    /// case-sensitive volume where they are genuinely different paths.
+    func testMoveIntoCaseDifferentDescendantThrowsOnCaseInsensitiveVolume() throws {
+        guard try isVolumeCaseInsensitive(root) else {
+            throw XCTSkip("volume under test is case-sensitive; case-fold guard does not apply")
+        }
+        let parent = try ExplorerFileOps.createFolder(in: root, name: "CaseParent")
+        let childLower = URL(fileURLWithPath: root.path + "/caseparent/child")
+        XCTAssertThrowsError(try ExplorerFileOps.move(from: parent, to: childLower)) { err in
+            XCTAssertEqual(err as? ExplorerFileError, .cannotMoveIntoSelf)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: parent.path),
+                      "a rejected case-differing self-nesting move must not have disturbed the tree")
+    }
+
+    /// F3: moving into the same parent referenced with different case must
+    /// stay a no-op, not fall through to `.alreadyExists`.
+    func testMoveIntoOwnParentViaDifferentCaseIsANoOp() throws {
+        guard try isVolumeCaseInsensitive(root) else {
+            throw XCTSkip("volume under test is case-sensitive; no-op case-fold does not apply")
+        }
+        let subdir = try ExplorerFileOps.createFolder(in: root, name: "SubDir")
+        let src = try ExplorerFileOps.createFile(in: subdir, name: "a.txt")
+        let lowerCasedSubdir = URL(fileURLWithPath: root.path + "/subdir")
+        let result = try ExplorerFileOps.move(from: src, to: lowerCasedSubdir)
+        XCTAssertEqual(result.path, src.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: src.path))
+    }
+
+    private func isVolumeCaseInsensitive(_ url: URL) throws -> Bool {
+        let values = try url.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey])
+        return values.volumeSupportsCaseSensitiveNames == false
+    }
 }
