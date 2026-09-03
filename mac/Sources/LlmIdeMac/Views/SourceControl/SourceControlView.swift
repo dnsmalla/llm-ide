@@ -1,9 +1,13 @@
 import SwiftUI
 
-/// Cursor-style Source Control panel over the active cloned repo. Two-pane
-/// HSplitView: left = branch header + staged/unstaged file groups + commit
-/// box; right = the colored unified diff of the selected file. Empty state
-/// when no repo is active. Discard goes through a destructive confirmation.
+/// Cursor-style Source Control panel over the active cloned repo. Two
+/// columns: left = branch header + either the staged/unstaged file groups and
+/// commit box (Changes) or the commit list and the selected commit's file
+/// list (History); right = the selected file's diff — Monaco's diff editor
+/// over a `HunkStagingList`, which is interactive in Changes mode and
+/// read-only in History. Exactly one file's diff is shown at a time in both
+/// modes. Empty state when no repo is active. Discard goes through a
+/// destructive confirmation.
 struct SourceControlView: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
@@ -34,6 +38,11 @@ struct SourceControlView: View {
     @State private var mode: PaneMode = .changes
     @State private var commits: [Commit] = []
     @State private var selectedCommit: Commit?
+    /// History mode browses ONE file of the selected commit at a time (same
+    /// shape as Changes mode), rather than rendering a whole multi-file
+    /// commit diff as a single blob.
+    @State private var commitFiles: [String] = []
+    @State private var selectedCommitFile: String?
     @State private var stashes: [SourceControlService.Stash] = []
     @State private var showStashMessage = false
     @State private var stashMessage = ""
@@ -46,6 +55,10 @@ struct SourceControlView: View {
     /// file/commit selection can't race (last-to-finish overwriting the
     /// current selection's diff).
     @State private var diffTask: Task<Void, Never>?
+    /// In-flight commit-file-list load, cancelled the same way and for the
+    /// same reason as `diffTask` — clicking down a commit list fast would
+    /// otherwise let an older commit's file list land last.
+    @State private var commitFilesTask: Task<Void, Never>?
 
     private enum PaneMode: String, CaseIterable { case changes = "Changes", history = "History" }
 
@@ -74,6 +87,19 @@ struct SourceControlView: View {
         loadDiff {
             let parsed = await scm.diff(root: root, file: file)
             let content = await scm.diffContent(root: root, file: file)
+            return (parsed, content.original, content.modified)
+        }
+    }
+
+    /// Right pane for one file of one commit (History mode). The hunks come
+    /// from a real `git show` diff (`commitFileHunks`) rather than a
+    /// whole-file line diff of the two contents: git emits compact ±3-context
+    /// hunks, so a 3-line change in a 2000-line file is a few rows instead of
+    /// two thousand.
+    private func loadCommitFileDiff(root: URL, sha: String, path: String) {
+        loadDiff {
+            let parsed = await scm.commitFileHunks(root: root, sha: sha, path: path)
+            let content = await scm.commitFileContent(root: root, sha: sha, path: path)
             return (parsed, content.original, content.modified)
         }
     }
@@ -148,11 +174,13 @@ struct SourceControlView: View {
     /// when no working tree exists.
     private var root: URL? { WorkspaceRoot.gitWorkingTree(config: config, projectStore: projectStore) }
 
-    /// File extension driving the right pane's Monaco language id — the
-    /// selected file's own extension. (History mode has no Monaco pane yet;
-    /// it still renders a whole commit's diff as a hunk list.)
+    /// File extension driving the right pane's Monaco language id. History
+    /// mode uses the selected COMMIT FILE's extension, not a "diff" hint —
+    /// that pane now shows one real file's before/after content, not a
+    /// multi-file unified-diff blob.
     private var diffLanguage: String {
-        (selected?.path as NSString?)?.pathExtension ?? ""
+        let path = mode == .history ? selectedCommitFile : selected?.path
+        return (path as NSString?)?.pathExtension ?? ""
     }
 
     /// Whether the active repo has saved credentials (enables pull/push/sync).
@@ -225,10 +253,12 @@ struct SourceControlView: View {
                 detailPlaceholder("Select a file to see its changes")
             }
         case .history:
-            if selectedCommit != nil {
+            if selectedCommitFile != nil {
                 historyDetail
             } else {
-                detailPlaceholder("Select a commit to see its changes")
+                detailPlaceholder(selectedCommit == nil
+                                  ? "Select a commit to browse the files it touched"
+                                  : "Select a file to see what this commit changed")
             }
         }
     }
@@ -248,12 +278,14 @@ struct SourceControlView: View {
         }
     }
 
-    /// The selected commit's whole diff, as the same native hunk list
-    /// Changes mode uses — read-only (both callbacks nil), since committed
-    /// history isn't stageable. Task 9 replaces this with per-file browsing
-    /// plus its own `MonacoDiffView`.
+    /// One file of one commit. Committed history is not stageable, so both
+    /// `HunkStagingList` callbacks stay nil (its read-only mode).
     private var historyDetail: some View {
-        HunkStagingList(hunks: hunks)
+        VSplitView {
+            MonacoDiffView(original: diffOriginal, modified: diffModified,
+                           language: MonacoLanguageMap.id(for: diffLanguage))
+            HunkStagingList(hunks: hunks)
+        }
     }
 
     private func detailPlaceholder(_ message: String) -> some View {
@@ -290,6 +322,9 @@ struct SourceControlView: View {
             // Clear any selection carried over from a previous repo.
             selectedCommit = nil
             selected = nil
+            commitFilesTask?.cancel()
+            commitFiles = []
+            selectedCommitFile = nil
             clearDiff()
             await scm.refresh(root: root)
         }
@@ -339,6 +374,9 @@ struct SourceControlView: View {
                 if let root { Task { commits = await scm.log(root: root) } }
             } else {
                 selectedCommit = nil
+                commitFilesTask?.cancel()
+                commitFiles = []
+                selectedCommitFile = nil
             }
         }
         // Keep the history list fresh on every refresh while in History mode,
@@ -351,15 +389,23 @@ struct SourceControlView: View {
                 Task { tags = await scm.tags(root: root) }
             }
         }
-        // Load the selected commit's diff into the shared right pane. No
-        // Monaco content here — History mode still renders a whole commit
-        // as one hunk list until Task 9 makes it per-file.
+        // Selecting a commit lists the files it touched — it does NOT load a
+        // diff. Picking one of those files is a separate step, mirroring
+        // Changes mode's select-a-file-then-see-its-diff shape.
         .onChange(of: selectedCommit) { _, c in
-            guard let c, let root else { clearDiff(); return }
-            loadDiff {
-                let parsed = await scm.commitDiff(root: root, sha: c.sha)
-                return (parsed, "", "")
+            selectedCommitFile = nil
+            clearDiff()
+            commitFilesTask?.cancel()
+            guard let c, let root else { commitFiles = []; return }
+            commitFilesTask = Task {
+                let files = await scm.commitFiles(root: root, sha: c.sha)
+                if Task.isCancelled { return }
+                commitFiles = files
             }
+        }
+        .onChange(of: selectedCommitFile) { _, path in
+            guard let path, let c = selectedCommit, let root else { clearDiff(); return }
+            loadCommitFileDiff(root: root, sha: c.sha, path: path)
         }
     }
 
@@ -467,19 +513,68 @@ struct SourceControlView: View {
         }
     }
 
+    /// Cap on the commit-file list's height so a commit touching a hundred
+    /// files can't push the commit list itself off-screen. Both halves stay
+    /// independently scrollable.
+    private static let commitFileListMaxHeight: CGFloat = 240
+
     @ViewBuilder private func historyList(_ root: URL) -> some View {
-        ScrollView {
-            errorBanner()
-            if commits.isEmpty {
-                Text("No commits")
-                    .font(Typography.caption).foregroundStyle(theme.current.textMuted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Spacing.md).padding(.top, Spacing.sm)
+        VStack(spacing: 0) {
+            ScrollView {
+                errorBanner()
+                if commits.isEmpty {
+                    Text("No commits")
+                        .font(Typography.caption).foregroundStyle(theme.current.textMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, Spacing.md).padding(.top, Spacing.sm)
+                }
+                ForEach(commits) { commit in
+                    commitRow(commit)
+                }
             }
-            ForEach(commits) { commit in
-                commitRow(commit)
+            if selectedCommit != nil {
+                Divider().background(theme.current.border)
+                commitFileList()
+                    .frame(maxHeight: Self.commitFileListMaxHeight)
             }
         }
+    }
+
+    /// Files touched by the selected commit. Picking one loads only THAT
+    /// file's diff into the right pane — History never renders a whole
+    /// multi-file commit at once.
+    @ViewBuilder private func commitFileList() -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Files (\(commitFiles.count))")
+                .font(Typography.caption).foregroundStyle(theme.current.textMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Spacing.md).padding(.top, Spacing.sm)
+            if commitFiles.isEmpty {
+                Text("No files in this commit")
+                    .font(Typography.caption).foregroundStyle(theme.current.textMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.xs)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(commitFiles, id: \.self) { path in
+                            commitFileRow(path)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func commitFileRow(_ path: String) -> some View {
+        Text(path)
+            .font(Typography.caption).foregroundStyle(theme.current.text)
+            .lineLimit(1).truncationMode(.middle)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Spacing.md).padding(.vertical, 3)
+            .background(selectedCommitFile == path ? theme.current.accent.opacity(0.12) : .clear)
+            .contentShape(Rectangle())
+            .onTapGesture { selectedCommitFile = path }
     }
 
     private func commitRow(_ commit: Commit) -> some View {

@@ -291,6 +291,10 @@ final class SourceControlService {
 
     /// Unified diff for a single commit. `--format=` suppresses the commit
     /// header so only the diff body is parsed. Returns [] on error.
+    ///
+    /// Currently has NO caller: History mode browses a commit one file at a
+    /// time (`commitFiles` + `commitFileHunks`) instead of rendering a whole
+    /// multi-file commit as one blob. Kept as the whole-commit primitive.
     func commitDiff(root: URL, sha: String) async -> [DiffHunk] {
         guard let raw = try? await repo.runGit(["show", "--format=", sha], at: root)
         else { return [] }
@@ -298,11 +302,23 @@ final class SourceControlService {
     }
 
     /// Repo-relative paths touched by `sha`, for History mode's per-file
-    /// browse (Task 9) — replaces trying to render an entire multi-file
-    /// commit through a single-file diff view.
+    /// browse — replaces trying to render an entire multi-file commit
+    /// through a single-file diff view.
+    ///
+    /// `-z` (NUL-separated, unquoted) rather than plain newline-separated
+    /// output: git's default `core.quotePath` wraps any non-ASCII path in
+    /// double quotes with octal escapes — `設計.txt` comes back as
+    /// `"\350\250\255\350\250\210.txt"` (verified against a real repo) —
+    /// and that string is not a path `commitFileContent`/`commitFileHunks`
+    /// can then `git show`, so every Japanese-named file in a commit would
+    /// open blank. `-z` also survives the (rare) path containing a newline.
+    ///
+    /// Returns [] for a merge commit: `git show` suppresses a merge's diff
+    /// by default, so there are no names to list.
     func commitFiles(root: URL, sha: String) async -> [String] {
-        guard let raw = try? await repo.runGit(["show", "--format=", "--name-only", sha], at: root) else { return [] }
-        return raw.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+        guard let raw = try? await repo.runGit(["show", "--format=", "--name-only", "-z", sha], at: root)
+        else { return [] }
+        return raw.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
     }
 
     /// One file's old/new content AT a specific commit — `sha^` (the parent)
