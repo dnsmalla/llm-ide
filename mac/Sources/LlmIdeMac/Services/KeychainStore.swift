@@ -182,11 +182,12 @@ enum KeychainStore {
     /// Settings refresh or API call.
     static func warmSessionCache(refreshTokenHost: String, gitLabHost: String) {
         migrateIfNeeded(refreshHost: refreshTokenHost, gitLabHost: gitLabHost)
-        // MobilePin keeps its own item (pairing PIN), separate from the blob
-        // above, but still warmed here so its keychain read also happens in
-        // this single launch-time pass instead of lazily on first mobile-
+        // Mobile Control keeps its own pairing-PIN item, separate from the
+        // blob above, but still warmed here so its keychain read also happens
+        // in this single launch-time pass instead of lazily on first mobile-
         // control use — which would otherwise cost a second unlock prompt.
-        MobilePin.warmCache()
+        // No-op when Mobile Control is compiled out.
+        FeatureCatalog.warmMobilePinCache()
     }
 
     /// Drop the in-memory mirror after a wipe attempt.
@@ -204,7 +205,7 @@ enum KeychainStore {
         loadFailed = false
         lastFailureStatus = nil
         lock.unlock()
-        MobilePin.clearSessionCache()
+        FeatureCatalog.clearMobilePinSessionCache()
     }
 
     // MARK: - JWT refresh token

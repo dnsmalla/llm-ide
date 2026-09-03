@@ -27,7 +27,6 @@ struct AutoCodeView: View {
     @State private var showingAddCustomTask = false
     @State private var selectedCustomTaskId: String? = nil
     @State private var customTaskPendingDelete: CustomAutoTask? = nil
-    @Environment(MobileControlManager.self) private var mobileControl
 
     /// Derived live from `customTasks` instead of stored as a snapshot — a
     /// stored `CustomAutoTask?` would go stale the moment another mutation
@@ -106,7 +105,7 @@ struct AutoCodeView: View {
                 .buttonStyle(.borderless)
                 .help("Add Custom Task")
 
-                Button { mobileControl.refreshAutoTaskStateForMobile() } label: {
+                Button { FeatureCatalog.refreshAutoTaskStateForMobile() } label: {
                     Image(systemName: "arrow.triangle.2.circlepath")
                 }
                 .buttonStyle(.borderless)
@@ -340,7 +339,7 @@ struct AutoCodeView: View {
     /// calls the same underlying method for a manual, visible re-sync).
     private func persistCustomTasksChange() {
         customTasks = CustomAutoTask.loadAll()
-        mobileControl.refreshAutoTaskStateForMobile()
+        FeatureCatalog.refreshAutoTaskStateForMobile()
     }
 
     @ViewBuilder

@@ -1,5 +1,11 @@
 import Foundation
 
+// The method already exists on the manager; this declaration lets
+// `MobileModule` hold it behind the shared `FeatureService` protocol.
+// Mirrors GraphAutoUpdater's conformance in Graph/Services/GraphModule.swift
+// and AutoCodeUpdateService's in AutoTask/Services/AutoTaskModule.swift.
+extension MobileControlManager: FeatureService {}
+
 /// Feature module for `.mobileSync`: the native WebSocket server + Bonjour.
 /// `start()` only launches the server when the user opted into Mobile
 /// Control AND auto-start; the manual Start button in Settings keeps calling

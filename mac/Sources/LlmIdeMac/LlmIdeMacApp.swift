@@ -57,9 +57,9 @@ fileprivate func installCrashHandlers() {
 // these declarations let feature modules hold them behind one protocol.
 // GraphAutoUpdater's conformance lives in Graph/Services/GraphModule.swift.
 // AutoCodeUpdateService's conformance lives in AutoTask/Services/AutoTaskModule.swift.
+// MobileControlManager's conformance lives in Services/MobileModule.swift.
 extension LiveSessionMirror: FeatureService {}
 extension AutoCaptureService: FeatureService {}
-extension MobileControlManager: FeatureService {}
 
 public struct LlmIdeMacApp: App {
     // Adopt an NSApplicationDelegate to handle reopen and "should-quit"
@@ -83,7 +83,6 @@ public struct LlmIdeMacApp: App {
     /// `updateService`/`sourceLinkStore` rather than in `init()` below.
     @StateObject private var featureRebuild = FeatureRebuildService()
     @State private var backend = BackendManager()
-    @State private var mobileControl = MobileControlManager()
     @State private var quickSwitcherShown = false
     @State private var activityStore: ActivityStore
     private let api: LlmIdeAPIClient
@@ -151,14 +150,6 @@ public struct LlmIdeMacApp: App {
         self._activityStore = State(wrappedValue: activity)
         self.api = client
         self.autoCapture = AutoCaptureService(capture: orchestrator, config: cfg)
-        // Hand the API client to the mobile control manager so inbound
-        // llm-ide chat turns from the iPhone can be proxied to the backend.
-        // Done last so all stored properties (incl. autoCapture) are set
-        // before `self.mobileControl` is read.
-        mobileControl.api = client
-        mobileControl.config = cfg
-        mobileControl.projectStore = projectStoreInstance
-        mobileControl.backendManager = backend
 
         // Register one module per feature. The registry starts nothing here;
         // the launch `.task` below calls refresh() once shells are mounted.
@@ -171,6 +162,17 @@ public struct LlmIdeMacApp: App {
         // window exists — breaking the "registry starts nothing here"
         // contract the comment above documents.
         featureRegistry.compiledFeatures = FeatureCatalog.compiledFeatures
+        // Builds the Mobile Control stack (native WebSocket server + Bonjour
+        // + PIN pairing) and registers MobileModule. Runs BEFORE
+        // bootAutoTask so construction order matches what the inline code
+        // used to do; the two boot functions cross-wire the mobile feature
+        // bridges idempotently regardless of order (see FeatureCatalog).
+        FeatureCatalog.bootMobile(
+            config: cfg,
+            api: client,
+            projectStore: projectStoreInstance,
+            backend: backend,
+            registry: featureRegistry)
         // Builds the entire Auto Task / Loop stack (scheduler, settings,
         // templates, skills, log store, on-disk histories) and registers
         // AutoTaskModule — see FeatureCatalog for construction order and
@@ -181,13 +183,12 @@ public struct LlmIdeMacApp: App {
             api: client,
             activity: activity,
             capture: self.autoCapture,
-            mobileControl: mobileControl,
             registry: featureRegistry,
             appSupportDir: appSupportBase)
-        // Must run AFTER bootAutoTask() — it installs push observers on the
-        // Auto Task / Loop mobile bridges bootAutoTask just constructed
-        // (previously this ran right after the inline bridge construction).
-        mobileControl.installMobilePushObservers()
+        // Must run AFTER both boot calls — it installs push observers on the
+        // Auto Task / Loop mobile bridges they just constructed (previously
+        // this ran right after the inline bridge construction).
+        FeatureCatalog.installMobilePushObservers()
         FeatureCatalog.bootGraph(
             projectStore: projectStoreInstance,
             config: cfg,
@@ -198,10 +199,6 @@ public struct LlmIdeMacApp: App {
         featureRegistry.register(module: ChatModule(
             mirror: mirror,
             isAuthenticated: { store.isAuthenticated }))
-        featureRegistry.register(module: MobileModule(
-            manager: mobileControl,
-            controlEnabled: { cfg.mobileControlEnabled },
-            autoStart: { cfg.mobileControlAutoStart }))
         for feature in [AppFeature.fileExplorer, .ganttIssues, .docGen, .terminal] {
             featureRegistry.register(module: PassiveModule(feature: feature))
         }
@@ -220,15 +217,16 @@ public struct LlmIdeMacApp: App {
         // we need to programmatically reopen the window after the
         // user closes it via Cmd-W.
         Window(L.App.name, id: "main") {
-            // Graph environment objects (GraphAutoUpdater/GraphSessionStore)
-            // and the Auto Task / Loop objects (settings/scheduler/templates/
-            // skills/log store) are installed by FeatureCatalog, not injected
-            // directly here — identity (no-op) when the respective feature is
-            // compiled out. Order among different-type environmentObject
-            // calls doesn't affect which object a descendant view resolves,
-            // so appending both pairs/groups last is equivalent to their old
+            // Graph environment objects (GraphAutoUpdater/GraphSessionStore),
+            // the Auto Task / Loop objects (settings/scheduler/templates/
+            // skills/log store), and the mobile control manager are all
+            // installed by FeatureCatalog, not injected directly here —
+            // identity (no-op) when the respective feature is compiled out.
+            // Order among different-type environmentObject/environment calls
+            // doesn't affect which object a descendant view resolves, so
+            // appending all three groups last is equivalent to their old
             // inline position.
-            FeatureCatalog.installGraphEnvironment(FeatureCatalog.installAutoTaskEnvironment(AnyView(
+            FeatureCatalog.installMobileEnvironment(FeatureCatalog.installGraphEnvironment(FeatureCatalog.installAutoTaskEnvironment(AnyView(
                 ContentView(api: api)
                     .environmentObject(theme)
                     .environmentObject(templateStore)
@@ -242,9 +240,8 @@ public struct LlmIdeMacApp: App {
                     .environmentObject(sourceLinkStore)
                     .environmentObject(featureRebuild)
                     .environment(backend)
-                    .environment(mobileControl)
                     .environment(activityStore)
-            )))
+            ))))
                 // 1000 gives the 3-pane Review layout breathing room
                 // (sidebar ~240 + code ~380 + assistant ~280 = 900,
                 // plus toolbar + dividers + comfort).  Users can still
@@ -355,20 +352,20 @@ public struct LlmIdeMacApp: App {
                 .onChange(of: projectStore.activeProject) { _, _ in
                     projectStore.syncLinkedRepoFromConfig(config)
                     if config.mobileControlEnabled {
-                        mobileControl.onWorkspaceChanged()
-                        mobileControl.onMacEnvironmentChanged()
+                        FeatureCatalog.notifyMobileWorkspaceChanged()
+                        FeatureCatalog.notifyMobileMacEnvironmentChanged()
                     }
                 }
                 .onChange(of: backend.status) { _, newStatus in
                     if config.mobileControlEnabled {
-                        mobileControl.onMacEnvironmentChanged()
+                        FeatureCatalog.notifyMobileMacEnvironmentChanged()
                     }
                     if case .running = newStatus {
                         if session.isAuthenticated {
                             CustomProvider.syncAllToBackend(api: api)
                         }
                         if config.mobileControlEnabled {
-                            mobileControl.onBackendReady()
+                            FeatureCatalog.notifyMobileBackendReady()
                         }
                     }
                 }
@@ -377,7 +374,7 @@ public struct LlmIdeMacApp: App {
                 // quits the app.
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
                     backend.stop()
-                    mobileControl.stop()
+                    FeatureCatalog.stopMobile()
                 }
                 .task {
                     // Idempotent. This task usually fires FIRST — before the

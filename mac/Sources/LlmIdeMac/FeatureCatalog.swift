@@ -29,6 +29,9 @@ enum FeatureCatalog {
         #if !FEATURE_AUTOTASK
         set.remove(.autoTasks)
         #endif
+        #if !FEATURE_MOBILE
+        set.remove(.mobileSync)
+        #endif
         return set
     }
 
@@ -219,18 +222,18 @@ enum FeatureCatalog {
     #endif
 
     /// Build + wire the ENTIRE Auto Task / Loop stack (scheduler + settings +
-    /// templates + skills + log store + on-disk run/action history, the two
-    /// mobile bridges) and register `AutoTaskModule`. No-op when the feature
-    /// is compiled out. Mirrors what LlmIdeMacApp.init used to do inline —
-    /// construction order and every wiring line preserved, including the
-    /// mobile-bridge construction that was a TEMP block directly in the app
-    /// between Phase2c Task 1 and Task 2.
+    /// templates + skills + log store + on-disk run/action history) and
+    /// register `AutoTaskModule`. No-op when the feature is compiled out.
+    /// Mirrors what LlmIdeMacApp.init used to do inline — construction order
+    /// and every wiring line preserved. The mobile-bridge wiring that used to
+    /// happen inline here now goes through `wireMobileFeatureBridges()` (see
+    /// the Mobile section below), so this function no longer needs a
+    /// `MobileControlManager` passed in.
     static func bootAutoTask(config: AppConfig,
                              projectStore: ProjectStore,
                              api: LlmIdeAPIClient,
                              activity: ActivityStore,
                              capture: AutoCaptureService,
-                             mobileControl: MobileControlManager,
                              registry: FeatureRegistry,
                              appSupportDir: URL) {
         #if FEATURE_AUTOTASK
@@ -294,17 +297,14 @@ enum FeatureCatalog {
         autoTaskSkills = skills
         autoTaskLogStore = taskLog
 
-        // Wire the Auto Task + Loop feature bridges so the phone can query
-        // scheduler state (`auto_task_list`), toggle master / per-task
-        // enables (`auto_task_toggle`), and control the active project's
-        // Loop (`loop_*`). Both share the same instances the UI observes —
-        // mutating through them keeps Settings, the Menu bar, and the
-        // scheduler in sync.
-        mobileControl.autoTaskBridge = MobileAutoTaskBridge(
-            manager: mobileControl, autoCode: service,
-            settings: settings, logStore: taskLog)
-        mobileControl.loopBridge = MobileLoopBridge(
-            manager: mobileControl, autoCode: service)
+        // Wire the Auto Task + Loop feature bridges onto the mobile manager
+        // so the phone can query scheduler state (`auto_task_list`), toggle
+        // master / per-task enables (`auto_task_toggle`), and control the
+        // active project's Loop (`loop_*`). `wireMobileFeatureBridges()` is
+        // idempotent and also called from `bootMobile` — whichever of the
+        // two boot functions runs second is the one that actually wires it,
+        // since each needs the OTHER feature's stored static to exist.
+        wireMobileFeatureBridges()
 
         registry.register(module: AutoTaskModule(
             scheduler: service,
@@ -371,6 +371,162 @@ enum FeatureCatalog {
     static func setAutoCodeEnvironment(_ environment: AppEnvironment?) {
         #if FEATURE_AUTOTASK
         autoCodeService?.environment = environment
+        #endif
+    }
+
+    // MARK: - Mobile
+
+    #if FEATURE_MOBILE
+    private static var mobileControlManager: MobileControlManager?
+    #endif
+
+    /// Build + wire the Mobile Control stack (native WebSocket server +
+    /// Bonjour advertiser + PIN pairing) and register `MobileModule`. No-op
+    /// when the feature is compiled out. Mirrors what LlmIdeMacApp.init used
+    /// to do inline (construction order and wiring preserved). Must run
+    /// BEFORE `bootAutoTask` in the app root — `wireMobileFeatureBridges()`
+    /// (called at the tail of both) is idempotent either way, but this keeps
+    /// the same order the inline code used.
+    static func bootMobile(config: AppConfig,
+                           api: LlmIdeAPIClient,
+                           projectStore: ProjectStore,
+                           backend: BackendManager,
+                           registry: FeatureRegistry) {
+        #if FEATURE_MOBILE
+        let manager = MobileControlManager()
+        // Hand the API client to the mobile control manager so inbound
+        // llm-ide chat turns from the iPhone can be proxied to the backend.
+        manager.api = api
+        manager.config = config
+        manager.projectStore = projectStore
+        manager.backendManager = backend
+        mobileControlManager = manager
+
+        registry.register(module: MobileModule(
+            manager: manager,
+            controlEnabled: { config.mobileControlEnabled },
+            autoStart: { config.mobileControlAutoStart }))
+
+        wireMobileFeatureBridges()
+        #endif
+    }
+
+    /// Inject the mobile control environment object (identity when compiled
+    /// out). Replaces the app root's `.environment(mobileControl)`.
+    static func installMobileEnvironment(_ view: AnyView) -> AnyView {
+        #if FEATURE_MOBILE
+        guard let manager = mobileControlManager else {
+            // bootMobile() wires mobileControlManager before any view can
+            // call this — reaching here means the environment was installed
+            // before boot, not that Mobile Control is absent.
+            assertionFailure("installMobileEnvironment called before bootMobile")
+            return view
+        }
+        return AnyView(view.environment(manager))
+        #else
+        return view
+        #endif
+    }
+
+    /// Must run AFTER both `bootMobile` and `bootAutoTask` — it installs push
+    /// observers on the Auto Task / Loop mobile bridges those boot functions
+    /// construct. No-op when compiled out.
+    static func installMobilePushObservers() {
+        #if FEATURE_MOBILE
+        mobileControlManager?.installMobilePushObservers()
+        #endif
+    }
+
+    /// Stop the mobile server on app termination. No-op when compiled out.
+    static func stopMobile() {
+        #if FEATURE_MOBILE
+        mobileControlManager?.stop()
+        #endif
+    }
+
+    /// Forward: the active project changed. No-op when compiled out.
+    static func notifyMobileWorkspaceChanged() {
+        #if FEATURE_MOBILE
+        mobileControlManager?.onWorkspaceChanged()
+        #endif
+    }
+
+    /// Forward: the Mac-side environment changed (project/backend state).
+    /// No-op when compiled out.
+    static func notifyMobileMacEnvironmentChanged() {
+        #if FEATURE_MOBILE
+        mobileControlManager?.onMacEnvironmentChanged()
+        #endif
+    }
+
+    /// Forward: the local backend became ready. No-op when compiled out.
+    static func notifyMobileBackendReady() {
+        #if FEATURE_MOBILE
+        mobileControlManager?.onBackendReady()
+        #endif
+    }
+
+    static func mobileControlSettingsSection() -> AnyView? {
+        #if FEATURE_MOBILE
+        return AnyView(MobileControlSettingsSection())
+        #else
+        return nil
+        #endif
+    }
+
+    /// Refresh Auto Task state for the phone (scheduler list + logs).
+    /// AutoCodeView calls this instead of holding its own
+    /// `@Environment(MobileControlManager.self)`. No-op when compiled out.
+    static func refreshAutoTaskStateForMobile() {
+        #if FEATURE_MOBILE
+        mobileControlManager?.refreshAutoTaskStateForMobile()
+        #endif
+    }
+
+    /// KeychainStore calls these instead of naming `MobilePin` directly
+    /// (precedent: `invalidateGraphEngineCache` above). No-op when compiled
+    /// out. `nonisolated` — unlike the manager-forwarding seams above, these
+    /// wrap `MobilePin`'s own static cache (not the MainActor-isolated
+    /// `mobileControlManager`), and KeychainStore's callers (session warm-up
+    /// at app launch, wipe-on-logout) are synchronous, non-MainActor-
+    /// isolated call sites, same as `MobilePin.warmCache()`/
+    /// `clearSessionCache()` were before this seam existed.
+    nonisolated static func warmMobilePinCache() {
+        #if FEATURE_MOBILE
+        MobilePin.warmCache()
+        #endif
+    }
+
+    nonisolated static func clearMobilePinSessionCache() {
+        #if FEATURE_MOBILE
+        MobilePin.clearSessionCache()
+        #endif
+    }
+
+    /// Wire the Auto Task + Loop feature bridges onto the stored mobile
+    /// manager so the phone can query scheduler state (`auto_task_list`),
+    /// toggle master / per-task enables (`auto_task_toggle`), and control
+    /// the active project's Loop (`loop_*`). Both bridges share the same
+    /// instances the UI observes — mutating through them keeps Settings, the
+    /// Menu bar, and the scheduler in sync.
+    ///
+    /// Called unconditionally from the tail of both `bootMobile` and
+    /// `bootAutoTask` — a true no-op unless BOTH features are compiled in,
+    /// and idempotent (guarded on `autoTaskBridge == nil`) so it's safe for
+    /// whichever of the two boot functions runs second to be the one that
+    /// actually wires it, regardless of app-root call order.
+    private static func wireMobileFeatureBridges() {
+        #if FEATURE_AUTOTASK && FEATURE_MOBILE
+        guard let mobile = mobileControlManager,
+              let service = autoCodeService,
+              let settings = autoTaskSettings,
+              let taskLog = autoTaskLogStore,
+              mobile.autoTaskBridge == nil else { return }
+        mobile.autoTaskBridge = MobileAutoTaskBridge(
+            manager: mobile, autoCode: service,
+            settings: settings, logStore: taskLog)
+        mobile.loopBridge = MobileLoopBridge(
+            manager: mobile, autoCode: service)
         #endif
     }
 }

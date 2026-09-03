@@ -23,7 +23,9 @@ struct SettingsView: View {
                         BackendSettingsSection()
                         ConnectionsSettingsSection(api: api).id("connections")
                         UpdatesSettingsSection()
-                        MobileControlSettingsSection()
+                        if let mobile = FeatureCatalog.mobileControlSettingsSection() {
+                            mobile
+                        }
                         PreferencesSettingsSection(api: api)
                         ProvidersSettingsSection(api: api)
                         CustomProvidersSection(api: api)

@@ -119,6 +119,12 @@ if autoTasksIncluded {
         "TaskLogStoreTests.swift",
     ])
 }
+// TEMP(Phase2d-Task3): unconditional until `mobile_sync` gets its own
+// LLMIDE_FEATURES key + libExcludes/testExcludes entries (Task 3). For now
+// FEATURE_MOBILE is always defined so FeatureCatalog's `#if FEATURE_MOBILE`
+// seams (Task 1) compile and behave exactly like today's always-on Mobile
+// Control, with no build-time exclusion yet.
+featureDefines.append(.define("FEATURE_MOBILE"))
 
 // GraphCore/GraphKit are only imported from within Sources/LlmIdeMac/Graph/
 // (verified in Task 1 Step 1: Services/Memory has zero GraphCore imports, and
