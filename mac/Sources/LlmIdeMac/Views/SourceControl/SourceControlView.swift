@@ -39,6 +39,16 @@ struct SourceControlView: View {
     /// from them.
     @State private var diffOriginal: String = ""
     @State private var diffModified: String = ""
+    /// Identity of the diff currently sitting in `hunks` (see `diffKey`), or
+    /// nil while a load is in flight. The hunk pane renders — and so the
+    /// Stage/Unstage buttons exist — only when this matches the selection the
+    /// pane is drawing, so a click can never send one file's hunk body under
+    /// another file's path (or under the same path's OTHER index side).
+    @State private var loadedKey: String?
+    /// True while a per-hunk `git apply --cached` is in flight. A second
+    /// click during that window would reliably fail and leave an error banner
+    /// sitting on top of a stage that actually succeeded.
+    @State private var isStagingHunk = false
     @State private var message: String = ""
     @State private var confirmDiscard: FileChange?
     @State private var branches: [String] = []
@@ -80,25 +90,45 @@ struct SourceControlView: View {
     /// drop both together or the two panes end up showing different files.
     private typealias DiffPayload = (hunks: [DiffHunk], original: String, modified: String)
 
+    /// What `hunks` currently describes. A path alone is NOT enough: a
+    /// partially-staged file (porcelain `MM`) has a staged and an unstaged
+    /// row sharing one path, whose hunks come from opposite sides of the
+    /// index and must never be applied to each other's side.
+    private static func diffKey(for file: FileChange) -> String {
+        file.path + (file.staged ? ":staged" : ":worktree")
+    }
+
+    private static func diffKey(sha: String, path: String) -> String {
+        "\(sha):\(path)"
+    }
+
     /// Load the right pane from an async producer, cancelling any prior load
-    /// first and discarding the result if this load was superseded.
-    private func loadDiff(_ produce: @escaping () async -> DiffPayload) {
+    /// first and discarding the result if this load was superseded. Clears
+    /// `loadedKey` for the duration, so the pane cannot offer actions over
+    /// the PREVIOUS selection's hunks while the new ones are still loading.
+    private func loadDiff(key: String, _ produce: @escaping () async -> DiffPayload) {
         diffTask?.cancel()
+        loadedKey = nil
         diffTask = Task {
             let payload = await produce()
             if Task.isCancelled { return }
             hunks = payload.hunks
             diffOriginal = payload.original
             diffModified = payload.modified
+            loadedKey = key
         }
     }
 
-    /// Right pane for one working-tree file (Changes mode).
+    /// Right pane for one working-tree file (Changes mode). The two producers
+    /// run as `async let` so their git subprocesses overlap — `diffContent`
+    /// alone spawns two, and serialising all of them widened the window in
+    /// which the pane shows one selection over another's data.
     private func loadFileDiff(root: URL, file: FileChange) {
-        loadDiff {
-            let parsed = await scm.diff(root: root, file: file)
-            let content = await scm.diffContent(root: root, file: file)
-            return (parsed, content.original, content.modified)
+        loadDiff(key: Self.diffKey(for: file)) {
+            async let parsed = scm.diff(root: root, file: file)
+            async let content = scm.diffContent(root: root, file: file)
+            let (hunks, text) = await (parsed, content)
+            return (hunks, text.original, text.modified)
         }
     }
 
@@ -108,10 +138,11 @@ struct SourceControlView: View {
     /// hunks, so a 3-line change in a 2000-line file is a few rows instead of
     /// two thousand.
     private func loadCommitFileDiff(root: URL, sha: String, path: String) {
-        loadDiff {
-            let parsed = await scm.commitFileHunks(root: root, sha: sha, path: path)
-            let content = await scm.commitFileContent(root: root, sha: sha, path: path)
-            return (parsed, content.original, content.modified)
+        loadDiff(key: Self.diffKey(sha: sha, path: path)) {
+            async let parsed = scm.commitFileHunks(root: root, sha: sha, path: path)
+            async let content = scm.commitFileContent(root: root, sha: sha, path: path)
+            let (hunks, text) = await (parsed, content)
+            return (hunks, text.original, text.modified)
         }
     }
 
@@ -119,6 +150,8 @@ struct SourceControlView: View {
     /// so it can't repopulate the pane a moment later.
     private func clearDiff() {
         diffTask?.cancel()
+        diffTask = nil
+        loadedKey = nil
         hunks = []
         diffOriginal = ""
         diffModified = ""
@@ -154,9 +187,17 @@ struct SourceControlView: View {
     /// no partial state to unwind — an error message is the whole remedy.
     /// This must NEVER be a `try?`: swallowing it means the user clicks
     /// Stage and nothing happens, silently.
+    ///
+    /// Re-entrant clicks are DROPPED (`isStagingHunk`) rather than queued: a
+    /// double-click would otherwise run the same apply twice, and the second
+    /// one reliably fails against an index the first already moved — leaving
+    /// an error banner sitting on top of a stage that actually worked.
     private func stageHunk(root: URL, file: FileChange, hunk: DiffHunk) {
+        guard !isStagingHunk else { return }
+        isStagingHunk = true
         scm.clearOpError()
         Task {
+            defer { isStagingHunk = false }
             do { try await gitTruthStore.stagePatch(root: root, path: file.path, hunk: hunk) }
             catch {
                 scm.setOpError("Couldn't stage that hunk in \(file.displayPath): \(error.localizedDescription)")
@@ -166,10 +207,13 @@ struct SourceControlView: View {
     }
 
     /// Unstage exactly one already-staged hunk, then refresh. Same failure
-    /// modes and same no-`try?` rule as `stageHunk`.
+    /// modes, same no-`try?` rule and same re-entry guard as `stageHunk`.
     private func unstageHunk(root: URL, file: FileChange, hunk: DiffHunk) {
+        guard !isStagingHunk else { return }
+        isStagingHunk = true
         scm.clearOpError()
         Task {
+            defer { isStagingHunk = false }
             do { try await gitTruthStore.unstagePatch(root: root, path: file.path, hunk: hunk) }
             catch {
                 scm.setOpError("Couldn't unstage that hunk in \(file.displayPath): \(error.localizedDescription)")
@@ -237,13 +281,21 @@ struct SourceControlView: View {
 
     @ViewBuilder private var content: some View {
         if let root {
-            // Fixed-width changes column — HSplitView overrides a child's
-            // width frame, so pin it outside the split to keep it minimal.
-            HStack(spacing: 0) {
-                leftPane(root).frame(width: 300)
-                Divider()
-                detailPane(root)
-                    .frame(minWidth: 360, maxWidth: .infinity)
+            VStack(spacing: 0) {
+                // Pinned ACROSS both panes, not inside the left pane's scroll
+                // view: per-hunk staging failures are raised by the RIGHT
+                // pane, and a banner the user has to scroll the left list to
+                // find reintroduces exactly the silence the no-`try?` rule on
+                // `stageHunk` exists to prevent.
+                errorBanner()
+                // Fixed-width changes column — HSplitView overrides a child's
+                // width frame, so pin it outside the split to keep it minimal.
+                HStack(spacing: 0) {
+                    leftPane(root).frame(width: 300)
+                    Divider()
+                    detailPane(root)
+                        .frame(minWidth: 360, maxWidth: .infinity)
+                }
             }
         } else {
             emptyState
@@ -281,21 +333,51 @@ struct SourceControlView: View {
         VSplitView {
             MonacoDiffView(original: diffOriginal, modified: diffModified,
                            language: MonacoLanguageMap.id(for: diffLanguage))
-            HunkStagingList(
-                hunks: hunks,
+            hunkPane(
+                key: Self.diffKey(for: file),
                 onStage: canStageHunks(file) ? { hunk in stageHunk(root: root, file: file, hunk: hunk) } : nil,
                 onUnstage: file.staged ? { hunk in unstageHunk(root: root, file: file, hunk: hunk) } : nil
             )
+            .disabled(isStagingHunk)
         }
     }
 
     /// One file of one commit. Committed history is not stageable, so both
     /// `HunkStagingList` callbacks stay nil (its read-only mode).
-    private var historyDetail: some View {
+    @ViewBuilder private var historyDetail: some View {
         VSplitView {
             MonacoDiffView(original: diffOriginal, modified: diffModified,
                            language: MonacoLanguageMap.id(for: diffLanguage))
-            HunkStagingList(hunks: hunks)
+            if let path = selectedCommitFile, let sha = selectedCommit?.sha {
+                hunkPane(key: Self.diffKey(sha: sha, path: path), onStage: nil, onUnstage: nil)
+            }
+        }
+    }
+
+    /// Lower half of the right pane.
+    ///
+    /// The hunk list — and therefore its Stage/Unstage buttons — renders ONLY
+    /// once `loadedKey` says the hunks in state belong to `key`. Without that
+    /// gate the newly selected file's buttons draw over the previously
+    /// selected file's hunks for the whole load window, and a click there
+    /// sends one file's hunk body under another file's path to
+    /// `git apply --cached`. The dangerous case is the same PATH flipping
+    /// index sides, where the synthesized patch has a plausible header and
+    /// can actually succeed against the side the user didn't choose.
+    ///
+    /// Zero hunks is a real, reachable state — binary files, mode-only
+    /// changes, 100 % renames — and gets the explicit empty state the
+    /// retired `UnifiedDiffView` used to render.
+    @ViewBuilder
+    private func hunkPane(key: String,
+                          onStage: ((DiffHunk) -> Void)?,
+                          onUnstage: ((DiffHunk) -> Void)?) -> some View {
+        if loadedKey != key {
+            detailPlaceholder("Loading…")
+        } else if hunks.isEmpty {
+            detailPlaceholder("No changes to show")
+        } else {
+            HunkStagingList(hunks: hunks, onStage: onStage, onUnstage: onUnstage)
         }
     }
 
@@ -334,7 +416,7 @@ struct SourceControlView: View {
             selectedCommit = nil
             selected = nil
             selectedFiles = []
-            commitFilesTask?.cancel()
+            commitFilesTask?.cancel(); commitFilesTask = nil
             commitFiles = []
             selectedCommitFile = nil
             clearDiff()
@@ -353,7 +435,14 @@ struct SourceControlView: View {
             if let root { Task { await scm.refresh(root: root) } }
             startPoll()
         }
-        .onDisappear { pollTask?.cancel(); pollTask = nil }
+        // Every long-running task this view owns dies with it — a diff or
+        // commit-file load started just before dismissal would otherwise run
+        // to completion and write `@State` for a view that is gone.
+        .onDisappear {
+            pollTask?.cancel(); pollTask = nil
+            diffTask?.cancel(); diffTask = nil
+            commitFilesTask?.cancel(); commitFilesTask = nil
+        }
         // Fix 2: re-resolve selection by path after any file-list mutation so the
         // diff pane stays correct after stage/unstage/discard
         .onChange(of: scm.state.files) { _, files in
@@ -366,9 +455,15 @@ struct SourceControlView: View {
             selectedFiles.formIntersection(files)
             guard let sel = selected else { clearDiff(); return }
             guard let root else { return }
-            // Prefer the unstaged copy; fall back to staged (e.g. freshly staged file)
-            let resolved = files.first(where: { $0.path == sel.path && !$0.staged })
-                         ?? files.first(where: { $0.path == sel.path && $0.staged })
+            // Stay on the SAME side of the index the user picked, falling back
+            // to the other side only when this one is gone (e.g. the file was
+            // just fully staged). Preferring "unstaged" unconditionally used
+            // to flip a partially-staged file (porcelain `MM`, which is TWO
+            // rows sharing one path) from the staged row to the unstaged one
+            // on the next poll — silently removing per-hunk Unstage from under
+            // the user, on the file state that most wants it.
+            let resolved = files.first(where: { $0.path == sel.path && $0.staged == sel.staged })
+                         ?? files.first(where: { $0.path == sel.path })
             if let resolved {
                 selected = resolved
                 loadFileDiff(root: root, file: resolved)
@@ -391,7 +486,7 @@ struct SourceControlView: View {
                 if let root { Task { commits = await scm.log(root: root) } }
             } else {
                 selectedCommit = nil
-                commitFilesTask?.cancel()
+                commitFilesTask?.cancel(); commitFilesTask = nil
                 commitFiles = []
                 selectedCommitFile = nil
             }
@@ -412,7 +507,7 @@ struct SourceControlView: View {
         .onChange(of: selectedCommit) { _, c in
             selectedCommitFile = nil
             clearDiff()
-            commitFilesTask?.cancel()
+            commitFilesTask?.cancel(); commitFilesTask = nil
             guard let c, let root else { commitFiles = []; return }
             commitFilesTask = Task {
                 let files = await scm.commitFiles(root: root, sha: c.sha)
@@ -518,7 +613,6 @@ struct SourceControlView: View {
             Divider().background(theme.current.border)
             if mode == .changes {
                 ScrollView {
-                    errorBanner()
                     fileGroup("Staged Changes", scm.stagedFiles, root, showUnstageAll: true)
                     fileGroup("Changes", scm.unstagedFiles, root, showStageAll: true)
                 }
@@ -552,7 +646,6 @@ struct SourceControlView: View {
     @ViewBuilder private func historyList(_ root: URL) -> some View {
         VStack(spacing: 0) {
             ScrollView {
-                errorBanner()
                 if commits.isEmpty {
                     Text("No commits")
                         .font(Typography.caption).foregroundStyle(theme.current.textMuted)
@@ -602,7 +695,7 @@ struct SourceControlView: View {
             .font(Typography.caption).foregroundStyle(theme.current.text)
             .lineLimit(1).truncationMode(.middle)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Spacing.md).padding(.vertical, 3)
+            .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.xs)
             .background(selectedCommitFile == path ? theme.current.accent.opacity(0.12) : .clear)
             .contentShape(Rectangle())
             .onTapGesture { selectedCommitFile = path }

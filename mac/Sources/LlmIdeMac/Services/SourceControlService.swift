@@ -318,7 +318,15 @@ final class SourceControlService {
     func commitFiles(root: URL, sha: String) async -> [String] {
         guard let raw = try? await repo.runGit(["show", "--format=", "--name-only", "-z", sha], at: root)
         else { return [] }
-        return raw.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
+        // `--format=` is expected to emit nothing before the first name, but
+        // drop EXACTLY one leading break if a git build ever emits a
+        // separator there — otherwise the first record parses as
+        // "\n<first path>" and only the first file of every commit silently
+        // fails to open. Exactly one, never a full trim: `-z`'s whole point
+        // is that a path may legitimately contain a newline.
+        var text = Substring(raw)
+        if let first = text.first, first.isNewline { text.removeFirst() }
+        return text.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
     }
 
     /// One file's old/new content AT a specific commit — `sha^` (the parent)
