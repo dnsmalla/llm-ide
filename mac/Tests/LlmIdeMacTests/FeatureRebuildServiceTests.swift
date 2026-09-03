@@ -40,6 +40,6 @@ final class FeatureRebuildServiceTests: XCTestCase {
     /// matching Package.swift update silently breaks drift detection.
     func testBuildTimeExcludableSetIsPinned() {
         let csv = AppFeature.buildTimeExcludable.map(\.rawValue).sorted().joined(separator: ",")
-        XCTAssertEqual(csv, "code_graph_3d,doc_gen,file_explorer,gantt_issues,terminal")
+        XCTAssertEqual(csv, "auto_tasks,code_graph_3d,doc_gen,file_explorer,gantt_issues,terminal")
     }
 }

@@ -19,7 +19,7 @@ clean:
 
 # --- mac app -----------------------------------------------------------------
 
-.PHONY: build-mac build-mac-lite test-mac regression test-shared-protocol
+.PHONY: build-mac build-mac-lite build-mac-min test-mac regression test-shared-protocol
 
 # Pin the Xcode toolchain for every Swift build/test below. git invokes the
 # pre-push hook with an environment that can resolve the CommandLineTools swift
@@ -58,6 +58,13 @@ build-mac: ## Build the full mac app
 build-mac-lite: ## non-engineer build: no Explorer/Gantt/DocGen/Terminal/Graph
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat,auto_tasks,mobile_sync swift build --manifest-cache none
 
+# Same rationale as build-mac-lite, one step further: drops auto_tasks too
+# (excludes the AutoTask/ and LoopEngine/ source folders — see Package.swift's
+# `auto_tasks` key), keeping only the two features with no source-exclusion
+# switch. --manifest-cache none for the same reason as build-mac-lite.
+build-mac-min: ## Non-engineer minimum: Chat + Mobile only (no AutoTask/Loop/Graph/view features)
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat,mobile_sync swift build --manifest-cache none
+
 test-mac:
 	cd mac && swift build --product LlmIdeMac
 ifeq ($(HAS_XCTEST),1)
@@ -80,7 +87,7 @@ endif
 # view (re-checks every `status: fixed` fault against the current agent and
 # refreshes `<project>/system/faults.csv`) before shipping an upgrade — the
 # CSV's `status` column is the release checklist.
-regression: test-mac build-mac-lite graph-gates
+regression: test-mac build-mac-lite build-mac-min graph-gates
 
 # The graph verification gates. These are plain executables precisely so they
 # run where `swift test` cannot (a Command-Line-Tools-only toolchain has no

@@ -19,7 +19,7 @@ let envFeatures = ProcessInfo.processInfo.environment["LLMIDE_FEATURES"]
 let includedFeatures: Set<String> = envFeatures.map {
     Set($0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
 } ?? [   // unset → everything (list each excludable key here)
-    "code_graph_3d", "file_explorer", "gantt_issues", "doc_gen", "terminal",
+    "code_graph_3d", "file_explorer", "gantt_issues", "doc_gen", "terminal", "auto_tasks",
 ]
 
 let graphIncluded = includedFeatures.contains("code_graph_3d")
@@ -27,6 +27,7 @@ let explorerIncluded = includedFeatures.contains("file_explorer")
 let ganttIncluded = includedFeatures.contains("gantt_issues")
 let docGenIncluded = includedFeatures.contains("doc_gen")
 let terminalIncluded = includedFeatures.contains("terminal")
+let autoTasksIncluded = includedFeatures.contains("auto_tasks")
 
 var libExcludes: [String] = []
 var testExcludes: [String] = ["README-truncated-tests.md"]
@@ -67,6 +68,56 @@ if terminalIncluded {
     featureDefines.append(.define("FEATURE_TERMINAL"))
 } else {
     libExcludes.append("Views/Terminal")
+}
+if autoTasksIncluded {
+    featureDefines.append(.define("FEATURE_AUTOTASK"))
+} else {
+    libExcludes.append(contentsOf: ["AutoTask", "LoopEngine"])
+    testExcludes.append(contentsOf: [
+        "AgentLoopStageRepairerTests.swift",
+        "AutoCodeCustomSchedulingTests.swift",
+        "AutoCodeUpdateServiceCLITests.swift",
+        "AutoCodeUpdateServiceComposedPromptTests.swift",
+        "AutoCodeUpdateServiceCronTests.swift",
+        "AutoCodeUpdateServiceCustomTaskTests.swift",
+        "AutoCodeUpdateServiceLoopEngineeringTests.swift",
+        "AutoCodeUpdateServicePipelineTasksTests.swift",
+        "AutoTaskCatalogTests.swift",
+        "AutoTaskConfigStoreTests.swift",
+        "AutoTaskLoopEngineeringTests.swift",
+        "AutoTaskModuleTests.swift",
+        "AutoTaskPromptComposerTests.swift",
+        "AutoTaskRunHistoryTests.swift",
+        "AutoTaskRunTriggerTests.swift",
+        "AutoTaskSettingsCronTests.swift",
+        "AutoTaskSettingsLoopEngineeringTests.swift",
+        "AutoTaskSettingsTests.swift",
+        "AutoTaskTemplateStoreTests.swift",
+        "AutoTaskTemplateTests.swift",
+        "CustomAutoTaskTests.swift",
+        "LoopDefaultLoopsTests.swift",
+        "LoopDefinitionTests.swift",
+        "LoopEngineConfigStoreTests.swift",
+        "LoopEngineConfigTests.swift",
+        "LoopEngineDefaultsTests.swift",
+        "LoopEngineRunnerTests.swift",
+        "LoopRunJournalTests.swift",
+        "LoopRunQueueTests.swift",
+        "LoopRunSummaryWriterTests.swift",
+        "LoopStageDetectorTests.swift",
+        "LoopStageSoloingTests.swift",
+        "LoopStageTests.swift",
+        "LoopTemplateStoreTests.swift",
+        "LoopTemplateTests.swift",
+        "LoopWorktreeManagerTests.swift",
+        "MobileLoopStateTests.swift",
+        "NoWallClockDefaultsTests.swift",
+        "ProgressWatchTests.swift",
+        "RegressionRunnerSweepAdapterTests.swift",
+        "RepairScopeGuardTests.swift",
+        "StageOutputParserTests.swift",
+        "TaskLogStoreTests.swift",
+    ])
 }
 
 // GraphCore/GraphKit are only imported from within Sources/LlmIdeMac/Graph/
@@ -141,11 +192,6 @@ let package = Package(
                 // builtin engine in and then failed at link time instead of
                 // degrading cleanly.
                 .define("GRAPHKIT_BUILTIN"),   // UNPLUG: remove
-                // TEMP(Phase2c-Task3): always on until Auto Tasks joins
-                // `includedFeatures`/`AppFeature.buildTimeExcludable` and gets
-                // its own env-driven selection like the other excludable
-                // features above; replaced by that then.
-                .define("FEATURE_AUTOTASK"),
             ] + featureDefines,
             linkerSettings: [
                 .linkedLibrary("sqlite3")

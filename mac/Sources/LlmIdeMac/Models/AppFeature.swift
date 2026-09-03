@@ -61,7 +61,7 @@ public enum AppFeature: String, CaseIterable, Codable, Identifiable {
     /// features `FeatureRebuildService` can ever detect drift on or stage a
     /// smaller rebuild for.
     public static let buildTimeExcludable: Set<AppFeature> = [
-        .codeGraph3D, .fileExplorer, .ganttIssues, .docGen, .terminal,
+        .codeGraph3D, .fileExplorer, .ganttIssues, .docGen, .terminal, .autoTasks,
     ]
 
     /// Drop features whose dependencies are not satisfied (e.g. disabling File
