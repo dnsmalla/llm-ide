@@ -16,11 +16,51 @@ struct HunkStagingList: View {
 
     private var isInteractive: Bool { onStage != nil || onUnstage != nil }
 
+    /// A single lazily-rendered row: either a hunk's header/action bar, or
+    /// one of its diff rows. Flattening hunks+rows into one sequence (rather
+    /// than an outer `LazyVStack` over hunks with an inner plain `VStack`
+    /// over rows) is what makes the list *actually* lazy — SwiftUI only
+    /// builds `LazyVStack` children near the visible scroll region, but a
+    /// non-lazy `VStack` nested inside one still builds ALL of its children
+    /// eagerly the moment its parent hunk row is realised. An untracked file
+    /// is synthesized as a single hunk containing every line
+    /// (`SourceControlService.diff`), so without flattening, opening a
+    /// 5,000-line new file built ~20,000 views in one layout pass.
+    private enum Item: Identifiable {
+        case header(hunkIndex: Int, hunk: DiffHunk)
+        case row(hunkIndex: Int, rowIndex: Int, row: DiffRow)
+
+        var id: String {
+            switch self {
+            case .header(let hunkIndex, _): return "h\(hunkIndex)"
+            case .row(let hunkIndex, let rowIndex, _): return "h\(hunkIndex)r\(rowIndex)"
+            }
+        }
+    }
+
+    private var items: [Item] {
+        var result: [Item] = []
+        result.reserveCapacity(hunks.reduce(0) { $0 + $1.rows.count + 1 })
+        for (hunkIndex, hunk) in hunks.enumerated() {
+            result.append(.header(hunkIndex: hunkIndex, hunk: hunk))
+            for (rowIndex, row) in hunk.rows.enumerated() {
+                result.append(.row(hunkIndex: hunkIndex, rowIndex: rowIndex, row: row))
+            }
+        }
+        return result
+    }
+
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(hunks.enumerated()), id: \.offset) { _, hunk in
-                    hunkBlock(hunk)
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(items) { item in
+                    switch item {
+                    case .header(let hunkIndex, let hunk):
+                        hunkHeader(hunk)
+                            .padding(.top, hunkIndex == 0 ? 0 : 8)
+                    case .row(_, _, let row):
+                        rowView(row)
+                    }
                 }
             }
             .padding(8)
@@ -28,33 +68,29 @@ struct HunkStagingList: View {
     }
 
     @ViewBuilder
-    private func hunkBlock(_ hunk: DiffHunk) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(hunk.header.isEmpty ? " " : hunk.header)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if isInteractive {
-                    if let onUnstage {
-                        Button("Unstage") { onUnstage(hunk) }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
-                    if let onStage {
-                        Button("Stage") { onStage(hunk) }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
+    private func hunkHeader(_ hunk: DiffHunk) -> some View {
+        HStack {
+            Text(hunk.header.isEmpty ? " " : hunk.header)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+            Spacer()
+            if isInteractive {
+                if let onUnstage {
+                    Button("Unstage") { onUnstage(hunk) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                if let onStage {
+                    Button("Stage") { onStage(hunk) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                 }
             }
-            ForEach(Array(hunk.rows.enumerated()), id: \.offset) { _, row in
-                rowView(row)
-            }
         }
-        .padding(6)
+        .padding(.horizontal, 6)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
         .background(Color(nsColor: .textBackgroundColor))
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.2)))
     }
 
     private let lineNumWidth: CGFloat = 38

@@ -12,8 +12,14 @@ struct DiffStats {
     let previewLines: [String]
 
     static func compute(old: String, new: String, previewLineCount: Int = 3) -> DiffStats {
-        let oldLines = old.components(separatedBy: "\n")
-        let newLines = new.components(separatedBy: "\n")
+        // Split on `\.isNewline`, never the literal "\n" — Swift treats
+        // "\r\n" as ONE Character, so a literal-"\n" split silently
+        // mis-counts CRLF files (the fourth occurrence of this trap in this
+        // project; `UnifiedDiffParser`/`SCMModels.splitLines` use the same
+        // idiom). Left uncorrected, this chip's "+N −M lines" count can
+        // disagree with the Monaco diff rendered right beside it.
+        let oldLines = old.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        let newLines = new.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
         let diff = newLines.difference(from: oldLines)
         var added = 0
         var removed = 0

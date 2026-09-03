@@ -287,10 +287,17 @@ struct CodeWorkflowSheet: View {
                 .font(.subheadline.weight(.medium))
             ForEach(svc.diffFiles) { file in
                 DisclosureGroup {
-                    HunkStagingList(hunks: file.hunks)
-                        .frame(maxHeight: 200)
-                        .background(Color(.textBackgroundColor))
-                        .cornerRadius(4)
+                    if file.hunks.isEmpty {
+                        Text("No changes to show")
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
+                            .frame(maxWidth: .infinity, minHeight: 60)
+                    } else {
+                        HunkStagingList(hunks: file.hunks)
+                            .frame(maxHeight: 200)
+                            .background(Color(.textBackgroundColor))
+                            .cornerRadius(4)
+                    }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: file.isNew ? "plus.circle.fill" : "pencil.circle.fill")

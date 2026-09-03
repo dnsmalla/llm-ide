@@ -16,6 +16,7 @@ import SwiftUI
 /// refresh that list atomically.
 struct UpdateFileSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var theme: ThemeStore
 
     enum ConfirmResult {
         case success
@@ -69,7 +70,7 @@ struct UpdateFileSheet: View {
             if let err = errorMessage {
                 Text(err)
                     .font(.system(size: 12))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(theme.current.danger)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
