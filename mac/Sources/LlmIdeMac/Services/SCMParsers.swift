@@ -42,10 +42,65 @@ enum StatusParser {
         }
     }
 
-    /// git quotes paths containing special chars in double quotes; strip them.
+    /// Decode one path from porcelain output.
+    ///
+    /// git wraps a path in double quotes as soon as it contains a space,
+    /// a quote, a backslash, a control character or any byte >= 0x80, and
+    /// then C-style-escapes the contents (`quote_c_style`). Stripping only
+    /// the quotes is not enough: `設計.txt` arrives as
+    /// `"\350\250\255\350\250\210.txt"` under git's default
+    /// `core.quotePath`, and returning that literal backslash soup as the
+    /// path meant every Japanese-named file showed as octal garbage in the
+    /// changes list AND could not be staged, unstaged or discarded — the
+    /// path handed back to `git add` did not exist. (Verified against a
+    /// real repo; `SourceControlService.commitFiles` dodges the same
+    /// problem by asking git for `-z` output instead.)
+    ///
+    /// Decoding runs over UTF-8 BYTES, not Characters: an octal escape is
+    /// one byte and a multi-byte character spans several of them, so the
+    /// bytes have to be reassembled before being read back as UTF-8.
     private static func unquote(_ s: String) -> String {
         guard s.hasPrefix("\""), s.hasSuffix("\""), s.count >= 2 else { return s }
-        return String(s.dropFirst().dropLast())
+        let inner = Array(s.dropFirst().dropLast().utf8)
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(inner.count)
+        var i = 0
+        while i < inner.count {
+            let byte = inner[i]
+            guard byte == UInt8(ascii: "\\"), i + 1 < inner.count else {
+                bytes.append(byte); i += 1; continue
+            }
+            let next = inner[i + 1]
+            // "\nnn" — always exactly three octal digits when git emits it.
+            if next >= UInt8(ascii: "0"), next <= UInt8(ascii: "7"), i + 3 < inner.count,
+               let value = octalByte(inner[i + 1], inner[i + 2], inner[i + 3]) {
+                bytes.append(value); i += 4; continue
+            }
+            switch next {
+            case UInt8(ascii: "a"): bytes.append(0x07)
+            case UInt8(ascii: "b"): bytes.append(0x08)
+            case UInt8(ascii: "t"): bytes.append(0x09)
+            case UInt8(ascii: "n"): bytes.append(0x0A)
+            case UInt8(ascii: "v"): bytes.append(0x0B)
+            case UInt8(ascii: "f"): bytes.append(0x0C)
+            case UInt8(ascii: "r"): bytes.append(0x0D)
+            // `\"` and `\\` — and any escape git grows later — are the
+            // escaped character itself.
+            default: bytes.append(next)
+            }
+            i += 2
+        }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
+    /// Three octal digits → one byte, or nil if any of them isn't 0-7.
+    private static func octalByte(_ a: UInt8, _ b: UInt8, _ c: UInt8) -> UInt8? {
+        var value = 0
+        for digit in [a, b, c] {
+            guard digit >= UInt8(ascii: "0"), digit <= UInt8(ascii: "7") else { return nil }
+            value = value * 8 + Int(digit - UInt8(ascii: "0"))
+        }
+        return value <= 0xFF ? UInt8(value) : nil
     }
 }
 

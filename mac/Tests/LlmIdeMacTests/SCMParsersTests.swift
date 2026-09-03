@@ -61,6 +61,33 @@ final class SCMParsersTests: XCTestCase {
         XCTAssertEqual(changes, [FileChange(path: "path with spaces.txt", status: .modified, staged: true)])
     }
 
+    /// git's default `core.quotePath` renders every non-ASCII byte as a
+    /// three-digit octal escape, so `設計.txt` arrives as
+    /// `"\350\250\255\350\250\210.txt"` (captured verbatim from a real
+    /// repo). Stripping only the quotes left that backslash soup as the
+    /// path: Japanese-named files rendered as octal garbage in the changes
+    /// list and could not be staged/unstaged/discarded, because the path
+    /// handed to `git add` did not exist on disk.
+    func testOctalEscapedNonASCIIPathIsDecoded() {
+        let changes = StatusParser.parse(porcelain: "M  \"\\350\\250\\255\\350\\250\\210.txt\"")
+        XCTAssertEqual(changes, [FileChange(path: "設計.txt", status: .modified, staged: true)])
+    }
+
+    /// A non-ASCII path that ALSO contains a space: git quotes the whole
+    /// thing and escapes only the high bytes, so the decoder must copy the
+    /// literal space through untouched while decoding around it.
+    func testNonASCIIPathWithSpaceIsDecoded() {
+        let porcelain = "A  \"\\346\\227\\245\\346\\234\\254\\350\\252\\236 \\343\\203\\206\\343\\202\\271\\343\\203\\210.txt\""
+        XCTAssertEqual(StatusParser.parse(porcelain: porcelain),
+                       [FileChange(path: "日本語 テスト.txt", status: .added, staged: true)])
+    }
+
+    /// `\"` and `\\` are C-style escapes, not literal backslash sequences.
+    func testEscapedQuoteAndBackslashInPathAreDecoded() {
+        XCTAssertEqual(StatusParser.parse(porcelain: "M  \"a\\\"b.txt\"").first?.path, "a\"b.txt")
+        XCTAssertEqual(StatusParser.parse(porcelain: "M  \"a\\\\b.txt\"").first?.path, "a\\b.txt")
+    }
+
     func testTooShortLineIsSkipped() {
         XCTAssertEqual(StatusParser.parse(porcelain: "M"), [])
         XCTAssertEqual(StatusParser.parse(porcelain: ""), [])
