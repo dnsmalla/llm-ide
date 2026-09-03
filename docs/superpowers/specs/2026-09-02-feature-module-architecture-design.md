@@ -1,7 +1,7 @@
 # Feature Module Architecture — Design
 
 **Date:** 2026-09-02
-**Status:** Phase 1 implemented; Phase 2a (Graph exclusion) implemented; Phase 2b (view features) implemented; Phase 3 (Apply & Rebuild) implemented; 2c–d pending
+**Status:** Phase 1 implemented; Phase 2a (Graph exclusion) implemented; Phase 2b (view features) implemented; Phase 2c (AutoTask+LoopEngine) implemented; Phase 3 (Apply & Rebuild) implemented; 2d pending
 **Goal:** The Workspace settings toggles (Settings → Workspace) currently hide
 menus and views only. This design makes a disabled feature actually leave the
 system: first its background work stops entirely (Phase 1), then its code is
@@ -137,7 +137,7 @@ Thin modules are still created: uniformity is what makes Phase 2 mechanical.
    only needs the mechanism plus whatever is excludable so far; features
    not yet excludable simply stay compiled and keep their Phase 1 runtime
    stop behavior.
-4. **AutoTask + LoopEngine as ONE excludable unit** — requires seaming
+4. **AutoTask + LoopEngine as ONE excludable unit (2c, DONE)** — requires seaming
    `MobileControlManager`'s deep AutoTask/Loop coupling through core
    protocols; the cycle stays internal to the unit.
 5. **Mobile** — last, because it depends on everything above; when a

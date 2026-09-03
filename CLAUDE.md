@@ -24,6 +24,7 @@ cd mac
 swift build           # Build the app
 swift test            # Run XCTest suite
 make build-mac-lite   # Build lite app: excludes Graph, Explorer, Gantt, Issues, DocGen, Terminal; leaves Chat, Auto Tasks, Mobile Sync, Live Capture, Library
+make build-mac-min    # Build minimum app: excludes all above plus Auto Tasks/Loop; leaves Chat, Mobile Sync, Live Capture, Library only
 ./build_app.sh        # Legacy build script (use `swift build` instead)
 
 # Testing
@@ -258,6 +259,8 @@ LLM-IDE Mac app (native NWListener WebSocket on :3006)
 LLM-IDE Server (Node.js @ :3456)
     └── Main backend server
 ```
+
+`MobileControlManager` dispatches Auto Tasks and Loop requests through `MobileFeatureBridge` protocol — when either feature is compiled out (via `LLMIDE_FEATURES`), the phone receives a degrade reply instead of routing to the feature's service.
 
 ### Quick Start
 
