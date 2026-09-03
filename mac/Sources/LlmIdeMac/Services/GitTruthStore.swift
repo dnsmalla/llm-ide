@@ -116,4 +116,29 @@ final class GitTruthStore {
         case .modified:   return existing == .added ? .added : .modified
         }
     }
+
+    private var watcher: RepoFileWatcher?
+
+    /// Start live-refreshing on filesystem changes under `root`. Debounced
+    /// 2s by `RepoFileWatcher`'s default — the same coalescing window
+    /// `GraphAutoUpdater` already relies on. Safe to call repeatedly (e.g. on
+    /// every workspace-root change): replaces any existing watcher.
+    /// `RepoFileWatcher.init?` returns nil if FSEvents can't start (rare) —
+    /// in that case this is a silent no-op and callers keep whatever manual
+    /// refresh path they already have.
+    func startWatching(root: URL) {
+        stopWatching()
+        watcher = RepoFileWatcher(repoRoot: root, debounce: 2.0) { [weak self] in
+            // Fires on the watcher's own background queue — hop back to the
+            // main actor before touching `self`.
+            Task { @MainActor in
+                await self?.refresh(root: root)
+            }
+        }
+    }
+
+    func stopWatching() {
+        watcher?.stop()
+        watcher = nil
+    }
 }

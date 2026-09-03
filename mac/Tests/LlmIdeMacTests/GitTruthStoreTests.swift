@@ -126,4 +126,37 @@ final class GitTruthStoreTests: XCTestCase {
         let marks = await store.lineMarks(root: repo, path: "tracked.txt")
         XCTAssertTrue(marks.isEmpty)
     }
+
+    // MARK: - startWatching
+
+    func testStartWatchingRefreshesOnFileChange() async throws {
+        let store = GitTruthStore()
+        await store.refresh(root: repo)
+        XCTAssertTrue(store.byPath.isEmpty)
+
+        store.startWatching(root: repo)
+        defer { store.stopWatching() }
+
+        try "changed\n".write(to: repo.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+
+        // FSEvents + the watcher's debounce is asynchronous and real-clock —
+        // poll rather than sleep-then-assert-once, so this isn't flaky on a
+        // loaded CI machine.
+        let deadline = Date().addingTimeInterval(6)
+        while Date() < deadline, store.byPath["tracked.txt"] != .modified {
+            try await Task.sleep(nanoseconds: 200_000_000)
+        }
+        XCTAssertEqual(store.byPath["tracked.txt"], .modified)
+    }
+
+    func testStopWatchingStopsFurtherRefreshes() async throws {
+        let store = GitTruthStore()
+        await store.refresh(root: repo)
+        store.startWatching(root: repo)
+        store.stopWatching()
+
+        try "changed\n".write(to: repo.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try await Task.sleep(nanoseconds: 3_000_000_000)   // longer than the watcher's own 2s debounce
+        XCTAssertTrue(store.byPath.isEmpty, "no refresh should have happened after stopWatching")
+    }
 }
