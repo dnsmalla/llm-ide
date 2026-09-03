@@ -14,7 +14,9 @@ struct TreeRowLabel: View {
     // file extension for FileIconKit (files only)
     var fileExtension: String = ""
     /// Git status decoration (nil → undecorated / clean). VS Code-style.
-    var gitStatus: GitStatusStore.Decoration? = nil
+    var gitStatus: GitTruthStore.Decoration? = nil
+
+    @EnvironmentObject private var theme: ThemeStore
 
     var body: some View {
         HStack(spacing: 4) {
@@ -77,15 +79,11 @@ struct TreeRowLabel: View {
         }
     }
 
-    /// VS Code-style status colors. Readable in both light and dark themes.
+    /// Status color, from the active palette — never a raw literal. Shared
+    /// with the Source Control changes list via `Theme.color(for:)`, so both
+    /// panels agree and Midnight reads correctly.
     private var gitColor: Color? {
-        switch gitStatus {
-        case .modified:   return Color(red: 0.85, green: 0.65, blue: 0.13)   // amber
-        case .added, .untracked: return Color(red: 0.45, green: 0.62, blue: 0.20) // green
-        case .deleted:    return Color(red: 0.80, green: 0.25, blue: 0.25)   // red
-        case .conflicted: return .orange
-        case .none:       return nil
-        }
+        gitStatus.map { theme.current.color(for: $0) }
     }
 
     /// Trailing single-letter badge (M/A/U/D/C), VS Code-style.

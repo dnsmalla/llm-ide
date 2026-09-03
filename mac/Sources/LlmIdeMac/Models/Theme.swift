@@ -173,6 +173,21 @@ extension Theme {
         default: return accent2
         }
     }
+
+    /// File-tree decoration color for a git decoration. Deliberately case-for-
+    /// case identical to `color(for: FileChange.Status)` above: the Explorer
+    /// tree and the Source Control changes list describe the same repository,
+    /// so a file that is blue in one must be blue in the other. `TreeRowLabel`
+    /// previously hardcoded its own amber/green/red hex triples, which is what
+    /// let the two panels drift.
+    func color(for decoration: GitTruthStore.Decoration) -> Color {
+        switch decoration {
+        case .added, .untracked: return success
+        case .deleted: return danger
+        case .conflicted: return warning
+        case .modified: return info
+        }
+    }
 }
 
 /// Convenience wrapper so views can read the active theme via

@@ -1,7 +1,7 @@
 import XCTest
 @testable import LlmIdeMacLib
 
-/// StatusParser/UnifiedDiffParser feed GitStatusStore, GitGutter, and
+/// StatusParser/UnifiedDiffParser feed GitTruthStore, GitGutter, and
 /// SourceControlService — a parsing regression here corrupts the
 /// Source Control panel's file list or the inline diff view app-wide.
 final class SCMParsersTests: XCTestCase {

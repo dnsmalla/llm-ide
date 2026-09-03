@@ -26,24 +26,21 @@ enum HunkPatchError: LocalizedError {
 }
 
 /// Repo-relative path -> effective git status, for file-tree decorations and
-/// (Task 8) editor gutter marks. Supersedes `GitStatusStore` — same
-/// behavior, same names, so P3's Explorer rewiring is a type swap, not a
-/// rewrite. `GitStatusStore.swift` is deleted once that swap happens; it is
-/// deliberately left in place (unused by anything new) until then so this
-/// task doesn't break `ExplorerView`'s build.
+/// (Task 8) editor gutter marks. The single source of git-decoration truth
+/// for both the Explorer tree and the Source Control changes list — P3
+/// deleted the Explorer-only predecessor once `ExplorerView` was rewired to
+/// this type.
 ///
-/// The bug `GitStatusStore` had in practice was never in this logic — it was
-/// that Explorer passed a root with no `.git` of its own (a container
-/// folder holding several clones). `refresh` already degrades safely for
-/// that case (empty status, no throw); the fix is entirely in what root
-/// callers pass — see `WorkspaceRoot.gitWorkingTree(config:projectStore:)`,
-/// which P1/P3 must use instead of a raw project/container path.
+/// The bug in the predecessor was never in this logic — it was that Explorer
+/// passed a root with no `.git` of its own (a container folder holding
+/// several clones). `refresh` already degrades safely for that case (empty
+/// status, no throw); the fix is entirely in what root callers pass — see
+/// `WorkspaceRoot.gitWorkingTree(config:projectStore:)`, which every caller
+/// must use instead of a raw project/container path.
 @MainActor @Observable
 final class GitTruthStore {
-    /// `: Equatable` (the original `GitStatusStore.Decoration` this is
-    /// ported from has no test exercising `==` on it, so the gap was latent
-    /// there — `GitTruthStoreTests` compares `Decoration?` via
-    /// `XCTAssertEqual`, which needs it).
+    /// `: Equatable` because `GitTruthStoreTests` compares `Decoration?` via
+    /// `XCTAssertEqual`, which needs it.
     enum Decoration: Equatable { case modified, added, untracked, deleted, conflicted }
 
     private(set) var byPath: [String: Decoration] = [:]   // repo-relative path
@@ -64,9 +61,6 @@ final class GitTruthStore {
         self.repo = repo ?? RepoManager()
     }
 
-    /// Byte-identical to `GitStatusStore.refresh(root:)`, deliberately — see
-    /// that type's note for why the duplicate survives until P3 deletes it,
-    /// and fix BOTH when you fix either.
     func refresh(root: URL?) async {
         guard let root,
               FileManager.default.fileExists(atPath: root.appendingPathComponent(".git").path) else {

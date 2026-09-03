@@ -37,7 +37,7 @@ struct ExplorerView: View {
     @State private var deleteError: String?
 
     // Git status decorations for the file tree (VS Code-style coloring).
-    @State private var decorations = GitStatusStore()
+    @State private var decorations = GitTruthStore()
     @Environment(\.controlActiveState) private var controlActiveState
 
     // Cursor/VSCode-style panel visibility. Tree shows by default; the AI
@@ -57,6 +57,17 @@ struct ExplorerView: View {
     private var root: URL? {
         if let code = projectStore.activeProjectCodeDir { return code }
         return WorkspaceRoot.resolve(config: config, projectStore: projectStore)
+    }
+
+    /// The git working tree — a DIFFERENT root from `root` above.
+    ///
+    /// `root` is the tree root (`<project>/code`, a container of clones with
+    /// no `.git` of its own). Passing that to the decoration store is exactly
+    /// why Explorer's git colors were dead: `refresh` requires `root/.git` and
+    /// correctly degraded to "no decorations". Decorations must resolve
+    /// against the actual working tree instead.
+    private var gitRoot: URL? {
+        WorkspaceRoot.gitWorkingTree(config: config, projectStore: projectStore)
     }
 
     /// cwd for the embedded terminal dock — mirrors AppShell.projectDirectory
@@ -114,12 +125,18 @@ struct ExplorerView: View {
             selectedURL = nil
         }
         // Refresh decorations when the project root changes / on appear.
-        .task(id: root?.path) { await decorations.refresh(root: root) }
-        // Re-check git status when the window regains key focus (VS Code does
-        // the same — picks up edits made via terminal/other tools).
-        .onChange(of: controlActiveState) { _, state in
-            if state == .key { Task { await decorations.refresh(root: root) } }
+        .task(id: gitRoot?.path) {
+            await decorations.refresh(root: gitRoot)
+            if let gitRoot { decorations.startWatching(root: gitRoot) } else { decorations.stopWatching() }
         }
+        // Re-check git status when the window regains key focus (VS Code does
+        // the same — picks up edits made via terminal/other tools). Kept even
+        // with the watcher running: FSEvents can be missed while the app is
+        // backgrounded.
+        .onChange(of: controlActiveState) { _, state in
+            if state == .key { Task { await decorations.refresh(root: gitRoot) } }
+        }
+        .onDisappear { decorations.stopWatching() }
         .firstLaunchOpenChat(flagKey: "DID_AUTO_OPEN_EXPLORE_CHAT_V1",
                              width: $chatPanelWidth, visible: $chatVisible)
         .sheet(item: $filePrompt) { prompt in
@@ -320,7 +337,7 @@ struct ExplorerView: View {
     }
 
     private func folderRow(_ node: FileSystemTree.Node, depth: Int, expanded isExpanded: Bool) -> some View {
-        let deco = root.flatMap {
+        let deco = gitRoot.flatMap {
             decorations.decoration(forAbsolute: node.url, root: $0, isDirectory: true)
         }
         let isSelected = selectedURL == node.url
@@ -352,7 +369,7 @@ struct ExplorerView: View {
     private func fileRow(_ node: FileSystemTree.Node, depth: Int) -> some View {
         let ext = node.url.pathExtension.lowercased()
         let selected = activeTab == node.url
-        let deco = root.flatMap {
+        let deco = gitRoot.flatMap {
             decorations.decoration(forAbsolute: node.url, root: $0, isDirectory: false)
         }
         return Button {
@@ -467,7 +484,7 @@ struct ExplorerView: View {
             if activeTab == url { activeTab = new }
             if selectedURL == url { selectedURL = new }
         }
-        Task { await decorations.refresh(root: root) }
+        Task { await decorations.refresh(root: gitRoot) }
     }
 
     /// Delete (trash) a file/folder, close tabs under it, refresh.
@@ -482,7 +499,7 @@ struct ExplorerView: View {
             if let selected = selectedURL, selected == url || selected.path.hasPrefix(url.path + "/") {
                 selectedURL = nil
             }
-            Task { await decorations.refresh(root: root) }
+            Task { await decorations.refresh(root: gitRoot) }
         } catch {
             deleteError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
         }
@@ -504,7 +521,7 @@ struct ExplorerView: View {
     /// Full tree + git refresh (toolbar Refresh).
     private func refreshAll() {
         childrenCache.removeAll()
-        Task { await decorations.refresh(root: root) }
+        Task { await decorations.refresh(root: gitRoot) }
     }
 
     /// Collapse every expanded folder (toolbar Collapse All), VS Code-style.
