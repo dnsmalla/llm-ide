@@ -105,11 +105,13 @@ struct AutoCodeView: View {
                 .buttonStyle(.borderless)
                 .help("Add Custom Task")
 
-                Button { FeatureCatalog.refreshAutoTaskStateForMobile() } label: {
-                    Image(systemName: "arrow.triangle.2.circlepath")
+                if FeatureCatalog.isMobileCompiled {
+                    Button { FeatureCatalog.refreshAutoTaskStateForMobile() } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Push current state to a paired iPhone now")
                 }
-                .buttonStyle(.borderless)
-                .help("Push current state to a paired iPhone now")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)

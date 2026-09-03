@@ -42,6 +42,13 @@ enum FeatureCatalog {
     /// already encodes it — no new `#if` needed here).
     static var isGraphCompiled: Bool { compiledFeatures.contains(.codeGraph3D) }
 
+    /// True when this build was compiled with the Mobile Sync feature — i.e.
+    /// a build with `FEATURE_MOBILE` off reports `false`. Callers outside
+    /// this file use this instead of naming `#if FEATURE_MOBILE` directly, so
+    /// a single seam decides "is Mobile in this build" (`compiledFeatures`
+    /// already encodes it — no new `#if` needed here).
+    static var isMobileCompiled: Bool { compiledFeatures.contains(.mobileSync) }
+
     // MARK: - Graph
 
     #if FEATURE_GRAPH

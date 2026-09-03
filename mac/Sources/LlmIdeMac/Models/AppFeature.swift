@@ -48,11 +48,11 @@ public enum AppFeature: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    /// Features listed in Settings → Workspace. Omits flags with a dedicated
-    /// card (`mobileSync` → Mobile Control).
-    static let settingsToggleable: [AppFeature] = allCases.filter {
-        $0 != .mobileSync
-    }
+    /// Features listed in Settings → Workspace. Every feature gets a normal
+    /// row here, including `mobileSync` — the toggle drives `MobileModule`
+    /// through the registry like any other feature; the Mobile Control card
+    /// still manages server enable/auto-start details when compiled in.
+    static let settingsToggleable: [AppFeature] = allCases
 
     /// Features whose build-time inclusion is switchable at all — every
     /// other feature is always compiled in. NOTE: `mac/Package.swift`'s

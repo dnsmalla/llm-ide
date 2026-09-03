@@ -20,6 +20,8 @@ struct HelpGuideView: View {
         .gantt: .ganttIssues,
         .docGen: .docGen,
         .codeGraph: .codeGraph3D,
+        .autoTasks: .autoTasks,
+        .loopEngine: .autoTasks,
     ]
 
     private var visibleTopics: [HelpTopic] {
@@ -404,7 +406,9 @@ struct HelpGuideView: View {
                 helpBullet("Connections — meetings, email, Slack, Box, and other inputs")
                 helpBullet("General — theme, language, and synced preferences")
                 helpBullet("Model Providers — API keys, default model, and Agent engine toggle")
-                helpBullet("Mobile Control — pair your iPhone companion")
+                if FeatureRegistry.shared.compiledFeatures.contains(.mobileSync) {
+                    helpBullet("Mobile Control — pair your iPhone companion")
+                }
                 helpBullet("Updates — check for app updates (powered by Sparkle)")
             }
 

@@ -19,7 +19,7 @@ clean:
 
 # --- mac app -----------------------------------------------------------------
 
-.PHONY: build-mac build-mac-lite build-mac-min test-mac regression test-shared-protocol
+.PHONY: build-mac build-mac-lite build-mac-min build-mac-mobile-only test-mac regression test-shared-protocol
 
 # Pin the Xcode toolchain for every Swift build/test below. git invokes the
 # pre-push hook with an environment that can resolve the CommandLineTools swift
@@ -66,6 +66,15 @@ build-mac-lite: ## non-engineer build: no Explorer/Gantt/DocGen/Terminal/Graph
 build-mac-min: ## Chat only: excludes all 7 excludable features
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat swift build --manifest-cache none
 
+# The mirror quadrant of build-mac-min: mobile_sync compiled IN, auto_tasks
+# compiled OUT. Guards the bridge seam the other quadrant can't see — with
+# AutoTask absent, MobileFeatureBridge's dynamic-downgrade path
+# (replyFeatureUnavailable) is what stands between the phone and a crash, not
+# just a hidden toggle. --manifest-cache none for the same reason as
+# build-mac-lite.
+build-mac-mobile-only: ## Build with Chat + Mobile only (no AutoTask/Loop — guards the bridge seam)
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat,mobile_sync swift build --manifest-cache none
+
 test-mac:
 	cd mac && swift build --product LlmIdeMac
 ifeq ($(HAS_XCTEST),1)
@@ -88,7 +97,7 @@ endif
 # view (re-checks every `status: fixed` fault against the current agent and
 # refreshes `<project>/system/faults.csv`) before shipping an upgrade — the
 # CSV's `status` column is the release checklist.
-regression: test-mac build-mac-lite build-mac-min graph-gates
+regression: test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates
 
 # The graph verification gates. These are plain executables precisely so they
 # run where `swift test` cannot (a Command-Line-Tools-only toolchain has no

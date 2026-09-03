@@ -128,8 +128,12 @@ final class FeatureRegistryTests: XCTestCase {
     }
 
     func testEveryFeatureHasAModuleRegisteredInComposition() {
-        // Mirror of the registration list in LlmIdeMacApp.init(). If this
-        // fails after adding an AppFeature case, add a module there AND here.
+        // Mirror of the registration list. Registrations now live in
+        // FeatureCatalog's boot functions (bootGraph, bootAutoTask,
+        // bootMobile) for the excludable stacks, plus LlmIdeMacApp.init()'s
+        // own passive registration loop for ChatModule and PassiveModule. If
+        // this fails after adding an AppFeature case, add a module there AND
+        // here.
         let covered: Set<AppFeature> = [
             .autoTasks,      // AutoTaskModule
             .codeGraph3D,    // GraphModule
