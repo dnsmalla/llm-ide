@@ -41,7 +41,8 @@ const agentSdkRoot = path.join(path.dirname(tmpDb), 'agent-sdk');
 try { fs.rmSync(agentSdkRoot, { recursive: true, force: true }); } catch { /* ok */ }
 
 const {
-  buildEngineOptions, resolveAnthropicKey, runAgentV2Turn, agentSdkHomeFor, resolveMaxBudgetUsd, approvalArgsFor, v2ToolPolicyForMode,
+  buildEngineOptions, resolveAnthropicKey, resolveAgentEngineAuth, runAgentV2Turn, agentSdkHomeFor, resolveMaxBudgetUsd,
+  approvalArgsFor, v2ToolPolicyForMode,
 } = await import('../llm_agent/sdk/engine.mjs');
 const { answerDecision, abortDecisionsForSession } = await import('../llm_agent/sdk/decisions.mjs');
 const { registerUser } = await import('../server/users.mjs');
@@ -49,6 +50,8 @@ const { getDb } = await import('../kb/db.mjs');
 const { persistTurnMemory } = await import('../llm_agent/runtime/memory-persist.mjs');
 const { listSessionMemory } = await import('../kb/session-memory.mjs');
 const { hasAlwaysAllow, setAlwaysAllow } = await import('../kb/tool-approvals.mjs');
+const { syncCustomProviders } = await import('../server/custom-providers.mjs');
+const { setSecret } = await import('../server/vault.mjs');
 
 // --- The brief's binding contract -------------------------------------------
 
@@ -521,6 +524,103 @@ test('per-user CLAUDE_CONFIG_DIR: composed for every KEYED turn',
     }, turnInjectable);
     assert.equal(keyedAmbientOk.options.env.CLAUDE_CONFIG_DIR, agentSdkHomeFor('user-a'),
       'a keyed turn keeps its per-user home even when ambient auth is allowed');
+  }));
+
+// --- Anthropic-compatible custom providers (gateway turns) ---------------------
+//
+// The Agent SDK only speaks the Anthropic Messages API, so a non-Anthropic
+// model reaches it through a custom provider's Anthropic-format door (Z.AI
+// GLM `…/api/anthropic`). The env contract is the `claude` CLI's own
+// LLM-gateway one — ANTHROPIC_BASE_URL + the provider's key — and anything
+// without such a door is refused BEFORE the SDK spawns.
+
+// Registers ONE provider (syncCustomProviders replaces the registry) with its
+// key in the vault; `anthropicBaseURL: null` registers a plain OpenAI-form
+// provider that the engine must refuse.
+function registerGatewayProvider(userId, {
+  id = 'glm-gw', anthropicBaseURL = 'https://api.z.ai/api/anthropic', key = 'glm-key-1',
+} = {}) {
+  const vaultKey = `custom.${id}.apiKey`;
+  syncCustomProviders([{
+    id, name: 'GLM', baseURL: 'https://api.z.ai/api/paas/v4', apiKey: vaultKey, models: [],
+    isOpenAICompatible: true, isEnabled: true,
+    ...(anthropicBaseURL ? { anthropicBaseURL } : {}),
+  }]);
+  if (key) setSecret(getDb(), userId, vaultKey, key);
+  return `custom:${id}`;
+}
+
+test('resolveAgentEngineAuth: first-party keeps the ladder; a gateway brings its own key + door; the rest is refused',
+  withAnthropicKey('sk-ant-first-party', async () => {
+    const user = registerUser(getDb(), { email: 'v2gw-auth@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+    try {
+      assert.deepEqual(resolveAgentEngineAuth(undefined, user.id),
+        { provider: 'anthropic', key: 'sk-ant-first-party', source: 'env', baseUrl: null });
+      assert.equal(resolveAgentEngineAuth('anthropic', user.id).baseUrl, null);
+
+      const gateway = registerGatewayProvider(user.id);
+      assert.deepEqual(resolveAgentEngineAuth(gateway, user.id),
+        { provider: gateway, key: 'glm-key-1', source: 'vault', baseUrl: 'https://api.z.ai/api/anthropic' });
+
+      const plain = registerGatewayProvider(user.id, { id: 'glm-plain', anthropicBaseURL: null });
+      assert.throws(() => resolveAgentEngineAuth(plain, user.id),
+        (e) => e.code === 'PROVIDER_NOT_AGENT_CAPABLE' && /Anthropic-compatible endpoint/.test(e.message));
+      assert.throws(() => resolveAgentEngineAuth('custom:never-registered', user.id),
+        (e) => e.code === 'PROVIDER_UNAVAILABLE' && /not found/.test(e.message));
+      for (const builtIn of ['openai', 'google', 'deepseek']) {
+        assert.throws(() => resolveAgentEngineAuth(builtIn, user.id),
+          (e) => e.code === 'PROVIDER_NOT_AGENT_CAPABLE', `${builtIn} has no Anthropic door`);
+      }
+    } finally { syncCustomProviders([]); }
+  }));
+
+test('gateway turn: ANTHROPIC_BASE_URL + the provider key ride the SDK env; the model id goes verbatim',
+  withAnthropicKey(undefined, async () => {
+    const user = registerUser(getDb(), { email: 'v2gw-turn@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+    const gateway = registerGatewayProvider(user.id);
+    const capture = {};
+    let spawned = false;
+    const refusingQuery = () => { spawned = true; return (async function* () {})(); };
+    try {
+      // No first-party key anywhere and ambient NOT allowed: a gateway turn
+      // must still run — on the provider's own key.
+      await runAgentV2Turn({
+        message: 'm', userId: user.id, mode: 'execute', provider: gateway, model: 'glm-4.7',
+        agentContext: { workspaceRoot: WS },
+        onEvent: () => {}, queryFactory: (p, o) => { capture.options = o; return (async function* () {})(); },
+      }, turnInjectable);
+      const env = capture.options.env;
+      assert.equal(env.ANTHROPIC_BASE_URL, 'https://api.z.ai/api/anthropic');
+      assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'glm-key-1', 'Z.AI/Ollama shape');
+      assert.equal(env.ANTHROPIC_API_KEY, 'glm-key-1', 'DeepSeek shape');
+      assert.equal(env.CLAUDE_CONFIG_DIR, agentSdkHomeFor(user.id), 'a gateway turn is a keyed turn: per-user home');
+      assert.equal(capture.options.model, 'glm-4.7');
+
+      // Refused before the SDK spawns — the factory is never reached.
+      const plain = registerGatewayProvider(user.id, { id: 'glm-plain', anthropicBaseURL: null });
+      for (const provider of [plain, 'openai']) {
+        await assert.rejects(
+          () => runAgentV2Turn({
+            message: 'm', userId: user.id, mode: 'execute', provider, agentContext: { workspaceRoot: WS },
+            allowAmbientAuth: true, onEvent: () => {}, queryFactory: refusingQuery,
+          }, turnInjectable),
+          (e) => e.code === 'PROVIDER_NOT_AGENT_CAPABLE',
+        );
+      }
+      assert.equal(spawned, false);
+    } finally { syncCustomProviders([]); }
+  }));
+
+test('first-party turn: no gateway env is injected (operator process.env semantics unchanged)',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const capture = {};
+    await runAgentV2Turn({
+      message: 'm', userId: 'user-a', mode: 'execute', agentContext: { workspaceRoot: WS },
+      onEvent: () => {}, queryFactory: (p, o) => { capture.options = o; return (async function* () {})(); },
+    }, turnInjectable);
+    assert.equal(capture.options.env.ANTHROPIC_BASE_URL, process.env.ANTHROPIC_BASE_URL);
+    assert.equal(capture.options.env.ANTHROPIC_AUTH_TOKEN, process.env.ANTHROPIC_AUTH_TOKEN);
+    assert.equal(capture.options.env.ANTHROPIC_API_KEY, 'sk-ant-v2-test');
   }));
 
 // The fake SDK query: captures the (prompt, options) the runner composed so
@@ -1040,7 +1140,8 @@ test('maxBudgetUsd: a usable cap flows into query options; no cap → option abs
       agentContext: { workspaceRoot: WS },
       onEvent: () => {}, queryFactory: makeFakeQuery(capped),
     }, { ...turnInjectable, resolveBudget: (...args) => { seen.push(args); return 1.25; } });
-    assert.deepEqual(seen, [['u1', 'claude-sonnet-5']], 'resolver sees (userId, requested model)');
+    assert.deepEqual(seen, [['u1', 'claude-sonnet-5', { provider: 'anthropic' }]],
+      'resolver sees (userId, requested model, the provider the turn runs on)');
     assert.equal(capped.options.maxBudgetUsd, 1.25);
 
     const uncapped = { messages: [] };

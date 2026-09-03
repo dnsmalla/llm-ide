@@ -82,6 +82,7 @@ function registerProvider(userId, overrides = {}) {
   syncCustomProviders([{
     id, name: 'GLM', baseURL, apiKey: vaultKey, models: [],
     isOpenAICompatible: true, isEnabled: overrides.isEnabled !== false,
+    ...(overrides.anthropicBaseURL ? { anthropicBaseURL: overrides.anthropicBaseURL } : {}),
   }]);
   if (overrides.seedKey !== false) {
     setSecret(getDb(), userId, vaultKey, overrides.keyValue ?? 'sk-glm-test');
@@ -161,4 +162,22 @@ test('handleCodeAssist custom:<uuid>: SSRF guard blocks an internal base URL bef
     restore();
     syncCustomProviders([]);
   }
+});
+
+// The Agent SDK engine reads a provider's optional Anthropic-format door
+// through this SAME resolver (one source of truth for custom-provider
+// credentials), so the field must pass through — normalized — and stay null
+// for a provider that has none.
+test('resolveCustomProviderDispatch: passes the optional anthropicBaseUrl through (null when absent)', async () => {
+  const { resolveCustomProviderDispatch } = await import('../providers/providers.mjs');
+  const { userId } = await setupUser();
+  try {
+    const withDoor = registerProvider(userId, { anthropicBaseURL: 'https://api.z.ai/api/anthropic/' });
+    assert.equal(resolveCustomProviderDispatch(withDoor, userId).anthropicBaseUrl,
+      'https://api.z.ai/api/anthropic', 'trailing slash is normalized away');
+    assert.equal(resolveCustomProviderDispatch(withDoor, userId).baseUrl,
+      'https://api.example.com/v1', 'the legacy OpenAI-form base URL is untouched');
+    const without = registerProvider(userId);
+    assert.equal(resolveCustomProviderDispatch(without, userId).anthropicBaseUrl, null);
+  } finally { syncCustomProviders([]); }
 });

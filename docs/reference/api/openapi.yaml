@@ -2969,7 +2969,18 @@ paths:
               properties:
                 message:  { type: string, description: 'User message (max 20 000 chars after sanitization)' }
                 language: { type: string }
-                model:    { type: string, description: 'Anthropic model id from the picker; omitted = config default' }
+                model:    { type: string, description: 'Model id from the picker, passed to the SDK verbatim (an Anthropic id, or the custom provider''s own id on a gateway turn); omitted = config default' }
+                provider:
+                  type: string
+                  description: >-
+                    Provider the turn runs on (server v43+): `anthropic` (default when
+                    omitted) or an Anthropic-compatible custom provider `custom:<uuid>`
+                    registered with an `anthropicBaseURL`. The engine points the Agent
+                    SDK at that endpoint with the provider's own key and meters the turn
+                    under this id. Any other value fails before the SDK spawns with a
+                    terminal error event coded `PROVIDER_NOT_AGENT_CAPABLE` (no
+                    Anthropic-compatible endpoint) or `PROVIDER_UNAVAILABLE`
+                    (unregistered / disabled / no key).
                 mode:     { type: string, description: 'Chat mode; plan/assist_plan map to SDK plan permission mode' }
                 planExecute:
                   type: boolean

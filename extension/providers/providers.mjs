@@ -196,7 +196,9 @@ export function providerApiKey(userId, provider) {
 // native tool-loop (llm_agent/runtime/route.mjs) and the legacy single-shot
 // `runClaude` path (providers/runtime.mjs) — so they can't drift.
 //
-// Returns `{ apiKey, baseUrl, name }` on success, or `{ error, message }`
+// Returns `{ apiKey, baseUrl, name, anthropicBaseUrl }` on success (the last is
+// the provider's optional Anthropic-format endpoint, null when it has none —
+// consumed only by the Agent SDK engine), or `{ error, message }`
 // (error ∈ 'not_found' | 'disabled' | 'no_key'); the caller surfaces `message`.
 // `db` defaults to the live DB; tests pass an in-memory store. A vault read
 // failure (e.g. a key that somehow isn't allow-listed) degrades to `no_key`
@@ -218,7 +220,7 @@ export function resolveCustomProviderDispatch(provider, userId, db = getDb()) {
     return { error: 'no_key',
       message: `No API key configured for ${cp.name}. Add one in Settings → Model Providers.` };
   }
-  return { apiKey, baseUrl: cp.baseURL, name: cp.name };
+  return { apiKey, baseUrl: cp.baseURL, name: cp.name, anthropicBaseUrl: cp.anthropicBaseURL || null };
 }
 
 // ── HTTP completion ───────────────────────────────────────────────────

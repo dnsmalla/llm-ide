@@ -92,9 +92,12 @@ export async function handleAgentV2Routes(
 
 // --- POST /agent/v2/stream ----------------------------------------------------
 //
-// Body: { message, language?, model?, mode?, skills?, planExecute?, agentContext:
-// { chatSessionId, workspaceRoot, … }, attachments?, fresh? } → SSE stream
-// of engine events with `mode_set` injected right after the first `init`.
+// Body: { message, language?, model?, provider?, mode?, skills?, planExecute?,
+// agentContext: { chatSessionId, workspaceRoot, … }, attachments?, fresh? } →
+// SSE stream of engine events with `mode_set` injected right after the first
+// `init`. `provider` is `anthropic` (or absent — older clients only ever sent
+// v2 turns for Anthropic) or an Anthropic-compatible `custom:<uuid>`; the
+// engine refuses anything it cannot run (resolveAgentEngineAuth).
 //
 // Session mapping: the server owns the chat→SDK-session binding
 // (kb/agent-sessions.mjs) so consecutive turns resume the same SDK
@@ -161,6 +164,9 @@ async function handleV2Stream(req, res, userId, deps) {
   }
 
   const model = typeof body.model === 'string' && body.model ? body.model : null;
+  // Metered and passed through as-is: the engine validates it before the SDK
+  // spawns, so a turn that reaches recordUsage really ran on this provider.
+  const provider = typeof body.provider === 'string' && body.provider ? body.provider : AGENT_SDK_PROVIDER;
 
   const lockKey = chatSessionLockKey(userId, chatSessionId);
   if (inFlightChatSessions.has(lockKey)) {
@@ -171,15 +177,19 @@ async function handleV2Stream(req, res, userId, deps) {
   }
   inFlightChatSessions.add(lockKey);
   try {
-    return await runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, effectiveMessage, body, deps);
+    return await runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, provider, effectiveMessage, body, deps);
   } finally {
     inFlightChatSessions.delete(lockKey);
   }
 }
 
+// Error codes the engine's provider gate throws (llm_agent/sdk/engine.mjs
+// resolveAgentEngineAuth) — forwarded verbatim on the stream's error event.
+const PROVIDER_ERROR_CODES = new Set(['PROVIDER_NOT_AGENT_CAPABLE', 'PROVIDER_UNAVAILABLE']);
+
 // The rest of the turn, once this chat session's lock is held — split out so
 // the lock's try/finally above stays a thin wrapper around it.
-async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, message, body, deps) {
+async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, provider, message, body, deps) {
   const db = getDb();
   const row = getOrCreateAgentSession(db, userId, chatSessionId);
   const resumeSdkSessionId = body.fresh ? null : row.sdk_session_id;
@@ -239,6 +249,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       userId,
       mode,
       model,
+      provider,
       language: body.language,
       skills: body.skills,
       // Set by the saved-plan card's "Execute plan" action — the one
@@ -283,7 +294,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     }
     recordUsage(db, {
       userId,
-      provider: AGENT_SDK_PROVIDER,
+      provider,
       model: meteredModel,
       endpoint: '/agent/v2/stream',
       inputTokens: usageTotals?.inputTokens,
@@ -305,7 +316,13 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
         retryable: true,
       });
     } else if (!ac.signal.aborted) {
-      send({ type: 'error', code: 'ENGINE_ERROR', message: err?.message || 'agent v2 turn failed', retryable: false });
+      // Provider refusals keep their own code (resolveAgentEngineAuth) so a
+      // client can tell "this provider cannot take the Agent engine" / "the
+      // custom-provider registry hasn't been synced since the server
+      // restarted" apart from a genuine engine failure. Everything else
+      // stays ENGINE_ERROR.
+      const code = PROVIDER_ERROR_CODES.has(err?.code) ? err.code : 'ENGINE_ERROR';
+      send({ type: 'error', code, message: err?.message || 'agent v2 turn failed', retryable: false });
     }
   }
   if (!res.writableEnded) res.end();

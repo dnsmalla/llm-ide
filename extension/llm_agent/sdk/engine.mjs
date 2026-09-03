@@ -59,6 +59,7 @@ import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory
 import { getAgentPersona } from '../../kb/personas.mjs';
 import { getSecret, makeSecretReader } from '../../server/vault.mjs';
 import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
+import { resolveCustomProviderDispatch } from '../../providers/providers.mjs';
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { mapSdkMessage } from './events.mjs';
 import { buildLlmIdeServer } from './tools.mjs';
@@ -88,6 +89,52 @@ export function resolveAnthropicKey(userId) {
   }
   if (process.env.ANTHROPIC_API_KEY) return { key: process.env.ANTHROPIC_API_KEY, source: 'env' };
   return { key: null, source: 'none' };
+}
+
+// --- Provider → SDK auth (Anthropic-compatible gateways) ---------------------
+//
+// The Agent SDK speaks the Anthropic Messages API and nothing else, so the
+// engine can run a non-Anthropic model ONLY through a provider that exposes an
+// Anthropic-format endpoint (Z.AI GLM `…/api/anthropic`, DeepSeek
+// `…/anthropic`, Ollama `:11434`). Such a provider is a user-registered
+// `custom:<uuid>` whose registry entry carries `anthropicBaseURL`; the SDK's
+// CLI subprocess is pointed at it through ANTHROPIC_BASE_URL — the same
+// LLM-gateway env contract the `claude` CLI documents, which is why "normal
+// Claude can use GLM" and this engine now can too. Every other provider id
+// (openai/google/…, or a custom provider with no Anthropic door) is refused
+// HERE, before anything spawns: the Mac only sends a v2 turn for a provider
+// it believes the engine can run, so a silent fallback would be a lie.
+//
+// Returns `{ provider, key, source, baseUrl }`. `baseUrl` null = first-party
+// Anthropic (the runner's auth ladder then decides keyed vs ambient). A
+// gateway turn ALWAYS carries a key — a gateway has no ambient login to fall
+// back to (Ollama simply accepts any non-empty token).
+export function resolveAgentEngineAuth(provider, userId, { resolveCustom = resolveCustomProviderDispatch } = {}) {
+  if (!provider || provider === AGENT_SDK_PROVIDER) {
+    return { provider: AGENT_SDK_PROVIDER, ...resolveAnthropicKey(userId), baseUrl: null };
+  }
+  if (typeof provider === 'string' && provider.startsWith('custom:')) {
+    const resolved = resolveCustom(provider, userId);
+    if (resolved.error) {
+      const err = new Error(resolved.message);
+      err.code = 'PROVIDER_UNAVAILABLE';
+      throw err;
+    }
+    if (!resolved.anthropicBaseUrl) {
+      const err = new Error(
+        `${resolved.name} has no Anthropic-compatible endpoint configured, so the Agent engine cannot run it. `
+        + 'Add one in Settings → Custom Providers (e.g. https://api.z.ai/api/anthropic), or pick Claude.',
+      );
+      err.code = 'PROVIDER_NOT_AGENT_CAPABLE';
+      throw err;
+    }
+    return { provider, key: resolved.apiKey, source: 'vault', baseUrl: resolved.anthropicBaseUrl };
+  }
+  const err = new Error(
+    `The Agent engine runs on Anthropic-compatible providers only; "${provider}" is not one.`,
+  );
+  err.code = 'PROVIDER_NOT_AGENT_CAPABLE';
+  throw err;
 }
 
 // --- Per-user engine homes (spec §6/§11) --------------------------------------
@@ -452,8 +499,11 @@ const MAX_TURNS = 40;
 // turn runs uncapped, with the per-model caps still enforced AFTER the fact
 // by the usage ledger: every result is metered via recordUsage in the route,
 // so resolveModel's window caps and auto-fallback keep working unchanged.
-export function resolveMaxBudgetUsd(userId, model, { usdCap = usdCapForModel } = {}) {
-  return usdCap(getDb(), userId, AGENT_SDK_PROVIDER, typeof model === 'string' && model ? model : null);
+export function resolveMaxBudgetUsd(userId, model, { usdCap = usdCapForModel, provider = AGENT_SDK_PROVIDER } = {}) {
+  // `provider` is the id the turn actually runs on: first-party Anthropic by
+  // default, or an Anthropic-compatible `custom:<uuid>` (whose limits chain is
+  // empty today, so usdCapForModel answers null and the turn runs uncapped).
+  return usdCap(getDb(), userId, provider, typeof model === 'string' && model ? model : null);
 }
 
 // Native tools outside the gated roster (and any unknown tool) stay denied —
@@ -538,6 +588,10 @@ export async function runAgentV2Turn(
   {
     message, userId, mode, model, language, skills, agentContext, attachments,
     planExecute,
+    // Provider id the client resolved for this turn: absent/`anthropic` for
+    // first-party Claude, or an Anthropic-compatible `custom:<uuid>`. Anything
+    // else is refused by resolveAgentEngineAuth before the SDK spawns.
+    provider = AGENT_SDK_PROVIDER,
     resumeSdkSessionId, onEvent, signal, allowAmbientAuth = false,
     queryFactory = sdkQueryFactory,
   } = {},
@@ -595,9 +649,12 @@ export async function runAgentV2Turn(
     throw new Error(`workspaceRoot is too broad: ${workspaceRoot}`);
   }
 
-  // Same auth ladder as the spike: per-user vault key → operator ambient
-  // auth. Ambient is opt-in so hermetic tests can assert the no-key error.
-  const { key } = resolveAnthropicKey(userId);
+  // Provider → auth. First-party Anthropic keeps the spike's ladder: per-user
+  // vault key → operator ambient auth (ambient is opt-in so hermetic tests can
+  // assert the no-key error). An Anthropic-compatible custom provider resolves
+  // to its own key + base URL — or throws here, before anything spawns.
+  const auth = resolveAgentEngineAuth(provider, userId);
+  const { key, baseUrl: gatewayBaseUrl } = auth;
   if (!key && !allowAmbientAuth) {
     throw new Error('No Anthropic API key available (set vault claude.apiKey or ANTHROPIC_API_KEY)');
   }
@@ -785,7 +842,7 @@ export async function runAgentV2Turn(
   // resolved by the SDK itself at init, after composition — capping against a
   // guess would cap the wrong budget. See resolveMaxBudgetUsd for exactly
   // what the limits system stores and why runs/tokens caps don't map here.
-  const maxBudgetUsd = resolveBudget(userId, model);
+  const maxBudgetUsd = resolveBudget(userId, model, { provider: auth.provider });
 
   // Per-user plugin view (spec parity with the legacy loop's route.mjs):
   // cheap enough to build per turn so a user toggling a plugin in Settings
@@ -854,6 +911,14 @@ export async function runAgentV2Turn(
           env: {
             ...process.env,
             ANTHROPIC_API_KEY: key,
+            // Gateway turn (Anthropic-compatible custom provider): aim the
+            // SDK's CLI at the provider's Anthropic door. The key rides in
+            // BOTH shapes because gateways differ — Z.AI and Ollama document
+            // ANTHROPIC_AUTH_TOKEN (Authorization: Bearer), DeepSeek documents
+            // ANTHROPIC_API_KEY (x-api-key). First-party turns leave whatever
+            // ANTHROPIC_BASE_URL the operator's process.env carries untouched,
+            // exactly as before.
+            ...(gatewayBaseUrl ? { ANTHROPIC_BASE_URL: gatewayBaseUrl, ANTHROPIC_AUTH_TOKEN: key } : {}),
             ...(sdkHome ? { CLAUDE_CONFIG_DIR: sdkHome } : {}),
           },
         }

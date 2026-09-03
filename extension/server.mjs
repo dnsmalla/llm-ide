@@ -124,7 +124,14 @@ const HOST = config.host;
 //     events (shared emitter in task-session-context.mjs), fired from the
 //     loop's phase:'tool' progress hook, so legacy-stamped chats get the
 //     same live progress bar. Additive for the same reason.
-const SERVER_API_VERSION = 42;
+//   v43 — POST /agent/v2/stream accepts `provider` (`anthropic` or an
+//     Anthropic-compatible `custom:<uuid>`): the engine points the Agent SDK
+//     at that provider's Anthropic-format endpoint and meters under it. Bumped
+//     although the field is optional: an older server IGNORES it and would run
+//     a GLM turn on the user's Claude credentials — exactly the silent
+//     fallback the Mac's provider gate promises never happens — so the Mac's
+//     floor (BackendManager.minimumServerApiVersion) must refuse such a server.
+const SERVER_API_VERSION = 43;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

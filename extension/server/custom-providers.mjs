@@ -41,6 +41,13 @@ export function syncCustomProviders(providers = []) {
       models: p.models || [],
       isOpenAICompatible: p.isOpenAICompatible !== false,
       isEnabled: p.isEnabled !== false,
+      // Optional Anthropic-format door (Z.AI `…/api/anthropic`, DeepSeek
+      // `…/anthropic`, Ollama `:11434`). Only the Agent SDK engine reads it:
+      // the legacy loop keeps dispatching to `baseURL` (OpenAI form). Null
+      // means "this provider cannot take the Agent engine".
+      anthropicBaseURL: typeof p.anthropicBaseURL === 'string' && p.anthropicBaseURL.trim()
+        ? p.anthropicBaseURL.trim().replace(/\/+$/, '')
+        : null,
     });
   }
 

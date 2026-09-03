@@ -176,6 +176,72 @@ test('stream: happy path emits init → mode_set → … → result, maps sessio
   });
 });
 
+// An Anthropic-compatible custom provider (Z.AI GLM's `…/api/anthropic` door)
+// rides the body as `provider`: the route forwards it verbatim to the engine
+// and meters the turn under it — not under a hardcoded 'anthropic'. Absent
+// (an older client) still means anthropic, as every v2 turn was before.
+test('stream: `provider` is forwarded to the engine and metered as sent; absent → anthropic', async () => {
+  const db = getDb();
+  const user = newUser('v2route-gateway@example.com');
+  let gotProvider;
+  const fakeTurn = async ({ onEvent, provider }) => {
+    gotProvider = provider;
+    onEvent({ type: 'init', sessionId: 'sdk-gw', claudeCodeVersion: '2.1.234', tools: [], capabilities: [] });
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-gw', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: { inputTokens: 3, outputTokens: 1 } };
+  };
+  await handleAgentV2Routes(makeReq({
+    method: 'POST', url: '/agent/v2/stream',
+    body: {
+      message: 'hello', mode: 'execute', model: 'glm-4.7', provider: 'custom:glm-gw',
+      agentContext: { chatSessionId: 'chat-gw', workspaceRoot: WS },
+    },
+    user,
+  }), makeRes(), { runTurn: fakeTurn });
+  assert.equal(gotProvider, 'custom:glm-gw');
+  assert.deepEqual(
+    db.prepare('SELECT provider, model FROM usage_ledger WHERE model = ?').get('glm-4.7'),
+    { provider: 'custom:glm-gw', model: 'glm-4.7' },
+  );
+
+  gotProvider = undefined;
+  await handleAgentV2Routes(makeReq({
+    method: 'POST', url: '/agent/v2/stream',
+    body: { message: 'hello', mode: 'execute', agentContext: { chatSessionId: 'chat-gw2', workspaceRoot: WS } },
+    user,
+  }), makeRes(), { runTurn: fakeTurn });
+  assert.equal(gotProvider, 'anthropic');
+});
+
+// The engine refuses a provider it cannot run BEFORE the SDK spawns, with a
+// code of its own; the stream's terminal error event must carry that code
+// (not the catch-all ENGINE_ERROR) so a client can tell the two apart.
+test('stream: a provider refusal keeps its own error code on the terminal event', async () => {
+  const user = newUser('v2route-refused@example.com');
+  for (const code of ['PROVIDER_NOT_AGENT_CAPABLE', 'PROVIDER_UNAVAILABLE']) {
+    const res = makeRes();
+    await handleAgentV2Routes(makeReq({
+      method: 'POST', url: '/agent/v2/stream',
+      body: { message: 'hello', mode: 'execute', provider: 'custom:plain',
+              agentContext: { chatSessionId: `chat-refused-${code}`, workspaceRoot: WS } },
+      user,
+    }), res, { runTurn: async () => { const e = new Error(`refused: ${code}`); e.code = code; throw e; } });
+    const last = res.sseEvents().at(-1);
+    assert.equal(last.type, 'error');
+    assert.equal(last.code, code);
+    assert.match(last.message, /refused/);
+    assert.equal(last.retryable, false);
+  }
+  // Anything else is still the catch-all.
+  const res = makeRes();
+  await handleAgentV2Routes(makeReq({
+    method: 'POST', url: '/agent/v2/stream',
+    body: { message: 'hello', mode: 'execute', agentContext: { chatSessionId: 'chat-boom', workspaceRoot: WS } },
+    user,
+  }), res, { runTurn: async () => { const e = new Error('boom'); e.code = 'SOMETHING_ELSE'; throw e; } });
+  assert.equal(res.sseEvents().at(-1).code, 'ENGINE_ERROR');
+});
+
 // A turn whose client sent no `model` must still be metered: the engine's
 // init event carries the actually-resolved model, and recordUsage skips rows
 // without one — losing them would blind the per-model usage caps.
