@@ -79,10 +79,21 @@ struct HunkStagingList: View {
                 .foregroundStyle(Color.secondary.opacity(0.7))
                 .frame(width: lineNumWidth, alignment: .trailing)
                 .padding(.trailing, 8)
+            // Sign column. The raw "+"/"−" glyphs read as punctuation to
+            // VoiceOver, so we replace them with descriptive labels (and hide
+            // the column entirely for unchanged context rows).
             Text(sign)
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(fg.opacity(0.7))
                 .frame(width: 14, alignment: .center)
+                .accessibilityLabel({
+                    switch row.kind {
+                    case .insert:  return "Added line"
+                    case .delete:  return "Removed line"
+                    case .context: return ""
+                    }
+                }())
+                .accessibilityHidden(row.kind == .context)
             Text(row.text.isEmpty ? " " : row.text)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(fg)
