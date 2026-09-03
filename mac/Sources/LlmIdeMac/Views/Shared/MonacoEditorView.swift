@@ -27,3 +27,100 @@ enum MonacoEditorMessageHandler {
         }
     }
 }
+
+/// The owning view `MonacoHost`'s own doc comment anticipated: computes
+/// `content`/`decorations`/`theme`/`revealRequest`/`readOnly` from its own
+/// state and passes them straight into a declarative `MonacoHost(...)` — no
+/// coordinator plumbing, the same way a caller already uses
+/// `SelfSizingMarkdownView(markdown:isDark:onHeight:)`.
+///
+/// Content flows two ways but never fights itself: Swift sets `content` on
+/// `MonacoHost` only when it actually changes (new file, or an external
+/// revert); every keystroke instead arrives as a `.contentChanged` message,
+/// which updates `$content` directly. The updated value then round-trips
+/// back into `MonacoHost(content: content, ...)` on the next render, but
+/// `MonacoHost.Coordinator.applyPendingChanges` only calls `setContent` when
+/// its own `lastContent` differs from the incoming value (`MonacoHost.swift`,
+/// `applyPendingChanges`) — since the round-tripped value already equals
+/// what `Coordinator` just recorded as `lastContent`, the diff is a no-op.
+/// The bridge only ever pushes a full `setContent` for a genuine external
+/// change, never as an echo of what Monaco itself just reported.
+///
+/// Per design §8: if Monaco doesn't signal `.ready` within 2 seconds
+/// (WebView init failure, missing bundled assets), this view falls back to
+/// the existing plain `TextEditor` — the pre-P1 implementation becomes the
+/// safety net rather than being deleted.
+struct MonacoEditorView: View {
+    @Binding var content: String
+    var language: String = "plaintext"
+    var decorations: [Int: GitGutter.Mark] = [:]
+    var revealRequest: MonacoRevealRequest? = nil
+    var readOnly: Bool = false
+    /// Fired when Monaco's Cmd+S command posts `.requestSave` — the caller
+    /// owns actually saving (disk I/O, dirty-state bookkeeping), matching
+    /// how `EditableTextDetailView.save()` already works.
+    var onRequestSave: (() -> Void)? = nil
+
+    @EnvironmentObject private var theme: ThemeStore
+    @State private var loadFailed = false
+    @State private var readyTimeoutTask: Task<Void, Never>?
+
+    var body: some View {
+        Group {
+            if loadFailed {
+                fallbackEditor
+            } else {
+                MonacoHost(
+                    content: content,
+                    language: language,
+                    decorations: decorations,
+                    theme: theme.current,
+                    revealRequest: revealRequest,
+                    readOnly: readOnly,
+                    onReady: handleReady,
+                    onMessage: handleMessage
+                )
+                .onAppear(perform: startReadyTimeout)
+                .onDisappear { readyTimeoutTask?.cancel() }
+            }
+        }
+    }
+
+    /// The pre-P1 implementation, preserved verbatim as the fallback
+    /// `MonacoHost`'s own doc comment (design §8) calls for. `readOnly`
+    /// still applies here — a failed-to-load preview must not become
+    /// silently editable.
+    private var fallbackEditor: some View {
+        TextEditor(text: $content)
+            .font(.system(size: 13, design: .monospaced))
+            .textEditorStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color(nsColor: .textBackgroundColor))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .disabled(readOnly)
+    }
+
+    private func startReadyTimeout() {
+        readyTimeoutTask?.cancel()
+        readyTimeoutTask = Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            loadFailed = true
+        }
+    }
+
+    private func handleReady() {
+        readyTimeoutTask?.cancel()
+    }
+
+    private func handleMessage(_ message: MonacoOutboundMessage) {
+        switch MonacoEditorMessageHandler.effect(for: message) {
+        case .updateContent(let text):
+            content = text
+        case .requestSave:
+            onRequestSave?()
+        case .none:
+            break
+        }
+    }
+}
