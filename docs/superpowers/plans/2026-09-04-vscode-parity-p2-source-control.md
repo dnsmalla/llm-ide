@@ -92,10 +92,11 @@ final class RepoManagerStdinTests: XCTestCase {
         let manager = RepoManager()
         let content = "llm-ide stdin test\n"
         let out = try await manager.runGit(["hash-object", "--stdin"], at: repo, stdin: Data(content.utf8))
-        // `echo -n "llm-ide stdin test\n" | git hash-object --stdin` — pinned
-        // independently via `printf '%s' "llm-ide stdin test\n" | git hash-object --stdin`
-        // outside this test, not recomputed by the test itself.
-        XCTAssertEqual(out.trimmingCharacters(in: .whitespacesAndNewlines), "9f3d288799fa0ad91f4dc63019c40aa476d67ca2")
+        // Pinned by actually running `printf 'llm-ide stdin test\n' | git
+        // hash-object --stdin` on this machine while writing this plan — a
+        // real, verified value, not recomputed by the test itself (which
+        // would make the assertion tautological).
+        XCTAssertEqual(out.trimmingCharacters(in: .whitespacesAndNewlines), "fadce32a3e866a06b57624e5622334cf13b6f13a")
     }
 
     /// A larger payload (bigger than one pipe buffer, ~64KB) must not
