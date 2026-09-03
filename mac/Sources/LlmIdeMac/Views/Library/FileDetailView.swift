@@ -514,10 +514,18 @@ struct CodeWebView: View {
 
         let classAttr = hljsLanguage.isEmpty ? "" : " class=\"language-\(hljsLanguage)\""
 
-        // Serialize the change map into a JS object literal: { lineNo: "g-add"|"g-mod" }.
+        // Serialize the change map into a JS object literal: { lineNo: "g-add"|"g-mod"|"g-del" }.
         let markEntries = changedLines
             .sorted { $0.key < $1.key }
-            .map { "\($0.key):\"\($0.value == .added ? "g-add" : "g-mod")\"" }
+            .map { entry -> String in
+                let cls: String
+                switch entry.value {
+                case .added:    cls = "g-add"
+                case .modified: cls = "g-mod"
+                case .deleted:  cls = "g-del"
+                }
+                return "\(entry.key):\"\(cls)\""
+            }
             .joined(separator: ",")
         let marksLiteral = "{\(markEntries)}"
 
@@ -588,6 +596,7 @@ struct CodeWebView: View {
           .ln { border-left: 3px solid transparent; }
           .ln.g-add { border-left-color: #2ea043; }
           .ln.g-mod { border-left-color: #2f81f7; }
+          .ln.g-del { border-left-color: #f85149; }
           /* hljs adds .hljs to <code>; reset its own background so the
              page background shows through cleanly. */
           .code-col code, .code-col code.hljs { background: transparent !important; padding: 0; }

@@ -635,11 +635,6 @@ struct SourceControlView: View {
         }
     }
     private func color(_ s: FileChange.Status) -> Color {
-        switch s {
-        case .added, .untracked: return .green
-        case .deleted: return .red
-        case .conflicted: return .orange
-        default: return theme.current.accent2
-        }
+        theme.current.color(for: s)
     }
 }

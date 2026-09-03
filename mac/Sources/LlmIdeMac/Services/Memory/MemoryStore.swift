@@ -241,16 +241,39 @@ public struct MemoryStore: Sendable {
         _ = try Self.runGit(["-C", repo.path, "checkout", "--"] + paths, at: repo)
     }
 
+    /// Drains stdout and stderr CONCURRENTLY, before `waitUntilExit()`. A
+    /// sequential stdout-then-stderr reader deadlocks if git writes more than
+    /// one pipe buffer (~64KB) to stderr — a large-repo `git diff` doing
+    /// binary/rename detection is exactly the pathological case. Mirrors
+    /// `RepoManager.git`'s dual-pipe drain (`RepoManager.swift:440-458`) —
+    /// same fix, smaller surface, so this stays its own small `Process` call
+    /// rather than a `RepoManager` migration (see this plan's Global
+    /// Constraints: `MemoryStore` must stay usable off the main actor).
     private static func runGit(_ args: [String], at repo: URL) throws -> String {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         p.arguments = args
         p.currentDirectoryURL = repo
-        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+        let stdout = Pipe(); let stderr = Pipe()
+        p.standardOutput = stdout; p.standardError = stderr
+
+        var outData = Data()
+        let readGroup = DispatchGroup()
+        readGroup.enter()
+        DispatchQueue.global(qos: .utility).async {
+            outData = stdout.fileHandleForReading.readDataToEndOfFile()
+            readGroup.leave()
+        }
+        readGroup.enter()
+        DispatchQueue.global(qos: .utility).async {
+            _ = stderr.fileHandleForReading.readDataToEndOfFile()
+            readGroup.leave()
+        }
+
         try p.run()
-        let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        return String(data: data, encoding: .utf8) ?? ""
+        readGroup.wait()
+        return String(data: outData, encoding: .utf8) ?? ""
     }
 
     // MARK: - Q&A writes (Phase C)
