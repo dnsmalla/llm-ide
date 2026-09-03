@@ -1,5 +1,21 @@
 import Foundation
 
+/// One row of `git status --porcelain=v1`.
+///
+/// **`Hashable` and `id` deliberately disagree, and it matters which you
+/// reach for.** `Equatable`/`Hashable` are SYNTHESIZED, so they cover every
+/// stored property — `path`, `status`, `staged` and `renamedFrom` — while
+/// `id` is a computed `staged + path` only. So:
+///
+/// - `Set<FileChange>` membership, `==`, and `firstIndex(of:)`
+///   (`SourceControlView`'s multi-selection and arrow-key navigation) match
+///   on the FULL row: a file whose status changed under a refresh is a
+///   different element, which is what makes stale members prunable.
+/// - `ForEach`/`Identifiable` matches on `id`, so a row keeps its identity —
+///   and its animation — across a status change at the same path and side.
+///
+/// Compare rows by `id` (or by `path`/`staged`) when you mean "the same file
+/// row"; compare by `==` when you mean "the same file row in the same state".
 struct FileChange: Identifiable, Hashable {
     enum Status: String { case added, modified, deleted, renamed, untracked, conflicted }
     var path: String          // repo-relative; for renames, the new path

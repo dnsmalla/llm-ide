@@ -941,15 +941,26 @@ struct SourceControlView: View {
 
     /// Move the diff-pane selection one row up (-1) or down (+1). Clamps at
     /// both ends rather than wrapping, matching Finder/Xcode list behavior.
+    ///
+    /// "Nothing selected" and "selected but not in this list" are handled
+    /// SEPARATELY. Collapsing them sent the selection to row 0 on any arrow
+    /// press inside the re-resolution window — `scm.state.files` has been
+    /// replaced but `.onChange(of:)` has not yet mapped `selected` onto the
+    /// new snapshot — which is a jump the user did not ask for, on a list
+    /// that refreshes itself every 3 seconds.
     private func moveSelection(_ delta: Int) {
         let files = filesInDisplayOrder
         guard !files.isEmpty else { return }
-        guard let current = selected, let idx = files.firstIndex(of: current) else {
+        guard let current = selected else {
             // Nothing selected yet: either arrow key lands on the first row.
             selected = files[0]
             selectedFiles = [files[0]]
             return
         }
+        // Stale selection: `.onChange(of: scm.state.files)` is about to
+        // re-resolve it (or clear it). Do nothing for this keystroke rather
+        // than yanking the selection to the top of the list.
+        guard let idx = files.firstIndex(of: current) else { return }
         let file = files[min(max(idx + delta, 0), files.count - 1)]
         selected = file
         selectedFiles = [file]
@@ -977,6 +988,16 @@ struct SourceControlView: View {
     /// Discard stays SINGLE-file: `confirmDiscard` presents a dialog naming
     /// one file, and this task does not extend it. A "Discard (3 Files)"
     /// label over a one-file dialog would misdescribe a destructive action.
+    ///
+    /// **The menu always targets the RIGHT-CLICKED row, which is not
+    /// necessarily the highlighted one.** Right-clicking outside the
+    /// selection leaves the highlight where it was, so the menu can look
+    /// like it acts on the highlighted row; the item labels ("Stage",
+    /// "Stage 3 Files") are what say which. Adopting the row on right-click
+    /// would need a pre-presentation hook `.contextMenu` does not offer —
+    /// mutating `@State` from a `@ViewBuilder` is illegal — so this is
+    /// documented rather than fixed. Do NOT reach for an
+    /// `NSViewRepresentable` right-click monitor to close the gap.
     @ViewBuilder
     private func contextMenuItems(for file: FileChange) -> some View {
         let selection = selectedFiles.contains(file) ? Array(selectedFiles) : [file]
@@ -1005,14 +1026,23 @@ struct SourceControlView: View {
         }
     }
 
+    /// A row's file label: a rename shows where the file CAME FROM as well as
+    /// where it is now; every other status is just the path. Shared by the
+    /// row's `Text` and its tooltip so the two cannot drift apart.
+    private func rowLabel(_ file: FileChange) -> String {
+        file.renamedFrom.map { "\($0) → \(file.displayPath)" } ?? file.displayPath
+    }
+
     private func fileRow(_ file: FileChange, _ root: URL) -> some View {
         HStack(spacing: Spacing.xs) {
             Text(badge(file.status)).font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(color(file.status)).frame(width: 14)
-            // A rename shows where the file CAME FROM as well as where it
-            // is now; every other status has nothing to prepend.
-            Text(file.renamedFrom.map { "\($0) → \(file.displayPath)" } ?? file.displayPath)
+            // Middle-truncated in a 300pt column, so the tooltip carries the
+            // whole thing — a rename prints two paths in the space one used
+            // to take and is the likeliest row to lose its middle.
+            Text(rowLabel(file))
                 .font(Typography.caption).lineLimit(1).truncationMode(.middle)
+                .help(rowLabel(file))
             Spacer()
             if file.staged {
                 Button { Task { await scm.unstage(root: root, path: file.path) } } label: {

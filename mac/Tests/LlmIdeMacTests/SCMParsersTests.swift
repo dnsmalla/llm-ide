@@ -82,6 +82,37 @@ final class SCMParsersTests: XCTestCase {
                                    renamedFrom: "設計.txt")])
     }
 
+    /// `" -> "` is a legal substring of a FILENAME, and git emits the
+    /// separator only for R and C. Searching for it ungated split ordinary
+    /// lines apart: ` M "arrow -> weird.txt"` (verbatim git output — the
+    /// spaces are why git quotes it) parsed to the path `weird.txt"`, which
+    /// exists nowhere, so the row rendered wrong and `git add`/`git restore`
+    /// against it failed. Untracked and conflicted lines were hit too.
+    func testArrowInFileNameIsNotSplitOnNonRenameLines() {
+        XCTAssertEqual(StatusParser.parse(porcelain: " M \"arrow -> weird.txt\""),
+                       [FileChange(path: "arrow -> weird.txt", status: .modified, staged: false)])
+        XCTAssertEqual(StatusParser.parse(porcelain: "M  \"arrow -> weird.txt\""),
+                       [FileChange(path: "arrow -> weird.txt", status: .modified, staged: true)])
+        XCTAssertEqual(StatusParser.parse(porcelain: "?? \"new -> thing.txt\""),
+                       [FileChange(path: "new -> thing.txt", status: .untracked, staged: false)])
+        XCTAssertEqual(StatusParser.parse(porcelain: "UU \"a -> b.txt\""),
+                       [FileChange(path: "a -> b.txt", status: .conflicted, staged: false)])
+    }
+
+    /// The gate must not cost a real rename INTO such a name: the first
+    /// `" -> "` there IS the separator.
+    func testRenameIntoAnArrowNamedFileStillSplits() {
+        let changes = StatusParser.parse(porcelain: "R  src.txt -> \"arrow -> weird.txt\"")
+        XCTAssertEqual(changes, [FileChange(path: "arrow -> weird.txt", status: .renamed,
+                                            staged: true, renamedFrom: "src.txt")])
+    }
+
+    /// Copy detection (`status.renames=copies`) emits the same
+    /// "old -> new" shape under status code C, so C splits too.
+    func testCopyStatusAlsoSplitsOnTheArrow() {
+        XCTAssertEqual(StatusParser.parse(porcelain: "C  src.txt -> copy.txt").first?.path, "copy.txt")
+    }
+
     /// "RM" = renamed in the index, modified in the worktree. Only the
     /// staged row describes the rename; the unstaged row is an ordinary
     /// modification of the NEW path and must not claim `renamedFrom`.

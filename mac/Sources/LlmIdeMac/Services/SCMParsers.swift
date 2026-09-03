@@ -12,15 +12,24 @@ enum StatusParser {
             let chars = Array(line)
             let x = chars[0], y = chars[1]
             var pathPart = String(chars[3...]).trimmingCharacters(in: .whitespaces)
-            // Rename: "old -> new". Keep the new path as `pathPart` and, no
-            // longer discarding the old one, feed `FileChange.renamedFrom`
+            // Rename/copy: "old -> new". Keep the new path as `pathPart` and,
+            // no longer discarding the old one, feed `FileChange.renamedFrom`
             // below so the changes list can show "old → new".
             //
+            // GATED ON THE STATUS CODE, because " -> " is a legal substring of
+            // a filename and git emits the separator only for R and C. An
+            // ungated search split ordinary lines apart:
+            // ` M "arrow -> weird.txt"` (verbatim git output — the spaces are
+            // why it's quoted) yielded the path `weird.txt"`, which exists
+            // nowhere, so the row rendered wrong AND `git add`/`git restore`
+            // against it failed. Untracked and conflicted lines were hit too.
+            //
             // Each side is quoted INDEPENDENTLY by git (`R  norm.txt ->
-            // "plain new.txt"` is real output), so both go through
-            // `unquote` separately rather than unquoting the joined string.
+            // "plain new.txt"` is real output), so both go through `unquote`
+            // separately rather than unquoting the joined string.
             var oldPathPart: String?
-            if let r = pathPart.range(of: " -> ") {
+            if x == "R" || x == "C" || y == "R" || y == "C",
+               let r = pathPart.range(of: " -> ") {
                 oldPathPart = unquote(String(pathPart[..<r.lowerBound]))
                 pathPart = String(pathPart[r.upperBound...])
             }
