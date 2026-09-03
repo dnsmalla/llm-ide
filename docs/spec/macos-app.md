@@ -208,7 +208,7 @@ Supervises the local Node `server.mjs` process (`@MainActor @Observable`, lines 
 - `start(nodePath:workingDirectory:)` (line 156) — checks if port 3456 is in use; if so, probes `/health` within 2 s. If healthy, adopts the external server; if not, kills the listener and spawns a fresh process. If the port is free, spawns immediately.
 - `spawn(...)` (line 244) — calls `Process.run()`, stays in `.starting` until `/health` responds, then calls `markRunning(...)` (line 361) which flips to `.running`
 - Auto-restart: up to 3 attempts with backoffs of 1 s, 5 s, 30 s (`restartBackoffsSec`, line 47); skipped on user-initiated stop (`userInitiatedStop` flag)
-- `probeHealthDetail()` (line 517) — 2 s ephemeral URLSession GET to `http://127.0.0.1:3456/health`; also checks `apiVersion` against `minimumServerApiVersion = 18` (line 505)
+- `probeHealthDetail()` (line 517) — 2 s ephemeral URLSession GET to `http://127.0.0.1:3456/health`; also checks `apiVersion` against `minimumServerApiVersion = 43` (line 565)
 - `stop()` (line 425) — SIGTERMs the spawned process; for adopted externals, uses `lsof -ti :<port>` to find and kill the listener
 
 #### `LiveSessionMirror` (`Services/LiveSessionMirror.swift`)

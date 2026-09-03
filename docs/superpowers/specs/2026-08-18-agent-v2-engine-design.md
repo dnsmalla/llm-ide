@@ -41,7 +41,9 @@ Node server (pure HTTP, unchanged pipeline: CORS → JWT → rate-limit)
         └─ sessions     agent_sessions table (migration 0029) + per-user CLAUDE_CONFIG_DIR
 ```
 
-Toggle is **Mac-local** (`UserDefaults`), not server state: the Mac picks the endpoint; the phone inherits via the shared engine. When provider ≠ anthropic the Mac auto-falls back to legacy `/code-assist` with a hint.
+Toggle is **Mac-local** (`UserDefaults`), not server state: the Mac picks the endpoint; the phone inherits via the shared engine. When the turn's provider is one the engine cannot run, the Mac auto-falls back to legacy `/code-assist` with a hint — and a chat *created* under such a provider is stamped legacy outright (no hint, full provider menu), see D3.
+
+**Anthropic-compatible providers (2026-09).** The Agent SDK speaks the Anthropic Messages API only, so a non-Claude model reaches the engine solely through a provider that exposes an Anthropic-format endpoint — Z.AI GLM (`https://api.z.ai/api/anthropic`), DeepSeek (`…/anthropic`, no MCP), Ollama (`:11434`). Such a provider is a Custom Provider carrying `anthropicBaseURL`; `baseURL` stays the OpenAI-form endpoint the legacy loop uses. The set of runnable providers is `AgentV2Selection.agentCapableProviders` (Anthropic ∪ enabled custom providers with `anthropicBaseURL`) on the Mac and `resolveAgentEngineAuth` on the server: a gateway turn sends `body.provider = custom:<uuid>`, the server composes `ANTHROPIC_BASE_URL` = that door plus the provider's vault key (`ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_API_KEY`, the CLI's documented LLM-gateway contract) into the SDK subprocess env, and meters the turn under the custom id. OpenAI and Gemini expose no Anthropic door and stay on the classic engine.
 
 ## 4. Wire protocol — `POST /agent/v2/stream`
 
@@ -90,14 +92,14 @@ Rules:
 ## 7. Engine construction (server, `llm_agent/sdk/`)
 
 Per-request `query()` options:
-- `model` from the picker (anthropic ids only); default from config
+- `model` from the picker, passed verbatim (anthropic ids; on a gateway turn the custom provider's own ids, e.g. `glm-4.7`); default from config
 - `includePartialMessages: true`; `settingSources: []` (operator-config isolation, spike-proven)
 - `cwd` = `agentContext.workspaceRoot`; `additionalDirectories` = the same readable-roots set the legacy engine gates (`buildReadableRoots({userId, workspaceRoot})`)
 - `permissionMode` per D4; `planModeInstructions` carries the assist_plan persona for plan/assist_plan
 - `allowedTools`: read-only set — `Read, Glob, Grep, WebSearch, WebFetch, mcp__llmide__*` *(judgment call ② includes web tools)*
 - `mcpServers: {llmide: buildServer(userId)}` — `kb_search` first (spike-proven), graph/issues next
 - `systemPrompt: {type:"preset", preset:"claude_code", append: languageDirective + persona + selected skills' SKILL.md bodies}` — skills via existing `readSkillInstructions` (≤ 5, same trust rules as legacy)
-- Auth ladder: vault `claude.apiKey` → `ANTHROPIC_API_KEY` env → operator ambient login (`allowAmbientAuth`)
+- Auth ladder (first-party): vault `claude.apiKey` → `ANTHROPIC_API_KEY` env → operator ambient login (`allowAmbientAuth`). Gateway turn (`provider = custom:<uuid>` with `anthropicBaseURL`): the provider's own vault key + `ANTHROPIC_BASE_URL`, no ambient rung; any other provider is refused before spawn (`resolveAgentEngineAuth`)
 - `maxTurns: 40`; `maxBudgetUsd` from the user's model-limits config when set; every `result` writes into the existing usage ledger (per-model caps keep working)
 - Attachments remain fenced prompt blocks (explicit user context) alongside engine-side `Read` within readable roots
 
@@ -106,8 +108,8 @@ Legacy concepts that do not exist in v2 turns and are **not emulated**: `pending
 ## 8. Mac integration
 
 - `AgentV2Transport` implements the existing `ChatTransport` protocol: `delta` → streaming append; tool events → `toolSteps` (existing SF Symbol icons); `result` → turn finish + metadata (cost/model); `approval_request` → engine approval-card state; `mode_set` → ModeBadge.
-- Engine selection: `useV2 = toggle && provider ∈ anthropic`; otherwise legacy. Stale-server guard: if `/agent/v2/stream` is absent from the server's endpoint list, the toggle surfaces "server update needed" instead of failing turns.
-- Model picker filters to anthropic models when v2 is on. Sessions UI unchanged.
+- Engine selection: `useV2 = toggle && provider ∈ agentCapableProviders && chat stamped v2`; otherwise legacy. New chats are stamped v2 only when their provider is in that set. Stale-server guard: if `/agent/v2/stream` is absent from the server's endpoint list, the toggle surfaces "server update needed" instead of failing turns.
+- Provider picker narrows to agent-capable providers (Claude + custom providers with `anthropicBaseURL`) when v2 is on. Sessions UI unchanged. **Known consequence:** switching a v2 chat between ambient-auth Claude (operator `~/.claude`, no `CLAUDE_CONFIG_DIR`) and a custom provider (keyed → per-user engine home) changes where the SDK transcript lives, so the resume misses → `SESSION_UNRESUMABLE` → the client's fresh-session retry (`freshSessionNote`) — the conversation's engine-side memory restarts on every such switch. Accepted for now (documented in the Settings hint); keying `agent_sessions` per provider would remove it.
 - Phone: `explore_chat` drives the shared engine unchanged (auto-continue/autoChain already suppressed for external turns).
 
 ## 9. Testing
