@@ -56,8 +56,8 @@ fileprivate func installCrashHandlers() {
 // FeatureService conformances — the methods already exist on each type;
 // these declarations let feature modules hold them behind one protocol.
 // GraphAutoUpdater's conformance lives in Graph/Services/GraphModule.swift.
+// AutoCodeUpdateService's conformance lives in AutoTask/Services/AutoTaskModule.swift.
 extension LiveSessionMirror: FeatureService {}
-extension AutoCodeUpdateService: FeatureService {}
 extension AutoCaptureService: FeatureService {}
 extension MobileControlManager: FeatureService {}
 
@@ -72,19 +72,9 @@ public struct LlmIdeMacApp: App {
     @StateObject private var templateStore: DocTemplateStore
     @StateObject private var session: SessionStore
     @StateObject private var config: AppConfig
-    // NOTE: no inline default — init() builds the single instance shared with
-    // AutoCodeUpdateService and MobileControlManager; a default here would be a
-    // second, dead instance.
-    @StateObject private var autoTaskSettings: AutoTaskSettings
     @StateObject private var capture: CaptionOrchestrator
     @StateObject private var deepLink: DeepLinkRouter
     @StateObject private var liveMirror: LiveSessionMirror
-    @StateObject private var autoCodeUpdate: AutoCodeUpdateService
-    /// Auto Task prompt templates for the open project (`templates/auto_task/`).
-    @StateObject private var autoTaskTemplates: AutoTaskTemplateStore
-    /// The open project's `.claude/skills/` — what an Auto Task can run under.
-    @StateObject private var autoTaskSkills = AutoTaskSkillCatalog()
-    @StateObject private var logStore: TaskLogStore
     @StateObject private var updateService = UpdateService()
     @StateObject private var projectStore: ProjectStore
     @StateObject private var sourceLinkStore = SourceLinkStore()
@@ -135,12 +125,7 @@ public struct LlmIdeMacApp: App {
         let router = DeepLinkRouter()
         let mirror = LiveSessionMirror(api: client)
         let appSupportBase = AppIdentity.applicationSupportRoot()
-        let registryURL = appSupportBase.appendingPathComponent("processed-actions.json")
-        let registry = ProcessedActionsRegistry(storeURL: registryURL)
-        let runHistoryURL = appSupportBase.appendingPathComponent("auto-task-runs.json")
-        let runHistory = AutoTaskRunHistory(storeURL: runHistoryURL)
         let projectStoreStateDir = appSupportBase
-        let autoTaskSettingsInstance = AutoTaskSettings()
         let projectStoreInstance = ProjectStore(
             stateDirectory: projectStoreStateDir,
             defaults: cfg.defaultProjectSettings())
@@ -152,38 +137,6 @@ public struct LlmIdeMacApp: App {
         // /kb/project/:id/export on close without threading the client
         // through every call site.
         projectStoreInstance._apiClient = client
-        let taskLogStore = TaskLogStore()
-        // `backend: nil` ⇒ auto-resolve from the active project's `linkedRepo`,
-        // which supports BOTH GitLab and GitHub (set by syncLinkedRepoFromConfig).
-        // Passing a GitLabClient here used to set `backendOverride` to a GitLab
-        // backend, which made resolveBackendAndProject() short-circuit into
-        // resolveWithBackend() — a path that ONLY checks GitLab saved projects.
-        // GitHub repos were silently ignored → "No linked repo". Leave the
-        // override for tests only.
-        let autoCode = AutoCodeUpdateService(
-            config: cfg,
-            autoTaskSettings: autoTaskSettingsInstance,
-            backend: nil,
-            registry: registry,
-            runHistory: runHistory,
-            projectStore: projectStoreInstance,
-            api: client,
-            logStore: taskLogStore)
-
-        // The registry's `bootstrap()` (the disk-read path) is invoked
-        // from the AppShell's first `.task` tick — see `autoCode.start()`
-        // which performs it lazily before any registry query.  Errors are
-        // surfaced after bootstrap inside AutoCodeUpdateService.
-        registry.onSaveError = { [weak autoCode] error in
-            Task { @MainActor in
-                autoCode?.setError("Action history failed to save: \(error.localizedDescription)")
-            }
-        }
-        runHistory.onSaveError = { [weak autoCode] error in
-            Task { @MainActor in
-                autoCode?.setError("Run history failed to save: \(error.localizedDescription)")
-            }
-        }
 
         self._config = StateObject(wrappedValue: cfg)
         self._templateStore = StateObject(wrappedValue: DocTemplateStore())
@@ -192,27 +145,10 @@ public struct LlmIdeMacApp: App {
         self._theme = StateObject(wrappedValue: themeStore)
         self._deepLink = StateObject(wrappedValue: router)
         self._liveMirror = StateObject(wrappedValue: mirror)
-        self._autoCodeUpdate = StateObject(wrappedValue: autoCode)
-        // The runner resolves a task's selected template at run time, and the
-        // store repoints task configs when a template is renamed or deleted —
-        // otherwise a rename would silently drop every task back to its own
-        // prompt.
-        let autoTaskTemplateStore = AutoTaskTemplateStore()
-        autoTaskTemplateStore.onTemplateIdChanged = { [weak autoCode] oldId, newId in
-            autoCode?.taskConfigs.retargetTemplate(from: oldId, to: newId)
-        }
-        autoCode.autoTaskTemplates = autoTaskTemplateStore
-        self._autoTaskTemplates = StateObject(wrappedValue: autoTaskTemplateStore)
-        self._logStore = StateObject(wrappedValue: taskLogStore)
         self._projectStore = StateObject(wrappedValue: projectStoreInstance)
         let activity = ActivityStore(api: client)
         activity.start()
         self._activityStore = State(wrappedValue: activity)
-        // Wire activity store weak refs on app-level services so they can
-        // report events without a global singleton. Mirrors weak var config
-        // on RegressionRunner.
-        autoCode.activity = activity
-        self._autoTaskSettings = StateObject(wrappedValue: autoTaskSettingsInstance)
         self.api = client
         self.autoCapture = AutoCaptureService(capture: orchestrator, config: cfg)
         // Hand the API client to the mobile control manager so inbound
@@ -220,28 +156,12 @@ public struct LlmIdeMacApp: App {
         // Done last so all stored properties (incl. autoCapture) are set
         // before `self.mobileControl` is read.
         mobileControl.api = client
-        // Wire the Auto Task + Loop feature bridges so the phone can query
-        // scheduler state (`auto_task_list`), toggle master / per-task
-        // enables (`auto_task_toggle`), and control the active project's
-        // Loop (`loop_*`). Both locals are constructed above and share the
-        // same @StateObject instances the UI observes — mutating through
-        // them keeps Settings, the Menu bar, and the scheduler in sync.
-        // TEMP(Phase2c-Task2): bridge construction moves into
-        // FeatureCatalog.bootAutoTask in the next task.
-        mobileControl.autoTaskBridge = MobileAutoTaskBridge(
-            manager: mobileControl, autoCode: autoCode,
-            settings: autoTaskSettingsInstance, logStore: taskLogStore)
-        mobileControl.loopBridge = MobileLoopBridge(
-            manager: mobileControl, autoCode: autoCode)
         mobileControl.config = cfg
         mobileControl.projectStore = projectStoreInstance
         mobileControl.backendManager = backend
-        mobileControl.installMobilePushObservers()
 
         // Register one module per feature. The registry starts nothing here;
         // the launch `.task` below calls refresh() once shells are mounted.
-        // Named `featureRegistry` (not `registry`) — that name is already
-        // taken above by the on-disk ProcessedActionsRegistry.
         let featureRegistry = FeatureRegistry.shared
         // Set BEFORE any module is registered: `compiledFeatures` has a
         // `didSet` that calls `refresh()`, and with `modules` still empty
@@ -251,10 +171,23 @@ public struct LlmIdeMacApp: App {
         // window exists — breaking the "registry starts nothing here"
         // contract the comment above documents.
         featureRegistry.compiledFeatures = FeatureCatalog.compiledFeatures
-        featureRegistry.register(module: AutoTaskModule(
-            scheduler: autoCode,
+        // Builds the entire Auto Task / Loop stack (scheduler, settings,
+        // templates, skills, log store, on-disk histories) and registers
+        // AutoTaskModule — see FeatureCatalog for construction order and
+        // every wiring line this used to do inline here.
+        FeatureCatalog.bootAutoTask(
+            config: cfg,
+            projectStore: projectStoreInstance,
+            api: client,
+            activity: activity,
             capture: self.autoCapture,
-            schedulerEnabled: { autoTaskSettingsInstance.enabled }))
+            mobileControl: mobileControl,
+            registry: featureRegistry,
+            appSupportDir: appSupportBase)
+        // Must run AFTER bootAutoTask() — it installs push observers on the
+        // Auto Task / Loop mobile bridges bootAutoTask just constructed
+        // (previously this ran right after the inline bridge construction).
+        mobileControl.installMobilePushObservers()
         FeatureCatalog.bootGraph(
             projectStore: projectStoreInstance,
             config: cfg,
@@ -288,25 +221,22 @@ public struct LlmIdeMacApp: App {
         // user closes it via Cmd-W.
         Window(L.App.name, id: "main") {
             // Graph environment objects (GraphAutoUpdater/GraphSessionStore)
-            // are installed by FeatureCatalog, not injected directly here —
-            // identity (no-op) when the feature is compiled out. Order among
-            // different-type environmentObject calls doesn't affect which
-            // object a descendant view resolves, so appending the graph pair
-            // last is equivalent to their old inline position.
-            FeatureCatalog.installGraphEnvironment(AnyView(
+            // and the Auto Task / Loop objects (settings/scheduler/templates/
+            // skills/log store) are installed by FeatureCatalog, not injected
+            // directly here — identity (no-op) when the respective feature is
+            // compiled out. Order among different-type environmentObject
+            // calls doesn't affect which object a descendant view resolves,
+            // so appending both pairs/groups last is equivalent to their old
+            // inline position.
+            FeatureCatalog.installGraphEnvironment(FeatureCatalog.installAutoTaskEnvironment(AnyView(
                 ContentView(api: api)
                     .environmentObject(theme)
                     .environmentObject(templateStore)
                     .environmentObject(session)
                     .environmentObject(config)
-                    .environmentObject(autoTaskSettings)
                     .environmentObject(capture)
                     .environmentObject(deepLink)
                     .environmentObject(liveMirror)
-                    .environmentObject(autoCodeUpdate)
-                    .environmentObject(autoTaskTemplates)
-                    .environmentObject(autoTaskSkills)
-                    .environmentObject(logStore)
                     .environmentObject(updateService)
                     .environmentObject(projectStore)
                     .environmentObject(sourceLinkStore)
@@ -314,7 +244,7 @@ public struct LlmIdeMacApp: App {
                     .environment(backend)
                     .environment(mobileControl)
                     .environment(activityStore)
-            ))
+            )))
                 // 1000 gives the 3-pane Review layout breathing room
                 // (sidebar ~240 + code ~380 + assistant ~280 = 900,
                 // plus toolbar + dividers + comfort).  Users can still

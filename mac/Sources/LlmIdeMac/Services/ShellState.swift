@@ -141,7 +141,7 @@ extension ShellState.Section {
     var backingFeature: AppFeature? {
         switch self {
         case .codeGraph: return .codeGraph3D
-        case .autoCode: return .autoTasks
+        case .autoCode, .loopEngine: return .autoTasks
         case .issues, .gantt: return .ganttIssues
         case .docGen: return .docGen
         case .explorer, .sourceControl, .search: return .fileExplorer

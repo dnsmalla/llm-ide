@@ -43,7 +43,9 @@ final class ShellStateHomeTests: XCTestCase {
         // Not hidden and its feature IS compiled: chosen section wins.
         XCTAssertEqual(
             ShellState.Section.resolveHome("gantt", hidden: [], compiled: withoutExplorer), .gantt)
-        // A section with no backingFeature at all is never affected.
+        // .loopEngine's backingFeature is .autoTasks, which is still compiled
+        // in `withoutExplorer` (only .fileExplorer was dropped) — so it's
+        // unaffected here, not because it lacks a backingFeature.
         XCTAssertEqual(
             ShellState.Section.resolveHome("loopEngine", hidden: [], compiled: withoutExplorer), .loopEngine)
     }
@@ -56,5 +58,13 @@ final class ShellStateHomeTests: XCTestCase {
     func testBackingFeatureMappingIsPinned() {
         let mapped = Set(ShellState.Section.allCases.compactMap(\.backingFeature))
         XCTAssertEqual(mapped, [.codeGraph3D, .autoTasks, .ganttIssues, .docGen, .fileExplorer])
+    }
+
+    /// `.loopEngine` gained `.autoTasks` as its backingFeature (Phase2c Task 2)
+    /// — Loop is itself an Auto Task under the hood (`loopEngineering`), so
+    /// the Phase-1 runtime toggle for Auto Tasks now also hides the Loop
+    /// section, whereas it was previously ungated.
+    func testLoopEngineBacksOntoAutoTasks() {
+        XCTAssertEqual(ShellState.Section.loopEngine.backingFeature, .autoTasks)
     }
 }

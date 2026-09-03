@@ -1,5 +1,11 @@
 import Foundation
 
+// The class body already has start()/stop(); this just lets AutoTaskModule
+// (and FeatureCatalog.bootAutoTask) hold it behind the shared FeatureService
+// protocol. Moved from LlmIdeMacApp.swift (Phase2c Task 2) — that file no
+// longer names this type at all.
+extension AutoCodeUpdateService: FeatureService {}
+
 /// Feature module for `.autoTasks`: activity capture plus the cron
 /// scheduler. Capture runs whenever the feature is on; the scheduler arms
 /// only when the user's master toggle is on — later master-toggle flips are

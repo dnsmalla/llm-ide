@@ -26,6 +26,9 @@ enum FeatureCatalog {
         #if !FEATURE_TERMINAL
         set.remove(.terminal)
         #endif
+        #if !FEATURE_AUTOTASK
+        set.remove(.autoTasks)
+        #endif
         return set
     }
 
@@ -202,6 +205,172 @@ enum FeatureCatalog {
             .environment(terminalSessions))
         #else
         return AnyView(EmptyView())
+        #endif
+    }
+
+    // MARK: - Auto Tasks / Loop
+
+    #if FEATURE_AUTOTASK
+    private static var autoTaskSettings: AutoTaskSettings?
+    private static var autoCodeService: AutoCodeUpdateService?
+    private static var autoTaskTemplates: AutoTaskTemplateStore?
+    private static var autoTaskSkills: AutoTaskSkillCatalog?
+    private static var autoTaskLogStore: TaskLogStore?
+    #endif
+
+    /// Build + wire the ENTIRE Auto Task / Loop stack (scheduler + settings +
+    /// templates + skills + log store + on-disk run/action history, the two
+    /// mobile bridges) and register `AutoTaskModule`. No-op when the feature
+    /// is compiled out. Mirrors what LlmIdeMacApp.init used to do inline —
+    /// construction order and every wiring line preserved, including the
+    /// mobile-bridge construction that was a TEMP block directly in the app
+    /// between Phase2c Task 1 and Task 2.
+    static func bootAutoTask(config: AppConfig,
+                             projectStore: ProjectStore,
+                             api: LlmIdeAPIClient,
+                             activity: ActivityStore,
+                             capture: AutoCaptureService,
+                             mobileControl: MobileControlManager,
+                             registry: FeatureRegistry,
+                             appSupportDir: URL) {
+        #if FEATURE_AUTOTASK
+        let registryURL = appSupportDir.appendingPathComponent("processed-actions.json")
+        let processedActions = ProcessedActionsRegistry(storeURL: registryURL)
+        let runHistoryURL = appSupportDir.appendingPathComponent("auto-task-runs.json")
+        let runHistory = AutoTaskRunHistory(storeURL: runHistoryURL)
+        let settings = AutoTaskSettings()
+        let taskLog = TaskLogStore()
+        // `backend: nil` ⇒ auto-resolve from the active project's `linkedRepo`,
+        // which supports BOTH GitLab and GitHub (set by syncLinkedRepoFromConfig).
+        // Passing a GitLabClient here used to set `backendOverride` to a GitLab
+        // backend, which made resolveBackendAndProject() short-circuit into
+        // resolveWithBackend() — a path that ONLY checks GitLab saved projects.
+        // GitHub repos were silently ignored → "No linked repo". Leave the
+        // override for tests only.
+        let service = AutoCodeUpdateService(
+            config: config,
+            autoTaskSettings: settings,
+            backend: nil,
+            registry: processedActions,
+            runHistory: runHistory,
+            projectStore: projectStore,
+            api: api,
+            logStore: taskLog)
+
+        // The registry's `bootstrap()` (the disk-read path) is invoked
+        // from the AppShell's first `.task` tick — see `autoCode.start()`
+        // which performs it lazily before any registry query.  Errors are
+        // surfaced after bootstrap inside AutoCodeUpdateService.
+        processedActions.onSaveError = { [weak service] error in
+            Task { @MainActor in
+                service?.setError("Action history failed to save: \(error.localizedDescription)")
+            }
+        }
+        runHistory.onSaveError = { [weak service] error in
+            Task { @MainActor in
+                service?.setError("Run history failed to save: \(error.localizedDescription)")
+            }
+        }
+
+        // The runner resolves a task's selected template at run time, and the
+        // store repoints task configs when a template is renamed or deleted —
+        // otherwise a rename would silently drop every task back to its own
+        // prompt.
+        let templates = AutoTaskTemplateStore()
+        templates.onTemplateIdChanged = { [weak service] oldId, newId in
+            service?.taskConfigs.retargetTemplate(from: oldId, to: newId)
+        }
+        service.autoTaskTemplates = templates
+        let skills = AutoTaskSkillCatalog()
+
+        // Wire activity store weak refs on app-level services so they can
+        // report events without a global singleton. Mirrors weak var config
+        // on RegressionRunner.
+        service.activity = activity
+
+        autoTaskSettings = settings
+        autoCodeService = service
+        autoTaskTemplates = templates
+        autoTaskSkills = skills
+        autoTaskLogStore = taskLog
+
+        // Wire the Auto Task + Loop feature bridges so the phone can query
+        // scheduler state (`auto_task_list`), toggle master / per-task
+        // enables (`auto_task_toggle`), and control the active project's
+        // Loop (`loop_*`). Both share the same instances the UI observes —
+        // mutating through them keeps Settings, the Menu bar, and the
+        // scheduler in sync.
+        mobileControl.autoTaskBridge = MobileAutoTaskBridge(
+            manager: mobileControl, autoCode: service,
+            settings: settings, logStore: taskLog)
+        mobileControl.loopBridge = MobileLoopBridge(
+            manager: mobileControl, autoCode: service)
+
+        registry.register(module: AutoTaskModule(
+            scheduler: service,
+            capture: capture,
+            schedulerEnabled: { settings.enabled }))
+        #endif
+    }
+
+    /// Inject the five Auto Task / Loop environment objects (identity when
+    /// compiled out).
+    static func installAutoTaskEnvironment(_ view: AnyView) -> AnyView {
+        #if FEATURE_AUTOTASK
+        guard let settings = autoTaskSettings, let service = autoCodeService,
+              let templates = autoTaskTemplates, let skills = autoTaskSkills,
+              let logStore = autoTaskLogStore else {
+            // bootAutoTask() wires these statics before any view can call
+            // this — reaching here means the environment was installed
+            // before boot, not that Auto Tasks is absent.
+            assertionFailure("installAutoTaskEnvironment called before bootAutoTask")
+            return view
+        }
+        return AnyView(view
+            .environmentObject(settings)
+            .environmentObject(service)
+            .environmentObject(templates)
+            .environmentObject(skills)
+            .environmentObject(logStore))
+        #else
+        return view
+        #endif
+    }
+
+    static func autoTasksPane(api: LlmIdeAPIClient) -> AnyView {
+        #if FEATURE_AUTOTASK
+        return AnyView(AutoCodeView(api: api))
+        #else
+        return AnyView(EmptyView())
+        #endif
+    }
+
+    static func loopEnginePane(api: LlmIdeAPIClient) -> AnyView {
+        #if FEATURE_AUTOTASK
+        return AnyView(LoopEngineHomeView(api: api))
+        #else
+        return AnyView(EmptyView())
+        #endif
+    }
+
+    /// Rebind Auto Task templates/skills/per-task configs to the active
+    /// project. Called from AppShell's `reloadDocTemplatesForActiveProject`
+    /// on project open/close/switch (the three auto-task lines of that
+    /// function). No-op when compiled out.
+    static func rebindAutoTaskProject(root: URL?, projectId: String?) {
+        #if FEATURE_AUTOTASK
+        autoTaskTemplates?.bindProject(root: root)
+        autoTaskSkills?.reload(projectRoot: root, force: true)
+        autoCodeService?.taskConfigs.bindProject(id: projectId)
+        #endif
+    }
+
+    /// Point the Auto Task scheduler at the active project's AppEnvironment
+    /// (nil on close/rebuild). Called from AppShell's initEnv()/rebuildEnv().
+    /// No-op when compiled out.
+    static func setAutoCodeEnvironment(_ environment: AppEnvironment?) {
+        #if FEATURE_AUTOTASK
+        autoCodeService?.environment = environment
         #endif
     }
 }

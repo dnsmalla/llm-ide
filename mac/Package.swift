@@ -141,6 +141,11 @@ let package = Package(
                 // builtin engine in and then failed at link time instead of
                 // degrading cleanly.
                 .define("GRAPHKIT_BUILTIN"),   // UNPLUG: remove
+                // TEMP(Phase2c-Task3): always on until Auto Tasks joins
+                // `includedFeatures`/`AppFeature.buildTimeExcludable` and gets
+                // its own env-driven selection like the other excludable
+                // features above; replaced by that then.
+                .define("FEATURE_AUTOTASK"),
             ] + featureDefines,
             linkerSettings: [
                 .linkedLibrary("sqlite3")

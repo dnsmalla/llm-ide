@@ -12,9 +12,6 @@ struct AppShell: View {
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var templateStore: DocTemplateStore
-    @EnvironmentObject var autoTaskTemplates: AutoTaskTemplateStore
-    @EnvironmentObject var autoTaskSkills: AutoTaskSkillCatalog
-    @EnvironmentObject var autoCodeUpdate: AutoCodeUpdateService
     @State private var shell = ShellState()
     @State private var itemStore = LibraryItemStore()
     @State private var crashReportStore = CrashReportStore()
@@ -638,9 +635,11 @@ struct AppShell: View {
             }
         case .autoCode:
             if registry.isEnabled(.autoTasks) {
-                AutoCodeView(api: api)
+                FeatureCatalog.autoTasksPane(api: api)
             } else {
-                DisabledFeaturePlaceholderView(featureName: "Auto Tasks")
+                DisabledFeaturePlaceholderView(
+                    featureName: "Auto Tasks",
+                    isCompiled: registry.compiledFeatures.contains(.autoTasks))
             }
         case .codeGraph:
             if registry.isEnabled(.codeGraph3D) {
@@ -650,7 +649,14 @@ struct AppShell: View {
                     featureName: "3D Code Graph",
                     isCompiled: registry.compiledFeatures.contains(.codeGraph3D))
             }
-        case .loopEngine: LoopEngineHomeView(api: api)
+        case .loopEngine:
+            if registry.isEnabled(.autoTasks) {
+                FeatureCatalog.loopEnginePane(api: api)
+            } else {
+                DisabledFeaturePlaceholderView(
+                    featureName: "Loop Engine",
+                    isCompiled: registry.compiledFeatures.contains(.autoTasks))
+            }
         case .settings:  SettingsView(api: api)
         }
     }
@@ -687,7 +693,7 @@ struct AppShell: View {
             let indexRoot = projectStore.activeProject
                 .map { URL(fileURLWithPath: $0.localPath) }
             self.appEnv = try AppEnvironment(indexRootURL: indexRoot)
-            autoCodeUpdate.environment = self.appEnv
+            FeatureCatalog.setAutoCodeEnvironment(self.appEnv)
             // Populate the NOTES and MEETINGS sections from the bound project's
             // source/ and llm-doc/ folders. Run OFF the main thread
             // (rescanAsync) so a large project's directory walk doesn't freeze
@@ -704,7 +710,7 @@ struct AppShell: View {
         // its fd; the new env opens a fresh sqlite handle against the
         // new path on init.
         appEnv?.indexer.stopWatching()
-        autoCodeUpdate.environment = nil
+        FeatureCatalog.setAutoCodeEnvironment(nil)
         appEnv = nil
         envInitError = nil
         initEnv()
@@ -888,12 +894,11 @@ struct AppShell: View {
         // Auto Task prompts live in the same project (`templates/auto_task/`)
         // and follow the same open/close/switch moments, so they rebind here
         // rather than needing their own observer of the same notification.
-        autoTaskTemplates.bindProject(root: root)
-        autoTaskSkills.reload(projectRoot: root, force: true)
         // Per-task settings are project-scoped for the same reason: a config's
         // templateId names a file in THIS project's templates/auto_task/, and
-        // every project is seeded with the same starter slugs.
-        autoCodeUpdate.taskConfigs.bindProject(id: projectStore.activeProject?.bundle.id)
+        // every project is seeded with the same starter slugs. No-op when
+        // Auto Tasks is compiled out.
+        FeatureCatalog.rebindAutoTaskProject(root: root, projectId: projectStore.activeProject?.bundle.id)
     }
 
     /// Ensures every path in `config.localCodeFolders` is referenced by the
