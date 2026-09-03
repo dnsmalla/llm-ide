@@ -1,7 +1,10 @@
 /// Shared source of truth for mapping a file extension to a highlight.js
-/// language id. Used by `DiffWebView` (unified diff) — `CodeWebView`, the
-/// other former consumer, was retired in P1 (VS Code parity plan) in favor
-/// of `MonacoEditorView`.
+/// language id. Currently has NO consumer: `CodeWebView` was retired in P1
+/// (VS Code parity plan) in favor of `MonacoEditorView`, and `DiffWebView`
+/// (`UnifiedDiffView`) in P2 in favor of `MonacoDiffView`. Kept because
+/// `HljsWebView` + the vendored highlight.js are still used by
+/// `MarkdownRenderer`, whose fenced code blocks are the natural next
+/// consumer; delete both together if that never happens.
 ///
 /// Hint only — `hljs.highlightAuto()` handles unknown extensions reasonably;
 /// an empty id means "no language class".

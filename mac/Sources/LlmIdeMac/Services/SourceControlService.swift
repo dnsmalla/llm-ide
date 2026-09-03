@@ -459,6 +459,13 @@ final class SourceControlService {
     /// `private(set)`, so the view can't clear it directly.
     func clearOpError() { state.opError = nil }
 
+    /// Setter half of `clearOpError`, for ops the VIEW drives rather than
+    /// this service: per-hunk staging goes through `GitTruthStore`'s
+    /// `git apply --cached` (this service only knows whole-file
+    /// `add`/`restore`), and a rejected patch has to reach the same sticky
+    /// banner every service-owned failure uses instead of vanishing.
+    func setOpError(_ message: String) { state.opError = message }
+
     // MARK: - Allow-list gating
 
     /// Which provider owns the repo at `root` (matched by clone localPath), or

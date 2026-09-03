@@ -11,8 +11,19 @@ struct SourceControlView: View {
     @EnvironmentObject var projectStore: ProjectStore
     @Environment(\.controlActiveState) private var controlActiveState
     @State private var scm = SourceControlService()
+    /// Per-hunk staging runs through `GitTruthStore` (`git apply --cached`),
+    /// not through `SourceControlService` — the service only knows whole-file
+    /// `add`/`restore`.
+    @State private var gitTruthStore = GitTruthStore()
     @State private var selected: FileChange?
     @State private var hunks: [DiffHunk] = []
+    /// Full old/new text behind the right pane's `MonacoDiffView`. Monaco's
+    /// diff editor computes its own word-level diff from full text and never
+    /// consumes `DiffHunk`, so these are loaded ALONGSIDE `hunks` (which is
+    /// what the `HunkStagingList` under it renders and stages), never derived
+    /// from them.
+    @State private var diffOriginal: String = ""
+    @State private var diffModified: String = ""
     @State private var message: String = ""
     @State private var confirmDiscard: FileChange?
     @State private var branches: [String] = []
@@ -38,14 +49,95 @@ struct SourceControlView: View {
 
     private enum PaneMode: String, CaseIterable { case changes = "Changes", history = "History" }
 
-    /// Load `hunks` from an async producer, cancelling any prior load first
-    /// and discarding the result if this load was superseded.
-    private func loadHunks(_ produce: @escaping () async -> [DiffHunk]) {
+    /// The right pane's whole payload: the parsed hunks the
+    /// `HunkStagingList` renders plus the full old/new text `MonacoDiffView`
+    /// renders. Loaded as ONE unit under ONE cancellable task on purpose —
+    /// both halves describe the same selection, so a superseded load has to
+    /// drop both together or the two panes end up showing different files.
+    private typealias DiffPayload = (hunks: [DiffHunk], original: String, modified: String)
+
+    /// Load the right pane from an async producer, cancelling any prior load
+    /// first and discarding the result if this load was superseded.
+    private func loadDiff(_ produce: @escaping () async -> DiffPayload) {
         diffTask?.cancel()
         diffTask = Task {
-            let h = await produce()
+            let payload = await produce()
             if Task.isCancelled { return }
-            hunks = h
+            hunks = payload.hunks
+            diffOriginal = payload.original
+            diffModified = payload.modified
+        }
+    }
+
+    /// Right pane for one working-tree file (Changes mode).
+    private func loadFileDiff(root: URL, file: FileChange) {
+        loadDiff {
+            let parsed = await scm.diff(root: root, file: file)
+            let content = await scm.diffContent(root: root, file: file)
+            return (parsed, content.original, content.modified)
+        }
+    }
+
+    /// Drop whatever the right pane is showing, cancelling any in-flight load
+    /// so it can't repopulate the pane a moment later.
+    private func clearDiff() {
+        diffTask?.cancel()
+        hunks = []
+        diffOriginal = ""
+        diffModified = ""
+    }
+
+    // MARK: - Per-hunk staging
+
+    /// Whether the right pane offers per-hunk **Stage** buttons for `file`.
+    ///
+    /// Untracked files are deliberately excluded even though they are
+    /// unstaged: `SourceControlService.diff` synthesizes a single
+    /// `@@ -0,0 +1,N @@` hunk covering the file's entire content, so "stage
+    /// this hunk" would just be "stage this file" — which the file row's own
+    /// `+` button already does — and the patch `GitTruthStore` synthesizes
+    /// carries an `a/<path>` header for a blob that does not exist in the
+    /// index, which `git apply --cached` correctly rejects.
+    private func canStageHunks(_ file: FileChange) -> Bool {
+        !file.staged && file.status != .untracked
+    }
+
+    /// Stage exactly one hunk, then refresh.
+    ///
+    /// NOTE: `git apply --cached` legitimately REJECTS some hunks, and the
+    /// user sees git's own wording ("patch does not apply") on the sticky
+    /// banner. Two ordinary causes:
+    ///   1. **The file has no trailing newline.** `UnifiedDiffParser` drops
+    ///      the `\ No newline at end of file` marker, so the patch
+    ///      `GitTruthStore.stagePatch` synthesizes cannot reproduce it and
+    ///      git refuses to apply it. Stage the whole file (the file row's
+    ///      `+` button) instead.
+    ///   2. The file changed on disk after the hunk was parsed.
+    /// A rejected `git apply --cached` is a no-op on the index, so there is
+    /// no partial state to unwind — an error message is the whole remedy.
+    /// This must NEVER be a `try?`: swallowing it means the user clicks
+    /// Stage and nothing happens, silently.
+    private func stageHunk(root: URL, file: FileChange, hunk: DiffHunk) {
+        scm.clearOpError()
+        Task {
+            do { try await gitTruthStore.stagePatch(root: root, path: file.path, hunk: hunk) }
+            catch {
+                scm.setOpError("Couldn't stage that hunk in \(file.displayPath): \(error.localizedDescription)")
+            }
+            await scm.refresh(root: root)
+        }
+    }
+
+    /// Unstage exactly one already-staged hunk, then refresh. Same failure
+    /// modes and same no-`try?` rule as `stageHunk`.
+    private func unstageHunk(root: URL, file: FileChange, hunk: DiffHunk) {
+        scm.clearOpError()
+        Task {
+            do { try await gitTruthStore.unstagePatch(root: root, path: file.path, hunk: hunk) }
+            catch {
+                scm.setOpError("Couldn't unstage that hunk in \(file.displayPath): \(error.localizedDescription)")
+            }
+            await scm.refresh(root: root)
         }
     }
 
@@ -56,11 +148,11 @@ struct SourceControlView: View {
     /// when no working tree exists.
     private var root: URL? { WorkspaceRoot.gitWorkingTree(config: config, projectStore: projectStore) }
 
-    /// highlight.js language hint for the right diff pane: "diff" in History
-    /// mode (multi-file commit diff), else the selected file's extension.
+    /// File extension driving the right pane's Monaco language id — the
+    /// selected file's own extension. (History mode has no Monaco pane yet;
+    /// it still renders a whole commit's diff as a hunk list.)
     private var diffLanguage: String {
-        if mode == .history { return "diff" }
-        return (selected?.path as NSString?)?.pathExtension ?? ""
+        (selected?.path as NSString?)?.pathExtension ?? ""
     }
 
     /// Whether the active repo has saved credentials (enables pull/push/sync).
@@ -111,12 +203,64 @@ struct SourceControlView: View {
             HStack(spacing: 0) {
                 leftPane(root).frame(width: 300)
                 Divider()
-                UnifiedDiffView(hunks: hunks, fileExtension: diffLanguage)
+                detailPane(root)
                     .frame(minWidth: 360, maxWidth: .infinity)
             }
         } else {
             emptyState
         }
+    }
+
+    /// Right pane: Monaco's real diff editor on top (the "view" half) over a
+    /// native `HunkStagingList` (the "act" half). Exactly ONE file's diff —
+    /// and so exactly one Monaco instance — is ever mounted; nothing is
+    /// mounted at all until something is selected, so an empty pane never
+    /// pays for a WebView.
+    @ViewBuilder private func detailPane(_ root: URL) -> some View {
+        switch mode {
+        case .changes:
+            if let selected {
+                changesDetail(root, selected)
+            } else {
+                detailPlaceholder("Select a file to see its changes")
+            }
+        case .history:
+            if selectedCommit != nil {
+                historyDetail
+            } else {
+                detailPlaceholder("Select a commit to see its changes")
+            }
+        }
+    }
+
+    /// Working-tree diff plus per-hunk staging. `HunkStagingList` is
+    /// read-only whenever both callbacks are nil, so a staged row offers only
+    /// Unstage and an untracked row offers neither (see `canStageHunks`).
+    private func changesDetail(_ root: URL, _ file: FileChange) -> some View {
+        VSplitView {
+            MonacoDiffView(original: diffOriginal, modified: diffModified,
+                           language: MonacoLanguageMap.id(for: diffLanguage))
+            HunkStagingList(
+                hunks: hunks,
+                onStage: canStageHunks(file) ? { hunk in stageHunk(root: root, file: file, hunk: hunk) } : nil,
+                onUnstage: file.staged ? { hunk in unstageHunk(root: root, file: file, hunk: hunk) } : nil
+            )
+        }
+    }
+
+    /// The selected commit's whole diff, as the same native hunk list
+    /// Changes mode uses — read-only (both callbacks nil), since committed
+    /// history isn't stageable. Task 9 replaces this with per-file browsing
+    /// plus its own `MonacoDiffView`.
+    private var historyDetail: some View {
+        HunkStagingList(hunks: hunks)
+    }
+
+    private func detailPlaceholder(_ message: String) -> some View {
+        Text(message)
+            .font(Typography.caption)
+            .foregroundStyle(theme.current.textMuted)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     var body: some View {
@@ -146,6 +290,7 @@ struct SourceControlView: View {
             // Clear any selection carried over from a previous repo.
             selectedCommit = nil
             selected = nil
+            clearDiff()
             await scm.refresh(root: root)
         }
         // Fix 1: refresh when window becomes key (picks up external changes)
@@ -168,32 +313,32 @@ struct SourceControlView: View {
             // In History mode the right pane shows a commit diff; don't let a
             // status refresh clobber it.
             guard mode == .changes else { return }
-            guard let sel = selected else { hunks = []; return }
+            guard let sel = selected else { clearDiff(); return }
             guard let root else { return }
             // Prefer the unstaged copy; fall back to staged (e.g. freshly staged file)
             let resolved = files.first(where: { $0.path == sel.path && !$0.staged })
                          ?? files.first(where: { $0.path == sel.path && $0.staged })
             if let resolved {
                 selected = resolved
-                loadHunks { await scm.diff(root: root, file: resolved) }
+                loadFileDiff(root: root, file: resolved)
             } else {
                 selected = nil
-                hunks = []
+                clearDiff()
             }
         }
         .onChange(of: selected) { _, sel in
-            guard let sel, let root else { hunks = []; return }
-            loadHunks { await scm.diff(root: root, file: sel) }
+            guard let sel, let root else { clearDiff(); return }
+            loadFileDiff(root: root, file: sel)
         }
         // History: load the commit list when entering History mode and clear
         // the file selection so file vs commit diffs never clobber each other.
         .onChange(of: mode) { _, new in
+            clearDiff()
             if new == .history {
                 selected = nil
                 if let root { Task { commits = await scm.log(root: root) } }
             } else {
                 selectedCommit = nil
-                hunks = []
             }
         }
         // Keep the history list fresh on every refresh while in History mode,
@@ -206,10 +351,15 @@ struct SourceControlView: View {
                 Task { tags = await scm.tags(root: root) }
             }
         }
-        // Load the selected commit's diff into the shared right pane.
+        // Load the selected commit's diff into the shared right pane. No
+        // Monaco content here — History mode still renders a whole commit
+        // as one hunk list until Task 9 makes it per-file.
         .onChange(of: selectedCommit) { _, c in
-            guard let c, let root else { hunks = []; return }
-            loadHunks { await scm.commitDiff(root: root, sha: c.sha) }
+            guard let c, let root else { clearDiff(); return }
+            loadDiff {
+                let parsed = await scm.commitDiff(root: root, sha: c.sha)
+                return (parsed, "", "")
+            }
         }
     }
 
