@@ -11,6 +11,14 @@ struct CustomProvider: Identifiable, Codable, Equatable {
     var isOpenAICompatible: Bool  // true = use OpenAI request/response format
     var description: String       // "Zhipu GLM 4", "Local Ollama", etc.
     var isEnabled: Bool = true
+    /// Optional Anthropic-format endpoint — the provider's second "door"
+    /// (Z.AI GLM: `https://api.z.ai/api/anthropic`; DeepSeek:
+    /// `https://api.deepseek.com/anthropic`; Ollama: `http://localhost:11434`).
+    /// The Claude Agent engine speaks the Anthropic Messages API only, so this
+    /// is what lets a non-Claude model run on it; `baseURL` stays the
+    /// OpenAI-form endpoint the classic engine dispatches to. Optional so
+    /// providers persisted before the field existed decode unchanged (nil).
+    var anthropicBaseURL: String? = nil
 
     init(
         name: String,
@@ -18,7 +26,8 @@ struct CustomProvider: Identifiable, Codable, Equatable {
         apiKey: String,
         models: [AIModel] = [],
         isOpenAICompatible: Bool = true,
-        description: String = ""
+        description: String = "",
+        anthropicBaseURL: String? = nil
     ) {
         self.name = name
         self.baseURL = baseURL
@@ -26,6 +35,18 @@ struct CustomProvider: Identifiable, Codable, Equatable {
         self.models = models
         self.isOpenAICompatible = isOpenAICompatible
         self.description = description
+        self.anthropicBaseURL = anthropicBaseURL
+    }
+
+    /// The `custom:<uuid>` id this provider travels under on the wire
+    /// (`ChatTransportInput.makeProvider`, the server registry key).
+    var wireId: String { "custom:\(id)" }
+
+    /// True when the provider declares an Anthropic-compatible endpoint, i.e.
+    /// the Agent engine can run it. Whitespace-only counts as absent — the
+    /// server normalizes the same way, so the two can't disagree.
+    var canRunAgentEngine: Bool {
+        !(anthropicBaseURL ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 

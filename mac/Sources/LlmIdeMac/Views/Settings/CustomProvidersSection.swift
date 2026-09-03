@@ -13,7 +13,7 @@ struct CustomProvidersSection: View {
                 Text("Add named LLM providers (GLM, Ollama, OpenRouter, etc.) for the Code Assistant composer.")
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
-                SettingsHint("For Anthropic, OpenAI, Gemini, DeepSeek, and a single shared custom endpoint, use Model Providers above. This section is for multiple named providers with their own model lists — e.g. Z.AI GLM: base URL https://api.z.ai/api/paas/v4 with models glm-5.2 / glm-5-turbo / glm-4.7.")
+                SettingsHint("For Anthropic, OpenAI, Gemini, DeepSeek, and a single shared custom endpoint, use Model Providers above. This section is for multiple named providers with their own model lists — e.g. Z.AI GLM: base URL https://api.z.ai/api/paas/v4 with models glm-5.2 / glm-5-turbo / glm-4.7. To run a provider on the Claude Agent engine, also give it its Anthropic-compatible URL (Z.AI: https://api.z.ai/api/anthropic).")
 
                 if providers.isEmpty {
                     VStack(alignment: .center, spacing: Spacing.sm) {
@@ -161,6 +161,7 @@ private struct AddProviderSheet: View {
 
     @State private var name = ""
     @State private var baseURL = ""
+    @State private var anthropicBaseURL = ""
     @State private var description = ""
     @State private var isOpenAICompatible = true
     @State private var models: [AIModel] = []
@@ -191,6 +192,18 @@ private struct AddProviderSheet: View {
                 VStack(alignment: .leading, spacing: Spacing.md) {
                     LabeledInput(label: "Provider Name", text: $name, placeholder: "GLM, Ollama, etc.")
                     LabeledInput(label: "API Base URL", text: $baseURL, placeholder: "https://api.example.com/v1")
+                    // The provider's Anthropic-format door. The Claude Agent
+                    // engine speaks the Anthropic API only, so this is what
+                    // lets its models run there; leave blank and the provider
+                    // stays on the classic engine (no warning, unchanged).
+                    VStack(alignment: .leading, spacing: 4) {
+                        LabeledInput(label: "Anthropic-compatible URL (optional — enables the Claude Agent engine)",
+                                     text: $anthropicBaseURL, placeholder: "https://api.z.ai/api/anthropic")
+                        Text("Z.AI GLM: https://api.z.ai/api/anthropic · DeepSeek: https://api.deepseek.com/anthropic · Ollama: http://localhost:11434. Uses the same API key.")
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     LabeledInput(label: "Description", text: $description, placeholder: "Zhipu GLM 4 (optional)")
 
                     // The provider's API key, stored in the server vault under
@@ -275,6 +288,7 @@ private struct AddProviderSheet: View {
             if let provider = provider {
                 name = provider.name
                 baseURL = provider.baseURL
+                anthropicBaseURL = provider.anthropicBaseURL ?? ""
                 description = provider.description
                 isOpenAICompatible = provider.isOpenAICompatible
                 models = provider.models
@@ -330,13 +344,15 @@ private struct AddProviderSheet: View {
     private func save() async {
         isSaving = true
         defer { isSaving = false }
+        let trimmedAnthropicURL = anthropicBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         var newProvider = CustomProvider(
             name: name,
             baseURL: baseURL,
             apiKey: "",   // set below from the stable id
             models: models,
             isOpenAICompatible: isOpenAICompatible,
-            description: description
+            description: description,
+            anthropicBaseURL: trimmedAnthropicURL.isEmpty ? nil : trimmedAnthropicURL
         )
         if let provider = provider {
             newProvider.id = provider.id   // keep id on edit

@@ -244,6 +244,18 @@ final class ChatEngine {
                            model: nil, provider: nil, mode: nil)
     }
 
+    /// The provider the NEXT minted chat is created under — the RESOLVED wire
+    /// id (`ChatTransportInput.makeProvider`), consulted exactly once per
+    /// mint by `mintFreshSession` to stamp the chat's engine: the Agent
+    /// engine only when this provider can run it (`AgentV2Selection.
+    /// engineForNewChat`). The panel wires its composer's live selection,
+    /// which is what the chat's first turn will actually send; the default
+    /// reads the Settings default provider so a mint that happens outside
+    /// the panel (registry, phone) still answers truthfully.
+    var resolveNewChatProvider: () -> String? = {
+        ChatTransportInput.makeProvider(selectedProvider: AppConfig.shared.activeCLI)
+    }
+
     /// Called at the very top of every user turn, before any state changes.
     /// Exists so the panel can reset per-turn budgets it still owns (today:
     /// `autoGitOpsThisTurn`, which `autoChainPendingAction` reads and which is

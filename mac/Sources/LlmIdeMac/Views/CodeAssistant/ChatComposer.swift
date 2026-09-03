@@ -106,7 +106,7 @@ extension CodeAssistantPanel {
             Image(systemName: "info.circle")
                 .font(.system(size: 11))
                 .foregroundStyle(theme.current.warning)
-            Text("The Claude Agent engine runs on Anthropic models only — this chat's turns will use the classic engine until you pick Claude.")
+            Text("The Claude Agent engine runs on Anthropic-compatible providers only (Claude, or a custom provider with an Anthropic-compatible URL) — this chat's turns will use the classic engine until you pick one.")
                 .font(.system(size: 11))
                 .foregroundStyle(theme.current.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -463,30 +463,33 @@ extension CodeAssistantPanel {
             ? modelState.customProviders.first(where: { "custom:\($0.id)" == modelState.selectedProvider })
             : nil
 
-        // Spec §8: "Model picker filters to anthropic models when v2 is on."
-        // "On" means `engine.usesAgentV2Engine` — toggle AND transport AND
-        // the LOADED CHAT's own engine marker (D3 clean cut) — not the bare
-        // toggle: a chat stamped legacy at creation stays legacy forever
-        // regardless of the toggle, and may already be using a non-Anthropic
-        // provider, so gating on the toggle alone would wrongly lock a
-        // legacy chat's picker to Anthropic-only. Mirrors the same rule
+        // Spec §8: "Provider picker narrows to agent-capable providers when
+        // v2 is on." "On" means `engine.usesAgentV2Engine` — toggle AND
+        // transport AND the LOADED CHAT's own engine marker (D3 clean cut) —
+        // not the bare toggle: a chat stamped legacy at creation stays legacy
+        // forever regardless of the toggle, and may already be using a
+        // provider the engine cannot run, so gating on the toggle alone would
+        // wrongly lock a legacy chat's picker. Mirrors the same rule
         // `usesAgentV2Engine` already applies to the save-plan affordance
         // (AgentV2ApprovalState.swift), so this can't drift from it.
         //
-        // The Agent v2 engine only runs turns whose resolved provider is
-        // Anthropic (AgentV2Selection.providerIsAnthropic); picking a
-        // different provider mid v2-chat would silently fall back that turn
+        // The Agent v2 engine only runs turns whose resolved provider it can
+        // take (AgentV2Selection.agentCapableProviders: Anthropic, or an
+        // enabled custom provider with an Anthropic-compatible URL); picking
+        // any other provider mid v2-chat would silently fall back that turn
         // to the legacy loop while the v2 SDK session sits untouched, so the
         // NEXT v2 turn resumes with no memory of what happened in between.
         // While this chat is on the v2 engine, don't offer that footgun at
-        // all — custom providers carry no "anthropic" id either, so they're
-        // hidden too. Off, every provider is available again, unchanged from
-        // before this filter existed.
-        let restrictToAnthropic = engine.usesAgentV2Engine
-        let providerChoices = restrictToAnthropic
+        // all: built-ins narrow to Claude, custom providers to the
+        // agent-capable ones. Off, every provider is available again,
+        // unchanged from before this filter existed.
+        let restrictToAgentCapable = engine.usesAgentV2Engine
+        let providerChoices = restrictToAgentCapable
             ? AICliTool.selectable.filter { $0.provider == AgentV2Selection.anthropicProvider }
             : AICliTool.selectable
-        let customProviderChoices = restrictToAnthropic ? [] : modelState.customProviders
+        let customProviderChoices = restrictToAgentCapable
+            ? modelState.customProviders.filter { $0.isEnabled && $0.canRunAgentEngine }
+            : modelState.customProviders
 
         return HStack(spacing: 6) {
             // Provider chip — a menu to switch among the direct-API providers

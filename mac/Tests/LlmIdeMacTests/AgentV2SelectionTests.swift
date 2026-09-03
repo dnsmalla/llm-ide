@@ -507,7 +507,8 @@ struct AgentV2SelectionTests {
         defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
         #expect(AgentV2Selection.toggleEnabled(defaults: defaults) == true)
-        #expect(AgentV2Selection.engineForNewChat(defaults: defaults) == AgentV2Selection.sessionEngineV2)
+        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "anthropic")
+                == AgentV2Selection.sessionEngineV2)
     }
 
     @Test("Explicit opt-out is honored")
@@ -518,20 +519,31 @@ struct AgentV2SelectionTests {
         defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set(false, forKey: AgentV2Selection.toggleKey)
         #expect(AgentV2Selection.toggleEnabled(defaults: defaults) == false)
-        #expect(AgentV2Selection.engineForNewChat(defaults: defaults) == nil)
+        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "anthropic") == nil)
     }
 
-    @Test("engineForNewChat: stamps v2 iff the toggle is on at creation")
+    @Test("engineForNewChat: stamps v2 iff the toggle is on AND the provider can run the engine")
     func engineForNewChatStamp() {
         let suite = "agent-v2-newchat-test"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        #expect(AgentV2Selection.engineForNewChat(defaults: defaults) == AgentV2Selection.sessionEngineV2,
-                "toggle on (the default) mints a v2 chat")
+        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "anthropic")
+                == AgentV2Selection.sessionEngineV2,
+                "toggle on (the default) + Anthropic mints a v2 chat")
+        // The bug this fixes: with the toggle on by default, a chat created
+        // under OpenAI/Gemini was stamped v2, then spent its life on the
+        // classic engine behind a permanent "Anthropic only" hint and a
+        // Claude-locked provider menu. Born legacy, it is simply a classic
+        // chat — no hint, full menu.
+        for provider in ["openai", "google", "deepseek", "custom:abc"] {
+            #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: provider) == nil,
+                    "\(provider): a provider the engine cannot run mints a legacy chat")
+        }
+        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: nil) == nil)
         defaults.set(false, forKey: AgentV2Selection.toggleKey)
-        #expect(AgentV2Selection.engineForNewChat(defaults: defaults) == nil,
+        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "anthropic") == nil,
                 "toggle off explicitly mints a legacy chat")
     }
 
@@ -544,6 +556,9 @@ struct AgentV2SelectionTests {
             defer { UserDefaults.standard.set(prev, forKey: key) }
 
             let engine = ChatEngine(scope: .explorer, transport: ScriptedLegacyTransport())
+            // Pinned: the default resolver reads the Settings default provider
+            // from UserDefaults.standard, which this test must not depend on.
+            engine.resolveNewChatProvider = { "anthropic" }
             engine.mintFreshSession()
             let v2Chat = UUID(uuidString: engine.currentSessionIDString)!
             #expect(ChatSessionStore.load(id: v2Chat)?.engine == AgentV2Selection.sessionEngineV2)
@@ -553,10 +568,20 @@ struct AgentV2SelectionTests {
             // keeps its stamp (the clean cut is per chat, not global state).
             UserDefaults.standard.set(false, forKey: key)
             let engine2 = ChatEngine(scope: .explorer, transport: ScriptedLegacyTransport())
+            engine2.resolveNewChatProvider = { "anthropic" }
             engine2.mintFreshSession()
             let legacyChat = UUID(uuidString: engine2.currentSessionIDString)!
             #expect(ChatSessionStore.load(id: legacyChat)?.engine == nil)
             #expect(ChatSessionStore.load(id: v2Chat)?.engine == AgentV2Selection.sessionEngineV2)
+
+            // Toggle back on, but the chat is born under a provider the
+            // engine cannot run: legacy stamp, honestly.
+            UserDefaults.standard.set(true, forKey: key)
+            let engine3 = ChatEngine(scope: .explorer, transport: ScriptedLegacyTransport())
+            engine3.resolveNewChatProvider = { "openai" }
+            engine3.mintFreshSession()
+            let openAIChat = UUID(uuidString: engine3.currentSessionIDString)!
+            #expect(ChatSessionStore.load(id: openAIChat)?.engine == nil)
         }
     }
 
@@ -772,11 +797,142 @@ struct AgentV2ProviderHintTests {
     // opposites across providers. That equivalence is what stopped drifting.
     @Test("the hint is the complement of useV2 for an eligible chat")
     func complementsUseV2() {
-        for provider in ["anthropic", "openai", "google", "deepseek", "custom:abc"] {
+        let capable: Set<String> = ["anthropic", "custom:glm"]
+        for provider in ["anthropic", "openai", "google", "deepseek", "custom:abc", "custom:glm"] {
             let runsV2 = AgentV2Selection.useV2(toggleOn: true, resolvedProvider: provider,
-                                                sessionEngine: AgentV2Selection.sessionEngineV2)
-            let hinted = AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: provider)
+                                                sessionEngine: AgentV2Selection.sessionEngineV2,
+                                                capableProviders: capable)
+            let hinted = AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: provider,
+                                                             capableProviders: capable)
             #expect(runsV2 != hinted, "\(provider): hint and useV2 must never agree")
         }
+    }
+}
+
+// The Agent SDK speaks the Anthropic Messages API only, so a non-Claude model
+// reaches the Agent engine through a custom provider's Anthropic-compatible
+// endpoint (Z.AI GLM `…/api/anthropic`). "Can this provider run the engine"
+// is therefore a set — Anthropic plus such providers — not an Anthropic check,
+// and every rule (per-turn selection, the composer hint, the new-chat stamp)
+// must read the same set.
+@Suite("AgentV2Selection.agentCapableProviders")
+struct AgentV2CapableProviderTests {
+    static func provider(_ id: String, door: String?, enabled: Bool = true) -> CustomProvider {
+        var provider = CustomProvider(name: id, baseURL: "https://example.test/v1", apiKey: "custom.\(id).apiKey",
+                                      models: [], anthropicBaseURL: door)
+        provider.id = id
+        provider.isEnabled = enabled
+        return provider
+    }
+
+    @Test("Anthropic always; a custom provider only when enabled AND it declares an Anthropic-compatible URL")
+    func setMembership() {
+        let capable = AgentV2Selection.agentCapableProviders(customProviders: [
+            Self.provider("glm", door: "https://api.z.ai/api/anthropic"),
+            Self.provider("glm-off", door: "https://api.z.ai/api/anthropic", enabled: false),
+            Self.provider("plain", door: nil),
+            Self.provider("blank", door: "   "),
+        ])
+        #expect(capable == ["anthropic", "custom:glm"])
+        #expect(AgentV2Selection.agentCapableProviders(customProviders: []) == ["anthropic"])
+    }
+
+    @Test("useV2, the hint, and the new-chat stamp all follow the capable set")
+    func rulesFollowCapableSet() {
+        let capable: Set<String> = ["anthropic", "custom:glm"]
+        let v2 = AgentV2Selection.sessionEngineV2
+        #expect(AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "custom:glm", sessionEngine: v2,
+                                       capableProviders: capable))
+        #expect(!AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "custom:plain", sessionEngine: v2,
+                                        capableProviders: capable))
+        #expect(!AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: "custom:glm",
+                                                     capableProviders: capable))
+        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: "openai",
+                                                    capableProviders: capable))
+        #expect(!AgentV2Selection.providerCanRunAgentEngine(nil, capableProviders: capable))
+
+        let suite = "v2-capable-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "custom:glm",
+                                                  capableProviders: capable) == v2)
+        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "custom:plain",
+                                                  capableProviders: capable) == nil)
+        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "openai",
+                                                  capableProviders: capable) == nil)
+    }
+
+    /// Mutable holder so the composite's per-turn closure can observe a
+    /// Settings change between turns without capturing a `var`.
+    final class CapableBox: @unchecked Sendable {
+        var set: Set<String>
+        init(_ set: Set<String>) { self.set = set }
+    }
+
+    @Test("the composite routes a capable custom provider to v2 (provider on the wire), others to legacy, re-read per turn")
+    @MainActor
+    func compositeRoutesByCapableSet() async throws {
+        let stream = QueuedAgentV2Stream()
+        let legacy = ScriptedLegacyTransport()
+        let box = CapableBox(["anthropic", "custom:glm"])
+        let composite = AgentV2EngineTransport(
+            v2: AgentV2Transport(streamer: stream), legacy: legacy,
+            isV2Enabled: { true },
+            sessionEngineMarker: { AgentV2Selection.sessionEngineV2 },
+            capableProviders: { box.set })
+        func input(_ provider: String) -> ChatTransportInput {
+            ChatTransportInput(message: "m", history: [], attachments: [], skills: [], agentContext: nil,
+                               language: nil, model: nil, provider: provider, mode: nil)
+        }
+        let noop: @MainActor (LlmIdeAPIClient.AgentProgress) -> Void = { _ in }
+
+        // Capable custom provider → the v2 streamer is contacted and the
+        // provider id rides the request body (the server needs it to pick the
+        // gateway). The scripted stream yields nothing, so the turn's outcome
+        // is irrelevant here — only that v2 was the engine.
+        _ = try? await composite.roundTrip(input("custom:glm"), onProgress: noop, onChunk: { _ in }, onApproval: { _ in })
+        #expect(stream.bodies.count == 1)
+        #expect(stream.bodies.first?["provider"] as? String == "custom:glm")
+        #expect(composite.lastTurnRanLegacy == false)
+
+        // Not capable → legacy verbatim; v2 never contacted.
+        let result = try await composite.roundTrip(input("custom:plain"), onProgress: noop, onChunk: { _ in }, onApproval: { _ in })
+        #expect(result.reply == "legacy reply")
+        #expect(composite.lastTurnRanLegacy)
+        #expect(stream.bodies.count == 1)
+
+        // The set is read per turn: revoke the door in Settings and the same
+        // provider's next turn goes legacy.
+        box.set = ["anthropic"]
+        _ = try await composite.roundTrip(input("custom:glm"), onProgress: noop, onChunk: { _ in }, onApproval: { _ in })
+        #expect(composite.lastTurnRanLegacy)
+        #expect(stream.bodies.count == 1)
+    }
+}
+
+@Suite("CustomProvider.anthropicBaseURL")
+struct CustomProviderAgentDoorTests {
+    @Test("providers persisted before the field existed decode with no door")
+    func decodesLegacyJSON() throws {
+        let json = """
+        [{"id":"abc","name":"GLM","baseURL":"https://api.z.ai/api/paas/v4","apiKey":"custom.abc.apiKey",\
+        "models":[],"isOpenAICompatible":true,"description":"","isEnabled":true}]
+        """
+        let decoded = try JSONDecoder().decode([CustomProvider].self, from: Data(json.utf8))
+        #expect(decoded.first?.anthropicBaseURL == nil)
+        #expect(decoded.first?.canRunAgentEngine == false)
+        #expect(decoded.first?.wireId == "custom:abc")
+    }
+
+    @Test("round-trips the door; whitespace-only counts as absent (matches the server's normalization)")
+    func roundTripsDoor() throws {
+        var provider = CustomProvider(name: "GLM", baseURL: "https://example.test/v1", apiKey: "k",
+                                      anthropicBaseURL: "https://api.z.ai/api/anthropic")
+        let back = try JSONDecoder().decode(CustomProvider.self, from: JSONEncoder().encode(provider))
+        #expect(back.anthropicBaseURL == "https://api.z.ai/api/anthropic")
+        #expect(back.canRunAgentEngine)
+        provider.anthropicBaseURL = "  "
+        #expect(!provider.canRunAgentEngine)
     }
 }

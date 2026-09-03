@@ -33,6 +33,37 @@ enum AgentV2Selection {
         resolvedProvider == anthropicProvider
     }
 
+    /// The provider ids the Agent engine can run: first-party Anthropic plus
+    /// every ENABLED custom provider that declares an Anthropic-compatible
+    /// endpoint (`CustomProvider.anthropicBaseURL`). The SDK speaks the
+    /// Anthropic Messages API and nothing else, so this — not "is it
+    /// Anthropic" — is the real capability test; it mirrors the server's
+    /// `resolveAgentEngineAuth`, which refuses anything outside this set
+    /// before the SDK spawns. Pure over the list so tests pin it without
+    /// touching UserDefaults.
+    static func agentCapableProviders(customProviders: [CustomProvider]) -> Set<String> {
+        var capable: Set<String> = [anthropicProvider]
+        for provider in customProviders where provider.isEnabled && provider.canRunAgentEngine {
+            capable.insert(provider.wireId)
+        }
+        return capable
+    }
+
+    /// `agentCapableProviders` over the persisted custom providers — the set
+    /// production callers consult (per turn, per mint, per hint).
+    static func liveAgentCapableProviders() -> Set<String> {
+        agentCapableProviders(customProviders: CustomProvider.loadAll())
+    }
+
+    /// True when `resolvedProvider` (the RESOLVED wire string, as for
+    /// `providerIsAnthropic`) is one the Agent engine can run. Nil — a turn
+    /// that never set a provider — answers false.
+    static func providerCanRunAgentEngine(_ resolvedProvider: String?,
+                                          capableProviders: Set<String> = [anthropicProvider]) -> Bool {
+        guard let resolvedProvider else { return false }
+        return capableProviders.contains(resolvedProvider)
+    }
+
     /// Per-chat engine marker (spec D3 clean cut), stored as
     /// `ChatSession.engine`: a chat stamped with this value at creation runs
     /// on the Agent v2 engine for its lifetime; an unstamped (nil) chat —
@@ -42,13 +73,17 @@ enum AgentV2Selection {
 
     /// The whole selection rule: the Agent engine answers a turn only when
     /// the user opted in (toggle off = global kill switch, v2 chats
-    /// included), the turn's provider is Anthropic, AND the chat itself was
-    /// created as a v2 chat (its engine marker). The marker is what makes
-    /// the clean cut per-chat rather than per-turn: flipping the toggle
-    /// mid-chat can never hand a legacy chat a context-blind fresh SDK
-    /// session, nor replay a v2 chat's history through the legacy loop.
-    static func useV2(toggleOn: Bool, resolvedProvider: String?, sessionEngine: String?) -> Bool {
-        toggleOn && sessionEngine == sessionEngineV2 && providerIsAnthropic(resolvedProvider)
+    /// included), the turn's provider is one the engine can run
+    /// (`capableProviders` — Anthropic, or an Anthropic-compatible custom
+    /// provider), AND the chat itself was created as a v2 chat (its engine
+    /// marker). The marker is what makes the clean cut per-chat rather than
+    /// per-turn: flipping the toggle mid-chat can never hand a legacy chat a
+    /// context-blind fresh SDK session, nor replay a v2 chat's history
+    /// through the legacy loop.
+    static func useV2(toggleOn: Bool, resolvedProvider: String?, sessionEngine: String?,
+                      capableProviders: Set<String> = [anthropicProvider]) -> Bool {
+        toggleOn && sessionEngine == sessionEngineV2
+            && providerCanRunAgentEngine(resolvedProvider, capableProviders: capableProviders)
     }
 
     /// Whether to show the composer's "this chat will use the classic engine"
@@ -60,8 +95,9 @@ enum AgentV2Selection {
     /// never the bare toggle. Gating on the toggle alone made the hint fire in
     /// chats that could never run on the Agent engine — a legacy-stamped chat,
     /// or an out-of-date server — where switching provider fixes nothing.
-    static func providerHintNeeded(usesAgentEngine: Bool, resolvedProvider: String?) -> Bool {
-        usesAgentEngine && !providerIsAnthropic(resolvedProvider)
+    static func providerHintNeeded(usesAgentEngine: Bool, resolvedProvider: String?,
+                                   capableProviders: Set<String> = [anthropicProvider]) -> Bool {
+        usesAgentEngine && !providerCanRunAgentEngine(resolvedProvider, capableProviders: capableProviders)
     }
 
     /// Current toggle value. UNSET defaults to true (the Agent engine is the
@@ -72,11 +108,24 @@ enum AgentV2Selection {
     }
 
     /// Engine marker to stamp on a NEWLY MINTED chat: the Agent v2 engine
-    /// iff the beta toggle is on at the moment of creation, else nil
-    /// (legacy). The one place the toggle decides a chat's engine — after
-    /// this stamp, `useV2` keeps the chat on the engine it was created with.
-    static func engineForNewChat(defaults: UserDefaults = .standard) -> String? {
-        toggleEnabled(defaults: defaults) ? sessionEngineV2 : nil
+    /// iff the beta toggle is on at the moment of creation AND the provider
+    /// the chat is created under can run it, else nil (legacy). The one
+    /// place the toggle decides a chat's engine — after this stamp, `useV2`
+    /// keeps the chat on the engine it was created with.
+    ///
+    /// The provider half is what stops a chat from being born on an engine
+    /// it can never use: with the toggle on by default, a user whose default
+    /// provider is OpenAI/Gemini used to get a v2-stamped chat whose every
+    /// turn silently fell back to the classic engine, under a permanent
+    /// "runs on Anthropic only" hint and a provider menu locked to Claude.
+    /// Stamping legacy instead gives that chat the classic engine honestly —
+    /// no hint, full provider menu — while a Claude/GLM chat stays v2.
+    static func engineForNewChat(defaults: UserDefaults = .standard,
+                                 resolvedProvider: String?,
+                                 capableProviders: Set<String> = [anthropicProvider]) -> String? {
+        toggleEnabled(defaults: defaults)
+            && providerCanRunAgentEngine(resolvedProvider, capableProviders: capableProviders)
+            ? sessionEngineV2 : nil
     }
 
     /// The plan-like modes whose v2 RESULT turns offer the "Save Plan"
@@ -140,9 +189,9 @@ enum ChatTransportFactory {
 ///   phone's live channel on external turns). If the fresh attempt also
 ///   fails, the error propagates and the turn surfaces as failed.
 ///
-/// Legacy routing (toggle off — the global kill switch —, a non-Anthropic
-/// provider, or a chat whose `engine` marker isn't `agentV2`) delegates
-/// verbatim to `legacy`; the v2 streamer is never contacted.
+/// Legacy routing (toggle off — the global kill switch —, a provider the
+/// engine cannot run, or a chat whose `engine` marker isn't `agentV2`)
+/// delegates verbatim to `legacy`; the v2 streamer is never contacted.
 @MainActor
 final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
 
@@ -166,6 +215,11 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
     /// loaded. The default claims legacy (nil) on purpose — a composite
     /// nobody wired stays fail-closed on /code-assist.
     var sessionEngineMarker: () -> String?
+    /// Provider ids the Agent engine can run, read at TURN time (a custom
+    /// provider may gain or lose its Anthropic-compatible URL in Settings
+    /// between turns). Injected like `isV2Enabled`; production reads the
+    /// persisted custom providers.
+    let capableProviders: () -> Set<String>
     /// Fired when a stale-server 404 forced a legacy fallback — the engine
     /// raises its transient notice banner. Wired by `ChatEngine` itself
     /// (init and `setTransport`), so the panel needs no plumbing.
@@ -187,11 +241,13 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
     init(v2: AgentV2Transport,
          legacy: ChatTransport,
          isV2Enabled: @escaping () -> Bool = { AgentV2Selection.toggleEnabled() },
-         sessionEngineMarker: @escaping () -> String? = { nil }) {
+         sessionEngineMarker: @escaping () -> String? = { nil },
+         capableProviders: @escaping () -> Set<String> = { AgentV2Selection.liveAgentCapableProviders() }) {
         self.v2 = v2
         self.legacy = legacy
         self.isV2Enabled = isV2Enabled
         self.sessionEngineMarker = sessionEngineMarker
+        self.capableProviders = capableProviders
     }
 
     /// Whether the round-trip currently in flight (or the most recent one)
@@ -312,7 +368,8 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
     private func selectsV2(_ input: ChatTransportInput) -> Bool {
         AgentV2Selection.useV2(toggleOn: isV2Enabled(),
                                resolvedProvider: input.provider,
-                               sessionEngine: sessionEngineMarker())
+                               sessionEngine: sessionEngineMarker(),
+                               capableProviders: capableProviders())
     }
 
     /// The stale-server shape: `LlmIdeAPIClient.agentV2Stream` throws its

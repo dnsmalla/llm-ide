@@ -249,11 +249,14 @@ extension ChatEngine {
     /// no-sessions-left branch of `deleteSession`.
     func mintFreshSession() {
         // D3 clean cut: the chat's engine is chosen HERE, once, at creation —
-        // v2 iff the beta toggle is on at this moment — and never changes
+        // v2 iff the beta toggle is on at this moment AND the provider the
+        // chat is born under can run the Agent engine — and never changes
         // after. Per-turn selection (`AgentV2EngineTransport.selectsV2`)
         // then requires the marker, so later toggle flips never migrate an
         // existing chat between engines.
-        let fresh = ChatSession(scope: scope, engine: AgentV2Selection.engineForNewChat())
+        let fresh = ChatSession(scope: scope, engine: AgentV2Selection.engineForNewChat(
+            resolvedProvider: resolveNewChatProvider(),
+            capableProviders: AgentV2Selection.liveAgentCapableProviders()))
         ChatSessionStore.save(fresh)
         currentSessionIDString = fresh.id.uuidString
         rememberCurrentPointer()

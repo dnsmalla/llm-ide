@@ -199,6 +199,14 @@ final class ChatEngineRegistry {
         }
         park(current)
         let fresh = makeEngine(scope: scope, api: api)
+        // The mint below decides the new chat's engine stamp from the provider
+        // it is born under, and this engine is minted BEFORE the panel adopts
+        // and wires it — so without this hand-off it would fall back to the
+        // Settings default provider, which `switchProvider(.custom)` never
+        // updates. The displayed engine is already wired to the composer's
+        // live selection; carry that over so "+ New chat" during a running
+        // turn stamps exactly like an idle one.
+        fresh.resolveNewChatProvider = current.resolveNewChatProvider
         fresh.mintFreshSession()
         displayed[scope] = fresh
         sweepBackground()

@@ -196,11 +196,10 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         onChunk: @escaping @MainActor (String) -> Void,
         onApproval: @escaping @MainActor (AgentV2Approval) -> Void
     ) async throws -> ChatTransportResult {
-        // Body mirrors the legacy request's shared fields minus
-        // history/tier/provider: v2 sessions own conversation history
-        // server-side, model routing is server-side, and no v2 caller sets
-        // a tier. Optional fields are omitted rather than nulled — the
-        // route types each one and treats missing exactly like absent.
+        // Body mirrors the legacy request's shared fields minus history and
+        // tier: v2 sessions own conversation history server-side, and no v2
+        // caller sets a tier. Optional fields are omitted rather than nulled
+        // — the route types each one and treats missing exactly like absent.
         var body: [String: Any] = [
             "message": input.message,
             "skills": input.skills,
@@ -208,6 +207,11 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         ]
         if let language = input.language { body["language"] = language }
         if let model = input.model { body["model"] = model }
+        // The resolved provider (`anthropic`, or an Anthropic-compatible
+        // `custom:<uuid>`): the server points the SDK at that provider's
+        // Anthropic-format endpoint and meters the turn under it. Absent
+        // means anthropic on the server, so an older client is unchanged.
+        if let provider = input.provider { body["provider"] = provider }
         if let mode = input.mode { body["mode"] = mode }
         // Only sent when true — an older server ignores the field, and a
         // false is indistinguishable from absent to the route.

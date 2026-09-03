@@ -169,7 +169,8 @@ struct CodeAssistantPanel: View {
     var agentV2ProviderBlocked: Bool {
         AgentV2Selection.providerHintNeeded(
             usesAgentEngine: engine.usesAgentV2Engine,
-            resolvedProvider: ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider))
+            resolvedProvider: ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider),
+            capableProviders: AgentV2Selection.agentCapableProviders(customProviders: modelState.customProviders))
     }
     @StateObject var session = CodeAssistantSession()
     /// Cursor-style "/" (command/skill) + "@" (file) autocomplete for the input.
@@ -401,6 +402,12 @@ struct CodeAssistantPanel: View {
         // the context as part of a fully-formed input, exactly as
         // `codeAssistRoundTrip` built `ctx` inline) — wired for completeness.
         engine.buildContext = { await buildAgentContext() }
+        // The composer's live provider is what a new chat's first turn will
+        // send, so it — not the Settings default, which `switchProvider`
+        // doesn't update for custom providers — decides the engine stamp.
+        engine.resolveNewChatProvider = {
+            ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider)
+        }
         engine.sendAnnouncement = { text in
             NSAccessibility.post(
                 element: NSApp as Any,

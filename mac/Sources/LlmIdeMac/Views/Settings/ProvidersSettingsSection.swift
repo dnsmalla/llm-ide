@@ -49,14 +49,14 @@ struct ProvidersSettingsSection: View {
                 Text("Agent engine (Code Assistant)")
                     .font(Typography.body)
                     .foregroundStyle(theme.current.text)
-                Text("New chats use the Claude Agent engine (Anthropic provider only). Turn off to use the classic engine.")
+                Text("New chats use the Claude Agent engine when their provider can run it: Claude, or a custom provider with an Anthropic-compatible URL (Custom Providers below). Other providers get the classic engine. Turn off to use the classic engine everywhere.")
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .toggleStyle(.switch)
-        SettingsHint("The Agent engine answers AskUserQuestion cards mid-turn and keeps its own server-side session per chat. Other providers and phone-driven background chats keep using the classic engine.")
+        SettingsHint("The Agent engine answers AskUserQuestion cards mid-turn and keeps its own server-side session per chat. It speaks the Anthropic API only: the built-in OpenAI, Gemini, DeepSeek and GLM entries above stay on the classic engine — to run GLM, DeepSeek or Ollama on the Agent engine, register them under Custom Providers with their Anthropic-compatible URL. Switching a running Agent-engine chat between Claude and a custom provider starts a fresh engine session. Phone-driven background chats always use the classic engine.")
     }
 
     private func isActive(_ p: ProviderCatalog.Entry) -> Bool {

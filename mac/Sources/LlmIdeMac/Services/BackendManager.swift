@@ -557,12 +557,15 @@ final class BackendManager {
     /// bumps for anything the chat path consumes, raise this too.
     /// 42 = tasks_progress on the legacy /code-assist stream + the
     /// per-turn chat identity stamp the 409 fix relies on.
+    /// 43 = `provider` on /agent/v2/stream (Anthropic-compatible custom
+    /// providers on the Agent engine). An older server ignores the field
+    /// and would run a GLM turn on the user's Claude credentials.
     ///
     /// The server reports its version via `/health.apiVersion`; a live server
     /// below this floor sets `serverVersionTooOld` and writes an actionable
     /// `lastError` (see `recordServerVersion`), which Settings → Backend,
     /// LoginView and ReconnectView already render.
-    nonisolated static let minimumServerApiVersion = 42
+    nonisolated static let minimumServerApiVersion = 43
 
     struct HealthProbeResult {
         let ok: Bool
