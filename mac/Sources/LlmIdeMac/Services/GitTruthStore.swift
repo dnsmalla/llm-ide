@@ -126,6 +126,50 @@ final class GitTruthStore {
         }
     }
 
+    /// Stage exactly one hunk (not the whole file) via `git apply --cached`,
+    /// piping a minimal synthesized patch to its stdin (`RepoManager`'s new
+    /// stdin support, added alongside this method). `path` is the file's
+    /// repo-relative path — the SAME string `DiffHunk`'s own rows don't
+    /// carry (a `DiffHunk` has no path of its own; it's always scoped to
+    /// one file by whoever parsed it).
+    func stagePatch(root: URL, path: String, hunk: DiffHunk) async throws {
+        let patch = Self.synthesizePatch(path: path, hunk: hunk)
+        _ = try await repo.runGit(["apply", "--cached", "-"], at: root, stdin: Data(patch.utf8))
+    }
+
+    /// Reverse of `stagePatch` — unstages exactly one currently-staged hunk.
+    /// `hunk` must be one parsed from the STAGED diff (`git diff --cached`),
+    /// not the working-tree diff, or `--reverse` will apply against the
+    /// wrong baseline and `git apply` will correctly reject it.
+    func unstagePatch(root: URL, path: String, hunk: DiffHunk) async throws {
+        let patch = Self.synthesizePatch(path: path, hunk: hunk)
+        _ = try await repo.runGit(["apply", "--cached", "--reverse", "-"], at: root, stdin: Data(patch.utf8))
+    }
+
+    /// Builds the minimal patch text `git apply` needs for one hunk of an
+    /// already-tracked file: a `diff --git`/`---`/`+++` header (both sides
+    /// name the same path — this task's use case is always a modification,
+    /// never a whole-file add/delete, which stay on `SourceControlService`'s
+    /// existing whole-file `stage`/`discard`), then the hunk's own `@@`
+    /// header line verbatim, then each row reconstructed with its unified-
+    /// diff prefix character.
+    private static func synthesizePatch(path: String, hunk: DiffHunk) -> String {
+        var lines = [
+            "diff --git a/\(path) b/\(path)",
+            "--- a/\(path)",
+            "+++ b/\(path)",
+            hunk.header,
+        ]
+        for row in hunk.rows {
+            switch row.kind {
+            case .context: lines.append(" " + row.text)
+            case .insert:  lines.append("+" + row.text)
+            case .delete:  lines.append("-" + row.text)
+            }
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
+
     private var watcher: RepoFileWatcher?
 
     /// Start live-refreshing on filesystem changes under `root`. Debounced
