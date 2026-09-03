@@ -1,7 +1,13 @@
 import Foundation
 
-/// Pure path arithmetic for the Explorer tree — no filesystem I/O, no actor
-/// isolation, so every rule here is unit-testable without a real directory.
+/// Path arithmetic for the Explorer tree — no actor isolation, so every rule
+/// here is unit-testable without a real directory.
+///
+/// Every function here is pure string work EXCEPT `canonical(_:)`, which
+/// resolves symlinks and therefore touches the filesystem. That one is
+/// boundary-only; see its own doc comment. Don't restore a blanket "no
+/// filesystem I/O" claim to this header — it was true before `canonical(_:)`
+/// existed, and a reader who trusts it will call `canonical(_:)` in a hot path.
 ///
 /// `key(_:)` is THE normalizer for this subsystem: `ExplorerTreeStore`'s
 /// children cache, its expansion set, its persistence, and its refresh path
@@ -71,8 +77,10 @@ enum ExplorerPaths {
     /// symlink-resolved URLs while building a child URL with
     /// `appendingPathComponent` does not, so the same logical file can arrive
     /// as two `URL`s that are `==`- and hash-unequal even though `key(_:)`
-    /// (a plain string on `standardizedFileURL.path`, no symlink resolution)
-    /// says they're the same place. `List(selection:)` matches by raw `URL`
+    /// says they're the same place. (`key(_:)` reads
+    /// `standardizedFileURL.path`, which does NOT chase symlinks in general —
+    /// it only applies Foundation's documented `/private` special case — so it
+    /// bridges these two spellings without being a general resolver.) `List(selection:)` matches by raw `URL`
     /// hashing, so a selection URL that didn't come straight from a `Row`
     /// would silently fail to select without this.
     ///
