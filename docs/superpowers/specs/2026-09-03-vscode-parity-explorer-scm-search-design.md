@@ -91,26 +91,30 @@ enum LineMark { case added, modified, deleted }   // GitGutter.Mark + .deleted
 ### 6.2 `MonacoHost` (new) — the shared editor/diff surface
 
 ```swift
-struct MonacoHost: NSViewRepresentable { /* wraps WKWebView, loads bundled Monaco once */ }
-
-@MainActor
-final class MonacoBridge: NSObject, WKScriptMessageHandler {
-    var onContentChanged: ((String) -> Void)?
-    var onRequestSave: (() -> Void)?
-    var onGutterAction: ((Int, GutterAction) -> Void)?
-    var onCursorMoved: ((Int, Int) -> Void)?
-    var onDiffHunkAction: ((String, HunkAction) -> Void)?
-
-    func setContent(_ text: String, language: String)
-    func setDecorations(_ marks: [Int: LineMark])
-    func setTheme(_ theme: Theme)
-    func reveal(line: Int)
-    func showDiff(original: String, modified: String, language: String)
-    func setReadOnly(_ readOnly: Bool)
+// Declarative — the caller sets these properties (content/decorations/
+// theme/revealRequest/diffRequest/readOnly) exactly like
+// SelfSizingMarkdownView(markdown:isDark:onHeight:); SwiftUI's normal
+// re-render cycle applies the change. There is no externally-held bridge
+// object — SwiftUI never exposes a NSViewRepresentable's Coordinator outside
+// the view itself, so the actual JS-calling methods (setContent/
+// setDecorations/setTheme/reveal/showDiff/setReadOnly) live PRIVATE on
+// MonacoHost.Coordinator, invoked only by its own diff-and-apply logic.
+struct MonacoHost: NSViewRepresentable {
+    var content: String?
+    var language: String = "plaintext"
+    var decorations: [Int: GitGutter.Mark] = [:]   // GitGutter.Mark gains .deleted; no separate LineMark type
+    var theme: Theme
+    var revealRequest: MonacoRevealRequest?         // carries an id so the same line can be re-requested
+    var diffRequest: MonacoDiffRequest?
+    var readOnly: Bool = false
+    var onReady: (() -> Void)?
+    var onMessage: ((MonacoOutboundMessage) -> Void)?
 }
 ```
 
-Unlike `HljsWebView.updateNSView`, which reloads the entire HTML document on every update (losing scroll position — a real bug in the current code), `MonacoHost` loads once and every subsequent update goes through the JS bridge (`postMessage`/`evaluateJavaScript`), matching how a real editor host must behave.
+`MonacoOutboundMessage` (JS→Swift, decoded from the `WKScriptMessageHandler` callback) carries `.ready`, `.contentChanged(text:)`, `.requestSave`, `.gutterAction(line:action:)`, `.cursorMoved(line:column:)`, `.diffHunkAction(hunkId:action:)` — see §6.4.
+
+Unlike `HljsWebView.updateNSView`, which reloads the entire HTML document on every update (losing scroll position — a real bug in the current code), `MonacoHost` loads once and every subsequent update goes through the JS bridge (`callAsyncJavaScript`), matching how a real editor host must behave.
 
 ### 6.3 `ExplorerTreeStore` (new) — supersedes `ExplorerView`'s inline `@State`
 
@@ -132,11 +136,30 @@ Fixes finding #9 (state mutation during view-body evaluation) by moving the cach
 
 ### 6.4 `MonacoBridge` message types
 
-Plain `Codable` enums/structs for the JS↔Swift JSON contract (listed under 6.2). No new abstraction beyond this — the bridge is intentionally small.
+Plain `Codable` types for the JS↔Swift JSON contract — no new abstraction beyond this, the bridge is intentionally small:
+
+```swift
+enum MonacoOutboundMessage: Decodable {
+    case ready
+    case contentChanged(text: String)
+    case requestSave
+    case gutterAction(line: Int, action: GutterAction)
+    case cursorMoved(line: Int, column: Int)
+    case diffHunkAction(hunkId: String, action: HunkAction)
+}
+enum GutterAction: String, Codable { case stage, unstage, revert }
+enum HunkAction: String, Codable { case stage, unstage }
+struct MonacoDecoration: Codable, Equatable { let line: Int; let kind: String }
+```
+
+`MonacoOutboundMessage` is JS→Swift only — decoded by `MonacoHost.Coordinator`'s `WKScriptMessageHandler` callback. Swift→JS calls (§6.2) go straight through `callAsyncJavaScript`, not this envelope; `MonacoDecoration` is the one exception, used to shape `setDecorations`' argument array from `GitGutter.Mark`.
 
 ### 6.5 Extended existing types (no new abstractions)
 
-- `RepoManager` — becomes the *only* git execution path. `AutoCodeUpdateService+CLI.swift`, `MemoryStore.swift`, and `RepairScopeGuard.swift`'s independent shell-outs are migrated to call it (or its injectable `runGit` seam, already used by `LoopWorktreeManager`).
+- `RepoManager` — becomes the *only* git execution path for the code this spec's panels (Explorer/Source Control/Search/editor) touch; it is **not** retrofitted onto unrelated subsystems. Two of the audit's three "bypass" findings turn out, on inspection, to be actor-isolation-incompatible with `RepoManager` (`@MainActor final class`) and not worth the redesign risk:
+  - `MemoryStore.swift` is a `public struct: Sendable`, deliberately usable off the main actor (`RegressionRunner.swift:263,270` call `gitDiff` synchronously via `try?`). Its `runGit` stays its own `Process` call but gets the same deadlock-safe concurrent stdout/stderr draining `RepoManager.git` already has (today it reads stdout only, after `waitUntilExit()` — the same large-diff pipe-block risk `RepoManager`'s design comment warns about).
+  - `RepairScopeGuard.swift` doesn't shell out directly at all — its `run(_:gitRoot:)` goes through a LoopEngine sandboxed command verifier (`verifier.verify(command:repoRoot:timeout:)`), which stays untouched. The only real duplication is its inline porcelain parser (`RepairScopeGuard.swift:184-198`), replaced with `StatusParser.parse(porcelain:)`.
+  - `AutoCodeUpdateService+CLI.swift`'s 12 `nonisolated static` git helpers are **out of scope**: unrelated Auto Task automation, no credentials passed, and the same actor-isolation mismatch at 6x the surface area. Candidate for a future, separate cleanup — not this spec.
 - `GitTruthStore.stagePatch(root:hunk:) async` / `unstagePatch` — new methods, added to the existing `SourceControlService`'s sibling rather than a new service, since they operate on the same `RepoManager` and the same `status`.
 - `ExplorerFileOps` — gains `move(from:to:)` / `copy(from:to:)`, following its existing `validate`/`createFile`/`rename`/`trash` pattern and test style.
 - `SearchService.search` — restructured to an `AsyncStream<FileMatch>` (or a callback-per-file API), with `Task.isCancelled` checked inside the walk loop, replacing the current `Task.detached` with zero cancellation checks.
@@ -157,17 +180,24 @@ var gutterAddedMark: Color, gutterModifiedMark: Color, gutterDeletedMark: Color
 var editorBackground: Color, editorLineNumber: Color
 ```
 
-Added the same way `success`/`warning`/`info` semantic aliases already are (`Theme.swift:92-96`). `UnifiedDiffView`, `Hljs.Palette`, and `SourceControlView.color(_:)` are updated to read these instead of hardcoded hex / raw SwiftUI colors, closing finding #3.
+Added the same way `success`/`warning`/`info` semantic aliases already are (`Theme.swift:92-96`) — computed from those existing tokens, not new stored literals, so the three palette definitions never need touching. `SourceControlView.color(_:)` is updated to read these instead of raw SwiftUI colors, closing finding #3 for that file. `UnifiedDiffView` and `Hljs.Palette`'s hardcoded hex are **deliberately left alone in P0**: both consumers (`DiffWebView`, `CodeWebView`) are fully replaced by Monaco in P2 and P1 respectively, so threading `Theme` through code about to be deleted would be throwaway work — YAGNI. Their raw-color cleanup happens implicitly when P1/P2 delete them, not as a separate fix.
 
 ## 7. Data flow (representative: editor gutter)
 
 ```
-GitTruthStore.refresh(root)
-  -> RepoManager.git(["diff", "HEAD", "--", path])       (unstaged)
-  -> RepoManager.git(["diff", "--cached", "--", path])    (staged)
+GitTruthStore.lineMarks(root, path)
+  -> RepoManager.runGit(["diff", "HEAD", "--", path])    (ONE call: combines
+                                                           staged + unstaged,
+                                                           new-line numbers
+                                                           already relative
+                                                           to the working file)
   -> UnifiedDiffParser.parse (existing, unchanged)
   -> GitGutter.changedLines(fromDiff:) extended with .deleted
-  -> lineMarks: [Int: LineMark]
+  -> [Int: GitGutter.Mark]
+
+  (A file GitTruthStore's own status reports as .added/.untracked has no HEAD
+  blob — `diff HEAD` produces nothing for it — so that case is handled
+  directly from the file's current contents: every line is marked .added.)
 
 MonacoEditorView.onChange(of: lineMarks)
   -> MonacoBridge.setDecorations(lineMarks)
@@ -206,7 +236,7 @@ Hunk staging: `GitTruthStore.stagePatch(root:hunk:)` synthesizes a minimal unifi
 
 Each phase is independently implementable and endable; later phases depend on earlier ones but not vice versa. P5 (blame, timeline, commit graph, 3-way merge UI) is explicitly out of scope for this spec.
 
-- **P0 — Foundation.** Theme tokens (§6.6) + hex/raw-color cleanup. `RepoManager` consolidation (§6.5). `GitTruthStore` (§6.1) with the root-bug fix and `RepoFileWatcher` wired in. `MonacoHost`/`MonacoBridge` scaffolding with the bundled asset pipeline (§4, §10), proven with a minimal read-only view before anything depends on it.
+- **P0 — Foundation.** Theme tokens (§6.6) + hex/raw-color cleanup. Git-layer hardening scoped to what's actually safe (§6.5): `RepairScopeGuard`'s parser dedup, `MemoryStore.runGit`'s pipe-draining fix — no actor-isolation-incompatible migrations. `GitTruthStore` (§6.1) with the root-bug fix and `RepoFileWatcher` wired in. `MonacoHost`/`MonacoBridge` scaffolding with the bundled asset pipeline (§4, §10) — resource resolution and the JS-message bridge contract are unit-tested; actually rendering Monaco on screen is proven manually once P1 wires the first real caller (no UI in this app shows a `MonacoHost` yet at the end of P0).
 - **P1 — Editor.** Replace `FileDetailView`'s `TextEditor` with `MonacoEditorView`: gutter decorations from `GitTruthStore`, syntax highlighting, line numbers, find/replace (Monaco's built-in widget), line-jump API (`reveal`). This is the direct answer to "git colors while editing."
 - **P2 — Source Control.** Replace `UnifiedDiffView` with `MonacoHost.showDiff`. Add hunk/line staging (§7). Collapse the five diff implementations onto `showDiff` (§5), including the agent's edit-approval flow. Changes list gets multi-select, keyboard nav, a context menu, and rename `old → new` display.
 - **P3 — Explorer.** `ExplorerTreeStore` (§6.3), live updates via `GitTruthStore.startWatching`, `List(selection:)`-based rows for multi-select/keyboard/full-width selection, drag & drop and cut/copy/paste (backed by `ExplorerFileOps.move`/`copy`), inline rename, resizable+persisted tree width, Copy Path, Find in Folder.
