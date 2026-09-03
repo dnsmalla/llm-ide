@@ -24,6 +24,20 @@ struct MobileControlSettingsSection: View {
         SettingsSectionCard(icon: "iphone", title: "Mobile Control") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
 
+                // The Workspace toggle (Settings → Workspace) is the single
+                // source of truth for whether MobileModule is registered and
+                // tracked; this card's own Start/Enable controls call
+                // mobile.start()/stop()/restart() directly. With the feature
+                // OFF there, letting those run would start the server outside
+                // FeatureRegistry's bookkeeping — refresh() would then have
+                // no way to stop it, since `running` never contains a
+                // disabled feature. Disable the card's controls until the
+                // feature is re-enabled there; read-only info (log,
+                // connection details) still renders below.
+                if !registry.isEnabled(.mobileSync) {
+                    SettingsHint("Mobile Sync is turned off in Workspace settings — enable it there first.")
+                }
+
                 Toggle(isOn: $config.mobileControlEnabled) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Enable Mobile Control")
@@ -87,6 +101,7 @@ struct MobileControlSettingsSection: View {
                     featuresBlock
                 }
             }
+            .disabled(!registry.isEnabled(.mobileSync))
         }
         .onAppear {
             refreshConnection()
