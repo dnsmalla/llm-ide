@@ -18,4 +18,14 @@ final class ThemeGitTokensTests: XCTestCase {
             XCTAssertEqual(theme.editorLineNumber, theme.textMuted, "\(theme.id): line numbers must track textMuted")
         }
     }
+
+    func testColorForStatusUsesThemeTokensNotRawColors() {
+        let t = Theme.dark
+        XCTAssertEqual(t.color(for: .added), t.success)
+        XCTAssertEqual(t.color(for: .untracked), t.success)
+        XCTAssertEqual(t.color(for: .deleted), t.danger)
+        XCTAssertEqual(t.color(for: .conflicted), t.warning)
+        XCTAssertEqual(t.color(for: .modified), t.accent2)
+        XCTAssertEqual(t.color(for: .renamed), t.accent2)
+    }
 }

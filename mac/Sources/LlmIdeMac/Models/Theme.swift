@@ -161,6 +161,18 @@ extension Theme {
     // Monaco theme base colors.
     var editorBackground: Color { body }
     var editorLineNumber: Color { textMuted }
+
+    /// Source Control changes-list badge/text color for a file's status.
+    /// Mirrors `SourceControlView`'s original raw-color mapping — same
+    /// cases, same fallback — but through Theme so Midnight reads correctly.
+    func color(for status: FileChange.Status) -> Color {
+        switch status {
+        case .added, .untracked: return success
+        case .deleted: return danger
+        case .conflicted: return warning
+        default: return accent2
+        }
+    }
 }
 
 /// Convenience wrapper so views can read the active theme via
