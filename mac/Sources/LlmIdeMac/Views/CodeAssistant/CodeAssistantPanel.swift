@@ -263,6 +263,13 @@ struct CodeAssistantPanel: View {
             .onChange(of: config.activeCLI) { _, _ in
                 modelState.selectedModel = config.defaultModelId
             }
+            // Settings → Custom Providers edits while this panel is open: the
+            // transport reads the live provider list every turn, but the menu
+            // and the Agent-engine hint read this snapshot — without the
+            // reload they lag until the next appear and disagree with routing.
+            .onReceive(NotificationCenter.default.publisher(for: .customProvidersChanged)) { _ in
+                modelState.customProviders = CustomProvider.loadAll()
+            }
             .onChange(of: useAgentV2) { _, enabled in
                 // Swap the shared engine's transport to match the toggle.
                 // `setTransport` refuses mid-turn (the in-flight round-trip

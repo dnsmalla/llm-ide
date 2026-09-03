@@ -68,6 +68,9 @@ extension CustomProvider {
         do {
             let data = try JSONEncoder().encode(providers)
             UserDefaults.standard.set(data, forKey: defaultsKey)
+            // Views holding a loadAll() snapshot (the chat panel's provider
+            // menu / Agent-engine hint) reload on this; see NotificationNames.
+            NotificationCenter.default.post(name: .customProvidersChanged, object: nil)
             // NOTE: backend registry sync is intentionally NOT done here. This
             // static, model-layer method has no access to the session access
             // token, and a bare URLSession POST to /kb/custom-providers (which

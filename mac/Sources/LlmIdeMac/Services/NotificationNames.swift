@@ -48,6 +48,16 @@ extension Notification.Name {
     /// with no shared ObservableObject the Mac UI already listens to.
     static let customAutoTasksChanged = Notification.Name("customAutoTasksChanged")
 
+    /// Posted by `CustomProvider.saveAll` after the persisted custom-provider
+    /// list changes (add / edit / delete / enable toggle in Settings →
+    /// Custom Providers). CodeAssistantPanel observes it to reload its
+    /// `modelState.customProviders` snapshot, which otherwise only loaded on
+    /// appear — so an Anthropic-compatible URL added while a chat is open
+    /// updates the composer's provider menu and Agent-engine hint at once,
+    /// keeping them in step with the transport, which reads the live list
+    /// every turn.
+    static let customProvidersChanged = Notification.Name("customProvidersChanged")
+
     // MARK: - Library / meetings
 
     /// Posted by LibraryRow when the user requests an action on a
