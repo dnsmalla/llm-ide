@@ -231,4 +231,41 @@ final class RepairScopeGuardTests: XCTestCase {
             XCTAssertTrue(config.protectedGlobs.contains(builtin))
         }
     }
+
+    // MARK: - Parser dedup (StatusParser refactor verification)
+
+    /// Always answers exit 0 with fixed `output` — enough to drive
+    /// `GitRepairScopeGuard.snapshot`'s `git status --porcelain` probe
+    /// without a real git process or working tree.
+    private struct FakeVerifier: FaultVerifier {
+        let output: String
+        func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
+            VerifyOutcome(exitCode: 0, output: output)
+        }
+    }
+
+    /// The case most likely to break during a parser swap: a rename must
+    /// keep only the NEW path, exactly like `StatusParser` (`SCMParsers.swift:16-18`)
+    /// already does and `SCMParsersTests` already pins — the pre-fix inline
+    /// parser here reimplemented the same "XY <path>" / " -> " splitting
+    /// independently, so this proves the swap doesn't silently flip which
+    /// side of the arrow survives.
+    func testSnapshotKeepsOnlyTheNewPathForRenamesUntrackedAndPlainModifications() async {
+        let porcelain = "R  old.txt -> new.txt\n M plain.txt\n?? untracked.txt\n"
+        let guardService = GitRepairScopeGuard(verifier: FakeVerifier(output: porcelain))
+        let snapshot = await guardService.snapshot(gitRoot: URL(fileURLWithPath: "/tmp"))
+        XCTAssertTrue(snapshot.usable)
+        XCTAssertEqual(snapshot.dirtyPaths, ["new.txt", "plain.txt", "untracked.txt"])
+    }
+
+    func testSnapshotUnusableWhenVerifierFails() async {
+        struct FailingVerifier: FaultVerifier {
+            func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
+                VerifyOutcome(exitCode: 128, output: "fatal: not a git repository")
+            }
+        }
+        let guardService = GitRepairScopeGuard(verifier: FailingVerifier())
+        let snapshot = await guardService.snapshot(gitRoot: URL(fileURLWithPath: "/tmp"))
+        XCTAssertFalse(snapshot.usable)
+    }
 }

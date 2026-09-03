@@ -182,21 +182,8 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
         case .failure(let reason):
             return .failure(reason)
         case .success(let output):
-            var paths: Set<String> = []
-            for line in output.split(separator: "\n") {
-                // Porcelain v1: "XY <path>", or "XY <old> -> <new>" for renames.
-                guard line.count > 3 else { continue }
-                var path = String(line.dropFirst(3))
-                if let arrow = path.range(of: " -> ") {
-                    path = String(path[arrow.upperBound...])
-                }
-                // Paths containing unusual bytes come back quoted by git.
-                if path.hasPrefix("\"") && path.hasSuffix("\"") && path.count > 1 {
-                    path = String(path.dropFirst().dropLast())
-                }
-                if !path.isEmpty { paths.insert(path) }
-            }
-            return .success(paths)
+            let paths = StatusParser.parse(porcelain: output).map(\.path)
+            return .success(Set(paths))
         }
     }
 
