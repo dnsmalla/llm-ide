@@ -140,7 +140,7 @@ Thin modules are still created: uniformity is what makes Phase 2 mechanical.
 4. **AutoTask + LoopEngine as ONE excludable unit (2c, DONE)** — requires seaming
    `MobileControlManager`'s deep AutoTask/Loop coupling through core
    protocols; the cycle stays internal to the unit.
-5. **Mobile** — last, because it depends on everything above; when a
+5. **Mobile (2d, DONE)** — last, because it depends on everything above; when a
    feature it needs is compiled out, the mobile surface for it degrades
    per capability flags.
 

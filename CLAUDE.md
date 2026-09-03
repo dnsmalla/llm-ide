@@ -24,7 +24,7 @@ cd mac
 swift build           # Build the app
 swift test            # Run XCTest suite
 make build-mac-lite   # Build lite app: excludes Graph, Explorer, Gantt, Issues, DocGen, Terminal; leaves Chat, Auto Tasks, Mobile Sync, Live Capture, Library
-make build-mac-min    # Build minimum app: Chat only (excludes all 7 excludable features: Graph, Explorer, Gantt, Issues, DocGen, Terminal, Auto Tasks, Mobile Sync)
+make build-mac-min    # Build minimum app: Chat only (excludes all 7 excludable features: Graph, Explorer, Gantt/Issues, DocGen, Terminal, Auto Tasks, Mobile Sync)
 ./build_app.sh        # Legacy build script (use `swift build` instead)
 
 # Testing
