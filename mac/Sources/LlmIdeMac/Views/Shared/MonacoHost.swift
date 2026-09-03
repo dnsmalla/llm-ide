@@ -6,6 +6,15 @@ import WebKit
 /// in a row — e.g. clicking the same search result again — still triggers a
 /// fresh call: a bare `Int` would look unchanged to `Coordinator.sync`'s
 /// diff the second time.
+///
+/// Callers MUST hold this value in `@State` (or equivalent) and only
+/// construct a fresh one in response to an actual reveal intent (e.g. a
+/// user clicking a search result) — never inline inside `body`. Since `id`
+/// defaults to a fresh `UUID()` on every construction, an inline
+/// `MonacoRevealRequest(line:)` in `body` produces a new id on every
+/// SwiftUI re-render, which `Coordinator.sync` reads as a fresh reveal
+/// request and causes the editor to unexpectedly re-scroll on every
+/// re-render.
 struct MonacoRevealRequest: Equatable {
     let line: Int
     let id = UUID()
@@ -103,6 +112,18 @@ struct MonacoHost: NSViewRepresentable {
 
     func updateNSView(_ web: WKWebView, context: Context) {
         context.coordinator.sync(self)
+    }
+
+    /// Called by SwiftUI just before the WKWebView is removed from the view
+    /// hierarchy. `WKUserContentController` holds a STRONG reference to any
+    /// registered script message handler, and `Coordinator` holds a strong
+    /// `webView` back-reference — without breaking that cycle here, every
+    /// `MonacoHost` teardown would leak the WKWebView (and its loaded Monaco
+    /// instance + WebContent process). Mirrors `FileDetailView`'s
+    /// `QLPreviewDetailView.dismantleNSView`.
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        nsView.configuration.userContentController.removeScriptMessageHandler(forName: "monacoBridge")
+        coordinator.webView = nil
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {

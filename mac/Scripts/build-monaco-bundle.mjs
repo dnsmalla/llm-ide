@@ -8,7 +8,11 @@
 // syntax highlighting, not IntelliSense, and the basic-languages Monarch
 // tokenizers cover every one of these languages on their own.
 //
-// Usage: cd mac && npm install monaco-editor@<version> --no-save && node Scripts/build-monaco-bundle.mjs
+// Version pinned to 0.50.0: 0.51.0+ restructured the package (no
+// `min/vs/base/`, no per-language `min/vs/basic-languages/<lang>/` dirs —
+// replaced with content-hashed flat chunk files), which crashes this script
+// with ENOENT on `base/`. Do not bump without rewriting the copy logic below.
+// Usage: cd mac && npm install monaco-editor@0.50.0 --no-save && node Scripts/build-monaco-bundle.mjs
 
 import { existsSync, mkdirSync, cpSync, rmSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

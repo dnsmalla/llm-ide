@@ -94,10 +94,19 @@ final class GitTruthStore {
             }
             if text.isEmpty { return [:] }
             // A trailing newline (the normal case for a text file) produces a
-            // phantom empty trailing component from `components(separatedBy:)`
-            // — drop it so "a\nb\nc\n" counts as 3 lines, not 4.
-            let lines = text.components(separatedBy: .newlines)
-            let lineCount = (lines.last?.isEmpty ?? false) ? lines.count - 1 : lines.count
+            // phantom empty trailing component if left in — drop it so
+            // "a\nb\nc\n" counts as 3 lines, not 4. Split on `\.isNewline`
+            // character-by-character rather than `CharacterSet.newlines`
+            // component splitting: `.newlines` treats \r and \n as two
+            // separate splits, inserting a spurious empty component between
+            // them and over-counting lines for CRLF content. Same technique
+            // `UnifiedDiffParser.parse` already uses for exactly this reason
+            // (see its doc comment) — Swift treats "\r\n" as one extended
+            // grapheme cluster, so a single `removeLast()` drops the whole
+            // terminator without truncating the line before it.
+            var content = text
+            if let last = content.last, last.isNewline { content.removeLast() }
+            let lineCount = content.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count
             return Dictionary(uniqueKeysWithValues: (1...lineCount).map { ($0, GitGutter.Mark.added) })
         }
         guard let diff = try? await repo.runGit(["diff", "HEAD", "--", path], at: root), !diff.isEmpty else {

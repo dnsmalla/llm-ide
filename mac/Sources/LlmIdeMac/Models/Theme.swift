@@ -294,6 +294,20 @@ extension Color {
         let b = Int((rgb.blueComponent * 255).rounded())
         return String(format: "#%02X%02X%02X", r, g, b)
     }
+
+    /// "#RRGGBBAA", best-effort — same use as `hexRGB()`, but preserves the
+    /// alpha channel. Monaco's theme color format accepts 8-digit hex, and
+    /// callers like `diffAddedBg`/`diffDeletedBg` (defined as
+    /// `.opacity(0.16)`) rely on that alpha to stay a subtle tint instead of
+    /// an opaque block once painted behind diff text.
+    func hexRGBA() -> String {
+        guard let rgb = NSColor(self).usingColorSpace(.deviceRGB) else { return "#000000FF" }
+        let r = Int((rgb.redComponent * 255).rounded())
+        let g = Int((rgb.greenComponent * 255).rounded())
+        let b = Int((rgb.blueComponent * 255).rounded())
+        let a = Int((rgb.alphaComponent * 255).rounded())
+        return String(format: "#%02X%02X%02X%02X", r, g, b, a)
+    }
 }
 
 /// One entry of Monaco's `IStandaloneThemeData.rules` — a token-type →
@@ -335,8 +349,8 @@ extension Theme {
                 "editorGutter.addedBackground": gutterAddedMark.hexRGB(),
                 "editorGutter.modifiedBackground": gutterModifiedMark.hexRGB(),
                 "editorGutter.deletedBackground": gutterDeletedMark.hexRGB(),
-                "diffEditor.insertedTextBackground": diffAddedBg.hexRGB(),
-                "diffEditor.removedTextBackground": diffDeletedBg.hexRGB(),
+                "diffEditor.insertedTextBackground": diffAddedBg.hexRGBA(),
+                "diffEditor.removedTextBackground": diffDeletedBg.hexRGBA(),
             ]
         )
     }
