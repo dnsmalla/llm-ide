@@ -77,19 +77,21 @@ extension DiffHunk {
         return [DiffHunk(header: "", rows: rows)]
     }
 
-    /// Splits `text` into lines for `fromLineDiff`. Blank lines in the
-    /// middle of the text are preserved (unlike `split(separator:)`, which
-    /// would silently drop them) — but a single trailing "\n", which is
-    /// how nearly every source file ends, is NOT counted as an extra empty
-    /// final line. Plain `components(separatedBy: "\n")` would otherwise
-    /// turn "a\nb\n" into `["a", "b", ""]` and produce a spurious blank
-    /// row at the end of every whole-file diff.
+    /// Splits `text` into lines for `fromLineDiff`, including CRLF content.
+    /// Same technique as `UnifiedDiffParser.parse`'s line split (see the
+    /// doc comment above its `split` call in `SCMParsers.swift` for the
+    /// full rationale) — the two must agree on what a "line" is, since
+    /// `fromLineDiff` exists to produce the exact same `[DiffHunk]` model.
+    /// In short: split on `\.isNewline` (a `"\n"`-only split misses CRLF,
+    /// which Swift treats as one grapheme cluster) after dropping exactly
+    /// one trailing break with `removeLast()` (every real file ends in a
+    /// newline; without this, that terminator becomes a phantom empty
+    /// final line), keeping `omittingEmptySubsequences: false` so a
+    /// genuine blank line mid-file survives.
     private static func splitLines(_ text: String) -> [String] {
         guard !text.isEmpty else { return [] }
-        var lines = text.components(separatedBy: "\n")
-        if text.hasSuffix("\n") {
-            lines.removeLast()
-        }
-        return lines
+        var content = text
+        if let last = content.last, last.isNewline { content.removeLast() }
+        return content.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
     }
 }
