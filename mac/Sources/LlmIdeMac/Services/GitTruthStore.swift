@@ -78,6 +78,34 @@ final class GitTruthStore {
         return byPath[rel]
     }
 
+    /// Working-tree line marks for one file — what the editor gutter should
+    /// decorate. `git diff HEAD -- path` combines staged and unstaged changes
+    /// in one call, with new-line numbers already relative to the CURRENT
+    /// working file, so no separate staged/unstaged merge is needed.
+    ///
+    /// A file this store's own `byPath` reports as `.added`/`.untracked` has
+    /// no HEAD blob — `git diff HEAD` produces nothing for it even though the
+    /// whole file is new content, so that case is handled directly from the
+    /// file's current contents instead of a diff.
+    func lineMarks(root: URL, path: String) async -> [Int: GitGutter.Mark] {
+        if byPath[path] == .added || byPath[path] == .untracked {
+            guard let text = try? String(contentsOf: root.appendingPathComponent(path), encoding: .utf8) else {
+                return [:]
+            }
+            if text.isEmpty { return [:] }
+            // A trailing newline (the normal case for a text file) produces a
+            // phantom empty trailing component from `components(separatedBy:)`
+            // — drop it so "a\nb\nc\n" counts as 3 lines, not 4.
+            let lines = text.components(separatedBy: .newlines)
+            let lineCount = (lines.last?.isEmpty ?? false) ? lines.count - 1 : lines.count
+            return Dictionary(uniqueKeysWithValues: (1...lineCount).map { ($0, GitGutter.Mark.added) })
+        }
+        guard let diff = try? await repo.runGit(["diff", "HEAD", "--", path], at: root), !diff.isEmpty else {
+            return [:]
+        }
+        return GitGutter.changedLines(fromDiff: diff)
+    }
+
     private func decoration(for s: FileChange.Status, existing: Decoration?) -> Decoration {
         switch s {
         case .untracked:  return existing ?? .untracked

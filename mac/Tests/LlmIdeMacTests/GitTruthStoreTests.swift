@@ -86,4 +86,44 @@ final class GitTruthStoreTests: XCTestCase {
         let outsideURL = URL(fileURLWithPath: "/tmp/unrelated.txt")
         XCTAssertNil(store.decoration(forAbsolute: outsideURL, root: repo, isDirectory: false))
     }
+
+    // MARK: - lineMarks
+
+    func testLineMarksForModifiedTrackedFile() async throws {
+        try "line1\nCHANGED\nline3\n".write(to: repo.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        let store = GitTruthStore()
+        await store.refresh(root: repo)
+        let marks = await store.lineMarks(root: repo, path: "tracked.txt")
+        XCTAssertEqual(marks[2], .modified)
+    }
+
+    func testLineMarksForStagedAndUnstagedChangesBothAppear() async throws {
+        // Stage one change, leave another unstaged, in the same file.
+        try "STAGED\n".write(to: repo.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try run(["add", "-A"])
+        try "STAGED\nUNSTAGED\n".write(to: repo.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+
+        let store = GitTruthStore()
+        await store.refresh(root: repo)
+        let marks = await store.lineMarks(root: repo, path: "tracked.txt")
+        // Both lines differ from HEAD (which still has "line1"), regardless
+        // of staged/unstaged — `git diff HEAD` sees the whole delta at once.
+        XCTAssertEqual(marks[1], .modified)
+        XCTAssertEqual(marks[2], .added)
+    }
+
+    func testLineMarksForNewUntrackedFileMarksEveryLineAdded() async throws {
+        try "a\nb\nc\n".write(to: repo.appendingPathComponent("new.txt"), atomically: true, encoding: .utf8)
+        let store = GitTruthStore()
+        await store.refresh(root: repo)
+        let marks = await store.lineMarks(root: repo, path: "new.txt")
+        XCTAssertEqual(marks, [1: .added, 2: .added, 3: .added])
+    }
+
+    func testLineMarksForCleanFileIsEmpty() async throws {
+        let store = GitTruthStore()
+        await store.refresh(root: repo)
+        let marks = await store.lineMarks(root: repo, path: "tracked.txt")
+        XCTAssertTrue(marks.isEmpty)
+    }
 }
