@@ -11,14 +11,19 @@ struct FileDetailView: View {
     /// When set (Library detail pane), shows a close control that clears the
     /// selection so the file list can use the full detail column again.
     var onClose: (() -> Void)? = nil
+    /// 1-based line to reveal once the editor has loaded (e.g. a search
+    /// result's line-jump, P4). `nil` for the common "just open the file"
+    /// case. Ignored by kinds that have no text editor (`.pdf`/`.image`/
+    /// `.quicklook`).
+    var initialLine: Int? = nil
 
     var body: some View {
         Group {
             switch fileKind {
-            case .markdown:  MarkdownDetailView(url: url)
+            case .markdown:  MarkdownDetailView(url: url, initialLine: initialLine)
             case .pdf:       PDFDetailView(url: url)
             case .image:     ImageDetailView(url: url)
-            case .code:      CodeDetailView(url: url)
+            case .code:      CodeDetailView(url: url, initialLine: initialLine)
             case .quicklook: QuickLookDetailView(url: url)
             }
         }
@@ -90,10 +95,12 @@ struct FileDetailView: View {
 
 struct MarkdownDetailView: View {
     let url: URL
+    var initialLine: Int? = nil
     @EnvironmentObject private var theme: ThemeStore
 
     var body: some View {
-        EditableTextDetailView(url: url, startInPreview: true, language: "markdown") { content in
+        EditableTextDetailView(url: url, startInPreview: true, language: "markdown",
+                               initialLine: initialLine) { content in
             MarkdownWebView(markdown: content, isDark: theme.current.isDark)
         }
     }
@@ -186,6 +193,7 @@ struct ImageDetailView: View {
 
 struct CodeDetailView: View {
     let url: URL
+    var initialLine: Int? = nil
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var projectStore: ProjectStore
@@ -199,7 +207,8 @@ struct CodeDetailView: View {
             onSaved: { await refreshGutter() },
             startInPreview: true,   // open code highlighted (read-only); Edit is one toggle away
             language: MonacoLanguageMap.id(for: url.pathExtension),
-            decorations: changedLines
+            decorations: changedLines,
+            initialLine: initialLine
         ) { content in
             MonacoEditorView(
                 content: .constant(content),
@@ -274,6 +283,10 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     /// Git gutter marks for the editor, keyed by line number. Empty for
     /// content types (markdown) that don't track a git gutter.
     var decorations: [Int: GitGutter.Mark] = [:]
+    /// Optional Monaco line-jump target for `MonacoRevealRequest`
+    /// (design's line-jump API — P4's search results are the first real
+    /// caller). `nil` for the common "just open the file" case.
+    var initialLine: Int? = nil
     /// Optional toolbar accessory rendered just left of Revert/Save.
     let accessory: () -> Accessory
     let preview: (String) -> Preview
@@ -283,12 +296,14 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
          startInPreview: Bool = false,
          language: String = "plaintext",
          decorations: [Int: GitGutter.Mark] = [:],
+         initialLine: Int? = nil,
          @ViewBuilder accessory: @escaping () -> Accessory,
          @ViewBuilder preview: @escaping (String) -> Preview) {
         self.url = url
         self.onSaved = onSaved
         self.language = language
         self.decorations = decorations
+        self.initialLine = initialLine
         self.accessory = accessory
         self.preview = preview
         // Code/markdown open in the rendered/highlighted Preview by default
@@ -298,6 +313,7 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
 
     @State private var content: String = ""
     @State private var savedContent: String = ""
+    @State private var revealRequest: MonacoRevealRequest?
     @State private var loadError: String?
     @State private var saveError: String?
     @State private var isPreview: Bool
@@ -418,6 +434,7 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
             content: $content,
             language: language,
             decorations: decorations,
+            revealRequest: revealRequest,
             onRequestSave: { Task { await saveWithToast() } }
         )
         .onChange(of: content) { _, _ in
@@ -438,6 +455,9 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
             }.value
             content = raw
             savedContent = raw
+            if let initialLine {
+                revealRequest = MonacoRevealRequest(line: initialLine)
+            }
         } catch {
             loadError = "The file could not be decoded as text. (\(error.localizedDescription))"
             content = ""
@@ -488,9 +508,10 @@ extension EditableTextDetailView where Accessory == EmptyView {
          startInPreview: Bool = false,
          language: String = "plaintext",
          decorations: [Int: GitGutter.Mark] = [:],
+         initialLine: Int? = nil,
          @ViewBuilder preview: @escaping (String) -> Preview) {
         self.init(url: url, onSaved: onSaved, startInPreview: startInPreview,
-                  language: language, decorations: decorations,
+                  language: language, decorations: decorations, initialLine: initialLine,
                   accessory: { EmptyView() }, preview: preview)
     }
 }
