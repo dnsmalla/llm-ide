@@ -298,32 +298,3 @@ struct ExplorerMobileEngineResolverTests {
         }
     }
 }
-
-/// A `ChatTransport` whose `roundTrip` suspends until `resume()` is called —
-/// for reproducing the mid-round-trip session-switch race
-/// `runExternalTurn`'s post-await `expectedSessionID` re-check guards
-/// against: the engine's active session changes while the transport call is
-/// still suspended. Same shape as `AgentAskTransportTests.swift`'s
-/// `SuspendableHistoryFetcher`, adapted to `ChatTransport`'s signature.
-@MainActor
-final class SuspendableChatTransport: ChatTransport, @unchecked Sendable {
-    var result = ChatTransportResult(reply: "the answer", pendingTool: nil, tasks: nil,
-                                     continueNeeded: nil, usage: nil, mode: nil)
-    var thrownError: Error?
-    private var continuation: CheckedContinuation<Void, Never>?
-
-    func resume() {
-        continuation?.resume()
-        continuation = nil
-    }
-
-    func roundTrip(
-        _ input: ChatTransportInput,
-        onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
-        onChunk: @escaping @MainActor (String) -> Void
-    ) async throws -> ChatTransportResult {
-        await withCheckedContinuation { self.continuation = $0 }
-        if let thrownError { throw thrownError }
-        return result
-    }
-}
