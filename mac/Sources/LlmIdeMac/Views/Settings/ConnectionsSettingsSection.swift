@@ -43,6 +43,7 @@ struct ConnectionsSettingsSection: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var sourceLinks: SourceLinkStore
     @Environment(AppEnvironment.self) private var env
+    @ObservedObject var registry = FeatureRegistry.shared
 
     /// Persisted per-section like `SettingsSectionCard`, so it survives launches.
     @AppStorage("settings.section.Connections.expanded") private var isExpanded = false
@@ -185,17 +186,29 @@ struct ConnectionsSettingsSection: View {
             badgeText: config.autoCaptureOnMeeting ? "On" : "Off",
             badgeTone: config.autoCaptureOnMeeting ? .positive : .neutral
         ) {
-            Toggle(isOn: $config.autoCaptureOnMeeting) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Auto-capture when a meeting app is frontmost")
-                        .font(Typography.body)
-                        .foregroundStyle(theme.current.text)
-                    Text(MeetingCaptureMatrix.autoCaptureDetail)
+            HStack(spacing: Spacing.sm) {
+                Toggle(isOn: $config.autoCaptureOnMeeting) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Auto-capture when a meeting app is frontmost")
+                            .font(Typography.body)
+                            .foregroundStyle(theme.current.text)
+                        Text(MeetingCaptureMatrix.autoCaptureDetail)
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
+                    }
+                }
+                .toggleStyle(.switch)
+                // AutoCaptureService runs as an Auto Task module
+                // (`AutoTaskModule.feature == .autoTasks`) — with that
+                // feature not compiled in, FeatureRegistry never starts it,
+                // so this toggle would silently do nothing.
+                .disabled(!registry.compiledFeatures.contains(.autoTasks))
+                if !registry.compiledFeatures.contains(.autoTasks) {
+                    Text("Not installed")
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
                 }
             }
-            .toggleStyle(.switch)
 
             MeetingCaptureMatrixView()
                 .environmentObject(theme)

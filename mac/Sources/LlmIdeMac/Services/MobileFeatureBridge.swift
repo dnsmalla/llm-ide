@@ -16,4 +16,11 @@ protocol MobileFeatureBridge: AnyObject {
     /// Install Combine push observers (called once from the manager's
     /// installMobilePushObservers).
     func installPushObservers()
+    /// Tear down whatever `installPushObservers()` subscribed — the teardown
+    /// symmetry `installPushObservers()` was missing. Called once from the
+    /// manager's `stop()`, right after it clears its own
+    /// `mobilePushCancellables`, so a stopped server leaves no bridge holding
+    /// live Combine subscriptions across a later `start()`. A no-op for a
+    /// bridge that installs no subscriptions of its own.
+    func removePushObservers()
 }

@@ -238,6 +238,12 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             .store(in: &cancellables)
     }
 
+    /// Cancel every subscription `installPushObservers()` stored, mirroring
+    /// the manager's own `mobilePushCancellables.removeAll()` in `stop()`.
+    func removePushObservers() {
+        cancellables.removeAll()
+    }
+
     // MARK: - Auto-task setup (per-task settings + prompt templates)
 
     /// Handle the `auto_task_setup_*` / `auto_task_config_*` /

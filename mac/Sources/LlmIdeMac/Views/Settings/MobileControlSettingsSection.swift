@@ -9,6 +9,7 @@ struct MobileControlSettingsSection: View {
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var theme: ThemeStore
     @Environment(MobileControlManager.self) private var mobile
+    @ObservedObject var registry = FeatureRegistry.shared
 
     @State private var autoScroll: Bool = true
     @State private var connection = MobileConnectionInfo.current()
@@ -546,7 +547,12 @@ struct MobileControlSettingsSection: View {
                 .foregroundStyle(theme.current.textMuted)
             featureRow(icon: "bubble.left.and.bubble.right", title: "LLM-IDE Chat", subtitle: "Ask questions from iPhone")
             featureRow(icon: "safari", title: "Explorer", subtitle: "Browse and chat with Mac explorer sessions")
-            featureRow(icon: "bolt.fill", title: "Auto Tasks", subtitle: "Toggle and inspect scheduled auto-code tasks")
+            // Compiled-out builds have no autoTaskBridge to serve these
+            // messages — listing the feature here would promise a phone
+            // capability this binary can't deliver.
+            if registry.compiledFeatures.contains(.autoTasks) {
+                featureRow(icon: "bolt.fill", title: "Auto Tasks", subtitle: "Toggle and inspect scheduled auto-code tasks")
+            }
         }
     }
 

@@ -286,6 +286,8 @@ final class MobileControlManager {
         sessionDirectoryWatcher?.stop()
         sessionDirectoryWatcher = nil
         mobilePushCancellables.removeAll()
+        autoTaskBridge?.removePushObservers()
+        loopBridge?.removePushObservers()
         onMobileClientDisconnected()
         server?.stop()
         server = nil
@@ -392,7 +394,13 @@ final class MobileControlManager {
 
     /// Feature message types the auto-task bridge owns — copied verbatim from
     /// the pre-split `handleAutoTask`/`handleAutoTaskSetup` switch cases.
-    private static let autoTaskMessageTypes: Set<String> = [
+    ///
+    /// Internal (not `private`) so `MobileFeatureBridgeTests` can pin this Set
+    /// against a hardcoded literal: adding a new `SharedProtocol` message type
+    /// must update BOTH the bridge's `handle(type:data:)` switch AND this Set
+    /// AND that test — a type present here but missing from the switch, or
+    /// vice versa, silently misroutes.
+    static let autoTaskMessageTypes: Set<String> = [
         MobileProtocol.Tag.autoTaskList,
         MobileProtocol.Tag.autoTaskToggle,
         MobileProtocol.Tag.autoTaskRun,
@@ -408,7 +416,12 @@ final class MobileControlManager {
 
     /// Feature message types the loop bridge owns — copied verbatim from the
     /// pre-split `handleLoop` switch cases.
-    private static let loopMessageTypes: Set<String> = [
+    ///
+    /// Internal (not `private`) so `MobileFeatureBridgeTests` can pin this Set
+    /// against a hardcoded literal — see `autoTaskMessageTypes`'s doc comment
+    /// for why: a new `SharedProtocol` message type must update BOTH the
+    /// bridge switch AND the Set AND that test.
+    static let loopMessageTypes: Set<String> = [
         MobileProtocol.Tag.loopStatusList,
         MobileProtocol.Tag.loopStart,
         MobileProtocol.Tag.loopStartStage,
@@ -852,7 +865,10 @@ final class MobileControlManager {
         // An immediate full snapshot for a client that just paired, rather
         // than waiting for the next Combine-debounced change — reusing the
         // same per-type handling `auto_task_list`/`auto_task_logs_list`
-        // already do on a direct pull request.
+        // already do on a direct pull request. Gated on `mobileClientPaired`
+        // like every other synthetic push below, so a stopped/unpaired state
+        // is a silent no-op instead of a "Mobile reply dropped" stderr line.
+        guard mobileClientPaired else { return }
         _ = autoTaskBridge?.handle(type: MobileProtocol.Tag.autoTaskList, data: nil)
         _ = autoTaskBridge?.handle(type: MobileProtocol.Tag.autoTaskLogsList, data: nil)
         pushExploreSessionListIfPaired()
@@ -873,6 +889,11 @@ final class MobileControlManager {
     /// tasks already auto-push via installMobilePushObservers(); this just
     /// gives an explicit, visible "synced now" affordance on top of that.
     func refreshAutoTaskStateForMobile() {
+        // A stopped/unpaired Mac must not push through a dead server — every
+        // other synthetic call in this file gates on the same flag; without
+        // it, every Mac-side task edit logged a "Mobile reply dropped" line
+        // even when nobody was there to receive it.
+        guard mobileClientPaired else { return }
         _ = autoTaskBridge?.handle(type: MobileProtocol.Tag.autoTaskList, data: nil)
     }
 

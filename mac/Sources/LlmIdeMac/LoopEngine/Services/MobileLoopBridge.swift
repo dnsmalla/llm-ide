@@ -165,6 +165,14 @@ final class MobileLoopBridge: MobileFeatureBridge {
         // Intentionally empty — see doc comment above.
     }
 
+    /// No-op counterpart to `installPushObservers()` — this bridge holds no
+    /// Combine subscriptions of its own to cancel (see that method's doc
+    /// comment). Kept so the manager can call it unconditionally alongside
+    /// `autoTaskBridge?.removePushObservers()`.
+    func removePushObservers() {
+        // Intentionally empty — no subscriptions to cancel.
+    }
+
     // MARK: - State snapshot
 
     /// Snapshot of the active project's loop. `running` deliberately reads the

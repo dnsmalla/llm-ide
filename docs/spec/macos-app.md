@@ -132,7 +132,7 @@ Six features are excludable at build time:
 - **`ganttIssues`** — Issues board and Gantt timeline (Phase 2b)
 - **`docGen`** — Document generator view (Phase 2b)
 - **`terminal`** — Terminal panel and **drops the SwiftTerm product dependency** (Phase 2b, independent of Explorer)
-- **`autoTasks`** — Automated code generation, Loop Engine verification-and-repair, task scheduling; when excluded, `AutoCaptureService` does not auto-arm on launch (manual capture remains unaffected), and `.loopEngine` is hidden from ShellState sections (Phase 2c)
+- **`autoTasks`** — Automated code generation, Loop Engine verification-and-repair, task scheduling; when excluded, `AutoCaptureService` does not auto-arm on launch (manual capture remains unaffected), and `.loopEngine` is hidden from ShellState sections (Phase 2c). This is no longer only a compile-time exclusion: the RUNTIME toggle (Settings → Workspace, Auto Tasks off while still compiled in) now also hides the Loop page, since `AppShell`'s toolbar filter and `PanelSectionTabs` both check `.loopEngine`'s `backingFeature` (`.autoTasks`) against `FeatureRegistry.isEnabled(_:)`, not just `compiledFeatures` — previously the Loop page stayed reachable with Auto Tasks toggled off at runtime (Phase 2c final-review fix)
 
 A "lite" non-engineer build (the `LLMIDE_FEATURES=agent_chat,auto_tasks,mobile_sync` preset used by `make build-mac-lite`) excludes codeGraph3D, fileExplorer, ganttIssues, docGen, and terminal, leaving only Agent Chat, Auto Tasks, Mobile Sync, Live Capture, and Library. A "minimum" build (the `LLMIDE_FEATURES=agent_chat,mobile_sync` preset used by `make build-mac-min`) excludes all six excludable features, leaving only Agent Chat, Mobile Sync, Live Capture, and Library.
 
