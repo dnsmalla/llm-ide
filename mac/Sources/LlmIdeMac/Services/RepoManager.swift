@@ -391,10 +391,20 @@ final class RepoManager {
         try await gitOutput(args, cwd: cwd)
     }
 
+    /// Same as `runGit(_:at:)`, but pipes `stdin` to the child process before
+    /// reading its output — needed for `git apply --cached -` (hunk staging,
+    /// see `GitTruthStore.stagePatch`). No existing call in this codebase
+    /// piped data into a subprocess before this; every other `Process` here
+    /// hardcodes `FileHandle.nullDevice`.
+    func runGit(_ args: [String], at cwd: URL, stdin: Data) async throws -> String {
+        let (out, _) = try await git(args, cwd: cwd, stdin: stdin)
+        return out
+    }
+
     /// Run git. When `token` is supplied, credentials are injected via the
     /// process environment (see `authEnv`) and redacted from any error text.
     @discardableResult
-    private func git(_ args: [String], cwd: URL, token: String? = nil, backend: Backend = .gitlab, timeout: TimeInterval? = nil) async throws -> (String, String) {
+    private func git(_ args: [String], cwd: URL, token: String? = nil, backend: Backend = .gitlab, timeout: TimeInterval? = nil, stdin: Data? = nil) async throws -> (String, String) {
         // No wall clock unless the caller asks for one. The old caps (120 s for
         // clone/fetch/pull/push, 30 s for local plumbing) failed the operations
         // that need time most: cloning or fetching a large repo on an ordinary
@@ -419,7 +429,12 @@ final class RepoManager {
                 // authenticating — see gitEnv. Detaching stdin closes the
                 // credential-prompt hole from the other side.
                 proc.environment = Self.gitEnv(token: token, backend: backend)
-                proc.standardInput = FileHandle.nullDevice
+                let stdinPipe = Pipe()
+                if let stdin {
+                    proc.standardInput = stdinPipe
+                } else {
+                    proc.standardInput = FileHandle.nullDevice
+                }
 
                 let stdout = Pipe()
                 let stderr = Pipe()
@@ -455,6 +470,22 @@ final class RepoManager {
                 DispatchQueue.global(qos: .userInitiated).async {
                     errData = stderr.fileHandleForReading.readDataToEndOfFile()
                     readGroup.leave()
+                }
+
+                // Write stdin concurrently with the stdout/stderr drains,
+                // all set up before proc.run() — exactly the same
+                // deadlock-avoidance shape this function already uses for
+                // reading (see the doc comment on the reads above): a
+                // large patch could otherwise fill the stdin pipe buffer
+                // while this thread is blocked writing it, with nothing
+                // yet reading stdout to unblock the child.
+                if let stdin {
+                    readGroup.enter()
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        stdinPipe.fileHandleForWriting.write(stdin)
+                        try? stdinPipe.fileHandleForWriting.close()
+                        readGroup.leave()
+                    }
                 }
 
                 do {
