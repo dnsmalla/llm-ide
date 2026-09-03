@@ -1,6 +1,30 @@
 import Foundation
 import Observation
 
+/// Why a `DiffHunk` was refused before any patch reached `git apply`.
+///
+/// These are REFUSALS, not git failures: nothing is spawned, so the index is
+/// provably untouched. They exist because `git apply --cached` is happy to
+/// accept a patch that is well-formed but semantically wrong and write a
+/// zero-byte blob for it — see `GitTruthStore.assertPatchable`.
+enum HunkPatchError: LocalizedError {
+    /// The hunk covers a whole-file creation (`@@ -0,0 …`) or a whole-file
+    /// deletion (`@@ … +0,0 @@`).
+    case wholeFileHunk(path: String)
+    /// The `@@` header isn't a parsable unified-diff range, so the patch's
+    /// line counts can't be trusted.
+    case unparsableHeader(path: String, header: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .wholeFileHunk(let path):
+            return "\(path): per-hunk staging can't add or delete a whole file — use the file row's + / − button instead."
+        case .unparsableHeader(let path, let header):
+            return "\(path): this hunk's header (\(header.isEmpty ? "empty" : header)) isn't a unified-diff range, so no patch can be built from it."
+        }
+    }
+}
+
 /// Repo-relative path -> effective git status, for file-tree decorations and
 /// (Task 8) editor gutter marks. Supersedes `GitStatusStore` — same
 /// behavior, same names, so P3's Explorer rewiring is a type swap, not a
@@ -126,13 +150,73 @@ final class GitTruthStore {
         }
     }
 
+    /// Refuse, BEFORE spawning git, any hunk `synthesizePatch` cannot
+    /// honestly represent. This is the load-bearing safety check for
+    /// per-hunk staging; the view's `canStageHunks`/`canUnstageHunks` gates
+    /// are the first line, this is the one that cannot be bypassed.
+    ///
+    /// **The hazard is a patch that SUCCEEDS.** `synthesizePatch` always
+    /// emits a content-modification header (`--- a/p` / `+++ b/p`). Handed a
+    /// whole-file add (`@@ -0,0 +1,N @@`) or a whole-file delete
+    /// (`@@ -1,N +0,0 @@`), `git apply --cached` accepts it with **exit
+    /// status 0** and rewrites the index blob to **zero bytes** instead of
+    /// adding or removing the index entry. Verified against real repos:
+    /// unstaging the one hunk of a staged new file left `AM <path>` with an
+    /// empty blob; doing it to a staged rename left `D  old` + `AM new`,
+    /// destroying the rename; staging the one hunk of a deleted file staged
+    /// an empty blob instead of the deletion. Commit after any of those and
+    /// the user commits an empty file — silently.
+    ///
+    /// **Why refuse rather than emit `/dev/null` headers.** A `DiffHunk`
+    /// carries no origin marker, and the header alone is genuinely
+    /// ambiguous: an empty TRACKED file gaining lines produces the same
+    /// `@@ -0,0 +1,N @@` as a brand-new file (verified), so `--- /dev/null`
+    /// would break that legitimate, currently-working case. And the rename
+    /// case is unrepairable in principle — restoring a staged rename needs
+    /// the OLD path, which a `DiffHunk` does not carry, so no header choice
+    /// can express it. Whole-file add/delete/rename already have correct,
+    /// tested handling on `SourceControlService`'s whole-file
+    /// `stage`/`unstage`/`discard`; per-hunk staging stays a
+    /// modification-only primitive and says so out loud.
+    ///
+    /// An unparsable header is refused for the same reason: the `@@` counts
+    /// are the only promise `synthesizePatch` makes about its body, so a
+    /// header git wouldn't recognise cannot produce a patch worth applying.
+    /// (`DiffHunk.fromLineDiff` builds hunks with an EMPTY header for the
+    /// agent-diff views — those must never reach `git apply`.)
+    static func assertPatchable(path: String, hunk: DiffHunk) throws {
+        /// "-a,b" / "+c,d" → b / d. A range with no comma ("-5") is git's
+        /// shorthand for exactly one line.
+        func lineCount(_ token: Substring) -> Int? {
+            let fields = token.dropFirst().split(separator: ",", omittingEmptySubsequences: false)
+            guard let first = fields.first, Int(first) != nil else { return nil }
+            if fields.count == 1 { return 1 }
+            guard fields.count == 2, let count = Int(fields[1]) else { return nil }
+            return count
+        }
+        let parts = hunk.header.split(separator: " ")
+        guard parts.count >= 3, parts[0] == "@@",
+              parts[1].hasPrefix("-"), parts[2].hasPrefix("+"),
+              let oldCount = lineCount(parts[1]), let newCount = lineCount(parts[2]) else {
+            throw HunkPatchError.unparsableHeader(path: path, header: hunk.header)
+        }
+        guard oldCount > 0, newCount > 0 else {
+            throw HunkPatchError.wholeFileHunk(path: path)
+        }
+    }
+
     /// Stage exactly one hunk (not the whole file) via `git apply --cached`,
     /// piping a minimal synthesized patch to its stdin (`RepoManager`'s new
     /// stdin support, added alongside this method). `path` is the file's
     /// repo-relative path — the SAME string `DiffHunk`'s own rows don't
     /// carry (a `DiffHunk` has no path of its own; it's always scoped to
     /// one file by whoever parsed it).
+    ///
+    /// Throws `HunkPatchError` — WITHOUT spawning git, so the index is
+    /// untouched — for any hunk `synthesizePatch` cannot represent; see
+    /// `assertPatchable`.
     func stagePatch(root: URL, path: String, hunk: DiffHunk) async throws {
+        try Self.assertPatchable(path: path, hunk: hunk)
         let patch = Self.synthesizePatch(path: path, hunk: hunk)
         _ = try await repo.runGit(["apply", "--cached", "-"], at: root, stdin: Data(patch.utf8))
     }
@@ -141,18 +225,27 @@ final class GitTruthStore {
     /// `hunk` must be one parsed from the STAGED diff (`git diff --cached`),
     /// not the working-tree diff, or `--reverse` will apply against the
     /// wrong baseline and `git apply` will correctly reject it.
+    ///
+    /// Guarded by the SAME `assertPatchable` check as `stagePatch`. The
+    /// asymmetry — a guard on the stage side only — was the actual bug:
+    /// unstaging is where the whole-file hunks live, because a staged new
+    /// file and a staged rename BOTH diff as `@@ -0,0 +1,N @@`.
     func unstagePatch(root: URL, path: String, hunk: DiffHunk) async throws {
+        try Self.assertPatchable(path: path, hunk: hunk)
         let patch = Self.synthesizePatch(path: path, hunk: hunk)
         _ = try await repo.runGit(["apply", "--cached", "--reverse", "-"], at: root, stdin: Data(patch.utf8))
     }
 
     /// Builds the minimal patch text `git apply` needs for one hunk of an
     /// already-tracked file: a `diff --git`/`---`/`+++` header (both sides
-    /// name the same path — this task's use case is always a modification,
-    /// never a whole-file add/delete, which stay on `SourceControlService`'s
-    /// existing whole-file `stage`/`discard`), then the hunk's own `@@`
-    /// header line verbatim, then each row reconstructed with its unified-
-    /// diff prefix character.
+    /// name the same path), then the hunk's own `@@` header line verbatim,
+    /// then each row reconstructed with its unified-diff prefix character.
+    ///
+    /// **Modification-only, by construction.** The header this emits is a
+    /// content modification, so a whole-file add or delete would be a lie —
+    /// and a dangerous one, because git accepts it and empties the blob.
+    /// Callers MUST go through `stagePatch`/`unstagePatch`, which run
+    /// `assertPatchable` first; do not call this directly.
     private static func synthesizePatch(path: String, hunk: DiffHunk) -> String {
         var lines = [
             "diff --git a/\(path) b/\(path)",

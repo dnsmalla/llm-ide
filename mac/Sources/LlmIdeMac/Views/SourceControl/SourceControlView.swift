@@ -168,15 +168,44 @@ struct SourceControlView: View {
 
     /// Whether the right pane offers per-hunk **Stage** buttons for `file`.
     ///
-    /// Untracked files are deliberately excluded even though they are
-    /// unstaged: `SourceControlService.diff` synthesizes a single
-    /// `@@ -0,0 +1,N @@` hunk covering the file's entire content, so "stage
-    /// this hunk" would just be "stage this file" — which the file row's own
-    /// `+` button already does — and the patch `GitTruthStore` synthesizes
-    /// carries an `a/<path>` header for a blob that does not exist in the
-    /// index, which `git apply --cached` correctly rejects.
+    /// **Per-hunk staging is a MODIFICATION-only feature**, so this is an
+    /// allow-list on `.modified` rather than a deny-list of the statuses
+    /// noticed so far. A deny-list is what produced the bug this replaces:
+    /// it excluded `.untracked` and nothing else, leaving `.deleted`,
+    /// `.added`, `.renamed` and `.conflicted` to reach `git apply --cached`.
+    ///
+    /// Every excluded status already has correct, tested whole-file handling
+    /// on the file row's own `+` / `−` / discard buttons, and for a
+    /// whole-file hunk "stage this hunk" means exactly "stage this file"
+    /// anyway — so nothing the user can express here is lost:
+    ///
+    /// - `.untracked` / `.added` — `SourceControlService.diff` produces one
+    ///   `@@ -0,0 +1,N @@` hunk covering the whole file.
+    /// - `.deleted` — one `@@ -1,N +0,0 @@` hunk.
+    /// - `.renamed` — `git diff --cached -- <newpath>` is pathspec-limited,
+    ///   so git reports a staged rename as a whole-file ADD of the new path.
+    /// - `.conflicted` — `git diff` emits a combined (`@@@`) diff, which
+    ///   `UnifiedDiffParser` does not model.
+    ///
+    /// Handing any of those to `GitTruthStore` is not merely useless, it is
+    /// destructive: `git apply --cached` accepts the modification-shaped
+    /// patch with exit status 0 and writes a ZERO-BYTE blob. `assertPatchable`
+    /// is the backstop that refuses it; this gate is why the user never gets
+    /// offered the button in the first place.
     private func canStageHunks(_ file: FileChange) -> Bool {
-        !file.staged && file.status != .untracked
+        !file.staged && file.status == .modified
+    }
+
+    /// Whether the right pane offers per-hunk **Unstage** buttons for `file`
+    /// — the exact mirror of `canStageHunks`, and the half that was missing.
+    ///
+    /// Unstage used to be gated on `file.staged` alone, so a staged NEW FILE
+    /// and a staged RENAME both offered it, and both silently emptied the
+    /// index blob when it was clicked (`AM <path>`, 0 bytes; the rename
+    /// destroyed outright). Whatever predicate governs stage must govern
+    /// unstage: read the two together, never one alone.
+    private func canUnstageHunks(_ file: FileChange) -> Bool {
+        file.staged && file.status == .modified
     }
 
     /// Stage exactly one hunk, then refresh.
@@ -190,6 +219,11 @@ struct SourceControlView: View {
     ///      git refuses to apply it. Stage the whole file (the file row's
     ///      `+` button) instead.
     ///   2. The file changed on disk after the hunk was parsed.
+    /// A third message comes from `GitTruthStore.assertPatchable` REFUSING
+    /// the hunk before git is spawned at all (a whole-file add/delete, or a
+    /// hunk with no usable `@@` header). `canStageHunks`/`canUnstageHunks`
+    /// normally keep those off screen, so it is a backstop rather than an
+    /// expected path — but it is the one that must never be a `try?`.
     /// A rejected `git apply --cached` is a no-op on the index, so there is
     /// no partial state to unwind — an error message is the whole remedy.
     /// This must NEVER be a `try?`: swallowing it means the user clicks
@@ -334,8 +368,10 @@ struct SourceControlView: View {
     }
 
     /// Working-tree diff plus per-hunk staging. `HunkStagingList` is
-    /// read-only whenever both callbacks are nil, so a staged row offers only
-    /// Unstage and an untracked row offers neither (see `canStageHunks`).
+    /// read-only whenever both callbacks are nil, so an added, deleted,
+    /// renamed, untracked or conflicted row offers neither button — see
+    /// `canStageHunks`/`canUnstageHunks`, which must always be read as a
+    /// pair.
     private func changesDetail(_ root: URL, _ file: FileChange) -> some View {
         VSplitView {
             MonacoDiffView(original: diffOriginal, modified: diffModified,
@@ -343,7 +379,7 @@ struct SourceControlView: View {
             hunkPane(
                 key: Self.diffKey(for: file),
                 onStage: canStageHunks(file) ? { hunk in stageHunk(root: root, file: file, hunk: hunk) } : nil,
-                onUnstage: file.staged ? { hunk in unstageHunk(root: root, file: file, hunk: hunk) } : nil
+                onUnstage: canUnstageHunks(file) ? { hunk in unstageHunk(root: root, file: file, hunk: hunk) } : nil
             )
             .disabled(isStagingHunk)
         }
