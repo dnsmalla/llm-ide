@@ -69,6 +69,10 @@ struct ExplorerView: View {
     /// Persisted chat-panel width (HSplitView has no width binding — read it
     /// back via GeometryReader, same pattern as ReviewView).
     @AppStorage("EXPLORER_CHAT_PANEL_WIDTH") private var chatPanelWidth: Double = 180
+    /// Persisted file-tree width. The tree column is pinned OUTSIDE the
+    /// HSplitView (see `body`), so it gets an explicit draggable divider
+    /// rather than `persistedPanelWidth`.
+    @AppStorage("EXPLORER_TREE_WIDTH") private var treeWidth: Double = 240
 
     /// The Explorer is the code-browsing pane, so it roots at the active
     /// project's `code/` folder (where repos clone to) — not the whole project
@@ -127,9 +131,9 @@ struct ExplorerView: View {
             HStack(spacing: 0) {
                 if treeVisible {
                     treePane
-                        .frame(width: 240)
+                        .frame(width: CGFloat(treeWidth))
                         .transition(.move(edge: .leading))
-                    Divider()
+                    ResizableDivider(width: $treeWidth)
                 }
                 // Editor + chat split, with the shared terminal dock BELOW
                 // just this column — so the terminal sits to the RIGHT of the
