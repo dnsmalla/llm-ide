@@ -19,6 +19,10 @@ struct ExplorerView: View {
     /// (design §3 finding #9).
     @State private var store = ExplorerTreeStore()
 
+    /// Explorer-internal cut/copy clipboard — never `NSPasteboard`. See
+    /// `ExplorerClipboard` for why the system pasteboard is the wrong tool.
+    @State private var clipboard = ExplorerClipboard()
+
     /// `root` with its symlinks resolved, paired with the raw path it was
     /// resolved FROM so a stale value can be detected without re-resolving.
     ///
@@ -498,7 +502,15 @@ struct ExplorerView: View {
             beginRename: { filePrompt = .rename(url: $0) },
             delete: { pendingDelete = $0 },
             revealInFinder: { NSWorkspace.shared.activateFileViewerSelecting($0) },
-            drop: { sources, destination, copy in performDrop(sources, into: destination, copy: copy) }
+            drop: { sources, destination, copy in performDrop(sources, into: destination, copy: copy) },
+            cut: { clipboard.cut($0) },
+            copy: { clipboard.copy($0) },
+            paste: { performPaste(into: $0) },
+            // Read HERE, inside `body`, not behind a closure: this is what
+            // registers the observation dependency that re-enables the Paste
+            // menu item the moment the clipboard changes. See
+            // `ExplorerActions.canPaste`.
+            canPaste: !clipboard.isEmpty
         )
     }
 
@@ -583,6 +595,44 @@ struct ExplorerView: View {
         }
         Task {
             for dir in touched { await reload(URL(fileURLWithPath: dir)) }
+            await refreshGit()
+        }
+    }
+
+    /// Apply the clipboard into `dir`. A cut is consumed (cleared) on a
+    /// successful paste, matching Finder/VS Code — the same cut cannot be
+    /// pasted twice. A copy stays armed so it can be pasted repeatedly, each
+    /// time producing a fresh Finder-style "… copy" sibling.
+    ///
+    /// Self-nesting and name collisions are rejected inside `ExplorerFileOps`
+    /// and surface in the shared alert; this never overwrites anything. On a
+    /// failure the clipboard is deliberately left armed, so the user can fix
+    /// the collision and paste again rather than re-selecting the sources.
+    private func performPaste(into dir: URL) {
+        guard let operation = clipboard.operation, !clipboard.isEmpty else { return }
+        let sources = clipboard.urls
+        let isMove = operation == .cut
+        var touched: Set<String> = [ExplorerPaths.key(dir)]
+        do {
+            // Canonical before anything enters `store.selection` or a tab:
+            // `List(selection:)` matches rows by raw `URL` hashing, and a URL
+            // built by appending a name to a directory keeps that directory's
+            // spelling instead of the one `loadChildren` produced.
+            let results = try ExplorerFileOps.paste(sources, into: dir, move: isMove)
+                .map(ExplorerPaths.canonical)
+            if isMove {
+                for (source, result) in zip(sources, results) {
+                    touched.insert(ExplorerPaths.key(source.deletingLastPathComponent()))
+                    remap(from: source, to: result)
+                }
+                clipboard.clear()
+            }
+            store.selection = Set(results)
+        } catch {
+            opError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
+        }
+        Task {
+            for parent in touched { await reload(URL(fileURLWithPath: parent)) }
             await refreshGit()
         }
     }

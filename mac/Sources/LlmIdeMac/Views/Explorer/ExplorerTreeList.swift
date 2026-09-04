@@ -18,6 +18,19 @@ struct ExplorerActions {
     /// Drag & drop landing. `copy` is true when ⌥ was held (Finder's
     /// convention); otherwise the sources are moved.
     var drop: (_ sources: [URL], _ destinationDir: URL, _ copy: Bool) -> Void
+    var cut: ([URL]) -> Void
+    var copy: ([URL]) -> Void
+    /// Paste into this directory.
+    var paste: (URL) -> Void
+    /// Whether the clipboard currently holds anything — gates the menu item.
+    ///
+    /// A stored `Bool`, NOT a `() -> Bool`: `ExplorerView` recomputes this
+    /// bundle inside `body`, so reading the clipboard THERE registers the
+    /// observation dependency that re-renders the tree when the clipboard
+    /// changes. Behind a closure the read would happen only when the closure
+    /// runs — inside an already-built menu, outside that tracking — and the
+    /// Paste item would stay stale until something else redrew the view.
+    var canPaste: Bool
 }
 
 /// The file tree, as a real `List` with a `Set<URL>` selection.
@@ -89,7 +102,32 @@ struct ExplorerTreeList: View {
         return rows.first { selected.contains($0.url) }
     }
 
+    /// The selection in display order — `Set` iteration order is not stable,
+    /// and a cut/copy of several rows should keep the order the user sees.
+    /// Resolved through `rows` (the already-flattened visible tree) rather
+    /// than a second `store.flatten` call, which costs ~3.75 ms at 2000 rows.
+    private var selectedInDisplayOrder: [URL] {
+        let selected = store.selection
+        guard !selected.isEmpty else { return [] }
+        return rows.map(\.url).filter { selected.contains($0) }
+    }
+
     private func handle(_ command: ExplorerKeyCommand) {
+        // Clipboard commands are valid with NO selection: paste lands in the
+        // display root. So they are resolved before the focused-row guard.
+        switch command {
+        case .cut:
+            actions.cut(selectedInDisplayOrder)
+            return
+        case .copy:
+            actions.copy(selectedInDisplayOrder)
+            return
+        case .paste:
+            actions.paste(focusedRow.map(\.enclosingDir) ?? displayRoot)
+            return
+        case .expand, .collapse, .open, .rename:
+            break
+        }
         guard let row = focusedRow else { return }
         switch command {
         case .expand:
@@ -115,8 +153,18 @@ struct ExplorerTreeList: View {
             }
         case .rename:
             actions.beginRename(row.url)
+        case .cut, .copy, .paste:
+            break   // handled above, before the focused-row guard
         }
     }
+}
+
+private extension ExplorerTreeStore.Row {
+    /// The directory this row ACTS ON: itself when it is a folder, its parent
+    /// when it is a file. Finder's and VS Code's rule — a file is never a
+    /// container. One definition shared by New File / New Folder, the row's
+    /// drop target, and paste, so the three cannot drift apart.
+    var enclosingDir: URL { isDirectory ? url : url.deletingLastPathComponent() }
 }
 
 /// One row: the shared `TreeRowLabel` plus this tree's context menu.
@@ -151,7 +199,7 @@ private struct ExplorerTreeRow: View {
             guard !sources.isEmpty else { return false }
             // Dropping on a FILE targets the folder it lives in, matching
             // Finder and VS Code — a file is never itself a container.
-            actions.drop(sources, enclosingDir, NSEvent.modifierFlags.contains(.option))
+            actions.drop(sources, row.enclosingDir, NSEvent.modifierFlags.contains(.option))
             return true
         }
         .contextMenu { contextMenuItems }
@@ -166,16 +214,16 @@ private struct ExplorerTreeRow: View {
         store.selection.contains(row.url) ? Array(store.selection) : [row.url]
     }
 
-    /// Where "New File"/"New Folder" create: inside a folder row, alongside a
-    /// file row.
-    private var enclosingDir: URL {
-        row.isDirectory ? row.url : row.url.deletingLastPathComponent()
-    }
-
     @ViewBuilder
     private var contextMenuItems: some View {
-        Button("New File") { actions.newFile(enclosingDir) }
-        Button("New Folder") { actions.newFolder(enclosingDir) }
+        Button("New File") { actions.newFile(row.enclosingDir) }
+        Button("New Folder") { actions.newFolder(row.enclosingDir) }
+        Divider()
+        Button(targets.count > 1 ? "Cut \(targets.count) Items" : "Cut") { actions.cut(targets) }
+        Button(targets.count > 1 ? "Copy \(targets.count) Items" : "Copy") { actions.copy(targets) }
+        Button("Paste") { actions.paste(row.enclosingDir) }
+            .disabled(!actions.canPaste)
+        Divider()
         Button("Rename") { actions.beginRename(row.url) }
         Button(targets.count > 1 ? "Delete \(targets.count) Items" : "Delete",
                role: .destructive) { actions.delete(targets) }

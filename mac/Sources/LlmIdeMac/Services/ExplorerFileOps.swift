@@ -194,6 +194,30 @@ enum ExplorerFileOps {
         return dest
     }
 
+    /// Apply a clipboard paste into `dir`: move each item when `shouldMove`
+    /// (a cut), copy it otherwise. Returns the resulting URLs in input order.
+    ///
+    /// Adds NO containment check of its own — `move`/`copy` already reject
+    /// self-nesting through `assertNotSelfNesting`, and a second, weaker
+    /// string-level check here would only be able to disagree with them.
+    ///
+    /// Stops at the first failure and rethrows — the items already processed
+    /// stay processed. That is deliberate: silently continuing past an error
+    /// would leave the user unable to tell which items landed, and rolling
+    /// back a partially-applied move is itself a destructive operation.
+    @discardableResult
+    static func paste(_ urls: [URL], into dir: URL, move shouldMove: Bool) throws -> [URL] {
+        var results: [URL] = []
+        for url in urls {
+            if shouldMove {
+                results.append(try move(from: url, to: dir))
+            } else {
+                results.append(try copy(from: url, to: dir))
+            }
+        }
+        return results
+    }
+
     /// A free URL for `name` inside `dir`, following Finder's naming:
     /// `a.txt` → `a copy.txt` → `a copy 2.txt` → `a copy 3.txt`. The base name
     /// and extension are split with `deletingPathExtension`/`pathExtension`

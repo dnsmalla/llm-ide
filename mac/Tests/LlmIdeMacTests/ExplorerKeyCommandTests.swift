@@ -40,6 +40,32 @@ final class ExplorerKeyCommandTests: XCTestCase {
         XCTAssertNil(ExplorerKeyCommand.resolve(character: "\u{F705}", command: true))
     }
 
+    func testCommandXCVAreCutCopyPaste() {
+        XCTAssertEqual(ExplorerKeyCommand.resolve(character: "x", command: true), .cut)
+        XCTAssertEqual(ExplorerKeyCommand.resolve(character: "c", command: true), .copy)
+        XCTAssertEqual(ExplorerKeyCommand.resolve(character: "v", command: true), .paste)
+    }
+
+    func testCommandLettersAreCaseInsensitive() {
+        // ⇧⌘C reports an uppercase character; it must still mean copy rather
+        // than falling through as an unhandled key.
+        XCTAssertEqual(ExplorerKeyCommand.resolve(character: "X", command: true), .cut)
+        XCTAssertEqual(ExplorerKeyCommand.resolve(character: "C", command: true), .copy)
+    }
+
+    func testBareLettersAreNotClipboardCommands() {
+        XCTAssertNil(ExplorerKeyCommand.resolve(character: "x", command: false))
+        XCTAssertNil(ExplorerKeyCommand.resolve(character: "v", command: false))
+    }
+
+    /// The clipboard branch must not swallow the non-command bindings F2 and
+    /// ⏎ still own — adding ⌘X/⌘C/⌘V is a pure addition, not a takeover.
+    func testCommandBranchDoesNotEatTheOtherBindings() {
+        XCTAssertEqual(ExplorerKeyCommand.resolve(character: "\u{F705}", command: false), .rename)
+        XCTAssertEqual(ExplorerKeyCommand.resolve(character: "\r", command: false), .open)
+        XCTAssertNil(ExplorerKeyCommand.resolve(character: "z", command: true))
+    }
+
     /// Pins the scalars against SwiftUI's own constants, so a wrong literal
     /// here fails the test rather than silently making the arrow keys dead.
     func testScalarsMatchSwiftUIKeyEquivalents() {

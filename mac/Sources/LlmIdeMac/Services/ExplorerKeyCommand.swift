@@ -18,6 +18,9 @@ enum ExplorerKeyCommand: Equatable {
     case collapse
     case open
     case rename
+    case cut
+    case copy
+    case paste
 
     /// The AppKit function-key scalars SwiftUI's `KeyEquivalent` constants
     /// carry (`NSRightArrowFunctionKey` = 0xF703, `NSLeftArrowFunctionKey` =
@@ -33,10 +36,23 @@ enum ExplorerKeyCommand: Equatable {
     /// `List` rows now, not buttons.
     static let f2: Character = "\u{F705}"
 
-    /// `command` is whether ⌘ was held. Command-modified keys are never claimed
-    /// here: ⌘←/⌘→ are macOS line-navigation chords, and ⌘⏎ is reserved.
+    /// `command` is whether ⌘ was held. The ONLY command chords claimed are
+    /// ⌘X/⌘C/⌘V; everything else command-modified is left to the system —
+    /// ⌘←/⌘→ are macOS line-navigation chords, and ⌘⏎ is reserved.
     static func resolve(character: Character, command: Bool) -> ExplorerKeyCommand? {
-        guard !command else { return nil }
+        if command {
+            // ⇧⌘C reports "C", so compare lowercased — otherwise the shifted
+            // chord falls through as an unhandled key. Compared as a `String`
+            // rather than via `Character(character.lowercased())`: that
+            // initializer traps unless the result is exactly one Character,
+            // and this switch has no need to reconstruct one.
+            switch character.lowercased() {
+            case "x": return .cut
+            case "c": return .copy
+            case "v": return .paste
+            default:  return nil
+            }
+        }
         switch character {
         case rightArrow: return .expand
         case leftArrow:  return .collapse
