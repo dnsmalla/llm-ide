@@ -70,6 +70,13 @@ enum WorkspaceRoot {
     /// empty tree. A brand-new project genuinely has no `code/` — nothing
     /// creates it until a repo is cloned — so this is a live path, not a
     /// defensive flourish.
+    ///
+    /// NEVER CALL THIS FROM A VIEW `body`. It does synchronous filesystem I/O
+    /// (`contentsOfDirectory` + `resolvingSymlinksInPath`) on the main actor and
+    /// caches nothing, so a per-render computed `var root` would re-walk the
+    /// workspace on every render. Resolve it once into `@State` from a
+    /// `.task(id:)`, the way `ExplorerView` stamps `treeRoot` — that is the
+    /// pattern the follow-up should copy when it removes the duplication above.
     @MainActor
     static func browsingRoot(config: AppConfig, projectStore: ProjectStore) -> URL? {
         pickBrowsingRoot(codeDir: projectStore.activeProjectCodeDir.map(ExplorerPaths.canonical),
