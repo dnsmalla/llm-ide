@@ -84,8 +84,12 @@ enum ExplorerPaths {
     /// `contentsOfDirectory` comes back hinted, and the two are `==`-unequal
     /// despite identical `.path`. Measured, that is exactly how a
     /// just-created folder fails to select itself. So the hint is re-derived
-    /// from the filesystem here. A path that does not exist keeps the
-    /// caller's hint — there is nothing to ask.
+    /// from the filesystem here. For a path that does NOT exist there is
+    /// nothing to ask, so this function leaves the hint alone — but do not read
+    /// that as "the hint survives": `standardizedFileURL` may already have
+    /// dropped it before this point (it does under `/var/folders`). The
+    /// guarantee for a non-existent path is only that the result is exactly
+    /// what the previous, hint-preserving `canonical` returned.
     ///
     /// This exists because `FileManager.contentsOfDirectory` returns
     /// symlink-resolved URLs while building a child URL with

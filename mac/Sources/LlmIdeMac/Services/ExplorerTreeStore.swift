@@ -429,13 +429,20 @@ final class ExplorerTreeStore {
     /// it did while it existed and the entry would leak.
     ///
     /// **One hop, one mutation.** This runs unattended on every FSEvent, so it
-    /// enumerates every cached directory in a SINGLE detached task and then
-    /// applies the whole result at once, rather than awaiting each directory in
-    /// turn. The sequential shape measured 330 ms across 201 cached directories
-    /// — almost all of it main-actor↔detached round-trips, not enumeration —
-    /// and, worse, wrote `children` up to N times with real suspension points
+    /// enumerates every cached directory in a SINGLE detached task and applies
+    /// the whole result at once, rather than awaiting each directory in turn.
+    ///
+    /// The reason is the **mutation count, not wall time**. Awaiting per
+    /// directory wrote `children` up to N times with real suspension points
     /// between the writes, so one watcher tick could make SwiftUI recompute the
-    /// view (and re-run `flatten`) N times instead of once.
+    /// view — and re-run `flatten` — N times instead of once. Measured, the
+    /// main-actor↔detached round-trips this removes are only ~3-5% of the
+    /// refresh (21.8 ms of 402 ms under `/var/folders`, 3.5 ms of 127 ms under
+    /// `$HOME`). The wall-time term is `.standardizedFileURL` per child, and it
+    /// is only expensive on `/private`-prefixed paths, where Foundation's
+    /// documented `/private` special case makes it hit the filesystem — which
+    /// is why a temp-directory benchmark of this method reads several times
+    /// worse than a real workspace under `/Users`.
     ///
     /// Batching does NOT weaken the newest-load-wins guarantee: every
     /// directory still takes its own ticket up front and every write is still
@@ -443,10 +450,9 @@ final class ExplorerTreeStore {
     /// during the walk still wins over this refresh's stale result for that
     /// one directory.
     func refreshLoaded() async {
-        let fm = FileManager.default
         let keys = Array(children.keys)
         guard !keys.isEmpty else {
-            selection = selection.filter { fm.fileExists(atPath: $0.path) }
+            await pruneVanishedSelection()
             return
         }
 
@@ -459,7 +465,13 @@ final class ExplorerTreeStore {
             pendingLoads[key] = loadTicket
         }
 
-        let walked = await Task.detached(priority: .userInitiated) { [keys] in
+        // Stat the selection in the SAME detached walk. Select-all makes this
+        // set as large as the tree, and it was the last piece of main-actor
+        // filesystem I/O left in here — 108 ms for 4000 selected rows, on every
+        // FSEvent tick.
+        let selectionSnapshot = selection
+
+        let walked = await Task.detached(priority: .userInitiated) { [keys, selectionSnapshot] in
             let fm = FileManager.default
             var fresh: [String: [FileSystemTree.Node]] = [:]
             var dead: [String] = []
@@ -474,7 +486,8 @@ final class ExplorerTreeStore {
                                         name: $0.name, isDirectory: $0.isDirectory)
                 }
             }
-            return (fresh: fresh, dead: dead)
+            let vanished = selectionSnapshot.filter { !fm.fileExists(atPath: $0.path) }
+            return (fresh: fresh, dead: dead, vanished: vanished)
         }.value
 
         // Apply synchronously — no awaits from here on, and each observable
@@ -492,10 +505,22 @@ final class ExplorerTreeStore {
         }
         children = updated
         if !deadKeys.isEmpty { expanded.subtract(deadKeys) }
-        // Read the CURRENT selection rather than a snapshot taken before the
-        // walk: the user may have selected something while it ran, and this
-        // must prune vanished rows, not clobber a newer selection.
-        selection = selection.filter { fm.fileExists(atPath: $0.path) }
+        // SUBTRACT what the walk found gone, rather than assigning a filtered
+        // snapshot. The snapshot is pre-walk, so assigning it would clobber
+        // anything the user selected while the walk ran; subtracting only ever
+        // removes rows that were confirmed gone, and leaves newer ones alone.
+        if !walked.vanished.isEmpty { selection.subtract(walked.vanished) }
+    }
+
+    /// Drop selected rows whose file is gone, doing the `stat`s off the main
+    /// actor. Used on the path where there is no cached directory to walk.
+    private func pruneVanishedSelection() async {
+        guard !selection.isEmpty else { return }
+        let snapshot = selection
+        let vanished = await Task.detached(priority: .userInitiated) { [snapshot] in
+            snapshot.filter { !FileManager.default.fileExists(atPath: $0.path) }
+        }.value
+        if !vanished.isEmpty { selection.subtract(vanished) }
     }
 
     private var watcher: RepoFileWatcher?
