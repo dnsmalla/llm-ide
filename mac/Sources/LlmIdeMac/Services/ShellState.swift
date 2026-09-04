@@ -130,6 +130,26 @@ final class ShellState {
     /// clears it), so the action works even when that meeting's detail pane
     /// isn't open yet — surviving the async mount a notification can't.
     var pendingResummarizeMeetingId: String?
+
+    /// Set by the Explorer's "Find in Folder" action: the `SearchView` "files
+    /// to include" glob to apply on its next appearance.
+    ///
+    /// A property rather than a `Notification`, for the same reason
+    /// `pendingResummarizeMeetingId` is one: switching sections is what MOUNTS
+    /// `SearchView`, so a notification posted at switch time would be
+    /// delivered before any observer existed.
+    var pendingSearchInclude: String?
+
+    /// Read and clear in one step, so a handoff applies exactly once and does
+    /// not re-narrow the search every time the user returns to the panel.
+    ///
+    /// Note `""` is a REAL value here — it is what
+    /// `ExplorerPaths.includeGlob` returns for the root itself, meaning
+    /// "search everything" — so absence is `nil` and only `nil`.
+    func takePendingSearchInclude() -> String? {
+        defer { pendingSearchInclude = nil }
+        return pendingSearchInclude
+    }
 }
 
 extension ShellState.Section {

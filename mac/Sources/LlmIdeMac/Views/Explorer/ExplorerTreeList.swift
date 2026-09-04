@@ -41,6 +41,14 @@ struct ExplorerActions {
     /// into a terminal, a chat message or another editor. `relative` selects
     /// display-root-relative paths over absolute ones.
     var copyPath: (_ urls: [URL], _ relative: Bool) -> Void
+    /// Switch to Search, scoped to this folder.
+    var findInFolder: (URL) -> Void
+    /// Whether this folder is reachable from SEARCH's root. Search and the
+    /// Explorer tree resolve their roots differently (design §3 finding #10,
+    /// assigned to P4), so a folder can legitimately sit outside Search's
+    /// reach — in which case the menu item is DISABLED rather than silently
+    /// running a search that returns nothing.
+    var canFindIn: (URL) -> Bool
 }
 
 /// The file tree, as a real `List` with a `Set<URL>` selection.
@@ -335,6 +343,13 @@ private struct ExplorerTreeRow: View {
         Divider()
         Button("Copy Path") { actions.copyPath(targets, false) }
         Button("Copy Relative Path") { actions.copyPath(targets, true) }
+        // Folders only — "Find in this file" is not a thing, and unlike the
+        // items above this one acts on the clicked ROW, never the selection:
+        // Search takes exactly one scope.
+        if row.isDirectory {
+            Button("Find in Folder") { actions.findInFolder(row.url) }
+                .disabled(!actions.canFindIn(row.url))
+        }
         Divider()
         Button("Reveal in Finder") { actions.revealInFinder(targets) }
     }

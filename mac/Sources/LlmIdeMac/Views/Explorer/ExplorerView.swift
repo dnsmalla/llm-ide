@@ -10,6 +10,7 @@ struct ExplorerView: View {
 
     @EnvironmentObject private var projectStore: ProjectStore
     @EnvironmentObject private var config: AppConfig
+    @Environment(ShellState.self) private var shell
 
     @State private var showProjectPaths = false
 
@@ -138,6 +139,15 @@ struct ExplorerView: View {
     /// against the actual working tree instead.
     private var gitRoot: URL? {
         WorkspaceRoot.gitWorkingTree(config: config, projectStore: projectStore)
+    }
+
+    /// The root `SearchView` walks — a THIRD root, distinct from both `root`
+    /// (the tree's `code/` container) and `gitRoot` (the git working tree).
+    /// Unifying Search's root with the Explorer's is design §3 finding #10 and
+    /// belongs to P4; until then, Find in Folder computes against Search's
+    /// ACTUAL root so the handoff is honest rather than plausible.
+    private var searchRoot: URL? {
+        WorkspaceRoot.resolve(config: config, projectStore: projectStore)
     }
 
     /// cwd for the embedded terminal dock — mirrors AppShell.projectDirectory
@@ -535,8 +545,25 @@ struct ExplorerView: View {
             canPaste: !clipboard.isEmpty,
             commitRename: { url, name in commitRename(url, to: name) },
             cancelRename: { renamingURL = nil },
-            copyPath: { urls, relative in copyPaths(urls, relative: relative, base: displayRoot) }
+            copyPath: { urls, relative in copyPaths(urls, relative: relative, base: displayRoot) },
+            findInFolder: { findInFolder($0) },
+            canFindIn: { url in
+                guard let searchRoot else { return false }
+                return ExplorerPaths.includeGlob(for: url, root: searchRoot) != nil
+            }
         )
+    }
+
+    /// Scope Search to `folder`, then switch to it.
+    ///
+    /// Setting the pending glob BEFORE changing the section is load-bearing:
+    /// the section change is what mounts `SearchView`, and its `.task` reads
+    /// the value on mount. Writing it afterwards would arrive too late.
+    private func findInFolder(_ folder: URL) {
+        guard let searchRoot,
+              let glob = ExplorerPaths.includeGlob(for: folder, root: searchRoot) else { return }
+        shell.pendingSearchInclude = glob
+        shell.section = .search
     }
 
     /// Put one path per line on the SYSTEM pasteboard — the one legitimate use

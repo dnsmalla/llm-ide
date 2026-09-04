@@ -5,6 +5,7 @@ struct SearchView: View {
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var projectStore: ProjectStore
+    @Environment(ShellState.self) private var shell
     @State private var searchService = SearchService()
 
     // Find state
@@ -42,6 +43,16 @@ struct SearchView: View {
             searchHeaderBar
             Divider()
             content
+        }
+        .task {
+            // The Explorer's "Find in Folder" handoff, consumed once on mount.
+            // `scheduleSearch()` is called explicitly rather than relying on
+            // the glob field's `onChange`: re-scoping to the SAME folder twice
+            // writes an unchanged value, which fires nothing.
+            if let pending = shell.takePendingSearchInclude() {
+                include = pending
+                scheduleSearch()
+            }
         }
     }
 
