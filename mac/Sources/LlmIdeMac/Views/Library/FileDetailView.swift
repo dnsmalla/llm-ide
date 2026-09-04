@@ -11,19 +11,21 @@ struct FileDetailView: View {
     /// When set (Library detail pane), shows a close control that clears the
     /// selection so the file list can use the full detail column again.
     var onClose: (() -> Void)? = nil
-    /// 1-based line to reveal once the editor has loaded (e.g. a search
-    /// result's line-jump, P4). `nil` for the common "just open the file"
-    /// case. Ignored by kinds that have no text editor (`.pdf`/`.image`/
-    /// `.quicklook`).
-    var initialLine: Int? = nil
+    /// Where to scroll once the editor has content — a search result's
+    /// line-jump. `MonacoRevealRequest` rather than a bare `Int` because it
+    /// carries a fresh `UUID`: clicking the SAME result twice must still
+    /// scroll, and an unchanged `Int` would look like no request at all.
+    /// `nil` for the common "just open the file" case. Ignored by kinds with
+    /// no text editor (`.pdf`/`.image`/`.quicklook`).
+    var revealTarget: MonacoRevealRequest? = nil
 
     var body: some View {
         Group {
             switch fileKind {
-            case .markdown:  MarkdownDetailView(url: url, initialLine: initialLine)
+            case .markdown:  MarkdownDetailView(url: url, revealTarget: revealTarget)
             case .pdf:       PDFDetailView(url: url)
             case .image:     ImageDetailView(url: url)
-            case .code:      CodeDetailView(url: url, initialLine: initialLine)
+            case .code:      CodeDetailView(url: url, revealTarget: revealTarget)
             case .quicklook: QuickLookDetailView(url: url)
             }
         }
@@ -95,12 +97,14 @@ struct FileDetailView: View {
 
 struct MarkdownDetailView: View {
     let url: URL
-    var initialLine: Int? = nil
+    var revealTarget: MonacoRevealRequest? = nil
     @EnvironmentObject private var theme: ThemeStore
 
     var body: some View {
+        // The rendered-markdown preview has no line model to scroll to, so it
+        // ignores the reveal; Edit mode's MonacoEditorView still honours it.
         EditableTextDetailView(url: url, startInPreview: true, language: "markdown",
-                               initialLine: initialLine) { content in
+                               revealTarget: revealTarget) { content, _ in
             MarkdownWebView(markdown: content, isDark: theme.current.isDark)
         }
     }
@@ -193,7 +197,7 @@ struct ImageDetailView: View {
 
 struct CodeDetailView: View {
     let url: URL
-    var initialLine: Int? = nil
+    var revealTarget: MonacoRevealRequest? = nil
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var projectStore: ProjectStore
@@ -208,12 +212,18 @@ struct CodeDetailView: View {
             startInPreview: true,   // open code highlighted (read-only); Edit is one toggle away
             language: MonacoLanguageMap.id(for: url.pathExtension),
             decorations: changedLines,
-            initialLine: initialLine
-        ) { content in
+            revealTarget: revealTarget
+        ) { content, reveal in
+            // The reveal MUST reach the preview too: code files open in
+            // preview (startInPreview: true above), so a search-result click
+            // lands here first. Before this, the preview's MonacoEditorView
+            // took no revealRequest at all and the click simply never
+            // scrolled.
             MonacoEditorView(
                 content: .constant(content),
                 language: MonacoLanguageMap.id(for: url.pathExtension),
                 decorations: changedLines,
+                revealRequest: reveal,
                 readOnly: true
             )
         }
@@ -283,27 +293,30 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     /// Git gutter marks for the editor, keyed by line number. Empty for
     /// content types (markdown) that don't track a git gutter.
     var decorations: [Int: GitGutter.Mark] = [:]
-    /// Optional Monaco line-jump target for `MonacoRevealRequest`
-    /// (design's line-jump API — P4's search results are the first real
-    /// caller). `nil` for the common "just open the file" case.
-    var initialLine: Int? = nil
+    /// Where to scroll once content has loaded — the search-result
+    /// line-jump. Held back until `content` is non-empty (see
+    /// `MonacoRevealGate`), then handed to BOTH the editor and the preview.
+    var revealTarget: MonacoRevealRequest? = nil
     /// Optional toolbar accessory rendered just left of Revert/Save.
     let accessory: () -> Accessory
-    let preview: (String) -> Preview
+    /// The read-only renderer. Takes the reveal request as well as the text
+    /// because code files open in preview, so the preview is where a
+    /// search-result click lands first.
+    let preview: (String, MonacoRevealRequest?) -> Preview
 
     init(url: URL,
          onSaved: (() async -> Void)? = nil,
          startInPreview: Bool = false,
          language: String = "plaintext",
          decorations: [Int: GitGutter.Mark] = [:],
-         initialLine: Int? = nil,
+         revealTarget: MonacoRevealRequest? = nil,
          @ViewBuilder accessory: @escaping () -> Accessory,
-         @ViewBuilder preview: @escaping (String) -> Preview) {
+         @ViewBuilder preview: @escaping (String, MonacoRevealRequest?) -> Preview) {
         self.url = url
         self.onSaved = onSaved
         self.language = language
         self.decorations = decorations
-        self.initialLine = initialLine
+        self.revealTarget = revealTarget
         self.accessory = accessory
         self.preview = preview
         // Code/markdown open in the rendered/highlighted Preview by default
@@ -334,7 +347,7 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
                     ContentUnavailableView("Can't Read File", systemImage: "doc.slash",
                                            description: Text(err))
                 } else if isPreview {
-                    preview(content)
+                    preview(content, revealRequest)
                 } else {
                     editor
                 }
@@ -347,6 +360,14 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
             }
         }
         .task(id: url) { await load() }
+        .onChange(of: revealTarget) { _, new in
+            // THE same-file fix. `.task(id: url)` does not re-run when only
+            // the line changes — clicking a second result in a file that is
+            // already open changes `revealTarget` and nothing else — so
+            // `load()` would never see it and the editor would never scroll.
+            guard MonacoRevealGate.shouldApply(target: new, contentIsEmpty: content.isEmpty) else { return }
+            revealRequest = new
+        }
         .confirmationDialog(
             "Discard unsaved changes?",
             isPresented: $showRevertConfirm,
@@ -455,8 +476,12 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
             }.value
             content = raw
             savedContent = raw
-            if let initialLine {
-                revealRequest = MonacoRevealRequest(line: initialLine)
+            // Applied here, after `content` is set, because a reveal against
+            // an empty buffer scrolls nothing AND burns the request (see
+            // MonacoRevealGate). This covers opening a NEW file at a line;
+            // the `.onChange` above covers a second click in the same file.
+            if MonacoRevealGate.shouldApply(target: revealTarget, contentIsEmpty: raw.isEmpty) {
+                revealRequest = revealTarget
             }
         } catch {
             loadError = "The file could not be decoded as text. (\(error.localizedDescription))"
@@ -508,10 +533,10 @@ extension EditableTextDetailView where Accessory == EmptyView {
          startInPreview: Bool = false,
          language: String = "plaintext",
          decorations: [Int: GitGutter.Mark] = [:],
-         initialLine: Int? = nil,
-         @ViewBuilder preview: @escaping (String) -> Preview) {
+         revealTarget: MonacoRevealRequest? = nil,
+         @ViewBuilder preview: @escaping (String, MonacoRevealRequest?) -> Preview) {
         self.init(url: url, onSaved: onSaved, startInPreview: startInPreview,
-                  language: language, decorations: decorations, initialLine: initialLine,
+                  language: language, decorations: decorations, revealTarget: revealTarget,
                   accessory: { EmptyView() }, preview: preview)
     }
 }

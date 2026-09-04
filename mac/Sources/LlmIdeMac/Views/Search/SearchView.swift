@@ -29,6 +29,12 @@ struct SearchView: View {
     // Editor pane
     @State private var tabs: [URL] = []
     @State private var activeTab: URL?
+    /// The pending line-jump and the file it belongs to. The URL is tracked
+    /// alongside the request because the user can also change tabs from
+    /// `EditorTabBar` — without it, switching to an unrelated tab would apply
+    /// the last search result's line number to a completely different file.
+    @State private var revealTarget: MonacoRevealRequest?
+    @State private var revealTargetURL: URL?
 
     // Search lifecycle
     @State private var debounce: Task<Void, Never>?
@@ -268,7 +274,7 @@ struct SearchView: View {
         }
         .padding(.horizontal, 6).padding(.vertical, 1)
         .contentShape(Rectangle())
-        .onTapGesture { open(fm.url) }
+        .onTapGesture { open(fm.url, line: lm.line) }
         .modifier(RowHoverActions(
             canReplace: showReplace && !replaceText.isEmpty,
             onReplace: { if let m = lm.matches.first { replaceOneAction(fm, fileIndex: m.fileIndex) } },
@@ -281,7 +287,11 @@ struct SearchView: View {
     @ViewBuilder private var editorPane: some View {
         VStack(spacing: 0) {
             if !tabs.isEmpty { EditorTabBar(tabs: $tabs, activeTab: $activeTab); Divider() }
-            if let activeTab { FileDetailView(url: activeTab).id(activeTab) }
+            if let activeTab {
+                FileDetailView(url: activeTab,
+                               revealTarget: activeTab == revealTargetURL ? revealTarget : nil)
+                    .id(activeTab)
+            }
             else { emptyState("Select a result to open") }
         }
     }
@@ -344,9 +354,21 @@ struct SearchView: View {
 
     // MARK: - Actions
 
-    private func open(_ url: URL) {
+    /// Open the result's file and scroll to its line. Before this, `open`
+    /// took only the URL and `FileDetailView` took no line at all, so a match
+    /// on line 847 opened the file at line 1 — search found matches the user
+    /// could not navigate to.
+    ///
+    /// A FRESH request every click, deliberately: `MonacoRevealRequest`
+    /// carries a UUID, so clicking the same result twice still scrolls — a
+    /// bare line number would look unchanged and do nothing the second time.
+    /// Constructed here, in an action, never inline in `body`, exactly as
+    /// `MonacoRevealRequest`'s own doc comment requires.
+    private func open(_ url: URL, line: Int) {
         if !tabs.contains(url) { tabs.append(url) }
         activeTab = url
+        revealTargetURL = url
+        revealTarget = MonacoRevealRequest(line: line)
     }
 
     // MARK: Replace actions (re-search after so results reflect the new state)
