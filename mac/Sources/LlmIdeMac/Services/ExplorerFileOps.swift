@@ -101,18 +101,35 @@ enum ExplorerFileOps {
     /// this cannot be left to the user to work around by renaming twice.
     ///
     /// The same-place test is `realWorldKey`, the fs-aware key the move/copy
-    /// guards already use — not a raw `lowercased()` comparison — so the
-    /// question asked is the one that matters: "do these two names denote the
-    /// same entry on THIS volume?" On a genuinely case-sensitive volume
-    /// `isCaseInsensitiveVolume` is false, the branch is skipped, and the
-    /// ordinary path handles it correctly (there `foo.swift` really is a
-    /// different, free name).
+    /// guards already use, AND a plain case-folded comparison of the two LEAF
+    /// names. Both are needed, and neither alone is right.
+    ///
+    /// `realWorldKey` alone is too LOOSE. It calls `resolvingSymlinksInPath()`,
+    /// which resolves the leaf of both sides — so it also reports "same place"
+    /// for three shapes that are two DISTINCT directory entries aliasing one
+    /// target: a symlink renamed onto its own target (`Link.txt` → `real.txt`),
+    /// one of two symlinks renamed onto the other (`A.txt` → `B.txt`, both
+    /// pointing at `t.txt`), and a directory symlink renamed onto the real
+    /// directory. Those must be refused, and routing them through the two-step
+    /// made them fail on the SECOND move with a raw Cocoa sentence quoting the
+    /// internal staging name — leaking a UUID no user can act on.
+    ///
+    /// The leaf comparison alone is too NARROW to be the whole test: it says
+    /// nothing about whether the volume folds case, which is what decides
+    /// whether the destination is occupied at all.
+    ///
+    /// Together they say exactly "same entry, spelled differently in case":
+    /// a case-only rename has the same case-folded leaf by definition, and
+    /// none of the three alias shapes ever does. So all three fall through to
+    /// the ordinary path and are refused with `.alreadyExists`, victims intact.
+    ///
+    /// On a genuinely case-sensitive volume `isCaseInsensitiveVolume` is false,
+    /// the branch is skipped, and the ordinary path handles it correctly (there
+    /// `foo.swift` really is a different, free name).
     ///
     /// Everything else still goes down the ordinary path, so a rename onto a
     /// DIFFERENT existing name is still refused with the victim intact —
-    /// including `Foo.swift` → `Bar.swift` where `bar.swift` exists, which
-    /// differs from the case-only shape precisely because the destination
-    /// resolves somewhere the source does not.
+    /// including `Foo.swift` → `Bar.swift` where `bar.swift` exists.
     @discardableResult
     static func rename(_ url: URL, to newName: String) throws -> URL {
         let trimmed = try validate(newName)
@@ -121,6 +138,7 @@ enum ExplorerFileOps {
         if dest == url { return url }
 
         if isCaseInsensitiveVolume(url),
+           trimmed.lowercased() == url.lastPathComponent.lowercased(),
            realWorldKey(url, caseInsensitive: true) == realWorldKey(dest, caseInsensitive: true) {
             return try renameChangingCaseOnly(url, to: dest, in: parent)
         }
@@ -136,15 +154,31 @@ enum ExplorerFileOps {
     /// — atomic, no copy, and no risk of a partially-written file.
     ///
     /// Staging is dot-prefixed and UUID-named so it is both hidden and
-    /// collision-proof; `uniqueDestination` covers the astronomically
-    /// unlikely rest. If the second move fails the first is undone, so a
-    /// failure leaves the item under its ORIGINAL name rather than stranded
-    /// under a hidden UUID the user would never find. The underlying error is
-    /// then rethrown as-is: at this point it is a real filesystem failure, and
-    /// `.writeFailed` ("Couldn't create the item.") would misdescribe it.
+    /// collision-proof, and it carries the ORIGINAL filename after the UUID so
+    /// that the one thing which can strand it — a hard kill (SIGKILL, a panic,
+    /// a yanked disk) between the two moves, where no `defer` or `catch` runs —
+    /// leaves something a user can recognize and rename back, rather than a
+    /// hidden nameless blob. `uniqueDestination` still guards the collision.
+    ///
+    /// The suffix is dropped when it would push the name past `NAME_MAX`: the
+    /// budget is checked in UTF-8 BYTES, because that is what the 255 limit
+    /// counts and this project's users have multi-byte filenames — a Japanese
+    /// name is 3 bytes per character, so a "short enough" character count is
+    /// not short enough. Truncating the name instead would risk cutting a
+    /// multi-byte scalar in half, so a too-long name simply falls back to the
+    /// bare UUID; a legitimate case-rename must never fail on its FIRST move
+    /// for the sake of a diagnostic nicety.
+    ///
+    /// If the second move fails the first is undone, so a failure leaves the
+    /// item under its ORIGINAL name rather than stranded. The underlying error
+    /// is then rethrown as-is: at this point it is a real filesystem failure,
+    /// and `.writeFailed` ("Couldn't create the item.") would misdescribe it.
     private static func renameChangingCaseOnly(_ url: URL, to dest: URL, in parent: URL) throws -> URL {
         let fm = FileManager.default
-        let staging = uniqueDestination(in: parent, name: "." + UUID().uuidString)
+        let stem = "." + UUID().uuidString
+        let labelled = stem + "-" + url.lastPathComponent
+        let stagingName = labelled.utf8.count <= 255 ? labelled : stem
+        let staging = uniqueDestination(in: parent, name: stagingName)
         try fm.moveItem(at: url, to: staging)
         do {
             try fm.moveItem(at: staging, to: dest)

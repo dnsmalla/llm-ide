@@ -185,6 +185,40 @@ final class ExplorerRenameNameTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: source, encoding: .utf8), "source")
     }
 
+    /// `realWorldKey` resolves symlinks on BOTH sides, so it reports "same
+    /// place" for two DISTINCT entries that alias one target. Those must not
+    /// reach the case-only two-step, which would fail on its second move and
+    /// surface a raw Cocoa sentence quoting the internal staging UUID. The
+    /// case-folded leaf comparison in the guard is what keeps them out.
+    func testSymlinkAliasesAreRefusedNotRoutedThroughTheCaseRename() throws {
+        let fm = FileManager.default
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("explorer-alias-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        // A symlink renamed onto its OWN target.
+        let target = dir.appendingPathComponent("real.txt")
+        try "victim".write(to: target, atomically: true, encoding: .utf8)
+        try fm.createSymbolicLink(atPath: dir.appendingPathComponent("Link.txt").path,
+                                  withDestinationPath: "real.txt")
+        XCTAssertThrowsError(
+            try ExplorerFileOps.rename(dir.appendingPathComponent("Link.txt"), to: "real.txt")
+        ) { error in
+            XCTAssertEqual(error as? ExplorerFileError, .alreadyExists)
+        }
+        XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "victim")
+
+        // A CASE-only rename of that same symlink still succeeds — the guard
+        // must not have been tightened into refusing symlinks outright.
+        let renamed = try ExplorerFileOps.rename(dir.appendingPathComponent("Link.txt"), to: "link.txt")
+        XCTAssertEqual(renamed.lastPathComponent, "link.txt")
+
+        // No hidden staging file survived either operation.
+        let listed = try fm.contentsOfDirectory(atPath: dir.path).sorted()
+        XCTAssertEqual(listed, ["link.txt", "real.txt"])
+    }
+
     /// "/" and "." / ".." stay owned by `ExplorerFileOps.validate` — ONE
     /// definition of a valid name, applied by the code that acts on it — so
     /// they arrive here as `.apply` and are refused when the rename runs.
