@@ -325,6 +325,40 @@ extension LlmIdeAPIClient {
 
     private static let agentV2Log = Logger(subsystem: "com.llmide.macapp", category: "API")
 
+    /// Number of times `connectAgentV2Stream` retries a 409 before giving up.
+    private static let turnLockMaxAttempts = 4
+
+    /// Opens the SSE connection, absorbing the TURN_IN_PROGRESS race left by
+    /// Stop: cancelling the previous turn's `URLSession` task closes the
+    /// connection on the client immediately, but the server only frees its
+    /// per-chat lock (`agent-v2.mjs`'s `inFlightChatSessions`) once it
+    /// detects that close AND the SDK subprocess actually unwinds — which,
+    /// for a turn doing real work (e.g. plan generation with tool calls),
+    /// can trail the client's own "ready to send again" state by a couple of
+    /// seconds. Without this, hitting Stop and immediately sending a
+    /// follow-up surfaced that gap as a hard 409 error. Safe to replay: the
+    /// route answers 409 before any engine or session-row work (its early
+    /// lock probe runs even ahead of the "auto" mode classifier), so no side
+    /// effect from a refused attempt exists to duplicate. Bounded: three
+    /// sleeps (0.4 s + 0.8 s + 1.6 s = 2.8 s) plus connect time, then the
+    /// fourth 409 is surfaced as `TURN_IN_PROGRESS` by the caller. A Stop
+    /// during the wait cancels through `Task.sleep`'s `CancellationError`.
+    private func connectAgentV2Stream(
+        _ req: URLRequest,
+        attempt: Int = 1,
+    ) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
+        let (bytes, response) = try await session(for: "/agent/v2/stream").bytes(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.http(status: 0, code: "NO_RESPONSE", message: "No HTTP response", details: nil)
+        }
+        if http.statusCode == 409, attempt < Self.turnLockMaxAttempts {
+            Self.agentV2Log.debug("agent/v2 turn lock held (409), retry \(attempt)/\(Self.turnLockMaxAttempts)")
+            try await Task.sleep(nanoseconds: Self.backoffNanos(attempt))
+            return try await connectAgentV2Stream(req, attempt: attempt + 1)
+        }
+        return (bytes, http)
+    }
+
     /// Streams one v2 chat turn from `POST /agent/v2/stream`.
     ///
     /// `body` is the request dictionary the caller assembled (message,
@@ -356,10 +390,7 @@ extension LlmIdeAPIClient {
         }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (bytes, response) = try await session(for: "/agent/v2/stream").bytes(for: req)
-        guard let http = response as? HTTPURLResponse else {
-            throw APIError.http(status: 0, code: "NO_RESPONSE", message: "No HTTP response", details: nil)
-        }
+        let (bytes, http) = try await connectAgentV2Stream(req)
         guard http.statusCode == 200 else {
             // Validation failures answer as plain JSON before the SSE
             // headers go out — same shape as the legacy stream's guard.
