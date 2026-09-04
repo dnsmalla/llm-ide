@@ -10,8 +10,6 @@ struct SearchResults: Equatable { var files: [FileMatch] = []; var totalMatches 
 @MainActor
 @Observable
 final class SearchService {
-    nonisolated private static let maxFileBytes = 1_000_000
-    nonisolated private static let maxMatches = 1000
     nonisolated private static let noiseNames = IgnoreList.directories
 
     /// Build the regex driving both find and replace. Plain queries are escaped;
@@ -60,7 +58,7 @@ final class SearchService {
         for case let url as URL in en {
             if noiseNames.contains(url.lastPathComponent) { en.skipDescendants(); continue }
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
-            if total >= maxMatches { break }
+            if total >= SearchEngine.maxMatches { break }
             // Standardize the enumerated path before stripping the root: on
             // macOS the enumerator yields `/private/var/…` while `rootPath`
             // (also standardized) is `/var/…`, so a raw-path prefix check fails
@@ -73,41 +71,19 @@ final class SearchService {
             guard GlobMatch.matchesAny(path: display, patterns: include) else { continue }
             if excludeActive && GlobMatch.matchesAny(path: display, patterns: exclude) { continue }
 
-            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            guard size <= maxFileBytes, let data = try? Data(contentsOf: url),
-                  !isBinary(data), let text = String(data: data, encoding: .utf8) else { continue }
-
-            var lineMatches: [LineMatch] = []
-            var fileIndex = 0   // monotonic per file, in document order
-            var lineNo = 0
-            for sub in text.split(separator: "\n", omittingEmptySubsequences: false) {
-                lineNo += 1
-                if total >= maxMatches { break }
-                let lineText = String(sub)
-                let nsLine = lineText as NSString
-                let hits = regex.matches(in: lineText, options: [], range: NSRange(location: 0, length: nsLine.length))
-                if hits.isEmpty { continue }
-                var matches: [Match] = []
-                for h in hits {
-                    if total >= maxMatches { break }
-                    matches.append(Match(nsRange: h.range, fileIndex: fileIndex))
-                    fileIndex += 1
-                    total += 1
-                }
-                if !matches.isEmpty {
-                    lineMatches.append(LineMatch(line: lineNo, lineText: lineText, matches: matches))
-                }
-            }
+            guard let text = SearchEngine.fileText(at: url) else { continue }
+            // CRLF-safe line splitting lives in SearchEngine: Swift treats
+            // "\r\n" as ONE Character, so the old `split(separator: "\n")`
+            // here reported every match in a CRLF file on line 1.
+            let (lineMatches, used) = SearchEngine.lineMatches(
+                in: text, regex: regex, budget: SearchEngine.maxMatches - total)
+            total += used
             if !lineMatches.isEmpty {
                 files.append(FileMatch(url: url, displayPath: display, lineMatches: lineMatches))
             }
         }
         files.sort { $0.displayPath.localizedCaseInsensitiveCompare($1.displayPath) == .orderedAscending }
         return SearchResults(files: files, totalMatches: total, fileCount: files.count, invalidPattern: false)
-    }
-
-    nonisolated private static func isBinary(_ data: Data) -> Bool {
-        data.prefix(4096).contains(0)
     }
 
     // MARK: - Replace
