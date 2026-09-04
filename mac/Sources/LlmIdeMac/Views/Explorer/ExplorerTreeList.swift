@@ -31,6 +31,10 @@ struct ExplorerActions {
     /// runs — inside an already-built menu, outside that tracking — and the
     /// Paste item would stay stale until something else redrew the view.
     var canPaste: Bool
+    /// Apply an inline rename. The `String` is the edited NAME only (never a
+    /// path); the view never touches the filesystem itself.
+    var commitRename: (URL, String) -> Void
+    var cancelRename: () -> Void
 }
 
 /// The file tree, as a real `List` with a `Set<URL>` selection.
@@ -59,6 +63,11 @@ struct ExplorerTreeList: View {
     let gitRoot: URL?
     let git: GitTruthStore
     let actions: ExplorerActions
+    /// The row currently being renamed inline, if any. Owned by `ExplorerView`
+    /// so a project switch or a delete can clear it — a rename editor must
+    /// never outlive the row it is editing.
+    var renamingURL: URL?
+    @Binding var renameText: String
 
     /// `List` needs a `Binding`; `store` is an `@Observable` reference type
     /// held as a plain `let`, so the binding is written out rather than
@@ -68,8 +77,15 @@ struct ExplorerTreeList: View {
     }
 
     var body: some View {
-        List(rows, selection: selectionBinding) { row in
-            ExplorerTreeRow(row: row, store: store, gitRoot: gitRoot, git: git, actions: actions)
+        // Resolved ONCE, here — not inside the row closure. It is O(rows), and
+        // every row needs the same answer, so computing it per row would make
+        // a render O(rows²) (4 M comparisons at the 2000-row case `flatten` is
+        // budgeted against).
+        let ordered = selectedInDisplayOrder
+        return List(rows, selection: selectionBinding) { row in
+            ExplorerTreeRow(row: row, store: store, gitRoot: gitRoot, git: git, actions: actions,
+                            selectedInDisplayOrder: ordered,
+                            renamingURL: renamingURL, renameText: $renameText)
                 .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
         }
         .listStyle(.sidebar)
@@ -167,19 +183,76 @@ private extension ExplorerTreeStore.Row {
     var enclosingDir: URL { isDirectory ? url : url.deletingLastPathComponent() }
 }
 
-/// One row: the shared `TreeRowLabel` plus this tree's context menu.
+/// One row: either the shared `TreeRowLabel` — carrying this tree's click,
+/// drag, drop and context menu — or, while the row is being renamed, an inline
+/// text field.
+///
+/// Written as two explicit branches rather than one modifier chain with an `if`
+/// inside it: every interaction modifier belongs to the LABEL. A `.draggable`
+/// or a click-to-open gesture left on a shared parent would sit on top of the
+/// text field and swallow the clicks that place the caret.
 private struct ExplorerTreeRow: View {
     let row: ExplorerTreeStore.Row
     let store: ExplorerTreeStore
     let gitRoot: URL?
     let git: GitTruthStore
     let actions: ExplorerActions
+    /// The whole selection in DISPLAY order, resolved once by the list. Handed
+    /// down rather than recomputed here — see `targets`.
+    let selectedInDisplayOrder: [URL]
+    let renamingURL: URL?
+    @Binding var renameText: String
+
+    @FocusState private var renameFocused: Bool
 
     var body: some View {
+        if renamingURL == row.url {
+            renameField
+        } else {
+            label
+        }
+    }
+
+    // MARK: - Rename branch
+
+    private var renameField: some View {
+        HStack(spacing: 0) {
+            Spacer().frame(width: nameIndent)
+            TextField("", text: $renameText)
+                .textFieldStyle(.plain)
+                .font(Typography.filename)
+                .focused($renameFocused)
+                .onSubmit { actions.commitRename(row.url, renameText) }
+                // Esc. `onExitCommand` is AppKit's cancel hook; a
+                // `.keyboardShortcut(.escape)` would not fire while a text
+                // field owns the keyboard.
+                .onExitCommand { actions.cancelRename() }
+                .onAppear { renameFocused = true }
+                .accessibilityLabel("Rename \(row.name)")
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// Where the name text starts inside `TreeRowLabel`, so the field opens
+    /// exactly over the name it replaces.
+    ///
+    /// Derived from that view's own layout (an `HStack(spacing: 4)`): `depth`
+    /// indent guides of 14pt each, then a 10pt chevron — or, on a file row,
+    /// the 10pt spacer that stands in for one — then a 16pt icon, with one
+    /// 4pt gap before each. At depth 0 `indentGuides` renders nothing at all
+    /// rather than a zero-width view, so its own gap disappears with it.
+    private var nameIndent: CGFloat {
+        let guides = row.depth > 0 ? CGFloat(row.depth) * 14 + 4 : 0
+        return guides + 10 + 4 + 16 + 4
+    }
+
+    // MARK: - Normal branch
+
+    private var label: some View {
         let decoration = gitRoot.flatMap {
             git.decoration(forAbsolute: row.url, root: $0, isDirectory: row.isDirectory)
         }
-        TreeRowLabel(
+        return TreeRowLabel(
             name: row.name,
             isFolder: row.isDirectory,
             isExpanded: store.expanded.contains(ExplorerPaths.key(row.url)),
@@ -190,6 +263,24 @@ private struct ExplorerTreeRow: View {
             onToggleChevron: row.isDirectory ? { Task { await store.toggle(row.url) } } : nil
         )
         .help(row.name)
+        // VS Code opens a file on single click. This is a
+        // `simultaneousGesture`, not an `onTapGesture`: a plain tap gesture
+        // CONSUMES the click, and `List` would never see it — losing selection,
+        // ⌘-toggle and ⇧-range in one go. Opening used to hang off
+        // `onChange(of: store.selection)` instead, which meant arrowing down
+        // through N files opened N permanent tabs; selection movement and
+        // opening are separate acts now.
+        .simultaneousGesture(TapGesture().onEnded {
+            // Folders are toggled by their own chevron button, never opened.
+            guard !row.isDirectory else { return }
+            // ⌘/⇧ clicks are multi-select gestures — extending a selection is
+            // not a request to open anything. Read from `NSEvent` because
+            // `TapGesture` carries no modifiers; same source the ⌥-copy drop
+            // below reads.
+            let flags = NSEvent.modifierFlags
+            guard !flags.contains(.command), !flags.contains(.shift) else { return }
+            actions.open(row.url)
+        })
         // `targets` is already exactly the right drag set: the whole selection
         // when the dragged row is part of it, otherwise just that row. One
         // `String` carries all of them — see `ExplorerDragPayload`.
@@ -210,8 +301,16 @@ private struct ExplorerTreeRow: View {
     /// rule the Source Control changes list uses, so the two panels behave
     /// identically. (SwiftUI's `List` does not select on right-click, which is
     /// why this has to be resolved explicitly.)
+    ///
+    /// The multi-row answer is `selectedInDisplayOrder`, never
+    /// `Array(store.selection)`: a `Set`'s iteration order is arbitrary and
+    /// changes with its contents, so the same four selected rows came out as
+    /// `b, d, c, a`. That order is USER-VISIBLE — it is the order a drag and a
+    /// context-menu cut/copy apply their operations in, and therefore which
+    /// item a partial failure stops at — so it has to be the order on screen,
+    /// the same one the keyboard path already used.
     private var targets: [URL] {
-        store.selection.contains(row.url) ? Array(store.selection) : [row.url]
+        store.selection.contains(row.url) ? selectedInDisplayOrder : [row.url]
     }
 
     @ViewBuilder

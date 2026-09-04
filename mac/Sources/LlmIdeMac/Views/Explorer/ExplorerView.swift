@@ -23,6 +23,12 @@ struct ExplorerView: View {
     /// `ExplorerClipboard` for why the system pasteboard is the wrong tool.
     @State private var clipboard = ExplorerClipboard()
 
+    /// Inline rename: which row is being edited, and its live text. Owned here
+    /// rather than in the row so a project switch, a delete, or a successful
+    /// commit can close an editor the row itself is about to stop rendering.
+    @State private var renamingURL: URL?
+    @State private var renameText = ""
+
     /// `root` with its symlinks resolved, paired with the raw path it was
     /// resolved FROM so a stale value can be detected without re-resolving.
     ///
@@ -184,6 +190,11 @@ struct ExplorerView: View {
         .task(id: root?.path) {
             treeStateRestored = false
             store.reset()          // also stops the previous root's watcher
+            renamingURL = nil      // a rename editor must not survive the switch
+            // Nor may the clipboard: a cut made in project A and pasted after
+            // switching to project B would MOVE A's files into B, and nothing
+            // on screen hints that the clipboard still holds a foreign path.
+            clipboard.clear()
             tabs.removeAll()
             activeTab = nil
             guard let root else {
@@ -221,14 +232,17 @@ struct ExplorerView: View {
         .onChange(of: store.expanded) { _, _ in
             persistTreeState()
         }
-        .onChange(of: store.selection) { _, selection in
+        // Selection changes persist, and do NOTHING else. Opening deliberately
+        // does not hang off this observer any more: `List` owns ↑/↓, so
+        // arrowing down through N files fired it N times and left N PERMANENT
+        // tabs open behind the cursor — and a multi-delete that shrank the
+        // selection to one survivor opened that survivor. Files open on click
+        // (`ExplorerTreeRow`'s simultaneous tap gesture) and on ⏎
+        // (`ExplorerKeyCommand.open`). This app has no preview tab, so VS
+        // Code's "arrow keys preview the file" has no faithful equivalent —
+        // not opening is the honest degradation.
+        .onChange(of: store.selection) { _, _ in
             persistTreeState()
-            // VS Code opens on single click. `List` selection IS the click, so
-            // opening happens here rather than in a tap gesture — a tap gesture
-            // on a `List` row would fight the control's own selection handling.
-            if selection.count == 1, let url = selection.first, !isDirectory(url) {
-                open(url)
-            }
         }
         // Refresh decorations when the project root changes / on appear.
         .task(id: gitRoot?.path) {
@@ -342,7 +356,9 @@ struct ExplorerView: View {
                                  displayRoot: displayRoot,
                                  gitRoot: gitRoot,
                                  git: decorations,
-                                 actions: actions())
+                                 actions: actions(),
+                                 renamingURL: renamingURL,
+                                 renameText: $renameText)
             }
         } else {
             emptyState
@@ -467,11 +483,6 @@ struct ExplorerView: View {
         activeTab = url
     }
 
-    private func isDirectory(_ url: URL) -> Bool {
-        var isDir: ObjCBool = false
-        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
-    }
-
     private func refreshGit() async {
         await decorations.refresh(root: gitRoot)
     }
@@ -499,7 +510,13 @@ struct ExplorerView: View {
             open: { open($0) },
             newFile: { filePrompt = .newFile(in: $0) },
             newFolder: { filePrompt = .newFolder(in: $0) },
-            beginRename: { filePrompt = .rename(url: $0) },
+            // Inline now, not the sheet. `FilePrompt.rename` stays in use for
+            // the tree TOOLBAR's display-root menu — that header is not a tree
+            // row, so it has nothing to edit in place.
+            beginRename: { url in
+                renamingURL = url
+                renameText = url.lastPathComponent
+            },
             delete: { pendingDelete = $0 },
             revealInFinder: { NSWorkspace.shared.activateFileViewerSelecting($0) },
             drop: { sources, destination, copy in performDrop(sources, into: destination, copy: copy) },
@@ -510,8 +527,36 @@ struct ExplorerView: View {
             // registers the observation dependency that re-enables the Paste
             // menu item the moment the clipboard changes. See
             // `ExplorerActions.canPaste`.
-            canPaste: !clipboard.isEmpty
+            canPaste: !clipboard.isEmpty,
+            commitRename: { url, name in commitRename(url, to: name) },
+            cancelRename: { renamingURL = nil }
         )
+    }
+
+    /// Apply an inline rename. An unchanged or empty name just closes the
+    /// editor. A refusal or a failure leaves the editor OPEN with the text
+    /// intact, so a bad name can be corrected rather than retyped.
+    ///
+    /// The new URL goes through `ExplorerPaths.canonical(_:)` before it reaches
+    /// the selection or a tab, exactly as `performFileOp` does: `rename`
+    /// builds its result by appending to the parent, which keeps whatever
+    /// spelling that parent had, while the row it must match came out of
+    /// `FileManager`. An uncanonical URL here silently never highlights.
+    private func commitRename(_ url: URL, to name: String) {
+        switch ExplorerRenameName.resolve(name, current: url.lastPathComponent) {
+        case .cancel:
+            renamingURL = nil
+        case .reject(let error):
+            opError = error.errorDescription
+        case .apply(let trimmed):
+            do {
+                let new = ExplorerPaths.canonical(try ExplorerFileOps.rename(url, to: trimmed))
+                renamingURL = nil
+                retarget(from: url, to: new)
+            } catch {
+                opError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
+            }
+        }
     }
 
     /// Run a create/rename op, then refresh the affected folder + git
@@ -527,9 +572,9 @@ struct ExplorerView: View {
         switch prompt.mode {
         case .newFile:
             // ONE spelling for both the selection and the tab: `open` dedupes
-            // by `==`, so opening the raw URL and selecting the canonical one
-            // (which re-enters `open` through the selection observer) would
-            // leave two tabs on one file.
+            // by `==`, and `List(selection:)` matches rows by raw `URL`
+            // hashing, so selecting one spelling and opening another would
+            // both fail to highlight and risk a second tab on one file.
             let url = ExplorerPaths.canonical(try ExplorerFileOps.createFile(in: prompt.dir, name: name))
             store.selection = [url]
             open(url)
@@ -545,28 +590,90 @@ struct ExplorerView: View {
         }
     }
 
-    /// Point open tabs, the active tab, and the selection at `new` instead of
-    /// `old`. Pure state remap — no filesystem work, no reload — so a
-    /// multi-item move can call it per item and reload ONCE at the end
-    /// instead of re-enumerating the same folder n times.
+    /// `url` re-pointed at `new` when it was at `old` — `new` itself when it IS
+    /// `old`, the matching path UNDER `new` when it is a strict descendant, and
+    /// `nil` when it is neither.
+    ///
+    /// The descendant half is what makes renaming or moving a FOLDER honest.
+    /// Matching by `==` alone (which is what `remap` did) re-pointed the folder
+    /// and abandoned everything inside it: a tab open on `docs/a.md` kept
+    /// pointing at a path that no longer exists once `docs/` was renamed, and
+    /// the selection and expansion of every row underneath went stale with it.
+    ///
+    /// Answered through `ExplorerPaths.relativePath`, so "same place" is judged
+    /// on standardized path keys rather than raw `URL` equality (a tab and a
+    /// row can spell one directory with and without its trailing-slash hint),
+    /// and so `/docs2` is never read as living inside `/docs`.
+    private func rebase(_ url: URL, from old: URL, to new: URL) -> URL? {
+        guard let relative = ExplorerPaths.relativePath(of: url, from: old) else { return nil }
+        guard !relative.isEmpty else { return new }
+        return ExplorerPaths.canonical(new.appendingPathComponent(relative))
+    }
+
+    /// Point open tabs, the active tab, the selection, and the expansion set at
+    /// `new` instead of `old` — including everything nested under `old`.
+    /// Pure state remap — no filesystem work, no reload — so a multi-item move
+    /// can call it per item and reload ONCE at the end instead of
+    /// re-enumerating the same folder n times.
     ///
     /// `new` must already be `ExplorerPaths.canonical`: `List(selection:)`
     /// matches rows by raw `URL` hashing, so an uncanonical URL inserted here
     /// silently never highlights.
-    private func remap(from old: URL, to new: URL) {
-        tabs = tabs.map { $0 == old ? new : $0 }
-        if activeTab == old { activeTab = new }
-        if store.selection.contains(old) {
-            store.selection.remove(old)
-            store.selection.insert(new)
+    ///
+    /// Returns the directories whose expansion moved with them. Their children
+    /// are still cached under the OLD keys, so `flatten` would render them
+    /// open and EMPTY until someone re-enumerates them — that is the caller's
+    /// job, batched with its other reloads. Nothing is returned for a moved
+    /// FILE, which is the common case.
+    @discardableResult
+    private func remap(from old: URL, to new: URL) -> [URL] {
+        tabs = tabs.map { rebase($0, from: old, to: new) ?? $0 }
+        if let active = activeTab, let moved = rebase(active, from: old, to: new) {
+            activeTab = moved
         }
+
+        let movedSelection = store.selection.compactMap { url in
+            rebase(url, from: old, to: new).map { (url, $0) }
+        }
+        if !movedSelection.isEmpty {
+            var selection = store.selection
+            for (before, after) in movedSelection {
+                selection.remove(before)
+                selection.insert(after)
+            }
+            store.selection = selection
+        }
+
+        // Expansion is keyed on `ExplorerPaths.key` STRINGS, not URLs, so it is
+        // rewritten by prefix here rather than through `rebase`. Without this a
+        // renamed folder comes back collapsed and strands its old key — and its
+        // open children collapse with it.
+        let oldKey = ExplorerPaths.key(old)
+        let newKey = ExplorerPaths.key(new)
+        let movedKeys = store.expanded.filter { $0 == oldKey || $0.hasPrefix(oldKey + "/") }
+        guard !movedKeys.isEmpty else { return [] }
+        var expanded = store.expanded
+        var reopened: [URL] = []
+        for key in movedKeys {
+            expanded.remove(key)
+            let moved = newKey + String(key.dropFirst(oldKey.count))
+            expanded.insert(moved)
+            reopened.append(URL(fileURLWithPath: moved, isDirectory: true))
+        }
+        store.expanded = expanded
+        return reopened
     }
 
-    /// Follow a renamed/moved item: remap the tabs and selection, then refresh
-    /// the folder it came from.
+    /// Follow a renamed/moved item: remap the tabs, selection and expansion,
+    /// then refresh the folder it came from and re-enumerate any folder whose
+    /// expansion moved with it.
     private func retarget(from old: URL, to new: URL) {
-        remap(from: old, to: new)
-        Task { await reload(old.deletingLastPathComponent()); await refreshGit() }
+        let reopened = remap(from: old, to: new)
+        Task {
+            await reload(old.deletingLastPathComponent())
+            for dir in reopened { await store.loadChildren(of: dir) }
+            await refreshGit()
+        }
     }
 
     /// Apply a drag & drop. ⌥ copies (Finder's convention); otherwise moves.
@@ -578,16 +685,41 @@ struct ExplorerView: View {
     /// overwrites anything. Stops at the first failure, like `delete(_:)`: the
     /// items already moved are visible in the tree after the refresh, so a
     /// partial application is never hidden.
+    /// `sources` with the ones that can only ever fail against this
+    /// destination removed: the destination folder ITSELF, and any folder the
+    /// destination lives inside.
+    ///
+    /// Dragging a multi-selection onto one of its own folders used to be
+    /// order-dependent — `[folder, e.txt]` aborted at `folder` and moved
+    /// nothing, `[e.txt, folder]` moved the file and then alerted — because the
+    /// ops loop stops at the first throw and `Set` order decided which came
+    /// first. Finder's rule is that the drop target is simply not part of its
+    /// own drag, so it is dropped from the list and the rest go through.
+    ///
+    /// When filtering would empty the list, the ORIGINAL sources are returned:
+    /// dragging a folder onto itself (or into its own child) with nothing else
+    /// selected is a genuine mistake, and it must still raise "Can't move a
+    /// folder into itself." rather than silently doing nothing.
+    private func droppable(_ sources: [URL], into destinationDir: URL) -> [URL] {
+        let destinationKey = ExplorerPaths.key(destinationDir)
+        let applicable = sources.filter {
+            ExplorerPaths.key($0) != destinationKey
+                && !ExplorerPaths.isDescendant(destinationDir, of: $0)
+        }
+        return applicable.isEmpty ? sources : applicable
+    }
+
     private func performDrop(_ sources: [URL], into destinationDir: URL, copy: Bool) {
         var touched: Set<String> = [ExplorerPaths.key(destinationDir)]
+        var reopened: [URL] = []
         do {
-            for source in sources {
+            for source in droppable(sources, into: destinationDir) {
                 if copy {
                     _ = try ExplorerFileOps.copy(from: source, to: destinationDir)
                 } else {
                     let moved = try ExplorerFileOps.move(from: source, to: destinationDir)
                     touched.insert(ExplorerPaths.key(source.deletingLastPathComponent()))
-                    remap(from: source, to: ExplorerPaths.canonical(moved))
+                    reopened += remap(from: source, to: ExplorerPaths.canonical(moved))
                 }
             }
         } catch {
@@ -595,6 +727,7 @@ struct ExplorerView: View {
         }
         Task {
             for dir in touched { await reload(URL(fileURLWithPath: dir)) }
+            for dir in reopened { await store.loadChildren(of: dir) }
             await refreshGit()
         }
     }
@@ -608,31 +741,51 @@ struct ExplorerView: View {
     /// and surface in the shared alert; this never overwrites anything. On a
     /// failure the clipboard is deliberately left armed, so the user can fix
     /// the collision and paste again rather than re-selecting the sources.
+    ///
+    /// Applied ITEM BY ITEM, the same shape `performDrop` uses, rather than
+    /// through `ExplorerFileOps.paste`. That helper stops at the first failure
+    /// and rethrows, which means the items it already moved are gone from disk
+    /// but their partial result never comes back — so a paste of `[a, b, c]`
+    /// that collided on `b` left `a` moved with its open tab still pointing at
+    /// the path `a` no longer occupies. Remapping per item is the only way to
+    /// keep the tabs honest about what actually happened.
     private func performPaste(into dir: URL) {
         guard let operation = clipboard.operation, !clipboard.isEmpty else { return }
         let sources = clipboard.urls
         let isMove = operation == .cut
         var touched: Set<String> = [ExplorerPaths.key(dir)]
+        var reopened: [URL] = []
+        var results: [URL] = []
         do {
-            // Canonical before anything enters `store.selection` or a tab:
-            // `List(selection:)` matches rows by raw `URL` hashing, and a URL
-            // built by appending a name to a directory keeps that directory's
-            // spelling instead of the one `loadChildren` produced.
-            let results = try ExplorerFileOps.paste(sources, into: dir, move: isMove)
-                .map(ExplorerPaths.canonical)
-            if isMove {
-                for (source, result) in zip(sources, results) {
+            for source in droppable(sources, into: dir) {
+                // Canonical before anything enters `store.selection` or a tab:
+                // `List(selection:)` matches rows by raw `URL` hashing, and a
+                // URL built by appending a name to a directory keeps that
+                // directory's spelling instead of the one `loadChildren`
+                // produced.
+                let landed = ExplorerPaths.canonical(
+                    isMove
+                        ? try ExplorerFileOps.move(from: source, to: dir)
+                        : try ExplorerFileOps.copy(from: source, to: dir))
+                results.append(landed)
+                if isMove {
                     touched.insert(ExplorerPaths.key(source.deletingLastPathComponent()))
-                    remap(from: source, to: result)
+                    reopened += remap(from: source, to: landed)
                 }
-                clipboard.clear()
             }
-            store.selection = Set(results)
         } catch {
             opError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
         }
+        // Only a cut that landed IN FULL is consumed. A partial one stays
+        // armed so the user can fix the collision and finish it — the items
+        // already moved fail harmlessly on the retry (their source is gone),
+        // whereas clearing here would strand the remainder with no way back to
+        // the selection that produced it.
+        if isMove, results.count == sources.count { clipboard.clear() }
+        if !results.isEmpty { store.selection = Set(results) }
         Task {
             for parent in touched { await reload(URL(fileURLWithPath: parent)) }
+            for folder in reopened { await store.loadChildren(of: folder) }
             await refreshGit()
         }
     }
@@ -652,6 +805,13 @@ struct ExplorerView: View {
                 }
                 store.selection = store.selection.filter {
                     $0 != url && !ExplorerPaths.isDescendant($0, of: url)
+                }
+                // An inline rename must never outlive its row: deleting the
+                // folder a rename is happening inside would otherwise leave an
+                // editor open over a ghost, whose ⏎ renames nothing.
+                if let renaming = renamingURL,
+                   renaming == url || ExplorerPaths.isDescendant(renaming, of: url) {
+                    renamingURL = nil
                 }
             }
         } catch {

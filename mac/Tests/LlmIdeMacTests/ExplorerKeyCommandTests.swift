@@ -73,4 +73,70 @@ final class ExplorerKeyCommandTests: XCTestCase {
         XCTAssertEqual(ExplorerKeyCommand.leftArrow, KeyEquivalent.leftArrow.character)
         XCTAssertEqual(ExplorerKeyCommand.returnKey, KeyEquivalent.return.character)
     }
+
+    /// SwiftUI has no `KeyEquivalent.f2`, so this scalar cannot be pinned the
+    /// way the arrows are above — it is pinned against `NSF2FunctionKey`'s
+    /// documented value instead. A wrong literal would show up only as a dead
+    /// rename key in the running app.
+    func testF2ScalarIsTheAppKitFunctionKey() {
+        XCTAssertEqual(ExplorerKeyCommand.f2, "\u{F705}")
+        XCTAssertEqual(ExplorerKeyCommand.f2.unicodeScalars.first?.value, 0xF705)
+    }
+}
+
+/// Inline rename's name rule. The interesting case is the interior newline:
+/// `ExplorerFileOps.validate` trims leading/trailing newlines and would let
+/// "a⏎b" through to `moveItem`.
+final class ExplorerRenameNameTests: XCTestCase {
+
+    func testUnchangedNameCancels() {
+        XCTAssertEqual(ExplorerRenameName.resolve("a.txt", current: "a.txt"), .cancel)
+    }
+
+    func testEmptyOrWhitespaceNameCancels() {
+        XCTAssertEqual(ExplorerRenameName.resolve("", current: "a.txt"), .cancel)
+        XCTAssertEqual(ExplorerRenameName.resolve("   ", current: "a.txt"), .cancel)
+    }
+
+    func testSurroundingWhitespaceIsTrimmedNotRejected() {
+        XCTAssertEqual(ExplorerRenameName.resolve("  b.txt \n", current: "a.txt"),
+                       .apply("b.txt"))
+    }
+
+    /// Trimming must not turn a merely-padded version of the SAME name into a
+    /// rename onto itself.
+    func testPaddedUnchangedNameStillCancels() {
+        XCTAssertEqual(ExplorerRenameName.resolve("  a.txt  ", current: "a.txt"), .cancel)
+    }
+
+    func testInteriorNewlineIsRejected() {
+        XCTAssertEqual(ExplorerRenameName.resolve("a\nb.txt", current: "a.txt"),
+                       .reject(.invalidName))
+        // "\r\n" is ONE Swift Character; a `contains("\n")` check misses it.
+        XCTAssertEqual(ExplorerRenameName.resolve("a\r\nb.txt", current: "a.txt"),
+                       .reject(.invalidName))
+        XCTAssertEqual(ExplorerRenameName.resolve("a\rb.txt", current: "a.txt"),
+                       .reject(.invalidName))
+        XCTAssertEqual(ExplorerRenameName.resolve("a\u{2028}b.txt", current: "a.txt"),
+                       .reject(.invalidName))
+    }
+
+    /// "/" and "." / ".." stay owned by `ExplorerFileOps.validate` — ONE
+    /// definition of a valid name, applied by the code that acts on it — so
+    /// they arrive here as `.apply` and are refused when the rename runs.
+    func testSlashIsLeftToTheFileOpToRefuse() {
+        XCTAssertEqual(ExplorerRenameName.resolve("a/b.txt", current: "a.txt"),
+                       .apply("a/b.txt"))
+        XCTAssertThrowsError(try ExplorerFileOps.rename(
+            URL(fileURLWithPath: "/tmp/does-not-exist/a.txt"), to: "a/b.txt")) { error in
+            XCTAssertEqual(error as? ExplorerFileError, .invalidName)
+        }
+    }
+
+    /// This project's users work in Japanese; a multi-byte name must round-trip
+    /// unchanged rather than being mangled by the trim.
+    func testJapaneseNameRoundTrips() {
+        XCTAssertEqual(ExplorerRenameName.resolve("設計 v2.txt", current: "設計.txt"),
+                       .apply("設計 v2.txt"))
+    }
 }
