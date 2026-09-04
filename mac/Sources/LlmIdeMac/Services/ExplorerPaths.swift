@@ -84,8 +84,18 @@ enum ExplorerPaths {
         }
         var covered: Set<Int> = []
         var ancestor: String?
-        for index in terminated.indices.sorted(by: { terminated[$0] < terminated[$1] }) {
-            if let ancestor, terminated[index].hasPrefix(ancestor) {
+        // Sort and containment MUST agree on what "less than" and "starts with"
+        // mean, so both compare UTF-8 bytes. `String.<` is scalar-ordered while
+        // `hasPrefix` is grapheme-ordered, and the two disagree exactly where a
+        // filename begins with a COMBINING MARK: it clusters with the preceding
+        // "/", so the child sorts away from its parent, fails `hasPrefix`, and —
+        // worse — becomes the carried `ancestor`, freeing every later child.
+        // Probed on real APFS: `topLevel([café, <combining>odd.txt, 設計.txt])`
+        // pruned nothing. Byte comparison has no such split.
+        for index in terminated.indices.sorted(by: {
+            terminated[$0].utf8.lexicographicallyPrecedes(terminated[$1].utf8)
+        }) {
+            if let ancestor, terminated[index].utf8.starts(with: ancestor.utf8) {
                 covered.insert(index)   // inside a kept entry (or a duplicate of one)
                 continue
             }
