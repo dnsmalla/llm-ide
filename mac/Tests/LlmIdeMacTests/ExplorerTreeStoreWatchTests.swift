@@ -180,6 +180,36 @@ final class ExplorerTreeStoreWatchTests: XCTestCase {
                        "one stopWatching must silence ALL watchers this store started")
     }
 
+    /// A build writing continuously into a directory the Explorer does not even
+    /// display must not starve live updates. The debounce is trailing-edge, so
+    /// before the watcher was given the Explorer's own ignore set, churn in
+    /// `DerivedData/` restarted the timer on every FSEvents batch and the tree
+    /// got NO updates for the build's whole duration.
+    func testChurnInAnIgnoredDirectoryDoesNotStarveLiveUpdates() async throws {
+        makeDir("DerivedData")
+        let store = ExplorerTreeStore()
+        await store.loadChildren(of: root)
+        store.startWatching(root)
+        defer { store.stopWatching() }
+
+        let churnRoot = root!
+        let churn = Task.detached {
+            let end = Date().addingTimeInterval(4)
+            var n = 0
+            while Date() < end {
+                FileManager.default.createFile(
+                    atPath: churnRoot.appendingPathComponent("DerivedData/x\(n).o").path,
+                    contents: Data())
+                n += 1
+                try? await Task.sleep(nanoseconds: 40_000_000)
+            }
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        makeFile("設計.txt")
+        try await waitForNames(["設計.txt"], in: root, store: store)
+        _ = await churn.value
+    }
+
     func testResetStopsWatching() async throws {
         let store = ExplorerTreeStore()
         await store.loadChildren(of: root)

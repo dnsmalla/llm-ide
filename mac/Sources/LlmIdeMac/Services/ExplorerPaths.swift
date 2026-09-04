@@ -73,6 +73,20 @@ enum ExplorerPaths {
     /// by the user, a persisted bookmark being restored, a reveal-a-file
     /// request) — never for per-render work in a hot path.
     ///
+    /// The result is a full `URL` identity, not merely a path match: two
+    /// spellings compare `==` AND hash-equal, so the result is safe to put
+    /// straight into a `Set<URL>` selection or compare against a row's `URL`.
+    /// Getting there needs the directory hint normalized as well as the path.
+    /// A `URL` carries a "is this a directory" flag (the trailing slash), and
+    /// `resolvingSymlinksInPath`/`standardizedFileURL` PRESERVE whatever the
+    /// input had — so a folder URL built by `appendingPathComponent` before
+    /// that folder existed stays hint-less, while the same folder listed by
+    /// `contentsOfDirectory` comes back hinted, and the two are `==`-unequal
+    /// despite identical `.path`. Measured, that is exactly how a
+    /// just-created folder fails to select itself. So the hint is re-derived
+    /// from the filesystem here. A path that does not exist keeps the
+    /// caller's hint — there is nothing to ask.
+    ///
     /// This exists because `FileManager.contentsOfDirectory` returns
     /// symlink-resolved URLs while building a child URL with
     /// `appendingPathComponent` does not, so the same logical file can arrive
@@ -91,6 +105,11 @@ enum ExplorerPaths {
     /// pass the result through `key(_:)`/`relativePath`/`isDescendant` as
     /// usual.
     static func canonical(_ url: URL) -> URL {
-        url.resolvingSymlinksInPath().standardizedFileURL
+        let resolved = url.resolvingSymlinksInPath().standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory) else {
+            return resolved
+        }
+        return URL(fileURLWithPath: resolved.path, isDirectory: isDirectory.boolValue)
     }
 }

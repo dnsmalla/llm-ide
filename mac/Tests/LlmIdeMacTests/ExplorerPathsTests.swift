@@ -110,4 +110,53 @@ final class ExplorerPathsTests: XCTestCase {
 
         XCTAssertEqual(ExplorerPaths.canonical(viaAppend), ExplorerPaths.canonical(viaListing))
     }
+
+    /// `canonical(_:)` must produce a full `URL` identity, not merely a
+    /// `.path` match. A `URL` carries a directory hint (the trailing slash)
+    /// and `standardizedFileURL` preserves whatever the input had, so two
+    /// spellings of one directory used to come back `.path`-equal but
+    /// `==`-unequal. `List(selection:)` matches by raw `URL` hashing, so that
+    /// difference is the whole bug.
+    func testCanonicalNormalizesTheDirectoryHintAcrossSpellings() {
+        let hintless = URL(fileURLWithPath: "/private/var/tmp", isDirectory: false)
+        let hinted = URL(fileURLWithPath: "/var/tmp", isDirectory: true)
+
+        XCTAssertEqual(ExplorerPaths.canonical(hintless), ExplorerPaths.canonical(hinted))
+        XCTAssertEqual(ExplorerPaths.canonical(hintless).hashValue,
+                       ExplorerPaths.canonical(hinted).hashValue)
+        XCTAssertTrue(Set([ExplorerPaths.canonical(hinted)])
+            .contains(ExplorerPaths.canonical(hintless)))
+    }
+
+    /// The live shape this was found in: a folder URL built BEFORE the folder
+    /// existed (so it carries no directory hint) is canonicalized and put into
+    /// a `Set<URL>` selection, where it must match the row `FileManager` hands
+    /// back for that same folder. Non-ASCII on purpose.
+    func testCanonicalOfAHintlessFolderMatchesItsDirectoryListingForm() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("explorer-paths-hint-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let name = "サブ フォルダ"
+
+        // built without a hint first — this is what a create-folder call returns
+        let hintless = URL(fileURLWithPath: root.path).appendingPathComponent(name, isDirectory: false)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(name),
+                                                withIntermediateDirectories: true)
+        let row = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+                .first { $0.lastPathComponent == name }).standardizedFileURL
+
+        XCTAssertEqual(ExplorerPaths.canonical(hintless), row)
+        XCTAssertTrue(Set([row]).contains(ExplorerPaths.canonical(hintless)),
+                      "a canonicalized folder URL must actually select its own row")
+    }
+
+    /// A path that does not exist has no hint to ask the filesystem for, and
+    /// must come back unchanged rather than guessed at.
+    func testCanonicalLeavesANonExistentPathAlone() {
+        let ghost = FileManager.default.temporaryDirectory
+            .appendingPathComponent("explorer-paths-ghost-\(UUID().uuidString)/nope.txt")
+        XCTAssertEqual(ExplorerPaths.canonical(ghost).path, ghost.standardizedFileURL.path)
+    }
 }

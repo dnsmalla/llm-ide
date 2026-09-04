@@ -52,6 +52,14 @@ final class ExplorerTreeStore {
     /// must throw its result away. See `loadChildren`.
     private var pendingLoads: [String: Int] = [:]
 
+    /// Bumped by `reset()` and by every `restoreState`. A restore spans several
+    /// loads, so a project switch can land while one is suspended part-way
+    /// through; comparing this at each suspension point lets the superseded
+    /// restore stop instead of re-inserting the previous project's expansion
+    /// onto the new tree. Same shape as `pendingLoads`, one generation for the
+    /// whole restore rather than one per directory.
+    private var restoreGeneration = 0
+
     // MARK: - Cache reads (pure — safe to call from `body`)
 
     /// Cached children of `dir`, or `[]` when it has not been loaded. Never
@@ -115,12 +123,21 @@ final class ExplorerTreeStore {
 
     /// Forget `dir`'s children so the next `loadChildren(of:)` re-enumerates.
     ///
-    /// Deliberately leaves `pendingLoads` and `selection` alone: this is the
-    /// "reload me" primitive, the rows come straight back, and dropping the
-    /// user's selection on a manual refresh would be a regression. The paths
-    /// that genuinely destroy rows (`collapse`, `refreshLoaded`) prune.
+    /// Deliberately leaves `selection` alone: this is the "reload me"
+    /// primitive, the rows come straight back, and dropping the user's
+    /// selection on a manual refresh would be a regression. The paths that
+    /// genuinely destroy rows (`collapse`, `refreshLoaded`) prune.
+    ///
+    /// `pendingLoads` is NOT in that category and must be cleared: a load
+    /// already in flight would otherwise still match its ticket and write the
+    /// PRE-invalidate enumeration back into the cache, after which `isLoaded`
+    /// answers true and nothing ever re-reads the directory. That is the same
+    /// non-cancellable-`Task.detached` shape `reset()` guards against, and the
+    /// toolbar Refresh path is exactly `invalidate` + reload.
     func invalidate(_ dir: URL) {
-        children.removeValue(forKey: ExplorerPaths.key(dir))
+        let key = ExplorerPaths.key(dir)
+        pendingLoads.removeValue(forKey: key)
+        children.removeValue(forKey: key)
     }
 
     /// Drop every piece of per-workspace state. Called when the active project
@@ -130,11 +147,16 @@ final class ExplorerTreeStore {
     /// Clearing `pendingLoads` is what makes this stick: an in-flight load
     /// started before the switch finds its ticket gone and discards its
     /// result, instead of repopulating the old project's children afterwards.
+    /// Bumping `restoreGeneration` does the same for a restore that is
+    /// suspended part-way through — it spans several loads, so without this a
+    /// superseded restore would re-insert the previous project's expansion
+    /// keys after the switch.
     func reset() {
         children.removeAll()
         expanded.removeAll()
         selection.removeAll()
         pendingLoads.removeAll()
+        restoreGeneration += 1
         // The watcher is per-workspace state too: a live watcher on the old
         // root would keep refreshing a tree that is no longer on screen.
         stopWatching()
@@ -319,11 +341,38 @@ final class ExplorerTreeStore {
     /// probe over a real tree: `canonical(root) + rel` is `==` AND hash-equal
     /// to the row for files, directories, symlinked entries, spaces and
     /// non-ASCII names, whichever way the caller spells the root.
-    func restoreState(for root: URL, defaults: UserDefaults = .standard) async {
-        guard let data = defaults.data(forKey: Self.defaultsKey(for: root)),
-              let state = try? JSONDecoder().decode(PersistedState.self, from: data) else { return }
+    ///
+    /// **Returns `true` only if this restore ran to completion.** A restore is
+    /// several loads long, so a project switch can land while one is suspended
+    /// mid-way; `reset()` and any newer `restoreState` both supersede it, and a
+    /// superseded restore returns `false` having written nothing further. The
+    /// return value is the caller's "restore is done, and it was MINE" signal —
+    /// the point at which it is safe to start persisting again. Persisting
+    /// before it would save the empty state `reset()` just installed over the
+    /// blob this call is about to read.
+    @discardableResult
+    func restoreState(for root: URL, defaults: UserDefaults = .standard) async -> Bool {
+        restoreGeneration += 1
+        let generation = restoreGeneration
 
         let base = ExplorerPaths.canonical(root)
+        // Load the root FIRST, and whether or not there is anything stored.
+        // `persistState` skips the root itself (its relative path is ""), so
+        // the root is never in `state.expanded` and a restore-only wiring —
+        // the obvious way to call this — would restore expansion and selection
+        // onto an empty cache and render ZERO rows, silently. Doing it here
+        // makes the promise above true and removes an ordering requirement
+        // from the caller. Already-loaded roots are not re-read.
+        if !isLoaded(base) {
+            await loadChildren(of: base)
+            guard restoreGeneration == generation else { return false }
+        }
+
+        guard let data = defaults.data(forKey: Self.defaultsKey(for: root)),
+              let state = try? JSONDecoder().decode(PersistedState.self, from: data) else {
+            return restoreGeneration == generation
+        }
+
         let fm = FileManager.default
         var restoredDirs: [URL] = []
         for rel in state.expanded {
@@ -334,12 +383,26 @@ final class ExplorerTreeStore {
         }
         // Shallowest first, so a parent is loaded before its child is expanded.
         restoredDirs.sort { $0.pathComponents.count < $1.pathComponents.count }
-        for dir in restoredDirs { await expand(dir) }
+        for dir in restoredDirs {
+            guard restoreGeneration == generation else { return false }
+            // Inlined rather than `await expand(dir)` deliberately: the guard
+            // and the mutation it protects must have NO suspension between
+            // them, and an `await` on a same-actor async call is a suspension
+            // point the compiler is free to take. This way a superseded restore
+            // cannot re-insert a stale expansion key for the old project.
+            expanded.insert(ExplorerPaths.key(dir))
+            if !isLoaded(dir) {
+                await loadChildren(of: dir)
+                guard restoreGeneration == generation else { return false }
+            }
+        }
 
+        guard restoreGeneration == generation else { return false }
         selection = Set(state.selection.compactMap { rel -> URL? in
             let url = base.appendingPathComponent(rel)
             return fm.fileExists(atPath: url.path) ? url : nil
         })
+        return true
     }
 
     // MARK: - Live filesystem updates
@@ -364,20 +427,74 @@ final class ExplorerTreeStore {
     /// a URL of a deleted file: `standardizedFileURL`'s `/private` fold is
     /// existence-dependent, so a path that vanished would key differently than
     /// it did while it existed and the entry would leak.
+    ///
+    /// **One hop, one mutation.** This runs unattended on every FSEvent, so it
+    /// enumerates every cached directory in a SINGLE detached task and then
+    /// applies the whole result at once, rather than awaiting each directory in
+    /// turn. The sequential shape measured 330 ms across 201 cached directories
+    /// — almost all of it main-actor↔detached round-trips, not enumeration —
+    /// and, worse, wrote `children` up to N times with real suspension points
+    /// between the writes, so one watcher tick could make SwiftUI recompute the
+    /// view (and re-run `flatten`) N times instead of once.
+    ///
+    /// Batching does NOT weaken the newest-load-wins guarantee: every
+    /// directory still takes its own ticket up front and every write is still
+    /// checked against it, so a user-initiated `loadChildren` that starts
+    /// during the walk still wins over this refresh's stale result for that
+    /// one directory.
     func refreshLoaded() async {
         let fm = FileManager.default
-        for key in Array(children.keys) {
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: key, isDirectory: &isDir), isDir.boolValue else {
-                children.removeValue(forKey: key)
-                expanded.remove(key)
-                // Drop any in-flight load too, or it would resurrect the
-                // directory as a "loaded, empty" entry when it lands.
-                pendingLoads.removeValue(forKey: key)
-                continue
-            }
-            await loadChildren(of: URL(fileURLWithPath: key))
+        let keys = Array(children.keys)
+        guard !keys.isEmpty else {
+            selection = selection.filter { fm.fileExists(atPath: $0.path) }
+            return
         }
+
+        // Tickets are taken BEFORE the suspension, exactly as `loadChildren`
+        // does, so a load starting mid-walk supersedes this one per-directory.
+        var tickets: [String: Int] = [:]
+        for key in keys {
+            loadTicket += 1
+            tickets[key] = loadTicket
+            pendingLoads[key] = loadTicket
+        }
+
+        let walked = await Task.detached(priority: .userInitiated) { [keys] in
+            let fm = FileManager.default
+            var fresh: [String: [FileSystemTree.Node]] = [:]
+            var dead: [String] = []
+            for key in keys {
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: key, isDirectory: &isDir), isDir.boolValue else {
+                    dead.append(key)
+                    continue
+                }
+                fresh[key] = FileSystemTree.children(of: URL(fileURLWithPath: key)).map {
+                    FileSystemTree.Node(url: $0.url.standardizedFileURL,
+                                        name: $0.name, isDirectory: $0.isDirectory)
+                }
+            }
+            return (fresh: fresh, dead: dead)
+        }.value
+
+        // Apply synchronously — no awaits from here on, and each observable
+        // property is written exactly once.
+        var updated = children
+        var deadKeys: Set<String> = []
+        for key in walked.dead where pendingLoads[key] == tickets[key] {
+            pendingLoads.removeValue(forKey: key)
+            updated.removeValue(forKey: key)
+            deadKeys.insert(key)
+        }
+        for (key, nodes) in walked.fresh where pendingLoads[key] == tickets[key] {
+            pendingLoads.removeValue(forKey: key)
+            updated[key] = nodes
+        }
+        children = updated
+        if !deadKeys.isEmpty { expanded.subtract(deadKeys) }
+        // Read the CURRENT selection rather than a snapshot taken before the
+        // walk: the user may have selected something while it ran, and this
+        // must prune vanished rows, not clobber a newer selection.
         selection = selection.filter { fm.fileExists(atPath: $0.path) }
     }
 
@@ -398,13 +515,28 @@ final class ExplorerTreeStore {
     /// No feedback loop: `refreshLoaded` only reads the filesystem, so a
     /// refresh cannot retrigger the watcher that caused it.
     ///
+    /// The watcher is handed the Explorer's OWN relevance filter
+    /// (`IgnoreList.directories` — what the tree actually hides) rather than
+    /// only `RepoFileWatcher`'s graph-oriented default. Without it, writes into
+    /// `DerivedData/`, `target/`, `build/`, `__pycache__/` etc. count as
+    /// "relevant" while being invisible in the tree, and because the debounce
+    /// is trailing-edge, a running build would restart it on every batch and
+    /// the Explorer would get NO live updates for the build's whole duration —
+    /// driven entirely by directories it does not display. `maxWait` caps that
+    /// for any burst the filter does not catch: a continuous stream of real
+    /// changes still yields a refresh every 5s instead of never.
+    ///
     /// Safe to call repeatedly: it replaces any existing watcher.
     /// `RepoFileWatcher.init?` returns nil if FSEvents can't start (rare); in
     /// that case this is a silent no-op and the toolbar's manual Refresh stays
-    /// the fallback.
+    /// the fallback — which is also the one case where `loadChildren`'s
+    /// residual ordering race has no self-healing FSEvent to correct it.
     func startWatching(_ root: URL) {
         stopWatching()
-        watcher = RepoFileWatcher(repoRoot: root, debounce: 1.0) { [weak self] in
+        watcher = RepoFileWatcher(repoRoot: root,
+                                  debounce: 1.0,
+                                  maxWait: 5.0,
+                                  additionalIgnoredDirectories: IgnoreList.directories) { [weak self] in
             // Fires on the watcher's own background queue — hop to the main
             // actor before touching `self`.
             Task { @MainActor in

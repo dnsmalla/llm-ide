@@ -120,6 +120,131 @@ final class ExplorerTreeStorePersistenceTests: XCTestCase {
         XCTAssertTrue(rowIDs.contains(loader.selection.first!))
     }
 
+    /// A restore-ONLY wiring — no `loadChildren` first — must render rows.
+    /// `persistState` skips the root itself, so the root is never in the
+    /// stored expansion set; before this was fixed, restore reinstated
+    /// expansion and selection onto an empty cache and `flatten` returned
+    /// ZERO rows, silently. Every other test here loads the root first and so
+    /// cannot see it.
+    func testRestoreOnlyWiringRendersRows() async {
+        let sub = makeDir("サブ フォルダ")
+        let file = makeFile("サブ フォルダ/設計.txt")
+        makeFile("with space.txt")
+
+        let saver = ExplorerTreeStore()
+        await saver.loadChildren(of: root)
+        await saver.expand(sub)
+        saver.selection = [file]
+        saver.persistState(for: root, defaults: defaults)
+
+        let loader = ExplorerTreeStore()
+        await loader.restoreState(for: root, defaults: defaults)   // and nothing else
+
+        XCTAssertTrue(loader.isLoaded(root), "restore must leave the root loaded")
+        let rows = loader.flatten(from: root)
+        XCTAssertFalse(rows.isEmpty, "restore-only wiring rendered an empty tree")
+        XCTAssertTrue(rows.contains { $0.name == "設計.txt" })
+        let selected = loader.selection.first
+        XCTAssertNotNil(selected)
+        if let selected {
+            XCTAssertTrue(Set(rows.map(\.id)).contains(selected),
+                          "restored selection matches no rendered row")
+        }
+    }
+
+    /// The root loads even when there is nothing stored, so a first run and a
+    /// restored run reach the same rendered state through one call.
+    func testRestoreWithNoStoredStateStillLoadsTheRoot() async {
+        makeFile("a.txt")
+        let store = ExplorerTreeStore()
+        await store.restoreState(for: root, defaults: defaults)
+        XCTAssertTrue(store.isLoaded(root))
+        XCTAssertEqual(store.flatten(from: root).map(\.name), ["a.txt"])
+    }
+
+    /// A restore spans several loads, so a project switch can land while one is
+    /// suspended part-way through. The superseded restore must write nothing
+    /// further — otherwise it re-inserts the PREVIOUS project's expansion keys
+    /// onto the new tree — and must report that it did not complete.
+    func testASupersededRestoreWritesNothingAndReportsFalse() async {
+        var dirs: [URL] = []
+        for d in 0..<12 {
+            dirs.append(makeDir("サブ フォルダ\(d)"))
+            for i in 0..<60 { makeFile("サブ フォルダ\(d)/f\(i).txt") }
+        }
+        let saver = ExplorerTreeStore()
+        await saver.loadChildren(of: root)
+        for dir in dirs { await saver.expand(dir) }
+        saver.selection = [makeFile("設計.txt")]
+        saver.persistState(for: root, defaults: defaults)
+
+        let store = ExplorerTreeStore()
+        async let restored: Bool = store.restoreState(for: root, defaults: defaults)
+        for _ in 0..<10 { await Task.yield() }
+        try? await Task.sleep(nanoseconds: 2_000_000)
+        store.reset()                       // the project switch
+        let completed = await restored
+
+        XCTAssertFalse(completed, "a superseded restore must not report completion")
+        XCTAssertTrue(store.expanded.isEmpty, "stale expansion survived a project switch")
+        XCTAssertTrue(store.selection.isEmpty, "stale selection survived a project switch")
+    }
+
+    /// The completion signal must be true for a restore that was NOT
+    /// superseded — it is what the view keys "safe to persist again" on.
+    func testACleanRestoreReportsCompletion() async {
+        let sub = makeDir("sub")
+        makeFile("sub/a.txt")
+        let saver = ExplorerTreeStore()
+        await saver.loadChildren(of: root)
+        await saver.expand(sub)
+        saver.persistState(for: root, defaults: defaults)
+
+        let store = ExplorerTreeStore()
+        let completed = await store.restoreState(for: root, defaults: defaults)
+
+        XCTAssertTrue(completed)
+        XCTAssertTrue(store.expanded.contains(ExplorerPaths.key(sub)))
+        XCTAssertFalse(store.flatten(from: root).isEmpty)
+    }
+
+    func testANewerRestoreSupersedesAnOlderOne() async {
+        let sub = makeDir("sub")
+        for i in 0..<60 { makeFile("sub/f\(i).txt") }
+        let saver = ExplorerTreeStore()
+        await saver.loadChildren(of: root)
+        await saver.expand(sub)
+        saver.persistState(for: root, defaults: defaults)
+
+        let store = ExplorerTreeStore()
+        async let first: Bool = store.restoreState(for: root, defaults: defaults)
+        for _ in 0..<10 { await Task.yield() }
+        try? await Task.sleep(nanoseconds: 2_000_000)
+        let second = await store.restoreState(for: root, defaults: defaults)
+        let firstCompleted = await first
+
+        XCTAssertTrue(second, "the newest restore must complete")
+        XCTAssertFalse(firstCompleted, "the superseded restore must report false")
+    }
+
+    /// `invalidate` must drop the in-flight load as well as the children, or
+    /// that load writes the PRE-invalidate listing back and `isLoaded` then
+    /// answers true forever. The toolbar Refresh path is invalidate + reload.
+    func testInvalidateIsNotUndoneByAnInFlightLoad() async {
+        for i in 0..<60 { makeFile("f\(i).txt") }
+        let store = ExplorerTreeStore()
+
+        async let load: Void = store.loadChildren(of: root)
+        for _ in 0..<10 { await Task.yield() }
+        try? await Task.sleep(nanoseconds: 2_000_000)
+        makeFile("zz-after.txt")
+        store.invalidate(root)
+        await load
+
+        XCTAssertFalse(store.isLoaded(root),
+                       "an in-flight load repopulated a directory that was invalidated")
+    }
+
     /// Restoring an expanded folder must also have LOADED it, or the tree
     /// renders the folder open and empty until the user pokes it.
     func testRestoreLoadsTheChildrenOfRestoredExpandedFolders() async {

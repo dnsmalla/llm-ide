@@ -23,7 +23,12 @@ final class RepoFileWatcher: @unchecked Sendable {
     private var pending: DispatchWorkItem?
     private let queue = DispatchQueue(label: "com.llmide.repo-watcher", qos: .utility)
     private let debounce: TimeInterval
+    private let maxWait: TimeInterval?
+    private let ignoredFragments: [String]
     private let onChange: @Sendable () -> Void
+
+    /// When the current burst of events began. Touched only on `queue`.
+    private var burstStart: DispatchTime?
 
     nonisolated private static let log = Logger(subsystem: "com.llmide.macapp", category: "RepoFileWatcher")
 
@@ -35,8 +40,28 @@ final class RepoFileWatcher: @unchecked Sendable {
     ]
 
     /// Returns nil if the FSEvents stream cannot be created or started.
-    init?(repoRoot: URL, debounce: TimeInterval = 2.0, onChange: @escaping @Sendable () -> Void) {
+    ///
+    /// - Parameters:
+    ///   - debounce: trailing-edge quiet period before `onChange` fires.
+    ///   - maxWait: cap on how long a SUSTAINED burst can keep postponing the
+    ///     callback. The debounce is trailing-edge, so without this a process
+    ///     writing continuously (a build) restarts the timer on every batch and
+    ///     `onChange` never fires for the whole build. `nil` keeps the original
+    ///     uncapped behaviour.
+    ///   - additionalIgnoredDirectories: directory NAMES to treat as noise on
+    ///     top of `ignored`, each matched as a `/name/` path fragment. Pass the
+    ///     caller's own relevance filter (e.g. `IgnoreList.directories`) so
+    ///     churn in a directory the caller does not even display cannot hold
+    ///     the debounce open.
+    init?(repoRoot: URL,
+          debounce: TimeInterval = 2.0,
+          maxWait: TimeInterval? = nil,
+          additionalIgnoredDirectories: Set<String> = [],
+          onChange: @escaping @Sendable () -> Void) {
         self.debounce = debounce
+        self.maxWait = maxWait
+        self.ignoredFragments = Self.ignored
+            + additionalIgnoredDirectories.map { "/\($0)/" }
         self.onChange = onChange
 
         let root = repoRoot.standardizedFileURL.path
@@ -86,19 +111,35 @@ final class RepoFileWatcher: @unchecked Sendable {
     // Runs on `queue`.
     private func handle(paths: [String]) {
         let hasRelevant = paths.contains { path in
-            !Self.ignored.contains { path.contains($0) }
+            !ignoredFragments.contains { path.contains($0) }
         }
         guard hasRelevant else { return }
+
+        let now = DispatchTime.now()
+        let start = burstStart ?? now
+        burstStart = start
+
         pending?.cancel()
-        let item = DispatchWorkItem { [onChange] in onChange() }
+        var deadline = now + debounce
+        // A sustained burst would otherwise postpone the callback forever;
+        // fire no later than `maxWait` after the burst began.
+        if let maxWait {
+            let cap = start + maxWait
+            if cap < deadline { deadline = cap }
+        }
+        let item = DispatchWorkItem { [weak self, onChange] in
+            self?.burstStart = nil          // on `queue`
+            onChange()
+        }
         pending = item
-        queue.asyncAfter(deadline: .now() + debounce, execute: item)
+        queue.asyncAfter(deadline: deadline, execute: item)
     }
 
     func stop() {
         queue.sync {
             pending?.cancel()
             pending = nil
+            burstStart = nil
             guard let stream else { return }
             FSEventStreamStop(stream)
             FSEventStreamInvalidate(stream)
