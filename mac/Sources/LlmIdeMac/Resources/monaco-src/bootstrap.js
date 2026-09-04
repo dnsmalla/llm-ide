@@ -36,7 +36,11 @@
           value: text,
           language: language,
           automaticLayout: true,
-          minimap: { enabled: true },
+          // No minimap. It is a VS Code signature, not something an editor
+          // needs: it costs a continuous render of the whole document and
+          // eats horizontal space that matters more in this app's split
+          // layout (tree + editor in one window) than it does in VS Code.
+          minimap: { enabled: false },
         });
         this.editor.onDidChangeModelContent(function () {
           post({ type: 'contentChanged', text: window.__llmide.editor.getValue() });
