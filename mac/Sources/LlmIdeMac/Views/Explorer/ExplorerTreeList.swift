@@ -115,6 +115,13 @@ struct ExplorerTreeList: View {
             return true
         }
         .onKeyPress(phases: .down) { press in
+            // While a row is being renamed the keyboard belongs to its
+            // TextField, and this List-level handler must not compete for it.
+            // If it won, ⏎ would resolve to `.open` on the row's OLD url and
+            // the rename would never commit, ←/→ would collapse the tree
+            // instead of moving the caret, and ⌘X/⌘C would cut the file rather
+            // than the selected text.
+            guard renamingURL == nil else { return .ignored }
             guard let command = ExplorerKeyCommand.resolve(
                 character: press.key.character,
                 command: press.modifiers.contains(.command)) else { return .ignored }

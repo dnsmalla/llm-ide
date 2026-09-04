@@ -699,12 +699,38 @@ struct ExplorerView: View {
             store.selection = selection
         }
 
+        let oldKey = ExplorerPaths.key(old)
+        let newKey = ExplorerPaths.key(new)
+
+        // Reap the children cached under the PRE-rename paths. Nothing else
+        // ever will on the rename path: `invalidate` is keyed on the path, and
+        // the caller only reloads the old parent and the folders whose
+        // expansion moved — all of them NEW keys. The old entries would sit
+        // there until `refreshLoaded`'s next FSEvent tick noticed the
+        // directory was gone, and until then every tick re-walks a subtree
+        // that no longer exists.
+        //
+        // Reaping is invisible to `flatten`, which is why it is safe to do
+        // here rather than after the reload: the renamed folder's own ROW
+        // comes from its PARENT's cache entry, which is not touched, and
+        // `appendRows` only descends into a directory that is in `expanded` —
+        // and the loop below is about to move the old key out of `expanded`.
+        // So no row that was rendering before this call stops rendering
+        // because of it.
+        //
+        // Placed BEFORE the `movedKeys` guard, not inside it: `collapse`
+        // leaves a folder's children cached on purpose, so a loaded-then-
+        // collapsed folder has a stale key to reap even though no expansion
+        // moved with it.
+        let staleKeys = store.children.keys.filter { $0 == oldKey || $0.hasPrefix(oldKey + "/") }
+        for key in staleKeys {
+            store.invalidate(URL(fileURLWithPath: key, isDirectory: true))
+        }
+
         // Expansion is keyed on `ExplorerPaths.key` STRINGS, not URLs, so it is
         // rewritten by prefix here rather than through `rebase`. Without this a
         // renamed folder comes back collapsed and strands its old key — and its
         // open children collapse with it.
-        let oldKey = ExplorerPaths.key(old)
-        let newKey = ExplorerPaths.key(new)
         let movedKeys = store.expanded.filter { $0 == oldKey || $0.hasPrefix(oldKey + "/") }
         guard !movedKeys.isEmpty else { return [] }
         var expanded = store.expanded
@@ -786,14 +812,32 @@ struct ExplorerView: View {
         return (applicable, missing)
     }
 
-    /// One alert line for every source that had vanished, raised only when the
-    /// operation itself did not already fail — a real error is the more
-    /// specific news.
+    /// One alert line for every source that had vanished.
+    ///
+    /// APPENDS to whatever is already in `opError` instead of standing down in
+    /// front of it. The old rule ("a real error is the more specific news")
+    /// deferred to ANY non-nil `opError` — including a stale one the user has
+    /// not dismissed yet, which has nothing to do with this operation. A paste
+    /// whose sources had all vanished then showed the user the PREVIOUS
+    /// operation's message and no word about the files that are gone. Files
+    /// disappearing out from under a cut is exactly the news that must never
+    /// be swallowed, so it is always added.
+    ///
+    /// Both facts survive when the operation ALSO failed: the callers set
+    /// `opError` from their `catch` immediately before calling this, and a
+    /// collision and a vanished source in one paste are two separate things
+    /// the user needs to know. Separated by a blank line so the alert reads as
+    /// two statements rather than one run-on sentence.
     private func reportMissing(_ missing: [String]) {
-        guard !missing.isEmpty, opError == nil else { return }
-        opError = missing.count == 1
-            ? ExplorerFileError.sourceMissing(missing[0]).errorDescription
+        guard !missing.isEmpty else { return }
+        let line = missing.count == 1
+            ? (ExplorerFileError.sourceMissing(missing[0]).errorDescription ?? "")
             : "These items no longer exist: " + missing.map { "“\($0)”" }.joined(separator: ", ")
+        if let existing = opError, !existing.isEmpty {
+            opError = existing + "\n\n" + line
+        } else {
+            opError = line
+        }
     }
 
     private func performDrop(_ sources: [URL], into destinationDir: URL, copy: Bool) {

@@ -5,6 +5,11 @@ import Foundation
 enum ExplorerFileError: LocalizedError, Equatable {
     case emptyName
     case invalidName
+    /// A name carrying a line break anywhere inside it. Its own case rather
+    /// than `invalidName` because that error's sentence names "/" and "." and
+    /// would send the user hunting for a slash that isn't there. Reachable by
+    /// pasting a wrapped line into the rename field or a name sheet.
+    case nameHasLineBreak
     case alreadyExists
     case writeFailed
     /// Dropping/pasting a folder into itself or into one of its own
@@ -24,6 +29,7 @@ enum ExplorerFileError: LocalizedError, Equatable {
         switch self {
         case .emptyName: return "Name can't be empty."
         case .invalidName: return "Name can't contain \"/\" or be \".\" or \"..\"."
+        case .nameHasLineBreak: return "Names can't contain line breaks."
         case .alreadyExists: return "An item with this name already exists."
         case .writeFailed: return "Couldn't create the item."
         case .cannotMoveIntoSelf: return "Can't move a folder into itself."
@@ -37,10 +43,24 @@ enum ExplorerFileError: LocalizedError, Equatable {
 /// the logic is testable without UI. Delete uses `trashItem` (Finder Trash,
 /// undoable) — never `removeItem`.
 enum ExplorerFileOps {
-    /// Throws if `name` is empty/whitespace, or contains "/" or is "." / "..".
+    /// Throws if `name` is empty/whitespace, carries a line break, contains
+    /// "/", or is "." / "..".
+    ///
+    /// The line-break rule is not covered by the trim above it: trimming takes
+    /// whitespace and newlines off the ENDS, so an interior one ("x⏎y.txt",
+    /// reachable by pasting a wrapped line into a name sheet) survives it and
+    /// reaches `createFile`/`moveItem`, producing a filename that tears in two
+    /// everywhere this project treats one line as one record.
+    ///
+    /// Tested with `\.isNewline` rather than `contains("\n")`: Swift treats
+    /// "\r\n" as ONE Character, so a literal check misses CRLF outright, along
+    /// with a lone CR and U+2028.
     private static func validate(_ name: String) throws -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw ExplorerFileError.emptyName }
+        guard !trimmed.contains(where: \.isNewline) else {
+            throw ExplorerFileError.nameHasLineBreak
+        }
         guard trimmed != ".", trimmed != "..", !trimmed.contains("/") else {
             throw ExplorerFileError.invalidName
         }
@@ -70,13 +90,68 @@ enum ExplorerFileOps {
 
     /// Rename `url` to `newName` (same parent). Returns the new URL. No-op
     /// (returns the original) when the name is unchanged.
+    ///
+    /// A CASE-ONLY rename (`Foo.swift` → `foo.swift`) is routed through a
+    /// two-step move. On the default case-insensitive APFS volume the source
+    /// and the destination are the SAME directory entry, so the `fileExists`
+    /// collision check below sees the file's own self and throws
+    /// `.alreadyExists` — "An item with this name already exists.", which is
+    /// flatly wrong when the only item in the way is the file being renamed.
+    /// Case-fixing a filename is routine (and F2 makes it one keystroke), so
+    /// this cannot be left to the user to work around by renaming twice.
+    ///
+    /// The same-place test is `realWorldKey`, the fs-aware key the move/copy
+    /// guards already use — not a raw `lowercased()` comparison — so the
+    /// question asked is the one that matters: "do these two names denote the
+    /// same entry on THIS volume?" On a genuinely case-sensitive volume
+    /// `isCaseInsensitiveVolume` is false, the branch is skipped, and the
+    /// ordinary path handles it correctly (there `foo.swift` really is a
+    /// different, free name).
+    ///
+    /// Everything else still goes down the ordinary path, so a rename onto a
+    /// DIFFERENT existing name is still refused with the victim intact —
+    /// including `Foo.swift` → `Bar.swift` where `bar.swift` exists, which
+    /// differs from the case-only shape precisely because the destination
+    /// resolves somewhere the source does not.
     @discardableResult
     static func rename(_ url: URL, to newName: String) throws -> URL {
         let trimmed = try validate(newName)
-        let dest = url.deletingLastPathComponent().appendingPathComponent(trimmed)
+        let parent = url.deletingLastPathComponent()
+        let dest = parent.appendingPathComponent(trimmed)
         if dest == url { return url }
+
+        if isCaseInsensitiveVolume(url),
+           realWorldKey(url, caseInsensitive: true) == realWorldKey(dest, caseInsensitive: true) {
+            return try renameChangingCaseOnly(url, to: dest, in: parent)
+        }
+
         guard !FileManager.default.fileExists(atPath: dest.path) else { throw ExplorerFileError.alreadyExists }
         try FileManager.default.moveItem(at: url, to: dest)
+        return dest
+    }
+
+    /// The two-step half of `rename` for a case-only change: move the item to
+    /// a unique staging name in its OWN directory, then move it to the final
+    /// name, which is now genuinely free. Same-directory moves are `rename(2)`
+    /// — atomic, no copy, and no risk of a partially-written file.
+    ///
+    /// Staging is dot-prefixed and UUID-named so it is both hidden and
+    /// collision-proof; `uniqueDestination` covers the astronomically
+    /// unlikely rest. If the second move fails the first is undone, so a
+    /// failure leaves the item under its ORIGINAL name rather than stranded
+    /// under a hidden UUID the user would never find. The underlying error is
+    /// then rethrown as-is: at this point it is a real filesystem failure, and
+    /// `.writeFailed` ("Couldn't create the item.") would misdescribe it.
+    private static func renameChangingCaseOnly(_ url: URL, to dest: URL, in parent: URL) throws -> URL {
+        let fm = FileManager.default
+        let staging = uniqueDestination(in: parent, name: "." + UUID().uuidString)
+        try fm.moveItem(at: url, to: staging)
+        do {
+            try fm.moveItem(at: staging, to: dest)
+        } catch {
+            try? fm.moveItem(at: staging, to: url)
+            throw error
+        }
         return dest
     }
 

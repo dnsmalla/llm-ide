@@ -109,16 +109,80 @@ final class ExplorerRenameNameTests: XCTestCase {
         XCTAssertEqual(ExplorerRenameName.resolve("  a.txt  ", current: "a.txt"), .cancel)
     }
 
+    /// `.nameHasLineBreak`, not `.invalidName`: the latter's sentence names "/"
+    /// and "." and would send the user hunting for a slash that isn't there.
     func testInteriorNewlineIsRejected() {
         XCTAssertEqual(ExplorerRenameName.resolve("a\nb.txt", current: "a.txt"),
-                       .reject(.invalidName))
+                       .reject(.nameHasLineBreak))
         // "\r\n" is ONE Swift Character; a `contains("\n")` check misses it.
         XCTAssertEqual(ExplorerRenameName.resolve("a\r\nb.txt", current: "a.txt"),
-                       .reject(.invalidName))
+                       .reject(.nameHasLineBreak))
         XCTAssertEqual(ExplorerRenameName.resolve("a\rb.txt", current: "a.txt"),
-                       .reject(.invalidName))
+                       .reject(.nameHasLineBreak))
         XCTAssertEqual(ExplorerRenameName.resolve("a\u{2028}b.txt", current: "a.txt"),
-                       .reject(.invalidName))
+                       .reject(.nameHasLineBreak))
+        XCTAssertEqual(ExplorerFileError.nameHasLineBreak.errorDescription,
+                       "Names can't contain line breaks.")
+    }
+
+    /// The sheets (New File / New Folder) reach `validate` directly — no
+    /// `ExplorerRenameName` in front of them — so the same rule must hold
+    /// there, with the same message.
+    func testSheetCreatePathRejectsInteriorNewline() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("explorer-newline-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        XCTAssertThrowsError(try ExplorerFileOps.createFile(in: dir, name: "x\ny.txt")) { error in
+            XCTAssertEqual(error as? ExplorerFileError, .nameHasLineBreak)
+        }
+        XCTAssertThrowsError(try ExplorerFileOps.createFolder(in: dir, name: "x\r\ny")) { error in
+            XCTAssertEqual(error as? ExplorerFileError, .nameHasLineBreak)
+        }
+        // A space is not a line break, and a Japanese name must still pass.
+        XCTAssertNoThrow(try ExplorerFileOps.createFile(in: dir, name: "x y.txt"))
+        XCTAssertNoThrow(try ExplorerFileOps.createFile(in: dir, name: "設計.txt"))
+    }
+
+    /// A case-only rename on a case-insensitive volume (the macOS/APFS default)
+    /// must succeed, not report "An item with this name already exists." —
+    /// the source and the destination are the same directory entry there.
+    func testCaseOnlyRenameSucceeds() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("explorer-case-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let source = dir.appendingPathComponent("Foo.swift")
+        try "hello".write(to: source, atomically: true, encoding: .utf8)
+
+        let renamed = try ExplorerFileOps.rename(source, to: "foo.swift")
+        XCTAssertEqual(renamed.lastPathComponent, "foo.swift")
+        XCTAssertEqual(try String(contentsOf: renamed, encoding: .utf8), "hello")
+        // Exactly one entry, spelled the new way, and no staging file left over.
+        let listed = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        XCTAssertEqual(listed, ["foo.swift"])
+    }
+
+    /// The case-only path must not become a way to clobber a DIFFERENT file
+    /// that happens to differ only in case from the requested name.
+    func testRenameOntoADifferentlyCasedSiblingIsStillRefused() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("explorer-case2-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let source = dir.appendingPathComponent("Foo.swift")
+        try "source".write(to: source, atomically: true, encoding: .utf8)
+        let victim = dir.appendingPathComponent("bar.swift")
+        try "victim".write(to: victim, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try ExplorerFileOps.rename(source, to: "Bar.swift")) { error in
+            XCTAssertEqual(error as? ExplorerFileError, .alreadyExists)
+        }
+        XCTAssertEqual(try String(contentsOf: victim, encoding: .utf8), "victim")
+        XCTAssertEqual(try String(contentsOf: source, encoding: .utf8), "source")
     }
 
     /// "/" and "." / ".." stay owned by `ExplorerFileOps.validate` — ONE

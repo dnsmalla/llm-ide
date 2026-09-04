@@ -21,17 +21,22 @@ enum ExplorerRenameName {
     /// Resolve `raw` (what the user typed) against `current` (the name the row
     /// carries now).
     ///
-    /// The ONE validity rule applied here is the newline one, because it is the
-    /// one `ExplorerFileOps.validate` does not cover: that function trims
-    /// leading and trailing whitespace-and-newlines, so an INTERIOR newline
-    /// ("a⏎b.txt" — reachable by pasting a wrapped line into the field) sails
-    /// through to `moveItem` and produces a filename that tears in two
-    /// everywhere this project treats one line as one record;
-    /// `ExplorerDragPayload.encode` already drops such a path rather than emit
-    /// something `decode` would split. Everything else ("/", ".", "..",
-    /// already-exists) stays owned by `ExplorerFileOps` — one definition of a
-    /// valid name, checked at the point that acts on it — and surfaces through
-    /// the same `.reject` path when it throws.
+    /// The ONE validity rule applied here is the newline one, so that the
+    /// inline editor can refuse "a⏎b.txt" (reachable by pasting a wrapped line
+    /// into the field) WITHOUT a filesystem round-trip. `ExplorerFileOps.validate`
+    /// enforces the identical rule for the sheets and as the backstop for this
+    /// path, and both raise the same `.nameHasLineBreak`; duplicating the check
+    /// costs one `contains` and keeps the editor's refusal instant.
+    ///
+    /// `.nameHasLineBreak`, NOT `.invalidName`: that error's sentence names "/"
+    /// and "." and would send the user hunting for a slash their name does not
+    /// contain — and a pasted line break is invisible in a one-line field, so a
+    /// message that does not say "line break" leaves them with no way to see
+    /// what is wrong.
+    ///
+    /// Everything else ("/", ".", "..", already-exists) stays owned by
+    /// `ExplorerFileOps` — checked at the point that acts on it — and surfaces
+    /// through the same `.reject` path when it throws.
     ///
     /// Tested against `\.isNewline` rather than `contains("\n")`: Swift treats
     /// "\r\n" as ONE Character, so a literal check misses CRLF, and it misses
@@ -39,7 +44,7 @@ enum ExplorerRenameName {
     static func resolve(_ raw: String, current: String) -> Outcome {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != current else { return .cancel }
-        guard !trimmed.contains(where: \.isNewline) else { return .reject(.invalidName) }
+        guard !trimmed.contains(where: \.isNewline) else { return .reject(.nameHasLineBreak) }
         return .apply(trimmed)
     }
 }
