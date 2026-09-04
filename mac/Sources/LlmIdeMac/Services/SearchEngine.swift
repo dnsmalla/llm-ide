@@ -119,4 +119,127 @@ enum SearchEngine {
         if total >= maxMatches { return .truncated(totalMatches: total, fileCount: fileCount) }
         return .completed(totalMatches: total, fileCount: fileCount)
     }
+
+    // MARK: - Candidate walk
+
+    /// Walk `root` pre-order and return, sorted by `displayPath`, the files a
+    /// search should read.
+    ///
+    /// Filters in order: `IgnoreList.directories` noise dirs (skipped whole),
+    /// `.gitignore` (repo root + `.git/info/exclude`, plus every nested
+    /// `.gitignore` added as its directory is ENTERED — pre-order guarantees a
+    /// nested rule lands after the rules it may override), then the
+    /// include/exclude globs on the repo-relative path.
+    ///
+    /// An ignored DIRECTORY is pruned with `skipDescendants()`, not merely
+    /// filtered: testing every file under `node_modules/` against the rule set
+    /// individually is the difference between milliseconds and seconds.
+    ///
+    /// Collecting up front rather than lazily is deliberate: enumeration only
+    /// touches directory metadata (no file is read here), so it costs
+    /// milliseconds even on a large repo, and it lets the ignore state be a
+    /// plain local `var` instead of `inout` state threaded through a lazy
+    /// sequence. Sorting here also means `scan` emits in display order, so the
+    /// UI can append instead of insert — and the truncation cutoff becomes
+    /// deterministic across runs.
+    ///
+    /// `respectGitignore: false` skips the `.gitignore` layer entirely (noise
+    /// dirs and the globs still apply), for a caller that wants to search
+    /// build output.
+    static func collectCandidates(root: URL,
+                                  include: String,
+                                  exclude: String,
+                                  respectGitignore: Bool = true,
+                                  isCancelled: () -> Bool) -> [Candidate] {
+        let fm = FileManager.default
+        // Two prefixes, because the cheap one usually works: the enumerator
+        // yields URLs built by appending to `root`, so their RAW paths carry
+        // the root's own spelling. Only when that fails (a symlinked/firmlinked
+        // root — the enumerator can yield `/private/var/…` where the caller
+        // passed `/var/…`) do we pay for `standardizedFileURL`, which hits the
+        // filesystem for Foundation's `/private` special case and measurably
+        // inflates a walk when called per entry.
+        let rawPrefix = root.path == "/" ? "/" : root.path + "/"
+        let stdRoot = root.standardizedFileURL.path
+        let stdPrefix = stdRoot == "/" ? "/" : stdRoot + "/"
+        // Optional rather than an empty `GitIgnoreRules`: nil is the honest
+        // representation of "this run does not consult .gitignore at all".
+        var ignore: GitIgnoreRules? = respectGitignore ? GitIgnoreRules.repoRoot(root) : nil
+
+        guard let en = fm.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+            options: [.skipsHiddenFiles]) else { return [] }
+
+        var out: [Candidate] = []
+        let excludeActive = exclude.split(separator: ",").contains {
+            !$0.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        for case let url as URL in en {
+            if isCancelled() { return [] }
+            if IgnoreList.directories.contains(url.lastPathComponent) {
+                en.skipDescendants()
+                continue
+            }
+            guard let display = relativePath(of: url, rawPrefix: rawPrefix, stdPrefix: stdPrefix) else { continue }
+            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isDirectoryKey])
+            let isDir = values?.isDirectory ?? false
+            if let ignore, isIgnoredHere(display, isDirectory: isDir, rules: ignore) {
+                if isDir { en.skipDescendants() }
+                continue
+            }
+            if isDir {
+                // Pre-order: this directory's own .gitignore must be in the
+                // rule list before any of its children are tested.
+                ignore?.addFile(at: url.appendingPathComponent(".gitignore"), base: display)
+                continue
+            }
+            guard values?.isRegularFile == true else { continue }
+            guard GlobMatch.matchesAny(path: display, patterns: include) else { continue }
+            if excludeActive && GlobMatch.matchesAny(path: display, patterns: exclude) { continue }
+            out.append(Candidate(url: url, displayPath: display))
+        }
+        return out.sorted {
+            $0.displayPath.localizedCaseInsensitiveCompare($1.displayPath) == .orderedAscending
+        }
+    }
+
+    /// Is `path` ignored BY ITS OWN NAME, ignoring its ancestors?
+    ///
+    /// `GitIgnoreRules.isIgnored(relativePath:isDirectory:)` also tests every
+    /// ancestor component, which is what a caller holding a bare path needs.
+    /// Inside this pre-order walk that work is pure waste: an ancestor
+    /// directory was evaluated when the enumerator entered it, and an ignored
+    /// one was pruned with `skipDescendants()`, so no path reaching this line
+    /// has an ignored ancestor. Measured on this repo's own `.gitignore` the
+    /// ancestor loop is the dominant cost — see the P4 T3 report.
+    ///
+    /// THIS MAKES `skipDescendants()` LOAD-BEARING FOR CORRECTNESS, not just
+    /// speed. Drop the pruning and files under an ignored directory start
+    /// coming back. (git's own rule — a file under an excluded directory can
+    /// never be re-included — is preserved either way: pruning and the
+    /// ancestor loop reach the same answer.)
+    ///
+    /// Last matching rule wins, mirroring `GitIgnoreRules.decide(path:isDirectory:)`,
+    /// which is private. Exposing it (or a `isIgnoredExact(...)`) would let this
+    /// duplication go away; see the T3 report's note to the reviewer.
+    private static func isIgnoredHere(_ path: String,
+                                      isDirectory: Bool,
+                                      rules: GitIgnoreRules) -> Bool {
+        var ignored = false
+        for rule in rules.rules where rule.matches(path: path, isDirectory: isDirectory) {
+            ignored = !rule.isNegated
+        }
+        return ignored
+    }
+
+    /// `url`'s path relative to the root the two prefixes describe, or nil when
+    /// it is outside. See `collectCandidates` for why there are two.
+    private static func relativePath(of url: URL, rawPrefix: String, stdPrefix: String) -> String? {
+        let raw = url.path
+        if raw.hasPrefix(rawPrefix) { return String(raw.dropFirst(rawPrefix.count)) }
+        let std = url.standardizedFileURL.path
+        guard std.hasPrefix(stdPrefix) else { return nil }
+        return String(std.dropFirst(stdPrefix.count))
+    }
 }

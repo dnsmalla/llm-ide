@@ -5,13 +5,38 @@ struct SearchOptions: Equatable { var caseSensitive = false; var wholeWord = fal
 struct Match: Hashable { let nsRange: NSRange; let fileIndex: Int }   // utf16 range within lineText
 struct LineMatch: Hashable { let line: Int; let lineText: String; let matches: [Match] }
 struct FileMatch: Identifiable, Hashable { let url: URL; let displayPath: String; let lineMatches: [LineMatch]; var id: String { url.path } }
-struct SearchResults: Equatable { var files: [FileMatch] = []; var totalMatches = 0; var fileCount = 0; var invalidPattern = false }
+struct SearchResults: Equatable {
+    var files: [FileMatch] = []
+    var totalMatches = 0
+    var fileCount = 0
+    var invalidPattern = false
+    /// The run stopped at `SearchEngine.maxMatches`; `files` is a prefix of
+    /// the truth and the UI must say so.
+    var truncated = false
+}
+
+/// One event from a streaming search.
+///
+/// Design §6.5 asks for "an `AsyncStream<FileMatch>` (or a callback-per-file
+/// API)". This is that, plus the two out-of-band signals the P4 UI needs: a
+/// truncation warning and the final totals are facts about the RUN, not about
+/// any one file, so they cannot ride inside a `FileMatch`.
+///
+/// There is deliberately no `.invalidPattern` case: that condition can only
+/// ever be known BEFORE the first event, so the caller checks it with
+/// `SearchService.makeRegex` and never starts a stream at all.
+enum SearchEvent: Equatable {
+    case file(FileMatch)
+    /// The run stopped at the match cap. Always yielded before `.finished`.
+    case truncated(cap: Int)
+    /// The run finished normally. NEVER yielded for a cancelled run — the
+    /// consumer is gone and a partial total would be a lie.
+    case finished(totalMatches: Int, fileCount: Int)
+}
 
 @MainActor
 @Observable
 final class SearchService {
-    nonisolated private static let noiseNames = IgnoreList.directories
-
     /// Build the regex driving both find and replace. Plain queries are escaped;
     /// `wholeWord` wraps `\b…\b`; `regex` is taken verbatim. Case-insensitive
     /// unless `caseSensitive`. Returns nil for an invalid regex pattern.
@@ -30,60 +55,109 @@ final class SearchService {
         return try? NSRegularExpression(pattern: pattern, options: opts)
     }
 
-    /// Walk `root`, matching the query against text-file contents. Runs the
-    /// blocking walk off the main actor. Empty/whitespace query → empty.
-    /// An invalid regex pattern → `invalidPattern = true`. `include`/`exclude`
-    /// are comma-separated globs over the repo-relative path; empty `include`
-    /// matches all, empty `exclude` excludes nothing.
+    /// Streaming, cancellable search. Returns immediately; the walk runs on a
+    /// detached task and yields `.file` as each matching file completes, in
+    /// `displayPath` order (`collectCandidates` sorts, so no re-sort is needed
+    /// downstream and the truncation cutoff is the same on every run).
+    ///
+    /// CANCELLATION (design §3 finding #8, §9): stop iterating — or cancel the
+    /// task that iterates — and `AsyncStream`'s termination handler cancels the
+    /// walk. `SearchEngine.scan` checks `Task.isCancelled` before every file, so
+    /// a superseded search stops within one file instead of running the whole
+    /// repo to completion in the background, which is exactly what the old
+    /// `Task.detached`-with-no-checks `search(...)` did. A cancelled run yields
+    /// NOTHING further — no `.truncated`, no `.finished`.
+    ///
+    /// TRUNCATION IS DELIBERATELY CONSERVATIVE. `SearchEngine.scan` reports
+    /// `.truncated` whenever the run ends with `total >= maxMatches`, including
+    /// a run that consumed every candidate and dropped nothing. This does NOT
+    /// suppress that warning when the candidate list was exhausted, because
+    /// exhaustion does not prove nothing was dropped: `lineMatches` also stops
+    /// at the remaining budget, so the LAST file can have unreported matches
+    /// while the walk still finishes. A false "there may be more" is safe; a
+    /// false "this is complete" is not. Distinguishing the two would need
+    /// `lineMatches` to report that it hit its budget — an engine change, not a
+    /// stream change.
+    ///
+    /// The caller MUST validate the pattern first with `makeRegex` — passing a
+    /// compiled regex in is what keeps an impossible error case out of
+    /// `SearchEvent`. `readText` is an injection seam mirroring
+    /// `SearchEngine.scan`'s: production uses the default, a test drives file
+    /// reads deterministically (and can observe how many candidates the walk
+    /// actually pulled after a consumer walks away).
+    nonisolated static func stream(regex: NSRegularExpression,
+                                   root: URL,
+                                   include: String,
+                                   exclude: String,
+                                   respectGitignore: Bool = true,
+                                   readText: @escaping @Sendable (URL) -> String? = { SearchEngine.fileText(at: $0) })
+        -> AsyncStream<SearchEvent> {
+        AsyncStream { continuation in
+            let task = Task.detached(priority: .userInitiated) {
+                let candidates = SearchEngine.collectCandidates(
+                    root: root, include: include, exclude: exclude,
+                    respectGitignore: respectGitignore,
+                    isCancelled: { Task.isCancelled })
+                if Task.isCancelled { continuation.finish(); return }
+
+                let outcome = SearchEngine.scan(
+                    candidates: candidates,
+                    regex: regex,
+                    readText: readText,
+                    isCancelled: { Task.isCancelled },
+                    emit: { continuation.yield(.file($0)) })
+
+                switch outcome {
+                case .completed(let total, let files):
+                    continuation.yield(.finished(totalMatches: total, fileCount: files))
+                case .truncated(let total, let files):
+                    continuation.yield(.truncated(cap: SearchEngine.maxMatches))
+                    continuation.yield(.finished(totalMatches: total, fileCount: files))
+                case .cancelled:
+                    break   // no `.finished`: the consumer is gone
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// Walk `root`, matching the query against text-file contents. Empty/
+    /// whitespace query → empty. An invalid regex pattern → `invalidPattern =
+    /// true`. `include`/`exclude` are comma-separated globs over the
+    /// repo-relative path; empty `include` matches all, empty `exclude`
+    /// excludes nothing.
+    ///
+    /// TODO(P4 T5): delete once SearchView consumes `stream` directly. This is
+    /// now a thin drain of `stream` kept only so the existing call site
+    /// compiles unchanged; it throws away the incremental delivery that is the
+    /// whole point of the stream.
+    ///
+    /// A cancelled run returns an EMPTY `SearchResults` rather than a partial
+    /// one: without `.finished` there are no trustworthy totals, and the caller
+    /// (which cancelled) discards the value anyway.
     func search(query rawQuery: String, root: URL, options: SearchOptions, include: String, exclude: String) async -> SearchResults {
         let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return SearchResults() }
         guard let regex = Self.makeRegex(query: query, options: options) else {
             return SearchResults(invalidPattern: true)
         }
-        let rootPath = root.standardizedFileURL.path
-        return await Task.detached(priority: .userInitiated) {
-            Self.walk(root: root, rootPath: rootPath, regex: regex, include: include, exclude: exclude)
-        }.value
-    }
-
-    nonisolated private static func walk(root: URL, rootPath: String, regex: NSRegularExpression, include: String, exclude: String) -> SearchResults {
-        let fm = FileManager.default
-        guard let en = fm.enumerator(at: root,
-            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
-            options: [.skipsHiddenFiles]) else { return SearchResults() }
-        var files: [FileMatch] = []
-        var total = 0
-        let excludeActive = exclude.split(separator: ",").contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        for case let url as URL in en {
-            if noiseNames.contains(url.lastPathComponent) { en.skipDescendants(); continue }
-            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
-            if total >= SearchEngine.maxMatches { break }
-            // Standardize the enumerated path before stripping the root: on
-            // macOS the enumerator yields `/private/var/…` while `rootPath`
-            // (also standardized) is `/var/…`, so a raw-path prefix check fails
-            // and the include/exclude globs would match against the full path.
-            // No-op for ordinary roots; fixes any symlinked/firmlinked root.
-            let filePath = url.standardizedFileURL.path
-            let display = filePath.hasPrefix(rootPath + "/") ? String(filePath.dropFirst(rootPath.count + 1)) : filePath
-
-            // Glob filter on the repo-relative path.
-            guard GlobMatch.matchesAny(path: display, patterns: include) else { continue }
-            if excludeActive && GlobMatch.matchesAny(path: display, patterns: exclude) { continue }
-
-            guard let text = SearchEngine.fileText(at: url) else { continue }
-            // CRLF-safe line splitting lives in SearchEngine: Swift treats
-            // "\r\n" as ONE Character, so the old `split(separator: "\n")`
-            // here reported every match in a CRLF file on line 1.
-            let (lineMatches, used) = SearchEngine.lineMatches(
-                in: text, regex: regex, budget: SearchEngine.maxMatches - total)
-            total += used
-            if !lineMatches.isEmpty {
-                files.append(FileMatch(url: url, displayPath: display, lineMatches: lineMatches))
+        var out = SearchResults()
+        var finished = false
+        for await event in Self.stream(regex: regex, root: root, include: include, exclude: exclude) {
+            switch event {
+            case .file(let match):
+                out.files.append(match)
+            case .truncated:
+                out.truncated = true
+            case .finished(let total, let fileCount):
+                out.totalMatches = total
+                out.fileCount = fileCount
+                finished = true
             }
         }
-        files.sort { $0.displayPath.localizedCaseInsensitiveCompare($1.displayPath) == .orderedAscending }
-        return SearchResults(files: files, totalMatches: total, fileCount: files.count, invalidPattern: false)
+        guard finished else { return SearchResults() }
+        return out
     }
 
     // MARK: - Replace
