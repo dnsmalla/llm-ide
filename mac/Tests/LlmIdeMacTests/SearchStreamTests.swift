@@ -185,12 +185,25 @@ final class SearchStreamTests: XCTestCase {
         XCTAssertTrue(truncated)
     }
 
-    func testEmptyQueryProducesNoResults() async {
-        write("a.txt", "needle\n")
-        let service = await SearchService()
-        let results = await service.search(query: "   ", root: root,
-                                           options: SearchOptions(), include: "", exclude: "")
-        XCTAssertEqual(results, SearchResults())
+    /// The empty-query guard, at its new home. It used to live inside the
+    /// batch `search(...)` wrapper (deleted once `SearchView` consumed
+    /// `stream` directly); `normalizedQuery` is that same rule, kept pure so
+    /// it stays testable. `nil` is what makes `scheduleSearch` return before
+    /// opening a stream — an empty pattern would otherwise match every
+    /// position in every file in the repo.
+    func testWhitespaceOnlyQueryIsNotSearchable() {
+        XCTAssertNil(SearchService.normalizedQuery("   "))
+        XCTAssertNil(SearchService.normalizedQuery(""))
+        XCTAssertNil(SearchService.normalizedQuery("\u{20}\u{09}\u{0A}"))
+        XCTAssertEqual(SearchService.normalizedQuery("  needle  "), "needle")
+        XCTAssertEqual(SearchService.normalizedQuery("  設計.txt "), "設計.txt")
+        // VERIFIED, not assumed: CharacterSet.whitespacesAndNewlines covers
+        // Unicode Zs, so the full-width Japanese space U+3000 trims away too —
+        // a lone 　 is not a searchable query. Unchanged from the deleted
+        // wrapper, which trimmed with the same character set.
+        XCTAssertNil(SearchService.normalizedQuery("\u{3000}"))
+        // …but it is preserved INSIDE a query, so "a　b" stays searchable.
+        XCTAssertEqual(SearchService.normalizedQuery(" a\u{3000}b "), "a\u{3000}b")
     }
 
     /// A consumer that walks away must terminate the walk instead of leaving a

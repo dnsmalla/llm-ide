@@ -60,6 +60,12 @@ struct SearchView: View {
                 scheduleSearch()
             }
         }
+        .onDisappear {
+            // Leaving the panel must stop the walk, not leave it grinding
+            // through the repo in the background: cancelling the consumer
+            // ends the AsyncStream, whose onTermination cancels the walk.
+            debounce?.cancel()
+        }
     }
 
     /// Thin panel header mirroring Explorer's / Source Control's, carrying the
@@ -415,18 +421,53 @@ struct SearchView: View {
         // one in a session.
         if resetExpanded { expanded.removeAll() }
         guard let root else { results = SearchResults(); return }
-        let q = query
+        // An all-whitespace or empty query starts NO walk at all — the guard
+        // the deleted batch `search(...)` wrapper used to own.
+        guard let q = SearchService.normalizedQuery(query) else { results = SearchResults(); return }
         let opts = options
         let inc = include
         let exc = exclude
         debounce = Task {
             try? await Task.sleep(nanoseconds: 250_000_000)
             if Task.isCancelled { return }
+            // The pattern is validated HERE, not inside the stream: an invalid
+            // regex can only ever be known before the first event, so it stays
+            // out of SearchEvent (see SearchService.stream's doc comment).
+            guard let regex = SearchService.makeRegex(query: q, options: opts) else {
+                results = SearchResults(invalidPattern: true)
+                return
+            }
             searching = true
             defer { searching = false }
-            let r = await searchService.search(query: q, root: root, options: opts, include: inc, exclude: exc)
-            if Task.isCancelled { return }
-            results = r
+            // Results are cleared only once the new run is actually starting,
+            // so a debounced keystroke doesn't blank the list mid-typing.
+            var accumulated = SearchResults()
+            results = accumulated
+            for await event in SearchService.stream(regex: regex, root: root,
+                                                    include: inc, exclude: exc) {
+                // Returning here tears down the AsyncStream's iterator, which
+                // fires its onTermination and cancels the walk task — this is
+                // the whole cancellation mechanism, not a belt-and-braces check.
+                // A cancelled run also yields no `.finished`; the loop simply
+                // ends, which means "superseded", never "failed".
+                if Task.isCancelled { return }
+                switch event {
+                case .file(let fm):
+                    // Events arrive pre-sorted by displayPath
+                    // (SearchEngine.collectCandidates sorts), so appending
+                    // keeps the list in order without an insertion search —
+                    // and never reshuffles rows under the user mid-run.
+                    accumulated.files.append(fm)
+                    accumulated.fileCount = accumulated.files.count
+                    accumulated.totalMatches += fm.lineMatches.reduce(0) { $0 + $1.matches.count }
+                case .truncated:
+                    accumulated.truncated = true
+                case .finished(let total, let files):
+                    accumulated.totalMatches = total
+                    accumulated.fileCount = files
+                }
+                results = accumulated
+            }
         }
     }
 }

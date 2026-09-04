@@ -37,6 +37,20 @@ enum SearchEvent: Equatable {
 @MainActor
 @Observable
 final class SearchService {
+    /// The query as the search actually sees it: surrounding whitespace is not
+    /// a search term. `nil` means "there is nothing to search for" — the caller
+    /// must clear its results and start NO walk, rather than scanning the whole
+    /// repo for a pattern that matches every position in every file.
+    ///
+    /// Pure and separated for tests, mirroring `MonacoRevealGate` and
+    /// `MonacoEditorMessageHandler.effect(for:)`. It lives here rather than in
+    /// `SearchView` because the deleted batch `search(...)` wrapper used to own
+    /// this rule, and `Views/Search` is excluded from the lite/min builds.
+    nonisolated static func normalizedQuery(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     /// Build the regex driving both find and replace. Plain queries are escaped;
     /// `wholeWord` wraps `\b…\b`; `regex` is taken verbatim. Case-insensitive
     /// unless `caseSensitive`. Returns nil for an invalid regex pattern.
@@ -120,44 +134,6 @@ final class SearchService {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
-    }
-
-    /// Walk `root`, matching the query against text-file contents. Empty/
-    /// whitespace query → empty. An invalid regex pattern → `invalidPattern =
-    /// true`. `include`/`exclude` are comma-separated globs over the
-    /// repo-relative path; empty `include` matches all, empty `exclude`
-    /// excludes nothing.
-    ///
-    /// TODO(P4 T5): delete once SearchView consumes `stream` directly. This is
-    /// now a thin drain of `stream` kept only so the existing call site
-    /// compiles unchanged; it throws away the incremental delivery that is the
-    /// whole point of the stream.
-    ///
-    /// A cancelled run returns an EMPTY `SearchResults` rather than a partial
-    /// one: without `.finished` there are no trustworthy totals, and the caller
-    /// (which cancelled) discards the value anyway.
-    func search(query rawQuery: String, root: URL, options: SearchOptions, include: String, exclude: String) async -> SearchResults {
-        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return SearchResults() }
-        guard let regex = Self.makeRegex(query: query, options: options) else {
-            return SearchResults(invalidPattern: true)
-        }
-        var out = SearchResults()
-        var finished = false
-        for await event in Self.stream(regex: regex, root: root, include: include, exclude: exclude) {
-            switch event {
-            case .file(let match):
-                out.files.append(match)
-            case .truncated:
-                out.truncated = true
-            case .finished(let total, let fileCount):
-                out.totalMatches = total
-                out.fileCount = fileCount
-                finished = true
-            }
-        }
-        guard finished else { return SearchResults() }
-        return out
     }
 
     // MARK: - Replace
