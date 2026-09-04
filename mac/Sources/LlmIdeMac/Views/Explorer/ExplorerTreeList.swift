@@ -15,6 +15,9 @@ struct ExplorerActions {
     var beginRename: (URL) -> Void
     var delete: ([URL]) -> Void
     var revealInFinder: ([URL]) -> Void
+    /// Drag & drop landing. `copy` is true when ⌥ was held (Finder's
+    /// convention); otherwise the sources are moved.
+    var drop: (_ sources: [URL], _ destinationDir: URL, _ copy: Bool) -> Void
 }
 
 /// The file tree, as a real `List` with a `Set<URL>` selection.
@@ -57,6 +60,17 @@ struct ExplorerTreeList: View {
                 .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
         }
         .listStyle(.sidebar)
+        // The empty space below the last row is a drop target for the tree
+        // root, so dragging to the bottom of the list moves an item OUT of
+        // whatever folder it is in — the only way to reach the root when the
+        // root itself has no row of its own (the single-repo display case).
+        // Row destinations are nested inside this one and win the hit test.
+        .dropDestination(for: String.self) { items, _ in
+            let sources = items.flatMap { ExplorerDragPayload.decode($0) }
+            guard !sources.isEmpty else { return false }
+            actions.drop(sources, displayRoot, NSEvent.modifierFlags.contains(.option))
+            return true
+        }
         .onKeyPress(phases: .down) { press in
             guard let command = ExplorerKeyCommand.resolve(
                 character: press.key.character,
@@ -128,6 +142,18 @@ private struct ExplorerTreeRow: View {
             onToggleChevron: row.isDirectory ? { Task { await store.toggle(row.url) } } : nil
         )
         .help(row.name)
+        // `targets` is already exactly the right drag set: the whole selection
+        // when the dragged row is part of it, otherwise just that row. One
+        // `String` carries all of them — see `ExplorerDragPayload`.
+        .draggable(ExplorerDragPayload.encode(targets))
+        .dropDestination(for: String.self) { items, _ in
+            let sources = items.flatMap { ExplorerDragPayload.decode($0) }
+            guard !sources.isEmpty else { return false }
+            // Dropping on a FILE targets the folder it lives in, matching
+            // Finder and VS Code — a file is never itself a container.
+            actions.drop(sources, enclosingDir, NSEvent.modifierFlags.contains(.option))
+            return true
+        }
         .contextMenu { contextMenuItems }
     }
 

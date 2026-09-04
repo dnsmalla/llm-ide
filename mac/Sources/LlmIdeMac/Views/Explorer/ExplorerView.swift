@@ -54,7 +54,10 @@ struct ExplorerView: View {
     /// Pending trash targets (empty = no confirmation showing). A LIST because
     /// the tree is multi-select now.
     @State private var pendingDelete: [URL] = []
-    @State private var deleteError: String?
+    /// Any failed destructive operation (trash, drag-move, paste) — shown in
+    /// the "Couldn't complete the operation" alert. Distinct from
+    /// `fileOpError`, which is the create/rename sheet's INLINE error.
+    @State private var opError: String?
 
     // Git status decorations for the file tree (VS Code-style coloring).
     @State private var decorations = GitTruthStore()
@@ -73,6 +76,21 @@ struct ExplorerView: View {
     /// HSplitView (see `body`), so it gets an explicit draggable divider
     /// rather than `persistedPanelWidth`.
     @AppStorage("EXPLORER_TREE_WIDTH") private var treeWidth: Double = 240
+
+    /// The tree column's resize bounds — ONE source of truth, handed to both
+    /// `ResizableDivider` (which clamps on write) and `clampedTreeWidth`
+    /// (which clamps on read).
+    private static let treeWidthMin = 160.0
+    private static let treeWidthMax = 520.0
+
+    /// `treeWidth` clamped for RENDERING. `@AppStorage` reads back whatever is
+    /// in `UserDefaults` unfiltered, so a value written by an older build, by
+    /// a `defaults write`, or a NaN that got stored once, would survive a whole
+    /// launch as an out-of-range (or un-layout-able) frame width — clamping
+    /// only on the drag write never gets a chance to correct it.
+    private var clampedTreeWidth: Double {
+        ResizableDivider.clamp(treeWidth, minWidth: Self.treeWidthMin, maxWidth: Self.treeWidthMax)
+    }
 
     /// The Explorer is the code-browsing pane, so it roots at the active
     /// project's `code/` folder (where repos clone to) — not the whole project
@@ -131,9 +149,10 @@ struct ExplorerView: View {
             HStack(spacing: 0) {
                 if treeVisible {
                     treePane
-                        .frame(width: CGFloat(treeWidth))
+                        .frame(width: CGFloat(clampedTreeWidth))
                         .transition(.move(edge: .leading))
-                    ResizableDivider(width: $treeWidth)
+                    ResizableDivider(width: $treeWidth,
+                                     minWidth: Self.treeWidthMin, maxWidth: Self.treeWidthMax)
                 }
                 // Editor + chat split, with the shared terminal dock BELOW
                 // just this column — so the terminal sits to the RIGHT of the
@@ -182,8 +201,14 @@ struct ExplorerView: View {
             let shown = store.displayRoot(for: base)
             if shown != base { await store.loadChildren(of: shown) }
             guard treeRoot?.rawPath == root.path else { return }
-            await store.restoreState(for: base)
-            guard treeRoot?.rawPath == root.path else { return }
+            // `restoreState` answers false when a NEWER restore superseded this
+            // one. That includes a re-run for the SAME root — `.task(id:)`
+            // fires again on disappear/reappear — which the `rawPath` check
+            // below cannot see, because both runs stamp the identical path.
+            // The Bool is the load-bearing signal now; the `rawPath` check
+            // stays as defence in depth against an outright project switch.
+            let restored = await store.restoreState(for: base)
+            guard restored, treeRoot?.rawPath == root.path else { return }
             treeStateRestored = true
             store.startWatching(base)
         }
@@ -253,10 +278,10 @@ struct ExplorerView: View {
             Text("You can undo this in Finder.")
         }
         .alert("Couldn’t complete the operation",
-               isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
-            Button("OK", role: .cancel) { deleteError = nil }
+               isPresented: Binding(get: { opError != nil }, set: { if !$0 { opError = nil } })) {
+            Button("OK", role: .cancel) { opError = nil }
         } message: {
-            Text(deleteError ?? "")
+            Text(opError ?? "")
         }
         .sheet(isPresented: $showProjectPaths) {
             ProjectPathsSheet()
@@ -472,7 +497,8 @@ struct ExplorerView: View {
             newFolder: { filePrompt = .newFolder(in: $0) },
             beginRename: { filePrompt = .rename(url: $0) },
             delete: { pendingDelete = $0 },
-            revealInFinder: { NSWorkspace.shared.activateFileViewerSelecting($0) }
+            revealInFinder: { NSWorkspace.shared.activateFileViewerSelecting($0) },
+            drop: { sources, destination, copy in performDrop(sources, into: destination, copy: copy) }
         )
     }
 
@@ -507,17 +533,58 @@ struct ExplorerView: View {
         }
     }
 
-    /// Follow a renamed/moved item: open tabs, the active tab, and the
-    /// selection all point at the new URL rather than a path that no longer
-    /// exists.
-    private func retarget(from old: URL, to new: URL) {
+    /// Point open tabs, the active tab, and the selection at `new` instead of
+    /// `old`. Pure state remap — no filesystem work, no reload — so a
+    /// multi-item move can call it per item and reload ONCE at the end
+    /// instead of re-enumerating the same folder n times.
+    ///
+    /// `new` must already be `ExplorerPaths.canonical`: `List(selection:)`
+    /// matches rows by raw `URL` hashing, so an uncanonical URL inserted here
+    /// silently never highlights.
+    private func remap(from old: URL, to new: URL) {
         tabs = tabs.map { $0 == old ? new : $0 }
         if activeTab == old { activeTab = new }
         if store.selection.contains(old) {
             store.selection.remove(old)
             store.selection.insert(new)
         }
+    }
+
+    /// Follow a renamed/moved item: remap the tabs and selection, then refresh
+    /// the folder it came from.
+    private func retarget(from old: URL, to new: URL) {
+        remap(from: old, to: new)
         Task { await reload(old.deletingLastPathComponent()); await refreshGit() }
+    }
+
+    /// Apply a drag & drop. ⌥ copies (Finder's convention); otherwise moves.
+    ///
+    /// Every source's ORIGINAL parent is refreshed alongside the destination,
+    /// or a moved file would keep rendering in the folder it came from until
+    /// the watcher's next tick. Self-nesting and name collisions are rejected
+    /// by `ExplorerFileOps` and surface in the shared alert — this never
+    /// overwrites anything. Stops at the first failure, like `delete(_:)`: the
+    /// items already moved are visible in the tree after the refresh, so a
+    /// partial application is never hidden.
+    private func performDrop(_ sources: [URL], into destinationDir: URL, copy: Bool) {
+        var touched: Set<String> = [ExplorerPaths.key(destinationDir)]
+        do {
+            for source in sources {
+                if copy {
+                    _ = try ExplorerFileOps.copy(from: source, to: destinationDir)
+                } else {
+                    let moved = try ExplorerFileOps.move(from: source, to: destinationDir)
+                    touched.insert(ExplorerPaths.key(source.deletingLastPathComponent()))
+                    remap(from: source, to: ExplorerPaths.canonical(moved))
+                }
+            }
+        } catch {
+            opError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
+        }
+        Task {
+            for dir in touched { await reload(URL(fileURLWithPath: dir)) }
+            await refreshGit()
+        }
     }
 
     /// Trash one or more items, close any tabs under them, refresh their
@@ -538,7 +605,7 @@ struct ExplorerView: View {
                 }
             }
         } catch {
-            deleteError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
+            opError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
         }
         Task {
             for parent in parents { await reload(URL(fileURLWithPath: parent)) }
