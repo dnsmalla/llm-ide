@@ -35,6 +35,12 @@ struct ExplorerActions {
     /// path); the view never touches the filesystem itself.
     var commitRename: (URL, String) -> Void
     var cancelRename: () -> Void
+    /// Write paths to the SYSTEM pasteboard — deliberately unlike cut/copy,
+    /// which stay in `ExplorerClipboard` because they are a pending file
+    /// OPERATION, not text. Copy Path exists precisely so a path can be pasted
+    /// into a terminal, a chat message or another editor. `relative` selects
+    /// display-root-relative paths over absolute ones.
+    var copyPath: (_ urls: [URL], _ relative: Bool) -> Void
 }
 
 /// The file tree, as a real `List` with a `Set<URL>` selection.
@@ -326,6 +332,9 @@ private struct ExplorerTreeRow: View {
         Button("Rename") { actions.beginRename(row.url) }
         Button(targets.count > 1 ? "Delete \(targets.count) Items" : "Delete",
                role: .destructive) { actions.delete(targets) }
+        Divider()
+        Button("Copy Path") { actions.copyPath(targets, false) }
+        Button("Copy Relative Path") { actions.copyPath(targets, true) }
         Divider()
         Button("Reveal in Finder") { actions.revealInFinder(targets) }
     }

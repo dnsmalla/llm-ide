@@ -356,7 +356,7 @@ struct ExplorerView: View {
                                  displayRoot: displayRoot,
                                  gitRoot: gitRoot,
                                  git: decorations,
-                                 actions: actions(),
+                                 actions: actions(displayRoot: displayRoot),
                                  renamingURL: renamingURL,
                                  renameText: $renameText)
             }
@@ -504,8 +504,13 @@ struct ExplorerView: View {
     }
 
     /// The action bundle handed to the tree. Rebuilt on each render, which is
-    /// fine: it is six closures over `self`, not state.
-    private func actions() -> ExplorerActions {
+    /// fine: it is a handful of closures over `self`, not state.
+    ///
+    /// `displayRoot` is a parameter rather than a re-derivation because
+    /// `treePane` has already resolved it for this render (and `flatten` is
+    /// keyed on the same value) — the two must not be able to disagree about
+    /// where the tree starts.
+    private func actions(displayRoot: URL) -> ExplorerActions {
         ExplorerActions(
             open: { open($0) },
             newFile: { filePrompt = .newFile(in: $0) },
@@ -529,8 +534,31 @@ struct ExplorerView: View {
             // `ExplorerActions.canPaste`.
             canPaste: !clipboard.isEmpty,
             commitRename: { url, name in commitRename(url, to: name) },
-            cancelRename: { renamingURL = nil }
+            cancelRename: { renamingURL = nil },
+            copyPath: { urls, relative in copyPaths(urls, relative: relative, base: displayRoot) }
         )
+    }
+
+    /// Put one path per line on the SYSTEM pasteboard — the one legitimate use
+    /// of `NSPasteboard` in this panel, because the point of Copy Path is to
+    /// paste the result somewhere outside the app.
+    ///
+    /// `relative` paths are computed against the tree's display root — the
+    /// folder whose name the tree header shows — so they read the way the user
+    /// sees the tree, and match a repo-relative path in the single-repo case. A
+    /// URL outside that root, or the root itself, falls back to its absolute
+    /// path rather than silently copying an empty line.
+    private func copyPaths(_ urls: [URL], relative: Bool, base: URL) {
+        let lines = urls.map { url -> String in
+            guard relative,
+                  let rel = ExplorerPaths.relativePath(of: url, from: base),
+                  !rel.isEmpty else { return ExplorerPaths.key(url) }
+            return rel
+        }
+        let text = lines.joined(separator: "\n")
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     /// Apply an inline rename. An unchanged or empty name just closes the
