@@ -135,6 +135,9 @@ final class ExplorerTreeStore {
         expanded.removeAll()
         selection.removeAll()
         pendingLoads.removeAll()
+        // The watcher is per-workspace state too: a live watcher on the old
+        // root would keep refreshing a tree that is no longer on screen.
+        stopWatching()
     }
 
     // MARK: - Expansion
@@ -337,5 +340,81 @@ final class ExplorerTreeStore {
             let url = base.appendingPathComponent(rel)
             return fm.fileExists(atPath: url.path) ? url : nil
         })
+    }
+
+    // MARK: - Live filesystem updates
+
+    /// Re-enumerate every directory currently in the cache, and forget the
+    /// ones that no longer exist (also pruning them from `expanded`, and
+    /// pruning vanished files from `selection`).
+    ///
+    /// Deliberately does NOT load directories that were never opened: the
+    /// tree's whole cost model is "one level at a time", and walking unopened
+    /// folders on every filesystem event would undo that.
+    ///
+    /// Row identity survives this. Every `Row.id` is the `URL` out of the
+    /// cached node, and a reload rebuilds those URLs through exactly the same
+    /// path `loadChildren` used the first time — `FileManager` resolves the
+    /// children of a directory the same way regardless of how the parent was
+    /// spelled, and the standardization on top is deterministic. So a file
+    /// that did not change keeps a byte-identical id across the refresh, and
+    /// `List(selection:)` neither loses the selection nor tears its animations.
+    ///
+    /// The cache is re-keyed off the STORED key strings, never re-derived from
+    /// a URL of a deleted file: `standardizedFileURL`'s `/private` fold is
+    /// existence-dependent, so a path that vanished would key differently than
+    /// it did while it existed and the entry would leak.
+    func refreshLoaded() async {
+        let fm = FileManager.default
+        for key in Array(children.keys) {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: key, isDirectory: &isDir), isDir.boolValue else {
+                children.removeValue(forKey: key)
+                expanded.remove(key)
+                // Drop any in-flight load too, or it would resurrect the
+                // directory as a "loaded, empty" entry when it lands.
+                pendingLoads.removeValue(forKey: key)
+                continue
+            }
+            await loadChildren(of: URL(fileURLWithPath: key))
+        }
+        selection = selection.filter { fm.fileExists(atPath: $0.path) }
+    }
+
+    private var watcher: RepoFileWatcher?
+
+    /// Start live-refreshing the loaded part of the tree on filesystem changes
+    /// under `root`.
+    ///
+    /// The debounce is **1.0s**, deliberately shorter than
+    /// `GitTruthStore.startWatching`'s 2.0s: a file appearing in the tree
+    /// should feel immediate, while a git-status recomputation (which shells
+    /// out) can afford to coalesce longer. The two watchers are separate on
+    /// purpose — this one is rooted at the TREE root (often a `code/`
+    /// container holding several clones), which is frequently not the git
+    /// working tree at all, and refreshing git status would not re-enumerate
+    /// any directory anyway.
+    ///
+    /// No feedback loop: `refreshLoaded` only reads the filesystem, so a
+    /// refresh cannot retrigger the watcher that caused it.
+    ///
+    /// Safe to call repeatedly: it replaces any existing watcher.
+    /// `RepoFileWatcher.init?` returns nil if FSEvents can't start (rare); in
+    /// that case this is a silent no-op and the toolbar's manual Refresh stays
+    /// the fallback.
+    func startWatching(_ root: URL) {
+        stopWatching()
+        watcher = RepoFileWatcher(repoRoot: root, debounce: 1.0) { [weak self] in
+            // Fires on the watcher's own background queue — hop to the main
+            // actor before touching `self`.
+            Task { @MainActor in
+                await self?.refreshLoaded()
+            }
+        }
+    }
+
+    func stopWatching() {
+        watcher?.stop()
+        watcher = nil
     }
 }
