@@ -685,9 +685,21 @@ struct ExplorerView: View {
     /// overwrites anything. Stops at the first failure, like `delete(_:)`: the
     /// items already moved are visible in the tree after the refresh, so a
     /// partial application is never hidden.
-    /// `sources` with the ones that can only ever fail against this
-    /// destination removed: the destination folder ITSELF, and any folder the
-    /// destination lives inside.
+    /// `sources` split into the ones worth applying against this destination
+    /// and the NAMES of the ones that have since vanished.
+    ///
+    /// Two kinds are held back. First, anything that no longer exists —
+    /// deleted or moved by another app between the ⌘X and the ⌘V, or between
+    /// picking a drag up and dropping it. `ExplorerFileOps` reports those as a
+    /// typed `.sourceMissing` now, but it still THROWS, and the caller's loop
+    /// stops at the first throw — so one file deleted from a three-item cut
+    /// took the other two down with it. Skipping them here and reporting them
+    /// once at the end lets everything that still exists land. (The test is
+    /// `ExplorerFileOps.itemExists`, which lstats: a broken symlink is a real
+    /// row the user can see and move, not a vanished item.)
+    ///
+    /// Second, the ones that can only ever fail against this destination: the
+    /// destination folder ITSELF, and any folder the destination lives inside.
     ///
     /// Dragging a multi-selection onto one of its own folders used to be
     /// order-dependent — `[folder, e.txt]` aborted at `folder` and moved
@@ -696,24 +708,45 @@ struct ExplorerView: View {
     /// first. Finder's rule is that the drop target is simply not part of its
     /// own drag, so it is dropped from the list and the rest go through.
     ///
-    /// When filtering would empty the list, the ORIGINAL sources are returned:
-    /// dragging a folder onto itself (or into its own child) with nothing else
-    /// selected is a genuine mistake, and it must still raise "Can't move a
-    /// folder into itself." rather than silently doing nothing.
-    private func droppable(_ sources: [URL], into destinationDir: URL) -> [URL] {
+    /// When the SECOND rule alone would empty the list, the original sources
+    /// are returned instead: dragging a folder onto itself (or into its own
+    /// child) with nothing else selected is a genuine mistake, and it must
+    /// still raise "Can't move a folder into itself." rather than silently
+    /// doing nothing. That fallback deliberately does NOT apply once something
+    /// vanished — there the honest answer is the `.sourceMissing` report, not
+    /// a doomed retry.
+    private func droppable(_ sources: [URL],
+                           into destinationDir: URL) -> (apply: [URL], missing: [String]) {
         let destinationKey = ExplorerPaths.key(destinationDir)
-        let applicable = sources.filter {
-            ExplorerPaths.key($0) != destinationKey
-                && !ExplorerPaths.isDescendant(destinationDir, of: $0)
+        var missing: [String] = []
+        let applicable = sources.filter { source in
+            guard ExplorerFileOps.itemExists(source) else {
+                missing.append(source.lastPathComponent)
+                return false
+            }
+            return ExplorerPaths.key(source) != destinationKey
+                && !ExplorerPaths.isDescendant(destinationDir, of: source)
         }
-        return applicable.isEmpty ? sources : applicable
+        if applicable.isEmpty, missing.isEmpty { return (sources, []) }
+        return (applicable, missing)
+    }
+
+    /// One alert line for every source that had vanished, raised only when the
+    /// operation itself did not already fail — a real error is the more
+    /// specific news.
+    private func reportMissing(_ missing: [String]) {
+        guard !missing.isEmpty, opError == nil else { return }
+        opError = missing.count == 1
+            ? ExplorerFileError.sourceMissing(missing[0]).errorDescription
+            : "These items no longer exist: " + missing.map { "“\($0)”" }.joined(separator: ", ")
     }
 
     private func performDrop(_ sources: [URL], into destinationDir: URL, copy: Bool) {
         var touched: Set<String> = [ExplorerPaths.key(destinationDir)]
         var reopened: [URL] = []
+        let (applicable, missing) = droppable(sources, into: destinationDir)
         do {
-            for source in droppable(sources, into: destinationDir) {
+            for source in applicable {
                 if copy {
                     _ = try ExplorerFileOps.copy(from: source, to: destinationDir)
                 } else {
@@ -725,6 +758,7 @@ struct ExplorerView: View {
         } catch {
             opError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
         }
+        reportMissing(missing)
         Task {
             for dir in touched { await reload(URL(fileURLWithPath: dir)) }
             for dir in reopened { await store.loadChildren(of: dir) }
@@ -756,8 +790,9 @@ struct ExplorerView: View {
         var touched: Set<String> = [ExplorerPaths.key(dir)]
         var reopened: [URL] = []
         var results: [URL] = []
+        let (applicable, missing) = droppable(sources, into: dir)
         do {
-            for source in droppable(sources, into: dir) {
+            for source in applicable {
                 // Canonical before anything enters `store.selection` or a tab:
                 // `List(selection:)` matches rows by raw `URL` hashing, and a
                 // URL built by appending a name to a directory keeps that
@@ -776,12 +811,14 @@ struct ExplorerView: View {
         } catch {
             opError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
         }
-        // Only a cut that landed IN FULL is consumed. A partial one stays
-        // armed so the user can fix the collision and finish it — the items
-        // already moved fail harmlessly on the retry (their source is gone),
-        // whereas clearing here would strand the remainder with no way back to
-        // the selection that produced it.
-        if isMove, results.count == sources.count { clipboard.clear() }
+        reportMissing(missing)
+        // Only a cut where everything APPLICABLE landed is consumed. A cut
+        // stopped by a real failure stays armed so the user can fix the
+        // collision and finish it; clearing there would strand the remainder
+        // with no way back to the selection that produced it. Sources that had
+        // already vanished don't count against that — no retry can bring them
+        // back, so they must not keep the clipboard armed forever.
+        if isMove, results.count == applicable.count { clipboard.clear() }
         if !results.isEmpty { store.selection = Set(results) }
         Task {
             for parent in touched { await reload(URL(fileURLWithPath: parent)) }

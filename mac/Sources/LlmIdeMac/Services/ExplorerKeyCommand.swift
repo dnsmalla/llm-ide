@@ -43,9 +43,10 @@ enum ExplorerKeyCommand: Equatable {
         if command {
             // ⇧⌘C reports "C", so compare lowercased — otherwise the shifted
             // chord falls through as an unhandled key. Compared as a `String`
-            // rather than via `Character(character.lowercased())`: that
-            // initializer traps unless the result is exactly one Character,
-            // and this switch has no need to reconstruct one.
+            // rather than via `Character(character.lowercased())`:
+            // `Character(_:)` requires exactly one grapheme and user input
+            // isn't guaranteed to be one. This switch has no need to
+            // reconstruct a `Character` either way.
             switch character.lowercased() {
             case "x": return .cut
             case "c": return .copy
