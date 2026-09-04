@@ -55,6 +55,76 @@ struct ChatEngineTurnTests {
         #expect(engine.messages[1].metadata?.failedError == nil)
     }
 
+    // The buffered transports (`askAgent` behind the LLM Chat sheet / menu-bar
+    // chat, the legacy `codeAssist` fallback) go through `send()`, which wraps
+    // the fetch error as `APIError.network(_)`. A Stop on those surfaces used
+    // to read "Network error: cancelled" with a Retry button.
+    @Test("Stop wrapped as APIError.network(URLError.cancelled) is still a clean stop")
+    func stopWrappedByNetworkError() async {
+        let (engine, t) = makeEngine()
+        t.scripted = [.chunk("partial")]
+        t.thrownError = APIError.network(URLError(.cancelled))
+        await engine.runTurn("hi")
+        #expect(engine.messages[1].status == .stopped)
+        #expect(engine.error == nil)
+        #expect(engine.messages[1].metadata?.failedError == nil)
+        #expect(engine.busy == false)
+    }
+
+    @Test("isCancellation: bare and wrapped stop shapes true, other errors false")
+    func isCancellationShapes() {
+        #expect(ChatEngine.isCancellation(CancellationError()))
+        #expect(ChatEngine.isCancellation(URLError(.cancelled)))
+        #expect(ChatEngine.isCancellation(APIError.network(URLError(.cancelled))))
+        #expect(ChatEngine.isCancellation(APIError.network(CancellationError())))
+        #expect(!ChatEngine.isCancellation(URLError(.timedOut)))
+        #expect(!ChatEngine.isCancellation(APIError.network(URLError(.timedOut))))
+        #expect(!ChatEngine.isCancellation(APIError.agent(message: "down")))
+    }
+
+    // The composer shows Stop whenever `busy` is set, and an auto-chained
+    // step streams its follow-up inside the same task — so a Stop reaches
+    // `sendFollowup`'s catch too, and used to raise an unconditional banner.
+    @Test("Stop during a follow-up shows no banner; a real failure still does")
+    func stopDuringFollowup() async {
+        let (engine, t) = makeEngine()
+        t.thrownError = CancellationError()
+        await engine.sendFollowup()
+        #expect(engine.error == nil)
+        #expect(engine.messages.last?.status == .stopped)
+
+        let (engine2, t2) = makeEngine()
+        t2.thrownError = APIError.agent(message: "down")
+        await engine2.sendFollowup()
+        #expect(engine2.error != nil)
+    }
+
+    // The server unparks the approval as `aborted` the moment the stream
+    // closes and keeps no tombstone, so a card left behind would answer 404
+    // ("timed out") on Submit.
+    @Test("Stop clears a parked v2 approval card")
+    func stopClearsPendingApproval() async {
+        let (engine, t) = makeEngine()
+        engine.pendingApproval = AgentV2ApprovalState(
+            approval: AgentV2Approval(requestId: "r1", kind: "AskUserQuestion"))
+        t.thrownError = CancellationError()
+        await engine.runTurn("hi")
+        #expect(engine.pendingApproval == nil)
+    }
+
+    // `stop()` disarms the scheduled auto-continue; the next user turn is
+    // fresh consent, otherwise its `continueNeeded` would be skipped once.
+    @Test("stop() sets agentStopRequested; a new user turn resets it")
+    func stopFlagLifecycle() async {
+        let (engine, t) = makeEngine()
+        engine.stop()
+        #expect(engine.agent.agentStopRequested == true)
+        t.result = .init(reply: "ok", pendingTool: nil, tasks: nil,
+                         continueNeeded: nil, usage: nil, mode: nil)
+        await engine.runTurn("next")
+        #expect(engine.agent.agentStopRequested == false)
+    }
+
     @Test("Real failure surfaces error and finalizes placeholder")
     func failure() async {
         let (engine, t) = makeEngine()

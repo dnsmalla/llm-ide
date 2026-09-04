@@ -281,7 +281,7 @@ extension ChatEngine {
             guard currentSessionIDString == expectedSessionID.uuidString else {
                 throw error
             }
-            let isCancellation = error is CancellationError || (error as? URLError)?.code == .cancelled
+            let isCancellation = Self.isCancellation(error)
             if revealingTurnID == streamingID {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
             }

@@ -428,8 +428,30 @@ final class ChatEngine {
     /// cancellation, so the network request is actually aborted; both turn
     /// kinds treat that as a clean stop (no error bubble).
     func stop() {
+        // A Stop also disarms the 0.8 s auto-continue timer a just-finished
+        // turn may have scheduled: `busy` drops as soon as the cancelled task
+        // unwinds, so without this the timer would find the engine idle and
+        // start "Continue working…" right after the user asked it to stop.
+        // `runTurn` resets the flag — a new user message is fresh consent.
+        agent.agentStopRequested = true
         runTask?.cancel()
         externalRunTask?.cancel()
+    }
+
+    /// Whether `error` is the user's own Stop rather than a failure. Shared by
+    /// every turn catch (`runTurn`, `sendFollowup`, `performExternalTurn`)
+    /// so they can't drift. Streaming transports throw the raw
+    /// `URLError.cancelled` / `CancellationError`, but the buffered ones —
+    /// `askAgent` behind the LLM Chat sheet and menu-bar chat, and the
+    /// legacy `codeAssist` fallback — go through `LlmIdeAPIClient.send()`,
+    /// which wraps the fetch error as `APIError.network(_)`. Before this
+    /// unwrapped that shape, every Stop on those surfaces showed a "Network
+    /// error: cancelled" banner and marked the turn `.failed` with a Retry.
+    nonisolated static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if let urlError = error as? URLError { return urlError.code == .cancelled }
+        if case .network(let inner) = error as? APIError { return isCancellation(inner) }
+        return false
     }
 
     /// Queue a message the user sent while a turn was running. Drained FIFO,
@@ -458,6 +480,12 @@ final class ChatEngine {
         busy = true
         statusText = ""
         error = nil
+        // A user turn is fresh consent to auto-continue. `stop()` and the
+        // composer's "Stop autonomous agent" both set this, and only the
+        // non-continue exit of `finishStreamingTurn` used to clear it — so
+        // the first `continueNeeded` turn after either stop silently skipped
+        // its continuation and left the plan card on "Executing plan…".
+        agent.agentStopRequested = false
         // Transient v2 banner (stale-server notice): it described the
         // PREVIOUS turn's fallback — a new turn starting means it has served
         // its purpose.
@@ -558,7 +586,7 @@ final class ChatEngine {
             // forever either way — plus the `self.error` banner explaining
             // what went wrong, and a per-message `.failed` status carrying the
             // reason (Task 16 hangs the retry affordance off exactly that).
-            let isCancellation = error is CancellationError || (error as? URLError)?.code == .cancelled
+            let isCancellation = Self.isCancellation(error)
             if revealingTurnID == streamingID {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
             }
@@ -709,15 +737,14 @@ final class ChatEngine {
             if revealingTurnID == streamingID {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
             }
-            // The banner stays unconditional here (unlike runTurn, which
-            // suppresses it for a user-initiated stop) — a follow-up is not
-            // something the user can press Stop on, so any error reaching
-            // this point is worth showing. The `.failed` STATUS, though, is
-            // reserved for real failures, so a cancellation propagated from
-            // an outer task doesn't mark a message retryable.
-            self.error = error.localizedDescription
-            let isCancellation = error is CancellationError || (error as? URLError)?.code == .cancelled
-            if !isCancellation {
+            // Same stop-vs-failure split as runTurn. The user CAN stop a
+            // follow-up: the composer shows Stop whenever `busy` is set, and
+            // an auto-chained step (Bypass-mode bash / git / edit) streams
+            // its follow-up inside the same `runTask` — so an unconditional
+            // banner here read "cancelled" after every such Stop. `.failed`
+            // stays reserved for real failures either way.
+            if !Self.isCancellation(error) {
+                self.error = error.localizedDescription
                 markFailed(streamingID, error)
             }
         }
@@ -946,6 +973,11 @@ final class ChatEngine {
                 tracker.phase = .failed
                 agent.planExecution = tracker
             }
+            // And drop a parked v2 approval: the server unparks it as
+            // `aborted` the moment the stream closes (no tombstone), so the
+            // card would otherwise stay interactive under the stopped turn
+            // and its Submit come back 404 as a misleading "timed out".
+            pendingApproval = nil
             return
         }
         self.agent.pendingTool = pendingTool

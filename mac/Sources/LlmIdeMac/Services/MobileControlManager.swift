@@ -618,7 +618,11 @@ final class MobileControlManager {
             await server?.send(Output(commandId: chat.commandId,
                                       payload: OutputPayload(stream: reply, done: true)))
             NotificationCenter.default.post(name: .llmChatTranscriptChanged, object: nil)
-        } catch is CancellationError {
+        } catch let error where ChatEngine.isCancellation(error) {
+            // Covers a Mac-side Stop too: `askAgent` goes through `send()`,
+            // which wraps the cancel as `APIError.network(URLError.cancelled)`
+            // — a bare `is CancellationError` let that fall through to the
+            // generic catch and sent the phone a "cancelled" CommandError.
             append(.info, "llmide_chat cancelled: \(chat.commandId.prefix(8))")
         } catch {
             guard !isMobileCommandCancelled(chat.commandId) else { return }
@@ -723,7 +727,10 @@ final class MobileControlManager {
             guard !isMobileCommandCancelled(chat.commandId) else { return }
             await server?.send(Output(commandId: chat.commandId,
                                       payload: OutputPayload(stream: reply, done: true)))
-        } catch is CancellationError {
+        } catch let error where ChatEngine.isCancellation(error) {
+            // Same as llmide_chat: a Mac-side Stop of a phone-driven turn
+            // surfaces as URLError.cancelled (streaming) or the wrapped
+            // APIError.network shape (buffered fallback), not CancellationError.
             append(.info, "explore_chat cancelled: \(chat.commandId.prefix(8))")
         } catch {
             guard !isMobileCommandCancelled(chat.commandId) else { return }
