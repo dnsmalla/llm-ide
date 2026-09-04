@@ -151,4 +151,61 @@ final class ExplorerClipboardTests: XCTestCase {
     func testPasteOfNothingIsAnEmptyResult() throws {
         XCTAssertTrue(try ExplorerFileOps.paste([], into: root, move: true).isEmpty)
     }
+
+    // MARK: - a source that vanished between the cut and the paste
+
+    /// One stale clipboard entry must not block the valid items behind it. If
+    /// it did, the paste would fail, so the clipboard would never be consumed,
+    /// so the next ⌘V would fail identically — wedged until the user
+    /// re-selects.
+    func testPasteSkipsAVanishedSourceAndStillMovesTheRest() throws {
+        let a = try ExplorerFileOps.createFile(in: root, name: "a.txt")
+        let b = try ExplorerFileOps.createFile(in: root, name: "b.txt")
+        let dest = try ExplorerFileOps.createFolder(in: root, name: "dest")
+        try FileManager.default.removeItem(at: a)
+
+        let results = try ExplorerFileOps.paste([a, b], into: dest, move: true)
+
+        XCTAssertEqual(results.map(\.lastPathComponent), ["b.txt"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("b.txt").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: b.path))
+    }
+
+    /// When NOTHING could be applied — the single-item case — silently doing
+    /// nothing would look like a broken ⌘V, so the throw names the item.
+    func testPasteOfOnlyVanishedSourcesThrowsNamingTheItem() throws {
+        let gone = root.appendingPathComponent("gone.txt")
+        XCTAssertThrowsError(try ExplorerFileOps.paste([gone], into: root, move: true)) { err in
+            XCTAssertEqual(err as? ExplorerFileError, .sourceMissing("gone.txt"))
+        }
+    }
+
+    /// A direct `move`/`copy` of a vanished source reports a typed error, not
+    /// `FileManager`'s raw "…either the former doesn't exist, or the folder
+    /// containing the latter doesn't exist" sentence.
+    func testMoveAndCopyOfAVanishedSourceReportATypedError() throws {
+        let gone = root.appendingPathComponent("gone.txt")
+        let dest = try ExplorerFileOps.createFolder(in: root, name: "dest")
+        XCTAssertThrowsError(try ExplorerFileOps.move(from: gone, to: dest)) { err in
+            XCTAssertEqual(err as? ExplorerFileError, .sourceMissing("gone.txt"))
+        }
+        XCTAssertThrowsError(try ExplorerFileOps.copy(from: gone, to: dest)) { err in
+            XCTAssertEqual(err as? ExplorerFileError, .sourceMissing("gone.txt"))
+        }
+    }
+
+    /// A BROKEN symlink is a real item the user can see and is entitled to
+    /// move — `fileExists(atPath:)` follows links and would call it vanished,
+    /// which is why the check lstats instead.
+    func testABrokenSymlinkIsNotTreatedAsVanished() throws {
+        let link = root.appendingPathComponent("link.txt")
+        try FileManager.default.createSymbolicLink(
+            at: link, withDestinationURL: root.appendingPathComponent("nothing-here.txt"))
+        let dest = try ExplorerFileOps.createFolder(in: root, name: "dest")
+
+        let results = try ExplorerFileOps.paste([link], into: dest, move: true)
+
+        XCTAssertEqual(results.map(\.lastPathComponent), ["link.txt"])
+        XCTAssertTrue(ExplorerFileOps.itemExists(dest.appendingPathComponent("link.txt")))
+    }
 }

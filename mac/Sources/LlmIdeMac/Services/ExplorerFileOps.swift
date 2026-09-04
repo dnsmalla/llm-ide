@@ -11,6 +11,14 @@ enum ExplorerFileError: LocalizedError, Equatable {
     /// descendants. `FileManager.moveItem` would either fail with an opaque
     /// Cocoa error or (for a copy) recurse forever, so this is caught first.
     case cannotMoveIntoSelf
+    /// A dragged, cut or copied source that no longer exists by the time the
+    /// operation is applied — deleted, renamed, or moved by another app
+    /// between the ⌘X and the ⌘V. Carries the item's name so the alert can
+    /// say WHICH one; `FileManager` would otherwise surface a raw Cocoa
+    /// sentence ("… couldn't be moved … because either the former doesn't
+    /// exist, or the folder containing the latter doesn't exist") that names
+    /// two possible causes and helps with neither.
+    case sourceMissing(String)
 
     var errorDescription: String? {
         switch self {
@@ -19,6 +27,7 @@ enum ExplorerFileError: LocalizedError, Equatable {
         case .alreadyExists: return "An item with this name already exists."
         case .writeFailed: return "Couldn't create the item."
         case .cannotMoveIntoSelf: return "Can't move a folder into itself."
+        case .sourceMissing(let name): return "“\(name)” no longer exists."
         }
     }
 }
@@ -123,6 +132,18 @@ enum ExplorerFileOps {
         return urlKey.hasPrefix(ancestorKey + "/")
     }
 
+    /// True when `url` names something on disk — a file, a folder, or a
+    /// BROKEN SYMLINK.
+    ///
+    /// `attributesOfItem` lstats, so unlike `FileManager.fileExists(atPath:)`
+    /// it does not answer false for a symlink whose target has gone. Such a
+    /// link is a real item the user can see in the tree and is entitled to
+    /// move; treating it as "already vanished" would silently skip it and
+    /// leave it behind after a cut.
+    static func itemExists(_ url: URL) -> Bool {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil
+    }
+
     /// Guard shared by `move` and `copy`: rejects "into itself" and "into my
     /// own descendant" before any filesystem call.
     ///
@@ -170,6 +191,9 @@ enum ExplorerFileOps {
     /// check below and throws `.alreadyExists` for what is really a no-op.
     @discardableResult
     static func move(from source: URL, to destinationDir: URL) throws -> URL {
+        guard itemExists(source) else {
+            throw ExplorerFileError.sourceMissing(source.lastPathComponent)
+        }
         try assertNotSelfNesting(source: source, destinationDir: destinationDir)
         let dest = destinationDir.appendingPathComponent(source.lastPathComponent)
         let caseInsensitive = isCaseInsensitiveVolume(source) || isCaseInsensitiveVolume(destinationDir)
@@ -188,6 +212,9 @@ enum ExplorerFileOps {
     /// name Finder-style on collision. Returns the new URL.
     @discardableResult
     static func copy(from source: URL, to destinationDir: URL) throws -> URL {
+        guard itemExists(source) else {
+            throw ExplorerFileError.sourceMissing(source.lastPathComponent)
+        }
         try assertNotSelfNesting(source: source, destinationDir: destinationDir)
         let dest = uniqueDestination(in: destinationDir, name: source.lastPathComponent)
         try FileManager.default.copyItem(at: source, to: dest)
@@ -201,19 +228,38 @@ enum ExplorerFileOps {
     /// self-nesting through `assertNotSelfNesting`, and a second, weaker
     /// string-level check here would only be able to disagree with them.
     ///
-    /// Stops at the first failure and rethrows — the items already processed
-    /// stay processed. That is deliberate: silently continuing past an error
-    /// would leave the user unable to tell which items landed, and rolling
-    /// back a partially-applied move is itself a destructive operation.
+    /// A source that VANISHED between the cut/copy and the paste (deleted, or
+    /// moved by another app) is skipped and the loop continues. One stale
+    /// clipboard entry must not block every valid item behind it — otherwise
+    /// the clipboard wedges: the paste fails, so nothing is consumed, so the
+    /// next ⌘V fails identically, forever, until the user re-selects.
+    ///
+    /// Any OTHER failure — a name collision, a self-nesting drop — stops at
+    /// the first one and rethrows; the items already processed stay processed.
+    /// That is deliberate: rolling back a partially-applied move is itself a
+    /// destructive operation, and the caller remaps per item so a partial
+    /// result is never hidden.
+    ///
+    /// Vanished sources are fatal only when NOTHING could be applied — the
+    /// single-item case, where silently doing nothing would look like a broken
+    /// ⌘V. Then the throw names the missing item.
     @discardableResult
     static func paste(_ urls: [URL], into dir: URL, move shouldMove: Bool) throws -> [URL] {
         var results: [URL] = []
+        var missing: [String] = []
         for url in urls {
+            guard itemExists(url) else {
+                missing.append(url.lastPathComponent)
+                continue
+            }
             if shouldMove {
                 results.append(try move(from: url, to: dir))
             } else {
                 results.append(try copy(from: url, to: dir))
             }
+        }
+        if results.isEmpty, let first = missing.first {
+            throw ExplorerFileError.sourceMissing(first)
         }
         return results
     }

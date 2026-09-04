@@ -14,32 +14,44 @@ import Foundation
 /// deselected but excludes NO test file — a type under `Views/Explorer/` would
 /// make `ExplorerDragPayloadTests` fail to compile in every lite build.
 enum ExplorerDragPayload {
-    /// Paths containing a newline are DROPPED, not encoded.
+    /// Each path is PERCENT-ENCODED before it is joined, so a newline can
+    /// never appear in the payload at all.
     ///
-    /// Such a name is legal on macOS but cannot survive a newline-delimited
-    /// payload; emitting it would decode into two paths and move an unrelated
-    /// file — or, worse, a path that happens to exist. Losing a drag is
-    /// recoverable (the user drags again, or uses cut/paste); moving the wrong
-    /// file is not. The rejection is per-item rather than whole-payload so a
-    /// 200-file drag is not defeated by one pathological name; the dropped
-    /// item simply stays where it was, which is visible in the tree.
+    /// A newline is legal in a macOS filename, and an earlier version of this
+    /// type dropped such a path rather than emit one that `decode` would tear
+    /// into two wrong paths. That failed closed, but silently: in a multi-item
+    /// drag one file just stayed put, and `encode` runs at drag START, where
+    /// there is no error channel to explain it. Encoding removes the class
+    /// instead of reporting it — nothing needs dropping, and the CRLF rule in
+    /// `decode` still holds for good measure.
     ///
-    /// The predicate is `\.isNewline`, matching `decode`'s separator exactly —
-    /// a lone CR, U+2028 and U+2029 are newlines to Swift too, so filtering
-    /// only "\n" would still let `decode` tear a path in half.
+    /// `.alphanumerics` is deliberately the narrowest useful allow-set: it
+    /// escapes `%` itself (to `%25`), so the escape character round-trips like
+    /// any other, and it escapes every newline, separator and control
+    /// character without needing to enumerate them. Unicode letters and
+    /// digits ARE alphanumeric, so Japanese names pass through legibly rather
+    /// than becoming a wall of `%E8%A8%AD`.
     static func encode(_ urls: [URL]) -> String {
-        urls.map { ExplorerPaths.key($0) }
-            .filter { !$0.contains(where: \.isNewline) }
+        urls.map { ExplorerPaths.key($0).addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "" }
+            .filter { !$0.isEmpty }
             .joined(separator: "\n")
     }
 
     /// Split on `\.isNewline`, never on the literal "\n": Swift treats "\r\n"
     /// as ONE Character, so a literal split would weld a stray "\r" onto the
-    /// preceding path. Whitespace is NOT trimmed — leading/trailing spaces are
-    /// legal in macOS filenames — so only genuinely blank lines are dropped.
+    /// preceding path.
+    ///
+    /// `removingPercentEncoding` answers nil on a malformed escape, and
+    /// `compactMap` drops those — a payload this type did not write (a plain
+    /// text drag from another app) either decodes cleanly or is ignored, never
+    /// half-decoded into a path that points somewhere unintended.
+    ///
+    /// Whitespace is NOT trimmed off a decoded path — leading and trailing
+    /// spaces are legal in macOS filenames — so only genuinely blank lines are
+    /// dropped.
     static func decode(_ text: String) -> [URL] {
         text.split(whereSeparator: \.isNewline)
-            .map(String.init)
+            .compactMap { String($0).removingPercentEncoding }
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             .map { URL(fileURLWithPath: $0) }
     }
