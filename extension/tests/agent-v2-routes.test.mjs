@@ -430,6 +430,62 @@ test('stream: a second turn for the same chat session while one is in flight get
   assert.equal(getOrCreateAgentSession(db, user.id, 'chat-conc', 'explorer').sdk_session_id, 'sdk-conc');
 });
 
+// The Mac client retries a 409 for a few seconds after Stop (the lock
+// outlives the client's cancel while the SDK subprocess unwinds). Two
+// contracts that retry leans on: a refused turn must be cheap — no "auto"
+// classifier LLM call — and the client-close abort path must release the
+// lock, so the retried turn eventually gets through.
+test('stream: 409 is answered before the auto classifier, and a client-close abort releases the lock', async () => {
+  const user = newUser('v2route-stop-retry@example.com');
+  let firstStarted = false;
+  // Mirrors the real engine on abort: the query loop ends once the turn
+  // signal fires; the route then unwinds and its finally frees the lock.
+  const fakeTurn = async ({ onEvent, signal }) => {
+    firstStarted = true;
+    onEvent({ type: 'init', sessionId: 'sdk-stop', claudeCodeVersion: '2.1.234', tools: [], capabilities: [] });
+    await new Promise((r) => signal.addEventListener('abort', r, { once: true }));
+    return { result: null, usageTotals: {} };
+  };
+  const req = (body) => makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: 'plan this', mode: 'auto', agentContext: { chatSessionId: 'chat-stop', workspaceRoot: WS }, ...body },
+    user,
+  });
+
+  const firstReq = req({});
+  const firstP = handleAgentV2Routes(firstReq, makeRes(), {
+    runTurn: fakeTurn,
+    classifyMode: async () => ({ mode: 'plan' }),
+  });
+  while (!firstStarted) await new Promise((r) => setImmediate(r));
+
+  // Refused while the lock is held — and refused BEFORE the classifier, so
+  // each client retry costs no LLM call.
+  const secondRes = makeRes();
+  await handleAgentV2Routes(req({}), secondRes, {
+    runTurn: async () => { throw new Error('must not run while a turn is in flight'); },
+    classifyMode: async () => { throw new Error('classifier must not run for a turn refused by the lock'); },
+  });
+  assert.equal(secondRes.statusCode, 409);
+  assert.equal(secondRes.json().error.code, 'TURN_IN_PROGRESS');
+
+  // The user pressed Stop: the client drops the connection. The route must
+  // unwind and release the lock without any further client action.
+  firstReq.fireClose();
+  assert.equal(await firstP, true);
+
+  const thirdRes = makeRes();
+  await handleAgentV2Routes(req({}), thirdRes, {
+    runTurn: async ({ onEvent }) => {
+      onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-stop', stopReason: 'end_turn' });
+      return { result: { subtype: 'success' }, usageTotals: {} };
+    },
+    classifyMode: async () => ({ mode: 'execute' }),
+  });
+  assert.equal(thirdRes.statusCode, 200, 'the retried turn proceeds once the aborted turn has unwound');
+});
+
 test('stream: validation — missing message/chatSessionId/workspaceRoot → 400 pre-SSE; no user → 401', async () => {
   const user = newUser('v2route-validation@example.com');
   const run = async (body, u) => {

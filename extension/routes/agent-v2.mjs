@@ -60,6 +60,14 @@ function chatSessionLockKey(userId, chatSessionId) {
   return `${userId}:${chatSessionId}`;
 }
 
+// The 409 both lock checks in handleV2Stream answer with — one body so the
+// early probe and the authoritative check can never drift apart.
+function sendTurnInProgress(res) {
+  sendJSON(res, 409, {
+    error: { code: 'TURN_IN_PROGRESS', message: 'A turn is already in progress for this chat session' },
+  });
+}
+
 export async function handleAgentV2Routes(
   req,
   res,
@@ -128,6 +136,18 @@ async function handleV2Stream(req, res, userId, deps) {
     return true;
   }
 
+  // Early lock probe — a cheap read only, the authoritative check-and-add
+  // is below. The Mac client retries a 409 for a few seconds after Stop
+  // (the lock outlives the client's own cancel while the SDK subprocess
+  // unwinds), and without this probe every one of those retries paid for
+  // the "auto" classifier's LLM call below before being refused. The TOCTOU
+  // gap between this probe and the real check is absorbed by that check.
+  const lockKey = chatSessionLockKey(userId, chatSessionId);
+  if (inFlightChatSessions.has(lockKey)) {
+    sendTurnInProgress(res);
+    return true;
+  }
+
   // Mode resolution — parity with the legacy loop (llm_agent/runtime/
   // route.mjs): "auto" (the Mac client's default) classifies the message
   // into a concrete mode, an explicit mode must be a known MODES member,
@@ -168,11 +188,8 @@ async function handleV2Stream(req, res, userId, deps) {
   // spawns, so a turn that reaches recordUsage really ran on this provider.
   const provider = typeof body.provider === 'string' && body.provider ? body.provider : AGENT_SDK_PROVIDER;
 
-  const lockKey = chatSessionLockKey(userId, chatSessionId);
   if (inFlightChatSessions.has(lockKey)) {
-    sendJSON(res, 409, {
-      error: { code: 'TURN_IN_PROGRESS', message: 'A turn is already in progress for this chat session' },
-    });
+    sendTurnInProgress(res);
     return true;
   }
   inFlightChatSessions.add(lockKey);
