@@ -15,6 +15,13 @@ struct TreeRowLabel: View {
     var fileExtension: String = ""
     /// Git status decoration (nil → undecorated / clean). VS Code-style.
     var gitStatus: GitTruthStore.Decoration? = nil
+    /// When non-nil (Explorer's `List`-based tree), the disclosure chevron
+    /// becomes its own button, so expanding a folder does NOT go through the
+    /// row's click. That separation is what makes ⌘/⇧ multi-select work on
+    /// folders — clicking a folder's body selects it like any other row
+    /// instead of also toggling it. `nil` (Library's `FileTreePanel`) keeps
+    /// the previous static chevron and needs no change.
+    var onToggleChevron: (() -> Void)? = nil
 
     @EnvironmentObject private var theme: ThemeStore
 
@@ -22,10 +29,22 @@ struct TreeRowLabel: View {
         HStack(spacing: 4) {
             if isFolder {
                 indentGuides(depth)
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 10)
+                if let onToggleChevron {
+                    Button(action: onToggleChevron) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 10)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isExpanded ? "Collapse \(name)" : "Expand \(name)")
+                } else {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 10)
+                }
                 Image(systemName: isExpanded ? "folder.fill" : "folder")
                     .font(Typography.filename)
                     .foregroundStyle(gitColor ?? folderTint ?? FileIconKit.folderColor)

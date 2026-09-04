@@ -13,17 +13,35 @@ struct ExplorerView: View {
 
     @State private var showProjectPaths = false
 
-    // Lazy tree state: which folders are expanded, and a cache of each
-    // expanded folder's children (filled on first expand so repeated
-    // toggles don't re-hit the filesystem).
-    @State private var expanded: Set<String> = []
-    @State private var childrenCache: [String: [FileSystemTree.Node]] = [:]
+    /// The tree's model — children cache, expansion, and selection. Replaces
+    /// the three `@State` properties that used to live here; `children(of:)`
+    /// wrote into one of them from inside `body`, which SwiftUI forbids
+    /// (design §3 finding #9).
+    @State private var store = ExplorerTreeStore()
 
-    // Selected tree row (folder or file) — VS Code/Cursor-style: distinct
-    // from expand/collapse and from the open editor tab. The toolbar's New
-    // File / New Folder buttons target this (or its parent, for a selected
-    // file) instead of always creating at the workspace root.
-    @State private var selectedURL: URL?
+    /// `root` with its symlinks resolved, paired with the raw path it was
+    /// resolved FROM so a stale value can be detected without re-resolving.
+    ///
+    /// Two reasons this is resolved once, in the `.task` below, and never per
+    /// render. (1) `FileManager.contentsOfDirectory(at:)` fails `ENOTDIR` on a
+    /// symlinked directory URL, so a symlinked workspace root enumerates empty
+    /// — a `FileSystemTree` bug that predates this tree, routed around here at
+    /// the boundary where the view hands a root to the store. (2) Every URL in
+    /// the store is standardized on the way in, and `List(selection:)` matches
+    /// rows by raw `URL` hashing, so the root must arrive in the same spelling
+    /// or nothing would ever highlight. `ExplorerPaths.canonical(_:)` is a
+    /// syscall — boundary-only, never in a hot path.
+    @State private var treeRoot: ResolvedRoot?
+
+    /// True once `restoreState` has run for the CURRENT `treeRoot`.
+    ///
+    /// The persistence observers below must stay quiet until then.
+    /// `store.reset()` empties `expanded` and `selection`, which fires those
+    /// observers, and `persistState` overwrites the saved blob
+    /// unconditionally — so without this gate every project switch would save
+    /// `{[], []}` over the tree shape the very next line of the `.task` is
+    /// about to restore, and the tree would come back collapsed every time.
+    @State private var treeStateRestored = false
 
     // Editor tabs.
     @State private var tabs: [URL] = []
@@ -33,7 +51,9 @@ struct ExplorerView: View {
     // an inline error for the sheet / an alert for delete failures.
     @State private var filePrompt: FilePrompt?
     @State private var fileOpError: String?
-    @State private var pendingDelete: URL?
+    /// Pending trash targets (empty = no confirmation showing). A LIST because
+    /// the tree is multi-select now.
+    @State private var pendingDelete: [URL] = []
     @State private var deleteError: String?
 
     // Git status decorations for the file tree (VS Code-style coloring).
@@ -57,6 +77,24 @@ struct ExplorerView: View {
     private var root: URL? {
         if let code = projectStore.activeProjectCodeDir { return code }
         return WorkspaceRoot.resolve(config: config, projectStore: projectStore)
+    }
+
+    /// The root the store is actually keyed on. Pure — it never resolves
+    /// anything itself, it only reports whether the value the `.task` resolved
+    /// still belongs to the current `root`.
+    ///
+    /// Falling back to `root` for the one render before the task lands is safe
+    /// (and is what avoids an empty-state flash on every project switch):
+    /// nothing is ever LOADED under the unresolved spelling, so that frame
+    /// renders an empty tree, never another project's.
+    private func treeBase(_ root: URL) -> URL {
+        guard let resolved = treeRoot, resolved.rawPath == root.path else { return root }
+        return resolved.url
+    }
+
+    private struct ResolvedRoot {
+        let rawPath: String
+        let url: URL
     }
 
     /// The git working tree — a DIFFERENT root from `root` above.
@@ -114,15 +152,50 @@ struct ExplorerView: View {
                     FeatureCatalog.terminalPanel(projectDirectory: projectDirectory)
                 }
             }
-        // Reset all per-project state when the active project changes, so the
-        // tree, cache, and open tabs never show a previous project's files
-        // (and the cache can't grow unbounded across switches).
-        .onChange(of: root?.path) { _, _ in
-            expanded.removeAll()
-            childrenCache.removeAll()
+        // Rebuild all per-project tree state when the active project changes,
+        // so one project's tree/selection/tabs never show under another.
+        .task(id: root?.path) {
+            treeStateRestored = false
+            store.reset()          // also stops the previous root's watcher
             tabs.removeAll()
             activeTab = nil
-            selectedURL = nil
+            guard let root else {
+                treeRoot = nil
+                return
+            }
+            // The ONE place the root's symlinks are resolved — see `treeRoot`.
+            let base = ExplorerPaths.canonical(root)
+            treeRoot = ResolvedRoot(rawPath: root.path, url: base)
+            await store.loadChildren(of: base)
+            // `.task(id:)` cancels this run when the project changes, but a
+            // cancelled Swift task keeps executing past an `await` unless it
+            // checks — and `loadChildren`'s inner work is deliberately
+            // non-cancellable. `treeRoot` is stamped synchronously by the
+            // newest run, so a superseded one sees a mismatch and bails
+            // instead of restoring the OLD project's expansion into the store
+            // the new run just reset, or watching the old root.
+            guard treeRoot?.rawPath == root.path else { return }
+            let shown = store.displayRoot(for: base)
+            if shown != base { await store.loadChildren(of: shown) }
+            guard treeRoot?.rawPath == root.path else { return }
+            await store.restoreState(for: base)
+            guard treeRoot?.rawPath == root.path else { return }
+            treeStateRestored = true
+            store.startWatching(base)
+        }
+        // Persist expansion/selection as they change (cheap: one small JSON
+        // blob), so a crash or a force-quit doesn't lose the tree's shape.
+        .onChange(of: store.expanded) { _, _ in
+            persistTreeState()
+        }
+        .onChange(of: store.selection) { _, selection in
+            persistTreeState()
+            // VS Code opens on single click. `List` selection IS the click, so
+            // opening happens here rather than in a tap gesture — a tap gesture
+            // on a `List` row would fight the control's own selection handling.
+            if selection.count == 1, let url = selection.first, !isDirectory(url) {
+                open(url)
+            }
         }
         // Refresh decorations when the project root changes / on appear.
         .task(id: gitRoot?.path) {
@@ -136,7 +209,11 @@ struct ExplorerView: View {
         .onChange(of: controlActiveState) { _, state in
             if state == .key { Task { await decorations.refresh(root: gitRoot) } }
         }
-        .onDisappear { decorations.stopWatching() }
+        .onDisappear {
+            decorations.stopWatching()
+            store.stopWatching()
+            persistTreeState()
+        }
         .firstLaunchOpenChat(flagKey: "DID_AUTO_OPEN_EXPLORE_CHAT_V1",
                              width: $chatPanelWidth, visible: $chatVisible)
         .sheet(item: $filePrompt) { prompt in
@@ -155,14 +232,19 @@ struct ExplorerView: View {
             }
         }
         .confirmationDialog(
-            pendingDelete.map { "Move “\($0.lastPathComponent)” to the Trash?" } ?? "",
-            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+            pendingDelete.count == 1
+                ? "Move “\(pendingDelete[0].lastPathComponent)” to the Trash?"
+                : "Move \(pendingDelete.count) items to the Trash?",
+            isPresented: Binding(get: { !pendingDelete.isEmpty },
+                                 set: { if !$0 { pendingDelete = [] } }),
             titleVisibility: .visible
         ) {
             Button("Move to Trash", role: .destructive) {
-                if let url = pendingDelete { delete(url) }
+                let targets = pendingDelete
+                pendingDelete = []
+                delete(targets)
             }
-            Button("Cancel", role: .cancel) { pendingDelete = nil }
+            Button("Cancel", role: .cancel) { pendingDelete = [] }
         } message: {
             Text("You can undo this in Finder.")
         }
@@ -208,59 +290,51 @@ struct ExplorerView: View {
     @ViewBuilder
     private var treePane: some View {
         if let root {
-            // When the workspace root's only child is a single folder (the
-            // common single-repo case — root is the project's code/
-            // container, its one child is the cloned repo), display AT that
-            // folder instead of wrapping it in an extra collapsible row.
-            // Mirrors VS Code/Cursor opening a folder directly: the folder's
-            // name becomes the fixed header, its contents are the top-level
-            // rows. A multi-repo project (2+ children under code/) keeps
-            // each repo as its own top-level collapsible row, unchanged.
-            let displayRoot = effectiveDisplayRoot(root)
+            // Single-repo case: when the root's only child is one folder (the
+            // root is the project's `code/` container and its one child is the
+            // clone), display AT that folder rather than wrapping it in an
+            // extra collapsible row. Owned by the store now — see
+            // `ExplorerTreeStore.displayRoot(for:)`.
+            let base = treeBase(root)
+            let displayRoot = store.displayRoot(for: base)
+            // `flatten` costs ~3.75 ms at 2000 rows against a 16.6 ms frame
+            // budget and BOTH consumers below need the same visible rows, so
+            // it runs exactly ONCE per render, here.
+            let rows = store.flatten(from: displayRoot)
             VStack(spacing: 0) {
-                treeToolbar(root: root, displayRoot: displayRoot)
+                treeToolbar(root: base, displayRoot: displayRoot, rows: rows)
                 Divider()
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(children(of: displayRoot)) { node in
-                            treeRow(node, depth: 0)
-                        }
-                    }
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .background(Color(NSColor.windowBackgroundColor))
+                ExplorerTreeList(rows: rows,
+                                 store: store,
+                                 displayRoot: displayRoot,
+                                 gitRoot: gitRoot,
+                                 git: decorations,
+                                 actions: actions())
             }
         } else {
             emptyState
         }
     }
 
-    /// See `treePane` doc comment. Pure function of already-loaded children
-    /// so it doesn't trigger extra filesystem work beyond the normal
-    /// top-level `children(of:)` call the tree already makes.
-    private func effectiveDisplayRoot(_ root: URL) -> URL {
-        let kids = children(of: root)
-        if kids.count == 1, kids[0].isDirectory { return kids[0].url }
-        return root
+    /// Where the toolbar's New File / New Folder buttons create: the selected
+    /// folder, the parent of a selected file, or `displayRoot` when nothing is
+    /// selected. With a multi-selection the FIRST row in display order wins —
+    /// resolved through the already-flattened `rows` rather than
+    /// `selection.first`, because `Set` iteration order is not stable and the
+    /// target would otherwise jump between identical clicks.
+    ///
+    /// Answers from the row's own `isDirectory` rather than re-`stat`ing the
+    /// path: this runs during `body`, and the row already knows.
+    private func toolbarTargetDir(rows: [ExplorerTreeStore.Row], displayRoot: URL) -> URL {
+        guard !store.selection.isEmpty,
+              let anchor = rows.first(where: { store.selection.contains($0.url) })
+        else { return displayRoot }
+        return anchor.isDirectory ? anchor.url : anchor.url.deletingLastPathComponent()
     }
 
-    /// Where the toolbar's New File / New Folder buttons create — the
-    /// selected folder, the parent of a selected file, or `displayRoot`
-    /// when nothing is selected. VS Code/Cursor: toolbar actions target the
-    /// current tree selection, not always the workspace root — previously
-    /// these buttons always created at `root`, silently ignoring whatever
-    /// folder the user had clicked.
-    private func toolbarTargetDir(displayRoot: URL) -> URL {
-        guard let selectedURL else { return displayRoot }
-        var isDir: ObjCBool = false
-        let exists = FileManager.default.fileExists(atPath: selectedURL.path, isDirectory: &isDir)
-        return (exists && isDir.boolValue) ? selectedURL : selectedURL.deletingLastPathComponent()
-    }
-
-    private func treeToolbar(root: URL, displayRoot: URL) -> some View {
-        let targetDir = toolbarTargetDir(displayRoot: displayRoot)
+    private func treeToolbar(root: URL, displayRoot: URL,
+                             rows: [ExplorerTreeStore.Row]) -> some View {
+        let targetDir = toolbarTargetDir(rows: rows, displayRoot: displayRoot)
         return HStack(spacing: 2) {
             Text(displayRoot == root
                  ? (projectStore.activeProject?.bundle.displayName ?? displayRoot.lastPathComponent)
@@ -279,7 +353,7 @@ struct ExplorerView: View {
                     // not a renameable/deletable entity.
                     if displayRoot != root {
                         Button("Rename") { filePrompt = .rename(url: displayRoot) }
-                        Button("Delete") { pendingDelete = displayRoot }
+                        Button("Delete") { pendingDelete = [displayRoot] }
                     }
                     Divider()
                     Button("Reveal in Finder") {
@@ -312,89 +386,6 @@ struct ExplorerView: View {
             .buttonStyle(.borderless).help("Collapse All")
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
-    }
-
-    /// Recursive row: a folder toggles expansion (and renders its children
-    /// when expanded); a file opens a tab on tap. Returns AnyView so the
-    /// opaque return type isn't defined in terms of itself (the recursive
-    /// child call would otherwise be self-referential).
-    private func treeRow(_ node: FileSystemTree.Node, depth: Int) -> AnyView {
-        if node.isDirectory {
-            let isExpanded = expanded.contains(node.id)
-            return AnyView(
-                VStack(alignment: .leading, spacing: 0) {
-                    folderRow(node, depth: depth, expanded: isExpanded)
-                    if isExpanded {
-                        ForEach(children(of: node.url)) { child in
-                            treeRow(child, depth: depth + 1)
-                        }
-                    }
-                }
-            )
-        } else {
-            return AnyView(fileRow(node, depth: depth))
-        }
-    }
-
-    private func folderRow(_ node: FileSystemTree.Node, depth: Int, expanded isExpanded: Bool) -> some View {
-        let deco = gitRoot.flatMap {
-            decorations.decoration(forAbsolute: node.url, root: $0, isDirectory: true)
-        }
-        let isSelected = selectedURL == node.url
-        return Button {
-            selectedURL = node.url
-            toggle(node)
-        } label: {
-            TreeRowLabel(name: node.name, isFolder: true, isExpanded: isExpanded,
-                         depth: depth, isSelected: isSelected, gitStatus: deco)
-        }
-        .buttonStyle(.plain)
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(isSelected ? Color.accentColor.opacity(0.22) : Color.clear)
-        )
-        .help(node.name)
-        .contextMenu {
-            Button("New File") { filePrompt = .newFile(in: node.url) }
-            Button("New Folder") { filePrompt = .newFolder(in: node.url) }
-            Button("Rename") { filePrompt = .rename(url: node.url) }
-            Button("Delete") { pendingDelete = node.url }
-            Divider()
-            Button("Reveal in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([node.url])
-            }
-        }
-    }
-
-    private func fileRow(_ node: FileSystemTree.Node, depth: Int) -> some View {
-        let ext = node.url.pathExtension.lowercased()
-        let selected = activeTab == node.url
-        let deco = gitRoot.flatMap {
-            decorations.decoration(forAbsolute: node.url, root: $0, isDirectory: false)
-        }
-        return Button {
-            selectedURL = node.url
-            open(node.url)
-        } label: {
-            TreeRowLabel(name: node.name, isFolder: false, isExpanded: false,
-                         depth: depth, isSelected: selected, fileExtension: ext, gitStatus: deco)
-        }
-        .buttonStyle(.plain)
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(selected ? Color.accentColor.opacity(0.22) : Color.clear)
-        )
-        .help(node.name)
-        .contextMenu {
-            Button("New File") { filePrompt = .newFile(in: node.url.deletingLastPathComponent()) }
-            Button("New Folder") { filePrompt = .newFolder(in: node.url.deletingLastPathComponent()) }
-            Button("Rename") { filePrompt = .rename(url: node.url) }
-            Button("Delete") { pendingDelete = node.url }
-            Divider()
-            Button("Reveal in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([node.url])
-            }
-        }
     }
 
     // MARK: - Editor area
@@ -438,95 +429,128 @@ struct ExplorerView: View {
 
     // MARK: - Behavior
 
-    /// Lazily resolved children of a directory, cached by path so repeated
-    /// renders/toggles don't re-enumerate.
-    private func children(of dir: URL) -> [FileSystemTree.Node] {
-        if let cached = childrenCache[dir.path] { return cached }
-        let nodes = FileSystemTree.children(of: dir)
-        childrenCache[dir.path] = nodes
-        return nodes
-    }
-
-    private func toggle(_ node: FileSystemTree.Node) {
-        if expanded.contains(node.id) {
-            expanded.remove(node.id)
-        } else {
-            // Warm the cache on first expand.
-            if childrenCache[node.url.path] == nil {
-                childrenCache[node.url.path] = FileSystemTree.children(of: node.url)
-            }
-            expanded.insert(node.id)
-        }
-    }
-
     private func open(_ url: URL) {
         if !tabs.contains(url) { tabs.append(url) }
         activeTab = url
     }
 
+    private func isDirectory(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+    }
+
+    private func refreshGit() async {
+        await decorations.refresh(root: gitRoot)
+    }
+
+    /// Save the tree's shape for the active root — but never before this
+    /// root's saved state has been restored. See `treeStateRestored`.
+    private func persistTreeState() {
+        guard treeStateRestored, let base = treeRoot?.url else { return }
+        store.persistState(for: base)
+    }
+
+    /// Re-enumerate `dir` and make sure it is expanded — the standard
+    /// follow-up to any operation that changed a directory's contents.
+    /// `invalidate` first, because `expand` only loads a directory the cache
+    /// does not already hold.
+    private func reload(_ dir: URL) async {
+        store.invalidate(dir)
+        await store.expand(dir)
+    }
+
+    /// The action bundle handed to the tree. Rebuilt on each render, which is
+    /// fine: it is six closures over `self`, not state.
+    private func actions() -> ExplorerActions {
+        ExplorerActions(
+            open: { open($0) },
+            newFile: { filePrompt = .newFile(in: $0) },
+            newFolder: { filePrompt = .newFolder(in: $0) },
+            beginRename: { filePrompt = .rename(url: $0) },
+            delete: { pendingDelete = $0 },
+            revealInFinder: { NSWorkspace.shared.activateFileViewerSelecting($0) }
+        )
+    }
+
     /// Run a create/rename op, then refresh the affected folder + git
-    /// decorations. Throws up to the sheet handler so a bad name surfaces inline.
+    /// decorations. Throws up to the sheet handler so a bad name surfaces
+    /// inline instead of silently failing.
+    ///
+    /// New URLs go through `ExplorerPaths.canonical(_:)` before they enter the
+    /// selection: `List(selection:)` matches rows by raw `URL` hashing, and a
+    /// URL built by appending a name to a directory keeps whatever spelling
+    /// that directory had, while the row it must match came out of
+    /// `FileManager` via `loadChildren`'s standardization.
     private func performFileOp(_ prompt: FilePrompt, _ name: String) throws {
         switch prompt.mode {
         case .newFile:
-            let url = try ExplorerFileOps.createFile(in: prompt.dir, name: name)
-            invalidate(prompt.dir); expand(prompt.dir); open(url)
-            selectedURL = url
+            // ONE spelling for both the selection and the tab: `open` dedupes
+            // by `==`, so opening the raw URL and selecting the canonical one
+            // (which re-enters `open` through the selection observer) would
+            // leave two tabs on one file.
+            let url = ExplorerPaths.canonical(try ExplorerFileOps.createFile(in: prompt.dir, name: name))
+            store.selection = [url]
+            open(url)
+            Task { await reload(prompt.dir); await refreshGit() }
         case .newFolder:
-            let url = try ExplorerFileOps.createFolder(in: prompt.dir, name: name)
-            invalidate(prompt.dir); expand(prompt.dir)
-            selectedURL = url
+            let url = ExplorerPaths.canonical(try ExplorerFileOps.createFolder(in: prompt.dir, name: name))
+            store.selection = [url]
+            Task { await reload(prompt.dir); await refreshGit() }
         case .rename:
             guard let url = prompt.url else { return }
             let new = try ExplorerFileOps.rename(url, to: name)
-            invalidate(url.deletingLastPathComponent())
-            tabs = tabs.map { $0 == url ? new : $0 }
-            if activeTab == url { activeTab = new }
-            if selectedURL == url { selectedURL = new }
+            retarget(from: url, to: ExplorerPaths.canonical(new))
         }
-        Task { await decorations.refresh(root: gitRoot) }
     }
 
-    /// Delete (trash) a file/folder, close tabs under it, refresh.
-    private func delete(_ url: URL) {
+    /// Follow a renamed/moved item: open tabs, the active tab, and the
+    /// selection all point at the new URL rather than a path that no longer
+    /// exists.
+    private func retarget(from old: URL, to new: URL) {
+        tabs = tabs.map { $0 == old ? new : $0 }
+        if activeTab == old { activeTab = new }
+        if store.selection.contains(old) {
+            store.selection.remove(old)
+            store.selection.insert(new)
+        }
+        Task { await reload(old.deletingLastPathComponent()); await refreshGit() }
+    }
+
+    /// Trash one or more items, close any tabs under them, refresh their
+    /// parents. Stops at the first failure and reports it — a partial delete
+    /// is visible in the tree after the refresh, so nothing is hidden.
+    private func delete(_ urls: [URL]) {
+        var parents: Set<String> = []
         do {
-            try ExplorerFileOps.trash(url)
-            invalidate(url.deletingLastPathComponent())
-            tabs.removeAll { $0 == url || $0.path.hasPrefix(url.path + "/") }
-            if let active = activeTab, active == url || active.path.hasPrefix(url.path + "/") {
-                activeTab = tabs.last
+            for url in urls {
+                try ExplorerFileOps.trash(url)
+                parents.insert(ExplorerPaths.key(url.deletingLastPathComponent()))
+                tabs.removeAll { $0 == url || ExplorerPaths.isDescendant($0, of: url) }
+                if let active = activeTab, active == url || ExplorerPaths.isDescendant(active, of: url) {
+                    activeTab = tabs.last
+                }
+                store.selection = store.selection.filter {
+                    $0 != url && !ExplorerPaths.isDescendant($0, of: url)
+                }
             }
-            if let selected = selectedURL, selected == url || selected.path.hasPrefix(url.path + "/") {
-                selectedURL = nil
-            }
-            Task { await decorations.refresh(root: gitRoot) }
         } catch {
             deleteError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
         }
-    }
-
-    /// Drop the cached children of `dir` so the next render re-enumerates.
-    private func invalidate(_ dir: URL) {
-        childrenCache.removeValue(forKey: dir.path)
-    }
-
-    /// Ensure `dir` is expanded and its children are loaded.
-    private func expand(_ dir: URL) {
-        if childrenCache[dir.path] == nil {
-            childrenCache[dir.path] = FileSystemTree.children(of: dir)
+        Task {
+            for parent in parents { await reload(URL(fileURLWithPath: parent)) }
+            await refreshGit()
         }
-        expanded.insert(dir.path)
     }
 
-    /// Full tree + git refresh (toolbar Refresh).
+    /// Full tree + git refresh (toolbar Refresh). Re-enumerates every loaded
+    /// folder rather than dropping the cache, so expansion survives.
     private func refreshAll() {
-        childrenCache.removeAll()
-        Task { await decorations.refresh(root: gitRoot) }
+        Task { await store.refreshLoaded(); await refreshGit() }
     }
 
     /// Collapse every expanded folder (toolbar Collapse All), VS Code-style.
     private func collapseAll() {
-        expanded.removeAll()
+        store.collapseAll()
     }
 
     private struct FilePrompt: Identifiable {
