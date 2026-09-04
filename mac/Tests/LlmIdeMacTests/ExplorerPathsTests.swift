@@ -1,6 +1,12 @@
 import XCTest
 @testable import LlmIdeMacLib
 
+/// FIXTURE HAZARD — the temp fixtures below live under `/var/folders`, which is
+/// exactly where `ExplorerPaths.key(_:)` is existence-dependent: Foundation
+/// folds `/private` only while a path EXISTS, so the same path keys differently
+/// once it is deleted. A deleted-path assertion that behaves oddly here is the
+/// FIXTURE, not the code — re-root under `$HOME` rather than chasing it. Latent
+/// today: no XCTest has ever executed in this repo.
 final class ExplorerPathsTests: XCTestCase {
 
     // MARK: - key
@@ -158,5 +164,71 @@ final class ExplorerPathsTests: XCTestCase {
         let ghost = FileManager.default.temporaryDirectory
             .appendingPathComponent("explorer-paths-ghost-\(UUID().uuidString)/nope.txt")
         XCTAssertEqual(ExplorerPaths.canonical(ghost).path, ghost.standardizedFileURL.path)
+    }
+
+    // MARK: - topLevel
+
+    private func paths(_ strings: [String]) -> [URL] {
+        strings.map { URL(fileURLWithPath: $0) }
+    }
+
+    /// The three shapes the final review reproduced on a real filesystem: a
+    /// drop, a copy and a confirmed three-item delete, each given a folder AND
+    /// something inside it. The child is redundant — trashing or moving the
+    /// folder takes it along — and leaving it in the list made the destructive
+    /// loop throw on it and silently abandon everything behind it.
+    func testTopLevelDropsAChildOfASelectedFolderAndKeepsTheSibling() {
+        let selection = paths(["/p/folder", "/p/folder/child.txt", "/p/other.txt"])
+        XCTAssertEqual(ExplorerPaths.topLevel(selection).map(\.path),
+                       ["/p/folder", "/p/other.txt"])
+    }
+
+    func testTopLevelKeepsTheInputOrder() {
+        let selection = paths(["/p/a.txt", "/p/folder", "/p/folder/deep/x", "/p/b.txt"])
+        XCTAssertEqual(ExplorerPaths.topLevel(selection).map(\.path),
+                       ["/p/a.txt", "/p/folder", "/p/b.txt"],
+                       "the order is the user's display order, and the loops apply in it")
+    }
+
+    /// A folder inside a folder inside a selected folder — only the outermost
+    /// survives, however deep the nesting goes.
+    func testTopLevelCollapsesAWholeNestedChain() {
+        let selection = paths(["/p/a", "/p/a/b", "/p/a/b/c", "/p/a/b/c/d.txt"])
+        XCTAssertEqual(ExplorerPaths.topLevel(selection).map(\.path), ["/p/a"])
+    }
+
+    /// A sibling whose name merely STARTS with a selected folder's name is not
+    /// inside it. Same rule `relativePath`'s `+ "/"` guard enforces.
+    func testTopLevelKeepsASiblingWithASharedNamePrefix() {
+        let selection = paths(["/p/proj", "/p/projector", "/p/proj.old"])
+        XCTAssertEqual(Set(ExplorerPaths.topLevel(selection).map(\.path)),
+                       Set(["/p/proj", "/p/projector", "/p/proj.old"]))
+    }
+
+    /// The adversarial ordering the sort has to survive: "." (0x2E) sorts
+    /// BEFORE "/" (0x2F), so on raw keys "/p/a." falls between "/p/a" and
+    /// "/p/a/z" and a scan that only remembers its previous neighbour loses
+    /// track of the ancestor. Terminating every key with "/" before sorting is
+    /// what keeps a folder's descendants contiguous behind it.
+    func testTopLevelSurvivesASeparatorAdjacentSiblingName() {
+        let selection = paths(["/p/a", "/p/a.", "/p/a/z.txt"])
+        XCTAssertEqual(ExplorerPaths.topLevel(selection).map(\.path), ["/p/a", "/p/a."])
+    }
+
+    /// Non-ASCII and spaces, because that is what this project's users select.
+    func testTopLevelHandlesJapaneseAndSpacedPaths() {
+        let selection = paths(["/p/資料 フォルダ", "/p/資料 フォルダ/設計.txt", "/p/読み.txt"])
+        XCTAssertEqual(ExplorerPaths.topLevel(selection).map(\.path),
+                       ["/p/資料 フォルダ", "/p/読み.txt"])
+    }
+
+    /// Nothing to prune must come back untouched, including the empty and
+    /// single-item selections every gesture starts from.
+    func testTopLevelLeavesAnUnnestedSelectionAlone() {
+        XCTAssertTrue(ExplorerPaths.topLevel([]).isEmpty)
+        XCTAssertEqual(ExplorerPaths.topLevel(paths(["/p/a.txt"])).map(\.path), ["/p/a.txt"])
+        let flat = paths(["/p/c.txt", "/p/a.txt", "/p/b.txt"])
+        XCTAssertEqual(ExplorerPaths.topLevel(flat).map(\.path),
+                       ["/p/c.txt", "/p/a.txt", "/p/b.txt"])
     }
 }

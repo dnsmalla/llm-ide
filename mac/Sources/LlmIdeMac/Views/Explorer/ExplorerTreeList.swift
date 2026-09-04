@@ -278,7 +278,6 @@ private struct ExplorerTreeRow: View {
             isFolder: row.isDirectory,
             isExpanded: store.expanded.contains(ExplorerPaths.key(row.url)),
             depth: row.depth,
-            isSelected: store.selection.contains(row.url),
             fileExtension: row.isDirectory ? "" : row.url.pathExtension.lowercased(),
             gitStatus: decoration,
             onToggleChevron: row.isDirectory ? { Task { await store.toggle(row.url) } } : nil

@@ -87,6 +87,13 @@ final class ExplorerKeyCommandTests: XCTestCase {
 /// Inline rename's name rule. The interesting case is the interior newline:
 /// `ExplorerFileOps.validate` trims leading/trailing newlines and would let
 /// "a⏎b" through to `moveItem`.
+///
+/// FIXTURE HAZARD — the temp fixtures below live under `/var/folders`, which is
+/// exactly where `ExplorerPaths.key(_:)` is existence-dependent: Foundation
+/// folds `/private` only while a path EXISTS, so the same path keys differently
+/// once it is deleted. A deleted-path assertion that behaves oddly here is the
+/// FIXTURE, not the code — re-root under `$HOME` rather than chasing it. Latent
+/// today: no XCTest has ever executed in this repo.
 final class ExplorerRenameNameTests: XCTestCase {
 
     func testUnchangedNameCancels() {

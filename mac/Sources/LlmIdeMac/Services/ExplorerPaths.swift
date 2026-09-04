@@ -45,6 +45,56 @@ enum ExplorerPaths {
         return !rel.isEmpty
     }
 
+    /// `urls` with every entry that ANOTHER entry already contains removed,
+    /// keeping the input's order (which is the user's display order, and
+    /// therefore the order the destructive loops apply in).
+    ///
+    /// Multi-select made "a folder AND something inside it" an everyday
+    /// selection — ⌘-click, or ⇧-range across an expanded folder. Moving or
+    /// trashing the folder takes the child with it, so the child's own turn
+    /// then operates on a source that no longer exists. Finder and VS Code
+    /// treat the child as REDUNDANT, not as an error: the containing entry is
+    /// the operation. Without this, `[folder, folder/child.txt, other.txt]`
+    /// moved the folder, threw `.sourceMissing` on the child, and — because
+    /// every destructive loop stopped at the first throw — silently never
+    /// touched `other.txt`, after the user had confirmed a three-item delete.
+    ///
+    /// EVERY destructive path must go through this (drop, copy, paste,
+    /// delete) or the four disagree about what one selection means.
+    ///
+    /// O(n log n), not the obvious O(n²) pairwise filter: ⌘A over a 2000-row
+    /// tree is one keystroke away from a delete, and four million
+    /// `relativePath` calls (each one two `standardizedFileURL` round-trips)
+    /// is seconds of beachball on a destructive gesture.
+    ///
+    /// The trailing "/" on each key before sorting is LOAD-BEARING, not
+    /// cosmetic. Sorting raw keys does not put a directory's descendants
+    /// directly after it: "/a." sorts between "/a" and "/a/z" ("." is 0x2E,
+    /// "/" is 0x2F), which would hide "/a/z" behind an unrelated neighbour and
+    /// leave a covered child in the list. Terminating every key makes "inside"
+    /// exactly "has this prefix", and a prefix-sorted list keeps everything
+    /// sharing a prefix contiguous — so one linear pass carrying the last kept
+    /// ancestor is enough.
+    static func topLevel(_ urls: [URL]) -> [URL] {
+        guard urls.count > 1 else { return urls }
+        // `key(_:)` never emits a trailing slash except for "/" itself.
+        let terminated = urls.map { url -> String in
+            let k = key(url)
+            return k.hasSuffix("/") ? k : k + "/"
+        }
+        var covered: Set<Int> = []
+        var ancestor: String?
+        for index in terminated.indices.sorted(by: { terminated[$0] < terminated[$1] }) {
+            if let ancestor, terminated[index].hasPrefix(ancestor) {
+                covered.insert(index)   // inside a kept entry (or a duplicate of one)
+                continue
+            }
+            ancestor = terminated[index]
+        }
+        guard !covered.isEmpty else { return urls }
+        return urls.indices.filter { !covered.contains($0) }.map { urls[$0] }
+    }
+
     /// The `SearchView` "files to include" glob that scopes a search to
     /// `folder`. `nil` when `folder` is outside `root` — Search walks from
     /// `root`, so a folder outside it can never be reached by narrowing the

@@ -757,25 +757,26 @@ struct ExplorerView: View {
         }
     }
 
-    /// Apply a drag & drop. ⌥ copies (Finder's convention); otherwise moves.
-    ///
-    /// Every source's ORIGINAL parent is refreshed alongside the destination,
-    /// or a moved file would keep rendering in the folder it came from until
-    /// the watcher's next tick. Self-nesting and name collisions are rejected
-    /// by `ExplorerFileOps` and surface in the shared alert — this never
-    /// overwrites anything. Stops at the first failure, like `delete(_:)`: the
-    /// items already moved are visible in the tree after the refresh, so a
-    /// partial application is never hidden.
     /// `sources` split into the ones worth applying against this destination
     /// and the NAMES of the ones that have since vanished.
     ///
-    /// Two kinds are held back. First, anything that no longer exists —
+    /// First the set is reduced to its topmost members by
+    /// `ExplorerPaths.topLevel`: a selection can hold a folder AND something
+    /// inside it, and moving or copying the folder carries the child with it,
+    /// so the child is redundant rather than a second operation. See that
+    /// function for what happened before it existed.
+    ///
+    /// Then two kinds are held back. First, anything that no longer exists —
     /// deleted or moved by another app between the ⌘X and the ⌘V, or between
     /// picking a drag up and dropping it. `ExplorerFileOps` reports those as a
-    /// typed `.sourceMissing` now, but it still THROWS, and the caller's loop
-    /// stops at the first throw — so one file deleted from a three-item cut
-    /// took the other two down with it. Skipping them here and reporting them
-    /// once at the end lets everything that still exists land. (The test is
+    /// typed `.sourceMissing`, but it still THROWS, and the caller's loop used
+    /// to stop at the first throw — so one file deleted from a three-item cut
+    /// took the other two down with it. The callers no longer `break`, so this
+    /// is now the first of two nets rather than the only one: filtering here
+    /// keeps the vanished items out of the operation entirely, and the callers
+    /// catch `.sourceMissing` for anything that vanishes in the window between
+    /// this check and its own turn. Both report through `reportMissing`, once,
+    /// after the loop. (The test is
     /// `ExplorerFileOps.itemExists`, which lstats: a broken symlink is a real
     /// row the user can see and move, not a vanished item.)
     ///
@@ -785,12 +786,12 @@ struct ExplorerView: View {
     /// Dragging a multi-selection onto one of its own folders used to be
     /// order-dependent — `[folder, e.txt]` aborted at `folder` and moved
     /// nothing, `[e.txt, folder]` moved the file and then alerted — because the
-    /// ops loop stops at the first throw and `Set` order decided which came
+    /// ops loop stopped at the first throw and `Set` order decided which came
     /// first. Finder's rule is that the drop target is simply not part of its
     /// own drag, so it is dropped from the list and the rest go through.
     ///
-    /// When the SECOND rule alone would empty the list, the original sources
-    /// are returned instead: dragging a folder onto itself (or into its own
+    /// When the SECOND rule alone would empty the list, the pruned sources are
+    /// returned instead: dragging a folder onto itself (or into its own
     /// child) with nothing else selected is a genuine mistake, and it must
     /// still raise "Can't move a folder into itself." rather than silently
     /// doing nothing. That fallback deliberately does NOT apply once something
@@ -798,9 +799,10 @@ struct ExplorerView: View {
     /// a doomed retry.
     private func droppable(_ sources: [URL],
                            into destinationDir: URL) -> (apply: [URL], missing: [String]) {
+        let topLevel = ExplorerPaths.topLevel(sources)
         let destinationKey = ExplorerPaths.key(destinationDir)
         var missing: [String] = []
-        let applicable = sources.filter { source in
+        let applicable = topLevel.filter { source in
             guard ExplorerFileOps.itemExists(source) else {
                 missing.append(source.lastPathComponent)
                 return false
@@ -808,7 +810,7 @@ struct ExplorerView: View {
             return ExplorerPaths.key(source) != destinationKey
                 && !ExplorerPaths.isDescendant(destinationDir, of: source)
         }
-        if applicable.isEmpty, missing.isEmpty { return (sources, []) }
+        if applicable.isEmpty, missing.isEmpty { return (topLevel, []) }
         return (applicable, missing)
     }
 
@@ -833,6 +835,15 @@ struct ExplorerView: View {
         let line = missing.count == 1
             ? (ExplorerFileError.sourceMissing(missing[0]).errorDescription ?? "")
             : "These items no longer exist: " + missing.map { "“\($0)”" }.joined(separator: ", ")
+        appendOpError(line)
+    }
+
+    /// Add `line` to the shared alert without displacing what is already
+    /// there. Two independent facts about one gesture (a collision AND a
+    /// vanished source) are two things the user needs, and the alert shows
+    /// one string.
+    private func appendOpError(_ line: String) {
+        guard !line.isEmpty else { return }
         if let existing = opError, !existing.isEmpty {
             opError = existing + "\n\n" + line
         } else {
@@ -840,12 +851,56 @@ struct ExplorerView: View {
         }
     }
 
+    /// One line per source that FAILED, each NAMING the item it belongs to.
+    ///
+    /// The destructive loops used to `break` on the first throw, so a
+    /// collision on the second of five items silently left the other three
+    /// unapplied while showing a message that named none of them. They now
+    /// run to completion and collect here instead — see `failureLine`.
+    private func reportFailures(_ failures: [String]) {
+        guard !failures.isEmpty else { return }
+        appendOpError(failures.joined(separator: "\n"))
+    }
+
+    /// A failure attributed to the item that produced it.
+    ///
+    /// Always prefixed with the name, even for a single-item gesture: with
+    /// multi-select, "An item with this name already exists." on its own does
+    /// not say WHICH of the five dragged files is the one still sitting in the
+    /// source folder.
+    private func failureLine(_ source: URL, _ error: Error) -> String {
+        let message = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
+        return "“\(source.lastPathComponent)”: \(message)"
+    }
+
+    /// Apply a drag & drop. ⌥ copies (Finder's convention); otherwise moves.
+    ///
+    /// (This doc comment used to sit above `droppable`, where it described the
+    /// wrong function — it was left behind when `droppable` was hoisted above
+    /// it.)
+    ///
+    /// Every source's ORIGINAL parent is refreshed alongside the destination,
+    /// or a moved file would keep rendering in the folder it came from until
+    /// the watcher's next tick. Self-nesting and name collisions are rejected
+    /// by `ExplorerFileOps` and surface in the shared alert — this never
+    /// overwrites anything.
+    ///
+    /// EVERY source gets its turn, like `performPaste` and `delete(_:)`. A
+    /// throw is collected and the loop continues; the collected lines are
+    /// reported together at the end. It used to `break`, which meant one
+    /// collision (or one source that lost a race with another process) took
+    /// every item behind it down silently — the user saw one sentence about
+    /// one file and no word that the rest of their drag had not happened.
+    /// Continuing is safe because each operation is independently guarded and
+    /// never overwrites: a refused item simply stays where it was.
     private func performDrop(_ sources: [URL], into destinationDir: URL, copy: Bool) {
         var touched: Set<String> = [ExplorerPaths.key(destinationDir)]
         var reopened: [URL] = []
-        let (applicable, missing) = droppable(sources, into: destinationDir)
-        do {
-            for source in applicable {
+        var failures: [String] = []
+        let (applicable, alreadyMissing) = droppable(sources, into: destinationDir)
+        var missing = alreadyMissing
+        for source in applicable {
+            do {
                 if copy {
                     _ = try ExplorerFileOps.copy(from: source, to: destinationDir)
                 } else {
@@ -853,10 +908,13 @@ struct ExplorerView: View {
                     touched.insert(ExplorerPaths.key(source.deletingLastPathComponent()))
                     reopened += remap(from: source, to: ExplorerPaths.canonical(moved))
                 }
+            } catch ExplorerFileError.sourceMissing(let name) {
+                missing.append(name)   // lost the race with another process
+            } catch {
+                failures.append(failureLine(source, error))
             }
-        } catch {
-            opError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
         }
+        reportFailures(failures)
         reportMissing(missing)
         Task {
             for dir in touched { await reload(URL(fileURLWithPath: dir)) }
@@ -875,13 +933,13 @@ struct ExplorerView: View {
     /// failure the clipboard is deliberately left armed, so the user can fix
     /// the collision and paste again rather than re-selecting the sources.
     ///
-    /// Applied ITEM BY ITEM, the same shape `performDrop` uses, rather than
-    /// through `ExplorerFileOps.paste`. That helper stops at the first failure
-    /// and rethrows, which means the items it already moved are gone from disk
-    /// but their partial result never comes back — so a paste of `[a, b, c]`
-    /// that collided on `b` left `a` moved with its open tab still pointing at
-    /// the path `a` no longer occupies. Remapping per item is the only way to
-    /// keep the tabs honest about what actually happened.
+    /// Applied ITEM BY ITEM, the same shape `performDrop` uses, and never
+    /// through a batch helper that returns only its final result: the items
+    /// already moved when item three collides are gone from disk, so a paste
+    /// of `[a, b, c]` that failed on `b` would leave `a` moved with its open
+    /// tab still pointing at the path `a` no longer occupies. Remapping per
+    /// item is the only way to keep the tabs honest about what actually
+    /// happened — and it is why `ExplorerFileOps` has no `paste` any more.
     private func performPaste(into dir: URL) {
         guard let operation = clipboard.operation, !clipboard.isEmpty else { return }
         let sources = clipboard.urls
@@ -889,9 +947,11 @@ struct ExplorerView: View {
         var touched: Set<String> = [ExplorerPaths.key(dir)]
         var reopened: [URL] = []
         var results: [URL] = []
-        let (applicable, missing) = droppable(sources, into: dir)
-        do {
-            for source in applicable {
+        var failures: [String] = []
+        let (applicable, alreadyMissing) = droppable(sources, into: dir)
+        var missing = alreadyMissing
+        for source in applicable {
+            do {
                 // Canonical before anything enters `store.selection` or a tab:
                 // `List(selection:)` matches rows by raw `URL` hashing, and a
                 // URL built by appending a name to a directory keeps that
@@ -906,18 +966,21 @@ struct ExplorerView: View {
                     touched.insert(ExplorerPaths.key(source.deletingLastPathComponent()))
                     reopened += remap(from: source, to: landed)
                 }
+            } catch ExplorerFileError.sourceMissing(let name) {
+                missing.append(name)   // lost the race with another process
+            } catch {
+                failures.append(failureLine(source, error))
             }
-        } catch {
-            opError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
         }
+        reportFailures(failures)
         reportMissing(missing)
-        // Only a cut where everything APPLICABLE landed is consumed. A cut
-        // stopped by a real failure stays armed so the user can fix the
-        // collision and finish it; clearing there would strand the remainder
-        // with no way back to the selection that produced it. Sources that had
-        // already vanished don't count against that — no retry can bring them
-        // back, so they must not keep the clipboard armed forever.
-        if isMove, results.count == applicable.count { clipboard.clear() }
+        // A cut is consumed unless a REAL failure held one of its items back.
+        // A cut stopped by a collision stays armed so the user can fix it and
+        // finish; clearing there would strand the remainder with no way back
+        // to the selection that produced it. Sources that had vanished — before
+        // the paste or during it — don't count against that: no retry can bring
+        // them back, so they must not keep the clipboard armed forever.
+        if isMove, failures.isEmpty { clipboard.clear() }
         if !results.isEmpty { store.selection = Set(results) }
         Task {
             for parent in touched { await reload(URL(fileURLWithPath: parent)) }
@@ -927,32 +990,59 @@ struct ExplorerView: View {
     }
 
     /// Trash one or more items, close any tabs under them, refresh their
-    /// parents. Stops at the first failure and reports it — a partial delete
-    /// is visible in the tree after the refresh, so nothing is hidden.
+    /// parents.
+    ///
+    /// Reduced to its topmost members first. `[folder, folder/keep.txt,
+    /// other.txt]` is one selection the user can make in two clicks, and
+    /// trashing `folder` takes `keep.txt` with it — so `keep.txt`'s own turn
+    /// used to throw, the loop `break`d, and `other.txt` was never trashed at
+    /// all, after the user had confirmed "Move 3 items to the Trash". All
+    /// three still reach the Trash under the pruned form (`keep.txt` inside
+    /// `folder`), so the confirmation the user answered is still honoured
+    /// exactly — which is why the dialog keeps counting what was SELECTED.
+    ///
+    /// Every remaining item then gets its turn: a failure is attributed to
+    /// its item and collected, never allowed to cancel the items behind it.
+    /// A partial delete is also visible in the tree after the refresh, but
+    /// "visible afterwards" was never enough for a confirmed destructive
+    /// action — the user has to be told.
     private func delete(_ urls: [URL]) {
         var parents: Set<String> = []
-        do {
-            for url in urls {
-                try ExplorerFileOps.trash(url)
-                parents.insert(ExplorerPaths.key(url.deletingLastPathComponent()))
-                tabs.removeAll { $0 == url || ExplorerPaths.isDescendant($0, of: url) }
-                if let active = activeTab, active == url || ExplorerPaths.isDescendant(active, of: url) {
-                    activeTab = tabs.last
-                }
-                store.selection = store.selection.filter {
-                    $0 != url && !ExplorerPaths.isDescendant($0, of: url)
-                }
-                // An inline rename must never outlive its row: deleting the
-                // folder a rename is happening inside would otherwise leave an
-                // editor open over a ghost, whose ⏎ renames nothing.
-                if let renaming = renamingURL,
-                   renaming == url || ExplorerPaths.isDescendant(renaming, of: url) {
-                    renamingURL = nil
-                }
+        var failures: [String] = []
+        var missing: [String] = []
+        for url in ExplorerPaths.topLevel(urls) {
+            // Same "vanished" test the drop/paste path uses, so all four
+            // destructive paths tell the user the same thing about a source
+            // another process removed first — rather than letting
+            // `trashItem` surface a raw Cocoa sentence.
+            guard ExplorerFileOps.itemExists(url) else {
+                missing.append(url.lastPathComponent)
+                continue
             }
-        } catch {
-            opError = (error as? ExplorerFileError)?.errorDescription ?? error.localizedDescription
+            do {
+                try ExplorerFileOps.trash(url)
+            } catch {
+                failures.append(failureLine(url, error))
+                continue
+            }
+            parents.insert(ExplorerPaths.key(url.deletingLastPathComponent()))
+            tabs.removeAll { $0 == url || ExplorerPaths.isDescendant($0, of: url) }
+            if let active = activeTab, active == url || ExplorerPaths.isDescendant(active, of: url) {
+                activeTab = tabs.last
+            }
+            store.selection = store.selection.filter {
+                $0 != url && !ExplorerPaths.isDescendant($0, of: url)
+            }
+            // An inline rename must never outlive its row: deleting the
+            // folder a rename is happening inside would otherwise leave an
+            // editor open over a ghost, whose ⏎ renames nothing.
+            if let renaming = renamingURL,
+               renaming == url || ExplorerPaths.isDescendant(renaming, of: url) {
+                renamingURL = nil
+            }
         }
+        reportFailures(failures)
+        reportMissing(missing)
         Task {
             for parent in parents { await reload(URL(fileURLWithPath: parent)) }
             await refreshGit()

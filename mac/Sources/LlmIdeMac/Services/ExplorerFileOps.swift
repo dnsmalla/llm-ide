@@ -160,6 +160,12 @@ enum ExplorerFileOps {
     /// leaves something a user can recognize and rename back, rather than a
     /// hidden nameless blob. `uniqueDestination` still guards the collision.
     ///
+    /// But recovery is FINDER-ONLY, never the Explorer: the staging name is
+    /// dot-prefixed, and `FileSystemTree.children` enumerates with
+    /// `.skipsHiddenFiles`, so the very tree the user was standing in when it
+    /// happened will never show the stranded file. Tell them `ls -a`, or
+    /// Finder with ⌘⇧. — not "look in the tree".
+    ///
     /// The suffix is dropped when it would push the name past `NAME_MAX`: the
     /// budget is checked in UTF-8 BYTES, because that is what the 255 limit
     /// counts and this project's users have multi-byte filenames — a Japanese
@@ -330,48 +336,14 @@ enum ExplorerFileOps {
         return dest
     }
 
-    /// Apply a clipboard paste into `dir`: move each item when `shouldMove`
-    /// (a cut), copy it otherwise. Returns the resulting URLs in input order.
-    ///
-    /// Adds NO containment check of its own — `move`/`copy` already reject
-    /// self-nesting through `assertNotSelfNesting`, and a second, weaker
-    /// string-level check here would only be able to disagree with them.
-    ///
-    /// A source that VANISHED between the cut/copy and the paste (deleted, or
-    /// moved by another app) is skipped and the loop continues. One stale
-    /// clipboard entry must not block every valid item behind it — otherwise
-    /// the clipboard wedges: the paste fails, so nothing is consumed, so the
-    /// next ⌘V fails identically, forever, until the user re-selects.
-    ///
-    /// Any OTHER failure — a name collision, a self-nesting drop — stops at
-    /// the first one and rethrows; the items already processed stay processed.
-    /// That is deliberate: rolling back a partially-applied move is itself a
-    /// destructive operation, and the caller remaps per item so a partial
-    /// result is never hidden.
-    ///
-    /// Vanished sources are fatal only when NOTHING could be applied — the
-    /// single-item case, where silently doing nothing would look like a broken
-    /// ⌘V. Then the throw names the missing item.
-    @discardableResult
-    static func paste(_ urls: [URL], into dir: URL, move shouldMove: Bool) throws -> [URL] {
-        var results: [URL] = []
-        var missing: [String] = []
-        for url in urls {
-            guard itemExists(url) else {
-                missing.append(url.lastPathComponent)
-                continue
-            }
-            if shouldMove {
-                results.append(try move(from: url, to: dir))
-            } else {
-                results.append(try copy(from: url, to: dir))
-            }
-        }
-        if results.isEmpty, let first = missing.first {
-            throw ExplorerFileError.sourceMissing(first)
-        }
-        return results
-    }
+    // Deliberately NO batch `paste(_:into:move:)` helper here. One lived in
+    // this type and went unused: the Explorer applies a paste ITEM BY ITEM
+    // (`ExplorerView.performPaste`) because it has to remap open tabs and the
+    // selection per item and report per item. A batch helper cannot do that —
+    // it returns one array and one throw — so its semantics necessarily
+    // disagreed with the shipped path, which is a trap for whoever reaches for
+    // it next. Prune the sources with `ExplorerPaths.topLevel`, then loop over
+    // `move`/`copy` here, the way `performPaste` and `performDrop` do.
 
     /// A free URL for `name` inside `dir`, following Finder's naming:
     /// `a.txt` → `a copy.txt` → `a copy 2.txt` → `a copy 3.txt`. The base name

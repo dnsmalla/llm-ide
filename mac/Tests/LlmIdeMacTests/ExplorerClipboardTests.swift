@@ -1,6 +1,12 @@
 import XCTest
 @testable import LlmIdeMacLib
 
+/// FIXTURE HAZARD — the temp fixtures below live under `/var/folders`, which is
+/// exactly where `ExplorerPaths.key(_:)` is existence-dependent: Foundation
+/// folds `/private` only while a path EXISTS, so the same path keys differently
+/// once it is deleted. A deleted-path assertion that behaves oddly here is the
+/// FIXTURE, not the code — re-root under `$HOME` rather than chasing it. Latent
+/// today: no XCTest has ever executed in this repo.
 @MainActor
 final class ExplorerClipboardTests: XCTestCase {
     var root: URL!
@@ -58,127 +64,31 @@ final class ExplorerClipboardTests: XCTestCase {
         XCTAssertNil(clip.operation)
     }
 
-    // MARK: - ExplorerFileOps.paste (real filesystem)
+    // MARK: - what a paste is made of (real filesystem)
+    //
+    // `ExplorerFileOps` has no batch paste helper any more, and these no
+    // longer pretend it does. A paste is `ExplorerView.performPaste` over
+    // `move`/`copy` per item, because only the view can remap the open tabs
+    // and the selection for each item as it lands. What is left here is the
+    // per-item behaviour that loop depends on; the collision, self-nesting and
+    // uniquifier rules live in `ExplorerFileOpsTests`.
 
-    func testPasteWithMoveRelocatesEveryItem() throws {
-        let a = try ExplorerFileOps.createFile(in: root, name: "a.txt")
-        let b = try ExplorerFileOps.createFile(in: root, name: "b.txt")
-        let dest = try ExplorerFileOps.createFolder(in: root, name: "dest")
-
-        let results = try ExplorerFileOps.paste([a, b], into: dest, move: true)
-
-        XCTAssertEqual(results.map(\.lastPathComponent), ["a.txt", "b.txt"])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: a.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("b.txt").path))
-    }
-
-    func testPasteWithCopyLeavesSourcesInPlace() throws {
-        let a = try ExplorerFileOps.createFile(in: root, name: "a.txt")
-        let dest = try ExplorerFileOps.createFolder(in: root, name: "dest")
-
-        let results = try ExplorerFileOps.paste([a], into: dest, move: false)
-
-        XCTAssertTrue(FileManager.default.fileExists(atPath: a.path))
-        XCTAssertEqual(results.map(\.lastPathComponent), ["a.txt"])
-    }
-
-    func testPasteCopyIntoTheSameFolderUniquifies() throws {
-        let a = try ExplorerFileOps.createFile(in: root, name: "a.txt")
-        let results = try ExplorerFileOps.paste([a], into: root, move: false)
-        XCTAssertEqual(results.map(\.lastPathComponent), ["a copy.txt"])
-    }
-
-    /// Pasting a copy twice is Finder's repeat-paste: two distinct siblings,
-    /// never one silently overwritten.
-    func testPastingTheSameCopyTwiceProducesTwoDistinctItems() throws {
-        let a = try ExplorerFileOps.createFile(in: root, name: "a.txt")
-        let first = try ExplorerFileOps.paste([a], into: root, move: false)
-        let second = try ExplorerFileOps.paste([a], into: root, move: false)
-        XCTAssertEqual(first.map(\.lastPathComponent), ["a copy.txt"])
-        XCTAssertEqual(second.map(\.lastPathComponent), ["a copy 2.txt"])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: a.path))
-    }
-
-    func testPasteMoveIntoTheSameFolderIsANoOp() throws {
-        let a = try ExplorerFileOps.createFile(in: root, name: "a.txt")
-        let results = try ExplorerFileOps.paste([a], into: root, move: true)
-        XCTAssertEqual(results.map(\.path), [a.path])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: a.path))
-    }
-
-    func testPasteMoveOntoAnExistingNameThrowsWithoutOverwriting() throws {
-        let a = try ExplorerFileOps.createFile(in: root, name: "a.txt")
-        try "source".write(to: a, atomically: true, encoding: .utf8)
-        let dest = try ExplorerFileOps.createFolder(in: root, name: "dest")
-        let clash = try ExplorerFileOps.createFile(in: dest, name: "a.txt")
-        try "victim".write(to: clash, atomically: true, encoding: .utf8)
-
-        XCTAssertThrowsError(try ExplorerFileOps.paste([a], into: dest, move: true)) { err in
-            XCTAssertEqual(err as? ExplorerFileError, .alreadyExists)
-        }
-        XCTAssertEqual(try String(contentsOf: clash, encoding: .utf8), "victim",
-                       "paste must never overwrite an existing file")
-    }
-
-    /// Pasting a cut folder into its own descendant is caught by
-    /// `ExplorerFileOps`'s own self-nesting guard — `paste` composes `move`
-    /// and adds NO second containment check of its own.
-    func testPasteOfAFolderIntoItsOwnDescendantIsRefused() throws {
-        let outer = try ExplorerFileOps.createFolder(in: root, name: "outer")
-        let inner = try ExplorerFileOps.createFolder(in: outer, name: "inner")
-
-        XCTAssertThrowsError(try ExplorerFileOps.paste([outer], into: inner, move: true)) { err in
-            XCTAssertEqual(err as? ExplorerFileError, .cannotMoveIntoSelf)
-        }
-        XCTAssertTrue(FileManager.default.fileExists(atPath: inner.path),
-                      "the tree must be untouched after a refused paste")
-    }
-
-    /// This project's users work in Japanese; a non-ASCII name must survive a
-    /// paste, including the Finder-style uniquifier.
-    func testPasteHandlesJapaneseNames() throws {
+    /// This project's users work in Japanese; a non-ASCII name (and a
+    /// destination with a space in it) must survive both halves of a paste,
+    /// including the Finder-style uniquifier.
+    func testMoveAndCopyHandleJapaneseNames() throws {
         let jp = try ExplorerFileOps.createFile(in: root, name: "設計.txt")
         let dest = try ExplorerFileOps.createFolder(in: root, name: "資料 フォルダ")
 
-        let moved = try ExplorerFileOps.paste([jp], into: dest, move: true)
-        XCTAssertEqual(moved.map(\.lastPathComponent), ["設計.txt"])
+        let moved = try ExplorerFileOps.move(from: jp, to: dest)
+        XCTAssertEqual(moved.lastPathComponent, "設計.txt")
         XCTAssertFalse(FileManager.default.fileExists(atPath: jp.path))
 
-        let copied = try ExplorerFileOps.paste(moved, into: dest, move: false)
-        XCTAssertEqual(copied.map(\.lastPathComponent), ["設計 copy.txt"])
-    }
-
-    func testPasteOfNothingIsAnEmptyResult() throws {
-        XCTAssertTrue(try ExplorerFileOps.paste([], into: root, move: true).isEmpty)
+        let copied = try ExplorerFileOps.copy(from: moved, to: dest)
+        XCTAssertEqual(copied.lastPathComponent, "設計 copy.txt")
     }
 
     // MARK: - a source that vanished between the cut and the paste
-
-    /// One stale clipboard entry must not block the valid items behind it. If
-    /// it did, the paste would fail, so the clipboard would never be consumed,
-    /// so the next ⌘V would fail identically — wedged until the user
-    /// re-selects.
-    func testPasteSkipsAVanishedSourceAndStillMovesTheRest() throws {
-        let a = try ExplorerFileOps.createFile(in: root, name: "a.txt")
-        let b = try ExplorerFileOps.createFile(in: root, name: "b.txt")
-        let dest = try ExplorerFileOps.createFolder(in: root, name: "dest")
-        try FileManager.default.removeItem(at: a)
-
-        let results = try ExplorerFileOps.paste([a, b], into: dest, move: true)
-
-        XCTAssertEqual(results.map(\.lastPathComponent), ["b.txt"])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("b.txt").path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: b.path))
-    }
-
-    /// When NOTHING could be applied — the single-item case — silently doing
-    /// nothing would look like a broken ⌘V, so the throw names the item.
-    func testPasteOfOnlyVanishedSourcesThrowsNamingTheItem() throws {
-        let gone = root.appendingPathComponent("gone.txt")
-        XCTAssertThrowsError(try ExplorerFileOps.paste([gone], into: root, move: true)) { err in
-            XCTAssertEqual(err as? ExplorerFileError, .sourceMissing("gone.txt"))
-        }
-    }
 
     /// A direct `move`/`copy` of a vanished source reports a typed error, not
     /// `FileManager`'s raw "…either the former doesn't exist, or the folder
@@ -203,9 +113,10 @@ final class ExplorerClipboardTests: XCTestCase {
             at: link, withDestinationURL: root.appendingPathComponent("nothing-here.txt"))
         let dest = try ExplorerFileOps.createFolder(in: root, name: "dest")
 
-        let results = try ExplorerFileOps.paste([link], into: dest, move: true)
+        XCTAssertTrue(ExplorerFileOps.itemExists(link))
+        let moved = try ExplorerFileOps.move(from: link, to: dest)
 
-        XCTAssertEqual(results.map(\.lastPathComponent), ["link.txt"])
+        XCTAssertEqual(moved.lastPathComponent, "link.txt")
         XCTAssertTrue(ExplorerFileOps.itemExists(dest.appendingPathComponent("link.txt")))
     }
 }

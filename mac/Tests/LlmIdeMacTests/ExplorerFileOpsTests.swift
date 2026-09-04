@@ -1,6 +1,12 @@
 import XCTest
 @testable import LlmIdeMacLib
 
+/// FIXTURE HAZARD — the temp fixtures below live under `/var/folders`, which is
+/// exactly where `ExplorerPaths.key(_:)` is existence-dependent: Foundation
+/// folds `/private` only while a path EXISTS, so the same path keys differently
+/// once it is deleted. A deleted-path assertion that behaves oddly here is the
+/// FIXTURE, not the code — re-root under `$HOME` rather than chasing it. Latent
+/// today: no XCTest has ever executed in this repo.
 final class ExplorerFileOpsTests: XCTestCase {
     var root: URL!
 

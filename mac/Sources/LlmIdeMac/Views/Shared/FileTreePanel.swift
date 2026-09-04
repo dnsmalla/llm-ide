@@ -175,8 +175,7 @@ private struct FSNodeRow: View {
             else        { expandedPaths.insert(node.id) }
         } label: {
             TreeRowLabel(name: node.name, isFolder: true, isExpanded: expanded,
-                         depth: depth, isSelected: false,
-                         folderTint: category.folderTint)
+                         depth: depth, folderTint: category.folderTint)
         }
         .buttonStyle(.plain)
         .listRowSeparator(.hidden)
@@ -193,7 +192,7 @@ private struct FSNodeRow: View {
     private var fileRow: some View {
         let ext = URL(fileURLWithPath: node.name).pathExtension.lowercased()
         return TreeRowLabel(name: node.name, isFolder: false, isExpanded: false,
-                            depth: depth, isSelected: false, fileExtension: ext)
+                            depth: depth, fileExtension: ext)
         .help(node.name)
         .contextMenu {
             if category == .meetings {

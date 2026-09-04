@@ -9,7 +9,11 @@ struct TreeRowLabel: View {
     let isFolder: Bool
     let isExpanded: Bool      // ignored for files
     let depth: Int
-    let isSelected: Bool
+    // No `isSelected`: this view renders no selection state of its own — the
+    // enclosing `List`/row draws the highlight. It used to take one anyway,
+    // which cost the Explorer a `store.selection.contains(row.url)` lookup,
+    // and an extra `@Observable` dependency edge, on EVERY row of EVERY
+    // render to feed a parameter the body never read.
     var folderTint: Color? = nil   // nil → default folder color
     // file extension for FileIconKit (files only)
     var fileExtension: String = ""
