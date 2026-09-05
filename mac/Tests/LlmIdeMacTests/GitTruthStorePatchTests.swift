@@ -56,7 +56,7 @@ final class GitTruthStorePatchTests: XCTestCase {
         let hunks = UnifiedDiffParser.parse(diff)
         XCTAssertEqual(hunks.count, 2, "fixture must produce two independent hunks — adjust the fixture if git merged them into one")
 
-        let store = GitTruthStore()
+        let store = await GitTruthStore()   // @MainActor type; this test is nonisolated
         try await store.stagePatch(root: repo, path: "f.txt", hunk: hunks[0])
 
         let staged = try run(["diff", "--cached", "--", "f.txt"])
@@ -75,7 +75,7 @@ final class GitTruthStorePatchTests: XCTestCase {
         let stagedHunks = UnifiedDiffParser.parse(staged)
         XCTAssertEqual(stagedHunks.count, 2)
 
-        let store = GitTruthStore()
+        let store = await GitTruthStore()   // @MainActor type; this test is nonisolated
         try await store.unstagePatch(root: repo, path: "f.txt", hunk: stagedHunks[0])
 
         let stagedAfter = try run(["diff", "--cached", "--", "f.txt"])
@@ -84,7 +84,7 @@ final class GitTruthStorePatchTests: XCTestCase {
     }
 
     func testStagePatchOnAMalformedHunkThrows() async {
-        let store = GitTruthStore()
+        let store = await GitTruthStore()   // @MainActor type; this test is nonisolated
         let bogus = DiffHunk(header: "@@ -1,1 +1,1 @@", rows: [
             DiffRow(kind: .delete, oldLine: 1, newLine: nil, text: "this line does not exist in f.txt"),
         ])
@@ -120,7 +120,7 @@ final class GitTruthStorePatchTests: XCTestCase {
         let before = try indexBlob("brand.txt")
         XCTAssertEqual(before.count, 17)
 
-        let store = GitTruthStore()
+        let store = await GitTruthStore()   // @MainActor type; this test is nonisolated
         do {
             try await store.unstagePatch(root: repo, path: "brand.txt", hunk: hunks[0])
             XCTFail("unstaging a whole-file add hunk must be refused, not applied")
@@ -141,7 +141,7 @@ final class GitTruthStorePatchTests: XCTestCase {
         XCTAssertEqual(hunks.first?.header, "@@ -0,0 +1,9 @@")
         let before = try indexBlob("renamed.txt")
 
-        let store = GitTruthStore()
+        let store = await GitTruthStore()   // @MainActor type; this test is nonisolated
         do {
             try await store.unstagePatch(root: repo, path: "renamed.txt", hunk: hunks[0])
             XCTFail("unstaging a staged rename's hunk must be refused, not applied")
@@ -161,7 +161,7 @@ final class GitTruthStorePatchTests: XCTestCase {
         XCTAssertEqual(hunks.first?.header, "@@ -1,9 +0,0 @@")
         let before = try indexBlob("f.txt")
 
-        let store = GitTruthStore()
+        let store = await GitTruthStore()   // @MainActor type; this test is nonisolated
         do {
             try await store.stagePatch(root: repo, path: "f.txt", hunk: hunks[0])
             XCTFail("staging a whole-file delete hunk must be refused, not applied")
@@ -176,7 +176,7 @@ final class GitTruthStorePatchTests: XCTestCase {
     /// EMPTY header, so its line counts promise nothing. Such a hunk must be
     /// refused rather than fed to git.
     func testStagePatchRefusesAHunkWithNoUsableHeader() async {
-        let store = GitTruthStore()
+        let store = await GitTruthStore()   // @MainActor type; this test is nonisolated
         let headerless = DiffHunk(header: "", rows: [
             DiffRow(kind: .insert, oldLine: nil, newLine: 1, text: "x"),
         ])
