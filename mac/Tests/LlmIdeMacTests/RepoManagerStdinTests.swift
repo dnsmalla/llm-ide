@@ -21,7 +21,9 @@ final class RepoManagerStdinTests: XCTestCase {
     /// actually reaches the child process, and whose output is independently
     /// verifiable (a known string has a known SHA1).
     func testStdinDataReachesTheGitSubprocess() async throws {
-        let manager = RepoManager()
+        // RepoManager is @MainActor; constructing it from a nonisolated async
+        // test is an actor hop, so it needs `await`.
+        let manager = await RepoManager()
         let content = "llm-ide stdin test\n"
         let out = try await manager.runGit(["hash-object", "--stdin"], at: repo, stdin: Data(content.utf8))
         // Pinned by actually running `printf 'llm-ide stdin test\n' | git
@@ -35,7 +37,9 @@ final class RepoManagerStdinTests: XCTestCase {
     /// deadlock — the same pipe-buffer hazard `RepoManager.git`'s own doc
     /// comment already documents for stdout/stderr, now checked for stdin.
     func testLargeStdinDoesNotDeadlock() async throws {
-        let manager = RepoManager()
+        // RepoManager is @MainActor; constructing it from a nonisolated async
+        // test is an actor hop, so it needs `await`.
+        let manager = await RepoManager()
         let big = String(repeating: "a", count: 200_000) + "\n"
         let exp = expectation(description: "runGit returns")
         var result: String?
