@@ -228,7 +228,7 @@ Sources/LlmIdeMac/
 │   ├── Theme.swift                    # dark / light / midnight palettes
 │   ├── GitLabModels.swift             # GitLabProject · GitLabIssue · GitLabLabel etc.
 │   ├── Caption.swift                  # Caption + MeetingSession
-│   └── Plan.swift                     # Plan / PlanTask / PlanSummary
+│   └── Plan.swift                     # Plan / PlanTask / AnyCodable
 ├── Services/
 │   ├── GitLabClient.swift             # async/await GitLab REST v4 client
 │   ├── GitHubClient.swift             # GitHub REST API client

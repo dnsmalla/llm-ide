@@ -70,3 +70,7 @@ exclude_docs: |
   _templates/
   _scripts/
   _stubs.txt
+  # Kept even though the directory is currently empty: the vendored
+  # writing-plans / brainstorming skills still save new plans and specs
+  # here, and they must never enter the published site or --strict build.
+  superpowers/

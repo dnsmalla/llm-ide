@@ -41,7 +41,7 @@ jobs:
         run: pip install -r docs-requirements.txt
 
       - name: Markdown lint
-        run: npx --yes markdownlint-cli2 "docs/**/*.md"
+        run: npx --yes markdownlint-cli2 "docs/**/*.md" "!docs/superpowers/**"
 
       - name: Build site (strict)
         run: mkdocs build --strict
