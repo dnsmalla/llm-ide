@@ -14,6 +14,29 @@ All notable changes to GraphKit. The Swift package and the TypeScript package
   `node_modules/` nor `dist/` passes the manifest gate. Regenerate after any
   `typescript/src` change with `cd typescript && npm run bundle`.
 
+### Fixed
+- **TypeScript code scanner skipped `.mjs`/`.cjs`.** `tsScanner`'s discovery set
+  omitted both extensions while its `language()` mapping already claimed them,
+  so any ESM-only tree scanned to **0 nodes**. Import resolution
+  (`RESOLVE_EXTS`) had the same gap. Measured on a Node server tree:
+  `0 → 65/26/194` nodes for three packages that previously produced nothing;
+  TypeScript trees are unchanged.
+
+### Removed
+**Breaking (Swift, GraphKit product).** Nine unreferenced public types — no
+consumer in this repository called any of them, and none appears in the
+`graph-engine.json` command contract. `GraphCore` is untouched.
+
+- **Document → text pipeline**: `InputReader`, `PDFExtractor`, `EPUBExtractor`,
+  `TextChunker`, `DocumentScanner`. GraphKit no longer extracts text from PDF or
+  EPUB, and no longer depends on PDFKit/Vision.
+- **Understand-Anything import**: `UAParser`, `UAStore`, `UAError`.
+- **`CodeNoteWriter`**.
+
+Text→graph (`MemoryGenerator`), code→graph (`StructureScanner`,
+`StructureGraphBuilder`), the merge (`GraphMerger`) and the cache (`ScanCache`)
+are unaffected.
+
 ## [1.7.0] - 2026-09-02
 
 One repository, two products. The package now exports **GraphCore** (canonical
