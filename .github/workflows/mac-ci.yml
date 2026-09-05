@@ -101,6 +101,14 @@ jobs:
           # the suite got.
           grep -E "Test Case .* started" swift-test.log | tail -3 | cut -c1-500 | sed 's/^/::error::[last started] /' || true
           echo "::notice::cases started=$(grep -cE 'Test Case .* started' swift-test.log || true) passed=$(grep -cE 'Test Case .* passed' swift-test.log || true) failed=$(grep -cE 'Test Case .* failed' swift-test.log || true)"
+          # swift-testing runs cases in parallel, so "last started" says little
+          # there; a hang is whichever case has a "started" line but neither a
+          # "passed" nor a "failed" one.
+          export LC_ALL=en_US.UTF-8
+          grep -E '^◇ Test .* started\.$' swift-test.log | sed -E 's/^◇ Test (.*) started\.$/\1/' | sort -u > started.txt || true
+          grep -E '^[✔✘] Test .* (passed|failed) after' swift-test.log | sed -E 's/^[✔✘] Test (.*) (passed|failed) after.*$/\1/' | sort -u > finished.txt || true
+          echo "::notice::swift-testing cases started=$(wc -l < started.txt | tr -d ' ') finished=$(wc -l < finished.txt | tr -d ' ')"
+          comm -23 started.txt finished.txt | head -10 | cut -c1-500 | sed 's/^/::error::[started, never finished] /' || true
           tail -30 swift-test.log | cut -c1-1500 | sed 's/%/%25/g' > tail.txt
           sed -n '1,10p'  tail.txt | sed 's/^/::notice::[tail -30..-21] /'
           sed -n '11,20p' tail.txt | sed 's/^/::warning::[tail -20..-11] /'
