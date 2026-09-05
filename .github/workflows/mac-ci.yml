@@ -45,5 +45,34 @@ jobs:
       - name: Build (debug)
         run: swift build
 
+      # The raw job log is admin-only on this repository, while check-run
+      # annotations and artifacts are readable by anyone with the run URL — so
+      # a failing `swift test` has to publish its own evidence (next two
+      # steps). pipefail keeps tee from masking the test exit code.
       - name: Test
-        run: swift test
+        shell: bash
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee swift-test.log
+
+      # XCTest assertion failures and compile errors share one shape,
+      # "<path>:<line>: error: <message>"; those become file/line annotations.
+      # Anything else that reads as a failure (swift-testing's ✘ lines, suite
+      # summaries) is annotated plain. GitHub keeps ~10 error annotations per
+      # step, hence the head limits.
+      - name: Surface test failures as annotations
+        if: failure()
+        shell: bash
+        run: |
+          grep -E '^[^ ]+\.swift:[0-9]+(:[0-9]+)?: error: ' swift-test.log | sort -u | head -10 \
+            | sed -E 's#^.*/mac/([^:]+):([0-9]+)(:[0-9]+)?: error: (.*)$#::error file=mac/\1,line=\2::\4#; t; s#^#::error::#' || true
+          grep -E '✘|Test Suite .* failed|Test Case .* failed|Executed [0-9]+ tests?, with [1-9][0-9]* failures?' swift-test.log | sort -u | head -10 \
+            | sed 's/^/::error::/' || true
+
+      - name: Upload swift test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-test-log
+          path: mac/swift-test.log
+          if-no-files-found: ignore
