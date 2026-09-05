@@ -69,7 +69,19 @@ jobs:
             sleep 10
           done
           if kill -0 "$pid" 2>/dev/null; then
-            echo "::error::swift test still running after 15 minutes — killed; see the 'last started' annotations for the hanging test"
+            echo "::error::swift test still running after 15 minutes — killed; see the 'last started' / 'never finished' / 'stack' annotations for the hanging test"
+            # Before killing anything, capture where the test process actually
+            # is: a hang is one test holding a thread (typically the main
+            # actor), and its frame is the only unambiguous evidence. `sample`
+            # ships with macOS; our own frames are the ones worth reading.
+            for tp in $(pgrep -f 'xctest|LlmIdeMacPackageTests|swiftpm-testing-helper' | head -3); do
+              sample "$tp" 2 -file "sample-$tp.txt" >/dev/null 2>&1 || true
+              if [ -s "sample-$tp.txt" ]; then
+                echo "::notice::sampled pid $tp ($(head -1 "sample-$tp.txt"))"
+                grep -E 'LlmIdeMacTests|LlmIdeMacLib' "sample-$tp.txt" | sed -E 's/^ *[+!:|]* *//; s/ \(in [^)]*\)//; s/ \+ [0-9]+ .*$//' \
+                  | awk '!seen[$0]++' | head -10 | cut -c1-500 | sed "s/^/::error::[stack $tp] /"
+              fi
+            done
             kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
             sleep 5
             kill -KILL -- "-$pid" 2>/dev/null || true
@@ -137,5 +149,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: swift-test-log
-          path: mac/swift-test.log
+          path: |
+            mac/swift-test.log
+            mac/sample-*.txt
           if-no-files-found: ignore
