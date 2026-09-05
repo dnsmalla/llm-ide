@@ -79,15 +79,21 @@ jobs:
           sed -n '11,20p' tail.txt | sed 's/^/::warning::[tail -20..-11] /'
           sed -n '21,30p' tail.txt | sed 's/^/::error::[tail -10..-1] /'
 
+      # Errors first: a Swift-6-mode warning repeated per compile job can push
+      # the one real "error:" line out of a 30-line window, and the compiler's
+      # `|` source-excerpt lines duplicate the message above them.
       - name: Publish failure keyword hits as annotations
         if: failure()
         shell: bash
         run: |
-          grep -inE 'error|fail|fatal|crash|signal|abort|exited|trap' swift-test.log \
-            | grep -vE 'passed|with 0 failures|0 unexpected' | cut -c1-1500 | sed 's/%/%25/g' | tail -30 > hits.txt || true
-          sed -n '1,10p'  hits.txt | sed 's/^/::notice::[hit] /'
-          sed -n '11,20p' hits.txt | sed 's/^/::warning::[hit] /'
-          sed -n '21,30p' hits.txt | sed 's/^/::error::[hit] /'
+          grep -nE ' error: ' swift-test.log | grep -vE 'warning:|^[0-9]+: +\|' \
+            | cut -c1-1500 | sed 's/%/%25/g' | tail -20 > hits.txt || true
+          grep -inE 'fail|fatal|crash|signal|abort|exited|trap' swift-test.log \
+            | grep -vE 'warning:|passed|with 0 failures|0 unexpected|^[0-9]+: +\|' \
+            | cut -c1-1500 | sed 's/%/%25/g' | tail -10 >> hits.txt || true
+          sed -n '1,10p'  hits.txt | sed 's/^/::error::[error] /'
+          sed -n '11,20p' hits.txt | sed 's/^/::warning::[error] /'
+          sed -n '21,30p' hits.txt | sed 's/^/::notice::[hit] /'
 
       - name: Upload swift test log
         if: always()
