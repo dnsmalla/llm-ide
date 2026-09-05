@@ -87,6 +87,13 @@ const PROFILES = {
   // DB-amplification DoS, while still allowing legitimate paged exports
   // (burst 5, then ~1 every 10s for follow-up cursor pages).
   kbExport:   { capacity: 5, refillRate: 1 / 10 },
+
+  // Applied to any profile name tryConsume does not recognize. Before this
+  // existed an unknown name FAILED OPEN — a route whose profile was typo'd
+  // or never added ran unthrottled forever, with only a one-line warning to
+  // show for it. Tight enough that a runaway loop is still stopped, loose
+  // enough that a config gap degrades to back-pressure rather than an outage.
+  unknownFallback: { capacity: 10, refillRate: 1 },
 };
 
 // Rate limits are scoped to (profile, scope) — the scope is typically a
@@ -94,17 +101,17 @@ const PROFILES = {
 // For unauthenticated routes (login/register) callers can pass the
 // remote IP as the scope to limit drive-by abuse.
 export function tryConsume(profileName, scope = 'global', tokens = 1) {
-  const profile = PROFILES[profileName];
+  let profile = PROFILES[profileName];
   if (!profile) {
     // Unknown profile — log once so a newly-added endpoint that forgot
-    // its rate-limit entry is visible in the server logs rather than
-    // silently unlimited.  We still allow the request so a config gap
-    // doesn't hard-break functionality.
+    // its rate-limit entry is visible in the server logs, then FAIL SAFE
+    // onto the conservative fallback bucket (still keyed by the unknown
+    // name, so two typo'd routes don't share one bucket).
     if (!_warnedProfiles.has(profileName)) {
       _warnedProfiles.add(profileName);
-      process.stderr.write(JSON.stringify({ level: 'warn', msg: 'rate_limit_unknown_profile', profile: profileName, note: 'request allowed but unthrottled — add it to PROFILES' }) + '\n');
+      process.stderr.write(JSON.stringify({ level: 'warn', msg: 'rate_limit_unknown_profile', profile: profileName, note: 'throttled with unknownFallback — add it to PROFILES' }) + '\n');
     }
-    return { ok: true };
+    profile = PROFILES.unknownFallback;
   }
   const key = `${profileName}::${scope}`;
   const b = getBucket(key, profile.capacity, profile.refillRate);
@@ -191,18 +198,23 @@ export function loadBuckets(db) {
   }
   const now = Date.now();
   for (const row of rows) {
+    // The CURRENT profile shape wins over what was persisted: getBucket
+    // never re-reads capacity/refill for a live bucket, so a row saved under
+    // yesterday's numbers (or under unknownFallback, before the profile was
+    // added) would otherwise pin the old limit for up to STALE_MS.
+    const profile = PROFILES[String(row.key).split('::')[0]] ?? PROFILES.unknownFallback;
     // Re-compute elapsed time since the row was saved and add any
     // tokens that would have accumulated — so a server that was down
     // for 30 minutes doesn't resume with a fully drained bucket.
     const elapsedSinceSave = (now - row.saved_at) / 1000;
     const refilled = Math.min(
-      row.capacity,
-      row.tokens + elapsedSinceSave * row.refill_rate,
+      profile.capacity,
+      row.tokens + elapsedSinceSave * profile.refillRate,
     );
     buckets.set(row.key, {
       tokens:     refilled,
-      capacity:   row.capacity,
-      refillRate: row.refill_rate,
+      capacity:   profile.capacity,
+      refillRate: profile.refillRate,
       lastRefill: now,
     });
   }
