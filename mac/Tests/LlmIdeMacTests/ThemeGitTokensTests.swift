@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import LlmIdeMacLib
 
 final class ThemeGitTokensTests: XCTestCase {
@@ -19,14 +20,26 @@ final class ThemeGitTokensTests: XCTestCase {
         }
     }
 
+    // `color(for:)` is overloaded for FileChange.Status and
+    // GitTruthStore.Decoration, and the two enums share member names, so an
+    // implicit `.added` is ambiguous — spell the type out.
     func testColorForStatusUsesThemeTokensNotRawColors() {
         let t = Theme.dark
-        XCTAssertEqual(t.color(for: .added), t.success)
-        XCTAssertEqual(t.color(for: .untracked), t.success)
-        XCTAssertEqual(t.color(for: .deleted), t.danger)
-        XCTAssertEqual(t.color(for: .conflicted), t.warning)
-        XCTAssertEqual(t.color(for: .modified), t.accent2)
-        XCTAssertEqual(t.color(for: .renamed), t.accent2)
+        XCTAssertEqual(t.color(for: FileChange.Status.added), t.success)
+        XCTAssertEqual(t.color(for: FileChange.Status.untracked), t.success)
+        XCTAssertEqual(t.color(for: FileChange.Status.deleted), t.danger)
+        XCTAssertEqual(t.color(for: FileChange.Status.conflicted), t.warning)
+        XCTAssertEqual(t.color(for: FileChange.Status.modified), t.accent2)
+        XCTAssertEqual(t.color(for: FileChange.Status.renamed), t.accent2)
+    }
+
+    func testColorForDecorationUsesThemeTokensNotRawColors() {
+        let t = Theme.dark
+        XCTAssertEqual(t.color(for: GitTruthStore.Decoration.added), t.success)
+        XCTAssertEqual(t.color(for: GitTruthStore.Decoration.untracked), t.success)
+        XCTAssertEqual(t.color(for: GitTruthStore.Decoration.deleted), t.danger)
+        XCTAssertEqual(t.color(for: GitTruthStore.Decoration.conflicted), t.warning)
+        XCTAssertEqual(t.color(for: GitTruthStore.Decoration.modified), t.info)
     }
 
     func testHexRGBFormatsAsUppercaseSixDigitHex() {
