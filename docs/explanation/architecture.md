@@ -57,7 +57,7 @@ This split means a crashed or cancelled generation run picks up exactly where it
 
 Every owned row carries a `user_id` foreign key. Three invariants:
 
-1. **No bare-user functions.** Every state-mutating helper in `kb/db.mjs` takes `userId` as its first parameter. `requireUser` panics if missing.
+1. **No bare-user functions.** Every state-mutating helper in `extension/kb/db.mjs` takes `userId` as its first parameter. `requireUser` panics if missing.
 2. **FTS5 is shared but hydration is scoped.** Cross-tenant hits exist in the index; the `findContext` / `search` paths drop any hit whose hydration query (filtered by `user_id`) returns nothing.
 3. **The router enforces the gate.** `routes/router.mjs` reads `req.user.id` and threads it through every call. Missing user → 401.
 

@@ -72,7 +72,7 @@ All entries use `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
 | `backendWorkingDir` | UserDefaults | empty | Directory containing `server.mjs`. |
 | `backendAutoStart` | UserDefaults | `false` | Launch backend at app start. |
 
-## Server (`extension/server/config.mjs`)
+## Server (`extension/core/config.mjs`)
 
 Every value is sourced from `process.env`. Defaults are dev-safe; the
 two starred entries are required in production.
@@ -134,7 +134,7 @@ new setting
 │       → KeychainStore (Mac) / per-user vault (server)
 │
 ├── Server-side, deploy-time
-│       → envStr/envInt/envBool in extension/server/config.mjs
+│       → envStr/envInt/envBool in extension/core/config.mjs
 │         + a line in extension/.env.example
 │
 └── Agent behavior (prompt, allowed tools, dispatch rules)

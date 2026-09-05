@@ -275,7 +275,7 @@ Two further per-user views feed the **v2 (Agent SDK) engine** only:
     non-zero is a hook failure that does not stop the turn
     (`llm_agent/sdk/hooks.mjs`). This covers Codex-layout packages (the SDK
     does not read `.codex-plugin`) and is what the `nativePlugins` pref
-    (`kb/user.mjs` → `nativePluginsEnabled`, default on) falls back to.
+    (`extension/kb/user.mjs` → `nativePluginsEnabled`, default on) falls back to.
 
   Invariants either way: a plugin with hooks is delivered by neither mechanism
   until the user has **hook-trusted** it (`plugins/state.mjs` → `hooksTrusted`,
@@ -316,7 +316,7 @@ This is computed once at server start as `globalPromptBase` (route.mjs) and used
 
 1. an optional **persona** suffix (the user's configured voice),
 2. the **redacted Graphify repository-memory block** — the same `renderGraphifyMemory(agentContext, userId)` output the internal agent gets, run through `redactFence` before injection. This lets the global Code Assistant ground project answers in repo memory even when it answers directly instead of delegating to `ask-internal`, and
-3. the **redacted session-memory block** (`## This session's memory` — `kb/session-memory.mjs`'s `listSessionMemory(userId, chatSessionId)`, also through `redactFence`) — facts extracted from THIS chat session's own earlier turns, recalled into later turns of the same session. `chatSessionId` is resolved by `resolveChatSessionId(agentContext)`, shared verbatim with the write path (below) so the two can never drift onto different keys.
+3. the **redacted session-memory block** (`## This session's memory` — `extension/kb/session-memory.mjs`'s `listSessionMemory(userId, chatSessionId)`, also through `redactFence`) — facts extracted from THIS chat session's own earlier turns, recalled into later turns of the same session. `chatSessionId` is resolved by `resolveChatSessionId(agentContext)`, shared verbatim with the write path (below) so the two can never drift onto different keys.
 
 The repo-memory and session-memory blocks are the **only** app-specific context the global agent receives — active project, indexed repos, recent issues/meetings, and app-capabilities all stay internal-only (the global agent's `agentContext.includeSystemContext` is never set, so the loop composes no `# System context` for it — route.mjs).
 
@@ -351,7 +351,7 @@ These are joined with `\n\n` and passed as `agentContext.base` to the internal `
 
 **Project memory has no session dimension.** It is durable and **edit-only** — changed only via the viewer's explicit per-fact delete/clear (`DELETE /kb/agent/project-memory`), never by a chat session's own lifecycle. (Earlier revisions carried a `chat-memory.origins.json` sidecar so deleting a chat could prune what it taught project memory — removed: that contradicted project memory being durable, and duplicated what session memory, below, now does properly.)
 
-**Session memory** (`kb/session-memory.mjs`, table `session_memory`) is the session-scoped counterpart: a real DB row per extracted fact, keyed by `(user_id, session_id)`. `persistTurnMemory` writes the SAME facts extracted for project memory into this table too, keyed on `resolveChatSessionId(agentContext)` — `agentContext.chatSessionId` (the client's stable per-conversation UUID) preferred over `agentContext.sessionId` (re-minted on every session switch). `route.mjs` reads it back with the identical resolution (§ above) so a turn recalls exactly what earlier turns in the SAME chat taught it. `DELETE /kb/agent/session-memory` (body: `{ sessionId }`, no repo/allow-list needed — session memory isn't repo-scoped) deletes every row for that session with a real `DELETE ... WHERE session_id = ?`, called when the Mac app's `deleteSession()` clears or removes a chat. A cap (`MAX_FACTS_PER_SESSION = 200`, oldest-evicted-first) guards against unbounded growth in a very long-lived session.
+**Session memory** (`extension/kb/session-memory.mjs`, table `session_memory`) is the session-scoped counterpart: a real DB row per extracted fact, keyed by `(user_id, session_id)`. `persistTurnMemory` writes the SAME facts extracted for project memory into this table too, keyed on `resolveChatSessionId(agentContext)` — `agentContext.chatSessionId` (the client's stable per-conversation UUID) preferred over `agentContext.sessionId` (re-minted on every session switch). `route.mjs` reads it back with the identical resolution (§ above) so a turn recalls exactly what earlier turns in the SAME chat taught it. `DELETE /kb/agent/session-memory` (body: `{ sessionId }`, no repo/allow-list needed — session memory isn't repo-scoped) deletes every row for that session with a real `DELETE ... WHERE session_id = ?`, called when the Mac app's `deleteSession()` clears or removes a chat. A cap (`MAX_FACTS_PER_SESSION = 200`, oldest-evicted-first) guards against unbounded growth in a very long-lived session.
 
 ---
 

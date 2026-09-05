@@ -47,7 +47,7 @@ structured project work and tracks outcomes back into a knowledge base.
 
 ## Module layout
 
-`kb/db.mjs` is the public storage façade — every consumer imports
+`extension/kb/db.mjs` is the public storage façade — every consumer imports
 from it as `import * as kb from './db.mjs'`. Internally, db.mjs is a
 small re-export shell + the shared helpers (`getDb`, `closeDb`,
 `lazyPrepare`, `genId`, `safeJSONStringify`, `safeParseMeta`) +
@@ -57,14 +57,14 @@ under `kb/` and is re-exported through db.mjs:
 
 | Sub-module          | What it owns                                              |
 |---------------------|-----------------------------------------------------------|
-| `kb/meetings.mjs`   | `ingestMeeting`, `getMeeting`, `listMeetings`, entities, `stats`, `statsAdmin` |
-| `kb/sources.mjs`    | `ingestSources`, `deleteSourcesByPrefix` (code/ticket/qa/doc) |
-| `kb/plans.mjs`      | `savePlan`, `listPlans`, `updateTask`, `mergeTaskMeta` + task CRUD |
-| `kb/personas.mjs`   | Multi-persona registry + Ask-the-Agent history             |
-| `kb/feedback.mjs`   | Agent-question verdicts + per-task aggregate stats         |
-| `kb/reviews.mjs`    | Phase-6 review queue (dispatch / codegen-apply approvals)  |
-| `kb/outcomes.mjs`   | Task outcome polling history + aggregate stats             |
-| `kb/user.mjs`       | Repo allow-list, UI prefs, JWT revocation list             |
+| `extension/kb/meetings.mjs`   | `ingestMeeting`, `getMeeting`, `listMeetings`, entities, `stats`, `statsAdmin` |
+| `extension/kb/sources.mjs`    | `ingestSources`, `deleteSourcesByPrefix` (code/ticket/qa/doc) |
+| `extension/kb/plans.mjs`      | `savePlan`, `listPlans`, `updateTask`, `mergeTaskMeta` + task CRUD |
+| `extension/kb/personas.mjs`   | Multi-persona registry + Ask-the-Agent history             |
+| `extension/kb/feedback.mjs`   | Agent-question verdicts + per-task aggregate stats         |
+| `extension/kb/reviews.mjs`    | Phase-6 review queue (dispatch / codegen-apply approvals)  |
+| `extension/kb/outcomes.mjs`   | Task outcome polling history + aggregate stats             |
+| `extension/kb/user.mjs`       | Repo allow-list, UI prefs, JWT revocation list             |
 
 HTTP routing follows the same pattern: `routes/router.mjs` is the
 dispatch shell, with route families lifted out under `routes/`:
@@ -86,7 +86,7 @@ the cycle.
 
 Every owned row carries a `user_id` foreign key.  The tenancy contract:
 
-- **No bare-user functions.**  Every state-mutating helper in `kb/db.mjs`
+- **No bare-user functions.**  Every state-mutating helper in `extension/kb/db.mjs`
   takes `userId` as its first parameter and includes it in the `WHERE`
   clause or `INSERT` row.  `requireUser` panics if it's missing.
 - **FTS5 is shared but hydration is scoped.**  Cross-tenant FTS hits
@@ -202,7 +202,7 @@ Every owned row carries a `user_id` foreign key.  The tenancy contract:
   OAuth2 authorization code flow against an IdP.  Schema supports it
   (drop the password column dependency).
 - **Postgres backend** — current SQLite design is fine to ~50
-  concurrent users.  Past that, swap `kb/db.mjs` for a
+  concurrent users.  Past that, swap `extension/kb/db.mjs` for a
   pg-backed implementation; the public API stays the same.
 - **RBAC beyond role=admin/user** — would add team membership and
   resource-level grants.  Schema reserves `role` for this.

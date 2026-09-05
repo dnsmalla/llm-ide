@@ -39,7 +39,7 @@ Allowed secret keys are `github.token`, `backlog.apiKey`, `linear.apiKey`, `slac
 
 Every owned row in the database carries a `user_id` foreign key. Three invariants hold:
 
-1. **No bare-user functions.** Every state-mutating helper in `kb/db.mjs` takes `userId` as its first parameter; `requireUser` panics if missing.
+1. **No bare-user functions.** Every state-mutating helper in `extension/kb/db.mjs` takes `userId` as its first parameter; `requireUser` panics if missing.
 2. **FTS5 is shared but hydration is scoped.** Cross-tenant hits can appear in the full-text index, but the `findContext` and `search` paths drop any hit whose hydration query (filtered by `user_id`) returns nothing. The index can see a row's tokens; the caller never receives its content.
 3. **The router enforces the gate.** `routes/router.mjs` reads `req.user.id` and threads it through every call. A missing or invalid user returns 401 before any data access occurs.
 

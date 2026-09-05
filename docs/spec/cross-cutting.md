@@ -176,7 +176,7 @@ The following invariants cross subsystem boundaries and are restated here as sys
 
 ### Per-row user_id tenancy
 
-Every owned row in the database carries a `user_id` foreign key. Every state-mutating helper in `kb/db.mjs` takes `userId` as its first parameter; the KB router reads `req.user.id` and threads it through every call. A missing or invalid user returns 401 before any data access.
+Every owned row in the database carries a `user_id` foreign key. Every state-mutating helper in `extension/kb/db.mjs` takes `userId` as its first parameter; the KB router reads `req.user.id` and threads it through every call. A missing or invalid user returns 401 before any data access.
 
 Detail: [`knowledge-base.md` §4](knowledge-base.md#4-tenancy-contract).
 
