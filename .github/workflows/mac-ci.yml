@@ -52,11 +52,12 @@ jobs:
       # annotations and artifacts are readable by anyone with the run URL — so
       # a failing `swift test` has to publish its own evidence (next two
       # steps). pipefail keeps tee from masking the test exit code.
-      # A green run takes ~3 minutes; a hung test would otherwise sit until the
-      # job timeout, where nothing that follows gets to run. `swift test` is
-      # started in its own process group so the watchdog can take the `xctest`
-      # child down with it — killing only the parent leaves the child holding
-      # the log open. Exit 124 = killed by the watchdog.
+      # A green run takes ~3 minutes end to end (XCTest ≈ 1.5 min, swift-testing
+      # well under a minute); a hung test would otherwise sit until the job
+      # timeout, where nothing that follows gets to run. `swift test` is started
+      # in its own process group so the watchdog can take the `xctest` child
+      # down with it — killing only the parent leaves the child holding the log
+      # open. Exit 124 = killed by the watchdog.
       - name: Test
         shell: bash
         run: |
@@ -64,12 +65,12 @@ jobs:
           swift test > swift-test.log 2>&1 &
           pid=$!
           set +m
-          for _ in $(seq 1 90); do
+          for _ in $(seq 1 48); do
             kill -0 "$pid" 2>/dev/null || break
             sleep 10
           done
           if kill -0 "$pid" 2>/dev/null; then
-            echo "::error::swift test still running after 15 minutes — killed; see the 'last started' / 'never finished' / 'stack' annotations for the hanging test"
+            echo "::error::swift test still running after 8 minutes — killed; see the 'last started' / 'never finished' / 'stack' annotations for the hanging test"
             # Before killing anything, capture where the test process actually
             # is: a hang is one test holding a thread (typically the main
             # actor), and its frame is the only unambiguous evidence. `sample`
@@ -78,8 +79,14 @@ jobs:
               sample "$tp" 2 -file "sample-$tp.txt" >/dev/null 2>&1 || true
               if [ -s "sample-$tp.txt" ]; then
                 echo "::notice::sampled pid $tp ($(head -1 "sample-$tp.txt"))"
-                grep -E 'LlmIdeMacTests|LlmIdeMacLib' "sample-$tp.txt" | sed -E 's/^ *[+!:|]* *//; s/ \(in [^)]*\)//; s/ \+ [0-9]+ .*$//' \
-                  | awk '!seen[$0]++' | head -10 | cut -c1-500 | sed "s/^/::error::[stack $tp] /"
+                # The hot path: every frame that carries the top sample count is
+                # on the thread that never moved. Print it deepest-first so the
+                # blocking call (a semaphore, a sync dispatch, a sleep) comes
+                # first and the test/engine frames that led there follow.
+                # Demangled library frames carry no module name, so no filter.
+                top=$(grep -oE '^ *[+!:| ]*[0-9]+ ' "sample-$tp.txt" | grep -oE '[0-9]+' | sort -n | tail -1)
+                grep -E "^ *[+!:| ]*${top} " "sample-$tp.txt" | sed -E 's/^ *[+!:| ]*[0-9]+ +//; s/ \+ [0-9]+ *$//' \
+                  | awk '!seen[$0]++' | tail -12 | tail -r | cut -c1-400 | sed "s/^/::error::[stack $tp hot path] /"
               fi
             done
             kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
