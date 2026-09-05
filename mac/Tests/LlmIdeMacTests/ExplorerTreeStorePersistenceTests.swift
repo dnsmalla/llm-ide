@@ -226,15 +226,22 @@ final class ExplorerTreeStorePersistenceTests: XCTestCase {
 
         let store = ExplorerTreeStore()
         async let first: Bool = store.restoreState(for: root, defaults: defaults)
-        // Exactly one yield, and no sleep. This test and the store share the
-        // main actor, whose queue is FIFO: the yield lets the already-queued
-        // child run `restoreState` up to its first suspension — the detached
-        // directory listing in `loadChildren`, which a fresh store always hits —
-        // and this continuation was queued at the yield, ahead of the child's
-        // resumption. So `second` always starts while `first` is in flight.
-        // The previous 10 yields + 2 ms sleep handed a fast CI runner enough
-        // time for `first` to finish first, and the assertion below failed.
-        await Task.yield()
+        // Wait for `first` to be DEMONSTRABLY in flight instead of guessing at
+        // scheduling: 10 yields + 2 ms let a fast CI runner finish `first`
+        // outright, and a single yield let this continuation win the actor
+        // before the child had even started (CI runs 33966040845, 33967357832).
+        // `isLoaded(root)` flips inside `first` right after its first await,
+        // and the very next thing `first` does is suspend again on the 60-file
+        // listing of `sub` — so once it reads true, `second` is guaranteed to
+        // start while `first` is still in flight. Bounded so a broken store
+        // fails the test instead of hanging it.
+        let base = ExplorerPaths.canonical(root)
+        var spins = 0
+        while !store.isLoaded(base), spins < 100_000 {
+            await Task.yield()
+            spins += 1
+        }
+        XCTAssertTrue(store.isLoaded(base), "first restore never loaded the root")
         let second = await store.restoreState(for: root, defaults: defaults)
         let firstCompleted = await first
 
