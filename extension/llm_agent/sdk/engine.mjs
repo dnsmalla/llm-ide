@@ -45,7 +45,7 @@ import {
 import { composeSystemContext } from '../internal/context/compose.mjs';
 import { buildSessionTaskPromptBlock } from '../runtime/task-session-context.mjs';
 import { V2_EXECUTE_GUIDANCE } from '../runtime/execute-guidance.mjs';
-import { buildReadableRoots, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
+import { buildReadableRoots, buildTrustedRoots, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
 import { expandTilde } from '../../graphkit/memory.mjs';
 import { redactFence } from '../runtime/redaction.mjs';
 import { persistTurnMemory } from '../runtime/memory-persist.mjs';
@@ -727,6 +727,9 @@ export async function runAgentV2Turn(
     }
   };
 
+  // DB-trusted indexed repos, resolved once per turn: the only places a test
+  // runner may execute unprompted (tools/gates.mjs TEST_RUNNER_PATTERNS).
+  const trustedRoots = buildTrustedRoots(userId);
   const canUseTool = async (toolName, input, callOpts) => {
     const registryName = toolName.startsWith('mcp__llmide__') ? toolName.slice('mcp__llmide__'.length) : null;
     const entry = registryName ? registryGet(registryName) : null;
@@ -741,7 +744,7 @@ export async function runAgentV2Turn(
       if (toolName === 'Bash') {
         // The SDK runs native Bash in cwd=workspaceRoot (buildEngineOptions),
         // so relative path tokens are judged against that directory.
-        const decision = runBashGate(input?.command, workspaceRoot);
+        const decision = runBashGate(input?.command, workspaceRoot, { trustedRoots });
         if (decision === 'blocked') return { behavior: 'deny', message: 'Command blocked for safety.' };
         if (decision === 'auto' || hasAlwaysAllow(userId, 'Bash')) {
           return { behavior: 'allow', updatedInput: input };

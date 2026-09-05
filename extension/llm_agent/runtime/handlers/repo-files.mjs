@@ -127,6 +127,33 @@ function resolveWithin(requested, roots, kind) {
   return null;
 }
 
+// The DB-trusted subset of the readable roots: indexed repos the user
+// deliberately registered, canonical. The open workspace is NOT here — it is
+// client-supplied and merely opened, which grants reads but not the right to
+// execute the repo's own scripts unprompted (run-bash's test-runner tier).
+export function buildTrustedRoots(userId) {
+  const out = [];
+  if (!userId) return out;
+  let paths;
+  try { paths = userRepoAllowlist(userId); } catch { return out; }
+  for (const p of paths) {
+    const real = canon(resolve(expandTilde(p)));
+    if (!real) continue;
+    try { if (!statSync(real).isDirectory()) continue; } catch { continue; }
+    out.push(real);
+  }
+  return out;
+}
+
+// True when `p` (symlinks resolved here; a path that does not exist is never
+// inside anything) is at or below one of `roots` (already canonical).
+export function isWithinRoots(p, roots) {
+  if (!Array.isArray(roots) || roots.length === 0) return false;
+  const real = canon(p);
+  if (!real) return false;
+  return roots.some((r) => isWithin(real, r));
+}
+
 export function resolveReadablePath(requested, roots) { return resolveWithin(requested, roots, 'file'); }
 
 // Handler: list files under the readable roots (optionally scoped to a subdir,

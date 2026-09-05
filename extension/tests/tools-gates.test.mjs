@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
+import path from 'node:path';
 import { runBashGate, autoGate } from '../llm_agent/tools/gates.mjs';
 
 test('blocks the same destructive patterns run-bash blocked before', () => {
@@ -16,7 +17,28 @@ test('auto-safe allowlist runs without a prompt', () => {
   assert.equal(runBashGate('ls -la'), 'auto');
   assert.equal(runBashGate('cat README.md'), 'auto');
   assert.equal(runBashGate('grep -rn foo .'), 'auto');
-  assert.equal(runBashGate('npm test'), 'auto');
+});
+
+test('test runners execute the repo\'s own code — auto only inside a DB-trusted indexed repo', () => {
+  // `npm test` runs whatever scripts.test says; `node --test x.mjs` runs x.mjs.
+  // In a repo the user merely opened that is unprompted arbitrary code
+  // execution, so trust has to come from the DB allow-list, not the workspace.
+  const trusted = process.cwd(); // must exist: containment resolves realpath
+  const opts = { trustedRoots: [trusted] };
+  for (const cmd of ['npm test', 'node --test tests/x.test.mjs', 'swift test', 'node test']) {
+    assert.equal(runBashGate(cmd), 'prompt', `no cwd: ${cmd}`);
+    assert.equal(runBashGate(cmd, trusted), 'prompt', `cwd but no trust list: ${cmd}`);
+    assert.equal(runBashGate(cmd, trusted, { trustedRoots: [] }), 'prompt', `empty trust list: ${cmd}`);
+    assert.equal(runBashGate(cmd, tmpdir(), opts), 'prompt', `cwd outside trusted: ${cmd}`);
+    assert.equal(runBashGate(cmd, 'tests', opts), 'prompt', `relative cwd: ${cmd}`);
+    assert.equal(runBashGate(cmd, path.join(trusted, 'does-not-exist'), opts), 'prompt', `missing cwd: ${cmd}`);
+    assert.equal(runBashGate(cmd, trusted, opts), 'auto', `inside trusted: ${cmd}`);
+    assert.equal(runBashGate(cmd, path.join(trusted, 'tests'), opts), 'auto', `subdir of trusted: ${cmd}`);
+  }
+  // Trust never relaxes the other checks.
+  assert.equal(runBashGate('npm test && rm -rf ~', trusted, opts), 'prompt');
+  assert.equal(runBashGate('node --test tests/*.test.mjs', trusted, opts), 'prompt');
+  assert.equal(runBashGate('node --test ../../.ssh/x.mjs', trusted, opts), 'prompt');
 });
 
 test('everything else prompts, conservatively — unmatched commands never silently auto-run', () => {
@@ -72,7 +94,10 @@ test('plain auto-safe commands are unaffected by the metacharacter check', () =>
   // The guard must not over-fire on ordinary single commands with flags.
   assert.equal(runBashGate('git log --oneline -20'), 'auto');
   assert.equal(runBashGate('grep -rn "foo bar" src'), 'auto');
-  assert.equal(runBashGate('node --test tests/x.test.mjs'), 'auto');
+  assert.equal(
+    runBashGate('node --test tests/x.test.mjs', process.cwd(), { trustedRoots: [process.cwd()] }),
+    'auto',
+  );
 });
 
 test('auto-safe reads that name a sensitive path drop to prompt (same denylist as the read/write handlers)', () => {

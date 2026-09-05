@@ -26,7 +26,7 @@ import { askInternal } from '../runtime/handlers/ask-internal.mjs';
 import { askSubagent } from '../runtime/handlers/ask-subagent.mjs';
 import { handleWebSearch } from '../runtime/handlers/web-search.mjs';
 import { handleFetchUrl } from '../runtime/handlers/fetch-url.mjs';
-import { handleListFiles, handleReadFile } from '../runtime/handlers/repo-files.mjs';
+import { handleListFiles, handleReadFile, buildTrustedRoots } from '../runtime/handlers/repo-files.mjs';
 import { handleFindCode } from '../runtime/handlers/find-code.mjs';
 import { searchKb } from '../runtime/handlers/search-kb.mjs';
 import { tasks } from '../runtime/handlers/session-tasks.mjs';
@@ -107,8 +107,9 @@ const ENTRIES = [
     kind: 'act',
     // The gate sees `args.cwd` too: a relocated command must be judged where
     // it will run, not where the workspace is. (No ctx here, so a relative
-    // cwd cannot be rooted and prompts; handleRunBash's containment is the
-    // backstop once approved.)
+    // cwd cannot be rooted and prompts, and with no trusted-roots list test
+    // runners prompt too; handleRunBash's containment is the backstop once
+    // approved.)
     gate: (args) => runBashGate(args.command, args.cwd),
     async execute(args, ctx) {
       // ONE gate per engine. `ctx.loopCtx` is the discriminator:
@@ -139,7 +140,9 @@ const ENTRIES = [
       const bashCtx = { workspaceRoot: ctx.agentContext?.workspaceRoot };
       const resolvedCwd = resolveBashCwd(args, bashCtx);
       if (resolvedCwd.error) return { error: resolvedCwd.error };
-      const decision = runBashGate(args.command, resolvedCwd.cwd);
+      const decision = runBashGate(args.command, resolvedCwd.cwd, {
+        trustedRoots: buildTrustedRoots(ctx.userId),
+      });
       if (decision === 'blocked') return { error: 'Command blocked for safety. Confirm destructive operations with the user before running.' };
       if (decision === 'auto') return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
       // decision === 'prompt' — always-allow only matters here.

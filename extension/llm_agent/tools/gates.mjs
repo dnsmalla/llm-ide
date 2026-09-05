@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
-import { isDeniedPath, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
+import { isDeniedPath, isTooBroadRoot, isWithinRoots } from '../runtime/handlers/repo-files.mjs';
 
 //
 // Safety classification for 'act'-kind registry entries (tools/registry.mjs),
@@ -35,9 +35,25 @@ const AUTO_SAFE_PATTERNS = [
   /^ls\b/,
   /^cat\b/,
   /^(grep|rg)\b/,
+];
+
+// Test runners look read-only but execute the repo's OWN code — whatever
+// `scripts.test` or the test files say. In a repo the user merely opened
+// (cloned to look at, handed over in a ticket) that is unprompted arbitrary
+// code execution. So these reach 'auto' only when the command runs inside a
+// DB-trusted indexed repo the user deliberately registered (`trustedRoots`,
+// from repo-files.mjs buildTrustedRoots) — never the open workspace on its
+// own, and never without a resolved cwd. Deviation from the registry design
+// spec §7, which listed them as unconditionally auto-safe (2026-09-05 audit).
+const TEST_RUNNER_PATTERNS = [
   /^(npm|node|swift)\s+test\b/,
   /^node\s+--test\b/,
 ];
+
+function runsInTrustedRepo(cwd, trustedRoots) {
+  if (typeof cwd !== 'string' || !path.isAbsolute(cwd)) return false;
+  return isWithinRoots(cwd, trustedRoots);
+}
 
 // Any shell metacharacter/control syntax that lets one command string carry a
 // SECOND command (or expand into one, or redirect into a file): `;` `&&` `||`
@@ -159,9 +175,12 @@ function namesSensitivePath(cmd, cwd) {
  *   caller knows it (the SDK's cwd on v2; the resolved run-bash cwd on
  *   legacy). Relative path tokens are judged against it; omit it and `..`
  *   tokens fall back to 'prompt'.
+ * @param {object} [opts]
+ * @param {string[]} [opts.trustedRoots]  Canonical DB-trusted repo roots
+ *   (buildTrustedRoots). Test runners are auto only when `cwd` is inside one.
  * @returns {'blocked'|'auto'|'prompt'}
  */
-export function runBashGate(command, cwd) {
+export function runBashGate(command, cwd, { trustedRoots } = {}) {
   const cmd = typeof command === 'string' ? command : '';
   // Blocklist first, unconditionally — a blocked command stays blocked
   // regardless of anything below (spec §7).
@@ -169,7 +188,10 @@ export function runBashGate(command, cwd) {
   // Compound/expanding commands are never auto-safe. Checked BEFORE the
   // allowlist so a matching prefix cannot smuggle a tail past it.
   if (SHELL_CONTROL_RE.test(cmd)) return 'prompt';
-  if (!AUTO_SAFE_PATTERNS.some((re) => re.test(cmd.trim()))) return 'prompt';
+  const trimmed = cmd.trim();
+  const isTestRunner = TEST_RUNNER_PATTERNS.some((re) => re.test(trimmed));
+  if (!isTestRunner && !AUTO_SAFE_PATTERNS.some((re) => re.test(trimmed))) return 'prompt';
+  if (isTestRunner && !runsInTrustedRepo(cwd, trustedRoots)) return 'prompt';
   // An auto-safe prefix says nothing about WHICH file it reads. Refuse the
   // auto tier when the command could expand into a path we never saw, or
   // names a sensitive path / over-broad root outright, so
