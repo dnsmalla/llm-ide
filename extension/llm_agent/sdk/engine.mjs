@@ -776,10 +776,9 @@ export async function runAgentV2Turn(
         return { behavior: 'deny', message: `${entry.name} is not available in ${requestedMode} mode.` };
       }
       // The gate runs FIRST and unconditionally — 'blocked' is a hard safety
-      // rail (docs/superpowers/specs/2026-08-19-agent-tools-registry-design.md
-      // §7: "a blocked command stays blocked even if the tool was
-      // always-allowed"), so hasAlwaysAllow must never be consulted before
-      // it: doing so would let a user who once always-allowed e.g. run-bash
+      // rail: a blocked command stays blocked even if the tool was
+      // always-allowed, so hasAlwaysAllow must never be consulted before
+      // it. Doing so would let a user who once always-allowed e.g. run-bash
       // bypass the blocklist entirely for every later command under that
       // same tool name. always-allow only ever shortcuts the PROMPT tier
       // (below) — skipping the interactive approval, never the gate itself.

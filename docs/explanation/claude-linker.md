@@ -5,7 +5,7 @@ status: stable
 
 # Claude linker
 
-> The two bounded layers — one per side — that own ALL Claude-specific knowledge (Agent SDK, `claude` CLI, model ids, transcript layout). An SDK/CLI update edits these layers and nothing else. Design history: `docs/superpowers/specs/2026-09-02-claude-linker-design.md`.
+> The two bounded layers — one per side — that own ALL Claude-specific knowledge (Agent SDK, `claude` CLI, model ids, transcript layout). An SDK/CLI update edits these layers and nothing else.
 
 ## The boundary
 

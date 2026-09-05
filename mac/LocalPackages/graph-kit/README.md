@@ -4,8 +4,7 @@ Shared, **multi-language** graph engine for turning **code** and **text** into a
 node/edge graph. Extracted from InfiniteBrain + meet-notes so a single update propagates to
 every consumer.
 
-UI-free (no SwiftUI) — consumers supply their own rendering. macOS 13+
-(PDF extraction uses PDFKit + Vision).
+UI-free (no SwiftUI) — consumers supply their own rendering. macOS 13+.
 
 ## Implementations
 
@@ -16,7 +15,7 @@ readable in another.
 
 | Language | Location | Status |
 |---|---|---|
-| Swift (SwiftPM) | repo root (`Sources/GraphKit`) | code→graph, text→graph, extraction, cache, UA import |
+| Swift (SwiftPM) | repo root (`Sources/GraphKit`) | code→graph, text→graph, cache |
 | TypeScript (npm `@dnsmalla/graph-kit`) | [`typescript/`](typescript/) | code→graph (TS/JS, call edges), text→graph, index, schema validation, CLI |
 
 The Swift docs below describe the Swift package; see [`typescript/README.md`](typescript/README.md)
@@ -24,11 +23,9 @@ for the TypeScript package and the `graph-kit` CLI.
 
 ## What it does
 
-- **Document → text**: extract text from PDF (with Vision OCR fallback), EPUB, Markdown, and plain text through one dispatch point (`InputReader`), plus semantic chunking (`TextChunker`) and junk-region detection (`DocumentScanner`).
 - **Code → graph**: scans a repo (Python/TypeScript/JavaScript/Kotlin via tree-sitter, Swift via regex) and produces files, classes, functions, methods, and `imports`/`contains`/`calls`/`inherits`/`implements` edges with `EXTRACTED`/`INFERRED`/`AMBIGUOUS` confidence.
 - **Text → graph**: chunks markdown by heading and links chunks via wiki-links + tags (`MemoryGenerator`).
 - **Incremental cache**: content-hash based re-scan (`Fingerprint`, `ScanCache`).
-- **External graph import**: parses Understand-Anything `knowledge-graph.json` (`UAParser`).
 
 ## Install
 

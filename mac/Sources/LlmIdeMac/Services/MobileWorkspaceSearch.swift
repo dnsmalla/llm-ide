@@ -6,7 +6,6 @@ import SharedProtocol
 enum MobileWorkspaceSearch {
 
     static let defaultLimit = 40
-    static let maxVisited = 12_000
     static let maxIndexVisited = 50_000
     static let maxReadBytes = 200_000
     static let maxFolderLines = 400

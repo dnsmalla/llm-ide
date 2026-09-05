@@ -12,7 +12,6 @@
 // the cap survives across router instances. The map is shared with
 // any other module that needs it (today only this one).
 
-import crypto from 'node:crypto';
 import {
   appendCaptions, getCaptionsSince, listActiveSessions, finalizeSession, liveEvents,
 } from '../agents/live-sessions.mjs';
@@ -30,29 +29,6 @@ const MAX_SSE_PER_USER = 4;
 export async function handleLiveRoutes(req, res, ctx) {
   const { userId, url } = ctx;
   if (!url.startsWith('/kb/live')) return false;
-
-  // POST /kb/live/sessions/new — server-side sessionId minting.
-  // The client can call this before starting a capture to receive a
-  // cryptographically-random, unpredictable sessionId, rather than
-  // generating one client-side.  Using server-minted IDs:
-  //   - prevents collisions even across browser tabs / concurrent clients
-  //   - avoids predictable IDs that another user could guess and pre-create
-  //     (though userId scoping already blocks cross-user access, belt +
-  //     suspenders)
-  //   - gives us a single source of truth for auditing live-session starts
-  //
-  // Clients that already generate their own IDs can continue doing so —
-  // this endpoint is opt-in.
-  if (req.method === 'POST' && url === '/kb/live/sessions/new') {
-    const body = parseJSON(await readBody(req, 64 * 1024)) || {};
-    const sessionId = crypto.randomBytes(16).toString('hex');
-    const meetingTitle = typeof body.meetingTitle === 'string' ? body.meetingTitle : '';
-    // Return the sessionId immediately; the session itself is created
-    // lazily on the first appendCaptions call so no state is allocated
-    // until data actually arrives.
-    sendJSON(res, 200, { sessionId, meetingTitle });
-    return true;
-  }
 
   // POST /kb/live/:sessionId/append
   if (req.method === 'POST' && url.endsWith('/append')) {

@@ -1,7 +1,6 @@
 // /agent/v2/* — the public HTTP surface of the v2 chat engine (the
-// Agent-SDK-powered successor of the CLI loop behind the Mac chat). Wire
-// contract: docs/superpowers/specs/2026-08-18-agent-v2-engine-design.md §4;
-// pinned shapes in tests/agent-v2-routes.test.mjs.
+// Agent-SDK-powered successor of the CLI loop behind the Mac chat). The wire
+// contract is pinned by tests/agent-v2-routes.test.mjs.
 //
 // Three endpoints, all JWT-authenticated (req.user is attached by the
 // global auth middleware before dispatch reaches here):

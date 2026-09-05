@@ -28,7 +28,6 @@ Mac app paths previously used `LLM-IDE` (with a space). `AppIdentity` renames le
 
 - Swift module / target names (`LlmIdeMacLib`) — SPM identifiers
 - Historical gitignore markers in existing user projects (`# >>> LLM-IDE managed`) — still recognized; new scaffolds use `# >>> LLM-IDE managed`
-- Archive docs under `docs/archive/` — historical record
 
 ## Consequences
 

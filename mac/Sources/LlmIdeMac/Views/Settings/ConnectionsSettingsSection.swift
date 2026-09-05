@@ -4,8 +4,8 @@ import SwiftUI
 /// unit-testable without a view.
 ///
 /// Meetings and Email are **fixed defaults** — they are not catalog
-/// connectors, are never selectable, and can never be hidden (hard spec
-/// constraint, `docs/superpowers/specs/2026-08-22-connector-catalog-design.md`).
+/// connectors, are never selectable, and can never be hidden (hard constraint
+/// of the connector catalog).
 /// Everything else appears only while the user has it selected, in catalog
 /// order. Ids the catalog no longer knows are dropped.
 enum ConnectionsSelection {

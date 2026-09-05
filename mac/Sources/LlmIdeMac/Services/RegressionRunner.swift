@@ -118,11 +118,6 @@ final class RegressionRunner: ObservableObject {
         self.config = config
     }
 
-    /// Set an explicit per-verify ceiling. `<= 0` means no limit (the default);
-    /// the old `max(1, t)` clamp made "unlimited" impossible to express, turning
-    /// a 0 into a one-second timeout that failed every command instantly.
-    func applyTimeout(_ t: TimeInterval) { verifyTimeout = t > 0 ? t : 0 }
-
     /// Execute the run. Safe to call repeatedly — resets state each
     /// call. Bails out cleanly when there are no fixed faults (or none
     /// in the `only` filter).

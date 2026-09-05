@@ -212,7 +212,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 ---
 
-## DOCX export (`extension/generate-docx.mjs`)
+## DOCX export (`extension/server/export-routes.mjs`)
 
 ### ✅ MUST preserve
 
@@ -235,7 +235,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 
 - **`isSafeServerUrl()` accepts ONLY** `http(s)://localhost:3456`, `http(s)://127.0.0.1:3456`, `http(s)://[::1]:3456`. Port must be explicitly present and must be `3456` — URLs without a port (e.g. `http://localhost`) are rejected. The server URL is written to `chrome.storage.local` directly; there is no `setServerUrl()` function. Validation happens on read in `getServerUrl()`, which silently falls back to `http://localhost:3456` for any unsafe or missing value.
 - **`getServerUrl()` strips trailing slashes** — request URLs concatenate `${url}/endpoint`, a trailing slash produces `//endpoint` and a 404.
-- **`generateMeetingNotes()` signature**: `(transcript, meetingTitle?, participants?, externalSignal?, language?)` — AbortSignal is threaded through so the UI can cancel.
+- **`generateMeetingNotesStream()` signature**: `(transcript, onChunk, meetingTitle?, participants?, externalSignal?, language?)` — AbortSignal is threaded through so the UI can cancel.
 - **`HEALTH_CHECK_TIMEOUT_MS` is short (few seconds)** and `REQUEST_TIMEOUT_MS` is long — don't unify them.
 
 ### ❌ DO NOT do these
@@ -363,7 +363,7 @@ Run through this against a real meeting before merging:
 ### ❌ DO NOT do these
 
 - **Do NOT run `node scripts/backup.mjs` while the server is up without quiescing writes.** The backup script is WAL-aware (`VACUUM INTO`) and safe to run concurrently for reads, but verify before adding writes to the backup path.
-- **Do NOT fork child processes that open the DB.** Use the in-process `kb/db.mjs` API from the same event loop instead.
+- **Do NOT fork child processes that open the DB.** Use the in-process `extension/kb/db.mjs` API from the same event loop instead.
 - **Do NOT set `PRAGMA journal_mode = DELETE`** (disables WAL). The WAL pragma is applied by the migration runner on first boot and must not be reverted.
 
 ---
@@ -385,7 +385,7 @@ Run through this against a real meeting before merging:
 
 ---
 
-## macOS Code Assistant panel (`mac/Sources/LlmIdeMac/Views/CodeAssistantPanel.swift`, `HistoryTextEditor.swift`)
+## macOS Code Assistant panel (`mac/Sources/LlmIdeMac/Views/CodeAssistant/CodeAssistantPanel.swift`, `HistoryTextEditor.swift`)
 
 ### ✅ MUST preserve
 

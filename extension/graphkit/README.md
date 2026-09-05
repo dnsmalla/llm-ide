@@ -48,13 +48,9 @@ Memory and graph coverage lives in `extension/tests/` — `project-memory`,
 A Phase 1/2 TypeScript scaffold (`storage/`, `services/`, `types/`, and a
 `storage/migrate.ts`) once sat alongside these files, implementing a parallel
 memory + graph stack under a `.llm-ide/` root. It was never wired to the server
-and was removed in favour of the layout above. Its design docs remain:
+and was removed in favour of the layout above.
 
-- `docs/superpowers/specs/2026-07-07-unified-memory-graph-system-design.md`
-- `docs/superpowers/plans/2026-07-07-phase1-storage-layer-types.md`
-- `docs/superpowers/plans/2026-07-08-phase2-service-layer.md`
-
-That spec's headline goal — one canonical directory, replacing the three
+That scaffold's headline goal — one canonical directory, replacing the three
 competing conventions — is what the `system/` layout above delivers. Its other
 goals (auto-capture, contradiction detection, stale-fact cleanup) are covered by
 `memory-extract.mjs` + `memory-writer.mjs`, which ship and are tested.

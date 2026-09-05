@@ -2,8 +2,7 @@
 // Single source of truth for every "special function" the /code-assist
 // agent loop can dispatch, engine-agnostic. Legacy (runtime/route.mjs) and
 // v2 (sdk/tools.mjs) both derive their dispatch/mount tables from
-// entries()/names() instead of hand-maintaining their own copy — see
-// docs/superpowers/specs/2026-08-19-agent-tools-registry-design.md.
+// entries()/names() instead of hand-maintaining their own copy.
 //
 // Deliberately does NOT carry `description`/schema: those already live in
 // llm_agent/global/<name>.md frontmatter (loaded once at boot into

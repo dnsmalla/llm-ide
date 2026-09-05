@@ -219,8 +219,7 @@ struct FeatureProfileSettingsSection: View {
 /// when `FeatureRebuildService.isEligible`, so every path in this view can
 /// assume a real `sourceRoot`/`installTarget` exist. Drives the full
 /// stage → confirm → swap-and-relaunch flow described in
-/// `docs/superpowers/specs/2026-09-02-feature-module-architecture-design.md`
-/// (Phase 3).
+/// `docs/spec/macos-app.md` ("Apply & Rebuild").
 struct BuildRebuildSettingsCard: View {
     @EnvironmentObject var rebuild: FeatureRebuildService
     @EnvironmentObject var theme: ThemeStore

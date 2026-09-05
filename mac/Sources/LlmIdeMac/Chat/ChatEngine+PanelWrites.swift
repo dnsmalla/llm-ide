@@ -146,10 +146,4 @@ extension ChatEngine {
         error = nil
     }
 
-    /// Hand the engine the handle for a panel-driven run, so the composer's
-    /// existing Stop button (`stop()`) cancels it like any other turn.
-    func setRunTask(_ task: Task<Void, Never>?) {
-        runTask = task
-    }
-
 }

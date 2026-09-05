@@ -1,8 +1,7 @@
 import Foundation
 import os
 
-/// Stage 5 of the unified knowledge graph
-/// (docs/superpowers/plans/2026-06-22-unified-knowledge-graph-automation.md):
+/// Stage 5 of the unified knowledge graph:
 /// drives `KnowledgeGraphService` automatically — on project open/switch and on
 /// a periodic timer — so the graph + memory stay current without the manual
 /// "Generate" button.

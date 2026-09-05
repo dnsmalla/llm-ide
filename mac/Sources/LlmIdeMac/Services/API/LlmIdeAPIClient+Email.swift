@@ -3,7 +3,6 @@ import Foundation
 // Top-level typealiases so call sites can reference these without the
 // LlmIdeAPIClient prefix (mirrors LlmIdeAPIClient+KB.swift).
 typealias EmailMessage = LlmIdeAPIClient.EmailMessage
-typealias EmailTestResult = LlmIdeAPIClient.EmailTestResult
 
 // External Email source endpoints. The IMAP password is written to the
 // server-side secrets vault via `setSecret` (key `email.imapPassword`)

@@ -18,10 +18,6 @@ export function getCustomProvider(providerId) {
   return customProvidersRegistry.get(providerId);
 }
 
-export function getAllCustomProviders() {
-  return Array.from(customProvidersRegistry.values());
-}
-
 /**
  * Sync custom providers from Mac app.
  * Called on app startup and whenever user adds/edits/deletes a custom provider.

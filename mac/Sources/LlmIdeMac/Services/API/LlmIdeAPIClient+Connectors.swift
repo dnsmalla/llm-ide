@@ -2,8 +2,7 @@ import Foundation
 
 /// One connector-catalog entry — the Library's "Add from catalog…" list and
 /// the Settings → Connections selection both read this shape. Mirrors
-/// `extension/connectors/connector-catalog.mjs`. See
-/// docs/superpowers/specs/2026-08-22-connector-catalog-design.md.
+/// `extension/connectors/connector-catalog.mjs`.
 struct ConnectorCatalogEntry: Decodable, Identifiable, Equatable {
     let id: String
     let name: String

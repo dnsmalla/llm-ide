@@ -3,7 +3,6 @@ import Foundation
 // Top-level typealiases so existing call sites that reference these
 // without the LlmIdeAPIClient prefix continue to compile.
 typealias IngestRequest = LlmIdeAPIClient.IngestRequest
-typealias IngestEntity = LlmIdeAPIClient.IngestEntity
 
 extension LlmIdeAPIClient {
 
