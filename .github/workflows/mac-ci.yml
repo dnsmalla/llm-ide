@@ -86,8 +86,10 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          grep -nE ' error: ' swift-test.log | grep -vE 'warning:|^[0-9]+: +\|' \
-            | cut -c1-1500 | sed 's/%/%25/g' | tail -20 > hits.txt || true
+          # Dedupe by content (drop the log line number): the same error is
+          # printed once per compile job, which would otherwise fill the window.
+          grep -E ' error: ' swift-test.log | grep -vE 'warning:|^ +\|' \
+            | cut -c1-1500 | sed 's/%/%25/g' | awk '!seen[$0]++' | tail -20 > hits.txt || true
           grep -inE 'fail|fatal|crash|signal|abort|exited|trap' swift-test.log \
             | grep -vE 'warning:|passed|with 0 failures|0 unexpected|^[0-9]+: +\|' \
             | cut -c1-1500 | sed 's/%/%25/g' | tail -10 >> hits.txt || true
