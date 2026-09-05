@@ -266,6 +266,31 @@ test('POST /auth/register is rate-limited per IP (429 + Retry-After)', async () 
   assert.ok(Number(got429.headers['Retry-After']) > 0, 'Retry-After header present');
 });
 
+test('GET /auth/*/callback is rate-limited per IP — the public OAuth redirects had no bucket', async () => {
+  // authPublic bucket: capacity 10 per IP. A bogus state is rejected before
+  // any outbound exchange, so this loop costs lookups only — but a public
+  // GET with no throttle is still a free loop.
+  const ip = `10.0.9.${++ipCounter}`;
+  let got429 = null;
+  for (let i = 0; i < 12; i += 1) {
+    const res = await callAuth({ method: 'GET', url: `/auth/google/callback?state=bogus${i}`, ip });
+    if (res.statusCode === 429) { got429 = res; break; }
+  }
+  assert.ok(got429, 'expected a 429 within 12 callback hits from one IP');
+  assert.ok(Number(got429.headers['Retry-After']) > 0, 'Retry-After header present');
+  // A browser tab is looking at this route, so the 429 is the HTML page.
+  assert.equal(got429.headers['Content-Type'], 'text/html');
+  assert.match(got429._body, /Too many sign-in attempts/);
+  // All three callbacks share that IP's bucket…
+  const slack = await callAuth({ method: 'GET', url: '/auth/slack/callback?state=bogus', ip });
+  assert.equal(slack.statusCode, 429);
+  const mcp = await callAuth({ method: 'GET', url: '/auth/mcp-connector/callback?state=bogus', ip });
+  assert.equal(mcp.statusCode, 429);
+  // …and a different IP is unaffected.
+  const fresh = await callAuth({ method: 'GET', url: '/auth/slack/callback?state=bogus' });
+  assert.notEqual(fresh.statusCode, 429);
+});
+
 // ---- authenticated routes ------------------------------------------------
 // handleAuth expects req.user pre-set by the authenticate middleware;
 // we set it directly (unit boundary is the route handler, not the JWT).

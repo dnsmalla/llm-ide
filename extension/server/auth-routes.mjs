@@ -54,9 +54,9 @@ function mcpPublicMessage(err) {
 // Shared OAuth-callback HTML response — both Google and Slack redirect here
 // after consent. A single copy so this HTML-escaping (a security control)
 // can't silently drift between the two provider callbacks.
-function oauthCallbackHtml(res, msg) {
+function oauthCallbackHtml(res, msg, status = 200) {
   const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.writeHead(status, { 'Content-Type': 'text/html' });
   res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${escHtml(msg)}</p><p>You can close this tab and return to LLM-IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`);
 }
 import { recordAudit } from './audit.mjs';
@@ -387,6 +387,28 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       send(res, err.status || 400, { error: { code: err.code || 'VALIDATION_FAILED', message: err.message } });
     }
     return;
+  }
+
+  // ---- OAuth callbacks: one per-IP bucket for all three ------------------
+  //
+  // These are public GETs (the provider's redirect carries no bearer), and
+  // the dispatcher's rateLimitProfile throttles POSTs plus two named GETs
+  // only — so until now they were the one unauthenticated surface with no
+  // bucket at all. `state` is verified before any outbound exchange, so a
+  // hammered callback costs a lookup and an HTML page rather than a token
+  // round-trip — but a free loop against a public route is still a free loop.
+  // Same per-IP bucket as login/refresh; a real sign-in is a single redirect.
+  const OAUTH_CALLBACK_PATHS = new Set([
+    '/auth/google/callback', '/auth/slack/callback', '/auth/mcp-connector/callback',
+  ]);
+  if (method === 'GET' && OAUTH_CALLBACK_PATHS.has(url.split('?')[0])) {
+    const r = tryConsume('authPublic', `oauth-callback:${ip}`);
+    if (!r.ok) {
+      // A browser tab is looking at this, not XHR — render the page.
+      res.setHeader('Retry-After', String(r.retryAfterSec));
+      oauthCallbackHtml(res, 'Too many sign-in attempts — wait a moment and start again from the app.', 429);
+      return;
+    }
   }
 
   // ---- Google Sign-In callback (public) -------------------------------
