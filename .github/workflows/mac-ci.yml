@@ -60,6 +60,13 @@ jobs:
       # open. Exit 124 = killed by the watchdog.
       - name: Test
         shell: bash
+        # LLMIDE_KEYCHAIN_BACKEND=memory: the runner's login keychain is locked
+        # and headless, so a real SecItem decrypt blocks in securityd waiting
+        # for a prompt nobody can answer — run 33969805853 parked every
+        # cooperative-pool thread there and the suite never finished. See
+        # KeychainStore.backend.
+        env:
+          LLMIDE_KEYCHAIN_BACKEND: memory
         run: |
           set -m
           swift test > swift-test.log 2>&1 &

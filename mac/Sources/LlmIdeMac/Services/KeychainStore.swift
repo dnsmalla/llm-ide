@@ -62,7 +62,19 @@ enum KeychainStore {
 
     /// Raw keychain access. Production uses `SecItem*`; tests substitute a
     /// fake to exercise the read-failure paths.
-    internal static var backend: RawKeychainAccess = SecItemKeychainAccess()
+    ///
+    /// `LLMIDE_KEYCHAIN_BACKEND=memory` selects a process-local in-memory store
+    /// for the whole process — set by mac-ci's Test step and `make test-mac`.
+    /// On a headless runner the login keychain is locked, and a real `SecItem`
+    /// decrypt then blocks inside securityd waiting for a prompt nobody can
+    /// answer: mac-ci run 33969805853 ended with every cooperative-pool thread
+    /// parked in `SecurityServer::ClientSession::decrypt` and the suite never
+    /// finishing. Any test that constructs `SessionStore`, `Config`, or
+    /// `MobilePin` reaches this path, so an opt-in per test is not enough.
+    internal static var backend: RawKeychainAccess =
+        ProcessInfo.processInfo.environment["LLMIDE_KEYCHAIN_BACKEND"] == "memory"
+            ? InMemoryKeychainAccess()
+            : SecItemKeychainAccess()
 
     /// True when secrets are readable (or legitimately absent). False after a
     /// failed load, when writes are blocked to protect the stored data.
@@ -363,6 +375,43 @@ enum KeychainStore {
         lock.unlock()
     }
     #endif
+}
+
+/// A process-local stand-in for the keychain (`LLMIDE_KEYCHAIN_BACKEND=memory`).
+/// Same contract as `SecItemKeychainAccess` — "not found" stays distinct from
+/// a failure, `deleteAll` reports `errSecItemNotFound` when nothing matched —
+/// with nothing persisted and nothing that can prompt.
+final class InMemoryKeychainAccess: RawKeychainAccess, @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [String: Data] = [:]
+
+    private func key(_ account: String, _ service: String) -> String { service + "\u{0}" + account }
+
+    func read(account: String, service: String) -> KeychainRawRead {
+        lock.lock(); defer { lock.unlock() }
+        if let data = items[key(account, service)] { return .found(data) }
+        return .notFound
+    }
+
+    func write(account: String, service: String, data: Data) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        items[key(account, service)] = data
+        return true
+    }
+
+    func delete(account: String, service: String) {
+        lock.lock(); defer { lock.unlock() }
+        items.removeValue(forKey: key(account, service))
+    }
+
+    @discardableResult
+    func deleteAll(service: String) -> OSStatus {
+        lock.lock(); defer { lock.unlock() }
+        let prefix = service + "\u{0}"
+        let matching = items.keys.filter { $0.hasPrefix(prefix) }
+        for k in matching { items.removeValue(forKey: k) }
+        return matching.isEmpty ? errSecItemNotFound : errSecSuccess
+    }
 }
 
 /// The real keychain, via `SecItem*`.

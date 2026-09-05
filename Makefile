@@ -78,7 +78,8 @@ build-mac-mobile-only: ## Build with Chat + Mobile only (no AutoTask/Loop — gu
 test-mac:
 	cd mac && swift build --product LlmIdeMac
 ifeq ($(HAS_XCTEST),1)
-	cd mac && swift test
+	# memory keychain: tests must never touch (or prompt for) the login keychain — see KeychainStore.backend
+	cd mac && LLMIDE_KEYCHAIN_BACKEND=memory swift test
 else
 	@echo "⚠ Skipping mac swift test — full Xcode required (XCTest not in $$(xcode-select -p))"
 endif
