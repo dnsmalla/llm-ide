@@ -8,8 +8,6 @@
 //   handleReviewRoutes(req, res, ctx) → boolean
 //     ctx = { userId, url }
 
-import fs from 'node:fs';
-import path from 'node:path';
 import * as kb from '../kb/db.mjs';
 import { dispatchPlan } from '../agents/dispatcher.mjs';
 import { applyCodegen } from '../agents/codegen-apply.mjs';
@@ -181,66 +179,6 @@ export async function handleReviewRoutes(req, res, ctx) {
     if (!body?.id) { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Missing id' } }); return true; }
     kb.deleteReview(userId, body.id);
     sendJSON(res, 200, { ok: true });
-    return true;
-  }
-
-  // POST /kb/review/cleanup-artifacts
-  // Remove the `.llmide-auto/<taskId>/` directory that codegen-apply
-  // wrote.  Called after the user integrates (or rejects) the generated
-  // files so they don't accumulate in the working tree.
-  //
-  // Safety rules:
-  //   1. repoPath must be on the user's server-side allow-list.
-  //   2. taskId is slugified to [A-Za-z0-9_.-] so the derived path
-  //      stays inside `.llmide-auto/<safeSlug>/` and can never
-  //      escape with ".." or leading slashes.
-  //   3. We only remove directories (not arbitrary paths).
-  if (req.method === 'POST' && url === '/kb/review/cleanup-artifacts') {
-    const body = parseJSON(await readBody(req));
-    const { repoPath, taskId } = body || {};
-    if (!repoPath || !taskId) {
-      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'repoPath and taskId required' } });
-      return true;
-    }
-    // Allow-list check.
-    const allowedRepos = kb.userRepoAllowlist(userId);
-    const normalRepo = String(repoPath).replace(/\/+$/, '');
-    if (!allowedRepos.some((r) => normalRepo === r.replace(/\/+$/, '') || normalRepo.startsWith(r.replace(/\/+$/, '') + '/'))) {
-      sendJSON(res, 403, { error: { code: 'REPO_NOT_ALLOWED', message: 'repoPath is not in your allow-list' } });
-      return true;
-    }
-    // Slug-safe taskId — no path traversal possible.
-    const safeTask = String(taskId).replace(/[^A-Za-z0-9_.-]+/g, '_').slice(0, 80);
-    if (!safeTask) {
-      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'taskId is invalid' } });
-      return true;
-    }
-    const artifactDir = path.join(normalRepo, '.llmide-auto', safeTask);
-    // Use realpathSync (not path.resolve) so symlinks in the repo path
-    // are resolved before the containment check — path.resolve is purely
-    // lexical and can be fooled by a symlinked repoPath on the allow-list.
-    let resolved, resolvedRepo;
-    try {
-      // realpathSync only works on existing paths; the artifact dir may
-      // not exist yet (that is fine — rmSync with force:true is a no-op).
-      // Resolve the repo root (which MUST exist) and then reconstruct the
-      // artifact path from there lexically.
-      resolvedRepo = fs.realpathSync(normalRepo);
-      resolved = path.join(resolvedRepo, '.llmide-auto', safeTask);
-    } catch (err) {
-      sendJSON(res, 403, { error: { code: 'REPO_RESOLVE_FAILED', message: `Cannot resolve repoPath: ${err.message}` } });
-      return true;
-    }
-    if (!resolved.startsWith(resolvedRepo + path.sep) && resolved !== resolvedRepo) {
-      sendJSON(res, 403, { error: { code: 'PATH_ESCAPE', message: 'Computed path escapes repoPath' } });
-      return true;
-    }
-    try {
-      fs.rmSync(artifactDir, { recursive: true, force: true });
-      sendJSON(res, 200, { ok: true, removed: artifactDir });
-    } catch (err) {
-      sendJSON(res, 500, { error: { code: 'CLEANUP_FAILED', message: err.message } });
-    }
     return true;
   }
 

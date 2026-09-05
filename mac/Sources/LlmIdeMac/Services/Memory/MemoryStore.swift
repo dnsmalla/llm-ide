@@ -117,31 +117,6 @@ public struct MemoryStore: Sendable {
         return try FaultReport.fromMarkdown(md)
     }
 
-    /// A Sendable snapshot of every fault's status, for callers that need
-    /// to scan + decode off the main actor and then publish the result.
-    /// `urls` is the sorted listing; `statuses` maps each decodable fault
-    /// to its status (undecodable files are omitted from the map but kept
-    /// in `urls`).
-    struct FaultStatusSnapshot: Sendable, Equatable {
-        let urls: [URL]
-        let statuses: [URL: FaultStatus]
-        /// Convenience for the menu-bar pill.
-        var openCount: Int { statuses.values.filter { $0 == .open }.count }
-    }
-
-    /// Pure disk work — list + decode all faults. Safe to call from a
-    /// background executor (MemoryStore is Sendable). The @MainActor
-    /// callers (RegressionView) await this off-main so the
-    /// frontmatter decode never blocks the UI thread.
-    func faultStatusSnapshot(at repo: URL) -> FaultStatusSnapshot {
-        let urls = listFaults(at: repo)
-        var statuses: [URL: FaultStatus] = [:]
-        for u in urls {
-            if let fault = try? loadFault(at: u) { statuses[u] = fault.status }
-        }
-        return FaultStatusSnapshot(urls: urls, statuses: statuses)
-    }
-
     /// In-place status flip. Reads the file, rewrites only the status
     /// frontmatter field, and writes back atomically. Notes body and
     /// other frontmatter fields are byte-preserved so user edits in
@@ -150,16 +125,6 @@ public struct MemoryStore: Sendable {
         let old = try String(contentsOf: url, encoding: .utf8)
         let updated = try FaultReport.rewritingStatus(in: old, to: newStatus)
         try updated.write(to: url, atomically: true, encoding: .utf8)
-    }
-
-    /// Flip status to `.fixed` and attach a verify command in one write.
-    /// When `command` is nil only the status changes.
-    func markFixed(at url: URL, verify command: String?) throws {
-        var fault = try loadFault(at: url)
-        fault.status = .fixed
-        if let command { fault.verify = command; fault.verifyKind = .command }
-        let md = try fault.toMarkdown()
-        try md.write(to: url, atomically: true, encoding: .utf8)
     }
 
     // MARK: - Faults registry (CSV export)
@@ -232,13 +197,6 @@ public struct MemoryStore: Sendable {
         let names = try Self.runGit(["-C", repo.path, "diff", "--name-only"], at: repo)
         let paths = names.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
         return GitDiff(unified: unified, changedPaths: paths)
-    }
-
-    /// Revert the given working-tree paths to HEAD. Used by "Discard" in
-    /// the repair-review UI.
-    func gitCheckout(at repo: URL, paths: [String]) throws {
-        guard !paths.isEmpty else { return }
-        _ = try Self.runGit(["-C", repo.path, "checkout", "--"] + paths, at: repo)
     }
 
     /// Drains stdout and stderr CONCURRENTLY, before `waitUntilExit()`. A

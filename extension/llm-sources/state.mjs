@@ -21,8 +21,6 @@ function stateFilePath() {
   return join(dirname(defaultSourcesDir()), 'llm-sources-state.json');
 }
 
-export const STATE_FILE = stateFilePath();
-
 function readAll() {
   const path = stateFilePath();
   if (!existsSync(path)) return {};

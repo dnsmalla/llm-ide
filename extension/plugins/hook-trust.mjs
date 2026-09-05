@@ -11,7 +11,7 @@
 // and out of plugins/state.mjs, which is storage only and knows nothing about
 // what the installed plugins declare.
 
-import { listHooksTrusted, setHooksTrusted } from './state.mjs';
+import { setHooksTrusted } from './state.mjs';
 
 /**
  * @param {string} userId
@@ -51,9 +51,4 @@ export function setPluginHookTrust(userId, pluginName, trusted, { listPlugins } 
   }
   setHooksTrusted(userId, pluginName, true);
   return { ok: true, hooksTrusted: true };
-}
-
-/** Whether this user has trusted this plugin's hooks. */
-export function isHooksTrusted(userId, pluginName) {
-  return listHooksTrusted(userId).has(pluginName);
 }

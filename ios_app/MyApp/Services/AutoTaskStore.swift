@@ -159,12 +159,6 @@ final class AutoTaskStore: ObservableObject {
         send(AutoTaskTemplateSave(id: id, name: name, body: body))
     }
 
-    /// Rename a template. The Mac may return a different id in the reply — the
-    /// id is the filename stem — and repoints the tasks that referenced it.
-    func renameTemplate(id: String, name: String) {
-        send(AutoTaskTemplateRename(id: id, name: name))
-    }
-
     func deleteTemplate(id: String) {
         send(AutoTaskTemplateDelete(id: id))
     }

@@ -1,7 +1,5 @@
 import Foundation
 
-typealias BoxTestResult = LlmIdeAPIClient.BoxTestResult
-typealias BoxIndexResult = LlmIdeAPIClient.BoxIndexResult
 
 // External Box source endpoints. The CCG client secret is written to the
 // server vault via `setSecret` (key `box.clientSecret`) — `/kb/box/test`

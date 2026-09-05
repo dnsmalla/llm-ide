@@ -42,15 +42,6 @@ struct Plan: Codable, Identifiable, Equatable {
     let tasks: [PlanTask]
 }
 
-struct PlanSummary: Codable, Identifiable, Equatable {
-    let id: String
-    let title: String
-    let meetingId: String?
-    let createdAt: String
-    let updatedAt: String
-    let taskCount: Int
-}
-
 /// Type-erased Codable JSON value, used for `meta` blobs whose shape
 /// varies per task.  Decodes any JSON scalar/array/object; encodes back
 /// in the same shape.  Tiny implementation — we don't need full

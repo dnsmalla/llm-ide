@@ -1,7 +1,6 @@
 import Foundation
 
 typealias SlackMessage = LlmIdeAPIClient.SlackMessage
-typealias SlackTestResult = LlmIdeAPIClient.SlackTestResult
 
 // External Slack source endpoints. The bot token is written to the server
 // vault via `setSecret` (key `slack.botToken`) — `/kb/slack/test` and
