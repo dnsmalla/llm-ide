@@ -3,8 +3,7 @@ import Foundation
 // MCP plugin registry — GET/POST/DELETE /auth/me/mcp-plugins/*. Mirrors
 // extension/mcp/state.mjs + mcp-config.mjs. A registered server reaches the
 // Claude CLI's --mcp-config only once a user has both consented AND enabled
-// it (per-user gates, same shape as llm-sources' per-user `enabled`). See
-// docs/superpowers/specs/2026-08-12-mcp-plugin-runtime-design.md.
+// it (per-user gates, same shape as llm-sources' per-user `enabled`).
 extension LlmIdeAPIClient {
 
     /// Descriptor for a credential a server needs. Never carries the value —

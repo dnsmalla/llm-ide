@@ -6,10 +6,7 @@ import Foundation
 // discovery via /kb/agent/skill-library), agents (subagent definitions),
 // hooks, and MCP servers. Discovery-only for ALL FOUR — a source never
 // contributes agent-loadable tools, and agents/hooks/MCP servers are
-// catalogued for display only, never invoked/executed/spawned. See
-// docs/superpowers/specs/2026-08-11-skills-sources-design.md and
-// docs/superpowers/specs/2026-08-12-llm-sources-rename-and-expand.md
-// Safety sections.
+// catalogued for display only, never invoked/executed/spawned.
 extension LlmIdeAPIClient {
 
     struct LlmSourceInfo: Decodable, Identifiable, Equatable {

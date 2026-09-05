@@ -2,8 +2,7 @@ import Foundation
 import GraphCore
 
 /// Routes a project's files to the right graph generator by file extension —
-/// the first stage of the unified knowledge graph (see
-/// docs/superpowers/plans/2026-06-22-unified-knowledge-graph-automation.md):
+/// the first stage of the unified knowledge graph:
 ///
 ///   • code-extension files  → the Code graph   (CodeNoteService / StructureScanner)
 ///   • doc-extension files    → InfiniteBrain    (GraphKit.MemoryGenerator)

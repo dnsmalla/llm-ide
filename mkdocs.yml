@@ -70,5 +70,3 @@ exclude_docs: |
   _templates/
   _scripts/
   _stubs.txt
-  superpowers/
-  archive/

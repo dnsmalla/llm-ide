@@ -18,6 +18,5 @@ with different prompts and handler sets.
 - Mechanism in `runtime/`. Markdown never lives there.
 - Content in `global/` and `internal/`. Code never lives there.
 
-Architecture spec: [`docs/superpowers/specs/2026-05-19-global-internal-agent-split-design.md`](../../docs/superpowers/specs/2026-05-19-global-internal-agent-split-design.md)
 Architecture explanation: [`docs/explanation/agent-tools.md`](../../docs/explanation/agent-tools.md)
 How to add a skill: [`docs/how-to/add-an-agent-skill.md`](../../docs/how-to/add-an-agent-skill.md)

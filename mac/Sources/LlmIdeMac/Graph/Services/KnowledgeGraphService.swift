@@ -3,8 +3,7 @@ import GraphCore
 import CryptoKit
 import os
 
-/// Stage 1 of the unified knowledge graph
-/// (docs/superpowers/plans/2026-06-22-unified-knowledge-graph-automation.md):
+/// Stage 1 of the unified knowledge graph:
 /// run BOTH generators for a project and expose both `CGData` outputs —
 ///
 ///   • code track → `CodeNoteService` (StructureScanner; filters code extensions

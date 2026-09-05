@@ -2946,8 +2946,7 @@ paths:
         '400': { description: SLACK_NO_TOKEN — connect Slack first, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ── Agent v2 engine ─────────────────────────────────────────────────────
-  # The Claude Agent SDK chat engine behind the Mac Code Assistant
-  # (design: docs/superpowers/specs/2026-08-18-agent-v2-engine-design.md).
+  # The Claude Agent SDK chat engine behind the Mac Code Assistant.
 
   /agent/v2/stream:
     post:

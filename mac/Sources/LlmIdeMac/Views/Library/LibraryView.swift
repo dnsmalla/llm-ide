@@ -84,7 +84,6 @@ struct LibraryView: View {
     /// are fixed defaults and are deliberately NOT in this catalog. Load
     /// errors surface (like `mcpPlugins`, unlike `plugins`/`llmSources`) —
     /// "nothing selected" and "the fetch failed" must not look identical.
-    /// See docs/superpowers/specs/2026-08-22-connector-catalog-design.md.
     @State private var connectors: [ConnectorCatalogEntry] = []
     @State private var connectorCatalog: [ConnectorCatalogEntry] = []
     @State private var connectorsError: String?
@@ -298,16 +297,13 @@ struct LibraryView: View {
             // git/local sources), each contributing any mix of skills (chat
             // "/" menu discovery via /kb/agent/skill-library), agents, and
             // hooks. Agents/hooks are catalogued for display only — never
-            // invoked/executed. See
-            // docs/superpowers/specs/2026-08-11-skills-sources-design.md and
-            // docs/superpowers/specs/2026-08-12-llm-sources-rename-and-expand.md.
+            // invoked/executed.
             llmSourcesSection
 
             // ── MCP Plugins section ────────────────────────────────────
             // Servers imported from ~/.claude.json or registered manually,
             // gated by per-user consent + enable before they reach the
-            // Claude CLI's --mcp-config. See
-            // docs/superpowers/specs/2026-08-12-mcp-plugin-runtime-design.md.
+            // Claude CLI's --mcp-config.
             mcpPluginsSection
 
             // ── Connectors section ─────────────────────────────────────
@@ -315,8 +311,7 @@ struct LibraryView: View {
             // Adding one here is what makes its card appear in
             // Settings → Connections; Meetings and Email are fixed defaults
             // and are not part of the catalog. Removing is visibility only —
-            // it never deletes fetched data. See
-            // docs/superpowers/specs/2026-08-22-connector-catalog-design.md.
+            // it never deletes fetched data.
             connectorsSection
         }
         .listStyle(.inset)

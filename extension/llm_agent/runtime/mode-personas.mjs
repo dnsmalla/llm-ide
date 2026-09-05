@@ -1,10 +1,9 @@
 // extension/llm_agent/runtime/mode-personas.mjs
 // Per-mode system-prompt additions + tool allowlist for /code-assist.
 // Plan/Review/Document are all "no write tools" variants of the SAME agent
-// loop and endpoint — see
-// docs/superpowers/plans/2026-08-09-code-assistant-modes-phase2.md for why
-// this replaced the original design's "route to a different pipeline" idea
-// (neither /kb/generate-plan nor a review/guardrail pipeline fit).
+// loop and endpoint. This deliberately replaced an earlier "route to a
+// different pipeline" idea — neither /kb/generate-plan nor a review/guardrail
+// pipeline fit.
 //
 // Tool restrictions for these modes are derived from the registry's `kind`
 // field — see tools/registry.mjs for the rationale on which tools have
