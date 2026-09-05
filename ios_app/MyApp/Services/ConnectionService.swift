@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import SharedProtocol
 
 // MARK: — Shared chat value types
@@ -162,8 +163,12 @@ final class ConnectionService: ObservableObject {
 
     func connectDirect(ip: String, port: Int = 3006, pin: String) {
         userClosed = false
-        if connectionStatus == .connected,
-           directIP == ip, directPort == port, directPIN == pin {
+        // Already live against this exact Mac: nothing to do. The credential
+        // is deliberately not part of the comparison — after pairing the PIN
+        // is empty on both sides and the token lives in the store, and tearing
+        // down a healthy socket to present the same credential again gains
+        // nothing.
+        if connectionStatus == .connected, directIP == ip, directPort == port {
             return
         }
         // Re-pointing at a DIFFERENT Mac: every store still holds the previous
@@ -205,10 +210,19 @@ final class ConnectionService: ObservableObject {
         webSocketTask = session.webSocketTask(with: url)
         webSocketTask?.resume()
         // Message-based pairing: the first frame after the WS opens must be a
-        // Pairing{pin} message. The Mac replies Connected{deviceName} (handled
-        // in handleMessage → "connected") or AuthFailed{message} (→ "auth_failed",
-        // which stops retrying).
-        if let data = try? JSONEncoder().encode(Pairing(pin: pin)),
+        // Pairing message. A phone that already holds a token from an earlier
+        // pairing presents that (no PIN travels); otherwise the PIN, together
+        // with this phone's id and name so the Mac issues a token in its
+        // Connected{deviceName, token} reply (handled in handleMessage →
+        // "connected"). A refusal is AuthFailed{message} (→ "auth_failed").
+        let token = connectionStore?.deviceToken ?? ""
+        let pairing = Pairing(
+            pin: token.isEmpty ? pin : "",
+            token: token.isEmpty ? nil : token,
+            deviceId: connectionStore?.deviceId,
+            deviceName: UIDevice.current.name
+        )
+        if let data = try? JSONEncoder().encode(pairing),
            let str = String(data: data, encoding: .utf8) {
             sendTextFrame(str)
         } else {
@@ -430,6 +444,17 @@ final class ConnectionService: ObservableObject {
             reconnectAttempt = 0
             if let connected = try? JSONDecoder().decode(Connected.self, from: data) {
                 connectionStore?.updateDeviceName(connected.deviceName)
+                // First pairing: the Mac traded our PIN for a token. Keep it;
+                // the PIN we just used is rotated on the Mac and is now dead.
+                if let token = connected.token, !token.isEmpty {
+                    directPIN = nil
+                    if connectionStore?.saveToken(token) == false {
+                        // Connected for now, but nothing to reconnect with: the
+                        // Mac has already rotated the PIN we used. Say so
+                        // instead of failing silently on the next reconnect.
+                        errorMessage = "Connected, but the pairing token could not be saved to the Keychain — you will need to pair again next time."
+                    }
+                }
             }
             startHeartbeat()
         case "heartbeat_ack":
@@ -459,12 +484,35 @@ final class ConnectionService: ObservableObject {
                 return
             }
             directPIN = nil
-            // Drop the persisted PIN too: if it's stale (Mac changed its PIN
-            // across a reinstall/update), auto-connect and manual pre-fill
-            // would otherwise re-send it forever. Clears `hasDevice` so
-            // `ContentView` routes back to `ConnectView` for a fresh entry.
-            connectionStore?.clearSavedPIN()
+            // Drop the persisted credentials too — a stale PIN (Mac changed
+            // its PIN across a reinstall/update) or a token the Mac no longer
+            // knows (revoked, registry reset) would otherwise be re-sent on
+            // every auto-connect forever. Clears `hasDevice` so `ContentView`
+            // routes back to `ConnectView` for a fresh pairing.
+            connectionStore?.clearCredentials()
             disconnect(clearDirect: true)
+        case "disconnected":
+            // The Mac closed THIS connection on purpose and said why. Unlike a
+            // dropped socket, blind reconnecting is wrong for two of the three
+            // reasons: a revoked token will only be refused again, and racing
+            // the phone that replaced us would just bounce both phones.
+            let notice = try? JSONDecoder().decode(Disconnected.self, from: data)
+            errorMessage = notice?.message ?? "The Mac closed the connection."
+            switch notice?.code {
+            case .revoked:
+                directPIN = nil
+                connectionStore?.clearCredentials()
+                disconnect(clearDirect: true)
+            case .replaced:
+                userClosed = true
+                disconnect(clearDirect: false)
+            case .stopped, .none:
+                // Mobile Control was stopped on the Mac — keep the pairing and
+                // retry with backoff, exactly like a dropped socket.
+                invalidateSocket()
+                connectionStatus = .disconnected
+                scheduleReconnect()
+            }
         case "explore_session_list", "explore_session_history", "explore_session_created", "explore_session_renamed":
             explorerStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "explore_search_reply":
@@ -537,7 +585,12 @@ final class ConnectionService: ObservableObject {
     }
 
     private func scheduleReconnect() {
-        guard let ip = directIP, let pin = directPIN else { return }
+        // Only the address is required: after the first pairing the PIN is
+        // gone (the Mac rotated it) and the token in `ConnectionStore` is the
+        // credential `connectDirect` presents. Requiring `directPIN` here
+        // silently killed every in-session retry after pairing.
+        guard let ip = directIP else { return }
+        let pin = directPIN ?? ""
         guard reconnectTask == nil else { return }
         // Show "connecting" rather than a false "disconnected" while auto-retrying.
         connectionStatus = .connecting
