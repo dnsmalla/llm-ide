@@ -41,6 +41,54 @@ final class ConnectionMessagesTests: XCTestCase {
         XCTAssertEqual(decoded, original)
         XCTAssertEqual(decoded.type, "pairing")
         XCTAssertEqual(decoded.pin, "123456")
+        // PIN-only pairing puts nothing else on the wire — an older Mac sees
+        // exactly the frame it always did.
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertFalse(json.contains("token"))
+        XCTAssertFalse(json.contains("deviceId"))
+    }
+
+    func testPairingTokenFormRoundTrips() throws {
+        let original = Pairing(pin: "", token: "tok-abc", deviceId: "dev-1", deviceName: "Dinesh's iPhone")
+        let decoded = try roundTrip(original)
+        XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.token, "tok-abc")
+        XCTAssertEqual(decoded.deviceId, "dev-1")
+        XCTAssertEqual(decoded.deviceName, "Dinesh's iPhone")
+    }
+
+    func testLegacyPairingDecodesWithNilExtras() throws {
+        // An older phone's frame: no token / deviceId / deviceName fields at all.
+        let legacy = Data(#"{"type":"pairing","pin":"123456"}"#.utf8)
+        let decoded = try JSONDecoder().decode(Pairing.self, from: legacy)
+        XCTAssertEqual(decoded.pin, "123456")
+        XCTAssertNil(decoded.token)
+        XCTAssertNil(decoded.deviceId)
+        XCTAssertNil(decoded.deviceName)
+    }
+
+    func testConnectedWithTokenRoundTripsAndLegacyDecodes() throws {
+        let issued = Connected(deviceName: "Mac", token: "tok-xyz", deviceId: "dev-1")
+        XCTAssertEqual(try roundTrip(issued), issued)
+        // An older Mac's reply carries only the name.
+        let legacy = Data(#"{"type":"connected","deviceName":"Old Mac"}"#.utf8)
+        let decoded = try JSONDecoder().decode(Connected.self, from: legacy)
+        XCTAssertEqual(decoded.deviceName, "Old Mac")
+        XCTAssertNil(decoded.token)
+        XCTAssertNil(decoded.deviceId)
+    }
+
+    func testDisconnectedRoundTripsWithStableCodes() throws {
+        for code in [Disconnected.Code.replaced, .revoked, .stopped] {
+            let original = Disconnected(code: code, message: "why")
+            let decoded = try roundTrip(original)
+            XCTAssertEqual(decoded, original)
+            XCTAssertEqual(decoded.type, "disconnected")
+        }
+        // The raw values are the wire contract the phone switches on.
+        let data = try JSONEncoder().encode(Disconnected(code: .revoked, message: "gone"))
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertTrue(json.contains(#""code":"revoked""#), json)
     }
 
     func testLlmIdeChatRoundTrips() throws {

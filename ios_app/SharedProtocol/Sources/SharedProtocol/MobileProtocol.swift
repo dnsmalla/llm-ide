@@ -27,6 +27,7 @@ public enum MobileProtocol {
         public static let heartbeatAck = "heartbeat_ack"
         public static let connected = "connected"
         public static let authFailed = "auth_failed"
+        public static let disconnected = "disconnected"
 
         // MARK: llm-ide chat channel
         public static let llmIdeChat = "llmide_chat"
