@@ -28,7 +28,9 @@ swift scripts/mobile/verify-native-pairing.swift
 | 2 | `{"type":"heartbeat"}` | `{"type":"heartbeat_ack","ts":…}` |
 | 3 | wrong PIN on fresh socket | `{"type":"auth_failed",…}` then close |
 
-Exit `0` = pass.
+Exit `0` = pass. The script pairs PIN-only (no `deviceId`), so no token is issued — but the PIN is one-time
+and **rotates after check 1**; the script reads the current PIN from the Keychain on each run (or pass the
+new PIN as the argument), so simply run it again.
 
 ### 3. Confirm Bonjour
 
@@ -46,10 +48,18 @@ dns-sd -B _llmide._tcp local.
 
 ### Correct PIN pairs
 
-- [ ] Mac log: `Client paired`
+- [ ] Mac log: `Client paired (device xxxxxxxx…)` followed by `Pairing PIN rotated`
+- [ ] Mac Settings: the PIN row and QR show a **new** PIN; the phone appears under **Paired devices** as “Connected now”
 - [ ] iOS toolbar: **Live** (not “waiting for screen”)
 - [ ] iOS home shows **Chat / Explore / Auto** toolbar (companion UI)
 - [ ] QR scan auto-fills and pairs
+
+### Token reconnect, revoke, replace
+
+- [ ] Kill the iOS app and relaunch: it reconnects **without** a PIN prompt (token auth); Mac log `Client paired (device …)` with no PIN rotation
+- [ ] Mac Settings → Paired devices → **Revoke**: the phone shows the revoke message and lands on the pairing screen; its next connect attempt is refused (`auth_failed`, not retryable) until it pairs with the current PIN
+- [ ] Pair a second phone while the first is connected: the first shows “Another device paired with this Mac” and does not auto-reconnect; Mac log `Replacing previously paired client`
+- [ ] Stop Mobile Control on the Mac: the phone shows “Mobile Control was stopped on the Mac” and retries with backoff
 
 > If iOS shows “waiting for screen…” or Screen Recording, delete the app and
 > reinstall from `ios_app/MyApp.xcodeproj` — that is an obsolete remote-desktop build.

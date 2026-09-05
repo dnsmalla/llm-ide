@@ -50,9 +50,18 @@ Open the LLM-IDE iOS app, then either:
 
 Wire flow:
 
-1. iPhone → `{"type":"pairing","pin":"<PIN>"}`
-2. Mac → `{"type":"connected","deviceName":"…"}`
-3. Home shows **Live** with Auto Task, Loop and Explorer summaries — tap **Open Explorer**, **Open Auto Tasks** or **Open Loop**
+1. iPhone → `{"type":"pairing","pin":"<PIN>","deviceId":"<uuid>","deviceName":"…"}`
+2. Mac → `{"type":"connected","deviceName":"…","token":"<per-device token>","deviceId":"<uuid>"}` — the Mac
+   remembers this phone (`Settings → Mobile Control → Paired devices`) and **rotates the PIN**; the phone keeps
+   the token in its Keychain
+3. Every later connect → `{"type":"pairing","pin":"","token":"<token>","deviceId":"<uuid>"}` — no PIN travels again
+4. Home shows **Live** with Auto Task, Loop and Explorer summaries — tap **Open Explorer**, **Open Auto Tasks** or **Open Loop**
+
+**Revoke** a phone from the Paired devices list: its token is refused from then on and, if connected, it is
+told `{"type":"disconnected","code":"revoked",…}` and dropped. A phone that pairs while another is connected
+displaces it with `code:"replaced"` (one active connection at a time). The PIN is **one-time**: every
+successful PIN pairing rotates it, so an older iOS build that sends only a PIN still pairs but must read the
+new PIN from Settings to pair again (it gets no token and never appears under Paired devices).
 
 ## Verify
 
@@ -115,11 +124,11 @@ Quit whatever holds the port, then **Start** Mobile Control again.
 
 ```
 iPhone (ios_app)
-    │  Bonjour + ws://<mac>:3006/ws?pin=…
-    │  {"type":"pairing","pin":"…"}
+    │  Bonjour + ws://<mac>:3006/ws
+    │  {"type":"pairing","pin":"…","deviceId":"…"} once, then {"token":"…"}
     ▼
 LlmIdeMac (MobileControlManager :3006)
-    │  PIN in Keychain · single active client
+    │  PIN in Keychain (rotates after each pairing) · paired-device registry (token hashes) · single active client
     └── HTTP → server.mjs (:3456) for Chat / Explore / Auto
 ```
 

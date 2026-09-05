@@ -285,7 +285,7 @@ cd ~/llm-ide/ios_app && open MyApp.xcodeproj
 - **Auto Tasks** — Toggle and inspect scheduled auto-code tasks
 - **Loop** — Start/stop the active project's Loop — the whole run or a single stage — watch the live log, read finished runs (control only; stages and budgets are edited on the Mac)
 - **Device Discovery** — Bonjour/mDNS (`_llmide._tcp`) or Direct IP + PIN
-- **PIN Authentication** — 6-digit PIN + QR code (`llmide://pair?…`)
+- **PIN Authentication** — 6-digit PIN + QR code (`llmide://pair?…`). Pairing trades the PIN for a **per-device token** (`MobilePairedDeviceStore`, hashed on disk; the phone keeps it in its Keychain) and the PIN **rotates** right after; the phone reconnects with the token. Settings → Mobile Control lists paired devices with **Revoke**. The PIN is one-time (rotates on every successful pairing); older phones (no `deviceId`) still pair but get no token and must re-pair with the new PIN
 
 ### Permissions Required
 
