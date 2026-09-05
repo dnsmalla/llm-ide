@@ -57,17 +57,37 @@ jobs:
 
       # XCTest assertion failures and compile errors share one shape,
       # "<path>:<line>: error: <message>"; those become file/line annotations.
-      # Anything else that reads as a failure (swift-testing's ✘ lines, suite
-      # summaries) is annotated plain. GitHub keeps ~10 error annotations per
-      # step, hence the head limits.
+      # GitHub keeps ~10 annotations per level per step, hence the head limits
+      # and the split across notice/warning/error below.
       - name: Surface test failures as annotations
         if: failure()
         shell: bash
         run: |
           grep -E '^[^ ]+\.swift:[0-9]+(:[0-9]+)?: error: ' swift-test.log | sort -u | head -10 \
             | sed -E 's#^.*/mac/([^:]+):([0-9]+)(:[0-9]+)?: error: (.*)$#::error file=mac/\1,line=\2::\4#; t; s#^#::error::#' || true
-          grep -E '✘|Test Suite .* failed|Test Case .* failed|Executed [0-9]+ tests?, with [1-9][0-9]* failures?' swift-test.log | sort -u | head -10 \
-            | sed 's/^/::error::/' || true
+
+      # A crash (fatalError, an actor-isolation trap, "Exited with unexpected
+      # signal") produces none of the shapes above, so also publish the raw
+      # evidence: the tail of the log and the last keyword hits.
+      - name: Publish log tail as annotations
+        if: failure()
+        shell: bash
+        run: |
+          echo "::notice::swift-test.log has $(wc -l < swift-test.log | tr -d ' ') lines"
+          tail -30 swift-test.log | cut -c1-1500 | sed 's/%/%25/g' > tail.txt
+          sed -n '1,10p'  tail.txt | sed 's/^/::notice::[tail -30..-21] /'
+          sed -n '11,20p' tail.txt | sed 's/^/::warning::[tail -20..-11] /'
+          sed -n '21,30p' tail.txt | sed 's/^/::error::[tail -10..-1] /'
+
+      - name: Publish failure keyword hits as annotations
+        if: failure()
+        shell: bash
+        run: |
+          grep -inE 'error|fail|fatal|crash|signal|abort|exited|trap' swift-test.log \
+            | grep -vE 'passed|with 0 failures|0 unexpected' | cut -c1-1500 | sed 's/%/%25/g' | tail -30 > hits.txt || true
+          sed -n '1,10p'  hits.txt | sed 's/^/::notice::[hit] /'
+          sed -n '11,20p' hits.txt | sed 's/^/::warning::[hit] /'
+          sed -n '21,30p' hits.txt | sed 's/^/::error::[hit] /'
 
       - name: Upload swift test log
         if: always()
