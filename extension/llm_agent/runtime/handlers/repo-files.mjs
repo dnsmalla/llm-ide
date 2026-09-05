@@ -32,8 +32,10 @@ const SKIP_DIRS = new Set([
   '.next', 'Pods', 'vendor', '.venv', '.svn', '.hg', '.idea', '.gradle',
 ]);
 // Path SEGMENTS whose presence denies the whole path (secret stores).
-const DENY_SEGMENTS = new Set(['.git', '.ssh', '.aws', '.gnupg']);
-const DENY_BASENAMES = new Set(['.npmrc', '.netrc', 'id_rsa', 'id_ed25519', 'id_dsa', '.pgpass']);
+const DENY_SEGMENTS = new Set(['.git', '.ssh', '.aws', '.gnupg', '.docker', '.kube']);
+const DENY_BASENAMES = new Set([
+  '.npmrc', '.netrc', 'id_rsa', 'id_ed25519', 'id_dsa', '.pgpass', '.bash_history', '.zsh_history',
+]);
 const DENY_EXT = new Set(['.pem', '.key', '.p12', '.pfx', '.keystore']);
 
 function canon(p) { try { return realpathSync(p); } catch { return null; } }
@@ -46,13 +48,17 @@ function isWithin(child, root) {
   return c === r || c.startsWith(r.endsWith(sep) ? r : r + sep);
 }
 
+// Case-insensitive on purpose: macOS and Windows open `~/.AWS/ID_RSA` as the
+// same file as `~/.aws/id_rsa`, and on Linux a file that merely LOOKS like a
+// secret store is a harmless refusal.
 export function isDeniedPath(absPath) {
-  if (absPath.split(sep).some((s) => DENY_SEGMENTS.has(s))) return true;
-  const base = basename(absPath);
+  const lower = absPath.toLowerCase();
+  if (lower.split(sep).some((s) => DENY_SEGMENTS.has(s))) return true;
+  const base = basename(lower);
   if (DENY_BASENAMES.has(base)) return true;
   if (base === '.env' || base.startsWith('.env.')) return true; // .env, .env.local, …
   const dot = base.lastIndexOf('.');
-  if (dot > 0 && DENY_EXT.has(base.slice(dot).toLowerCase())) return true;
+  if (dot >= 0 && DENY_EXT.has(base.slice(dot))) return true;
   return false;
 }
 
