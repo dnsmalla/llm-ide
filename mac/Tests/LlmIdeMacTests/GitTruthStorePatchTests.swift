@@ -220,7 +220,9 @@ final class GitTruthStorePatchTests: XCTestCase {
         return data
     }
 
+    // Newlines only: porcelain v1's first column is significant, and an
+    // unstaged change is " D f.txt" — trimming whitespace would eat that.
     private func porcelain() throws -> String {
-        try run(["status", "--porcelain=v1"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        try run(["status", "--porcelain=v1"]).trimmingCharacters(in: .newlines)
     }
 }

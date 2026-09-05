@@ -226,8 +226,15 @@ final class ExplorerTreeStorePersistenceTests: XCTestCase {
 
         let store = ExplorerTreeStore()
         async let first: Bool = store.restoreState(for: root, defaults: defaults)
-        for _ in 0..<10 { await Task.yield() }
-        try? await Task.sleep(nanoseconds: 2_000_000)
+        // Exactly one yield, and no sleep. This test and the store share the
+        // main actor, whose queue is FIFO: the yield lets the already-queued
+        // child run `restoreState` up to its first suspension — the detached
+        // directory listing in `loadChildren`, which a fresh store always hits —
+        // and this continuation was queued at the yield, ahead of the child's
+        // resumption. So `second` always starts while `first` is in flight.
+        // The previous 10 yields + 2 ms sleep handed a fast CI runner enough
+        // time for `first` to finish first, and the assertion below failed.
+        await Task.yield()
         let second = await store.restoreState(for: root, defaults: defaults)
         let firstCompleted = await first
 

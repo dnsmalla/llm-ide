@@ -90,6 +90,12 @@ final class GitTruthStoreTests: XCTestCase {
     // MARK: - lineMarks
 
     func testLineMarksForModifiedTrackedFile() async throws {
+        // setUp commits a ONE-line file; against that, "line1\nCHANGED\nline3\n"
+        // is two added lines and git correctly reports line 2 as .added. Commit
+        // three lines first so line 2 is a genuine modification.
+        try "line1\nline2\nline3\n".write(to: repo.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try run(["add", "-A"])
+        try run(["commit", "-q", "-m", "three lines"])
         try "line1\nCHANGED\nline3\n".write(to: repo.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
         let store = GitTruthStore()
         await store.refresh(root: repo)

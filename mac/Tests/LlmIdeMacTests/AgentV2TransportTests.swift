@@ -459,12 +459,14 @@ struct AgentV2TransportTests {
         let agentContext = try #require(body["agentContext"] as? [String: Any])
         #expect(agentContext["chatSessionId"] as? String == "CS-1")
         #expect(agentContext["workspaceRoot"] as? String == "~/proj")
-        // v2 owns none of these — server sessions hold history; provider
-        // routing is server-side.
+        // v2 owns none of these — server sessions hold history; the tier is
+        // resolved server-side.
         #expect(body["history"] == nil)
-        #expect(body["provider"] == nil)
         #expect(body["tier"] == nil)
         #expect(body["fresh"] == nil)
+        // The resolved provider IS sent (since 15e0d7c2): the server points the
+        // SDK at that provider's Anthropic-compatible endpoint.
+        #expect(body["provider"] as? String == "anthropic")
     }
 
     @Test("fresh round trip sends fresh: true (sessionUnresumable recovery hook)")
