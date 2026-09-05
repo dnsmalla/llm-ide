@@ -25,6 +25,29 @@ struct MobilePairingFrameTests {
         #expect(!MobileWebSocketServer.isPairingFrame(Data("not json".utf8)))
     }
 
+    /// The token form of `Pairing` (pin empty, token + deviceId set) rides the
+    /// same tag, so it must pass the same gate — otherwise every reconnect of
+    /// an already-paired phone would be refused and charged a throttle failure.
+    @Test("the token form of Pairing passes the envelope gate too")
+    func tokenFormAccepted() throws {
+        let data = try JSONEncoder().encode(
+            Pairing(pin: "", token: "tok", deviceId: "dev-1", deviceName: "iPhone"))
+        #expect(MobileWebSocketServer.isPairingFrame(data))
+    }
+
+    /// Device ids come from the phone. A UUID is what we expect; whitespace is
+    /// noise, empty means "legacy phone, no token", and something absurdly long
+    /// is not an id at all.
+    @Test("cleanDeviceId normalises phone-supplied ids and rejects junk")
+    func cleanDeviceId() {
+        #expect(MobileWebSocketServer.cleanDeviceId("  ABC-123 \n") == "ABC-123")
+        #expect(MobileWebSocketServer.cleanDeviceId(nil) == nil)
+        #expect(MobileWebSocketServer.cleanDeviceId("") == nil)
+        #expect(MobileWebSocketServer.cleanDeviceId("   ") == nil)
+        #expect(MobileWebSocketServer.cleanDeviceId(String(repeating: "x", count: 129)) == nil)
+        #expect(MobileWebSocketServer.cleanDeviceId(String(repeating: "x", count: 128)) != nil)
+    }
+
     /// A throttle/lockout refusal must be marked retryable so the phone keeps a
     /// PIN it was never given the chance to prove.
     @Test("AuthFailed carries retryable across the wire; absent decodes as nil")

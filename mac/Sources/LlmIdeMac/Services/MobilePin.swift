@@ -93,15 +93,41 @@ enum MobilePin {
 
     /// Generates a new random 6-digit PIN, overwrites any stored PIN, returns it.
     static func regenerate() throws -> String {
-        // SystemRandomNumberGenerator — sufficient entropy for a 6-digit LAN PIN.
-        var rng = SystemRandomNumberGenerator()
-        let n = Int.random(in: 0...999_999, using: &rng)
-        let pin = String(format: "%06d", n)
+        let pin = mint()
         try write(pin)
         cacheLock.lock()
         sessionPin = pin
         cacheLock.unlock()
         return pin
+    }
+
+    /// Retire the current PIN NOW, without touching the Keychain: the new PIN
+    /// goes into the session cache, which is what `read()` serves, so the very
+    /// next validation sees it. Callers then `persist` the returned PIN off
+    /// their own thread. Split from `regenerate()` because the pairing server
+    /// rotates on its serial queue, and a `SecItem` write on a locked or
+    /// prompting keychain parks the calling thread in securityd — which would
+    /// freeze every frame, send and deadline that queue serialises.
+    static func rotateInMemory() -> String {
+        let pin = mint()
+        cacheLock.lock()
+        sessionPin = pin
+        cacheLock.unlock()
+        return pin
+    }
+
+    /// Write a PIN produced by `rotateInMemory()` to the Keychain. On failure
+    /// the in-memory PIN stays live for this app session; the previous PIN
+    /// would come back at next launch, which the caller should log loudly.
+    static func persist(_ pin: String) throws {
+        try write(pin)
+    }
+
+    /// SystemRandomNumberGenerator — sufficient entropy for a 6-digit LAN PIN
+    /// behind `PairingThrottle`.
+    private static func mint() -> String {
+        var rng = SystemRandomNumberGenerator()
+        return String(format: "%06d", Int.random(in: 0...999_999, using: &rng))
     }
 
     /// Stores `pin` under `mobile::pin`, overwriting any existing value.

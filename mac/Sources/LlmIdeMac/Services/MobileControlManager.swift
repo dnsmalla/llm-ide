@@ -108,6 +108,18 @@ final class MobileControlManager {
     /// True after a client completes PIN pairing; cleared on disconnect.
     // internal: shared with the Mobile*Bridge classes (feature folders)
     var mobileClientPaired = false
+    /// Phones that completed PIN pairing and hold a per-device token — the
+    /// registry token auth checks against, and what Settings lists/revokes.
+    private let pairedDeviceStore = MobilePairedDeviceStore()
+    /// Snapshot of `pairedDeviceStore.all` for the Settings list, refreshed on
+    /// every pairing, authentication, and revoke.
+    private(set) var pairedDevices: [MobilePairedDeviceStore.Device] = []
+    /// Device id of the phone currently connected; nil when none is, or when a
+    /// legacy phone paired with a bare PIN and has no id.
+    private(set) var connectedDeviceId: String?
+    /// Bumped each time the pairing PIN rotates so Settings re-reads the PIN
+    /// and redraws the QR.
+    private(set) var pinGeneration = 0
     private var mobilePushCancellables = Set<AnyCancellable>()
     private var mobileInflightTasks: [String: Task<Void, Never>] = [:]
     /// Commands the iPhone cancelled — late HTTP replies must not persist or stream.
@@ -121,6 +133,7 @@ final class MobileControlManager {
     let decoder = JSONDecoder()
 
     init() {
+        pairedDevices = pairedDeviceStore.all
         // Best-effort teardown of the native server on force-quit / Cmd-Q /
         // logout so the listener + Bonjour service don't briefly outlive the
         // app. `stop()` is idempotent and main-isolated like this hook.
@@ -165,7 +178,17 @@ final class MobileControlManager {
                 let normalized = (candidate.count <= 6 && isAllDigits)
                     ? String(repeating: "0", count: 6 - candidate.count) + candidate
                     : candidate
-                return normalized == pin
+                // Read the PIN at validation time, not the one captured when
+                // the server started: it rotates after every token-issuing
+                // pairing (`onPinConsumed`), and the stale capture would keep
+                // accepting the retired PIN. `read()` is the session cache.
+                return normalized == (MobilePin.read() ?? pin)
+            },
+            authenticateToken: { [pairedDeviceStore] deviceId, token in
+                pairedDeviceStore.authenticate(deviceId: deviceId, token: token)
+            },
+            issueToken: { [pairedDeviceStore] deviceId, deviceName in
+                pairedDeviceStore.issueToken(deviceId: deviceId, name: deviceName)
             },
             onInbound: { [weak self] data in
                 Task(priority: .userInitiated) { @MainActor in
@@ -177,6 +200,25 @@ final class MobileControlManager {
             },
             onClientPaired: { [weak self] in
                 Task { @MainActor [weak self] in self?.onMobileClientPaired() }
+            },
+            onClientIdentified: { [weak self] deviceId in
+                Task { @MainActor [weak self] in
+                    self?.connectedDeviceId = deviceId
+                    self?.refreshPairedDevices()
+                }
+            },
+            onPinConsumed: { [weak self] in
+                // Retire the PIN HERE, synchronously on the server's queue, so
+                // it is dead before the next frame is examined — a MainActor
+                // hop would leave it valid for a few milliseconds. Only the
+                // in-memory half runs on the queue; the Keychain write happens
+                // off it (a SecItem write can block in securityd, and this
+                // queue serialises every frame the server handles).
+                let fresh = MobilePin.rotateInMemory()
+                Task.detached(priority: .utility) { [weak self] in
+                    let persisted = (try? MobilePin.persist(fresh)) != nil
+                    await MainActor.run { self?.pinDidRotate(persisted: persisted) }
+                }
             },
             onClientDisconnected: { [weak self] in
                 Task { @MainActor [weak self] in self?.onMobileClientDisconnected() }
@@ -884,9 +926,40 @@ final class MobileControlManager {
 
     private func onMobileClientDisconnected() {
         mobileClientPaired = false
+        connectedDeviceId = nil
         mobileCancelledCommandIds.removeAll()
         for task in mobileInflightTasks.values { task.cancel() }
         mobileInflightTasks.removeAll()
+    }
+
+    // MARK: - Paired devices
+
+    /// Bookkeeping after the server rotated the PIN on a successful pairing
+    /// (see `onPinConsumed` in `start()`): Settings re-reads the PIN and QR via
+    /// `pinGeneration`. The new PIN is live in memory either way; a failed
+    /// Keychain write only means the PREVIOUS one comes back at next launch,
+    /// which is worth a loud line.
+    private func pinDidRotate(persisted: Bool) {
+        pinGeneration += 1
+        if persisted {
+            append(.info, "Pairing PIN rotated — the previous PIN no longer works")
+        } else {
+            append(.stderr, "Pairing PIN rotated for this session, but the Keychain write failed — the previous PIN returns at next launch")
+        }
+    }
+
+    func refreshPairedDevices() {
+        pairedDevices = pairedDeviceStore.all
+    }
+
+    /// Forget a phone. Its token is refused from now on, and if it is the one
+    /// connected right now it is told why and dropped.
+    func revokeDevice(_ id: String) {
+        pairedDeviceStore.revoke(id: id)
+        refreshPairedDevices()
+        server?.disconnectClient(deviceId: id, code: .revoked,
+                                 message: "This device was removed in Settings → Mobile Control on the Mac")
+        append(.info, "Revoked paired device \(id.prefix(8))…")
     }
 
     /// Explicit "push now" for the Auto Tasks page's Refresh button, and for

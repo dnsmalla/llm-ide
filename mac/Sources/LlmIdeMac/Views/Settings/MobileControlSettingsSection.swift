@@ -59,6 +59,8 @@ struct MobileControlSettingsSection: View {
                         notReadyBlock
                     }
 
+                    pairedDevicesBlock
+
                     Divider().padding(.vertical, 4)
 
                     Toggle("Start Mobile Control on app launch", isOn: Binding(
@@ -105,7 +107,13 @@ struct MobileControlSettingsSection: View {
         }
         .onAppear {
             refreshConnection()
+            mobile.refreshPairedDevices()
             mobile.exploreIndex.bootstrapFromDisk()
+        }
+        .onChange(of: mobile.pinGeneration) { _, _ in
+            // The PIN rotates right after a phone pairs; re-read it so the PIN
+            // row and QR never show a code that has already been retired.
+            refreshConnection()
         }
         .onChange(of: scenePhase) { _, phase in
             // The user likely just connected Tailscale in another app;
@@ -263,6 +271,68 @@ struct MobileControlSettingsSection: View {
         case .running:
             return ""
         }
+    }
+
+    // MARK: - Paired devices
+
+    /// Phones that hold a per-device token. Revoke drops the token (and the
+    /// live connection, if that phone is the one connected). Shown whether or
+    /// not the server is running: the registry outlives the server.
+    private var pairedDevicesBlock: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Paired devices")
+                .font(Typography.section)
+                .foregroundStyle(theme.current.textMuted)
+            if mobile.pairedDevices.isEmpty {
+                Text("No devices paired yet. Scan the QR with the LLM-IDE iPhone app — pairing issues the phone a token, and the PIN rotates afterwards.")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(mobile.pairedDevices) { device in
+                    HStack(spacing: Spacing.sm) {
+                        Image(systemName: "iphone")
+                            .foregroundStyle(theme.current.textMuted)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(device.name)
+                                .font(Typography.body)
+                                .foregroundStyle(theme.current.text)
+                            Text(deviceStatusLine(device))
+                                .font(Typography.caption)
+                                .foregroundStyle(device.id == mobile.connectedDeviceId
+                                                 ? theme.current.success : theme.current.textMuted)
+                        }
+                        Spacer()
+                        Button("Revoke") {
+                            mobile.revokeDevice(device.id)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(theme.current.danger)
+                        .help("Forget this phone. It will need the current PIN to pair again.")
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(theme.current.body.opacity(0.6)))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.current.border.opacity(0.4)))
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        return f
+    }()
+
+    /// iOS 16+ reports a generic "iPhone" as the device name unless the app
+    /// holds the user-assigned-name entitlement, so the id's first characters
+    /// are always shown to tell two phones apart.
+    private func deviceStatusLine(_ device: MobilePairedDeviceStore.Device) -> String {
+        let idTag = "id \(device.id.prefix(6))"
+        if device.id == mobile.connectedDeviceId { return "Connected now · \(idTag)" }
+        let seen = Self.relativeFormatter.localizedString(for: device.lastSeenAt, relativeTo: Date())
+        return "Last seen \(seen) · paired \(device.pairedAt.formatted(date: .abbreviated, time: .omitted)) · \(idTag)"
     }
 
     // MARK: - Pairing QR

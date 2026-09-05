@@ -28,9 +28,23 @@ final class MobileWebSocketServer: @unchecked Sendable {
     private var currentPort: Int { basePort + portIndex }
     private let deviceName: String
     private let validatePin: (String) -> Bool
+    /// (deviceId, token) → is this the live token for that device? Token auth
+    /// is how a phone that paired before reconnects without a PIN.
+    private let authenticateToken: (String, String) -> Bool
+    /// (deviceId, deviceName) → a fresh token to hand the phone after a PIN
+    /// pairing, or nil when tokens aren't offered. Issuing one is what lets
+    /// the PIN rotate (`onPinConsumed`).
+    private let issueToken: (String, String) -> String?
     private let onInbound: InboundHandler
     private let onLog: (String) -> Void
     private let onClientPaired: () -> Void
+    /// The device id of the client that just paired — nil for an older phone
+    /// that paired with a bare PIN. Fired just before `onClientPaired`.
+    private let onClientIdentified: (String?) -> Void
+    /// A PIN pairing just issued a token: the PIN has served its purpose and
+    /// the owner should rotate it so a shoulder-surfed or captured PIN can't
+    /// be replayed.
+    private let onPinConsumed: () -> Void
     private let onClientDisconnected: () -> Void
     private let onBindFailed: (Error) -> Void
     /// Fired once per successful bind with the port that actually took —
@@ -47,6 +61,9 @@ final class MobileWebSocketServer: @unchecked Sendable {
     /// valid PIN (see `handlePairing`); until then it lives in `challengers`.
     private var client: NWConnection?
     private var paired = false
+    /// Device id the paired client authenticated as (token auth, or a PIN
+    /// pairing that requested a token). nil for a legacy PIN-only phone.
+    private var clientDeviceId: String?
     /// Connections that have arrived but not yet paired. They never reach
     /// `onInbound`, and they never displace the incumbent `client` — that only
     /// happens on a proven PIN. Bounded so a peer opening sockets in a loop
@@ -78,9 +95,13 @@ final class MobileWebSocketServer: @unchecked Sendable {
     init(port: Int, portCandidates: Int = MobileWebSocketServer.defaultPortCandidates,
          deviceName: String,
          validatePin: @escaping (String) -> Bool,
+         authenticateToken: @escaping (String, String) -> Bool = { _, _ in false },
+         issueToken: @escaping (String, String) -> String? = { _, _ in nil },
          onInbound: @escaping InboundHandler,
          onLog: @escaping (String) -> Void,
          onClientPaired: @escaping () -> Void = {},
+         onClientIdentified: @escaping (String?) -> Void = { _ in },
+         onPinConsumed: @escaping () -> Void = {},
          onClientDisconnected: @escaping () -> Void = {},
          onListening: @escaping (Int) -> Void = { _ in },
          onBindFailed: @escaping (Error) -> Void = { _ in }) {
@@ -89,9 +110,13 @@ final class MobileWebSocketServer: @unchecked Sendable {
         self.onListening = onListening
         self.deviceName = deviceName
         self.validatePin = validatePin
+        self.authenticateToken = authenticateToken
+        self.issueToken = issueToken
         self.onInbound = onInbound
         self.onLog = onLog
         self.onClientPaired = onClientPaired
+        self.onClientIdentified = onClientIdentified
+        self.onPinConsumed = onPinConsumed
         self.onClientDisconnected = onClientDisconnected
         self.onBindFailed = onBindFailed
     }
@@ -206,9 +231,21 @@ final class MobileWebSocketServer: @unchecked Sendable {
     func stop() {
         queue.async {
             self.shouldRun = false   // halt any pending EADDRINUSE retry
-            self.client?.stateUpdateHandler = nil
-            self.client?.cancel()
+            if let client = self.client {
+                client.stateUpdateHandler = nil
+                // Tell the phone this is a deliberate stop, not a dropped
+                // network — and let the frame flush before the socket goes.
+                // Only the client cancel is deferred; the listener below is
+                // released immediately so the port comes back promptly.
+                if self.paired {
+                    self.sendDirect(Disconnected(code: .stopped, message: "Mobile Control was stopped on the Mac"), to: client)
+                    self.queue.asyncAfter(deadline: .now() + 0.2) { client.cancel() }
+                } else {
+                    client.cancel()
+                }
+            }
             self.client = nil
+            self.clientDeviceId = nil
             // Unpaired peers mid-handshake must go too, or they linger holding
             // a socket (and a receive loop) past the user's Stop.
             for challenger in self.challengers {
@@ -340,6 +377,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
                     self.onLog("Client disconnected")
                     self.client = nil
                     self.paired = false
+                    self.clientDeviceId = nil
                     self.onClientDisconnected()
                 }
                 // Break the conn → handler → conn retain cycle.
@@ -415,28 +453,40 @@ final class MobileWebSocketServer: @unchecked Sendable {
             reject(conn, message: "Expected a pairing message", retryable: false)
             return
         }
+        let deviceId = Self.cleanDeviceId(pairing.deviceId)
+        // Token auth: a phone that paired before. The token stands in for the
+        // PIN entirely — no PIN is examined, so a rotated PIN changes nothing
+        // for an already-paired phone. A stale or revoked token is a plain
+        // refusal (not retryable): the phone must pair again with the current
+        // PIN. It still costs a throttle failure so tokens can't be ground
+        // any faster than PINs.
+        if let token = pairing.token, !token.isEmpty {
+            guard let deviceId, authenticateToken(deviceId, token) else {
+                throttle.registerFailure(host: host, now: Date())
+                onLog("Rejected token auth — unknown device or a stale/revoked token")
+                reject(conn, message: "This device is no longer paired with this Mac — pair again with the current PIN",
+                       retryable: false)
+                return
+            }
+            throttle.registerSuccess(host: host)
+            admit(conn, deviceId: deviceId, reply: Connected(deviceName: deviceName))
+            return
+        }
         if validatePin(pairing.pin) {
             throttle.registerSuccess(host: host)
-            // NOW the incumbent may be replaced — after a proven PIN, never
-            // before. Its handler is cleared first so the cancellation below
-            // can't race the `client` reassignment through the state handler.
-            if let incumbent = client, incumbent !== conn {
-                onLog("Replacing previously paired client")
-                incumbent.stateUpdateHandler = nil
-                incumbent.cancel()
-                // Deliberately NOT calling onClientDisconnected() here: the
-                // manager wraps each callback in its own unstructured
-                // MainActor Task, so a disconnect/paired pair can land
-                // inverted and leave `mobileClientPaired == false` right
-                // after a successful pair. The paired callback below does
-                // the per-connection reset for the incoming client.
+            // A phone that identifies itself gets a token and never needs the
+            // PIN again. Either way the PIN is one-time: it rotates after EVERY
+            // successful use (`onPinConsumed`), so a PIN that was read over a
+            // shoulder, captured, or presented by a client that deliberately
+            // omits `deviceId` (and so never shows up in Settings) cannot be
+            // reused. A legacy phone still pairs — with the PIN shown at that
+            // moment — and has to re-pair next time.
+            var reply = Connected(deviceName: deviceName)
+            if let deviceId, let token = issueToken(deviceId, pairing.deviceName ?? "") {
+                reply = Connected(deviceName: deviceName, token: token, deviceId: deviceId)
             }
-            challengers.removeAll { $0 === conn }
-            client = conn
-            paired = true
-            onLog("Client paired")
-            onClientPaired()
-            Task { await self.send(Connected(deviceName: deviceName)) }
+            admit(conn, deviceId: reply.token != nil ? deviceId : nil, reply: reply)
+            onPinConsumed()
         } else {
             throttle.registerFailure(host: host, now: Date())
             // Diagnostic: show the received candidate's shape (not its value)
@@ -447,6 +497,64 @@ final class MobileWebSocketServer: @unchecked Sendable {
             onLog("Wrong PIN — rejecting (received \(received.count) char\(received.count == 1 ? "" : "s")\(digits ? ", all digits" : ", has non-digits"))")
             reject(conn, message: "Wrong PIN", retryable: false)
         }
+    }
+
+    /// Promote an authenticated challenger to THE client. Must run on `queue`.
+    private func admit(_ conn: NWConnection, deviceId: String?, reply: Connected) {
+        // NOW the incumbent may be replaced — after proven credentials, never
+        // before. Its handler is cleared first so the cancellation below can't
+        // race the `client` reassignment through the state handler. It is told
+        // why (`replaced`) and the cancel is deferred so that frame flushes —
+        // until now the ousted phone saw only a dead socket.
+        if let incumbent = client, incumbent !== conn {
+            onLog("Replacing previously paired client")
+            incumbent.stateUpdateHandler = nil
+            sendDirect(Disconnected(code: .replaced, message: "Another device paired with this Mac"), to: incumbent)
+            queue.asyncAfter(deadline: .now() + 0.2) { incumbent.cancel() }
+            // Deliberately NOT calling onClientDisconnected() here: the
+            // manager wraps each callback in its own unstructured
+            // MainActor Task, so a disconnect/paired pair can land
+            // inverted and leave `mobileClientPaired == false` right
+            // after a successful pair. The paired callback below does
+            // the per-connection reset for the incoming client.
+        }
+        challengers.removeAll { $0 === conn }
+        client = conn
+        paired = true
+        clientDeviceId = deviceId
+        onLog(deviceId == nil ? "Client paired (PIN only)" : "Client paired (device \(deviceId!.prefix(8))…)")
+        onClientIdentified(deviceId)
+        onClientPaired()
+        // Directly to THIS connection, synchronously on the queue — not via
+        // `send`, which (a) targets whoever `client` is by the time its Task
+        // runs, so a phone admitted in between would receive this phone's
+        // token, and (b) logs an 80-char prefix of every frame, which for a
+        // Connected{token} is a slice of the token.
+        sendDirect(reply, to: conn)
+        onLog(reply.token == nil ? "📤 Sent connected" : "📤 Sent connected (token issued)")
+    }
+
+    /// Drop the paired client if it is `deviceId`, telling it why first. This
+    /// is the live half of revoking a device in Settings: the registry refuses
+    /// the token from now on; this ends the session it may currently hold.
+    func disconnectClient(deviceId: String, code: Disconnected.Code, message: String) {
+        queue.async {
+            guard let conn = self.client, self.paired, self.clientDeviceId == deviceId else { return }
+            self.onLog("Disconnecting paired client (\(code.rawValue))")
+            self.sendDirect(Disconnected(code: code, message: message), to: conn)
+            // The state handler stays installed: its `.cancelled` branch clears
+            // `client`/`paired` and fires onClientDisconnected as for any drop.
+            self.queue.asyncAfter(deadline: .now() + 0.2) { conn.cancel() }
+        }
+    }
+
+    /// A usable device id: trimmed, non-empty, bounded. Phones send a UUID;
+    /// anything wildly longer is not a device id and is treated as absent.
+    static func cleanDeviceId(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 128 else { return nil }
+        return trimmed
     }
 
     /// Deliver a terminal `AuthFailed` to ONE connection and drop it. The
