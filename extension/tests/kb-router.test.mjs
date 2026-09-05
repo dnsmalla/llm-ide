@@ -62,6 +62,44 @@ function makeRes() {
   };
 }
 
+test('POST /kb/ingest redacts secrets before they reach meetings/entities/FTS', async () => {
+  resetDb();
+  const users = await import('../server/users.mjs');
+  const u = users.registerUser(db.getDb(), {
+    email: `ingest-redact-${Date.now()}@example.com`,
+    password: 'CorrectHorseBattery',
+    displayName: 'ir',
+  });
+  const key = 'AKIA' + 'Q'.repeat(16);
+  // A PAT read aloud and wrapped across two caption lines.
+  const wrapped = 'ghp_' + 'a'.repeat(18) + '\n' + 'a'.repeat(18);
+  const req = makeReq({
+    method: 'POST',
+    url: '/kb/ingest',
+    userId: u.id,
+    body: {
+      id: 'm-redact-1',
+      title: `Key rotation ${key}`,
+      transcript: `Alice: the new key is ${key}\nBob: and the PAT is ${wrapped}\nAlice: rotate quarterly`,
+      entities: [{ id: 'e1', kind: 'action', text: `Rotate ${key}`, quote: `the new key is ${key}` }],
+    },
+  });
+  const res = makeRes();
+  assert.equal(await handleKB(req, res), true);
+  assert.equal(res.statusCode, 200, res._body);
+
+  const transcript = db.getMeetingTranscript(u.id, 'm-redact-1');
+  const dump = JSON.stringify({
+    transcript,
+    byWord: db.search(u.id, { q: 'quarterly' }),
+    byKey: db.search(u.id, { q: key }),
+  });
+  assert.equal(dump.includes(key), false, 'raw AWS key must not be stored or searchable');
+  assert.equal(dump.includes('ghp_aaaa'), false, 'line-wrapped PAT must not be stored');
+  assert.ok(dump.includes('[REDACTED]'), 'marker should be present where the key was');
+  assert.ok(dump.includes('rotate quarterly'), 'ordinary transcript text is untouched');
+});
+
 test('POST /kb/connect-git rejects an un-allowlisted path with 403 PATH_NOT_APPROVED', async () => {
   resetDb();
   const userId = 'u-test-' + Date.now();

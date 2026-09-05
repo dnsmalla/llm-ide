@@ -15,27 +15,36 @@ import {
 import { outcomeStats as outcomeStatsImpl } from './outcomes.mjs';
 import { recordActivity } from './activity.mjs';
 import { logger } from '../core/logger.mjs';
+import { redactSecretsForStorage } from '../core/redact-secrets.mjs';
 
 const ALLOWED_KINDS = new Set(['action', 'decision', 'blocker']);
 
 // ── Writes ────────────────────────────────────────────────────────
 
+// Everything written here is indexed by FTS5 and re-surfaced by search, the
+// Library UI, and prompt grounding — so a credential read aloud in a meeting
+// (or pasted into a transcript) would otherwise be replayed into every later
+// LLM call. Redaction happens HERE, not in the route, so every caller of
+// ingestMeeting gets it. Secrets only: emails and names are meeting content.
 export function ingestMeeting(userId, input) {
   requireUser(userId);
   const db = getDb();
+  const transcriptRaw = typeof input.transcript === 'string' ? input.transcript : '';
+  const transcript = redactSecretsForStorage(transcriptRaw);
   const meta = {
     ...(input.meta && typeof input.meta === 'object' ? input.meta : {}),
     ...(input.projectId ? { projectId: String(input.projectId).slice(0, 64) } : {}),
+    ...(transcript !== transcriptRaw ? { secretsRedacted: true } : {}),
   };
   const meeting = {
     id: String(input.id || ''),
     user_id: userId,
-    title: String(input.title || 'Untitled meeting'),
+    title: redactSecretsForStorage(String(input.title || 'Untitled meeting')),
     date: String(input.date || new Date().toISOString()),
     duration_sec: Number.isFinite(input.duration) ? Math.round(input.duration) : 0,
     language: input.language ? String(input.language) : null,
     participants: safeJSONStringify(Array.isArray(input.participants) ? input.participants : []),
-    transcript: typeof input.transcript === 'string' ? input.transcript : '',
+    transcript,
     meta: safeJSONStringify(meta),
   };
   if (!meeting.id) throw new Error('Missing meeting id');
@@ -79,9 +88,9 @@ export function ingestMeeting(userId, input) {
         meeting_id: m.id,
         user_id: userId,
         kind: e.kind,
-        text: String(e.text).slice(0, 2000),
+        text: redactSecretsForStorage(String(e.text).slice(0, 2000)),
         meta: safeJSONStringify(e.meta || {}),
-        quote: e.quote ? String(e.quote).slice(0, 500) : null,
+        quote: e.quote ? redactSecretsForStorage(String(e.quote).slice(0, 500)) : null,
       });
     }
   });
@@ -89,7 +98,8 @@ export function ingestMeeting(userId, input) {
   const entityList = Array.isArray(input.entities) ? input.entities : [];
   tx(meeting, entityList);
 
-  const title = String(input.title || 'Untitled meeting');
+  // The redacted title, so the activity feed never carries what the row doesn't.
+  const { title } = meeting;
   const participantCount = Array.isArray(input.participants) ? input.participants.length : 0;
   const date = String(input.date || new Date().toISOString());
   try {

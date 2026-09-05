@@ -4,6 +4,7 @@
 // (mac/Sources/LlmIdeMac/Services/ChatSessionStore.swift), not this table.
 import crypto from 'node:crypto';
 import { getDb, requireUser, lazyPrepare } from './db.mjs';
+import { redactSecretsForStorage } from '../core/redact-secrets.mjs';
 
 const TITLE_MAX = 120;
 const CONTENT_MAX = 64_000;
@@ -22,8 +23,10 @@ function nowSec() {
   return Date.now() / 1000;
 }
 
+// Titles are client-supplied and often derived from the first message, so a
+// pasted key can land here too — same redaction as the messages.
 function normTitle(raw) {
-  const t = String(raw || '').trim();
+  const t = redactSecretsForStorage(String(raw || '')).trim();
   return t ? t.slice(0, TITLE_MAX) : 'New chat';
 }
 
@@ -155,11 +158,16 @@ export function clearChatMessages(userId, sessionId) {
 export function appendChatMessage(userId, sessionId, { role, content, meta = null }) {
   requireUser(userId);
   if (!ROLES.has(role)) throw new Error(`invalid role: ${role}`);
-  const text = String(content || '').slice(0, CONTENT_MAX);
+  // Stored transcripts come back as chat history and search hits, so a key a
+  // user pastes ("configure it with sk-ant-…") must not be persisted as-is.
+  // Redacted at the write, not the route, so every caller is covered. The
+  // marker contains no quote characters, so redacting inside meta JSON keeps
+  // it parseable.
+  const text = redactSecretsForStorage(String(content || '').slice(0, CONTENT_MAX));
   if (!text) throw new Error('content is required');
   let metaJson = null;
   if (meta != null) {
-    metaJson = JSON.stringify(meta).slice(0, META_MAX);
+    metaJson = redactSecretsForStorage(JSON.stringify(meta).slice(0, META_MAX));
   }
   const db = getDb();
   const tx = db.transaction((uid, sid, r, c, m) => {

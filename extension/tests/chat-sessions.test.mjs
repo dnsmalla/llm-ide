@@ -44,6 +44,36 @@ test('create, append, list messages chronological', () => {
   assert.equal(loaded.messages[1].content, 'hi there');
 });
 
+test('appendChatMessage redacts secrets at the write — a pasted key never reaches chat_messages', () => {
+  reset();
+  const u = provision('redact@example.test');
+  const session = db.createChatSession(u.id, { title: 'Setup', surface: 'extension', mode: 'transcript' });
+  const key = 'sk-ant-api03-' + 'k'.repeat(30);
+  const laced = 'AKIA' + 'Q'.repeat(8) + '\u200B' + 'Q'.repeat(8);
+  db.appendChatMessage(u.id, session.id, {
+    role: 'user',
+    content: `configure it with ${key} and ${laced} please`,
+    meta: { attachment: `token ${key}` },
+  });
+  const loaded = db.getChatSession(u.id, session.id);
+  assert.equal(loaded.messages[0].content, 'configure it with [REDACTED] and [REDACTED] please');
+  const dump = JSON.stringify(loaded);
+  assert.equal(dump.includes(key), false, 'raw key must not survive in content or meta');
+  assert.equal(dump.includes('QQQQQQQQ'), false, 'laced key must not survive');
+});
+
+test('session titles are redacted on create and update — titles are often the first message', () => {
+  reset();
+  const u = provision('title-redact@example.test');
+  const key = 'ghp_' + 'a'.repeat(36);
+  const session = db.createChatSession(u.id, { title: `Set up ${key}`, surface: 'extension', mode: 'ask' });
+  assert.equal(session.title, 'Set up [REDACTED]');
+  db.updateChatSession(u.id, session.id, { title: `Rotate ${key} now` });
+  const loaded = db.getChatSession(u.id, session.id);
+  assert.equal(loaded.title, 'Rotate [REDACTED] now');
+  assert.equal(JSON.stringify(db.listChatSessions(u.id)).includes(key), false);
+});
+
 test('sessions are isolated per user', () => {
   reset();
   const a = provision('a@example.test');
