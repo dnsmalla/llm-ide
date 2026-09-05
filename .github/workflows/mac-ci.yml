@@ -22,6 +22,9 @@ jobs:
   build-test:
     name: Build & test
     runs-on: macos-15
+    # Backstop only — the Test step has its own 15-minute watchdog so the
+    # annotation steps below still get to run and name the hanging test.
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: mac
@@ -49,11 +52,30 @@ jobs:
       # annotations and artifacts are readable by anyone with the run URL — so
       # a failing `swift test` has to publish its own evidence (next two
       # steps). pipefail keeps tee from masking the test exit code.
+      # A green run takes ~3 minutes; a hung test would otherwise sit until the
+      # job timeout, where nothing that follows gets to run. `swift test` is
+      # started in its own process group so the watchdog can take the `xctest`
+      # child down with it — killing only the parent leaves the child holding
+      # the log open. Exit 124 = killed by the watchdog.
       - name: Test
         shell: bash
         run: |
-          set -o pipefail
-          swift test 2>&1 | tee swift-test.log
+          set -m
+          swift test > swift-test.log 2>&1 &
+          pid=$!
+          set +m
+          for _ in $(seq 1 90); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 10
+          done
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "::error::swift test still running after 15 minutes — killed; see the 'last started' annotations for the hanging test"
+            kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+            sleep 5
+            kill -KILL -- "-$pid" 2>/dev/null || true
+            exit 124
+          fi
+          wait "$pid"
 
       # XCTest assertion failures and compile errors share one shape,
       # "<path>:<line>: error: <message>"; those become file/line annotations.
@@ -74,6 +96,11 @@ jobs:
         shell: bash
         run: |
           echo "::notice::swift-test.log has $(wc -l < swift-test.log | tr -d ' ') lines"
+          # XCTest announces every case before running it, so the last few
+          # "started" lines identify a hang; the passed/failed counts say how far
+          # the suite got.
+          grep -E "Test Case .* started" swift-test.log | tail -3 | cut -c1-500 | sed 's/^/::error::[last started] /' || true
+          echo "::notice::cases started=$(grep -cE 'Test Case .* started' swift-test.log || true) passed=$(grep -cE 'Test Case .* passed' swift-test.log || true) failed=$(grep -cE 'Test Case .* failed' swift-test.log || true)"
           tail -30 swift-test.log | cut -c1-1500 | sed 's/%/%25/g' > tail.txt
           sed -n '1,10p'  tail.txt | sed 's/^/::notice::[tail -30..-21] /'
           sed -n '11,20p' tail.txt | sed 's/^/::warning::[tail -20..-11] /'
