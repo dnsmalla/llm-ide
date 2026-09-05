@@ -14,15 +14,14 @@
 // doesn't violate the constraint above. It's used to scrub the raw matched
 // value out of secret findings before they're persisted/returned — see
 // findMatches(..., { redact: true }) below.
-import { redactSecrets } from '../core/redact-secrets.mjs';
+import { redactSecrets, ZERO_WIDTH_RE } from '../core/redact-secrets.mjs';
 
 // Zero-width characters an attacker can embed inside a token to defeat the
-// whitespace-collapse evasion pass: U+200B ZWSP, U+200C ZWNJ, U+200D ZWJ,
-// U+2060 word-joiner, U+FEFF BOM/ZWNBSP. Written as an escaped alternation
-// (not a character class) because invisible literals are editor-fragile and
-// escaped ZWJ inside a class trips no-misleading-character-class. Exported so
-// scan.mjs strips the exact same set — the two evasion passes must not drift.
-export const ZERO_WIDTH_RE = /(?:\u200B|\u200C|\u200D|\u2060|\uFEFF)+/g;
+// whitespace-collapse evasion pass. Defined ONCE in core/redact-secrets.mjs
+// (the storage-time redactor needs the same set) and re-exported here so
+// scan.mjs strips exactly what findMatches strips — the evasion passes must
+// not drift.
+export { ZERO_WIDTH_RE };
 
 // Exported so scan.mjs can import the same list instead of maintaining
 // a parallel copy that could silently drift out of sync.
