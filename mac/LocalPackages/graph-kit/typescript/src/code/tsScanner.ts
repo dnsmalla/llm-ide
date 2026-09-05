@@ -16,10 +16,13 @@ import type { CGData, CGEdge, CGNode, CGNodeKind } from "../models.js";
 import { EXCLUDED_DIRS } from "../exclusions.js";
 import { loadScipIndex, parseScipJson } from "./scipScanner.js";
 
-const CODE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"]);
+// .mjs/.cjs belong here: `language()` below already maps them to javascript,
+// but omitting them from discovery made every ESM-only tree (the whole Node
+// server under extension/) scan to 0 nodes.
+const CODE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"]);
 // Dotted dirs (.git, .graphkit) are covered by the walk's startsWith(".") check.
 const SKIP_DIRS = EXCLUDED_DIRS;
-const RESOLVE_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"];
+const RESOLVE_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
 
 interface Heritage {
   symbolId: string;
