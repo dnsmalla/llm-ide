@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { isDeniedPath } from '../runtime/handlers/repo-files.mjs';
+import { homedir } from 'node:os';
+import { isDeniedPath, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
 
 //
 // Safety classification for 'act'-kind registry entries (tools/registry.mjs),
@@ -49,7 +50,118 @@ const AUTO_SAFE_PATTERNS = [
 // of (that fix removed one pattern; this addresses the cause).
 const SHELL_CONTROL_RE = /[;&|`<>\n\r]|\$\(/;
 
-export function runBashGate(command) {
+// Expansion syntax — `$` (parameter substitution), `*` `?` `[` (globs), `{`
+// (brace expansion) — makes the shell open a path we never inspected, so
+// `cat ~/.a*/credentials` or `cat $HOME/.aws/x` would slip past the
+// sensitive-path check below while reading the same file. Only UNQUOTED
+// occurrences expand (`$` also inside double quotes), which is what keeps
+// `grep -rn "handler[0-9]*" src` on the auto tier: regex metacharacters inside
+// quotes are literal to /bin/sh. An unterminated quote is unparseable and
+// therefore not auto-safe.
+function hasUnquotedExpansion(cmd) {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < cmd.length; i += 1) {
+    const ch = cmd[i];
+    if (inSingle) {
+      if (ch === "'") inSingle = false;
+      continue;
+    }
+    if (ch === '\\') {
+      i += 1;
+      continue;
+    }
+    if (ch === '$') return true;
+    if (inDouble) {
+      if (ch === '"') inDouble = false;
+      continue;
+    }
+    if (ch === "'") inSingle = true;
+    else if (ch === '"') inDouble = true;
+    else if ('*?[{'.includes(ch)) return true;
+  }
+  return inSingle || inDouble;
+}
+
+// The shell strips quotes (and, on POSIX, backslash escapes) before it opens a
+// file, so the gate compares the string the shell will: `~/".aws"/x` and
+// `~/.a\ws/x` are both `~/.aws/x`. On win32 `\` is the separator and is kept.
+function shellLiteral(token) {
+  const unquoted = token.replace(/['"]/g, '');
+  return process.platform === 'win32' ? unquoted : unquoted.replace(/\\/g, '');
+}
+
+// A path under $HOME whose first segment is a dotdir/dotfile (~/.config,
+// ~/.zshrc, ~/.claude) or ~/Library holds credentials for tools the denylist
+// does not know by name (gh hosts.yml, gcloud, Keychains, app tokens), and a
+// recursive grep rooted there reads them all. Case-insensitive like the
+// denylist.
+function isHomePrivateArea(abs) {
+  const rel = path.relative(homedir().toLowerCase(), abs.toLowerCase());
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+  const first = rel.split(/[\\/]/)[0];
+  return first.startsWith('.') || first === 'library';
+}
+
+// Sensitive = on the denylist, OR a root broad enough that a recursive
+// `grep -r` / `rg` / `ls -R` would walk INTO one (`~`, `/`, anything
+// isTooBroadRoot rejects — the trailing separator is trimmed first so
+// `~//` cannot dodge the `=== home` compare), OR a private area of $HOME.
+function isSensitiveAbsolute(abs) {
+  const norm = path.normalize(abs).replace(/[\\/]+$/, '') || path.sep;
+  return isDeniedPath(norm) || isTooBroadRoot(norm) || isHomePrivateArea(norm);
+}
+
+function hasDotDot(p) {
+  return p.split(/[\\/]/).includes('..');
+}
+
+// True when the cwd or any token of a (quote-free, expansion-free) command
+// names a sensitive path. Relative tokens are resolved against `cwd` when the
+// caller knows it (both engines do), so `cat ../package.json` in a monorepo
+// stays auto while `grep -r AKIA ..` from ~/proj resolves to ~ and prompts.
+// Without a cwd, `..` climbs out of somewhere we cannot see and prompts.
+// `~name` is another user's home, which we cannot resolve either.
+//
+// Known limit: this is a string check. A symlink inside the workspace that
+// points at ~/.aws/credentials is invisible here; the read-file tool's
+// realpath containment is the layer that catches that, not the bash gate.
+function namesSensitivePath(cmd, cwd) {
+  let root = null;
+  if (typeof cwd === 'string' && cwd) {
+    // A relative cwd cannot be rooted here (the registry gate has no ctx), and
+    // `{cwd: ".config/gh"}` relocates every token into a directory we never
+    // saw — same rule as `~name`: unresolvable means prompt. Callers that
+    // know the workspace resolve first and pass an absolute cwd.
+    if (!path.isAbsolute(cwd)) return true;
+    if (isSensitiveAbsolute(cwd)) return true;
+    root = cwd;
+  }
+  return cmd.split(/\s+/).some((token) => {
+    const bare = shellLiteral(token);
+    if (!bare) return false;
+    if (isDeniedPath(bare)) return true;
+    if (bare.startsWith('~')) {
+      if (!bare.startsWith('~/')) return true;
+      return isSensitiveAbsolute(path.join(homedir(), bare.slice(2)));
+    }
+    if (path.isAbsolute(bare)) return isSensitiveAbsolute(bare);
+    if (root) return isSensitiveAbsolute(path.resolve(root, bare));
+    return hasDotDot(bare);
+  });
+}
+
+/**
+ * Classify a bash command for the approval ladder.
+ *
+ * @param {string} command  The raw string that will reach `/bin/sh -c`.
+ * @param {string} [cwd]    The directory the command will run in, when the
+ *   caller knows it (the SDK's cwd on v2; the resolved run-bash cwd on
+ *   legacy). Relative path tokens are judged against it; omit it and `..`
+ *   tokens fall back to 'prompt'.
+ * @returns {'blocked'|'auto'|'prompt'}
+ */
+export function runBashGate(command, cwd) {
   const cmd = typeof command === 'string' ? command : '';
   // Blocklist first, unconditionally — a blocked command stays blocked
   // regardless of anything below (spec §7).
@@ -57,8 +169,15 @@ export function runBashGate(command) {
   // Compound/expanding commands are never auto-safe. Checked BEFORE the
   // allowlist so a matching prefix cannot smuggle a tail past it.
   if (SHELL_CONTROL_RE.test(cmd)) return 'prompt';
-  if (AUTO_SAFE_PATTERNS.some((re) => re.test(cmd.trim()))) return 'auto';
-  return 'prompt';
+  if (!AUTO_SAFE_PATTERNS.some((re) => re.test(cmd.trim()))) return 'prompt';
+  // An auto-safe prefix says nothing about WHICH file it reads. Refuse the
+  // auto tier when the command could expand into a path we never saw, or
+  // names a sensitive path / over-broad root outright, so
+  // `cat ~/.aws/credentials` cannot run unattended. 'prompt', not 'blocked':
+  // token parsing of a shell string is heuristic, and a false positive must
+  // stay approvable by the user.
+  if (hasUnquotedExpansion(cmd) || namesSensitivePath(cmd, cwd)) return 'prompt';
+  return 'auto';
 }
 
 export function autoGate() {

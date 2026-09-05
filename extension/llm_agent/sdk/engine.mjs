@@ -739,7 +739,9 @@ export async function runAgentV2Turn(
         return { behavior: 'deny', message: `${toolName} is not available in ${requestedMode} mode.` };
       }
       if (toolName === 'Bash') {
-        const decision = runBashGate(input?.command);
+        // The SDK runs native Bash in cwd=workspaceRoot (buildEngineOptions),
+        // so relative path tokens are judged against that directory.
+        const decision = runBashGate(input?.command, workspaceRoot);
         if (decision === 'blocked') return { behavior: 'deny', message: 'Command blocked for safety.' };
         if (decision === 'auto' || hasAlwaysAllow(userId, 'Bash')) {
           return { behavior: 'allow', updatedInput: input };

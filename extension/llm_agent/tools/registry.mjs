@@ -30,7 +30,7 @@ import { handleListFiles, handleReadFile } from '../runtime/handlers/repo-files.
 import { handleFindCode } from '../runtime/handlers/find-code.mjs';
 import { searchKb } from '../runtime/handlers/search-kb.mjs';
 import { tasks } from '../runtime/handlers/session-tasks.mjs';
-import { handleRunBash } from '../runtime/handlers/run-bash.mjs';
+import { handleRunBash, resolveBashCwd } from '../runtime/handlers/run-bash.mjs';
 import { handleProjectMemory } from '../runtime/handlers/project-memory.mjs';
 import { handleLoadSkill } from '../runtime/handlers/load-skill.mjs';
 import { runBashGate, autoGate } from './gates.mjs';
@@ -105,7 +105,11 @@ const ENTRIES = [
   {
     name: 'run-bash',
     kind: 'act',
-    gate: (args) => runBashGate(args.command),
+    // The gate sees `args.cwd` too: a relocated command must be judged where
+    // it will run, not where the workspace is. (No ctx here, so a relative
+    // cwd cannot be rooted and prompts; handleRunBash's containment is the
+    // backstop once approved.)
+    gate: (args) => runBashGate(args.command, args.cwd),
     async execute(args, ctx) {
       // ONE gate per engine. `ctx.loopCtx` is the discriminator:
       //
@@ -129,7 +133,13 @@ const ENTRIES = [
       // see the identical fix + rationale in Task 7's canUseTool. Checking
       // always-allow before the gate would let a run-bash always-allowed for
       // one safe command bypass the blocked check on every later invocation.
-      const decision = runBashGate(args.command);
+      // Judge the command in the directory it will actually run in — the
+      // same resolution handleRunBash performs (and refuses when a
+      // model-supplied cwd escapes the workspace).
+      const bashCtx = { workspaceRoot: ctx.agentContext?.workspaceRoot };
+      const resolvedCwd = resolveBashCwd(args, bashCtx);
+      if (resolvedCwd.error) return { error: resolvedCwd.error };
+      const decision = runBashGate(args.command, resolvedCwd.cwd);
       if (decision === 'blocked') return { error: 'Command blocked for safety. Confirm destructive operations with the user before running.' };
       if (decision === 'auto') return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
       // decision === 'prompt' — always-allow only matters here.

@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -8,6 +9,50 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_CHARS = 20_000;
+
+// True when `target` is an existing directory at or below `root`, after
+// resolving symlinks on both sides.
+function isDirectoryWithinRoot(target, root) {
+  let real;
+  let realRoot;
+  try {
+    real = fs.realpathSync(target);
+    realRoot = fs.realpathSync(root);
+    if (!fs.statSync(real).isDirectory()) return false;
+  } catch {
+    return false;
+  }
+  return real === realRoot || real.startsWith(realRoot + path.sep);
+}
+
+/**
+ * Resolve the directory a run-bash call will execute in: explicit arg →
+ * workspace root → home.
+ *
+ * A model-supplied `cwd` is resolved against the workspace and must be an
+ * existing directory inside it (realpath containment, like writePathGate).
+ * Without that, `{ cwd: "/Users/me/.aws", command: "cat credentials" }`
+ * relocates a gate-approved command onto a file the gate never saw — so with
+ * no workspace open there is nothing to contain it in, and it is refused
+ * rather than resolved against $HOME. Exported so the gate judges the SAME
+ * directory the command will actually run in.
+ *
+ * @returns {{ cwd: string } | { error: string }}
+ */
+export function resolveBashCwd(args, ctx = {}) {
+  const workspaceRoot = ctx?.workspaceRoot ? path.resolve(ctx.workspaceRoot) : null;
+  if (typeof args?.cwd !== 'string' || !args.cwd) {
+    return { cwd: workspaceRoot ?? os.homedir() };
+  }
+  if (!workspaceRoot) {
+    return { error: 'cwd requires an open project workspace; omit cwd or open a project folder first.' };
+  }
+  const cwd = path.resolve(workspaceRoot, args.cwd);
+  if (!isDirectoryWithinRoot(cwd, workspaceRoot)) {
+    return { error: `cwd must be an existing directory inside the project workspace (${workspaceRoot}).` };
+  }
+  return { cwd };
+}
 
 /**
  * Execute a shell command and return stdout + stderr.
@@ -27,10 +72,9 @@ export async function handleRunBash(args, ctx = {}) {
     MAX_TIMEOUT_MS,
   );
 
-  // Resolve working directory: explicit arg → workspace root → home.
-  const cwd = args?.cwd
-    ? path.resolve(args.cwd)
-    : (ctx?.workspaceRoot ? path.resolve(ctx.workspaceRoot) : os.homedir());
+  const resolved = resolveBashCwd(args, ctx);
+  if (resolved.error) return { error: resolved.error };
+  const { cwd } = resolved;
 
   try {
     const { stdout, stderr } = await execFileAsync(
