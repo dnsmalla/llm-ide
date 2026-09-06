@@ -70,4 +70,68 @@ final class DocGenTreeSelectionTests: XCTestCase {
         XCTAssertTrue(result.contains(other))
         XCTAssertEqual(result.count, 4)
     }
+
+    // MARK: - states(forForest:) — rows read this, not state(for:), so it needs
+    // its own coverage (see DocGenTreeSelection.states doc comment).
+
+    /// Adds, versus `tree()`: a nested folder-of-folders with NO file leaves
+    /// anywhere beneath it (`empty-parent/empty-child/`), to exercise the
+    /// vacuous 0-of-0 case at two folder depths.
+    private func mixedTree() -> FSNode {
+        folder("/repo", [
+            folder("/repo/src", [file("/repo/src/a.swift"), file("/repo/src/b.swift")]),
+            folder("/repo/empty-parent", [folder("/repo/empty-parent/empty-child", [])]),
+            file("/repo/README.md"),
+        ])
+    }
+
+    private func allNodes(_ node: FSNode) -> [FSNode] {
+        [node] + node.children.flatMap(allNodes)
+    }
+
+    func testStatesForForestIsPartialAtEveryAncestorOfAMixedSelection() {
+        let selected: Set<DocGenSource> = [
+            .file(url: URL(fileURLWithPath: "/repo/src/a.swift"), name: "a.swift"),
+            .file(url: URL(fileURLWithPath: "/repo/README.md"), name: "README.md"),
+        ]
+        let states = DocGenTreeSelection.states(forForest: [mixedTree()], selected: selected)
+
+        XCTAssertEqual(states["/repo"], .partial)
+        XCTAssertEqual(states["/repo/src"], .partial)
+        XCTAssertEqual(states["/repo/src/a.swift"], .all)
+        XCTAssertEqual(states["/repo/src/b.swift"], .none)
+        XCTAssertEqual(states["/repo/README.md"], .all)
+    }
+
+    func testStatesForForestFolderWithZeroFileLeavesIsNeverAll() {
+        let tree = mixedTree()
+
+        // Even when every actual file leaf in the forest is selected, a
+        // folder whose subtree has ZERO file leaves must still read as
+        // `.none` — a vacuous 0-of-0 comparison (hits == total when
+        // total == 0) must never be mistaken for "fully selected".
+        let everyLeaf = Set(DocGenTreeSelection.fileLeaves(of: tree).map {
+            DocGenSource.file(url: $0.url, name: $0.name)
+        })
+        let states = DocGenTreeSelection.states(forForest: [tree], selected: everyLeaf)
+
+        XCTAssertEqual(states["/repo"], .all)
+        XCTAssertEqual(states["/repo/empty-parent"], .none)
+        XCTAssertEqual(states["/repo/empty-parent/empty-child"], .none)
+    }
+
+    func testStatesForForestAgreesWithPerNodeStateForEveryNode() {
+        let tree = mixedTree()
+        let selected: Set<DocGenSource> = [
+            .file(url: URL(fileURLWithPath: "/repo/src/a.swift"), name: "a.swift")
+        ]
+        let states = DocGenTreeSelection.states(forForest: [tree], selected: selected)
+
+        for node in allNodes(tree) {
+            XCTAssertEqual(
+                states[node.id],
+                DocGenTreeSelection.state(for: node, selected: selected),
+                "states(forForest:) disagrees with state(for:) at \(node.id)")
+        }
+    }
 }
