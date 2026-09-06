@@ -38,6 +38,16 @@ struct DocGenPromptBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(Color(nsColor: .windowBackgroundColor))
+        // The document only actually changes on a SUCCESSFUL generate or
+        // applyEdit (a failed revision leaves `editedContent` untouched by
+        // design — see `DocGenViewModel.applyEdit`). So this is the signal
+        // to collapse the edit field back to the compact action row; on
+        // failure it fires nothing, and the field stays open with
+        // `vm.editError` visible so the user can retry without losing their
+        // typed instruction or the document underneath.
+        .onChange(of: vm.editedContent) { _, _ in
+            isShowingEditField = false
+        }
     }
 
     // MARK: - Idle
@@ -158,6 +168,7 @@ struct DocGenPromptBar: View {
         HStack(spacing: 8) {
             Button {
                 isShowingEditField = true
+                vm.editError = nil // defensive: no stale error from an earlier attempt
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "pencil").font(.system(size: 11))
@@ -197,8 +208,38 @@ struct DocGenPromptBar: View {
     /// editor. The document itself (`DocGenEditorPanel`) always stays
     /// read-only; typing an instruction here and pressing Apply Edit sends
     /// the current document back through `/generate-doc` for a full rewrite.
+    ///
+    /// Deliberately does NOT collapse back to `actionRow` when Apply Edit is
+    /// pressed — only a successful revision does that (via the `onChange`
+    /// on `body`). A failure keeps this field open, with `vm.editError`
+    /// shown above it and the typed instruction still in place, so the user
+    /// can adjust and retry without the document ever disappearing.
     private var editPromptRow: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let error = vm.editError {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(theme.current.danger)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button {
+                        vm.editError = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Dismiss")
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(theme.current.danger.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
+
             TextField("Describe the change (e.g. \"Add a risks section\")",
                       text: $vm.editPrompt, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -216,6 +257,7 @@ struct DocGenPromptBar: View {
                 Button {
                     isShowingEditField = false
                     vm.editPrompt = ""
+                    vm.editError = nil
                 } label: {
                     Text("Cancel")
                         .font(.callout)
@@ -227,7 +269,6 @@ struct DocGenPromptBar: View {
 
                 let canApply = !vm.editPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 Button {
-                    isShowingEditField = false
                     vm.applyEdit(api: api)
                 } label: {
                     HStack(spacing: 5) {

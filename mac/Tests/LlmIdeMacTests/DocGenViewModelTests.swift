@@ -93,4 +93,79 @@ final class DocGenViewModelTests: XCTestCase {
         vm.cancelGeneration()
         XCTAssertFalse(vm.isBusy)
     }
+
+    // MARK: - Revision failure invariant: no worse than before pressing Apply
+
+    /// `LlmIdeAPIClient(baseURL:)` with no `sessionStore` makes
+    /// `generateDoc(...)` throw `APIError.noSession` deterministically,
+    /// with no real network I/O — a convenient, fast, always-reproducible
+    /// stand-in for "the revision request failed" (which is exactly what a
+    /// timeout, rate limit, 5xx, or a 400 from `validateDocRequest` would
+    /// also produce: an error caught by `applyEdit`'s `catch`).
+    private func failingAPI() -> LlmIdeAPIClient {
+        LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+    }
+
+    func testFailedRevisionPreservesDocument() async throws {
+        let vm = DocGenViewModel()
+        let original = "# Sprint Review\n\nOriginal content the user has not saved yet."
+        vm.editedContent = original
+        vm.editPrompt = "Make section 2 shorter"
+
+        vm.applyEdit(api: failingAPI())
+        XCTAssertTrue(vm.isBusy, "should flip to .generating synchronously, same as generate()")
+
+        // Let the scheduled Task run to completion — generateDoc throws
+        // .noSession with no real network wait, so this is generous, not tight.
+        try? await Task.sleep(nanoseconds: 300_000_000)
+
+        XCTAssertFalse(vm.isBusy)
+        XCTAssertEqual(vm.editedContent, original,
+                       "a failed revision must not lose the document that was there before Apply Edit")
+        XCTAssertNotNil(vm.editError, "the failure must be reported, not silently swallowed")
+        switch vm.generationState {
+        case .done(let text, _):
+            XCTAssertEqual(text, original)
+        default:
+            XCTFail("expected generationState back at .done(<pre-edit document>), got \(vm.generationState)")
+        }
+    }
+
+    func testCancelledRevisionRestoresPriorDocument() {
+        let vm = DocGenViewModel()
+        let original = "# Sprint Review\n\nOriginal content the user has not saved yet."
+        vm.editedContent = original
+        vm.editPrompt = "Add a risks section"
+
+        vm.applyEdit(api: failingAPI())
+        XCTAssertTrue(vm.isBusy)
+        vm.cancelGeneration()
+
+        XCTAssertFalse(vm.isBusy)
+        XCTAssertEqual(vm.editedContent, original,
+                       "cancelling a revision must not lose the document that was there before Apply Edit")
+        switch vm.generationState {
+        case .done(let text, _):
+            XCTAssertEqual(text, original)
+        default:
+            XCTFail("expected cancelling a revision to restore .done(<pre-edit document>), got \(vm.generationState)")
+        }
+    }
+
+    func testOversizedDocumentRefusesRevisionWithoutSending() {
+        let vm = DocGenViewModel()
+        let oversized = String(repeating: "a", count: 50_001) // one over the mirrored server cap
+        vm.editedContent = oversized
+        vm.editPrompt = "Shorten this"
+
+        vm.applyEdit(api: failingAPI())
+
+        // Refused synchronously — never even reaches .generating, so there's
+        // no truncated round-trip to silently overwrite the original with.
+        XCTAssertFalse(vm.isBusy)
+        XCTAssertEqual(vm.editedContent, oversized)
+        XCTAssertNotNil(vm.editError)
+        XCTAssertTrue(vm.editError?.contains("50000") == true,
+                     "the message should name the exact limit; got: \(vm.editError ?? "nil")")
+    }
 }

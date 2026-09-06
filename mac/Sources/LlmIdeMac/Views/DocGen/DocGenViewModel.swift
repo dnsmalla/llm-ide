@@ -14,6 +14,14 @@ final class DocGenViewModel: ObservableObject {
     /// make, not free-form document text. Consumed (and cleared) by
     /// `applyEdit(api:)`.
     @Published var editPrompt: String = ""
+    /// A dismissible inline message for the LAST revision attempt only (too
+    /// long to send, request failed, cancelled). NEVER routed through
+    /// `.error(...)` the way `generate()`'s failures are — an initial
+    /// generation has no prior document to protect, but a revision does:
+    /// on failure `applyEdit` leaves `generationState` at
+    /// `.done(<pre-edit document>, ...)` and reports the problem here
+    /// instead, so the document a revision failed to improve is never lost.
+    @Published var editError: String?
     /// The generated document. Owned here, NOT by the editor panel, because
     /// Save and Edit live in the prompt bar and must act on this text. The
     /// document is always read-only in the UI — the only way it changes is a
@@ -39,6 +47,22 @@ final class DocGenViewModel: ObservableObject {
     }
 
     private var generationTask: Task<Void, Never>?
+    /// Snapshot of the document as it stood right before the in-flight
+    /// revision started; nil whenever a fresh `generate()` (not an
+    /// `applyEdit`) is in flight, or when nothing is in flight at all.
+    /// `cancelGeneration()` reads this to know what a Cancel press should
+    /// restore: a fresh generation has no prior document (→ `.idle`), a
+    /// revision does (→ back to `.done(thatDocument, ...)`).
+    private var preRevisionDocument: String?
+
+    /// Mirrors the server's `MAX_SOURCE_CONTENT` cap in
+    /// `extension/server/export-routes.mjs` (`/generate-doc` truncates any
+    /// single source past this length before building the prompt). Checked
+    /// here so a revision of a document past this length is refused up
+    /// front with a clear message, instead of silently revising a
+    /// truncated copy and overwriting the original with the (now
+    /// tail-shorter) result.
+    private static let maxRevisionSourceChars = 50_000
 
     var canGenerate: Bool {
         (selectedTemplate != nil || selectedCommand != nil) && !selectedSources.isEmpty
@@ -66,6 +90,8 @@ final class DocGenViewModel: ObservableObject {
         let command = selectedCommand
         let userPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         generationTask?.cancel()
+        preRevisionDocument = nil // this is a fresh generation, not a revision
+        editError = nil
         generationState = .generating
         unreadableSourceNames = []
 
@@ -133,10 +159,32 @@ final class DocGenViewModel: ObservableObject {
     /// No server change: this is the same endpoint `generate(api:)` calls,
     /// just with the document-so-far as the (only) source instead of the
     /// original meeting/file sources.
+    ///
+    /// Invariant: no revision failure may leave the user with less than
+    /// they had before pressing Apply. Unlike `generate()` — which has no
+    /// prior document to protect, so `.error(...)` is the right terminal
+    /// state for it — a failed or refused revision here always leaves
+    /// `generationState` at `.done(<pre-edit document>, ...)` with
+    /// `editedContent` untouched, and reports the problem via `editError`
+    /// instead. `cancelGeneration()` restores the same way for a cancelled
+    /// revision (see `preRevisionDocument`).
     func applyEdit(api: LlmIdeAPIClient) {
         let instruction = editPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !instruction.isEmpty else { return }
         let currentDocument = editedContent
+
+        // Refuse up front rather than silently revising a truncated copy:
+        // the server truncates any source over maxRevisionSourceChars
+        // before building the prompt, so a document past that would come
+        // back revised-from-a-truncated-copy and overwrite the original
+        // with the (silently shorter) result.
+        guard currentDocument.count <= Self.maxRevisionSourceChars else {
+            editError = "This document is \(currentDocument.count) characters, over the " +
+                "\(Self.maxRevisionSourceChars)-character limit for a single revision. " +
+                "Save it and start a new document for further changes."
+            return
+        }
+
         let template = selectedTemplate
         let command = selectedCommand
 
@@ -156,8 +204,9 @@ final class DocGenViewModel: ObservableObject {
             "return the complete revised document, not a diff or fragment)"
 
         generationTask?.cancel()
+        preRevisionDocument = currentDocument
+        editError = nil
         generationState = .generating
-        unreadableSourceNames = []
 
         generationTask = Task {
             do {
@@ -170,27 +219,45 @@ final class DocGenViewModel: ObservableObject {
                 editedContent = result
                 editPrompt = ""
                 isSaved = false
+                preRevisionDocument = nil
                 generationState = .done(result, skipped: [])
             } catch {
+                // Task.isCancelled here means cancelGeneration() already
+                // restored generationState synchronously — don't clobber it.
                 if !Task.isCancelled {
-                    generationState = .error(error.localizedDescription)
+                    editError = error.localizedDescription
+                    generationState = .done(currentDocument, skipped: [])
+                    preRevisionDocument = nil
                 }
             }
         }
     }
 
+    /// A fresh generation has no prior document, so cancelling it returns to
+    /// `.idle` exactly as before. A revision DOES have a prior document
+    /// (`preRevisionDocument`, snapshotted at the top of `applyEdit`) —
+    /// cancelling it must restore that document rather than dropping to
+    /// `.idle`, per the same no-worse-than-before invariant `applyEdit`'s
+    /// error path upholds.
     func cancelGeneration() {
         generationTask?.cancel()
-        generationState = .idle
         unreadableSourceNames = []
+        if let preRevision = preRevisionDocument {
+            generationState = .done(preRevision, skipped: [])
+        } else {
+            generationState = .idle
+        }
+        preRevisionDocument = nil
     }
 
     func resetToIdle() {
         generationState = .idle
         unreadableSourceNames = []
         editPrompt = ""
+        editError = nil
         editedContent = ""
         isSaved = false
+        preRevisionDocument = nil
     }
 
     /// Write the generated markdown to the configured output folder. Unlike the
