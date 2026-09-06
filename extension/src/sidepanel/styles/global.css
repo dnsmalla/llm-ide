@@ -191,12 +191,6 @@ a:focus-visible {
   flex: 1;
 }
 
-.meeting-title {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  margin-top: 2px;
-}
-
 .meeting-subtitle {
   font-size: var(--text-xs);
   color: var(--color-text-subtle);
@@ -217,12 +211,11 @@ a:focus-visible {
 }
 
 /* ============================================================
-   BUTTONS — consolidated 4-variant system
+   BUTTONS — consolidated 3-variant system
    ============================================================
    .btn-primary   — filled blue   (main CTA)
    .btn-secondary — outlined      (secondary action)
    .btn-ghost     — text-only     (low emphasis)
-   .btn-danger    — red tint      (destructive)
 
    Sizes:
    default → 14px, 8px 16px
@@ -386,24 +379,6 @@ a:focus-visible {
 }
 
 /* Icon-only close button — borderless, used in dialog headers */
-.btn-icon-close {
-  background: transparent;
-  border: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: var(--radius-xs);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition:
-    color var(--transition-fast),
-    background var(--transition-fast);
-}
-.btn-icon-close:hover {
-  color: var(--color-text);
-  background: rgba(255, 255, 255, 0.08);
-}
 
 /* Generic square icon button (e.g. dismiss in banners) */
 .btn.btn-icon {
@@ -412,23 +387,6 @@ a:focus-visible {
 }
 
 /* Danger tint */
-.btn-danger {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  border: none;
-  border-radius: var(--radius-md);
-  padding: 5px var(--space-3);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--transition-fast);
-  background: var(--color-danger-dim);
-  color: var(--color-danger);
-}
-.btn-danger:hover:not(:disabled) {
-  background: rgba(234, 67, 53, 0.28);
-}
 
 /* Pop-out / icon buttons in header */
 .btn-popout {
@@ -455,7 +413,6 @@ a:focus-visible {
 /* ============================================================
    FORM CONTROLS — unified dark system
    ============================================================ */
-.form-input,
 .settings-input,
 .settings-select,
 .settings-textarea,
@@ -478,7 +435,6 @@ a:focus-visible {
     box-shadow var(--transition-fast);
   width: 100%;
 }
-.form-input:focus,
 .settings-input:focus,
 .settings-select:focus,
 .settings-textarea:focus,
@@ -491,7 +447,6 @@ a:focus-visible {
   border-color: var(--color-border-focus);
   box-shadow: 0 0 0 1px var(--color-primary-dim);
 }
-.form-input::placeholder,
 .settings-input::placeholder,
 .settings-textarea::placeholder,
 .chat-input::placeholder,
@@ -606,63 +561,9 @@ a:focus-visible {
 }
 
 /* ============================================================
-   AGENT CONTROLS
+   AGENT STATUS DOT
    ============================================================ */
-.agent-controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  flex-shrink: 0;
-}
-.btn-agent-send,
-.btn-agent-stop {
-  font-size: var(--text-sm);
-  padding: 5px 10px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--color-primary-border);
-  background: transparent;
-  color: var(--color-primary);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background var(--transition-fast);
-}
-.btn-agent-send:hover:not(:disabled),
-.btn-agent-stop:hover:not(:disabled) {
-  background: var(--color-primary-dim);
-}
-.btn-agent-send:disabled,
-.btn-agent-stop:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
 
-.agent-controls.agent-running {
-  padding: 4px var(--space-2);
-  border-radius: var(--radius-pill);
-  background: var(--color-danger-dim);
-  border: 1px solid var(--color-danger-border);
-  align-items: center;
-}
-.agent-running-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-.agent-running-line1 {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.agent-running-line2 {
-  font-size: 10px;
-  color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .agent-status-dot {
   color: var(--color-danger-bright);
 }
@@ -674,152 +575,6 @@ a:focus-visible {
 }
 .agent-status-dot--standby {
   color: #d9a93c;
-}
-.agent-label {
-  font-size: var(--text-sm);
-  color: var(--color-text-subtle);
-}
-.btn-agent-stop {
-  border-color: var(--color-danger-border);
-  color: var(--color-danger);
-}
-.btn-agent-stop:hover:not(:disabled) {
-  background: var(--color-danger-dim);
-}
-.agent-error {
-  font-size: var(--text-xs);
-  color: var(--color-danger-bright);
-  cursor: pointer;
-  user-select: none;
-}
-.agent-mode-hint {
-  font-size: 10px;
-  color: var(--color-text-subtle);
-  font-style: italic;
-}
-
-.agent-controls.agent-editing {
-  flex: 1;
-  min-width: 0;
-}
-
-.agent-diagnose-trigger {
-  background: transparent;
-  border: 1px solid var(--color-danger-border);
-  color: var(--color-danger);
-  font-size: 10px;
-  padding: 2px var(--space-2);
-  margin-left: var(--space-1);
-  border-radius: var(--radius-pill);
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-.agent-diagnose-trigger:hover {
-  background: var(--color-danger-dim);
-}
-.agent-diagnose-trigger-quiet {
-  border-color: rgba(255, 255, 255, 0.15);
-  color: var(--color-text-subtle);
-}
-.agent-diagnose-trigger-quiet:hover {
-  border-color: rgba(255, 255, 255, 0.3);
-  color: var(--color-text-muted);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.agent-diagnose {
-  position: absolute;
-  z-index: 100;
-  top: 100px;
-  left: var(--space-3);
-  right: var(--space-3);
-  max-width: 480px;
-  background: var(--color-bg-1);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  padding: 14px var(--space-4);
-}
-.agent-diagnose-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--color-text);
-  margin-bottom: 10px;
-}
-.agent-diagnose-header button {
-  background: transparent;
-  border: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  font-size: var(--text-base);
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-sm);
-  transition: color var(--transition-fast);
-}
-.agent-diagnose-header button:hover {
-  color: var(--color-text);
-}
-.agent-diagnose-error {
-  color: var(--color-danger);
-  font-size: var(--text-sm);
-  margin: 0;
-}
-.agent-diagnose-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.agent-diagnose-item {
-  display: flex;
-  gap: 10px;
-  padding: var(--space-2) 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-.agent-diagnose-item:first-child {
-  border-top: none;
-}
-.agent-diagnose-mark {
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--text-xs);
-  font-weight: 700;
-}
-.agent-diagnose-item.ok .agent-diagnose-mark {
-  background: rgba(34, 197, 94, 0.18);
-  color: #4ade80;
-}
-.agent-diagnose-item.fail .agent-diagnose-mark {
-  background: var(--color-danger-dim);
-  color: var(--color-danger);
-}
-.agent-diagnose-body {
-  flex: 1;
-  min-width: 0;
-}
-.agent-diagnose-label {
-  font-size: var(--text-sm);
-  color: var(--color-text);
-  margin-bottom: 2px;
-}
-.agent-diagnose-detail {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  word-break: break-word;
-}
-.agent-diagnose-detail code {
-  background: rgba(255, 255, 255, 0.08);
-  padding: 1px 5px;
-  border-radius: var(--radius-xs);
-  font-size: 10px;
-  font-family: var(--font-mono);
 }
 
 /* ============================================================
