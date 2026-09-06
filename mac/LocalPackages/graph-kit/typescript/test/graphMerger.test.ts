@@ -3,6 +3,11 @@ import assert from "node:assert/strict";
 import { mergeCodeAndDoc, normalizeModulePrefix, type MergeChunk } from "../src/build/graphMerger.js";
 import { inlineCodeSpans } from "../src/text/docCodeLinker.js";
 import type { CGData, CGNode } from "../src/models.js";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 function file(path: string): CGNode {
   return {
@@ -143,4 +148,39 @@ test("inlineCodeSpans takes identifiers, not prose", () => {
   assert.deepEqual(inlineCodeSpans("`a phrase in backticks`"), [], "whitespace disqualifies");
   assert.deepEqual(inlineCodeSpans("`x`"), [], "1 char is below the 2-char floor");
   assert.deepEqual(inlineCodeSpans("`dup` and `dup`"), ["dup"], "deduped");
+});
+
+test("the merge CLI refuses a chunk without an id, as Swift refuses it", () => {
+  // Liberal in what it accepts, strict about identity: `id` is the edge
+  // endpoint, so a chunk without one produces edges with an undefined `fromId`
+  // — a graph this tool's own `validate` rejects. Swift's decoder throws on the
+  // same payload; failing here keeps the two engines' contracts aligned.
+  //
+  // Exercised through the CLI, which is where the guard lives: asserting the
+  // predicate inline would only re-state it.
+  const dir = mkdtempSync(join(tmpdir(), "gk-merge-cli-"));
+  try {
+    const empty = join(dir, "empty.json");
+    const noId = join(dir, "chunks.json");
+    writeFileSync(empty, JSON.stringify({ schemaVersion: 1, nodes: [], edges: [], layers: [], tour: [] }));
+    writeFileSync(noId, JSON.stringify([{ body: "x", wikiLinks: [] }]));
+    // dist/test/graphMerger.test.js → graph-kit root is three levels up.
+    const cli = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..",
+                        "bin", "graph-kit.js");
+    const run = spawnSync("node", [
+      cli, "merge", empty, empty, noId, "--out", join(dir, "out.json"),
+    ], { encoding: "utf8" });
+    assert.equal(run.status, 1, "a chunk with no id must not produce a graph");
+    assert.match(run.stderr, /has no string "id"/);
+
+    // The same payload WITH an id merges cleanly, so the guard is not just
+    // rejecting everything.
+    writeFileSync(noId, JSON.stringify([{ id: "chunk:1", body: "x", wikiLinks: [] }]));
+    const ok = spawnSync("node", [
+      cli, "merge", empty, empty, noId, "--out", join(dir, "out.json"),
+    ], { encoding: "utf8" });
+    assert.equal(ok.status, 0, ok.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -143,6 +143,13 @@ function cmdMerge(args: string[]): void {
   // Swift writes `docURL` where this one writes `docPath`, and neither is used.
   const chunks = JSON.parse(readFileSync(chunksPath, "utf8")) as MergeChunk[];
   if (!Array.isArray(chunks)) fail(`${chunksPath} is not a chunk array`);
+  // `id` is the one chunk field Swift's decoder does NOT default — it is the
+  // edge endpoint, so a chunk without one yields edges with an undefined
+  // `fromId`. Swift refuses the payload outright; this side would happily emit
+  // a graph its own `validate` then rejects. Be liberal about the rest, strict
+  // about identity.
+  const missing = chunks.findIndex((c) => typeof c?.id !== "string" || c.id === "");
+  if (missing !== -1) fail(`${chunksPath}: chunk at index ${missing} has no string "id"`);
   const merged = mergeCodeAndDoc(code, doc, chunks);
   const json = serializeDocument(toDocument(merged));
   const outPath = optValue(args, "--out");
