@@ -18,7 +18,7 @@
 - **Conventional Commits**, subject in Japanese or English, ≤50 chars, no trailing period. One concern per commit.
 - **`mac/Package.swift` excludes only `Views/DocGen`** when the `doc_gen` feature is off (line 67). New files under `Models/` and `Services/` compile in *every* build, so they must not reference any type declared inside `Views/DocGen`.
 - **Server caps are fixed values:** 20 sources, 50 000 chars per source, 30 sections, 10 000 chars per command, 2 000 chars per prompt, 8 MB request body.
-- **`SERVER_API_VERSION` is currently `44`** (`extension/server.mjs:145`) and must be bumped to `45` in Task 1 because the wire format changes.
+- **`SERVER_API_VERSION` is currently `43`** (`extension/server.mjs:134` on this branch) and must be bumped to `44` in Task 1 because the wire format changes. (An earlier draft of this plan said 44→45: that reading came from the shared checkout while it sat on `refactor/skills-registry-remove-default-sources`, whose commit `89aa4cd3` had already bumped it. This branch is based on `da08a6a5`, before that bump.)
 - **Swift tests may not execute on this toolchain.** `swift test` has historically failed here for lack of an XCTest runner. Write the test files anyway (CI and other machines run them), but the **mandatory local gate is the three builds** in Task 14. If `swift test` does run, all tests must pass.
 - **Store method naming mirrors `DocTemplateStore`** exactly: `bootstrap()`, `reloadProject*(at:)`, `importMarkdownFile(at:)`, `add(_:)`, `update(_:)`, `delete(id:)`.
 
@@ -256,7 +256,7 @@ Expected: PASS — 5 tests.
 
 - [ ] **Step 6: Bump the server API version**
 
-In `extension/server.mjs:145`, change `const SERVER_API_VERSION = 44;` to `const SERVER_API_VERSION = 45;`.
+In `extension/server.mjs:134`, change `const SERVER_API_VERSION = 43;` to `const SERVER_API_VERSION = 44;`.
 
 - [ ] **Step 7: Run the full extension suite**
 
