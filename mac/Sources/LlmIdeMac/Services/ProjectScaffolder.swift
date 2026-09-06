@@ -123,6 +123,8 @@ enum ProjectScaffolder {
 
         // 7. Doc Gen templates — default subfolders under templates/
         ProjectDocTemplatesSeeder.seedIfNeeded(at: folderURL)
+        // 7b. Doc Gen commands — default subfolders under commands/
+        ProjectDocCommandsSeeder.seedIfNeeded(at: folderURL)
 
         log.info("scaffold complete: \(folderURL.lastPathComponent, privacy: .public)")
     }

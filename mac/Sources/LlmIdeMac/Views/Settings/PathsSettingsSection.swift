@@ -21,6 +21,7 @@ struct ProjectPathsPanel: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var templateStore: DocTemplateStore
+    @EnvironmentObject var commandStore: DocCommandStore
     @Environment(AppEnvironment.self) private var env
 
     @State private var createStatus: String?
@@ -189,6 +190,7 @@ struct ProjectPathsPanel: View {
             try projectStore.rebuildActiveProjectFolders()
             if let root = projectStore.activeProject.map({ URL(fileURLWithPath: $0.localPath) }) {
                 templateStore.reloadProjectTemplates(at: root)
+                commandStore.reloadProjectCommands(at: root)
             }
             createStatus = "Project folders rebuilt. Agent skills refreshing…"
         } catch {
