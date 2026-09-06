@@ -86,13 +86,6 @@ struct UAGraphView: View {
             }
         }
 
-        var runLabel: String {
-            switch self {
-            case .code: return "Generate Code Graph"
-            case .data: return "Generate InfiniteBrain"
-            case .all:  return "Generate Graph"
-            }
-        }
         var description: String {
             switch self {
             case .code: return "Generate code notes + graph for the selected code folder."

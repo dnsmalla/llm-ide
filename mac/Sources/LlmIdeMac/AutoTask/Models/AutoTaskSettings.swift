@@ -319,20 +319,6 @@ final class AutoTaskSettings: ObservableObject {
         setNextFireAt(next, for: task)
     }
 
-    var menuBarSummary: String {
-        guard enabled else { return "Auto Tasks: Disabled" }
-        let count = enabledTasks.count
-        return "Auto Tasks: \(count) enabled"
-    }
-    
-    var lookbackDescription: String {
-        if lookbackByDays {
-            return "Last \(lookbackDays) day\(lookbackDays == 1 ? "" : "s")"
-        } else {
-            return "Last \(lookbackMeetingCount) meeting\(lookbackMeetingCount == 1 ? "" : "s")"
-        }
-    }
-
     /// Map the legacy shared interval (minutes) to a per-task cron seed.
     static func cronFromInterval(_ minutes: Int?) -> String {
         guard let minutes else { return defaultCron }

@@ -174,16 +174,6 @@ public final class NoteService: Sendable {
         repoRoot.appendingPathComponent("llm-doc", isDirectory: true)
     }
 
-    /// Directory for generated meeting notes: notesRoot/meetings/
-    public var meetingsDir: URL {
-        notesRoot.appendingPathComponent("meetings", isDirectory: true)
-    }
-
-    /// Directory for generated email notes: notesRoot/emails/
-    public var emailsDir: URL {
-        notesRoot.appendingPathComponent("emails", isDirectory: true)
-    }
-
     /// Directory for generated document notes: notesRoot/documents/
     public var documentsDir: URL {
         notesRoot.appendingPathComponent("documents", isDirectory: true)

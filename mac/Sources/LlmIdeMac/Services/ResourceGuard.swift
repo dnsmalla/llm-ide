@@ -80,12 +80,6 @@ final class ResourceGuardService: @unchecked Sendable {
     /// its own queue while the dispatch source's handler writes it from another.
     private var lastLevel: MemoryPressure = .normal
 
-    /// Latest observed pressure, for the UI to show why work stopped.
-    var currentLevel: MemoryPressure {
-        lock.lock(); defer { lock.unlock() }
-        return lastLevel
-    }
-
     init(sustainedSeconds: TimeInterval = ResourceGuardService.defaultSustainedSeconds) {
         self.sustainedSeconds = sustainedSeconds
         self.tracker = MemoryPressureTracker(abortAt: .critical, sustainedFor: sustainedSeconds)

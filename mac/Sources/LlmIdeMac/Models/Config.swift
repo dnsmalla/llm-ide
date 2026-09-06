@@ -317,10 +317,6 @@ final class AppConfig: ObservableObject {
         }
     }
 
-    var gitLabActiveProjectId: Int? {
-        gitLabSavedProjects.first(where: { $0.isActive })?.resolvedId
-    }
-
     // ── Repository provider preference ───────────────────────────────
     /// Preferred repo provider for Issues, Gantt, and Code workflows.
     /// When set, the non-preferred provider's repositories/projects are
@@ -358,9 +354,6 @@ final class AppConfig: ObservableObject {
                 defaults.set(data, forKey: "gitHubSavedRepos")
             }
         }
-    }
-    var gitHubActiveRepoId: Int? {
-        gitHubSavedRepos.first(where: { $0.isActive })?.resolvedId
     }
     /// Last-used repo ("owner/name") so the Gantt reopens on the same repo —
     /// the GitHub counterpart of `gitLabLastProjectId`.

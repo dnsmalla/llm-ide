@@ -149,9 +149,6 @@ extension Theme {
     var diffAddedBg: Color { success.opacity(0.16) }
     var diffDeletedFg: Color { danger }
     var diffDeletedBg: Color { danger.opacity(0.16) }
-    var diffModifiedBg: Color { info.opacity(0.16) }
-    /// Word-level (intra-line) diff highlight, used by the Monaco diff editor.
-    var diffWordHighlight: Color { warning.opacity(0.35) }
 
     // Editor gutter marks (added/modified/deleted line markers).
     var gutterAddedMark: Color { success }
