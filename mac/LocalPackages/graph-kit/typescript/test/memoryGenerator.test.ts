@@ -131,3 +131,63 @@ test("skips vendor and build directories (node_modules, dist, build, vendor, cov
     },
   );
 });
+
+// --------------------------------------------------------------------------
+// Swift parity: `graph-only` and `related-modules`
+//
+// These two frontmatter keys drive real behaviour on the Swift side —
+// `graphOnly` keeps a doc out of the agent-facing memory artifacts, and
+// `relatedModules` is what the merge step turns into documents/EXTRACTED
+// doc→code edges. The port dropped both, and because Swift's decoder defaults
+// them (`false` / `[]`) a plugin emitting chunks without them degraded
+// SILENTLY: no error, just zero declared-module edges and graph-only docs
+// leaking into memory artifacts.
+// --------------------------------------------------------------------------
+
+test("frontmatter graph-only and related-modules reach every chunk", () => {
+  withTempVault(
+    {
+      "spec.md":
+        "---\ntype: note\ngraph-only: true\nrelated-modules: [kb, src/app]\n---\n" +
+        "# Title\n\nBody one.\n\n## Sub\n\nBody two.\n",
+    },
+    (dir) => {
+      const { chunks } = generateFromDir(dir);
+      assert.ok(chunks.length >= 2, "expected a chunk per heading");
+      for (const chunk of chunks) {
+        assert.equal(chunk.graphOnly, true, `graphOnly on ${chunk.title}`);
+        assert.deepEqual(chunk.relatedModules, ["kb", "src/app"]);
+      }
+    },
+  );
+});
+
+test("related-modules accepts a YAML block sequence", () => {
+  withTempVault(
+    { "a.md": "---\nrelated-modules:\n  - kb/db.mjs\n  - ./routes\n---\n# T\n\nBody.\n" },
+    (dir) => {
+      const [chunk] = generateFromDir(dir).chunks;
+      // Case and authoring form are preserved here; normalising `./routes` to a
+      // repo-relative prefix is the merge step's job, as it is in Swift.
+      assert.deepEqual(chunk!.relatedModules, ["kb/db.mjs", "./routes"]);
+    },
+  );
+});
+
+test("graph-only accepts the YAML boolean spellings Swift accepts", () => {
+  for (const [raw, expected] of [["true", true], ["yes", true], ["1", true],
+                                 ["false", false], ["no", false], ["maybe", false]] as const) {
+    withTempVault({ "a.md": `---\ngraph-only: ${raw}\n---\n# T\n\nBody.\n` }, (dir) => {
+      const [chunk] = generateFromDir(dir).chunks;
+      assert.equal(chunk!.graphOnly, expected, `graph-only: ${raw}`);
+    });
+  }
+});
+
+test("absent frontmatter keys default the way Swift defaults them", () => {
+  withTempVault({ "a.md": "# T\n\nBody.\n" }, (dir) => {
+    const [chunk] = generateFromDir(dir).chunks;
+    assert.equal(chunk!.graphOnly, false);
+    assert.deepEqual(chunk!.relatedModules, []);
+  });
+});

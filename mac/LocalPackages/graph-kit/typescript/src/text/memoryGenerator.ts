@@ -26,6 +26,14 @@ export interface MemoryChunk {
   wikiLinks: string[];
   title: string;
   displayHeading: string;
+  /** Frontmatter `graph-only: true` — graph the doc, keep it out of the
+   *  agent-facing memory artifacts. Mirrors Swift `MemoryChunk.graphOnly`. */
+  graphOnly: boolean;
+  /** Frontmatter `related-modules:` — declared code-module affinity, consumed
+   *  by the merge step to emit documents/EXTRACTED doc→code edges. Case is
+   *  preserved for display; consumers match case-insensitively. Mirrors Swift
+   *  `MemoryChunk.relatedModules`. */
+  relatedModules: string[];
 }
 
 export interface GeneratedMemory {
@@ -244,6 +252,9 @@ function chunkDoc(docPath: string, _fileURL: string, docID: string, docTitle: st
       wikiLinks,
       title: headingPath[headingPath.length - 1] ?? docTitle,
       displayHeading: headingPath.length === 0 ? "(preamble)" : headingPath.join(" › "),
+      // Doc-level frontmatter applies to every chunk of that doc, as in Swift.
+      graphOnly: fm.graphOnly,
+      relatedModules: fm.relatedModules,
     });
     bodyBuf = [];
   };
@@ -270,37 +281,108 @@ function chunkDoc(docPath: string, _fileURL: string, docID: string, docTitle: st
 // frontmatter (lightweight: type/kind + tags, no YAML dependency)
 // --------------------------------------------------------------------------
 
-function stripFrontmatter(text: string): { text: string; kind: CGNodeKind | null; tags: string[] } {
-  if (!text.startsWith("---\n")) return { text, kind: null, tags: [] };
+interface ParsedFrontmatter {
+  text: string;
+  kind: CGNodeKind | null;
+  tags: string[];
+  graphOnly: boolean;
+  relatedModules: string[];
+}
+
+const EMPTY_FRONTMATTER = { kind: null, tags: [], graphOnly: false, relatedModules: [] };
+
+function stripFrontmatter(text: string): ParsedFrontmatter {
+  if (!text.startsWith("---\n")) return { text, ...EMPTY_FRONTMATTER };
   const end = text.indexOf("\n---\n", 4);
-  if (end === -1) return { text, kind: null, tags: [] };
+  if (end === -1) return { text, ...EMPTY_FRONTMATTER };
   const block = text.slice(4, end);
   const remaining = text.slice(end + 5);
 
   const blockLines = block.split("\n");
   let rawType = "";
   let rawTags: string[] = [];
+  let graphOnly = false;
+  let rawModules: string[] = [];
+
+  /** Values may be inline (`[a, b]` / `a, b`) or a YAML block sequence on the
+   *  following `- item` lines. Both forms appear in real docs. */
+  const listValue = (inline: string, from: number): string[] => {
+    if (inline) return splitTagString(inline);
+    const out: string[] = [];
+    for (let j = from + 1; j < blockLines.length; j++) {
+      const lm = /^\s*-\s*(.+?)\s*$/.exec(blockLines[j]!);
+      if (!lm) break;
+      out.push(lm[1]!);
+    }
+    return out;
+  };
+
   for (let i = 0; i < blockLines.length; i++) {
-    const m = /^([A-Za-z_]+)\s*:\s*(.*)$/.exec(blockLines[i]!.trim());
+    // Hyphens are part of the key: `graph-only` and `related-modules` are the
+    // documented spellings, and a `[A-Za-z_]+` key pattern silently skipped
+    // both — which is how the TypeScript port came to drop them entirely.
+    const m = /^([A-Za-z_-]+)\s*:\s*(.*)$/.exec(blockLines[i]!.trim());
     if (!m) continue;
     const key = m[1]!.toLowerCase();
     const val = m[2]!.trim();
     if ((key === "type" || key === "kind") && rawType === "") {
       rawType = val;
     } else if (key === "tags") {
-      if (val) {
-        rawTags = splitTagString(val);
-      } else {
-        // YAML block sequence: gather following `- item` lines.
-        for (let j = i + 1; j < blockLines.length; j++) {
-          const lm = /^\s*-\s*(.+?)\s*$/.exec(blockLines[j]!);
-          if (!lm) break;
-          rawTags.push(lm[1]!);
-        }
-      }
+      rawTags = listValue(val, i);
+    } else if (key === "graph-only" || key === "graphonly") {
+      graphOnly = parseBool(val) ?? false;
+    } else if (key === "related-modules" || key === "relatedmodules") {
+      rawModules = listValue(val, i);
     }
   }
-  return { text: remaining, kind: kindFromTypeString(rawType), tags: cleanTags(rawTags) };
+  return {
+    text: remaining,
+    kind: kindFromTypeString(rawType),
+    tags: cleanTags(rawTags),
+    graphOnly,
+    relatedModules: cleanModules(rawModules),
+  };
+}
+
+/** YAML-ish booleans, matching Swift `MemoryGenerator.parseBool`. */
+function parseBool(raw: string): boolean | null {
+  switch (unquote(raw).toLowerCase()) {
+    case "true":
+    case "yes":
+    case "1":
+      return true;
+    case "false":
+    case "no":
+    case "0":
+      return false;
+    default:
+      return null;
+  }
+}
+
+/** Strip surrounding single/double quotes from a scalar. */
+function unquote(raw: string): string {
+  const s = raw.trim();
+  if (s.length < 2) return s;
+  for (const q of ['"', "'"]) {
+    if (s.startsWith(q) && s.endsWith(q)) return s.slice(1, -1);
+  }
+  return s;
+}
+
+/** Trim, unquote and de-duplicate a declared module list, preserving case and
+ *  order. Path-form normalisation (`./kb`, `kb/`, `kb/*`) is the merge step's
+ *  job, matching where Swift does it. */
+function cleanModules(raw: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw) {
+    const cleaned = unquote(part).trim();
+    if (!cleaned || seen.has(cleaned)) continue;
+    seen.add(cleaned);
+    out.push(cleaned);
+  }
+  return out;
 }
 
 /** Split an inline tag value: `[a, b]` or `a, b` or `a b`. */
