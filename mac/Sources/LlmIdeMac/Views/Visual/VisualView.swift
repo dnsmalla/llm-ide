@@ -56,7 +56,7 @@ struct VisualView: View {
             // drives only the centre ↔ chat split.
             HStack(spacing: 0) {
             if treeVisible {
-                VisualSourcePanel(vm: vm, api: api)
+                VisualSourcePanel(vm: vm, api: api, selectedURL: $treeSelectedURL)
                     .frame(width: 240)
                     .transition(.move(edge: .leading))
                 Divider()

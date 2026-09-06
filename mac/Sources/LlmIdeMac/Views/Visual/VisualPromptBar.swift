@@ -15,6 +15,12 @@ struct VisualPromptBar: View {
 
     @AppStorage("VISUAL_USE_CHAT") private var useChatMode = false
 
+    /// The reply text last written by `saveChatOutput`, or nil before the
+    /// first save. Gates double-press: pressing Save again for the SAME
+    /// reply is a no-op instead of writing a second `chat-output-1.md` —
+    /// only a genuinely new reply re-arms the button.
+    @State private var lastSavedChatReply: String?
+
     @EnvironmentObject private var outputStore: DocGenOutputStore
     @EnvironmentObject private var projectStore: ProjectStore
     @EnvironmentObject private var theme: ThemeStore
@@ -71,29 +77,35 @@ struct VisualPromptBar: View {
     }
 
     private var saveChatOutputRow: some View {
-        Button {
-            guard let reply = latestAssistantReply else { return }
-            vm.save(content: reply, api: api, config: outputStore.config, projectRoot: projectRoot)
+        let reply = latestAssistantReply
+        let alreadySaved = reply != nil && reply == lastSavedChatReply
+        return Button {
+            guard let reply, !alreadySaved else { return }
+            vm.saveChatOutput(content: reply, api: api, config: outputStore.config, projectRoot: projectRoot)
+            lastSavedChatReply = reply
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: "square.and.arrow.down.on.square")
+                Image(systemName: alreadySaved ? "checkmark.square" : "square.and.arrow.down.on.square")
                     .font(.system(size: 11))
-                Text("Save chat output")
+                Text(alreadySaved ? "Chat output saved" : "Save chat output")
                     .font(.callout.weight(.semibold))
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(latestAssistantReply != nil ? theme.current.accent : Color.secondary.opacity(0.18))
+                    .fill(reply != nil && !alreadySaved ? theme.current.accent : Color.secondary.opacity(0.18))
             )
-            .foregroundStyle(latestAssistantReply != nil ? .white : Color.secondary.opacity(0.5))
+            .foregroundStyle(reply != nil && !alreadySaved ? .white : Color.secondary.opacity(0.5))
         }
         .buttonStyle(.plain)
-        .disabled(latestAssistantReply == nil)
-        .help(latestAssistantReply != nil
-              ? "Save the chat's latest reply to the folder set in Setup"
-              : "No finished assistant reply yet — send a message in the chat panel first")
+        .disabled(reply == nil || alreadySaved)
+        .help(
+            reply == nil
+                ? "No finished assistant reply yet — send a message in the chat panel first"
+                : alreadySaved
+                    ? "Already saved this reply — send another message to save again"
+                    : "Save the chat's latest reply to the folder set in Setup (does not affect the generated document)")
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(Color(nsColor: .windowBackgroundColor))

@@ -42,6 +42,24 @@ final class GenerationViewModelTests: XCTestCase {
         XCTAssertTrue(vm.canGenerate)
     }
 
+    /// Regression for the Visual "Use chat" critical bug: `relaxRequirements`
+    /// must only lift the template/command requirement, never the source
+    /// requirement — `generate()` has no content to send with zero sources
+    /// and always fails with "No readable source content…" regardless of
+    /// `relaxRequirements`. Arming Generate here used to present a button
+    /// that instantly failed every time it was pressed.
+    func testRelaxedModeStillRequiresASource() {
+        let vm = GenerationViewModel()
+        vm.relaxRequirements = true
+        XCTAssertTrue(vm.selectedSources.isEmpty)
+        XCTAssertFalse(vm.canGenerate,
+                       "chat mode with no sources ticked must not present a generate-able state")
+
+        vm.selectedSources = [makeSource()]
+        XCTAssertTrue(vm.canGenerate,
+                      "once a source is ticked, chat mode should not also require a template/command")
+    }
+
     func testOutputFilenamePrefersTemplateThenCommand() {
         let vm = GenerationViewModel()
         XCTAssertEqual(vm.outputFilename, "generated-doc")

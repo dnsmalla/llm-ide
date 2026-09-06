@@ -84,7 +84,9 @@ struct GenerationPromptBar: View {
         .disabled(!vm.canGenerate)
         .help(vm.canGenerate
               ? "Generate the document"
-              : "Choose a template or command, and at least one source")
+              : (vm.relaxRequirements
+                 ? "Select at least one source to generate from, or ask in the chat panel instead"
+                 : "Choose a template or command, and at least one source"))
         .animation(.easeInOut(duration: 0.15), value: vm.canGenerate)
     }
 

@@ -75,7 +75,13 @@ final class GenerationViewModel: ObservableObject {
     private static let maxRevisionSourceChars = 50_000
 
     var canGenerate: Bool {
-        if relaxRequirements { return true }
+        // Chat mode only lifts the template/command requirement — `generate()`
+        // still needs at least one readable source to send, and always fails
+        // with "No readable source content…" when `selectedSources` is empty
+        // (see the guard partway through `generate()`). Arming the button
+        // with nothing to generate from used to present a Generate that
+        // instantly failed; see VisualSourcePanel's "Use chat" toggle.
+        if relaxRequirements { return !selectedSources.isEmpty }
         return (selectedTemplate != nil || selectedCommand != nil) && !selectedSources.isEmpty
     }
 
@@ -305,6 +311,51 @@ final class GenerationViewModel: ObservableObject {
             alert.messageText = "Save Failed"
             alert.informativeText = error.localizedDescription
             alert.runModal()
+        }
+    }
+
+    /// Writes a chat reply to disk WITHOUT touching document state.
+    ///
+    /// `save(content:...)` above is the DOCUMENT save: it flips `isSaved`
+    /// (disabling Edit/Save and arming the no-confirmation "Start another"
+    /// reset) and names the file from `outputFilename` (the template/command
+    /// name). Visual's "Save chat output" used to call that same method,
+    /// which meant saving a chat reply silently wrote it under the
+    /// document's name, marked an unsaved generated document as saved, and
+    /// made "Start another" destroy it with no confirmation. This is a
+    /// separate path, deliberately inert with respect to `isSaved`,
+    /// `generationState` and `editedContent` — see `VisualPromptBar`, the
+    /// only caller.
+    ///
+    /// Filename is fixed and clearly chat-derived (never `outputFilename`),
+    /// so it can never collide with — or be mistaken for — the document's
+    /// own save. Double-press dedup (never write a spurious `-1.md` for the
+    /// SAME reply) is the caller's job: `VisualPromptBar` disables the
+    /// button once the on-screen reply matches the last one actually
+    /// written here.
+    @discardableResult
+    func saveChatOutput(content: String, api: LlmIdeAPIClient,
+                        config: DocGenOutputConfig, projectRoot: URL? = nil,
+                        revealInFinder: Bool = true) -> URL? {
+        do {
+            let url = try api.exportMarkdown(
+                content: content,
+                filename: "chat-output",
+                projectRoot: projectRoot,
+                directory: config.resolvedDirectory(projectRoot: projectRoot))
+            if revealInFinder {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+            if projectRoot != nil {
+                NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
+            }
+            return url
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Save Failed"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+            return nil
         }
     }
 }

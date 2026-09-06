@@ -11,6 +11,12 @@ import SwiftUI
 struct VisualSourcePanel: View {
     @ObservedObject var vm: GenerationViewModel
     let api: LlmIdeAPIClient
+    /// The image viewer's selection, owned by `VisualView` and threaded
+    /// straight through to `GenerationSourceTree` so tapping a file's name
+    /// here opens it in `VisualCenterPanel` — see
+    /// `GenerationSourceTree.selectedURL` for why this is a distinct tap
+    /// target from the source-ticking checkbox.
+    @Binding var selectedURL: URL?
     /// Visual's own "talk to chat instead" toggle. Owned here (not on
     /// `GenerationViewModel`, which Doc Gen shares) so it can never leak into
     /// Doc Gen's UI. `VisualView` reads this same key to decide the center
@@ -46,9 +52,16 @@ struct VisualSourcePanel: View {
     /// exception Doc Gen sees. Computed up front — before Generate is even
     /// pressed — so the limitation is visible while the user is still
     /// picking sources, not just after a run comes back with a skipped list.
+    ///
+    /// Deliberately NOT `ImageShowPanel.isImage` alone: that set includes
+    /// `svg`, but SVG is XML text — `/generate-doc` reads it fine as UTF-8.
+    /// Warning on it would tell users a working source is broken.
     private var unreadableImageSources: [String] {
         vm.selectedSources.compactMap { source -> String? in
-            guard case .file(let url, let name) = source, ImageShowPanel.isImage(url) else { return nil }
+            guard case .file(let url, let name) = source,
+                  ImageShowPanel.isImage(url),
+                  url.pathExtension.lowercased() != "svg"
+            else { return nil }
             return name
         }.sorted()
     }
@@ -66,7 +79,8 @@ struct VisualSourcePanel: View {
                     GenerationSourceTree(
                         vm: vm, isExpanded: sectionExpanded("sources"),
                         categories: [.data, .code],
-                        sourceTabStorageKey: "visual.sourceTab")
+                        sourceTabStorageKey: "visual.sourceTab",
+                        selectedURL: $selectedURL)
                     if !unreadableImageSources.isEmpty {
                         imageSourceWarning
                     }
@@ -120,7 +134,18 @@ struct VisualSourcePanel: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(unreadableImageSources.count) image source\(unreadableImageSources.count == 1 ? "" : "s") ticked")
                     .font(.caption.weight(.medium))
-                Text("Generate reads sources as text, so \(unreadableImageSources.count == 1 ? "this image" : "these images") will be skipped. Turn on Use chat above to attach images to the chat instead.")
+                // NOTE: do not send users to "Use chat" for images. This
+                // panel's chat (CodeAssistantPanel, CodeAssistant+Attachments)
+                // base64-encodes image bytes with a `[binary:...]` prefix into
+                // a plain-text attachment that nothing on the server ever
+                // decodes back into a picture — the model would just
+                // hallucinate over the blob while it eats ~40% of the
+                // attachment budget. The one real vision path is the separate
+                // LLM Chat sheet (menu bar → LLM Chat), which sends true image
+                // content blocks via /kb/agent/ask, but only when the user has
+                // an Anthropic API key configured — too big a caveat to state
+                // briefly here, so this warning stops at "skipped".
+                Text("Generate reads sources as text, so \(unreadableImageSources.count == 1 ? "this image" : "these images") will be skipped — image files can't be used as generation sources.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

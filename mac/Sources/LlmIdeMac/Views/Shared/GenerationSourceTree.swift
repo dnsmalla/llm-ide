@@ -14,6 +14,17 @@ struct GenerationSourceTree: View {
     /// `llm-doc/`, which the LLM Doc tab covers).
     let categories: [LibraryItem.Category]
 
+    /// Optional viewer-selection binding. Defaulted nil so Doc Gen's call
+    /// site (which never passes it) behaves exactly as before this tree
+    /// gained a second purpose. Visual passes its own `treeSelectedURL`
+    /// binding: tapping a file row's name/icon (NOT its checkbox) sets this
+    /// so `VisualCenterPanel`'s image viewer can open it, while the checkbox
+    /// keeps ticking the file as a generation source — the two must stay
+    /// independent, since selecting an image must not tick it and ticking
+    /// must not change what the viewer shows. See `VisualSourcePanel` /
+    /// `VisualView.treeSelectedURL`.
+    let selectedURL: Binding<URL?>?
+
     @Environment(LibraryItemStore.self) private var itemStore
     @EnvironmentObject private var theme: ThemeStore
 
@@ -24,10 +35,12 @@ struct GenerationSourceTree: View {
     @State private var expandedPaths: Set<String> = []
 
     init(vm: GenerationViewModel, isExpanded: Binding<Bool>,
-         categories: [LibraryItem.Category], sourceTabStorageKey: String) {
+         categories: [LibraryItem.Category], sourceTabStorageKey: String,
+         selectedURL: Binding<URL?>? = nil) {
         self.vm = vm
         self._isExpanded = isExpanded
         self.categories = categories
+        self.selectedURL = selectedURL
         self._selectedTabRaw = AppStorage(
             wrappedValue: (categories.first ?? .code).rawValue,
             sourceTabStorageKey)
@@ -110,7 +123,8 @@ struct GenerationSourceTree: View {
                         vm: vm,
                         expandedPaths: $expandedPaths,
                         tint: selectedTab.uiColor,
-                        states: states)
+                        states: states,
+                        selectedURL: selectedURL)
                 }
             }
             .padding(.bottom, 10)
@@ -143,6 +157,11 @@ private struct GenerationTreeRow: View {
     /// O(visible rows × subtree size) on a repo-sized Code tree).
     let states: [String: GenerationTreeSelection.State]
 
+    /// See `GenerationSourceTree.selectedURL` — nil for Doc Gen, set by
+    /// Visual. Only file rows offer a selection tap target; folders have
+    /// nothing to view.
+    let selectedURL: Binding<URL?>?
+
     @EnvironmentObject private var theme: ThemeStore
 
     var body: some View {
@@ -153,7 +172,8 @@ private struct GenerationTreeRow: View {
             if expandedPaths.contains(node.id) {
                 ForEach(node.children) { child in
                     GenerationTreeRow(node: child, depth: depth + 1, vm: vm,
-                                  expandedPaths: $expandedPaths, tint: tint, states: states)
+                                  expandedPaths: $expandedPaths, tint: tint, states: states,
+                                  selectedURL: selectedURL)
                 }
             }
         }
@@ -197,6 +217,12 @@ private struct GenerationTreeRow: View {
         .help(node.name)
     }
 
+    /// Whether this row is the file currently opened in Visual's image
+    /// viewer. Always false for Doc Gen (`selectedURL` is nil there).
+    private var isViewingSelection: Bool {
+        selectedURL?.wrappedValue == node.url
+    }
+
     private var fileRow: some View {
         let selected = selectionState == .all
         return HStack(spacing: 7) {
@@ -204,13 +230,7 @@ private struct GenerationTreeRow: View {
                 vm.selectedSources = GenerationTreeSelection.toggled(
                     node: node, selected: vm.selectedSources)
             }
-            Image(systemName: iconForExt(node.url.pathExtension.lowercased()))
-                .font(.system(size: 10))
-                .foregroundStyle(selected ? tint : Color.secondary.opacity(0.5))
-                .frame(width: 13)
-            Text(node.name)
-                .font(.callout)
-                .lineLimit(1)
+            nameArea(selected: selected)
             Spacer(minLength: 0)
             if let item = node.item, vm.unreadableSourceNames.contains(item.name) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -224,6 +244,36 @@ private struct GenerationTreeRow: View {
         .padding(.vertical, 4)
         .background(selected ? theme.current.accent.opacity(0.07) : Color.clear)
         .help(node.name)
+    }
+
+    /// Icon + filename — the row's OTHER tap target, distinct from
+    /// `checkbox` above. When `selectedURL` is supplied (Visual only),
+    /// tapping this opens the file in the image viewer WITHOUT ticking it as
+    /// a source; the checkbox ticks it as a source WITHOUT changing the
+    /// viewer. Doc Gen passes no binding, so this renders as the same
+    /// plain, non-interactive label it always has.
+    @ViewBuilder
+    private func nameArea(selected: Bool) -> some View {
+        let label = HStack(spacing: 7) {
+            Image(systemName: iconForExt(node.url.pathExtension.lowercased()))
+                .font(.system(size: 10))
+                .foregroundStyle(selected ? tint : Color.secondary.opacity(0.5))
+                .frame(width: 13)
+            Text(node.name)
+                .font(.callout)
+                .fontWeight(isViewingSelection ? .semibold : .regular)
+                .lineLimit(1)
+        }
+        if let selectedURL {
+            Button {
+                selectedURL.wrappedValue = node.url
+            } label: {
+                label.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            label
+        }
     }
 
     private func checkbox(state: GenerationTreeSelection.State,
