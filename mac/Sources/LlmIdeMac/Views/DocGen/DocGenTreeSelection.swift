@@ -43,4 +43,50 @@ enum DocGenTreeSelection {
     static func source(for item: LibraryItem) -> DocGenSource {
         .file(url: item.url, name: item.name)
     }
+
+    /// Bottom-up selection state for every node in `roots`, keyed by
+    /// `FSNode.id` (the absolute path). Computed once per render so row
+    /// bodies can do an O(1) dictionary lookup instead of each calling
+    /// `state(for:selected:)`, which walks its own subtree — with a repo-sized
+    /// Code tree, doing that per visible folder row on every checkbox click
+    /// made the cost O(visible rows × subtree size). This is a single
+    /// bottom-up pass over the forest, O(total nodes) regardless of how many
+    /// rows are on screen.
+    static func states(forForest roots: [FSNode], selected: Set<DocGenSource>) -> [String: State] {
+        var result: [String: State] = [:]
+        for root in roots {
+            _ = accumulate(root, selected: selected, into: &result)
+        }
+        return result
+    }
+
+    /// Post-order visit of `node`: fills `result[node.id]` for `node` and
+    /// every descendant, and returns (selected leaf count, total leaf count)
+    /// so the parent can fold children's counts without re-walking them.
+    private static func accumulate(
+        _ node: FSNode, selected: Set<DocGenSource>, into result: inout [String: State]
+    ) -> (hits: Int, total: Int) {
+        if let item = node.item {
+            let isSelected = selected.contains(source(for: item))
+            result[node.id] = isSelected ? State.all : State.none
+            return (isSelected ? 1 : 0, 1)
+        }
+        var hits = 0
+        var total = 0
+        for child in node.children {
+            let (childHits, childTotal) = accumulate(child, selected: selected, into: &result)
+            hits += childHits
+            total += childTotal
+        }
+        let state: State
+        if total == 0 || hits == 0 {
+            state = .none
+        } else if hits == total {
+            state = .all
+        } else {
+            state = .partial
+        }
+        result[node.id] = state
+        return (hits, total)
+    }
 }
