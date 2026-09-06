@@ -70,6 +70,33 @@ if CommandLine.arguments.dropFirst().first == "--emit-memory" {
     exit(0)
 }
 
+if CommandLine.arguments.dropFirst().first == "--emit-merge" {
+    let rest = Array(CommandLine.arguments.dropFirst(2))
+    guard rest.count == 4 else {
+        FileHandle.standardError.write(Data(
+            "usage: graph-engine-lab --emit-merge <code.json> <doc.json> <chunks.json> <out.json>\n".utf8))
+        exit(2)
+    }
+    do {
+        let code = try GraphDocument.decode(Data(contentsOf: URL(fileURLWithPath: rest[0]))).graph
+        let doc = try GraphDocument.decode(Data(contentsOf: URL(fileURLWithPath: rest[1]))).graph
+        let chunks = try JSONDecoder().decode(
+            [MemoryChunk].self, from: Data(contentsOf: URL(fileURLWithPath: rest[2])))
+        let merged = GraphMerger.merge(code: code, doc: doc, chunks: chunks)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(GraphDocument(merged))
+            .write(to: URL(fileURLWithPath: rest[3]), options: .atomic)
+        let summary = "graph-engine-lab: merged → \(merged.nodes.count) nodes, "
+            + "\(merged.edges.count) edges\n"
+        FileHandle.standardError.write(Data(summary.utf8))
+    } catch {
+        FileHandle.standardError.write(Data("emit-merge failed: \(error)\n".utf8))
+        exit(1)
+    }
+    exit(0)
+}
+
 var failures: [String] = []
 
 func check(_ condition: Bool, _ name: String, _ detail: @autoclosure () -> String) {

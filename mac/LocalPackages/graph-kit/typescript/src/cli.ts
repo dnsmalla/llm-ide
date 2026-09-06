@@ -6,6 +6,10 @@
 //       Build a text→memory graph from a folder of markdown/text files.
 //   graph-kit index <graph.json> [--out index.md]
 //       Render a markdown index from a canonical graph document.
+//   graph-kit merge <code.json> <doc.json> <chunks.json> [--out graph.json]
+//       Join a code graph and a doc graph, adding doc→code cross-links. This is
+//       the `merge` command a host's plugin manifest declares; without it a host
+//       can only union the two tracks, losing every cross-link.
 //   graph-kit validate <graph.json>
 //       Validate a graph document against the canonical schema (exit 1 on failure).
 
@@ -15,6 +19,7 @@ import { generateIndex } from "./indexGenerator.js";
 import { parseDocumentString, serializeDocument, toDocument, toGraph } from "./models.js";
 import { updateMemory, type UpdateReport } from "./incremental.js";
 import { scanCode } from "./code/tsScanner.js";
+import { mergeCodeAndDoc, type MergeChunk } from "./build/graphMerger.js";
 
 function fail(msg: string): never {
   process.stderr.write(`graph-kit: ${msg}\n`);
@@ -125,6 +130,36 @@ function cmdWatch(args: string[]): void {
   });
 }
 
+function cmdMerge(args: string[]): void {
+  const [codePath, docPath, chunksPath] = args;
+  if (!codePath || !docPath || !chunksPath ||
+      codePath.startsWith("--") || docPath.startsWith("--") || chunksPath.startsWith("--")) {
+    fail("usage: graph-kit merge <code.json> <doc.json> <chunks.json> [--out f]");
+  }
+  const code = toGraph(parseDocumentString(readFileSync(codePath, "utf8")));
+  const doc = toGraph(parseDocumentString(readFileSync(docPath, "utf8")));
+  // Chunks are whatever the doc track emitted. Only id/body/wikiLinks/
+  // relatedModules are read, so a payload from either implementation works —
+  // Swift writes `docURL` where this one writes `docPath`, and neither is used.
+  const chunks = JSON.parse(readFileSync(chunksPath, "utf8")) as MergeChunk[];
+  if (!Array.isArray(chunks)) fail(`${chunksPath} is not a chunk array`);
+  // `id` is the one chunk field Swift's decoder does NOT default — it is the
+  // edge endpoint, so a chunk without one yields edges with an undefined
+  // `fromId`. Swift refuses the payload outright; this side would happily emit
+  // a graph its own `validate` then rejects. Be liberal about the rest, strict
+  // about identity.
+  const missing = chunks.findIndex((c) => typeof c?.id !== "string" || c.id === "");
+  if (missing !== -1) fail(`${chunksPath}: chunk at index ${missing} has no string "id"`);
+  const merged = mergeCodeAndDoc(code, doc, chunks);
+  const json = serializeDocument(toDocument(merged));
+  const outPath = optValue(args, "--out");
+  if (outPath) writeFileSync(outPath, json);
+  else process.stdout.write(json);
+  process.stderr.write(
+    `graph-kit: merged → ${merged.nodes.length} nodes, ${merged.edges.length} edges\n`,
+  );
+}
+
 function cmdValidate(args: string[]): void {
   const file = args[0];
   if (!file) fail("usage: graph-kit validate <graph.json>");
@@ -146,9 +181,10 @@ async function main(argv: string[]): Promise<void> {
     case "watch": return cmdWatch(rest);
     case "code": return cmdCode(rest);
     case "index": return cmdIndex(rest);
+    case "merge": return cmdMerge(rest);
     case "validate": return cmdValidate(rest);
     default:
-      fail(`unknown command '${cmd ?? ""}'. Use: memory | update | watch | code | index | validate`);
+      fail(`unknown command '${cmd ?? ""}'. Use: memory | update | watch | code | merge | index | validate`);
   }
 }
 

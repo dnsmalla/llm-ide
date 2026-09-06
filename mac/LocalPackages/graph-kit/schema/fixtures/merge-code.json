@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    { "id": "file:kb/db.mjs", "title": "db.mjs", "kind": "file",
+      "metadata": { "source_file": "kb/db.mjs" } },
+    { "id": "file:kb/auth.mjs", "title": "auth.mjs", "kind": "file",
+      "metadata": { "source_file": "kb/auth.mjs" } },
+    { "id": "file:kb/cache.mjs", "title": "cache.mjs", "kind": "file",
+      "metadata": { "source_file": "kb/cache.mjs" } },
+    { "id": "file:kb/index.mjs", "title": "index.mjs", "kind": "file",
+      "metadata": { "source_file": "kb/index.mjs" } },
+    { "id": "file:kb/jobs.mjs", "title": "jobs.mjs", "kind": "file",
+      "metadata": { "source_file": "kb/jobs.mjs" } },
+    { "id": "file:kb/mail.mjs", "title": "mail.mjs", "kind": "file",
+      "metadata": { "source_file": "kb/mail.mjs" } },
+    { "id": "file:kb/net.mjs", "title": "net.mjs", "kind": "file",
+      "metadata": { "source_file": "kb/net.mjs" } },
+    { "id": "file:kb/queue.mjs", "title": "queue.mjs", "kind": "file",
+      "metadata": { "source_file": "kb/queue.mjs" } },
+    { "id": "file:kb/store.mjs", "title": "store.mjs", "kind": "file",
+      "metadata": { "source_file": "kb/store.mjs" } },
+    { "id": "file:kb/util.mjs", "title": "util.mjs", "kind": "file",
+      "metadata": { "source_file": "kb/util.mjs" } },
+    { "id": "file:src/app.ts", "title": "app.ts", "kind": "file",
+      "metadata": { "source_file": "src/app.ts" } },
+    { "id": "function:kb/db.mjs:backupTo", "title": "backupTo", "kind": "function",
+      "metadata": { "source_file": "kb/db.mjs" } },
+    { "id": "function:src/app.ts:Widget", "title": "Widget", "kind": "function",
+      "metadata": { "source_file": "src/app.ts" } }
+  ],
+  "edges": [
+    { "fromId": "file:kb/db.mjs", "toId": "function:kb/db.mjs:backupTo",
+      "kind": "contains", "confidence": "EXTRACTED" }
+  ],
+  "layers": [],
+  "tour": []
+}

@@ -15,6 +15,7 @@ import { join, extname, relative, resolve, dirname } from "node:path";
 import type { CGData, CGEdge, CGNode, CGNodeKind } from "../models.js";
 import { EXCLUDED_DIRS } from "../exclusions.js";
 import { loadScipIndex, parseScipJson } from "./scipScanner.js";
+import { LINE_SCANNED_EXTS, lineScannedLanguage, scanFileByLines } from "./lineScanner.js";
 
 // .mjs/.cjs belong here: `language()` below already maps them to javascript,
 // but omitting them from discovery made every ESM-only tree (the whole Node
@@ -48,13 +49,32 @@ export async function scanCode(
   const maxFileBytes = opts.maxFileBytes ?? 1_000_000;
   const rootAbs = resolve(root);
 
-  const files = collectCodeFiles(rootAbs, maxFiles, maxFileBytes);
+  const collected = collectCodeFiles(rootAbs, maxFiles, maxFileBytes);
+  // Split by who can parse them: the compiler API only understands the TS/JS
+  // family, so Swift/Kotlin/Python go to the line scanner instead of being
+  // handed to `ts.createProgram` (which would silently produce nothing).
+  const files = collected.filter((f) => !lineScannedLanguage(f));
+  const lineFiles = collected.filter((f) => lineScannedLanguage(f) !== null);
   const nodes: CGNode[] = [];
   const edges: CGEdge[] = [];
   const symbolIdsByName = new Map<string, string[]>(); // name → ids (for heritage resolution)
   const heritages: Heritage[] = [];
   const callSites: Array<{ fromId: string; name: string }> = [];
   const seenEdge = new Set<string>();
+  // Node ids must be unique. The Swift reference builder guards this explicitly
+  // (`guard !nodeIds.contains(id) else { continue }` in StructureGraphBuilder);
+  // pushing unconditionally produced duplicate ids for ordinary input — a Swift
+  // `extension X` beside `struct X`, or two `func` overloads, collide on
+  // `symbol:<file>#<name>`. Consumers dedupe first-wins, so the extras were
+  // silently discarded rather than reported. Doubling as the module-node
+  // membership test also removes an O(n^2) rescan of the whole node array.
+  const nodeIds = new Set<string>();
+  const pushNode = (node: CGNode): boolean => {
+    if (nodeIds.has(node.id)) return false;
+    nodeIds.add(node.id);
+    nodes.push(node);
+    return true;
+  };
 
   const addEdge = (fromId: string, toId: string, kind: CGEdge["kind"], confidence: CGEdge["confidence"]) => {
     if (fromId === toId) return;
@@ -71,7 +91,14 @@ export async function scanCode(
     const rel = relative(rootAbs, file);
     const fileId = `file:${rel}`;
     const language = [".js", ".jsx", ".mjs", ".cjs"].includes(extname(file)) ? "javascript" : "typescript";
-    nodes.push({ id: fileId, title: rel.split("/").pop() ?? rel, kind: "file", metadata: { path: rel, language } });
+    // `source_file` is the canonical key: the merge step's module-affinity and
+  // path-mention lookups read it, as do Swift's StructureGraphBuilder and the
+  // SCIP scanner. Emitting only `path` meant a code graph produced HERE fed
+  // into a merge yielded zero declared-module edges and zero path mentions —
+  // silently, since a missing key is indistinguishable from "no modules".
+  // `path` is kept as a legacy alias; nothing in-tree reads it.
+  pushNode({ id: fileId, title: rel.split("/").pop() ?? rel, kind: "file",
+             metadata: { source_file: rel, path: rel, language } });
 
     let text: string;
     try {
@@ -88,7 +115,7 @@ export async function scanCode(
         if (target) addEdge(fileId, `file:${target}`, "imports", "EXTRACTED");
         continue;
       }
-      emitDeclaration(stmt, fileId, rel, nodes, addEdge, addSymbolName, heritages);
+      emitDeclaration(stmt, fileId, rel, pushNode, addEdge, addSymbolName, heritages);
     }
     collectCalls(sf, rel, callSites);
   }
@@ -113,6 +140,41 @@ export async function scanCode(
     }
   }
 
+  // ---- Line-scanned languages (Swift / Kotlin / Python) -------------------
+  for (const file of lineFiles) {
+    const structure = scanFileByLines(file);
+    if (!structure) continue;
+    const rel = relative(rootAbs, file);
+    const fileId = `file:${rel}`;
+    pushNode({
+      id: fileId,
+      title: rel.split("/").pop() ?? rel,
+      kind: "file",
+      metadata: { source_file: rel, path: rel, language: structure.language },
+    });
+    for (const symbol of structure.symbols) {
+      const id = `symbol:${rel}#${symbol.name}`;
+      if (!pushNode({
+        id,
+        title: symbol.name,
+        kind: symbol.kind === "function" ? "function" : "other",
+        metadata: { source_file: rel, path: rel, symbolKind: symbol.kind,
+                    line: `L${symbol.line}` },
+      })) continue;
+      addEdge(fileId, id, "contains", "EXTRACTED");
+      addSymbolName(symbol.name, id);
+    }
+    for (const module of structure.imports) {
+      // Module specifiers here are package/module names, not resolvable file
+      // paths, so the edge points at a synthetic module node — the same shape
+      // an unresolved TS/JS import takes.
+      const moduleId = `module:${module}`;
+      pushNode({ id: moduleId, title: module, kind: "other",
+                 metadata: { module, language: structure.language } });
+      addEdge(fileId, moduleId, "imports", "EXTRACTED");
+    }
+  }
+
   return { nodes, edges, layers: [], tour: [] };
 }
 
@@ -120,16 +182,19 @@ function emitDeclaration(
   stmt: ts.Statement,
   fileId: string,
   rel: string,
-  nodes: CGNode[],
+  pushNode: (node: CGNode) => boolean,
   addEdge: (f: string, t: string, k: CGEdge["kind"], c: CGEdge["confidence"]) => void,
   addSymbolName: (name: string, id: string) => void,
   heritages: Heritage[],
 ): void {
   const addSymbol = (name: string, kind: CGNodeKind, symbolKind: string): string => {
     const id = `symbol:${rel}#${name}`;
-    nodes.push({ id, title: name, kind, metadata: { path: rel, symbolKind } });
-    addSymbolName(name, id);
-    addEdge(fileId, id, "contains", "EXTRACTED");
+    // A duplicate is skipped whole — no second node, no repeated name binding,
+    // no repeated containment edge — mirroring the Swift builder's `continue`.
+    if (pushNode({ id, title: name, kind, metadata: { source_file: rel, path: rel, symbolKind } })) {
+      addSymbolName(name, id);
+      addEdge(fileId, id, "contains", "EXTRACTED");
+    }
     return id;
   };
 
@@ -148,8 +213,9 @@ function emitDeclaration(
     for (const member of stmt.members) {
       if (ts.isMethodDeclaration(member) && member.name && ts.isIdentifier(member.name)) {
         const mId = `symbol:${rel}#${stmt.name.text}.${member.name.text}`;
-        nodes.push({ id: mId, title: `${stmt.name.text}.${member.name.text}`, kind: "symbol", metadata: { path: rel, symbolKind: "method" } });
-        addEdge(classId, mId, "contains", "EXTRACTED");
+        if (pushNode({ id: mId, title: `${stmt.name.text}.${member.name.text}`, kind: "symbol", metadata: { source_file: rel, path: rel, symbolKind: "method" } })) {
+          addEdge(classId, mId, "contains", "EXTRACTED");
+        }
       }
     }
   } else if (ts.isInterfaceDeclaration(stmt)) {
@@ -258,7 +324,8 @@ function collectCodeFiles(root: string, maxFiles: number, maxFileBytes: number):
         continue;
       }
       if (st.isDirectory()) walk(full);
-      else if (st.isFile() && CODE_EXTS.has(extname(full)) && st.size <= maxFileBytes && !name.endsWith(".d.ts")) {
+      else if (st.isFile() && (CODE_EXTS.has(extname(full)) || LINE_SCANNED_EXTS.has(extname(full).toLowerCase()))
+               && st.size <= maxFileBytes && !name.endsWith(".d.ts")) {
         out.push(full);
       }
     }

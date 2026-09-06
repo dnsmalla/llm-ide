@@ -1,10 +1,17 @@
 #!/usr/bin/env node
-// Cross-implementation conformance gate for the doc track (InfiniteBrain).
+// Cross-implementation conformance gate: the doc track (InfiniteBrain) and
+// the merge that joins it to the code track.
 //
 // Runs BOTH memory generators over one corpus and diffs what they produced:
 //
-//   Swift        swift run -c release graph-engine-lab --emit-memory <corpus> <out>
-//   TypeScript   node bin/graph-kit.js memory <corpus> --out <out>
+//   doc    Swift  graph-engine-lab --emit-memory <corpus> <out>
+//          TS     node bin/graph-kit.js memory <corpus> --out <out>
+//   merge  Swift  graph-engine-lab --emit-merge <code> <doc> <chunks> <out>
+//          TS     node bin/graph-kit.js merge <code> <doc> <chunks> --out <out>
+//
+// The merge comparison feeds BOTH sides the same code graph, doc graph and
+// chunks, isolating merge logic from code scanning — which is TypeScript/
+// JavaScript-only on the plugin side and would otherwise dominate the diff.
 //
 // Why: `schema/fixtures/*.json` only prove a graph decodes and round-trips.
 // They cannot catch the two implementations DISAGREEING — which is exactly how
@@ -69,6 +76,25 @@ const DEFAULT_CORPUS = {
   "key-case.md":
     "---\nType: note\nGRAPH-ONLY: true\nRelated-Modules: [kb]\ngraphonly: true\n---\n" +
     "# Key Case\n\nEvery key here is a spelling neither side should honour.\n",
+  // Merge inputs. These exercise the three doc→code cross-link mechanisms
+  // against schema/fixtures/merge-code.json: a wikilink to a code symbol
+  // (references/EXTRACTED), declared module affinity in several authoring forms
+  // (documents/EXTRACTED, including the fan-out cap — `kb` covers 10 files but
+  // only 8 may link), and inline backtick mentions (references/INFERRED).
+  "merge-wikilink.md":
+    "# Merge Wikilink\n\nSee [[backupTo]] and [[Widget]].\n",
+  "merge-modules.md":
+    "---\nrelated-modules: [kb, ./src, missing/**, .., .]\n---\n" +
+    "# Merge Modules\n\nDeclared affinity in several authoring forms.\n",
+  // Reaches `backupTo` by wikilink AND by backtick mention. Without this the
+  // corpus produced no duplicate cross-link pair at all, so deleting the
+  // `crossSeen` de-duplication was a literal no-op on the gate — the precedence
+  // rule it enforces went untested.
+  "merge-dedup.md":
+    "# Merge Dedup\n\nSee [[backupTo]], and also `backupTo` written as a mention.\n",
+  "merge-mentions.md":
+    "# Merge Mentions\n\nThe `kb/db.mjs` file defines `backupTo`, and `app.ts` uses it.\n\n" +
+    "```\n`kb/auth.mjs` must not link from inside a fence\n```\n",
   // Fenced content must affect neither link/tag extraction nor CHUNKING: a `#`
   // line inside a fence is sample text, and treating it as a heading changes
   // node identity because chunk ids hash the heading path.
@@ -119,11 +145,32 @@ function project(payload) {
 
 const show = (row) => row.split(SEP).join(" | ");
 
+/**
+ * Multiset difference, not set difference.
+ *
+ * Comparing as sets made a duplicate invisible: an implementation emitting the
+ * same edge twice where the other emits it once produced zero rows of
+ * difference. The entire cross-link precedence design rests on de-duplication
+ * (`crossSeen`), so counting is the comparison this gate needs.
+ */
 function diffSets(label, swiftRows, tsRows, out) {
-  const inTs = new Set(tsRows);
-  const inSwift = new Set(swiftRows);
-  const swiftOnly = swiftRows.filter((x) => !inTs.has(x));
-  const tsOnly = tsRows.filter((x) => !inSwift.has(x));
+  const count = (rows) => {
+    const m = new Map();
+    for (const r of rows) m.set(r, (m.get(r) ?? 0) + 1);
+    return m;
+  };
+  const swiftCounts = count(swiftRows);
+  const tsCounts = count(tsRows);
+  const expand = (a, b) => {
+    const extra = [];
+    for (const [row, n] of a) {
+      const surplus = n - (b.get(row) ?? 0);
+      for (let i = 0; i < surplus; i++) extra.push(row);
+    }
+    return extra;
+  };
+  const swiftOnly = expand(swiftCounts, tsCounts);
+  const tsOnly = expand(tsCounts, swiftCounts);
   if (swiftOnly.length === 0 && tsOnly.length === 0) {
     out.push(`  OK   ${label}: ${swiftRows.length} identical`);
     return true;
@@ -184,10 +231,60 @@ try {
     ok = false;
   }
 
+  // ---- Merge track -------------------------------------------------------
+  //
+  // Both implementations are handed the SAME code graph, doc graph and chunks,
+  // so this isolates merge logic from code scanning (which is TypeScript/
+  // JavaScript-only on the plugin side and would otherwise dominate the diff).
+  // The doc side comes from Swift's emission so the inputs are byte-identical.
+  const codeFixture = join(ROOT, "schema/fixtures/merge-code.json");
+  const swiftPayload = JSON.parse(readFileSync(swiftOut, "utf8"));
+  const docOnly = join(work, "doc.json");
+  const chunksOnly = join(work, "chunks.json");
+  writeFileSync(docOnly, JSON.stringify({
+    schemaVersion: swiftPayload.schemaVersion,
+    nodes: swiftPayload.nodes, edges: swiftPayload.edges,
+    layers: swiftPayload.layers ?? [], tour: swiftPayload.tour ?? [],
+  }));
+  writeFileSync(chunksOnly, JSON.stringify(swiftPayload.chunks ?? []));
+
+  const swiftMergeOut = join(work, "swift-merge.json");
+  const tsMergeOut = join(work, "ts-merge.json");
+  execFileSync(
+    "swift",
+    ["run", "-c", "release", "graph-engine-lab", "--emit-merge",
+     codeFixture, docOnly, chunksOnly, swiftMergeOut],
+    { cwd: ROOT, stdio: ["ignore", "ignore", "inherit"],
+      env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" } },
+  );
+  execFileSync(
+    "node",
+    ["bin/graph-kit.js", "merge", codeFixture, docOnly, chunksOnly, "--out", tsMergeOut],
+    { cwd: ROOT, stdio: ["ignore", "ignore", "inherit"] },
+  );
+
+  const swiftMerge = project(JSON.parse(readFileSync(swiftMergeOut, "utf8")));
+  const tsMerge = project(JSON.parse(readFileSync(tsMergeOut, "utf8")));
+  ok = diffSets("merge nodes", swiftMerge.nodes, tsMerge.nodes, report) && ok;
+  ok = diffSets("merge edges", swiftMerge.edges, tsMerge.edges, report) && ok;
+  // A merge that produced no cross-links would trivially agree. Assert the
+  // corpus actually generated some, so this comparison cannot go vacuous the
+  // way the doc track's empty-corpus case could.
+  const crossKinds = new Set(["documents"]);
+  const crossCount = JSON.parse(readFileSync(swiftMergeOut, "utf8")).edges
+    .filter((e) => crossKinds.has(e.kind) || (e.kind === "references" && e.fromId.startsWith("doc:")))
+    .length;
+  if (crossCount > 0) {
+    report.push(`  OK   merge cross-links: ${crossCount} produced`);
+  } else {
+    report.push("  FAIL merge cross-links: none produced — the comparison is vacuous");
+    ok = false;
+  }
+
   console.log(report.join("\n"));
   console.log("\n" + "=".repeat(72));
   if (ok) {
-    console.log("PASS - Swift and TypeScript doc tracks agree\n");
+    console.log("PASS - Swift and TypeScript agree on the doc track and the merge\n");
   } else {
     // Copy the artifacts somewhere durable before the temp dir is removed, so
     // a failure can actually be inspected.
