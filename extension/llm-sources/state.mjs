@@ -73,7 +73,9 @@ export function setEnabled(userId, sourceId, enabled) {
 // silently (listEnabled's builtin fallback only applies to users with NO
 // entry). Having the defaults on meant "I want skills", so map it onto the
 // builtin (.skills) source rather than merely deleting it. Idempotent; writes
-// only when something changed. Runs next to seedBuiltinOnce().
+// only when something changed. Called by registry.mjs's seedBuiltinOnce()
+// BEFORE it drops the legacy registry row (see the ordering note there), so
+// no caller has to remember it and no pruneOrphans() can race it.
 export function migrateLegacyDefaultSources() {
   const all = readAll();
   let touched = false;

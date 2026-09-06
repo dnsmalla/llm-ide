@@ -1,14 +1,14 @@
 import SwiftUI
 
 /// Detail pane for a registered LLM source: version/location/ref, its
-/// discovered skills/agents/commands/templates/hooks/MCP servers, and the Update / Reveal /
-/// Remove actions the design doc calls for. The builtin source shows
-/// "Install" instead of "Update" when its submodule isn't checked out (the
-/// only source kind with a real re-fetch path when missing — a local/git
-/// source with a missing directory can't be revived by "Update" either,
-/// since fetch/checkout both need the dir to exist; the fix there is
-/// Remove + re-add). Remove never shows for builtin — the server rejects
-/// it anyway, this just avoids a pointless round trip.
+/// discovered skills/agents/commands/templates/hooks/MCP servers, and the
+/// Update / Reveal / Remove actions the design doc calls for. The builtin
+/// source shows "Install" instead of "Update" when its submodule isn't
+/// checked out (the only source kind with a real re-fetch path when missing
+/// — a local/git source with a missing directory can't be revived by
+/// "Update" either, since fetch/checkout both need the dir to exist; the fix
+/// there is Remove + re-add). Remove never shows for builtin — the server
+/// rejects it anyway, this just avoids a pointless round trip.
 ///
 /// Agents, commands, templates, hooks, and MCP servers are DISPLAY ONLY —
 /// this view never invokes a listed agent or command, executes a listed

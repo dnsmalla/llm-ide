@@ -98,7 +98,9 @@ endif
 # view (re-checks every `status: fixed` fault against the current agent and
 # refreshes `<project>/system/faults.csv`) before shipping an upgrade — the
 # CSV's `status` column is the release checklist.
-regression: test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates
+# graph-kit-checkout goes FIRST: it is a one-line precondition, and failing it
+# after four Mac builds (many minutes in) is the wrong place to learn about it.
+regression: graph-kit-checkout test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates
 
 # The graph verification gates. These are plain executables precisely so they
 # run where `swift test` cannot (a Command-Line-Tools-only toolchain has no
@@ -121,9 +123,9 @@ regression: test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-ga
 .PHONY: graph-kit-checkout
 graph-kit-checkout:
 	@test -f mac/LocalPackages/graph-kit/Package.swift || { \
-	  echo "graph-gates: mac/LocalPackages/graph-kit is not checked out. The Mac build no longer"; \
-	  echo "  needs the submodule, but the graph gates run from it. Fix with:"; \
-	  echo "    git submodule update --init mac/LocalPackages/graph-kit"; \
+	  echo "graph-gates: mac/LocalPackages/graph-kit is not checked out. The Mac build no longer" >&2; \
+	  echo "  needs the submodule, but the graph gates run from it. Fix with:" >&2; \
+	  echo "    git submodule update --init mac/LocalPackages/graph-kit" >&2; \
 	  exit 1; }
 
 .PHONY: graph-gates

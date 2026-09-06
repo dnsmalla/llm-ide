@@ -32,7 +32,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as yaml from 'js-yaml';
 import { resolveCentralSkillsRepo } from '../core/skills-repo.mjs';
-import { listEnabled, pruneOrphans } from './state.mjs';
+import { listEnabled, pruneOrphans, migrateLegacyDefaultSources } from './state.mjs';
 
 // Git operations (clone/fetch/checkout/submodule-update) run async — the
 // server is single-threaded Node, so a *Sync spawn here would freeze every
@@ -454,11 +454,19 @@ export function countDiscoveryMcpServers(dir) {
 // Registry id of the curated default_sources snapshot that v44 removed. A
 // registry persisted before v44 still carries it, pointing at a directory that
 // no longer exists, so the Library kept listing a dead "Default Sources" row.
-// Dropped at seed time; state.mjs's migrateLegacyDefaultSources() repairs the
-// per-user enable state the same way.
+// Dropped at seed time. The per-user enable state is repaired by
+// state.mjs's migrateLegacyDefaultSources(), which seedBuiltinOnce() calls
+// itself so EVERY seed site (boot, GET /auth/me/llm-sources, the skill-library
+// builder) repairs state before anything reads it — a caller that seeded but
+// forgot to migrate would compute an empty catalog and cache it.
 export const LEGACY_DEFAULT_SOURCES_ID = 'default-sources';
 
 export function seedBuiltinOnce() {
+  // State FIRST, then the registry row: removeSource() → pruneOrphans() drops
+  // any enabled id that is not in the registry, so if the row went first a
+  // DELETE landing in between would strip `default-sources` from a user's set
+  // before it was mapped onto builtin — silently and permanently.
+  migrateLegacyDefaultSources();
   const persisted = readRegistry();
   const list = persisted.filter((s) => s.id !== LEGACY_DEFAULT_SOURCES_ID);
   let dirty = list.length !== persisted.length;

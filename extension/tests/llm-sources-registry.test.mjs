@@ -25,6 +25,7 @@ const { readRegistry, writeRegistry, isValidLlmSource, seedBuiltinOnce,
   countDiscoveryMcpServers, listDiscoveryMcpServers,
   sourceDiscoveryDetail } =
   await import('../llm-sources/registry.mjs');
+const { listEnabled } = await import('../llm-sources/state.mjs');
 
 test('isValidLlmSource accepts registry.yaml or plugin.json+skills/', () => {
   assert.ok(isValidLlmSource(fakeRepo));
@@ -89,6 +90,24 @@ test('seedBuiltinOnce drops the pre-v44 default-sources entry from a persisted r
   assert.deepEqual(readRegistry().map((s) => s.id), [BUILTIN_ID],
     'legacy entry removed, builtin seeded in its place');
   seedBuiltinOnce(); // idempotent once clean
+  assert.deepEqual(readRegistry().map((s) => s.id), [BUILTIN_ID]);
+});
+
+test('seedBuiltinOnce repairs per-user enable state itself, before dropping the legacy row', () => {
+  // The state repair is folded into the seed so no seed site (boot, the list
+  // route, the skill-library builder) can read a user's enabled set before it
+  // is mapped — and it runs BEFORE the registry write so a pruneOrphans()
+  // racing in between cannot strip the legacy id unmapped.
+  fs.writeFileSync(path.join(tmpRoot, 'llm-sources-state.json'), JSON.stringify({
+    __defaultsSeeded: true,
+    'legacy-user': { enabled: ['default-sources'] },
+  }));
+  writeRegistry([
+    { id: LEGACY_DEFAULT_SOURCES_ID, name: 'Default Sources', origin: 'local',
+      location: path.join(tmpRoot, 'gone', 'llm_default_sources'), builtin: true },
+  ]);
+  seedBuiltinOnce();
+  assert.deepEqual([...listEnabled('legacy-user')], [BUILTIN_ID]);
   assert.deepEqual(readRegistry().map((s) => s.id), [BUILTIN_ID]);
 });
 

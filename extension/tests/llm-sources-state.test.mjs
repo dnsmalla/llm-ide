@@ -48,12 +48,17 @@ test('migrateLegacyDefaultSources maps a pre-v44 default-sources entry onto buil
     'both':          { enabled: ['builtin', 'default-sources'] },
     'with-repo':     { enabled: ['my-repo', 'default-sources'] },
     'untouched':     { enabled: ['my-repo'] },
+    'opt-out':       { enabled: [] },
   }));
   assert.equal(migrateLegacyDefaultSources(), true);
   assert.deepEqual([...listEnabled('only-defaults')], ['builtin']);
   assert.deepEqual([...listEnabled('both')], ['builtin']);
   assert.deepEqual([...listEnabled('with-repo')].sort(), ['builtin', 'my-repo']);
   assert.deepEqual([...listEnabled('untouched')], ['my-repo'], 'users without the legacy id are left alone');
+  assert.deepEqual([...listEnabled('opt-out')], [],
+    'an explicit empty set is an intentional opt-out and must stay empty');
+  const raw = JSON.parse(fs.readFileSync(path.join(tmpRoot, 'llm-sources-state.json'), 'utf8'));
+  assert.equal(raw.__defaultsSeeded, true, 'reserved __ marker keys survive the rewrite');
   assert.equal(migrateLegacyDefaultSources(), false, 'idempotent: nothing left to migrate');
 });
 

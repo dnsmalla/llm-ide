@@ -1020,10 +1020,8 @@ server.listen(PORT, HOST, () => {
     void (async () => {
       try {
         const { seedBuiltinOnce } = await import('./llm-sources/registry.mjs');
-        const { migrateLegacyDefaultSources } = await import('./llm-sources/state.mjs');
         const { resolveCentralSkillsRepo } = await import('./core/skills-repo.mjs');
         seedBuiltinOnce();
-        migrateLegacyDefaultSources();
         if (!resolveCentralSkillsRepo()) {
           logger.error('skills_repo_missing', {
             message: '.skills is not initialized — every skill (planning pipeline included) is unavailable until this is fixed.',
