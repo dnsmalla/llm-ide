@@ -26,7 +26,7 @@ The macOS app (`LlmIdeMac`) is the primary IDE client — a single-window SwiftU
 | Yams | `from: "5.1.0"` |
 | Sparkle | `from: "2.6.0"` |
 | SwiftTerm | `from: "1.2.0"` |
-| graph-kit (`GraphKit` + `GraphCore`) | `.package(url: "https://github.com/dnsmalla/graph-kit.git", revision: …)` — a **remote** dependency pinned by commit in `Package.swift`, so SwiftPM fetches and caches it and the build does **not** depend on the submodule at `mac/LocalPackages/graph-kit` being checked out. That submodule still exists (same repo, same commit) as the working tree for editing the engine and running its labs. Two pins to keep in step when bumping the engine: the `revision:` here and the submodule gitlink. The repo is **private** — a cold resolve needs git credentials for `github.com/dnsmalla` |
+| graph-kit (`GraphKit` + `GraphCore`) | `.package(url: "https://github.com/dnsmalla/graph-kit.git", revision: …)` — a **remote** dependency pinned by commit in `Package.swift`, so SwiftPM fetches and caches it and the build does **not** depend on the submodule at `mac/LocalPackages/graph-kit` being checked out. That submodule still exists (same repo, same commit) as the working tree for editing the engine and running its labs. Two pins to keep in step when bumping the engine: the `revision:` here and the submodule gitlink. The repo is public — a cold resolve needs only network access, no credentials. `make regression`'s `graph-gates` still runs from the submodule (guarded by the `graph-kit-checkout` target) |
 
 **Bundled resources** (lines 28–35): `note_template.docx`, `generate_meeting_note.py`, vendored highlight.js v11.9.0 (`highlight.min.js`), and two highlight.js themes (`atom-one-dark.min.css`, `atom-one-light.min.css`).
 

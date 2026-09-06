@@ -214,10 +214,10 @@ cd "$PROJ_DIR"
 # NOTE: graph-kit is a `url:` dependency again (pinned by revision), NOT a
 # `path:` one, so a build no longer depends on the submodule in
 # LocalPackages/graph-kit/ being checked out — SwiftPM fetches and caches the
-# repo itself. The trade-off: it is a PRIVATE repo, so a resolve that actually
-# reaches the network needs git credentials for github.com/dnsmalla. The other
-# three remote dependencies (Yams, Sparkle, SwiftTerm) are public. Once
-# Package.resolved is satisfied from cache, none of this needs network.
+# repo itself. All four remote dependencies (Yams, Sparkle, SwiftTerm,
+# graph-kit) are PUBLIC, so a cold resolve needs network access and nothing
+# else — no git credentials. Once Package.resolved is satisfied from cache,
+# not even that.
 #
 # Only when the cache can't satisfy Package.resolved (fresh checkout, or a
 # deliberate dependency bump) do we fall back to a networked resolve. Set
@@ -231,7 +231,7 @@ if [ "${LLMIDE_FORCE_RESOLVE:-}" = "1" ]; then
 elif swift package resolve --disable-automatic-resolution >/dev/null 2>&1; then
   echo -e "${BLUE}[build]${NC} dependencies satisfied from Package.resolved (offline — no remote fetch)"
 else
-  echo -e "${BLUE}[build]${NC} Package.resolved not fully cached — resolving from remotes (needs network + git credentials for graph-kit)..."
+  echo -e "${BLUE}[build]${NC} Package.resolved not fully cached — resolving from remotes (needs network; all deps are public)..."
   swift package resolve
   SPM_OFFLINE=""
 fi
@@ -258,11 +258,13 @@ if ! swift build -c release --product "$APP_NAME" $SPM_OFFLINE $FEATURE_BUILD_FL
     echo -e "${YELLOW}[build] A source file changed while the compiler was reading it — an editor or${NC}" >&2
     echo -e "${YELLOW}[build] another session is writing under mac/Sources/. Not a code error: wait for${NC}" >&2
     echo -e "${YELLOW}[build] that to settle (git status shows what is in flight), then re-run.${NC}" >&2
-  elif grep -qiE "graph-kit|could not read Username|Authentication failed|could not find the commit" "$build_log"; then
-    echo -e "${RED}[build] graph-kit could not be fetched: this machine has no usable git credentials${NC}" >&2
-    echo -e "${RED}[build] for the PRIVATE repo github.com/dnsmalla/graph-kit. Verify with:${NC}" >&2
-    echo -e "${RED}[build]   git ls-remote https://github.com/dnsmalla/graph-kit.git${NC}" >&2
-    echo -e "${RED}[build] and set up a credential helper (or SSH + url rewrite) first.${NC}" >&2
+  elif grep -qiE "graph-kit|could not find the commit|could not read Username|Authentication failed" "$build_log"; then
+    echo -e "${RED}[build] graph-kit could not be resolved. The repo is public (no credentials needed), so${NC}" >&2
+    echo -e "${RED}[build] check that github.com is reachable through your network/proxy, and that the${NC}" >&2
+    echo -e "${RED}[build] revision pinned in mac/Package.swift exists upstream:${NC}" >&2
+    echo -e "${RED}[build]   git ls-remote https://github.com/dnsmalla/graph-kit.git | grep <pinned sha>${NC}" >&2
+    echo -e "${RED}[build] A \"could not find the commit\" right after \"Fetched … from cache\" has also been a${NC}" >&2
+    echo -e "${RED}[build] transient while another SwiftPM process was updating the shared cache — retry once.${NC}" >&2
   fi
   rm -f "$build_log"
   exit 1

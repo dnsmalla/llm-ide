@@ -146,9 +146,9 @@ Then load `extension/dist/` as an unpacked Chrome extension. Full tutorial: [Rec
 
 > Already cloned without `--recurse-submodules`? Run `./setup.sh` — it initializes both
 > submodules (`.skills` and `mac/LocalPackages/graph-kit`). The Mac build no longer needs
-> the graph-kit submodule (SwiftPM fetches that package from GitHub itself), but it does
-> need git credentials for the private `dnsmalla/graph-kit` repo on a cold resolve; keep
-> the submodule if you want to edit the engine or run its labs locally.
+> the graph-kit submodule — SwiftPM fetches that (public) package from GitHub itself, so a
+> cold resolve needs only network access — but `make regression`'s graph gates run from
+> it and it is where you edit the engine, so keep it initialized.
 
 ---
 
