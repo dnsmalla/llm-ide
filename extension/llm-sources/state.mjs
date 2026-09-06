@@ -47,12 +47,6 @@ export function listEnabled(userId) {
   return new Set(Array.isArray(arr) ? arr.filter((s) => typeof s === 'string') : []);
 }
 
-// User ids that have any enable state. Keys starting with '__' are reserved
-// markers, never user ids.
-export function listStateUserIds() {
-  return Object.keys(readAll()).filter((k) => !k.startsWith('__'));
-}
-
 export function setEnabled(userId, sourceId, enabled) {
   if (!userId || typeof sourceId !== 'string') return new Set();
   const all = readAll();
