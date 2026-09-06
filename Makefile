@@ -112,8 +112,22 @@ regression: test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-ga
 # blocks, and id'd symlinked paths differently. Wired into `regression` because a gate
 # nothing runs is a gate in name only — the layout gate passed a 1094%-wrong
 # force calculation for exactly as long as nobody executed it.
+# The gates need the graph-kit SUBMODULE checked out. The Mac BUILD no longer
+# does (mac/Package.swift fetches graph-kit by URL), so a fresh clone that
+# skipped `git submodule update` builds fine and then dies here: from an empty
+# submodule dir `swift run` walks up to mac/Package.swift and still runs the
+# labs, but conformance-memory.mjs exists only in the submodule's scripts/ —
+# the failure was a bare Node MODULE_NOT_FOUND stack trace naming no cause.
+.PHONY: graph-kit-checkout
+graph-kit-checkout:
+	@test -f mac/LocalPackages/graph-kit/Package.swift || { \
+	  echo "graph-gates: mac/LocalPackages/graph-kit is not checked out. The Mac build no longer"; \
+	  echo "  needs the submodule, but the graph gates run from it. Fix with:"; \
+	  echo "    git submodule update --init mac/LocalPackages/graph-kit"; \
+	  exit 1; }
+
 .PHONY: graph-gates
-graph-gates:
+graph-gates: graph-kit-checkout
 	cd mac/LocalPackages/graph-kit && swift run -c release graph-layout-lab
 	cd mac/LocalPackages/graph-kit && swift run -c release graph-engine-lab
 	cd mac/LocalPackages/graph-kit && node scripts/conformance-memory.mjs
