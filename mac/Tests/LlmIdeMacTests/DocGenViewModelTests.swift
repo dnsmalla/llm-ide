@@ -53,10 +53,39 @@ final class DocGenViewModelTests: XCTestCase {
 
     func testResetClearsEditState() {
         let vm = DocGenViewModel()
-        vm.isEditing = true
+        vm.editPrompt = "make it shorter"
         vm.editedContent = "draft"
         vm.resetToIdle()
-        XCTAssertFalse(vm.isEditing)
+        XCTAssertEqual(vm.editPrompt, "")
         XCTAssertEqual(vm.editedContent, "")
+    }
+
+    func testResetClearsSavedFlag() {
+        let vm = DocGenViewModel()
+        let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+        // isSaved is private(set); drive it through save() rather than
+        // poking the property directly. A real temp directory keeps this
+        // hermetic (no project root, no Downloads folder side effects).
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("docgen-test-\(UUID().uuidString)")
+        var config = DocGenOutputConfig()
+        config.localFolderPath = tmpDir.path
+        vm.save(content: "draft", api: api, config: config)
+        XCTAssertTrue(vm.isSaved)
+        vm.resetToIdle()
+        XCTAssertFalse(vm.isSaved)
+        try? FileManager.default.removeItem(at: tmpDir)
+    }
+
+    func testIsBusyOnlyWhileGenerating() {
+        let vm = DocGenViewModel()
+        let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+        XCTAssertFalse(vm.isBusy)
+        vm.selectedSources = [makeSource()]
+        vm.selectedTemplate = makeTemplate()
+        vm.generate(api: api)
+        XCTAssertTrue(vm.isBusy)
+        vm.cancelGeneration()
+        XCTAssertFalse(vm.isBusy)
     }
 }

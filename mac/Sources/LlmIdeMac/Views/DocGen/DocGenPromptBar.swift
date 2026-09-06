@@ -11,9 +11,13 @@ struct DocGenPromptBar: View {
     @EnvironmentObject private var projectStore: ProjectStore
     @EnvironmentObject private var theme: ThemeStore
 
-    /// Guards "Start another" — shown only when `vm.editedContent` has
-    /// diverged from the generated text, so unsaved edits aren't lost silently.
+    /// Guards "Start another" — shown only when the document hasn't been
+    /// saved yet, so an unsaved revision isn't lost silently.
     @State private var showDiscardConfirmation = false
+    /// Whether the edit-instruction field is expanded. Local UI state, not on
+    /// the view model: it's transient (which control is showing), not part of
+    /// the generation/document model.
+    @State private var isShowingEditField = false
 
     private var projectRoot: URL? {
         projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
@@ -27,8 +31,8 @@ struct DocGenPromptBar: View {
                 generateButton
             case .generating:
                 generatingRow
-            case .done(let generatedText, _):
-                doneRow(generatedText: generatedText)
+            case .done:
+                doneRow()
             }
         }
         .padding(.horizontal, 12)
@@ -101,7 +105,7 @@ struct DocGenPromptBar: View {
 
     // MARK: - Done
 
-    private func doneRow(generatedText: String) -> some View {
+    private func doneRow() -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill")
@@ -112,42 +116,15 @@ struct DocGenPromptBar: View {
                 Spacer()
             }
 
-            HStack(spacing: 8) {
-                Button {
-                    vm.isEditing.toggle()
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "pencil").font(.system(size: 11))
-                        Text(vm.isEditing ? "Done Editing" : "Edit").font(.callout)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    vm.save(content: vm.editedContent,
-                            api: api,
-                            config: outputStore.config,
-                            projectRoot: projectRoot)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "square.and.arrow.down.fill").font(.system(size: 11))
-                        Text("Save").font(.callout.weight(.semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .background(theme.current.accent, in: RoundedRectangle(cornerRadius: 8))
-                    .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
-                .help("Save to the folder set in Setup")
+            if isShowingEditField {
+                editPromptRow
+            } else {
+                actionRow
             }
 
             Button {
-                if vm.editedContent == generatedText {
-                    // No divergence from what was generated — nothing to lose.
+                if vm.isSaved {
+                    // Already saved — nothing unsaved to lose.
                     vm.resetToIdle()
                 } else {
                     showDiscardConfirmation = true
@@ -159,7 +136,7 @@ struct DocGenPromptBar: View {
             }
             .buttonStyle(.plain)
             .confirmationDialog(
-                "Discard your edits to this document?",
+                "Discard this document?",
                 isPresented: $showDiscardConfirmation,
                 titleVisibility: .visible
             ) {
@@ -168,7 +145,105 @@ struct DocGenPromptBar: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Your changes have not been saved. Starting another document discards them.")
+                Text("This document has not been saved. Starting another discards it.")
+            }
+        }
+    }
+
+    /// Edit + Save, side by side. Both disable once the current document is
+    /// saved (`vm.isSaved`) — re-pressing Save used to silently write a
+    /// duplicate `-1.md` file, and a saved document has nothing left to edit
+    /// until the user starts another or applies a further revision.
+    private var actionRow: some View {
+        HStack(spacing: 8) {
+            Button {
+                isShowingEditField = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "pencil").font(.system(size: 11))
+                    Text("Edit").font(.callout)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .disabled(vm.isSaved)
+            .opacity(vm.isSaved ? 0.5 : 1)
+
+            Button {
+                vm.save(content: vm.editedContent,
+                        api: api,
+                        config: outputStore.config,
+                        projectRoot: projectRoot)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "square.and.arrow.down.fill").font(.system(size: 11))
+                    Text("Save").font(.callout.weight(.semibold))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(theme.current.accent, in: RoundedRectangle(cornerRadius: 8))
+                .foregroundStyle(.white)
+            }
+            .buttonStyle(.plain)
+            .disabled(vm.isSaved)
+            .opacity(vm.isSaved ? 0.5 : 1)
+            .help(vm.isSaved ? "Already saved" : "Save to the folder set in Setup")
+        }
+    }
+
+    /// Shown after pressing Edit: a prompt-driven revision, not a typable
+    /// editor. The document itself (`DocGenEditorPanel`) always stays
+    /// read-only; typing an instruction here and pressing Apply Edit sends
+    /// the current document back through `/generate-doc` for a full rewrite.
+    private var editPromptRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("Describe the change (e.g. \"Add a risks section\")",
+                      text: $vm.editPrompt, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.callout)
+                .lineLimit(1...4)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color.secondary.opacity(0.15), lineWidth: 1)
+                )
+
+            HStack(spacing: 8) {
+                Button {
+                    isShowingEditField = false
+                    vm.editPrompt = ""
+                } label: {
+                    Text("Cancel")
+                        .font(.callout)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+
+                let canApply = !vm.editPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                Button {
+                    isShowingEditField = false
+                    vm.applyEdit(api: api)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles").font(.system(size: 11))
+                        Text("Apply Edit").font(.callout.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(canApply ? theme.current.accent : Color.secondary.opacity(0.18))
+                    )
+                    .foregroundStyle(canApply ? .white : Color.secondary.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canApply)
             }
         }
     }

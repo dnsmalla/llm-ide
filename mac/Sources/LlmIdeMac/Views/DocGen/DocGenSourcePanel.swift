@@ -45,6 +45,12 @@ struct DocGenSourcePanel: View {
                 }
                 .padding(.bottom, 12)
             }
+            // Setup, Template & Command, and Sources all live inside this
+            // ScrollView — one `.disabled` here covers all three while a
+            // generation (fresh or an applied edit) is in flight, instead of
+            // desyncing the run's inputs from what's still selectable.
+            .disabled(vm.isBusy)
+            .opacity(vm.isBusy ? 0.5 : 1)
 
             Divider()
             footer

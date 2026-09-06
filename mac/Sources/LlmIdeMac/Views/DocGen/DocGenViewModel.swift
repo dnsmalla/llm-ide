@@ -10,15 +10,25 @@ final class DocGenViewModel: ObservableObject {
     @Published var selectedCommand: DocCommand?
     /// The short, per-run instruction typed in the prompt bar.
     @Published var prompt: String = ""
-    /// Whether the generated document is editable. Set by the prompt bar's
-    /// Edit button after a run completes.
-    @Published var isEditing = false
-    /// The document as edited. Owned here, NOT by the editor panel, because
-    /// Save lives in the prompt bar and must write what the user edited.
+    /// The instruction typed after pressing Edit — describes the revision to
+    /// make, not free-form document text. Consumed (and cleared) by
+    /// `applyEdit(api:)`.
+    @Published var editPrompt: String = ""
+    /// The generated document. Owned here, NOT by the editor panel, because
+    /// Save and Edit live in the prompt bar and must act on this text. The
+    /// document is always read-only in the UI — the only way it changes is a
+    /// fresh `generate` or an `applyEdit` round-trip through the model.
     @Published var editedContent: String = ""
     @Published private(set) var generationState: GenerationState = .idle
     /// Source display names that could not be read before the last generate attempt.
     @Published private(set) var unreadableSourceNames: Set<String> = []
+    /// True once the current document has been written to disk by `save`;
+    /// false whenever a new document lands (a fresh generation or an applied
+    /// edit). Drives disabling Edit/Save after a successful save (pressing
+    /// Save twice used to silently write a second `-1` file) and drives the
+    /// "Start another" discard confirmation (confirm only when there is a
+    /// genuinely unsaved document).
+    @Published private(set) var isSaved = false
 
     enum GenerationState {
         case idle
@@ -32,6 +42,14 @@ final class DocGenViewModel: ObservableObject {
 
     var canGenerate: Bool {
         (selectedTemplate != nil || selectedCommand != nil) && !selectedSources.isEmpty
+    }
+
+    /// True while a run (fresh generate or applied edit) is in flight. Drives
+    /// a single `.disabled` on the left panel's container so Setup, Template &
+    /// Command, and Sources can't desync from the run — see `DocGenSourcePanel`.
+    var isBusy: Bool {
+        if case .generating = generationState { return true }
+        return false
     }
 
     /// Base filename for a save: template name, else command name, else a
@@ -95,8 +113,64 @@ final class DocGenViewModel: ObservableObject {
                     prompt: userPrompt.isEmpty ? nil : userPrompt,
                     sources: sources)
                 editedContent = result
-                isEditing = false
+                isSaved = false
                 generationState = .done(result, skipped: skippedSources)
+            } catch {
+                if !Task.isCancelled {
+                    generationState = .error(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    /// Prompt-driven revision: sends the CURRENT document back through the
+    /// existing `/generate-doc` endpoint as the source material, with the
+    /// user's instruction as the request's `prompt`, and replaces the
+    /// document with the result. Reuses the currently selected
+    /// template/command exactly as `generate` does, so the document keeps
+    /// its shape (headings/sections) across the revision.
+    ///
+    /// No server change: this is the same endpoint `generate(api:)` calls,
+    /// just with the document-so-far as the (only) source instead of the
+    /// original meeting/file sources.
+    func applyEdit(api: LlmIdeAPIClient) {
+        let instruction = editPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !instruction.isEmpty else { return }
+        let currentDocument = editedContent
+        let template = selectedTemplate
+        let command = selectedCommand
+
+        // Framed so the model treats this as a revision of the attached
+        // document rather than a fresh draft, and returns the whole thing —
+        // both the source name and the prompt say so, since either alone
+        // could read as "write something new" or "describe the change".
+        let revisionPrompt = """
+        Revise the existing document below (attached as the source named \
+        "Current document") according to this instruction. Return the FULL \
+        revised document as your entire output — not a diff, not just the \
+        changed section, and no commentary before or after it.
+
+        Instruction: \(instruction)
+        """
+        let sourceName = "Current document (existing draft to revise — " +
+            "return the complete revised document, not a diff or fragment)"
+
+        generationTask?.cancel()
+        generationState = .generating
+        unreadableSourceNames = []
+
+        generationTask = Task {
+            do {
+                let result = try await api.generateDoc(
+                    templateName: template?.name,
+                    sections: template?.sections,
+                    command: command?.instruction,
+                    prompt: revisionPrompt,
+                    sources: [(name: sourceName, content: currentDocument)])
+                editedContent = result
+                editPrompt = ""
+                isSaved = false
+                generationState = .done(result, skipped: [])
             } catch {
                 if !Task.isCancelled {
                     generationState = .error(error.localizedDescription)
@@ -114,8 +188,9 @@ final class DocGenViewModel: ObservableObject {
     func resetToIdle() {
         generationState = .idle
         unreadableSourceNames = []
-        isEditing = false
+        editPrompt = ""
         editedContent = ""
+        isSaved = false
     }
 
     /// Write the generated markdown to the configured output folder. Unlike the
@@ -129,6 +204,7 @@ final class DocGenViewModel: ObservableObject {
                 filename: outputFilename,
                 projectRoot: projectRoot,
                 directory: config.resolvedDirectory(projectRoot: projectRoot))
+            isSaved = true
             NSWorkspace.shared.activateFileViewerSelecting([url])
             // A doc saved into the project is a new Library file; nudge the
             // sidebar to rescan (the de-facto "library changed" signal) so it

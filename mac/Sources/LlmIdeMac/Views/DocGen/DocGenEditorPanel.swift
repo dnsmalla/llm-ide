@@ -304,15 +304,15 @@ struct DocGenEditorPanel: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.current.success)
-                Text(vm.isEditing
-                     ? "Editing — press Save in the right panel when you're done"
-                     : "Document ready — press Edit in the right panel to change it")
+                Text(vm.isSaved
+                     ? "Saved — press Start another to generate a new document"
+                     : "Document ready — press Edit in the right panel to revise it with a prompt")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 HStack(spacing: 4) {
-                    Image(systemName: vm.isEditing ? "pencil" : "lock")
+                    Image(systemName: "lock")
                         .font(.caption2)
-                    Text(vm.isEditing ? "Editable" : "Read-only")
+                    Text("Read-only")
                         .font(.caption2)
                 }
                 .foregroundStyle(.tertiary)
@@ -338,12 +338,16 @@ struct DocGenEditorPanel: View {
 
             Divider()
 
+            // Always read-only: manual typing is removed entirely. Revising
+            // the document is prompt-driven — see the Edit button in
+            // `DocGenPromptBar`, which sends the current text back through
+            // `/generate-doc` with the user's instruction as the prompt.
             TextEditor(text: $vm.editedContent)
                 .font(.system(.callout, design: .monospaced))
                 .scrollContentBackground(.hidden)
                 .background(Color(nsColor: .textBackgroundColor))
-                .disabled(!vm.isEditing)
-                .opacity(vm.isEditing ? 1 : 0.85)
+                .disabled(true)
+                .opacity(0.85)
                 .onAppear { if vm.editedContent.isEmpty { vm.editedContent = text } }
                 .onChange(of: text) { _, new in vm.editedContent = new }
         }
