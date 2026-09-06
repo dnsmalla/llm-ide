@@ -196,8 +196,16 @@ final class DocGenViewModel: ObservableObject {
     /// Write the generated markdown to the configured output folder. Unlike the
     /// old export flow there is no location prompt — the folder is chosen once
     /// in the Setup section.
+    ///
+    /// `revealInFinder` defaults to `true` (real production behavior is
+    /// unchanged — every call site in the app still gets the Finder
+    /// reveal). It exists solely so a unit test can drive a real save
+    /// (still writing a real file, so `isSaved`/dedupe behavior stay
+    /// genuinely covered) without popping a Finder window from a headless
+    /// test run.
     func save(content: String, api: LlmIdeAPIClient,
-              config: DocGenOutputConfig, projectRoot: URL? = nil) {
+              config: DocGenOutputConfig, projectRoot: URL? = nil,
+              revealInFinder: Bool = true) {
         do {
             let url = try api.exportMarkdown(
                 content: content,
@@ -205,7 +213,9 @@ final class DocGenViewModel: ObservableObject {
                 projectRoot: projectRoot,
                 directory: config.resolvedDirectory(projectRoot: projectRoot))
             isSaved = true
-            NSWorkspace.shared.activateFileViewerSelecting([url])
+            if revealInFinder {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
             // A doc saved into the project is a new Library file; nudge the
             // sidebar to rescan (the de-facto "library changed" signal) so it
             // appears immediately instead of only after the next index event.

@@ -253,12 +253,24 @@ struct DocGenEditorPanel: View {
 
     // MARK: - Generating view
 
+    /// Pulled out of the `Text` interpolation below as a plain, explicitly
+    /// typed `String` — a chained `??` over two different optional types
+    /// inside a string interpolation is a known SwiftUI type-checker
+    /// blowup ("unable to type-check this expression in reasonable time").
+    /// `swift build` passing on one toolchain/cache doesn't clear it; giving
+    /// the type-checker an already-resolved `String` avoids the risk
+    /// entirely instead of relying on staying under whatever the current
+    /// limit happens to be.
+    private var generatingTitle: String {
+        vm.selectedTemplate?.name ?? vm.selectedCommand?.name ?? "document"
+    }
+
     private var generatingView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
                     ProgressView().controlSize(.small)
-                    Text("Generating \"\(vm.selectedTemplate?.name ?? vm.selectedCommand?.name ?? "document")\" with Claude…")
+                    Text("Generating \"\(generatingTitle)\" with Claude…")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

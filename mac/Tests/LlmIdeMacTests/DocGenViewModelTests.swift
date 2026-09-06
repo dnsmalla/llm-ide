@@ -70,7 +70,12 @@ final class DocGenViewModelTests: XCTestCase {
             .appendingPathComponent("docgen-test-\(UUID().uuidString)")
         var config = DocGenOutputConfig()
         config.localFolderPath = tmpDir.path
-        vm.save(content: "draft", api: api, config: config)
+        // revealInFinder: false — this still performs a real write (the
+        // isSaved/dedupe behavior stays genuinely covered), it just skips
+        // the NSWorkspace Finder-reveal side effect so the test doesn't pop
+        // a Finder window from a headless run. Production callers (the
+        // prompt bar's Save button) keep the default `true`.
+        vm.save(content: "draft", api: api, config: config, revealInFinder: false)
         XCTAssertTrue(vm.isSaved)
         vm.resetToIdle()
         XCTAssertFalse(vm.isSaved)
