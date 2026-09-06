@@ -199,20 +199,25 @@ fi
 
 cd "$PROJ_DIR"
 
-# Dependency resolution. One dependency (graph-kit) is a PRIVATE repo, so a
-# plain `swift build` — which contacts every remote to check for updates —
-# fails with "could not read Username for 'https://github.com'" on any machine
-# without git credentials, even when the pinned versions are already cached.
+# Dependency resolution. A plain `swift build` contacts every remote to check
+# for updates, which is slow and fails outright with no network even when the
+# pinned versions are already cached.
 #
 # So resolve OFFLINE first: `--disable-automatic-resolution` uses only the
 # versions in Package.resolved and never re-checks remotes. When the local
 # cache already satisfies Package.resolved (the common case — warm `.build/`)
-# this needs no network and no credentials. We then build with the same flag
-# so the build step can't reach out either.
+# this needs no network at all. We then build with the same flag so the build
+# step can't reach out either.
+#
+# NOTE: this used to say graph-kit was a PRIVATE repo needing git credentials.
+# That has not been true since it became a `path:` dependency — SwiftPM never
+# fetches it, it just reads the directory. All three remote dependencies
+# (Yams, Sparkle, SwiftTerm) are public. graph-kit's failure mode is now a
+# missing SUBMODULE, handled separately below.
 #
 # Only when the cache can't satisfy Package.resolved (fresh checkout, or a
-# deliberate dependency bump) do we fall back to a networked resolve — which
-# does require credentials for graph-kit. Set LLMIDE_FORCE_RESOLVE=1 to skip
+# deliberate dependency bump) do we fall back to a networked resolve. Set
+# LLMIDE_FORCE_RESOLVE=1 to skip
 # the offline attempt and always resolve from remotes.
 SPM_OFFLINE="--disable-automatic-resolution"
 if [ "${LLMIDE_FORCE_RESOLVE:-}" = "1" ]; then
@@ -238,10 +243,10 @@ if [ -n "${LLMIDE_FEATURES:-}" ]; then
 fi
 if ! swift build -c release --product "$APP_NAME" $SPM_OFFLINE $FEATURE_BUILD_FLAGS; then
   echo -e "${RED}[build] swift build failed.${NC}" >&2
-  echo -e "${RED}[build] If the error mentions 'could not read Username for https://github.com',${NC}" >&2
-  echo -e "${RED}[build] the private graph-kit dependency needs to be fetched once with git${NC}" >&2
-  echo -e "${RED}[build] credentials. Run 'swift package resolve' with credentials available,${NC}" >&2
-  echo -e "${RED}[build] then re-run this script (the warm cache then builds offline).${NC}" >&2
+  echo -e "${RED}[build] If the error mentions LocalPackages/graph-kit/Package.swift not${NC}" >&2
+  echo -e "${RED}[build] existing, the graph-kit SUBMODULE is not checked out. Run:${NC}" >&2
+  echo -e "${RED}[build]   git submodule update --init --recursive mac/LocalPackages/graph-kit${NC}" >&2
+  echo -e "${RED}[build] (or ./setup.sh) and re-run this script.${NC}" >&2
   exit 1
 fi
 

@@ -1,13 +1,28 @@
 #!/usr/bin/env bash
-# Re-install skills when the .skills submodule pointer changes.
+# Re-sync submodules when their pointers change.
 # Fires after `git pull`, `git merge`, and `git rebase --merge`.
+#
+# Handled per submodule because the follow-up differs: .skills needs the kit
+# re-installed into every agent dir, graph-kit needs nothing beyond the
+# checkout. Leaving graph-kit out was a real hazard — a pull that bumped its
+# pin left the working tree on the OLD engine, and a subsequent `git add -A`
+# from the repo root silently staged a one-line REVERT of the pin. For a
+# source-compatible bump the stale build still succeeds, so nothing announces
+# that the wrong engine is being tested.
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 changed=$(git diff --name-only HEAD@{1} HEAD 2>/dev/null || true)
+
 if echo "$changed" | grep -q "^\.skills$\|^\.gitmodules$"; then
   echo "🔄  .skills pointer changed — updating submodule and reinstalling skills..."
   git submodule update --init --recursive .skills
   bash "$ROOT/scripts/install-skills.sh" --prune
   echo "✅  Skills up to date."
+fi
+
+if echo "$changed" | grep -q "^mac/LocalPackages/graph-kit$\|^\.gitmodules$"; then
+  echo "🔄  graph-kit pointer changed — updating submodule..."
+  git submodule update --init --recursive mac/LocalPackages/graph-kit
+  echo "✅  graph-kit up to date."
 fi

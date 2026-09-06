@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Re-install skills when switching to a branch with a different .skills pointer.
+# Re-sync submodules when switching to a branch with different pointers.
 # $1=prev HEAD, $2=new HEAD, $3=1 if branch checkout (0 if file checkout)
+#
+# Handled per submodule because the follow-up differs: .skills needs the kit
+# re-installed into every agent dir, graph-kit needs nothing beyond the
+# checkout. See post-merge for why omitting graph-kit was a hazard.
 set -euo pipefail
 
 PREV="$1"
@@ -16,4 +20,10 @@ if echo "$changed" | grep -q "^\.skills$\|^\.gitmodules$"; then
   git submodule update --init --recursive .skills
   bash "$ROOT/scripts/install-skills.sh" --prune
   echo "✅  Skills up to date."
+fi
+
+if echo "$changed" | grep -q "^mac/LocalPackages/graph-kit$\|^\.gitmodules$"; then
+  echo "🔄  graph-kit pointer changed — updating submodule..."
+  git submodule update --init --recursive mac/LocalPackages/graph-kit
+  echo "✅  graph-kit up to date."
 fi

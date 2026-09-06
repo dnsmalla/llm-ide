@@ -137,14 +137,16 @@ Deep dive: [Architecture overview](docs/explanation/architecture.md) · [Server 
 ```bash
 git clone --recurse-submodules git@github.com:dnsmalla/llm-ide.git
 cd llm-ide
-./setup.sh                        # npm install, .skills submodule, agent symlinks, git hooks
+./setup.sh                        # npm install, submodules (.skills + graph-kit), agent symlinks, git hooks
 cd extension && npm run build     # extension/dist/ is gitignored — build before loading Chrome
 cd extension && npm run server
 ```
 
 Then load `extension/dist/` as an unpacked Chrome extension. Full tutorial: [Record your first meeting](docs/tutorials/01-first-meeting.md).
 
-> Already cloned without `--recurse-submodules`? Run `./setup.sh` — it initializes `.skills` automatically.
+> Already cloned without `--recurse-submodules`? Run `./setup.sh` — it initializes both
+> submodules (`.skills` and `mac/LocalPackages/graph-kit`). Without the latter the Mac
+> build fails on a missing `LocalPackages/graph-kit/Package.swift`.
 
 ---
 
@@ -252,7 +254,7 @@ swift run LlmIdeMac    # or open .build/debug/LlmIdeMac
 
 ```bash
 git pull origin main
-./setup.sh                    # deps, submodule, skills symlinks
+./setup.sh                    # deps, submodules, skills symlinks
 cd extension && npm run build # refresh extension/dist if UI changed
 cd extension && npm run server
 ```
