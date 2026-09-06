@@ -133,7 +133,8 @@ const HOST = config.host;
 //     floor (BackendManager.minimumServerApiVersion) must refuse such a server.
 //   v44 — removed `default_sources`: llm_default_sources/, its curated
 //     core-builtin-skills.json allowlist, and POST /auth/me/llm-sources/
-//     refresh-default are all gone. `.skills` (BUILTIN_ID) is now read
+//     refresh-default are all gone (an older client calling it now gets a
+//     plain 404, not a dedicated status). `.skills` (BUILTIN_ID) is now read
 //     directly, unfiltered, as the sole always-on source — no committed
 //     fallback copy. GET /auth/me/llm-sources no longer seeds a
 //     "Default Sources" row. GET /health gained a `checks.skills` /
@@ -141,7 +142,13 @@ const HOST = config.host;
 //     so every skill (planning pipeline included) is unavailable until it is
 //     — see docs/explanation/invariants.md. Bumped because an older client
 //     (Mac) still special-cases the `default-sources` id in its Library UI
-//     and still calls the now-410 refresh-default endpoint.
+//     and still calls the removed refresh-default endpoint. Additive in the
+//     same release, not independently bumped: GET /auth/me/llm-sources and
+//     .../<id>/discovery gained `commandCount`/`templateCount` and
+//     `commands`/`templates` (new discovery-only families, same shape as the
+//     existing `agents`), and hook discovery gained a third, named
+//     `hooks/<name>/hook.json` convention alongside the existing two — an
+//     older client simply doesn't decode the new fields.
 const SERVER_API_VERSION = 44;
 const ENDPOINTS = [
   '/generate-notes',

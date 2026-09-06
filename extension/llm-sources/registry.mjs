@@ -331,6 +331,11 @@ function listNamedHookFiles(dir) {
   try { entries = readdirSync(d, { withFileTypes: true }); } catch { return []; }
   const out = [];
   for (const e of entries) {
+    // Bound the WALK itself, not just the final merged result (#47) — every
+    // sibling reader in this file caps inside its loop; without this, a
+    // source with many hooks/<name>/ folders costs one bounded-but-still-up-
+    // to-1MB synchronous read per folder on every list/discovery call.
+    if (out.length >= MAX_DISCOVERY_ENTRIES) break;
     if (!e.isDirectory()) continue;
     const file = join(d, e.name, 'hook.json');
     if (!existsSync(file)) continue;
