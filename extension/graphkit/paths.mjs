@@ -30,7 +30,7 @@
 import { join } from 'node:path';
 
 export const SYSTEM_DIR = 'system';
-export const MEMORY_DIRNAME = 'memory';
+const MEMORY_DIRNAME = 'memory';
 
 /** `<root>/system` — the single generated-knowledge container. */
 export function systemDir(root) {

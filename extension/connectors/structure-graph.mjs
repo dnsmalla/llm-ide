@@ -27,7 +27,7 @@ import { writeCodeGraph, clearCodeGraph, GRAPH_SOURCE_STRUCTURE } from '../kb/co
 // repo — a graph larger than this arrives across several calls. Sized well under
 // the 8 MB body limit for a typical node/edge payload.
 export const MAX_NODES_PER_REQUEST = 5000;
-export const MAX_EDGES_PER_REQUEST = 20000;
+const MAX_EDGES_PER_REQUEST = 20000;
 
 const MAX_ID_CHARS = 512;
 const MAX_TITLE_CHARS = 256;

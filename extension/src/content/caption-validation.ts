@@ -4,8 +4,8 @@
 import type { PlatformId } from '../lib/platforms';
 
 /** Meet room URLs: /abc-defg-hij, /lookup/..., /_meet/... */
-export const MEET_ROOM_RE = /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\/.*)?$/i;
-export const MEET_VALID_PATHS = ['/lookup/', '/_meet/'] as const;
+const MEET_ROOM_RE = /^\/[a-z]{3}-[a-z]{4}-[a-z]{3}(\/.*)?$/i;
+const MEET_VALID_PATHS = ['/lookup/', '/_meet/'] as const;
 
 export const GROUP_ICON_RE = /^groups\b\s*/i;
 

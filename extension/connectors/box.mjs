@@ -105,7 +105,7 @@ export function buildTokenForm({ clientId, clientSecret, subjectType, subjectId 
 }
 
 /** Exchange CCG creds for a short-lived access token. */
-export async function exchangeCCGToken(creds, _opts = {}) {
+async function exchangeCCGToken(creds, _opts = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_DEADLINE_MS);
   try {
@@ -172,7 +172,7 @@ async function listFolderRecursive(session, folderId, { depth = 0, prefix = '', 
 }
 
 /** Fetch a file's extracted text, or null when no text representation exists. */
-export async function fetchExtractedText(session, fileId, opts = {}) {
+async function fetchExtractedText(session, fileId, opts = {}) {
   const pollMs = opts.pollDelayMs ?? DEFAULT_POLL_MS;
   const retryDelayMs = opts.retryDelayMs;
   const infoUrl = `${API}/files/${encodeURIComponent(fileId)}?fields=representations`;

@@ -17,7 +17,7 @@ export const PLUGIN_NAME_RE = /^[a-z][a-z0-9-]{1,40}$/;
 // different dot-dirs for the same JSON shape, and llm-ide's loader reads
 // either in place — so a manifest-bearing source is imported whole rather
 // than flattened into the own format.
-export const VENDOR_MANIFEST_RELS = Object.freeze([
+const VENDOR_MANIFEST_RELS = Object.freeze([
   join('.claude-plugin', 'plugin.json'),
   join('.codex-plugin', 'plugin.json'),
 ]);
@@ -30,7 +30,7 @@ export function findVendorManifestRel(dir) {
 // Tree-copy limits for whole-plugin imports. Deliberately more generous than
 // the zip path (5 MB) because vendor trees can carry references/ and assets/
 // alongside SKILL.md — but still bounded.
-export const TREE_COPY_LIMITS = Object.freeze({
+const TREE_COPY_LIMITS = Object.freeze({
   maxFileBytes: 512 * 1024, maxTotalBytes: 10 * 1024 * 1024, maxFiles: 500,
 });
 

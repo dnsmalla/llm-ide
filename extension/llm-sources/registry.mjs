@@ -202,7 +202,7 @@ export function countDiscoverySkills(dir) {
 // name when the frontmatter is missing/invalid so a malformed skill is still
 // VISIBLE in the detail list rather than silently absent (the count already
 // includes it — a list that omitted it would contradict its own count).
-export function listDiscoverySkills(dir) {
+function listDiscoverySkills(dir) {
   const skills = [];
   for (const fam of LIBRARY_FAMILIES) {
     const d = join(dir, fam);
@@ -517,7 +517,7 @@ const SLUG_RE = /^[a-z][a-z0-9-]{1,40}$/;
 // chars outside the standard ref charset. Required by the plan's Global
 // Constraints.
 const REF_RE = /^[a-zA-Z0-9._/-]{1,100}$/;
-export function isValidRef(ref) {
+function isValidRef(ref) {
   return typeof ref === 'string' && !ref.startsWith('-') && REF_RE.test(ref);
 }
 

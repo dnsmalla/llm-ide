@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-export function defaultClaudeJsonPath() {
+function defaultClaudeJsonPath() {
   return process.env.CLAUDE_CONFIG_PATH || join(homedir(), '.claude.json');
 }
 

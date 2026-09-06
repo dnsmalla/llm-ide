@@ -147,7 +147,7 @@ export function login(db, { email, password, userAgent }) {
   };
 }
 
-export function storeRefreshToken(db, userId, token, userAgent) {
+function storeRefreshToken(db, userId, token, userAgent) {
   const expiresAt = new Date(Date.now() + config.refreshTokenTTLSec * 1000).toISOString();
   db.prepare(`
     INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, user_agent)

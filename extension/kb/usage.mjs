@@ -25,7 +25,7 @@
 // o3-mini, a reasoning model whose thinking tokens eat a small
 // max_completion_tokens budget and return empty content for structured
 // prompts).
-export const DEFAULT_CHAINS = {
+const DEFAULT_CHAINS = {
   anthropic: [
     { model: 'claude-opus-4-8',            label: 'Opus 4.8' },
     { model: 'claude-sonnet-4-6',          label: 'Sonnet 4.6' },

@@ -287,7 +287,7 @@ function ensurePluginEntry(st, userId, id) {
   return st[userId][id];
 }
 
-export function pruneMcpState(validIds) {
+function pruneMcpState(validIds) {
   const all = readState();
   let touched = false;
   for (const [userId, entry] of Object.entries(all)) {

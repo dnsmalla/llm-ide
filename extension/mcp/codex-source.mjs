@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { parseTomlLite } from '../core/toml-lite.mjs';
 
-export function defaultCodexConfigPath() {
+function defaultCodexConfigPath() {
   return process.env.CODEX_CONFIG_PATH || join(homedir(), '.codex', 'config.toml');
 }
 

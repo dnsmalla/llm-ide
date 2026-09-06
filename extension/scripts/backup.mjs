@@ -11,11 +11,11 @@ function isoStamp() {
   return new Date().toISOString().replace(/:/g, '-');
 }
 
-export function defaultBackupPath(dbPath) {
+function defaultBackupPath(dbPath) {
   return `${dbPath}.bak-${isoStamp()}.db`;
 }
 
-export function parseArgs(argv) {
+function parseArgs(argv) {
   const args = Array.from(argv);
   let dbPath = config.dbPath;
   let outPath = null;
@@ -48,7 +48,7 @@ export function parseArgs(argv) {
   };
 }
 
-export async function sha256File(filePath) {
+async function sha256File(filePath) {
   const hash = createHash('sha256');
   await new Promise((resolve, reject) => {
     const stream = createReadStream(filePath);

@@ -52,7 +52,7 @@ export function routeTimeoutMs(url, method) {
   return BUDGETS_POST.get(path) ?? null;
 }
 
-export function errTimeout(ms) {
+function errTimeout(ms) {
   return new AppError('TIMEOUT', `Request exceeded the ${Math.round(ms / 1000)}s budget for this route`, { status: 504 });
 }
 
