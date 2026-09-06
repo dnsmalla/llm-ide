@@ -8,9 +8,10 @@ struct DocGenView: View {
     /// Chat open-state is persisted (default open) so the assistant reads as
     /// the primary surface — same pattern as Explorer / Review / Visual. A
     /// manual close sticks across launches. NOTE: this only hides
-    /// `CodeAssistantPanel` (the chat) — `GenerationPromptBar` (Generate/Edit/Save)
-    /// is the only place those actions live and must always render, so it is
-    /// never gated by this flag. See DocGenView.body below.
+    /// `CodeAssistantPanel` (the chat) — `DocGenPromptBar` (Generate/Edit/Save,
+    /// plus "Save chat output" in Use chat mode) is the only place those
+    /// actions live and must always render, so it is never gated by this flag.
+    /// See DocGenView.body below.
     @AppStorage("DOCGEN_CHAT_VISIBLE") private var chatVisible = true
     /// Persisted chat-panel width (HSplitView has no width binding — read it
     /// back via GeometryReader, same pattern as the other sections).
@@ -58,7 +59,7 @@ struct DocGenView: View {
             // dragging its divider could balloon it past its 260pt cap.
             if chatVisible {
                 VStack(spacing: 0) {
-                    GenerationPromptBar(vm: vm, api: api)
+                    DocGenPromptBar(vm: vm, api: api)
                     Divider()
                     CodeAssistantPanel(
                         api: api,
@@ -80,7 +81,7 @@ struct DocGenView: View {
             // the user's saved chat-column width exactly.
             if !chatVisible {
                 Divider()
-                GenerationPromptBar(vm: vm, api: api)
+                DocGenPromptBar(vm: vm, api: api)
                     .frame(width: 260)
                     .transition(.move(edge: .trailing))
             }

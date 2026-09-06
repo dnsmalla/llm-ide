@@ -2,12 +2,14 @@ import SwiftUI
 
 /// Visual's left panel — mirrors `DocGenSourcePanel`'s three sections (Setup,
 /// Template & Command, Sources) so the generation flow reads identically to
-/// Doc Gen, plus one Visual-only addition: the "Use chat" toggle.
+/// Doc Gen, plus the "Use chat" toggle both tabs now carry independently
+/// (see `DocGenSourcePanel`'s own copy).
 ///
 /// Deliberately its own type rather than a shared one: the expanded-sections
 /// and source-tab `@AppStorage` keys must be namespaced separately from Doc
 /// Gen's ("docgen.…") so the two panels don't fight over one persisted
-/// collapse/tab state, and "Use chat" must never appear in Doc Gen at all.
+/// collapse/tab state, and each tab's "Use chat" toggle must stay on its own
+/// key so the two modes never share state.
 struct VisualSourcePanel: View {
     @ObservedObject var vm: GenerationViewModel
     let api: LlmIdeAPIClient
@@ -17,13 +19,14 @@ struct VisualSourcePanel: View {
     /// `GenerationSourceTree.selectedURL` for why this is a distinct tap
     /// target from the source-ticking checkbox.
     @Binding var selectedURL: URL?
-    /// Visual's own "talk to chat instead" toggle. Owned here (not on
-    /// `GenerationViewModel`, which Doc Gen shares) so it can never leak into
-    /// Doc Gen's UI. `VisualPromptBar` declares its own `@AppStorage` on this
-    /// same key to decide whether to show its extra "Save chat output"
-    /// control — that is how `@AppStorage` sharing works, so each `private`
-    /// declaration is still correct on its own. This panel also mirrors the
-    /// value onto `vm.relaxRequirements`.
+    /// Visual's own "talk to chat instead" toggle. Own key so it never
+    /// shares state with Doc Gen's `DOCGEN_USE_CHAT` — see
+    /// `DocGenSourcePanel` for the identical pattern this mirrors.
+    /// `VisualPromptBar` declares its own `@AppStorage` on this same key to
+    /// decide whether to show its "Save chat output" control — that is how
+    /// `@AppStorage` sharing works, so each `private` declaration is still
+    /// correct on its own. This panel also mirrors the value onto
+    /// `vm.relaxRequirements`.
     @AppStorage("VISUAL_USE_CHAT") private var useChatMode = false
 
     /// See `DocGenSourcePanel.expandedSectionsRaw` for why this is an opt-in

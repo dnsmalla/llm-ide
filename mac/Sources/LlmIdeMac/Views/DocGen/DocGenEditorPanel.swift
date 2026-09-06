@@ -23,8 +23,9 @@ struct DocGenEditorPanel: View {
             steps: [
                 GenerationChecklistStep(
                     title: "Choose a template or command",
-                    detail: "Pick either one in the Template & Command section on the left",
-                    done: vm.selectedTemplate != nil || vm.selectedCommand != nil),
+                    detail: "Pick either one in the Template & Command section on the left — " +
+                        "optional with Use chat on",
+                    done: vm.selectedTemplate != nil || vm.selectedCommand != nil || vm.relaxRequirements),
                 GenerationChecklistStep(
                     title: "Select code or doc files or folders",
                     detail: "Tick files, or a whole folder, in the Sources section on the left",

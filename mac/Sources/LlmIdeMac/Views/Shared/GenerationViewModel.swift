@@ -5,10 +5,13 @@ import Foundation
 final class GenerationViewModel: ObservableObject {
     @Published var selectedSources: Set<DocGenSource> = []
     /// Lifts `canGenerate`'s template/command + source requirement. Defaults
-    /// false (Doc Gen's behavior, unchanged) — set true only by Visual's
-    /// "Use chat" mode, where the chat panel is the primary surface and a
-    /// template/command/source is merely optional scaffolding rather than a
-    /// prerequisite. See `VisualSourcePanel`.
+    /// false (both tabs' behavior with "Use chat" off, unchanged) — set true
+    /// by either tab's own "Use chat" toggle (`VisualSourcePanel`'s
+    /// `VISUAL_USE_CHAT`, `DocGenSourcePanel`'s `DOCGEN_USE_CHAT`), where the
+    /// chat panel is the primary surface and a template/command/source is
+    /// merely optional scaffolding rather than a prerequisite. Each tab owns
+    /// its own `GenerationViewModel` instance (`VisualView`/`DocGenView`
+    /// `@StateObject`), so one tab's toggle never affects the other's.
     @Published var relaxRequirements: Bool = false
     @Published var selectedTemplate: DocTemplate?
     /// A reusable instruction. Either a template or a command is enough to
@@ -80,7 +83,8 @@ final class GenerationViewModel: ObservableObject {
         // with "No readable source content…" when `selectedSources` is empty
         // (see the guard partway through `generate()`). Arming the button
         // with nothing to generate from used to present a Generate that
-        // instantly failed; see VisualSourcePanel's "Use chat" toggle.
+        // instantly failed; see VisualSourcePanel's and DocGenSourcePanel's
+        // "Use chat" toggles.
         if relaxRequirements { return !selectedSources.isEmpty }
         return (selectedTemplate != nil || selectedCommand != nil) && !selectedSources.isEmpty
     }
@@ -330,9 +334,9 @@ final class GenerationViewModel: ObservableObject {
     /// Filename is fixed and clearly chat-derived (never `outputFilename`),
     /// so it can never collide with — or be mistaken for — the document's
     /// own save. Double-press dedup (never write a spurious `-1.md` for the
-    /// SAME reply) is the caller's job: `VisualPromptBar` disables the
-    /// button once the on-screen reply matches the last one actually
-    /// written here.
+    /// SAME reply) is the caller's job: `GenerationSaveChatOutputRow` (used
+    /// by both `VisualPromptBar` and `DocGenPromptBar`) disables the button
+    /// once the on-screen reply matches the last one actually written here.
     @discardableResult
     func saveChatOutput(content: String, api: LlmIdeAPIClient,
                         config: DocGenOutputConfig, projectRoot: URL? = nil,
