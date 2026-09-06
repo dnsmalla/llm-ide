@@ -1146,7 +1146,8 @@ paths:
                     properties:
                       name:    { type: string }
                       content: { type: string }
-                  description: 'Source material (max 20 items, 50 000 chars each)'
+                  minItems: 1
+                  description: 'Source material (max 20 items, 50 000 chars each); non-empty is required, not just present'
       responses:
         '200':
           description: Generated markdown document
