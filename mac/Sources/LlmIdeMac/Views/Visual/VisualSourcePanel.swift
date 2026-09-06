@@ -142,11 +142,19 @@ struct VisualSourcePanel: View {
                 // a plain-text attachment that nothing on the server ever
                 // decodes back into a picture — the model would just
                 // hallucinate over the blob while it eats ~40% of the
-                // attachment budget. The one real vision path is the separate
-                // LLM Chat sheet (menu bar → LLM Chat), which sends true image
-                // content blocks via /kb/agent/ask, but only when the user has
-                // an Anthropic API key configured — too big a caveat to state
-                // briefly here, so this warning stops at "skipped".
+                // attachment budget.
+                //
+                // There is currently NO working way for a user to get an
+                // image to a model from this app, on either chat surface.
+                // /kb/agent/ask does accept real image content blocks
+                // server-side (extension/routes/agent.mjs -> runClaude(...,
+                // images)), but no Mac client actually feeds it one:
+                // AgentAskTransport.swift:62 hardcodes `images: []` (its own
+                // comment: "the sheet has never supported attaching one"),
+                // and LlmChatSheet.swift has no attach affordance at all. Do
+                // not point a future change at the LLM Chat sheet as a
+                // working vision path without first wiring an attach UI
+                // there AND updating AgentAskTransport to send it.
                 Text("Generate reads sources as text, so \(unreadableImageSources.count == 1 ? "this image" : "these images") will be skipped — image files can't be used as generation sources.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
