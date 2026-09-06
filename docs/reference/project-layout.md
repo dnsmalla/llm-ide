@@ -29,6 +29,7 @@ it already contains `system/project.json` or is completely empty
 ├── data/          documents, data files, images; Doc Gen markdown exports
 ├── llm-doc/       generated notes (AI output) — detailed below
 ├── templates/     Doc Gen templates, one subfolder each (<slug>/template.md)
+├── commands/      Doc Gen commands, one subfolder each (<slug>/command.md)
 ├── system/        LLM-IDE managed state (mostly git-ignored)
 │   ├── project.json   project marker + settings (written by ProjectStore)
 │   ├── faults/        fault log entries
@@ -48,6 +49,7 @@ it already contains `system/project.json` or is completely empty
 | `data/` | documents, data, images; Doc Gen markdown export | yes | import / Doc Gen export |
 | `llm-doc/` | generated notes (AI output) | yes (`.gitkeep`) | `NoteService` + meeting/email/connector writers |
 | `templates/` | Doc Gen templates (`<slug>/template.md`) | yes | `DocTemplateStore`, `ProjectDocTemplatesSeeder` |
+| `commands/` | Doc Gen commands (`<slug>/command.md`) | yes | `DocCommandStore`, `ProjectDocCommandsSeeder` |
 | `system/project.json` | project marker + metadata | yes | `ProjectStore` |
 | `system/faults/` | fault log entries | yes | `MemoryStore` |
 | `system/graph/` | knowledge graph + code notes | **no** | `GraphAutoUpdater`, `CodeNoteService` |
@@ -107,8 +109,9 @@ and the Library UI labels the section "LLM Doc".
 
 ### Not here
 
-- Doc Gen markdown exports (`POST /generate-doc`) write to `<project>/data/`,
-  not `llm-doc/`.
+- Doc Gen markdown exports (`POST /generate-doc`) default to `<project>/data/`,
+  not `llm-doc/` — the output folder is configurable per project in Doc Gen's
+  Setup section (`DocGenOutputStore`), so a given install may write elsewhere.
 - Code notes live under `system/graph/`, not `llm-doc/`.
 - Raw transcripts live under `source/`.
 
