@@ -26,7 +26,7 @@ The macOS app (`LlmIdeMac`) is the primary IDE client — a single-window SwiftU
 | Yams | `from: "5.1.0"` |
 | Sparkle | `from: "2.6.0"` |
 | SwiftTerm | `from: "1.2.0"` |
-| graph-kit (`GraphKit` + `GraphCore`) | vendored `1.7.0` (vendored) — `.package(path: "LocalPackages/graph-kit")`, not a git pin |
+| graph-kit (`GraphKit` + `GraphCore`) | **git submodule** at `mac/LocalPackages/graph-kit` → `github.com/dnsmalla/graph-kit`, pinned by commit. Still referenced as `.package(path: "LocalPackages/graph-kit")` — SwiftPM sees a directory either way — so the pin lives in the gitlink, not in `Package.swift`. Run `git submodule update --init --recursive` (or `./setup.sh`) after cloning, or the Mac build fails with a "package not found" that never mentions submodules |
 
 **Bundled resources** (lines 28–35): `note_template.docx`, `generate_meeting_note.py`, vendored highlight.js v11.9.0 (`highlight.min.js`), and two highlight.js themes (`atom-one-dark.min.css`, `atom-one-light.min.css`).
 

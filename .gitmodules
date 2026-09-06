@@ -1,3 +1,6 @@
 [submodule ".skills"]
 	path = .skills
 	url = https://github.com/dnsmalla/skills.git
+[submodule "mac/LocalPackages/graph-kit"]
+	path = mac/LocalPackages/graph-kit
+	url = https://github.com/dnsmalla/graph-kit.git

@@ -84,6 +84,18 @@ if [ -d "$REPO_ROOT/.githooks" ]; then
     echo "✅ git hooks enabled (.githooks)"
 fi
 
+# 4b. graph-kit — the graph engine, consumed as a submodule so this repo and
+# the standalone package cannot drift the way they did while it was vendored.
+# `mac/Package.swift` still references it by path, so an uninitialised
+# submodule fails the Mac build with a confusing "package not found" rather
+# than anything that names the real cause.
+if [ -f "$REPO_ROOT/.gitmodules" ] && grep -q 'path = mac/LocalPackages/graph-kit' "$REPO_ROOT/.gitmodules" 2>/dev/null; then
+    echo ""
+    echo "⚙️  Fetching graph-kit (graph engine submodule)..."
+    git -C "$REPO_ROOT" submodule update --init --recursive mac/LocalPackages/graph-kit
+    echo "✅ graph-kit ready"
+fi
+
 # 5. Central skills kit — pin via `.skills` submodule, then symlink into
 # every AI tool dir (Claude / Cursor / Codex / .agents / Gemini).
 echo ""

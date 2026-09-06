@@ -125,6 +125,12 @@ skills やドキュメントを届ける用途には使えますが、生成は�
 `.package(path: "LocalPackages/graph-kit")` の行は**残します** — 常在の
 `GraphCore` プロダクト（モデル + レイアウト）がこのパッケージから来るためです。
 
+なお `mac/LocalPackages/graph-kit` は git サブモジュール
+（`github.com/dnsmalla/graph-kit`）です。SwiftPM から見ればどちらもディレクトリ
+なので `.package(path:)` の記述は変わりませんが、バージョンの固定は
+`Package.swift` ではなく gitlink 側にあります。エンジン本体の変更はあちらの
+リポジトリにコミットし、こちらは pin を進めてください。
+
 `#if canImport(GraphKit)` ではなく明示的な define を使っています。`canImport` は
 `.build` に残った古いモジュールに対しても真を返すため、ビルトインエンジンを
 コンパイルに含めた上でリンク時に失敗し、綺麗に縮退しませんでした。
