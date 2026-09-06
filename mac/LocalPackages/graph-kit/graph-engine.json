@@ -30,6 +30,19 @@
         "{out}"
       ],
       "timeoutSeconds": 600
+    },
+    "merge": {
+      "command": "node",
+      "args": [
+        "bin/graph-kit.js",
+        "merge",
+        "{code}",
+        "{doc}",
+        "{chunks}",
+        "--out",
+        "{out}"
+      ],
+      "timeoutSeconds": 300
     }
   }
 }
