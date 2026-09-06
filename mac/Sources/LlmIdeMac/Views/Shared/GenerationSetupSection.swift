@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Where generated documents go. Only local-folder output is wired; Box, Slack
 /// and email render disabled so the panel is honest about what works today.
-struct DocGenSetupSection: View {
+struct GenerationSetupSection: View {
     @Binding var isExpanded: Bool
 
     @EnvironmentObject private var outputStore: DocGenOutputStore
@@ -21,7 +21,7 @@ struct DocGenSetupSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            DocGenSectionHeader(
+            GenerationSectionHeader(
                 title: "Setup",
                 icon: "gearshape",
                 color: theme.current.accent,
@@ -130,7 +130,7 @@ struct DocGenSetupSection: View {
 /// Collapse chevron + icon + label, matching the Library sidebar's
 /// section-header convention. Lifted out of `DocGenSourcePanel` so all three
 /// sections render an identical header.
-struct DocGenSectionHeader: View {
+struct GenerationSectionHeader: View {
     let title: String
     let icon: String
     let color: Color

@@ -3,8 +3,8 @@ import SwiftUI
 /// Step 3 of Doc Gen: a short prompt, then Generate — and, once a run finishes,
 /// Edit and Save. Sits above the chat panel rather than inside it, because
 /// `CodeAssistantPanel` is shared with Explorer, Review and Visual.
-struct DocGenPromptBar: View {
-    @ObservedObject var vm: DocGenViewModel
+struct GenerationPromptBar: View {
+    @ObservedObject var vm: GenerationViewModel
     let api: LlmIdeAPIClient
 
     @EnvironmentObject private var outputStore: DocGenOutputStore
@@ -40,7 +40,7 @@ struct DocGenPromptBar: View {
         .background(Color(nsColor: .windowBackgroundColor))
         // The document only actually changes on a SUCCESSFUL generate or
         // applyEdit (a failed revision leaves `editedContent` untouched by
-        // design — see `DocGenViewModel.applyEdit`). So this is the signal
+        // design — see `GenerationViewModel.applyEdit`). So this is the signal
         // to collapse the edit field back to the compact action row; on
         // failure it fires nothing, and the field stays open with
         // `vm.editError` visible so the user can retry without losing their

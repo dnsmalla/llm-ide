@@ -1,7 +1,7 @@
 import XCTest
 @testable import LlmIdeMac
 
-final class DocGenTreeSelectionTests: XCTestCase {
+final class GenerationTreeSelectionTests: XCTestCase {
 
     private func file(_ path: String) -> FSNode {
         let item = LibraryItem(name: URL(fileURLWithPath: path).lastPathComponent,
@@ -25,54 +25,54 @@ final class DocGenTreeSelectionTests: XCTestCase {
 
     func testFileLeavesCollectsRecursively() {
         XCTAssertEqual(
-            DocGenTreeSelection.fileLeaves(of: tree()).map(\.path).sorted(),
+            GenerationTreeSelection.fileLeaves(of: tree()).map(\.path).sorted(),
             ["/repo/README.md", "/repo/src/a.swift", "/repo/src/b.swift"])
     }
 
     func testStateIsNoneWhenNothingSelected() {
-        XCTAssertEqual(DocGenTreeSelection.state(for: tree(), selected: []), .none)
+        XCTAssertEqual(GenerationTreeSelection.state(for: tree(), selected: []), .none)
     }
 
     func testStateIsPartialWithSomeSelected() {
         let selected: Set<DocGenSource> = [
             .file(url: URL(fileURLWithPath: "/repo/src/a.swift"), name: "a.swift")
         ]
-        XCTAssertEqual(DocGenTreeSelection.state(for: tree(), selected: selected), .partial)
+        XCTAssertEqual(GenerationTreeSelection.state(for: tree(), selected: selected), .partial)
     }
 
     func testStateIsAllWhenEveryLeafSelected() {
-        let selected = Set(DocGenTreeSelection.fileLeaves(of: tree()).map {
+        let selected = Set(GenerationTreeSelection.fileLeaves(of: tree()).map {
             DocGenSource.file(url: $0.url, name: $0.name)
         })
-        XCTAssertEqual(DocGenTreeSelection.state(for: tree(), selected: selected), .all)
+        XCTAssertEqual(GenerationTreeSelection.state(for: tree(), selected: selected), .all)
     }
 
     func testTogglingAFolderSelectsEveryLeafBeneathIt() {
-        let result = DocGenTreeSelection.toggled(node: tree(), selected: [])
+        let result = GenerationTreeSelection.toggled(node: tree(), selected: [])
         XCTAssertEqual(result.count, 3)
     }
 
     func testTogglingAFullySelectedFolderClearsIt() {
-        let full = DocGenTreeSelection.toggled(node: tree(), selected: [])
-        XCTAssertTrue(DocGenTreeSelection.toggled(node: tree(), selected: full).isEmpty)
+        let full = GenerationTreeSelection.toggled(node: tree(), selected: [])
+        XCTAssertTrue(GenerationTreeSelection.toggled(node: tree(), selected: full).isEmpty)
     }
 
     func testTogglingAPartialFolderSelectsTheRest() {
         let partial: Set<DocGenSource> = [
             .file(url: URL(fileURLWithPath: "/repo/src/a.swift"), name: "a.swift")
         ]
-        XCTAssertEqual(DocGenTreeSelection.toggled(node: tree(), selected: partial).count, 3)
+        XCTAssertEqual(GenerationTreeSelection.toggled(node: tree(), selected: partial).count, 3)
     }
 
     func testTogglingLeavesUnrelatedSelectionsAlone() {
         let other = DocGenSource.file(url: URL(fileURLWithPath: "/elsewhere/x.md"), name: "x.md")
-        let result = DocGenTreeSelection.toggled(node: tree(), selected: [other])
+        let result = GenerationTreeSelection.toggled(node: tree(), selected: [other])
         XCTAssertTrue(result.contains(other))
         XCTAssertEqual(result.count, 4)
     }
 
     // MARK: - states(forForest:) — rows read this, not state(for:), so it needs
-    // its own coverage (see DocGenTreeSelection.states doc comment).
+    // its own coverage (see GenerationTreeSelection.states doc comment).
 
     /// Adds, versus `tree()`: a nested folder-of-folders with NO file leaves
     /// anywhere beneath it (`empty-parent/empty-child/`), to exercise the
@@ -94,7 +94,7 @@ final class DocGenTreeSelectionTests: XCTestCase {
             .file(url: URL(fileURLWithPath: "/repo/src/a.swift"), name: "a.swift"),
             .file(url: URL(fileURLWithPath: "/repo/README.md"), name: "README.md"),
         ]
-        let states = DocGenTreeSelection.states(forForest: [mixedTree()], selected: selected)
+        let states = GenerationTreeSelection.states(forForest: [mixedTree()], selected: selected)
 
         XCTAssertEqual(states["/repo"], .partial)
         XCTAssertEqual(states["/repo/src"], .partial)
@@ -110,10 +110,10 @@ final class DocGenTreeSelectionTests: XCTestCase {
         // folder whose subtree has ZERO file leaves must still read as
         // `.none` — a vacuous 0-of-0 comparison (hits == total when
         // total == 0) must never be mistaken for "fully selected".
-        let everyLeaf = Set(DocGenTreeSelection.fileLeaves(of: tree).map {
+        let everyLeaf = Set(GenerationTreeSelection.fileLeaves(of: tree).map {
             DocGenSource.file(url: $0.url, name: $0.name)
         })
-        let states = DocGenTreeSelection.states(forForest: [tree], selected: everyLeaf)
+        let states = GenerationTreeSelection.states(forForest: [tree], selected: everyLeaf)
 
         XCTAssertEqual(states["/repo"], .all)
         XCTAssertEqual(states["/repo/empty-parent"], .none)
@@ -125,12 +125,12 @@ final class DocGenTreeSelectionTests: XCTestCase {
         let selected: Set<DocGenSource> = [
             .file(url: URL(fileURLWithPath: "/repo/src/a.swift"), name: "a.swift")
         ]
-        let states = DocGenTreeSelection.states(forForest: [tree], selected: selected)
+        let states = GenerationTreeSelection.states(forForest: [tree], selected: selected)
 
         for node in allNodes(tree) {
             XCTAssertEqual(
                 states[node.id],
-                DocGenTreeSelection.state(for: node, selected: selected),
+                GenerationTreeSelection.state(for: node, selected: selected),
                 "states(forForest:) disagrees with state(for:) at \(node.id)")
         }
     }

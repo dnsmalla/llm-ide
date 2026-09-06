@@ -2,9 +2,9 @@ import SwiftUI
 
 /// Step 1 of Doc Gen: a template (document structure) and/or a command
 /// (instructions). Either alone is enough to generate; both may be selected
-/// together (see `DocGenViewModel.canGenerate`).
-struct DocGenTemplateSection: View {
-    @ObservedObject var vm: DocGenViewModel
+/// together (see `GenerationViewModel.canGenerate`).
+struct GenerationTemplateSection: View {
+    @ObservedObject var vm: GenerationViewModel
     @Binding var isExpanded: Bool
 
     @EnvironmentObject private var templateStore: DocTemplateStore
@@ -19,7 +19,7 @@ struct DocGenTemplateSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                DocGenSectionHeader(
+                GenerationSectionHeader(
                     title: "Template & Command",
                     icon: "doc.badge.gearshape",
                     color: theme.current.accent,

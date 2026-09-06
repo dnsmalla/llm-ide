@@ -3,22 +3,38 @@ import SwiftUI
 /// Step 2 of Doc Gen: tick source files or whole folders, across three Library
 /// categories. Trees are built with the same helpers the Library tab uses, so
 /// the hierarchy shown here cannot drift from the hierarchy shown there.
-struct DocGenSourceTree: View {
-    @ObservedObject var vm: DocGenViewModel
+struct GenerationSourceTree: View {
+    @ObservedObject var vm: GenerationViewModel
     @Binding var isExpanded: Bool
+
+    /// Library categories to offer as tabs, caller-supplied so this tree can
+    /// be reused outside Doc Gen (e.g. Visual passes `[.data, .code]`, and
+    /// Doc Gen passes `[.code, .notes, .data]` unchanged — meetings are
+    /// deliberately absent there: generated meeting notes already land in
+    /// `llm-doc/`, which the LLM Doc tab covers).
+    let categories: [LibraryItem.Category]
 
     @Environment(LibraryItemStore.self) private var itemStore
     @EnvironmentObject private var theme: ThemeStore
 
-    /// Meetings are deliberately absent: generated meeting notes already land
-    /// in `llm-doc/`, which the LLM Doc tab covers.
-    private static let categories: [LibraryItem.Category] = [.code, .notes, .data]
-
-    @AppStorage("docgen.sourceTab") private var selectedTabRaw = LibraryItem.Category.code.rawValue
+    /// `@AppStorage` key for the selected tab, caller-supplied so each host
+    /// keeps its own persisted choice — Doc Gen keeps `"docgen.sourceTab"`
+    /// verbatim so users' saved tab choice survives this move.
+    @AppStorage private var selectedTabRaw: String
     @State private var expandedPaths: Set<String> = []
 
+    init(vm: GenerationViewModel, isExpanded: Binding<Bool>,
+         categories: [LibraryItem.Category], sourceTabStorageKey: String) {
+        self.vm = vm
+        self._isExpanded = isExpanded
+        self.categories = categories
+        self._selectedTabRaw = AppStorage(
+            wrappedValue: (categories.first ?? .code).rawValue,
+            sourceTabStorageKey)
+    }
+
     private var selectedTab: LibraryItem.Category {
-        LibraryItem.Category(rawValue: selectedTabRaw) ?? .code
+        LibraryItem.Category(rawValue: selectedTabRaw) ?? (categories.first ?? .code)
     }
 
     /// The server accepts at most 20 sources. Selection is never blocked at
@@ -28,7 +44,7 @@ struct DocGenSourceTree: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            DocGenSectionHeader(
+            GenerationSectionHeader(
                 title: "Sources",
                 icon: "tray.full",
                 color: .indigo,
@@ -46,7 +62,7 @@ struct DocGenSourceTree: View {
 
     private var tabPicker: some View {
         Picker("", selection: $selectedTabRaw) {
-            ForEach(Self.categories, id: \.self) { category in
+            ForEach(categories, id: \.self) { category in
                 Text(category.sectionTitle).tag(category.rawValue)
             }
         }
@@ -83,12 +99,12 @@ struct DocGenSourceTree: View {
         } else {
             // Computed once per render: rows read this dictionary (O(1)) rather
             // than each walking their own subtree via
-            // DocGenTreeSelection.state(for:selected:). See the doc comment on
-            // `DocGenTreeSelection.states(forForest:selected:)`.
-            let states = DocGenTreeSelection.states(forForest: trees, selected: vm.selectedSources)
+            // GenerationTreeSelection.state(for:selected:). See the doc comment on
+            // `GenerationTreeSelection.states(forForest:selected:)`.
+            let states = GenerationTreeSelection.states(forForest: trees, selected: vm.selectedSources)
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(trees) { root in
-                    DocGenTreeRow(
+                    GenerationTreeRow(
                         node: root,
                         depth: 0,
                         vm: vm,
@@ -113,19 +129,19 @@ struct DocGenSourceTree: View {
 
 /// One row of the Doc Gen source tree. Separate struct so the recursion doesn't
 /// hit SwiftUI's @ViewBuilder recursion limit — same reason `FSNodeRow` exists.
-private struct DocGenTreeRow: View {
+private struct GenerationTreeRow: View {
     let node: FSNode
     let depth: Int
-    @ObservedObject var vm: DocGenViewModel
+    @ObservedObject var vm: GenerationViewModel
     @Binding var expandedPaths: Set<String>
     let tint: Color
 
     /// Selection state for every node in the current forest, keyed by path —
-    /// computed once by the parent (`DocGenSourceTree.treeBody`) so this row
+    /// computed once by the parent (`GenerationSourceTree.treeBody`) so this row
     /// never walks its own subtree just to read its state (controller ruling
     /// R11: that walk, repeated per visible folder row on every click, is
     /// O(visible rows × subtree size) on a repo-sized Code tree).
-    let states: [String: DocGenTreeSelection.State]
+    let states: [String: GenerationTreeSelection.State]
 
     @EnvironmentObject private var theme: ThemeStore
 
@@ -136,14 +152,14 @@ private struct DocGenTreeRow: View {
             folderRow
             if expandedPaths.contains(node.id) {
                 ForEach(node.children) { child in
-                    DocGenTreeRow(node: child, depth: depth + 1, vm: vm,
+                    GenerationTreeRow(node: child, depth: depth + 1, vm: vm,
                                   expandedPaths: $expandedPaths, tint: tint, states: states)
                 }
             }
         }
     }
 
-    private var selectionState: DocGenTreeSelection.State {
+    private var selectionState: GenerationTreeSelection.State {
         states[node.id] ?? .none
     }
 
@@ -151,7 +167,7 @@ private struct DocGenTreeRow: View {
         let expanded = expandedPaths.contains(node.id)
         return HStack(spacing: 7) {
             checkbox(state: selectionState) {
-                vm.selectedSources = DocGenTreeSelection.toggled(
+                vm.selectedSources = GenerationTreeSelection.toggled(
                     node: node, selected: vm.selectedSources)
             }
             Button {
@@ -185,7 +201,7 @@ private struct DocGenTreeRow: View {
         let selected = selectionState == .all
         return HStack(spacing: 7) {
             checkbox(state: selectionState) {
-                vm.selectedSources = DocGenTreeSelection.toggled(
+                vm.selectedSources = GenerationTreeSelection.toggled(
                     node: node, selected: vm.selectedSources)
             }
             Image(systemName: iconForExt(node.url.pathExtension.lowercased()))
@@ -210,7 +226,7 @@ private struct DocGenTreeRow: View {
         .help(node.name)
     }
 
-    private func checkbox(state: DocGenTreeSelection.State,
+    private func checkbox(state: GenerationTreeSelection.State,
                           toggle: @escaping () -> Void) -> some View {
         Button(action: toggle) {
             ZStack {

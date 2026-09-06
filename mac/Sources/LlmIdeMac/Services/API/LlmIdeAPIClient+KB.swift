@@ -67,7 +67,7 @@ extension LlmIdeAPIClient {
     // extension still hits the server's POST /extract-entities; the
     // Mac never did because meeting ingestion handles entity extraction
     // server-side inside /kb/ingest. ExtractedEntity stays because
-    // MeetingDetail.entities (consumed by DocGenViewModel) decodes
+    // MeetingDetail.entities (consumed by GenerationViewModel) decodes
     // through it.
 
     // --- KB methods --------------------------------------------------

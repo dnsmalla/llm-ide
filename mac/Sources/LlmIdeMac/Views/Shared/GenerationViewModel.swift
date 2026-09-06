@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 @MainActor
-final class DocGenViewModel: ObservableObject {
+final class GenerationViewModel: ObservableObject {
     @Published var selectedSources: Set<DocGenSource> = []
     @Published var selectedTemplate: DocTemplate?
     /// A reusable instruction. Either a template or a command is enough to

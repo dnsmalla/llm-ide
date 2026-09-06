@@ -2,7 +2,7 @@ import Foundation
 
 /// Checkbox maths for Doc Gen's source trees. Pure functions over `FSNode`, so
 /// the tri-state folder behaviour is testable without a view.
-enum DocGenTreeSelection {
+enum GenerationTreeSelection {
 
     enum State {
         case none

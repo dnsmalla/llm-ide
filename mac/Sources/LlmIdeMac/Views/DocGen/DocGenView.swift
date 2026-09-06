@@ -2,13 +2,13 @@ import SwiftUI
 
 struct DocGenView: View {
     let api: LlmIdeAPIClient
-    @StateObject private var vm = DocGenViewModel()
+    @StateObject private var vm = GenerationViewModel()
     /// Sources panel visible by default so template + Library pickers are discoverable.
     @AppStorage("DOCGEN_SOURCES_VISIBLE") private var sourceVisible = true
     /// Chat open-state is persisted (default open) so the assistant reads as
     /// the primary surface — same pattern as Explorer / Review / Visual. A
     /// manual close sticks across launches. NOTE: this only hides
-    /// `CodeAssistantPanel` (the chat) — `DocGenPromptBar` (Generate/Edit/Save)
+    /// `CodeAssistantPanel` (the chat) — `GenerationPromptBar` (Generate/Edit/Save)
     /// is the only place those actions live and must always render, so it is
     /// never gated by this flag. See DocGenView.body below.
     @AppStorage("DOCGEN_CHAT_VISIBLE") private var chatVisible = true
@@ -58,7 +58,7 @@ struct DocGenView: View {
             // dragging its divider could balloon it past its 260pt cap.
             if chatVisible {
                 VStack(spacing: 0) {
-                    DocGenPromptBar(vm: vm, api: api)
+                    GenerationPromptBar(vm: vm, api: api)
                     Divider()
                     CodeAssistantPanel(
                         api: api,
@@ -80,7 +80,7 @@ struct DocGenView: View {
             // the user's saved chat-column width exactly.
             if !chatVisible {
                 Divider()
-                DocGenPromptBar(vm: vm, api: api)
+                GenerationPromptBar(vm: vm, api: api)
                     .frame(width: 260)
                     .transition(.move(edge: .trailing))
             }

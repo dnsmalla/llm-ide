@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct DocGenEditorPanel: View {
-    @ObservedObject var vm: DocGenViewModel
+    @ObservedObject var vm: GenerationViewModel
     let api: LlmIdeAPIClient
 
     @EnvironmentObject private var theme: ThemeStore
@@ -44,7 +44,7 @@ struct DocGenEditorPanel: View {
                 )
             } else if vm.selectedCommand == nil {
                 // Only shown when NEITHER a template nor a command is picked
-                // yet — a command alone satisfies step 1 (see DocGenTemplateSection),
+                // yet — a command alone satisfies step 1 (see GenerationTemplateSection),
                 // so this must not render alongside the command badge below.
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.left")
@@ -352,7 +352,7 @@ struct DocGenEditorPanel: View {
 
             // Always read-only: manual typing is removed entirely. Revising
             // the document is prompt-driven — see the Edit button in
-            // `DocGenPromptBar`, which sends the current text back through
+            // `GenerationPromptBar`, which sends the current text back through
             // `/generate-doc` with the user's instruction as the prompt.
             TextEditor(text: $vm.editedContent)
                 .font(.system(.callout, design: .monospaced))

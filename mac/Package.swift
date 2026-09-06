@@ -69,8 +69,11 @@ if ganttIncluded {
 if docGenIncluded {
     featureDefines.append(.define("FEATURE_DOCGEN"))
 } else {
+    // DocGenViewModelTests.swift / DocGenTreeSelectionTests.swift moved to
+    // GenerationViewModelTests.swift / GenerationTreeSelectionTests.swift
+    // alongside their subjects' move to Views/Shared (always compiled), so
+    // there is no longer a doc_gen-specific test file to exclude here.
     libExcludes.append("Views/DocGen")
-    testExcludes.append(contentsOf: ["DocGenViewModelTests.swift", "DocGenTreeSelectionTests.swift"])
 }
 if terminalIncluded {
     featureDefines.append(.define("FEATURE_TERMINAL"))

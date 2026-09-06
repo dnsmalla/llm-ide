@@ -2,7 +2,7 @@ import XCTest
 @testable import LlmIdeMac
 
 @MainActor
-final class DocGenViewModelTests: XCTestCase {
+final class GenerationViewModelTests: XCTestCase {
 
     private func makeSource() -> DocGenSource {
         .file(url: URL(fileURLWithPath: "/tmp/a.md"), name: "a.md")
@@ -17,33 +17,33 @@ final class DocGenViewModelTests: XCTestCase {
     }
 
     func testCannotGenerateWithoutSources() {
-        let vm = DocGenViewModel()
+        let vm = GenerationViewModel()
         vm.selectedTemplate = makeTemplate()
         XCTAssertFalse(vm.canGenerate)
     }
 
     func testCannotGenerateWithoutTemplateOrCommand() {
-        let vm = DocGenViewModel()
+        let vm = GenerationViewModel()
         vm.selectedSources = [makeSource()]
         XCTAssertFalse(vm.canGenerate)
     }
 
     func testCommandAloneIsEnough() {
-        let vm = DocGenViewModel()
+        let vm = GenerationViewModel()
         vm.selectedSources = [makeSource()]
         vm.selectedCommand = makeCommand()
         XCTAssertTrue(vm.canGenerate)
     }
 
     func testTemplateAloneIsEnough() {
-        let vm = DocGenViewModel()
+        let vm = GenerationViewModel()
         vm.selectedSources = [makeSource()]
         vm.selectedTemplate = makeTemplate()
         XCTAssertTrue(vm.canGenerate)
     }
 
     func testOutputFilenamePrefersTemplateThenCommand() {
-        let vm = DocGenViewModel()
+        let vm = GenerationViewModel()
         XCTAssertEqual(vm.outputFilename, "generated-doc")
         vm.selectedCommand = makeCommand()
         XCTAssertEqual(vm.outputFilename, "Summarize-doc")
@@ -52,7 +52,7 @@ final class DocGenViewModelTests: XCTestCase {
     }
 
     func testResetClearsEditState() {
-        let vm = DocGenViewModel()
+        let vm = GenerationViewModel()
         vm.editPrompt = "make it shorter"
         vm.editedContent = "draft"
         vm.resetToIdle()
@@ -61,7 +61,7 @@ final class DocGenViewModelTests: XCTestCase {
     }
 
     func testResetClearsSavedFlag() {
-        let vm = DocGenViewModel()
+        let vm = GenerationViewModel()
         let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
         // isSaved is private(set); drive it through save() rather than
         // poking the property directly. A real temp directory keeps this
@@ -83,7 +83,7 @@ final class DocGenViewModelTests: XCTestCase {
     }
 
     func testIsBusyOnlyWhileGenerating() {
-        let vm = DocGenViewModel()
+        let vm = GenerationViewModel()
         let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
         XCTAssertFalse(vm.isBusy)
         vm.selectedSources = [makeSource()]
@@ -107,7 +107,7 @@ final class DocGenViewModelTests: XCTestCase {
     }
 
     func testFailedRevisionPreservesDocument() async throws {
-        let vm = DocGenViewModel()
+        let vm = GenerationViewModel()
         let original = "# Sprint Review\n\nOriginal content the user has not saved yet."
         vm.editedContent = original
         vm.editPrompt = "Make section 2 shorter"
@@ -132,7 +132,7 @@ final class DocGenViewModelTests: XCTestCase {
     }
 
     func testCancelledRevisionRestoresPriorDocument() {
-        let vm = DocGenViewModel()
+        let vm = GenerationViewModel()
         let original = "# Sprint Review\n\nOriginal content the user has not saved yet."
         vm.editedContent = original
         vm.editPrompt = "Add a risks section"
@@ -153,7 +153,7 @@ final class DocGenViewModelTests: XCTestCase {
     }
 
     func testOversizedDocumentRefusesRevisionWithoutSending() {
-        let vm = DocGenViewModel()
+        let vm = GenerationViewModel()
         let oversized = String(repeating: "a", count: 50_001) // one over the mirrored server cap
         vm.editedContent = oversized
         vm.editPrompt = "Shorten this"

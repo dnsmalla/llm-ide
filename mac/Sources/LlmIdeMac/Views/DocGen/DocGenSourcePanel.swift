@@ -3,7 +3,7 @@ import SwiftUI
 /// Doc Gen's left panel: where output goes, what shape the document takes, and
 /// which files feed it — in the order the user works through them.
 struct DocGenSourcePanel: View {
-    @ObservedObject var vm: DocGenViewModel
+    @ObservedObject var vm: GenerationViewModel
     let api: LlmIdeAPIClient
 
     /// Persisted set of EXPANDED section ids (comma-joined). Absence ⇒
@@ -37,11 +37,14 @@ struct DocGenSourcePanel: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    DocGenSetupSection(isExpanded: sectionExpanded("setup"))
+                    GenerationSetupSection(isExpanded: sectionExpanded("setup"))
                     Divider().padding(.vertical, 6)
-                    DocGenTemplateSection(vm: vm, isExpanded: sectionExpanded("template"))
+                    GenerationTemplateSection(vm: vm, isExpanded: sectionExpanded("template"))
                     Divider().padding(.vertical, 6)
-                    DocGenSourceTree(vm: vm, isExpanded: sectionExpanded("sources"))
+                    GenerationSourceTree(
+                        vm: vm, isExpanded: sectionExpanded("sources"),
+                        categories: [.code, .notes, .data],
+                        sourceTabStorageKey: "docgen.sourceTab")
                 }
                 .padding(.bottom, 12)
             }
