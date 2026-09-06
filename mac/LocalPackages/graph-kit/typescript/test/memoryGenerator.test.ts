@@ -317,3 +317,45 @@ test("the document text after a frontmatter fence is trimmed", () => {
     assert.equal(chunk!.body, "\nBody.");
   });
 });
+
+// --------------------------------------------------------------------------
+// Swift parity: frontmatter keys are case-SENSITIVE
+//
+// Swift stores keys verbatim and looks up only the documented spellings.
+// Lowercasing the key here made this implementation honour `GRAPH-ONLY:` and
+// `graphonly:` that Swift ignores — the same doc-suppression divergence the
+// ported parser exists to close, reintroduced by the port itself.
+// --------------------------------------------------------------------------
+
+test("only the documented key spellings are honoured", () => {
+  for (const key of ["GRAPH-ONLY", "Graph-Only", "graphonly", "GraphOnly"]) {
+    withTempVault({ "a.md": `---\n${key}: true\n---\n# T\n\nBody.\n` }, (dir) => {
+      const [chunk] = generateFromDir(dir).chunks;
+      assert.equal(chunk!.graphOnly, false, `${key} must not be honoured`);
+    });
+  }
+  // Both documented spellings still work.
+  for (const key of ["graph-only", "graphOnly"]) {
+    withTempVault({ "a.md": `---\n${key}: true\n---\n# T\n\nBody.\n` }, (dir) => {
+      const [chunk] = generateFromDir(dir).chunks;
+      assert.equal(chunk!.graphOnly, true, `${key} must be honoured`);
+    });
+  }
+});
+
+test("related-modules and type follow the same case rule", () => {
+  withTempVault(
+    { "a.md": "---\nType: note\nRelated-Modules: [kb]\n---\n# T\n\nBody.\n" },
+    (dir) => {
+      const [chunk] = generateFromDir(dir).chunks;
+      assert.deepEqual(chunk!.relatedModules, [], "Related-Modules is not a recognised key");
+    },
+  );
+  withTempVault(
+    { "a.md": "---\nrelatedModules: [kb]\n---\n# T\n\nBody.\n" },
+    (dir) => {
+      const [chunk] = generateFromDir(dir).chunks;
+      assert.deepEqual(chunk!.relatedModules, ["kb"], "camelCase spelling is documented");
+    },
+  );
+});

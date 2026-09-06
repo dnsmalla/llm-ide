@@ -62,6 +62,13 @@ const DEFAULT_CORPUS = {
   "nested-frontmatter.md":
     "---\ntype: note\nschema:\n  graph-only: true\n  tags: [sneaky]\n---\n" +
     "# Nested\n\nBody.\n",
+  // Key spellings. Only `graph-only`/`graphOnly` and `related-modules`/
+  // `relatedModules` are recognised — case-folding the key made this side
+  // accept `GRAPH-ONLY:` and `graphonly:` that Swift ignores, so one engine
+  // suppressed a document the other published.
+  "key-case.md":
+    "---\nType: note\nGRAPH-ONLY: true\nRelated-Modules: [kb]\ngraphonly: true\n---\n" +
+    "# Key Case\n\nEvery key here is a spelling neither side should honour.\n",
   // Fenced content must affect neither link/tag extraction nor CHUNKING: a `#`
   // line inside a fence is sample text, and treating it as a heading changes
   // node identity because chunk ids hash the heading path.

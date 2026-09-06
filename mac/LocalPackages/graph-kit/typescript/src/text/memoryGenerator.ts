@@ -368,7 +368,14 @@ function parseFrontmatterMapping(block: string): Record<string, string> {
     if (colon === -1) continue;
     const key = line.slice(0, colon).trim();
     if (!key) continue;
-    currentKey = key.toLowerCase();
+    // Keys are stored VERBATIM, as Swift stores them, and looked up by the
+    // exact spellings Swift accepts. Lowercasing here looked harmless but made
+    // this implementation accept key spellings Swift rejects (`GRAPH-ONLY:`,
+    // `graphonly:`), which resurrects the very divergence the ported parser
+    // exists to close: `graph-only` decides whether a document is withheld from
+    // the agent's memory artifacts, so one engine would suppress a doc the
+    // other publishes.
+    currentKey = key;
     currentValue = line.slice(colon + 1);
   }
   flush();
@@ -425,9 +432,9 @@ function stripFrontmatter(text: string): ParsedFrontmatter {
   const map = parseFrontmatterMapping(block);
   const rawType = unquote(map["type"] ?? map["kind"] ?? "");
   const tags = cleanTags(listParts(normalizeFrontmatterList(map["tags"])));
-  const graphOnly = parseBool(map["graph-only"] ?? map["graphonly"] ?? "") ?? false;
+  const graphOnly = parseBool(map["graph-only"] ?? map["graphOnly"] ?? "") ?? false;
   const relatedModules = cleanModules(
-    listParts(normalizeFrontmatterList(map["related-modules"] ?? map["relatedmodules"])),
+    listParts(normalizeFrontmatterList(map["related-modules"] ?? map["relatedModules"])),
   );
 
   return { text: remaining, kind: kindFromTypeString(rawType), tags, graphOnly, relatedModules };
