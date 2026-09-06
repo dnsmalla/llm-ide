@@ -245,15 +245,29 @@ FEATURE_BUILD_FLAGS=""
 if [ -n "${LLMIDE_FEATURES:-}" ]; then
   FEATURE_BUILD_FLAGS="--manifest-cache none"
 fi
-if ! swift build -c release --product "$APP_NAME" $SPM_OFFLINE $FEATURE_BUILD_FLAGS; then
+# tee keeps the compiler output streaming live while we keep a copy to
+# diagnose from. pipefail (set above) makes `if !` see swift build's status.
+build_log="$(mktemp -t llmide-build)"
+if ! swift build -c release --product "$APP_NAME" $SPM_OFFLINE $FEATURE_BUILD_FLAGS 2>&1 | tee "$build_log"; then
   echo -e "${RED}[build] swift build failed.${NC}" >&2
-  echo -e "${RED}[build] If the error mentions graph-kit being unreachable or asks for${NC}" >&2
-  echo -e "${RED}[build] authentication, this machine has no git credentials for the${NC}" >&2
-  echo -e "${RED}[build] PRIVATE repo github.com/dnsmalla/graph-kit. Verify with:${NC}" >&2
-  echo -e "${RED}[build]   git ls-remote https://github.com/dnsmalla/graph-kit.git${NC}" >&2
-  echo -e "${RED}[build] and set up a credential helper (or SSH + url rewrite) first.${NC}" >&2
+  # Hint from what actually went wrong, not every hint every time: the
+  # credentials footer printed under a "modified during the build" failure
+  # sent someone checking git config when an editor had simply saved a file
+  # mid-compile.
+  if grep -q "was modified during the build" "$build_log"; then
+    echo -e "${YELLOW}[build] A source file changed while the compiler was reading it — an editor or${NC}" >&2
+    echo -e "${YELLOW}[build] another session is writing under mac/Sources/. Not a code error: wait for${NC}" >&2
+    echo -e "${YELLOW}[build] that to settle (git status shows what is in flight), then re-run.${NC}" >&2
+  elif grep -qiE "graph-kit|could not read Username|Authentication failed|could not find the commit" "$build_log"; then
+    echo -e "${RED}[build] graph-kit could not be fetched: this machine has no usable git credentials${NC}" >&2
+    echo -e "${RED}[build] for the PRIVATE repo github.com/dnsmalla/graph-kit. Verify with:${NC}" >&2
+    echo -e "${RED}[build]   git ls-remote https://github.com/dnsmalla/graph-kit.git${NC}" >&2
+    echo -e "${RED}[build] and set up a credential helper (or SSH + url rewrite) first.${NC}" >&2
+  fi
+  rm -f "$build_log"
   exit 1
 fi
+rm -f "$build_log"
 
 BUILT_BIN="$PROJ_DIR/.build/release/$APP_NAME"
 if [ ! -f "$BUILT_BIN" ]; then
