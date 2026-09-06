@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Detail pane for a registered LLM source: version/location/ref, its
-/// discovered skills/agents/hooks/MCP servers, and the Update / Reveal /
+/// discovered skills/agents/commands/templates/hooks/MCP servers, and the Update / Reveal /
 /// Remove actions the design doc calls for. The builtin source shows
 /// "Install" instead of "Update" when its submodule isn't checked out (the
 /// only source kind with a real re-fetch path when missing — a local/git
@@ -10,9 +10,9 @@ import SwiftUI
 /// Remove + re-add). Remove never shows for builtin — the server rejects
 /// it anyway, this just avoids a pointless round trip.
 ///
-/// Agents, hooks, and MCP servers are DISPLAY ONLY — this view never
-/// invokes a listed agent, executes a listed hook's command, or spawns a
-/// listed MCP server. That's true for every source including builtin; only
+/// Agents, commands, templates, hooks, and MCP servers are DISPLAY ONLY —
+/// this view never invokes a listed agent or command, executes a listed
+/// hook's command, or spawns a listed MCP server. That's true for every source including builtin; only
 /// the hardcoded server-side handlers in route.mjs are ever actually run.
 ///
 /// Mutations here don't push a refresh back to the sidebar's own
@@ -46,6 +46,8 @@ struct LlmSourceDetailView: View {
                     if let discovery {
                         skillsBlock(discovery.skills ?? [])
                         agentsBlock(discovery.agents)
+                        commandsBlock(discovery.commands ?? [])
+                        templatesBlock(discovery.templates ?? [])
                         hooksBlock(discovery.hooks)
                         mcpServersBlock(discovery.mcpServers)
                     }
@@ -94,6 +96,8 @@ struct LlmSourceDetailView: View {
             if let ref = s.ref { LabeledContent("Ref", value: ref) }
             LabeledContent("Skills", value: "\(s.skillCount)")
             LabeledContent("Agents", value: "\(s.agentCount)")
+            LabeledContent("Commands", value: "\(s.commandCount)")
+            LabeledContent("Templates", value: "\(s.templateCount)")
             LabeledContent("Hooks", value: "\(s.hookCount)")
             LabeledContent("MCP servers", value: "\(s.mcpCount)")
             if !s.installed {
@@ -134,6 +138,36 @@ struct LlmSourceDetailView: View {
                     HStack(alignment: .top, spacing: 8) {
                         Text(a.name).font(.body.bold())
                         Text(a.description).font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func commandsBlock(_ commands: [LlmIdeAPIClient.LlmSourceCommand]) -> some View {
+        if !commands.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Commands (\(commands.count))").font(.headline)
+                ForEach(commands) { c in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("/\(c.name)").font(.system(.body, design: .monospaced).bold())
+                        Text(c.description).font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func templatesBlock(_ templates: [LlmIdeAPIClient.LlmSourceTemplate]) -> some View {
+        if !templates.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Templates (\(templates.count))").font(.headline)
+                ForEach(templates) { t in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(t.name).font(.body.bold())
+                        Text(t.description).font(.callout).foregroundStyle(.secondary)
                     }
                 }
             }

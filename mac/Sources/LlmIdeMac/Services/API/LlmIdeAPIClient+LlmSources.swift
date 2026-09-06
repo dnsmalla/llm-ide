@@ -2,11 +2,12 @@ import Foundation
 
 // LLM-source registry — GET/POST/DELETE /auth/me/llm-sources/*.
 // Mirrors extension/llm-sources/registry.mjs. Each registered source may
-// contribute any mix of four discoverable kinds: skills (chat "/" menu
+// contribute any mix of six discoverable kinds: skills (chat "/" menu
 // discovery via /kb/agent/skill-library), agents (subagent definitions),
-// hooks, and MCP servers. Discovery-only for ALL FOUR — a source never
-// contributes agent-loadable tools, and agents/hooks/MCP servers are
-// catalogued for display only, never invoked/executed/spawned.
+// commands (prompt templates), templates (fill-in documents), hooks, and MCP
+// servers. Discovery-only for ALL SIX — a source never contributes
+// agent-loadable tools, and everything but skills is catalogued for display
+// only, never invoked/executed/spawned.
 extension LlmIdeAPIClient {
 
     struct LlmSourceInfo: Decodable, Identifiable, Equatable {
@@ -20,18 +21,21 @@ extension LlmIdeAPIClient {
         let installed: Bool
         let skillCount: Int
         let agentCount: Int
+        let commandCount: Int
+        let templateCount: Int
         let hookCount: Int
         let mcpCount: Int
         let enabled: Bool
 
         enum CodingKeys: String, CodingKey {
             case id, name, origin, location, builtin, version, ref, installed
-            case skillCount, agentCount, hookCount, mcpCount, enabled
+            case skillCount, agentCount, commandCount, templateCount, hookCount, mcpCount, enabled
         }
         /// `agentCount`/`hookCount`/`mcpCount` arrived with the v28 MCP bump
-        /// (v27 renamed the endpoints but didn't carry them). Decode all four
-        /// counts with fallbacks so an app paired with a not-yet-restarted v27
-        /// server still decodes the list instead of throwing `keyNotFound` and
+        /// (v27 renamed the endpoints but didn't carry them), and
+        /// `commandCount`/`templateCount` later still. Decode every count with
+        /// a fallback so an app paired with a not-yet-restarted older server
+        /// still decodes the list instead of throwing `keyNotFound` and
         /// silently rendering the section empty. Mirrors the back-compat pattern
         /// in `SkillLibraryEntry.init(from:)`.
         init(from decoder: Decoder) throws {
@@ -46,6 +50,8 @@ extension LlmIdeAPIClient {
             self.installed  = try c.decode(Bool.self, forKey: .installed)
             self.skillCount = try c.decodeIfPresent(Int.self, forKey: .skillCount) ?? 0
             self.agentCount = try c.decodeIfPresent(Int.self, forKey: .agentCount) ?? 0
+            self.commandCount  = try c.decodeIfPresent(Int.self, forKey: .commandCount) ?? 0
+            self.templateCount = try c.decodeIfPresent(Int.self, forKey: .templateCount) ?? 0
             self.hookCount  = try c.decodeIfPresent(Int.self, forKey: .hookCount) ?? 0
             self.mcpCount   = try c.decodeIfPresent(Int.self, forKey: .mcpCount) ?? 0
             self.enabled    = try c.decode(Bool.self, forKey: .enabled)
@@ -79,6 +85,21 @@ extension LlmIdeAPIClient {
         let path: String
         var id: String { path }
     }
+    /// `commands/*.md` — a prompt template the user invokes by name. Same
+    /// frontmatter shape as an agent; catalogued, never auto-run.
+    struct LlmSourceCommand: Decodable, Identifiable, Equatable {
+        let name: String
+        let description: String
+        let path: String
+        var id: String { path }
+    }
+    /// `templates/*.md` — a fill-in document the user pastes/adapts.
+    struct LlmSourceTemplate: Decodable, Identifiable, Equatable {
+        let name: String
+        let description: String
+        let path: String
+        var id: String { path }
+    }
     struct LlmSourceHook: Decodable, Identifiable, Equatable {
         let event: String
         let matcher: String?
@@ -96,6 +117,10 @@ extension LlmIdeAPIClient {
         /// pre-skills response shape (the field shipped later than the rest).
         let skills: [LlmSourceSkill]?
         let agents: [LlmSourceAgent]
+        /// Optional for the same reason as `skills`: these two families were
+        /// added to the discovery response after agents/hooks/mcpServers.
+        let commands: [LlmSourceCommand]?
+        let templates: [LlmSourceTemplate]?
         let hooks: [LlmSourceHook]
         let mcpServers: [LlmSourceMcpServer]
     }

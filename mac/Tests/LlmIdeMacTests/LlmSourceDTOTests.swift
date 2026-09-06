@@ -9,7 +9,8 @@ final class LlmSourceDTOTests: XCTestCase {
         let json = """
         {"sources":[{"id":"builtin","name":"Central Skills","origin":"builtin",
         "location":"/repo/.skills","builtin":true,"version":"3.0.0",
-        "installed":true,"skillCount":57,"agentCount":2,"hookCount":1,"mcpCount":1,"enabled":true}]}
+        "installed":true,"skillCount":57,"agentCount":2,"commandCount":3,"templateCount":4,
+        "hookCount":1,"mcpCount":1,"enabled":true}]}
         """.data(using: .utf8)!
         struct Wrap: Decodable { let sources: [LlmIdeAPIClient.LlmSourceInfo] }
         let decoded = try JSONDecoder().decode(Wrap.self, from: json)
@@ -17,6 +18,8 @@ final class LlmSourceDTOTests: XCTestCase {
         XCTAssertEqual(decoded.sources[0].id, "builtin")
         XCTAssertNil(decoded.sources[0].ref)
         XCTAssertEqual(decoded.sources[0].agentCount, 2)
+        XCTAssertEqual(decoded.sources[0].commandCount, 3)
+        XCTAssertEqual(decoded.sources[0].templateCount, 4)
         XCTAssertEqual(decoded.sources[0].hookCount, 1)
         XCTAssertEqual(decoded.sources[0].mcpCount, 1)
     }
@@ -35,6 +38,8 @@ final class LlmSourceDTOTests: XCTestCase {
         XCTAssertEqual(decoded.sources.count, 1)
         XCTAssertEqual(decoded.sources[0].skillCount, 57)
         XCTAssertEqual(decoded.sources[0].agentCount, 0)
+        XCTAssertEqual(decoded.sources[0].commandCount, 0)
+        XCTAssertEqual(decoded.sources[0].templateCount, 0)
         XCTAssertEqual(decoded.sources[0].hookCount, 0)
         XCTAssertEqual(decoded.sources[0].mcpCount, 0)
     }
@@ -66,5 +71,24 @@ final class LlmSourceDTOTests: XCTestCase {
         XCTAssertEqual(decoded.mcpServers[0].name, "filesystem")
         XCTAssertEqual(decoded.mcpServers[0].command, "npx")
         XCTAssertEqual(decoded.mcpServers[0].args, ["-y", "@modelcontextprotocol/server-filesystem"])
+        // Pre-commands/templates response shape: the newer families decode as
+        // nil (the view falls back to `?? []`), not as a keyNotFound throw.
+        XCTAssertNil(decoded.commands)
+        XCTAssertNil(decoded.templates)
+    }
+
+    func testDecodesDiscoveryDetailWithCommandsAndTemplates() throws {
+        let json = """
+        {"skills":[],"agents":[],
+        "commands":[{"name":"ship-it","description":"release checklist","path":"/repo/commands/ship-it.md"}],
+        "templates":[{"name":"incident-report","description":"post-incident writeup","path":"/repo/templates/incident-report.md"}],
+        "hooks":[],"mcpServers":[]}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(LlmIdeAPIClient.LlmSourceDiscoveryDetail.self, from: json)
+        XCTAssertEqual(decoded.commands?.count, 1)
+        XCTAssertEqual(decoded.commands?[0].name, "ship-it")
+        XCTAssertEqual(decoded.commands?[0].id, "/repo/commands/ship-it.md")
+        XCTAssertEqual(decoded.templates?.count, 1)
+        XCTAssertEqual(decoded.templates?[0].name, "incident-report")
     }
 }

@@ -63,6 +63,8 @@ struct LlmSourceRow: View {
         var parts: [String] = []
         if source.skillCount > 0 { parts.append("\(source.skillCount) skill\(source.skillCount == 1 ? "" : "s")") }
         if source.agentCount > 0 { parts.append("\(source.agentCount) agent\(source.agentCount == 1 ? "" : "s")") }
+        if source.commandCount > 0 { parts.append("\(source.commandCount) command\(source.commandCount == 1 ? "" : "s")") }
+        if source.templateCount > 0 { parts.append("\(source.templateCount) template\(source.templateCount == 1 ? "" : "s")") }
         if source.hookCount > 0 { parts.append("\(source.hookCount) hook\(source.hookCount == 1 ? "" : "s")") }
         if source.mcpCount > 0 { parts.append("\(source.mcpCount) MCP server\(source.mcpCount == 1 ? "" : "s")") }
         if let v = source.version, !v.isEmpty { parts.append("v\(v)") }
