@@ -42,9 +42,21 @@ struct VisualPromptBar: View {
     /// Both hold genuinely incomplete text — saving one under this feature's
     /// normal "Save chat output" label would write a truncated document with
     /// no indication to the user that it isn't what they think it is.
+    ///
+    /// Broken into explicit, separately-typed steps (find the message, then
+    /// trim its content, then decide) rather than one chained guard: a
+    /// closure predicate combined with `.trimmingCharacters(...).isEmpty`
+    /// negation in a single condition is the same type-checker blowup shape
+    /// `DocGenEditorPanel.generatingTitle` was pulled out to avoid — passing
+    /// today doesn't mean it stays fast (or under the limit) on a different
+    /// toolchain.
     private var latestAssistantReply: String? {
-        guard let last = chatEngine.messages.last(where: { $0.role == .assistant && $0.status == .done }),
-              !last.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let doneMessages = chatEngine.messages.filter { message -> Bool in
+            message.role == .assistant && message.status == .done
+        }
+        guard let last = doneMessages.last else { return nil }
+        let trimmed: String = last.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
         return last.content
     }
 
