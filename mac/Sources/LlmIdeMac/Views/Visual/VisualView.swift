@@ -38,7 +38,7 @@ struct VisualView: View {
         VStack(spacing: 0) {
             SectionChromeBar(toggles: [
                 SectionToggle(icon: "sidebar.left", isOn: treeVisible,
-                              helpOn: "Hide library tree", helpOff: "Show library tree") {
+                              helpOn: "Hide Sources", helpOff: "Show Sources") {
                     withAnimation(.easeInOut(duration: 0.2)) { treeVisible.toggle() }
                 }
             ]) {
@@ -202,11 +202,11 @@ struct ImageShowPanel: View {
         } else if selectedURL != nil {
             EmptyStateView(icon: "photo",
                            title: "Not an image",
-                           message: "Select an image file (PNG, JPG, SVG, …) in the library tree to preview it here.")
+                           message: "In the **Sources** section on the left, tap an image file's name (PNG, JPG, SVG, …) to preview it here — its checkbox ticks it as a generation source instead.")
         } else {
             EmptyStateView(icon: "photo.on.rectangle.angled",
                            title: "Select an image to view",
-                           message: "Add image folders to the **Data** section of the library tree, then pick a file to preview it.")
+                           message: "Expand **Sources** on the left, switch to the **Data** tab, then tap a file's name to preview it here — its checkbox ticks it as a generation source instead.")
         }
     }
 

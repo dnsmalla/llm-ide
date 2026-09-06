@@ -19,10 +19,12 @@ struct VisualSourcePanel: View {
     @Binding var selectedURL: URL?
     /// Visual's own "talk to chat instead" toggle. Owned here (not on
     /// `GenerationViewModel`, which Doc Gen shares) so it can never leak into
-    /// Doc Gen's UI. `VisualView` reads this same key to decide the center
-    /// panel's fallback tone and the prompt bar's extra "Save chat output"
-    /// control, and mirrors it onto `vm.relaxRequirements`.
-    @AppStorage("VISUAL_USE_CHAT") var useChatMode = false
+    /// Doc Gen's UI. `VisualPromptBar` declares its own `@AppStorage` on this
+    /// same key to decide whether to show its extra "Save chat output"
+    /// control — that is how `@AppStorage` sharing works, so each `private`
+    /// declaration is still correct on its own. This panel also mirrors the
+    /// value onto `vm.relaxRequirements`.
+    @AppStorage("VISUAL_USE_CHAT") private var useChatMode = false
 
     /// See `DocGenSourcePanel.expandedSectionsRaw` for why this is an opt-in
     /// (expanded, not collapsed) set — same reasoning, own key so Visual's

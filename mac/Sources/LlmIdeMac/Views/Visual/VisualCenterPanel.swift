@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Visual's centre panel: `ImageShowPanel` while idle (and, dimmed under a
-/// banner, while a run is in flight), and the generated document once a run
-/// completes or fails — with a control back to the image either way. The
+/// Visual's centre panel: `ImageShowPanel` while idle (with a status banner
+/// on top while a run is in flight — the image itself stays at full opacity,
+/// not dimmed), and the generated document once a run completes or fails —
+/// with a control back to the image either way. The
 /// image `selectedURL` binding is threaded straight through untouched, so
 /// flipping between image and document never loses the tree selection.
 struct VisualCenterPanel: View {
