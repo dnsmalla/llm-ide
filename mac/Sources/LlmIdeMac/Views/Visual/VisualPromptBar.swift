@@ -15,8 +15,12 @@ struct VisualPromptBar: View {
 
     /// Visual's own "talk to chat instead" toggle — namespaced separately
     /// from Doc Gen's `DOCGEN_USE_CHAT` so the two tabs' modes never share
-    /// state. See `VisualSourcePanel`, which owns the toggle UI and mirrors
-    /// this same key onto `vm.relaxRequirements`.
+    /// state. `VisualSourcePanel` owns the toggle UI itself, but NOT the
+    /// mirror onto `vm.relaxRequirements` — that sync is owned by
+    /// `VisualView` (`Views/Visual/VisualView.swift`), which is always
+    /// constructed for this tab, independent of `VisualSourcePanel`'s mount
+    /// state. Verify against `VisualView.useChatMode`'s doc comment rather
+    /// than assuming.
     @AppStorage("VISUAL_USE_CHAT") private var useChatMode = false
 
     var body: some View {

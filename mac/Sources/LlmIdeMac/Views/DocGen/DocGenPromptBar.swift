@@ -14,8 +14,12 @@ struct DocGenPromptBar: View {
 
     /// Doc Gen's own "talk to chat instead" toggle — namespaced separately
     /// from Visual's `VISUAL_USE_CHAT` so the two tabs' modes never share
-    /// state. See `DocGenSourcePanel`, which owns the toggle UI and mirrors
-    /// this same key onto `vm.relaxRequirements`.
+    /// state. `DocGenSourcePanel` owns the toggle UI itself, but NOT the
+    /// mirror onto `vm.relaxRequirements` — that sync is owned by
+    /// `DocGenView` (`Views/DocGen/DocGenView.swift`), which is always
+    /// constructed for this tab, unlike `DocGenSourcePanel`, which only
+    /// exists in the tree while Sources is visible. Verify against
+    /// `DocGenView.useChatMode`'s doc comment rather than assuming.
     @AppStorage("DOCGEN_USE_CHAT") private var useChatMode = false
 
     var body: some View {
