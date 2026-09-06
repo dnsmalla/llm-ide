@@ -157,22 +157,37 @@ test('validateDocRequest: whitespace-only command is treated as absent', () => {
   assert.equal(result.ok, false);
 });
 
-// buildDocRef — regression coverage for the command-only ref collision fix
-// (Finding 1 / Ruling R4): a generic 'Document' title for every command-only
-// run must not collapse different commands onto the same KB ref.
-test('buildDocRef: template runs keep the original ref shape unchanged', () => {
-  const ref = buildDocRef({ hasTemplate: true, docTitle: 'Sprint Review', command: '', sourceNames: 'a|b' });
+// buildDocRef — regression coverage for the ref collision fixes (Finding 1 /
+// Ruling R4, extended by Finding-1-followup / Ruling R7): the hash segment
+// is present whenever a command is present — command-only OR
+// template+command — and absent only for a template with no command, which
+// must keep the exact pre-existing ref shape so old KB rows are never
+// orphaned.
+test('buildDocRef: template with NO command keeps the original ref shape (literal)', () => {
+  const ref = buildDocRef({ docTitle: 'Sprint Review', command: '', sourceNames: 'a|b' });
   assert.equal(ref, 'doc:Sprint Review:a|b');
 });
 
-test('buildDocRef: same command + same sources produce the same ref (update, not stack)', () => {
-  const refA = buildDocRef({ hasTemplate: false, docTitle: 'Document', command: 'Summarize.', sourceNames: 'a|b' });
-  const refB = buildDocRef({ hasTemplate: false, docTitle: 'Document', command: 'Summarize.', sourceNames: 'a|b' });
+test('buildDocRef: command-only — same command + same sources produce the same ref (update, not stack)', () => {
+  const refA = buildDocRef({ docTitle: 'Document', command: 'Summarize.', sourceNames: 'a|b' });
+  const refB = buildDocRef({ docTitle: 'Document', command: 'Summarize.', sourceNames: 'a|b' });
   assert.equal(refA, refB);
 });
 
-test('buildDocRef: different command + same sources produce different refs (no clobber)', () => {
-  const refA = buildDocRef({ hasTemplate: false, docTitle: 'Document', command: 'Summarize.', sourceNames: 'a|b' });
-  const refB = buildDocRef({ hasTemplate: false, docTitle: 'Document', command: 'Translate.', sourceNames: 'a|b' });
+test('buildDocRef: command-only — different command + same sources produce different refs (no clobber)', () => {
+  const refA = buildDocRef({ docTitle: 'Document', command: 'Summarize.', sourceNames: 'a|b' });
+  const refB = buildDocRef({ docTitle: 'Document', command: 'Translate.', sourceNames: 'a|b' });
   assert.notEqual(refA, refB);
+});
+
+test('buildDocRef: template + command A vs template + command B, same sources — refs differ', () => {
+  const refA = buildDocRef({ docTitle: 'Sprint Review', command: 'Be terse.', sourceNames: 'a|b' });
+  const refB = buildDocRef({ docTitle: 'Sprint Review', command: 'Be verbose.', sourceNames: 'a|b' });
+  assert.notEqual(refA, refB);
+});
+
+test('buildDocRef: template + same command, same sources, run twice — refs match', () => {
+  const refA = buildDocRef({ docTitle: 'Sprint Review', command: 'Be terse.', sourceNames: 'a|b' });
+  const refB = buildDocRef({ docTitle: 'Sprint Review', command: 'Be terse.', sourceNames: 'a|b' });
+  assert.equal(refA, refB);
 });

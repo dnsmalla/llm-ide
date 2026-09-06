@@ -86,21 +86,29 @@ export function validateDocRequest(body) {
   return { ok: true, hasTemplate, hasCommand };
 }
 
-/// Build the KB ingestion ref for a generated doc. Template runs keep their
-/// original ref shape unchanged (`doc:<docTitle>:<sourceNames>`) so existing
-/// rows are not invalidated. Command-only runs fall back to a generic
-/// 'Document' title, so a hash of the (already sanitized) command text is
-/// folded into the ref — otherwise every command-only run over the same
-/// sources collides on one ref and silently overwrites the previous run's
-/// KB row (kb/sources.mjs does DELETE-then-INSERT keyed on
-/// (user_id, kind, ref, chunk_idx)). Same command + same sources therefore
-/// still produces the same ref (update, not stack); a different command
-/// produces a different ref (no clobber).
-export function buildDocRef({ hasTemplate, docTitle, command, sourceNames }) {
-  const base = hasTemplate
-    ? `doc:${docTitle}:${sourceNames}`
-    : `doc:${docTitle}:${crypto.createHash('sha256').update(command || '').digest('hex').slice(0, 12)}:${sourceNames}`;
-  return base.slice(0, 1000);
+/// Build the KB ingestion ref for a generated doc:
+/// `doc:<docTitle>[:<commandHash>]:<sourceNames>` — the hash segment is
+/// present if and only if a command is present.
+///
+/// A template-only run (no command) MUST keep the ref shape byte-identical
+/// to before this task (`doc:<docTitle>:<sourceNames>`, no hash segment) so
+/// existing KB rows are never orphaned.
+///
+/// Whenever a command is present — template+command, or command-only (where
+/// docTitle falls back to the generic 'Document') — a hash of the (already
+/// sanitized) command text is folded into the ref. Without it, two runs
+/// that share a title/sources but differ only in command text (e.g. the
+/// user keeps a template selected and swaps the command, or runs two
+/// different commands with no template) collide on one ref and silently
+/// overwrite each other's KB row (kb/sources.mjs does DELETE-then-INSERT
+/// keyed on (user_id, kind, ref, chunk_idx)). Same command + same sources
+/// therefore still produces the same ref (update, not stack); a different
+/// command produces a different ref (no clobber).
+export function buildDocRef({ docTitle, command, sourceNames }) {
+  const hashSegment = command
+    ? `:${crypto.createHash('sha256').update(command).digest('hex').slice(0, 12)}`
+    : '';
+  return `doc:${docTitle}${hashSegment}:${sourceNames}`.slice(0, 1000);
 }
 
 // Build a docx Document from the structured JSON the model returns.
@@ -290,7 +298,7 @@ export async function handleExportRoutes(req, res) {
     const sourceNames = body.sources.map((s) => sanitizeLine(String(s.name || ''), 80)).join('|');
     ingestGeneratedDoc({
       userId: req.user?.id,
-      ref: buildDocRef({ hasTemplate, docTitle, command, sourceNames }),
+      ref: buildDocRef({ docTitle, command, sourceNames }),
       title: docTitle,
       body: trimmed,
       meta: { generator: 'generate-doc', template: templateName || null, sections, command: command || null, sources: sourceNames },
