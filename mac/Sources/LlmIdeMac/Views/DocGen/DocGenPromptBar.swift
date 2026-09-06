@@ -11,6 +11,10 @@ struct DocGenPromptBar: View {
     @EnvironmentObject private var projectStore: ProjectStore
     @EnvironmentObject private var theme: ThemeStore
 
+    /// Guards "Start another" — shown only when `vm.editedContent` has
+    /// diverged from the generated text, so unsaved edits aren't lost silently.
+    @State private var showDiscardConfirmation = false
+
     private var projectRoot: URL? {
         projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
     }
@@ -23,8 +27,8 @@ struct DocGenPromptBar: View {
                 generateButton
             case .generating:
                 generatingRow
-            case .done:
-                doneRow
+            case .done(let generatedText, _):
+                doneRow(generatedText: generatedText)
             }
         }
         .padding(.horizontal, 12)
@@ -97,7 +101,7 @@ struct DocGenPromptBar: View {
 
     // MARK: - Done
 
-    private var doneRow: some View {
+    private func doneRow(generatedText: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "checkmark.circle.fill")
@@ -141,12 +145,31 @@ struct DocGenPromptBar: View {
                 .help("Save to the folder set in Setup")
             }
 
-            Button { vm.resetToIdle() } label: {
+            Button {
+                if vm.editedContent == generatedText {
+                    // No divergence from what was generated — nothing to lose.
+                    vm.resetToIdle()
+                } else {
+                    showDiscardConfirmation = true
+                }
+            } label: {
                 Text("Start another")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .confirmationDialog(
+                "Discard your edits to this document?",
+                isPresented: $showDiscardConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Discard & Start Another", role: .destructive) {
+                    vm.resetToIdle()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Your changes have not been saved. Starting another document discards them.")
+            }
         }
     }
 }
