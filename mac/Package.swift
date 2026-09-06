@@ -65,6 +65,7 @@ if docGenIncluded {
     featureDefines.append(.define("FEATURE_DOCGEN"))
 } else {
     libExcludes.append("Views/DocGen")
+    testExcludes.append("DocGenViewModelTests.swift")
 }
 if terminalIncluded {
     featureDefines.append(.define("FEATURE_TERMINAL"))

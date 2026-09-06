@@ -120,7 +120,7 @@ struct DocGenEditorPanel: View {
                     let exportText = editableContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         ? content
                         : editableContent
-                    vm.exportMarkdown(content: exportText, api: api, projectRoot: root)
+                    vm.save(content: exportText, api: api, config: DocGenOutputConfig(), projectRoot: root)
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "arrow.down.circle.fill").font(.system(size: 12))
