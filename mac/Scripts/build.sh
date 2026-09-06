@@ -194,7 +194,9 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
 PLIST
 
 if [ -d "$PROJ_DIR/Sources/LlmIdeMac/Resources" ]; then
-  rsync -a "$PROJ_DIR/Sources/LlmIdeMac/Resources/" "$APP_DIR/Contents/Resources/"
+  # monaco-src/ is the build-time input to Scripts/build-monaco-bundle.mjs;
+  # the app loads the generated Resources/monaco/ instead (see Package.swift).
+  rsync -a --exclude 'monaco-src' "$PROJ_DIR/Sources/LlmIdeMac/Resources/" "$APP_DIR/Contents/Resources/"
 fi
 
 cd "$PROJ_DIR"

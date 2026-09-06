@@ -31,7 +31,12 @@ let terminalIncluded = includedFeatures.contains("terminal")
 let autoTasksIncluded = includedFeatures.contains("auto_tasks")
 let mobileIncluded = includedFeatures.contains("mobile_sync")
 
-var libExcludes: [String] = []
+// Resources/monaco-src/ is the hand-authored INPUT to
+// Scripts/build-monaco-bundle.mjs, which copies it into Resources/monaco/ (the
+// bundle the app loads, declared as a resource below). It is never read at
+// runtime, so tell SwiftPM it is not a resource — otherwise every build warns
+// "found 2 file(s) which are unhandled" for index.html / bootstrap.js.
+var libExcludes: [String] = ["Resources/monaco-src"]
 var testExcludes: [String] = ["README-truncated-tests.md"]
 var featureDefines: [SwiftSetting] = []
 if graphIncluded {
