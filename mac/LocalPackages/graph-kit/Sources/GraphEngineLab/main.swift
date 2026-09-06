@@ -13,6 +13,62 @@ import GraphKit
 /// unplugged, this one exists to test the engine.
 ///
 /// Usage: swift run graph-engine-lab
+///        swift run graph-engine-lab --emit-memory <docDir> <out.json>
+///
+/// The second form is the Swift half of the **cross-implementation
+/// conformance gate**. It runs `MemoryGenerator` over a corpus and writes the
+/// same payload the TypeScript CLI's `memory` command writes, so
+/// `scripts/conformance-memory.mjs` can diff the two.
+///
+/// Why this exists: `schema/fixtures/*.json` only prove a graph *decodes* and
+/// round-trips. Nothing proved the two implementations produce the SAME graph
+/// from the same input — which is how the TypeScript port came to silently drop
+/// `graph-only` and `related-modules` while still passing every test it had.
+
+/// The doc-track payload: the canonical graph document plus the two additive
+/// keys a `docMemory` run carries. Mirrors `cmdMemory` in `typescript/src/cli.ts`
+/// and what `PluginGraphEngine.EngineOutput` decodes.
+struct MemoryEmission: Encodable {
+    let schemaVersion: Int
+    let nodes: [CGNode]
+    let edges: [CGEdge]
+    let layers: [UALayer]
+    let tour: [UATourStep]
+    let chunks: [MemoryChunk]
+    let docCount: Int
+}
+
+if CommandLine.arguments.dropFirst().first == "--emit-memory" {
+    let rest = Array(CommandLine.arguments.dropFirst(2))
+    guard rest.count == 2 else {
+        FileHandle.standardError.write(Data(
+            "usage: graph-engine-lab --emit-memory <docDir> <out.json>\n".utf8))
+        exit(2)
+    }
+    let corpus = URL(fileURLWithPath: rest[0], isDirectory: true)
+    let output = URL(fileURLWithPath: rest[1])
+    let memory = MemoryGenerator.generate(roots: [corpus])
+    let emission = MemoryEmission(
+        schemaVersion: GraphDocument.currentSchemaVersion,
+        nodes: memory.graph.nodes, edges: memory.graph.edges,
+        layers: memory.graph.layers, tour: memory.graph.tour,
+        chunks: memory.chunks, docCount: memory.docCount)
+    let encoder = JSONEncoder()
+    // Sorted keys so a byte-level diff of two emissions is readable; the
+    // conformance script compares structurally, but a human reading the
+    // artifacts should not have to fight key order.
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    do {
+        try encoder.encode(emission).write(to: output, options: .atomic)
+    } catch {
+        FileHandle.standardError.write(Data("emit failed: \(error)\n".utf8))
+        exit(1)
+    }
+    let summary = "graph-engine-lab: \(memory.docCount) doc(s) → "
+        + "\(memory.graph.nodes.count) nodes, \(memory.graph.edges.count) edges\n"
+    FileHandle.standardError.write(Data(summary.utf8))
+    exit(0)
+}
 
 var failures: [String] = []
 

@@ -105,13 +105,18 @@ regression: test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-ga
 # XCTest): graph-layout-lab asserts the layout engine against exact N² ground
 # truth and Louvain reference values; graph-engine-lab asserts generation
 # invariants (containment direction, cross-link precedence, related-modules
-# linking, fingerprint stability). Wired into `regression` because a gate
+# linking, fingerprint stability). conformance-memory.mjs runs BOTH the Swift
+# and TypeScript doc tracks over one corpus and diffs them — schema/fixtures
+# only prove a graph decodes, never that the two engines AGREE, which is how
+# the port silently dropped graph-only/related-modules, scanned fenced code
+# blocks, and id'd symlinked paths differently. Wired into `regression` because a gate
 # nothing runs is a gate in name only — the layout gate passed a 1094%-wrong
 # force calculation for exactly as long as nobody executed it.
 .PHONY: graph-gates
 graph-gates:
 	cd mac/LocalPackages/graph-kit && swift run -c release graph-layout-lab
 	cd mac/LocalPackages/graph-kit && swift run -c release graph-engine-lab
+	cd mac/LocalPackages/graph-kit && node scripts/conformance-memory.mjs
 
 # Enable the repo's git hooks (.githooks/). The pre-push hook runs the
 # regression gate before any push that touches mac/. Run once per clone.

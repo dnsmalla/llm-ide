@@ -5,7 +5,7 @@
 // Faithful port of the Swift `MemoryGenerator`. v1: no LLM, no embeddings.
 
 import { createHash } from "node:crypto";
-import { readFileSync, statSync, readdirSync } from "node:fs";
+import { readFileSync, statSync, readdirSync, realpathSync } from "node:fs";
 import { EXCLUDED_DIRS } from "../exclusions.js";
 import { join, extname, basename, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -26,6 +26,14 @@ export interface MemoryChunk {
   wikiLinks: string[];
   title: string;
   displayHeading: string;
+  /** Frontmatter `graph-only: true` — graph the doc, keep it out of the
+   *  agent-facing memory artifacts. Mirrors Swift `MemoryChunk.graphOnly`. */
+  graphOnly: boolean;
+  /** Frontmatter `related-modules:` — declared code-module affinity, consumed
+   *  by the merge step to emit documents/EXTRACTED doc→code edges. Case is
+   *  preserved for display; consumers match case-insensitively. Mirrors Swift
+   *  `MemoryChunk.relatedModules`. */
+  relatedModules: string[];
 }
 
 export interface GeneratedMemory {
@@ -68,13 +76,31 @@ export function docIdentity(docPath: string): {
   docID: string;
   docTitle: string;
 } {
-  const abs = resolve(docPath);
+  // Symlinks are resolved, not just `..`/`.` normalised, because the doc id is
+  // sha256 of this string and Swift's `URL.path` yields the REAL path. Without
+  // realpath the two implementations id the same file differently the moment a
+  // symlink is anywhere in the tree — on macOS `/var` → `/private/var` alone is
+  // enough — and every join on node ids (cross-links, incremental cache reuse,
+  // the merge step) silently stops matching.
+  const abs = realpathOrResolve(docPath);
   return {
     abs,
     fileURL: pathToFileURL(abs).href,
     docID: "doc:" + shortHash(abs),
     docTitle: basename(abs, extname(abs)),
   };
+}
+
+/** Real path when the file exists, plain resolution otherwise. A doc can be
+ *  passed in that no longer exists (a stale cache entry, a caller-supplied
+ *  list); id derivation must stay total rather than throwing. */
+function realpathOrResolve(p: string): string {
+  const abs = resolve(p);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
 }
 
 /** One doc's chunked result — the cacheable unit for incremental updates. */
@@ -180,7 +206,9 @@ export function assembleGraph(docs: DocMeta[]): { graph: CGData; chunks: MemoryC
   const titleByID = new Map(allChunks.map((c) => [c.id, c.title] as const));
   for (const c of allChunks) {
     if (c.wikiLinks.length > 0) continue;
-    const body = c.body.toLowerCase();
+    // Fences stripped here too, matching Swift: an identifier mentioned only
+    // inside a code sample is not a topical reference to another chunk.
+    const body = strippingFencedBlocks(c.body).toLowerCase();
     for (const [otherID, otherTitle] of titleByID) {
       if (otherID === c.id) continue;
       const needle = otherTitle.toLowerCase();
@@ -230,8 +258,12 @@ function chunkDoc(docPath: string, _fileURL: string, docID: string, docTitle: st
     const bounded = body.slice(0, MAX_CHUNK_BODY_CHARS);
     const id = `${docID}::${shortHash(headingStack.join("/"))}:${chunks.length}`;
     const kind = classify(headingStack[headingStack.length - 1], bounded) ?? defaultKind;
-    const tags = mergeTags(frontmatterTags, extractHashtags(bounded));
-    const wikiLinks = extractWikiLinks(bounded);
+    // Scan with fenced code blocks removed, as Swift does. A code sample that
+    // happens to contain `[[Foo]]` or `#bar` is quoting, not authoring: left in,
+    // it manufactures reference edges and tags the document never meant.
+    const scanText = strippingFencedBlocks(bounded);
+    const tags = mergeTags(frontmatterTags, extractHashtags(scanText));
+    const wikiLinks = extractWikiLinks(scanText);
     const headingPath = [...headingStack];
     chunks.push({
       id,
@@ -244,12 +276,27 @@ function chunkDoc(docPath: string, _fileURL: string, docID: string, docTitle: st
       wikiLinks,
       title: headingPath[headingPath.length - 1] ?? docTitle,
       displayHeading: headingPath.length === 0 ? "(preamble)" : headingPath.join(" › "),
+      // Doc-level frontmatter applies to every chunk of that doc, as in Swift.
+      graphOnly: fm.graphOnly,
+      relatedModules: fm.relatedModules,
     });
     bodyBuf = [];
   };
 
+  let inFence = false;
   for (const line of lines) {
-    const heading = parseHeading(line);
+    // Fence state gates heading detection, as it does in Swift. A `#` line
+    // inside a code fence is sample text, not a section: treated as a heading
+    // it splits the document into a chunk that exists in one implementation and
+    // not the other — and because chunk ids hash the heading path, that changes
+    // NODE IDENTITY, not just content.
+    const fenceMark = line.trim();
+    if (fenceMark.startsWith("```") || fenceMark.startsWith("~~~")) {
+      inFence = !inFence;
+      bodyBuf.push(line);
+      continue;
+    }
+    const heading = inFence ? null : parseHeading(line);
     if (heading) {
       flush();
       while (headingLevels.length > 0 && headingLevels[headingLevels.length - 1]! >= heading.level) {
@@ -270,44 +317,168 @@ function chunkDoc(docPath: string, _fileURL: string, docID: string, docTitle: st
 // frontmatter (lightweight: type/kind + tags, no YAML dependency)
 // --------------------------------------------------------------------------
 
-function stripFrontmatter(text: string): { text: string; kind: CGNodeKind | null; tags: string[] } {
-  if (!text.startsWith("---\n")) return { text, kind: null, tags: [] };
-  const end = text.indexOf("\n---\n", 4);
-  if (end === -1) return { text, kind: null, tags: [] };
-  const block = text.slice(4, end);
-  const remaining = text.slice(end + 5);
-
-  const blockLines = block.split("\n");
-  let rawType = "";
-  let rawTags: string[] = [];
-  for (let i = 0; i < blockLines.length; i++) {
-    const m = /^([A-Za-z_]+)\s*:\s*(.*)$/.exec(blockLines[i]!.trim());
-    if (!m) continue;
-    const key = m[1]!.toLowerCase();
-    const val = m[2]!.trim();
-    if ((key === "type" || key === "kind") && rawType === "") {
-      rawType = val;
-    } else if (key === "tags") {
-      if (val) {
-        rawTags = splitTagString(val);
-      } else {
-        // YAML block sequence: gather following `- item` lines.
-        for (let j = i + 1; j < blockLines.length; j++) {
-          const lm = /^\s*-\s*(.+?)\s*$/.exec(blockLines[j]!);
-          if (!lm) break;
-          rawTags.push(lm[1]!);
-        }
-      }
-    }
-  }
-  return { text: remaining, kind: kindFromTypeString(rawType), tags: cleanTags(rawTags) };
+interface ParsedFrontmatter {
+  text: string;
+  kind: CGNodeKind | null;
+  tags: string[];
+  graphOnly: boolean;
+  relatedModules: string[];
 }
 
-/** Split an inline tag value: `[a, b]` or `a, b` or `a b`. */
-function splitTagString(raw: string): string[] {
-  let inner = raw.trim();
-  if (inner.startsWith("[") && inner.endsWith("]")) inner = inner.slice(1, -1);
-  return inner.split(/[\s,]+/);
+const EMPTY_FRONTMATTER = { kind: null, tags: [], graphOnly: false, relatedModules: [] };
+
+/**
+ * Minimal YAML-ish frontmatter mapping parser — a port of Swift
+ * `MemoryGenerator.parseSimpleFrontmatterMapping`.
+ *
+ * Only top-level `key: value` lines are read; everything after the first colon
+ * is kept verbatim (descriptions may contain colons), and an INDENTED line is a
+ * continuation of the current key's value.
+ *
+ * That indentation rule is load-bearing, not incidental. Matching a trimmed
+ * line instead promoted keys nested under another mapping to top level — so a
+ * `schema:` block containing `graph-only: true` (a shape skill and agent files
+ * routinely have) made this implementation withhold a document that Swift kept.
+ * It is also what makes a NON-indented `- item` sequence yield an empty value
+ * on both sides rather than a list on one.
+ *
+ * Deliberately not a real YAML parser: Swift avoids Yams here because agent
+ * files carry unquoted colons and nested mappings that can trap it mid-parse
+ * during a background graph build.
+ */
+function parseFrontmatterMapping(block: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  let currentKey: string | null = null;
+  let currentValue = "";
+  const flush = () => {
+    if (currentKey !== null) out[currentKey] = currentValue.trim();
+    currentKey = null;
+    currentValue = "";
+  };
+  for (const line of block.split("\n")) {
+    if (line.startsWith(" ") || line.startsWith("\t")) {
+      if (currentKey !== null) {
+        if (currentValue !== "") currentValue += "\n";
+        currentValue += line.trim();
+      }
+      continue;
+    }
+    flush();
+    const colon = line.indexOf(":");
+    if (colon === -1) continue;
+    const key = line.slice(0, colon).trim();
+    if (!key) continue;
+    // Keys are stored VERBATIM, as Swift stores them, and looked up by the
+    // exact spellings Swift accepts. Lowercasing here looked harmless but made
+    // this implementation accept key spellings Swift rejects (`GRAPH-ONLY:`,
+    // `graphonly:`), which resurrects the very divergence the ported parser
+    // exists to close: `graph-only` decides whether a document is withheld from
+    // the agent's memory artifacts, so one engine would suppress a doc the
+    // other publishes.
+    currentKey = key;
+    currentValue = line.slice(colon + 1);
+  }
+  flush();
+  return out;
+}
+
+/**
+ * Interpret a mapping value that may be a YAML block sequence, a flow sequence
+ * or a plain scalar. Port of Swift `normalizeFrontmatterList`.
+ */
+function normalizeFrontmatterList(raw: string | undefined): string[] | string | null {
+  if (raw === undefined) return null;
+  const s = raw.trim();
+  if (!s) return null;
+  // Block sequence: the line parser joined `- item` lines with newlines.
+  if (s.startsWith("- ") || s.startsWith("-\n") || s.includes("\n- ")) {
+    return s
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("-"))
+      .map((l) => unquote(l.slice(1)))
+      .filter((l) => l !== "");
+  }
+  // Flow sequence: [a, b] / ["a", "b"].
+  if (s.startsWith("[") && s.endsWith("]")) {
+    return s
+      .slice(1, -1)
+      .split(",")
+      .map((p) => unquote(p))
+      .filter((p) => p !== "");
+  }
+  return unquote(s);
+}
+
+/** A normalised list value as parts: an array stays as-is, a scalar splits on
+ *  whitespace or comma. Mirrors the shared head of Swift's
+ *  `parseFrontmatterTags` / `parseModuleList`. */
+function listParts(value: string[] | string | null): string[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") return value.split(/[\s,]+/).filter((p) => p !== "");
+  return [];
+}
+
+function stripFrontmatter(text: string): ParsedFrontmatter {
+  if (!text.startsWith("---\n")) return { text, ...EMPTY_FRONTMATTER };
+  const end = text.indexOf("\n---\n", 4);
+  if (end === -1) return { text, ...EMPTY_FRONTMATTER };
+  const block = text.slice(4, end);
+  // Trimmed, as Swift trims: the closing fence's trailing newline belongs to
+  // the fence, not the body, so an untrimmed slice gave every chunk of every
+  // frontmatter-bearing document a different body than Swift produced.
+  const remaining = text.slice(end + 5).trim();
+
+  const map = parseFrontmatterMapping(block);
+  const rawType = unquote(map["type"] ?? map["kind"] ?? "");
+  const tags = cleanTags(listParts(normalizeFrontmatterList(map["tags"])));
+  const graphOnly = parseBool(map["graph-only"] ?? map["graphOnly"] ?? "") ?? false;
+  const relatedModules = cleanModules(
+    listParts(normalizeFrontmatterList(map["related-modules"] ?? map["relatedModules"])),
+  );
+
+  return { text: remaining, kind: kindFromTypeString(rawType), tags, graphOnly, relatedModules };
+}
+
+/** YAML-ish booleans, matching Swift `MemoryGenerator.parseBool`. */
+function parseBool(raw: string): boolean | null {
+  switch (unquote(raw).toLowerCase()) {
+    case "true":
+    case "yes":
+    case "1":
+      return true;
+    case "false":
+    case "no":
+    case "0":
+      return false;
+    default:
+      return null;
+  }
+}
+
+/** Strip surrounding single/double quotes from a scalar. */
+function unquote(raw: string): string {
+  const s = raw.trim();
+  if (s.length < 2) return s;
+  for (const q of ['"', "'"]) {
+    if (s.startsWith(q) && s.endsWith(q)) return s.slice(1, -1);
+  }
+  return s;
+}
+
+/** Trim, unquote and de-duplicate a declared module list, preserving case and
+ *  order. Path-form normalisation (`./kb`, `kb/`, `kb/*`) is the merge step's
+ *  job, matching where Swift does it. */
+function cleanModules(raw: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw) {
+    const cleaned = unquote(part).trim();
+    if (!cleaned || seen.has(cleaned)) continue;
+    seen.add(cleaned);
+    out.push(cleaned);
+  }
+  return out;
 }
 
 /** Trim, strip leading `#` and surrounding quotes, lowercase, dedupe. */
@@ -346,6 +517,30 @@ function kindFromTypeString(s: string): CGNodeKind | null {
 const WIKI_RE = /\[\[([^[\]|\n]+)(?:\|[^[\]\n]*)?\]\]/g;
 const HASHTAG_RE = /(?:^|[\s([])#([A-Za-z][A-Za-z0-9_/-]*)/g;
 const CHECKBOX_RE = /^\s*-\s*\[[ x]\]\s/m;
+
+/**
+ * Drop fenced code blocks so quoted text is not scanned for links or tags.
+ *
+ * Mirrors Swift `MemoryGenerator.strippingFencedBlocks`, including its
+ * limitations: fence toggling matches on the PRESENCE of a marker, not on
+ * matching character or length, so a stray `~~~` inside a ``` fence desyncs the
+ * toggle for the rest of the document; indentation is not considered either.
+ * Kept deliberately identical — a heuristic that differs between the two
+ * implementations is worse than one that is imperfect in the same way in both.
+ */
+export function strippingFencedBlocks(body: string): string {
+  const out: string[] = [];
+  let inFence = false;
+  for (const line of body.split("\n")) {
+    const t = line.trim();
+    if (t.startsWith("```") || t.startsWith("~~~")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence) out.push(line);
+  }
+  return out.join("\n");
+}
 
 export function extractWikiLinks(body: string): string[] {
   const seen = new Set<string>();
