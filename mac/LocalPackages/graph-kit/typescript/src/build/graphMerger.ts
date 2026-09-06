@@ -111,7 +111,7 @@ export function mergeCodeAndDoc(code: CGData, doc: CGData, chunks: MergeChunk[])
 
   // (1) Wikilinks — author-asserted, so EXTRACTED.
   for (const chunk of chunks) {
-    for (const name of chunk.wikiLinks) {
+    for (const name of chunk.wikiLinks ?? []) {
       for (const codeId of codeIdsByTitle.get(name.toLowerCase()) ?? []) {
         linkOnce(chunk.id, codeId, "references", "EXTRACTED");
       }

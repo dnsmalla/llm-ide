@@ -142,3 +142,51 @@ test("scanned file nodes carry source_file, so the merge can resolve them", asyn
     );
   });
 });
+
+// --------------------------------------------------------------------------
+// Node ids must be unique.
+//
+// The Swift reference builder guards this explicitly; pushing unconditionally
+// produced collisions on ordinary Swift input — `extension Widget` beside
+// `struct Widget`, or two `func render` overloads, both land on
+// `symbol:<file>#<name>`. Consumers dedupe first-wins, so the extras were
+// silently discarded rather than reported, and `validate` does not check it.
+// --------------------------------------------------------------------------
+
+test("extensions and overloads do not produce duplicate node ids", async () => {
+  await withTree(
+    {
+      "Sample.swift":
+        "struct Widget {\n    func render() {}\n}\n" +
+        "extension Widget {\n    func render(x: Int) {}\n}\n" +
+        "extension Widget {\n    func helper() {}\n}\n",
+    },
+    async (dir) => {
+      const graph = await scanCode(dir);
+      const ids = graph.nodes.map((n) => n.id);
+      assert.equal(new Set(ids).size, ids.length,
+                   `duplicate ids: ${ids.filter((x, i) => ids.indexOf(x) !== i)}`);
+    },
+  );
+});
+
+test("typescript overloads do not produce duplicate node ids either", async () => {
+  await withTree(
+    { "a.ts": "export function f(x: number): string;\nexport function f(x: string): string;\n" +
+              "export function f(x: any): string { return String(x); }\n" },
+    async (dir) => {
+      const graph = await scanCode(dir);
+      const ids = graph.nodes.map((n) => n.id);
+      assert.equal(new Set(ids).size, ids.length);
+    },
+  );
+});
+
+test("a merge chunk missing optional wire fields does not throw", () => {
+  // Swift's MemoryChunk decoder defaults body/wikiLinks/relatedModules because
+  // the type is a wire format between implementations. Dereferencing them raw
+  // made this side die on a payload Swift merges without complaint.
+  const code = { nodes: [], edges: [], layers: [], tour: [] };
+  const bare = { id: "chunk:1" } as { id: string };
+  assert.doesNotThrow(() => mergeCodeAndDoc(code, code, [bare]));
+});

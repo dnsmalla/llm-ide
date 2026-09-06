@@ -22,8 +22,14 @@ import { strippingFencedBlocks } from "./memoryGenerator.js";
  */
 export interface MergeChunk {
   id: string;
-  body: string;
-  wikiLinks: string[];
+  /** Every field but `id` is optional on purpose. Swift's `MemoryChunk` decoder
+   *  defaults each of these, and says why: the type is a wire format between
+   *  implementations, so "requiring exact parity would mean a perfectly good
+   *  engine's output failed to decode". Dereferencing them raw made this side
+   *  die with a TypeError on a payload Swift merges without complaint — and
+   *  after minification the message named a mangled identifier, not the field. */
+  body?: string;
+  wikiLinks?: string[];
   relatedModules?: string[];
 }
 
@@ -55,7 +61,7 @@ export function docCodeLinks(
   const out: DocCodeLink[] = [];
   const seen = new Set<string>();
   for (const chunk of chunks) {
-    const scanText = strippingFencedBlocks(chunk.body);
+    const scanText = strippingFencedBlocks(chunk.body ?? "");
     for (const mention of inlineCodeSpans(scanText)) {
       const ids = inventory.get(mention.toLowerCase());
       if (!ids) continue;

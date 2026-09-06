@@ -51,7 +51,6 @@ export interface LineFileStructure {
   language: string;
   imports: string[];
   symbols: LineSymbol[];
-  loc: number;
 }
 
 /** First identifier following `keyword `, or null. */
@@ -180,5 +179,5 @@ export function scanFileByLines(absPath: string): LineFileStructure | null {
     const symbol = symbolFromLine(line, language);
     if (symbol) symbols.push({ ...symbol, line: i + 1 });
   }
-  return { language, imports, symbols, loc: lines.length };
+  return { language, imports, symbols };
 }

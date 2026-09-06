@@ -61,6 +61,20 @@ export async function scanCode(
   const heritages: Heritage[] = [];
   const callSites: Array<{ fromId: string; name: string }> = [];
   const seenEdge = new Set<string>();
+  // Node ids must be unique. The Swift reference builder guards this explicitly
+  // (`guard !nodeIds.contains(id) else { continue }` in StructureGraphBuilder);
+  // pushing unconditionally produced duplicate ids for ordinary input — a Swift
+  // `extension X` beside `struct X`, or two `func` overloads, collide on
+  // `symbol:<file>#<name>`. Consumers dedupe first-wins, so the extras were
+  // silently discarded rather than reported. Doubling as the module-node
+  // membership test also removes an O(n^2) rescan of the whole node array.
+  const nodeIds = new Set<string>();
+  const pushNode = (node: CGNode): boolean => {
+    if (nodeIds.has(node.id)) return false;
+    nodeIds.add(node.id);
+    nodes.push(node);
+    return true;
+  };
 
   const addEdge = (fromId: string, toId: string, kind: CGEdge["kind"], confidence: CGEdge["confidence"]) => {
     if (fromId === toId) return;
@@ -83,8 +97,8 @@ export async function scanCode(
   // into a merge yielded zero declared-module edges and zero path mentions —
   // silently, since a missing key is indistinguishable from "no modules".
   // `path` is kept as a legacy alias; nothing in-tree reads it.
-  nodes.push({ id: fileId, title: rel.split("/").pop() ?? rel, kind: "file",
-               metadata: { source_file: rel, path: rel, language } });
+  pushNode({ id: fileId, title: rel.split("/").pop() ?? rel, kind: "file",
+             metadata: { source_file: rel, path: rel, language } });
 
     let text: string;
     try {
@@ -101,7 +115,7 @@ export async function scanCode(
         if (target) addEdge(fileId, `file:${target}`, "imports", "EXTRACTED");
         continue;
       }
-      emitDeclaration(stmt, fileId, rel, nodes, addEdge, addSymbolName, heritages);
+      emitDeclaration(stmt, fileId, rel, pushNode, addEdge, addSymbolName, heritages);
     }
     collectCalls(sf, rel, callSites);
   }
@@ -132,7 +146,7 @@ export async function scanCode(
     if (!structure) continue;
     const rel = relative(rootAbs, file);
     const fileId = `file:${rel}`;
-    nodes.push({
+    pushNode({
       id: fileId,
       title: rel.split("/").pop() ?? rel,
       kind: "file",
@@ -140,13 +154,13 @@ export async function scanCode(
     });
     for (const symbol of structure.symbols) {
       const id = `symbol:${rel}#${symbol.name}`;
-      nodes.push({
+      if (!pushNode({
         id,
         title: symbol.name,
         kind: symbol.kind === "function" ? "function" : "other",
         metadata: { source_file: rel, path: rel, symbolKind: symbol.kind,
                     line: `L${symbol.line}` },
-      });
+      })) continue;
       addEdge(fileId, id, "contains", "EXTRACTED");
       addSymbolName(symbol.name, id);
     }
@@ -155,10 +169,8 @@ export async function scanCode(
       // paths, so the edge points at a synthetic module node — the same shape
       // an unresolved TS/JS import takes.
       const moduleId = `module:${module}`;
-      if (!nodes.some((n) => n.id === moduleId)) {
-        nodes.push({ id: moduleId, title: module, kind: "other",
-                     metadata: { module, language: structure.language } });
-      }
+      pushNode({ id: moduleId, title: module, kind: "other",
+                 metadata: { module, language: structure.language } });
       addEdge(fileId, moduleId, "imports", "EXTRACTED");
     }
   }
@@ -170,16 +182,19 @@ function emitDeclaration(
   stmt: ts.Statement,
   fileId: string,
   rel: string,
-  nodes: CGNode[],
+  pushNode: (node: CGNode) => boolean,
   addEdge: (f: string, t: string, k: CGEdge["kind"], c: CGEdge["confidence"]) => void,
   addSymbolName: (name: string, id: string) => void,
   heritages: Heritage[],
 ): void {
   const addSymbol = (name: string, kind: CGNodeKind, symbolKind: string): string => {
     const id = `symbol:${rel}#${name}`;
-    nodes.push({ id, title: name, kind, metadata: { source_file: rel, path: rel, symbolKind } });
-    addSymbolName(name, id);
-    addEdge(fileId, id, "contains", "EXTRACTED");
+    // A duplicate is skipped whole — no second node, no repeated name binding,
+    // no repeated containment edge — mirroring the Swift builder's `continue`.
+    if (pushNode({ id, title: name, kind, metadata: { source_file: rel, path: rel, symbolKind } })) {
+      addSymbolName(name, id);
+      addEdge(fileId, id, "contains", "EXTRACTED");
+    }
     return id;
   };
 
@@ -198,8 +213,9 @@ function emitDeclaration(
     for (const member of stmt.members) {
       if (ts.isMethodDeclaration(member) && member.name && ts.isIdentifier(member.name)) {
         const mId = `symbol:${rel}#${stmt.name.text}.${member.name.text}`;
-        nodes.push({ id: mId, title: `${stmt.name.text}.${member.name.text}`, kind: "symbol", metadata: { source_file: rel, path: rel, symbolKind: "method" } });
-        addEdge(classId, mId, "contains", "EXTRACTED");
+        if (pushNode({ id: mId, title: `${stmt.name.text}.${member.name.text}`, kind: "symbol", metadata: { source_file: rel, path: rel, symbolKind: "method" } })) {
+          addEdge(classId, mId, "contains", "EXTRACTED");
+        }
       }
     }
   } else if (ts.isInterfaceDeclaration(stmt)) {

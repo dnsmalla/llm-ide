@@ -86,6 +86,12 @@ const DEFAULT_CORPUS = {
   "merge-modules.md":
     "---\nrelated-modules: [kb, ./src, missing/**, .., .]\n---\n" +
     "# Merge Modules\n\nDeclared affinity in several authoring forms.\n",
+  // Reaches `backupTo` by wikilink AND by backtick mention. Without this the
+  // corpus produced no duplicate cross-link pair at all, so deleting the
+  // `crossSeen` de-duplication was a literal no-op on the gate — the precedence
+  // rule it enforces went untested.
+  "merge-dedup.md":
+    "# Merge Dedup\n\nSee [[backupTo]], and also `backupTo` written as a mention.\n",
   "merge-mentions.md":
     "# Merge Mentions\n\nThe `kb/db.mjs` file defines `backupTo`, and `app.ts` uses it.\n\n" +
     "```\n`kb/auth.mjs` must not link from inside a fence\n```\n",
@@ -139,11 +145,32 @@ function project(payload) {
 
 const show = (row) => row.split(SEP).join(" | ");
 
+/**
+ * Multiset difference, not set difference.
+ *
+ * Comparing as sets made a duplicate invisible: an implementation emitting the
+ * same edge twice where the other emits it once produced zero rows of
+ * difference. The entire cross-link precedence design rests on de-duplication
+ * (`crossSeen`), so counting is the comparison this gate needs.
+ */
 function diffSets(label, swiftRows, tsRows, out) {
-  const inTs = new Set(tsRows);
-  const inSwift = new Set(swiftRows);
-  const swiftOnly = swiftRows.filter((x) => !inTs.has(x));
-  const tsOnly = tsRows.filter((x) => !inSwift.has(x));
+  const count = (rows) => {
+    const m = new Map();
+    for (const r of rows) m.set(r, (m.get(r) ?? 0) + 1);
+    return m;
+  };
+  const swiftCounts = count(swiftRows);
+  const tsCounts = count(tsRows);
+  const expand = (a, b) => {
+    const extra = [];
+    for (const [row, n] of a) {
+      const surplus = n - (b.get(row) ?? 0);
+      for (let i = 0; i < surplus; i++) extra.push(row);
+    }
+    return extra;
+  };
+  const swiftOnly = expand(swiftCounts, tsCounts);
+  const tsOnly = expand(tsCounts, swiftCounts);
   if (swiftOnly.length === 0 && tsOnly.length === 0) {
     out.push(`  OK   ${label}: ${swiftRows.length} identical`);
     return true;
