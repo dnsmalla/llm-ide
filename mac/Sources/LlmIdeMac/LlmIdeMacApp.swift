@@ -70,6 +70,8 @@ public struct LlmIdeMacApp: App {
 
     @StateObject private var theme: ThemeStore
     @StateObject private var templateStore: DocTemplateStore
+    @StateObject private var commandStore: DocCommandStore
+    @StateObject private var docGenOutputStore: DocGenOutputStore
     @StateObject private var session: SessionStore
     @StateObject private var config: AppConfig
     @StateObject private var capture: CaptionOrchestrator
@@ -139,6 +141,8 @@ public struct LlmIdeMacApp: App {
 
         self._config = StateObject(wrappedValue: cfg)
         self._templateStore = StateObject(wrappedValue: DocTemplateStore())
+        self._commandStore = StateObject(wrappedValue: DocCommandStore())
+        self._docGenOutputStore = StateObject(wrappedValue: DocGenOutputStore())
         self._session = StateObject(wrappedValue: store)
         self._capture = StateObject(wrappedValue: orchestrator)
         self._theme = StateObject(wrappedValue: themeStore)
@@ -230,6 +234,8 @@ public struct LlmIdeMacApp: App {
                 ContentView(api: api)
                     .environmentObject(theme)
                     .environmentObject(templateStore)
+                    .environmentObject(commandStore)
+                    .environmentObject(docGenOutputStore)
                     .environmentObject(session)
                     .environmentObject(config)
                     .environmentObject(capture)
@@ -285,6 +291,8 @@ public struct LlmIdeMacApp: App {
                     // customTemplates on first frame still gets the
                     // hydrated list within the same .task tick.
                     templateStore.bootstrap()
+                    commandStore.bootstrap()
+                    docGenOutputStore.bootstrap()
                     // Start the backend FIRST. Session restore below calls
                     // the backend (api.refresh), so it must already be coming
                     // up — and, more importantly, a slow or blocked restore

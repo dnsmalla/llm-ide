@@ -18,6 +18,7 @@ import os.log
 /// ├── data/       ← documents, data files, images
 /// ├── llm-doc/    ← notes generated from meetings/email
 /// ├── templates/  ← Doc Gen templates (`<slug>/template.md`)
+/// ├── commands/   ← Doc Gen commands (`<slug>/command.md`)
 /// └── system/     ← LLM-IDE managed: settings, faults, graph, index (most git-ignored)
 ///     ├── project.json   ← project metadata (written by ProjectStore)
 ///     ├── sync.json      ← last export info  (git-ignored)
@@ -37,7 +38,7 @@ enum ProjectScaffolder {
     static let requiredDirectories = [
         "source",
         "source/meetings", "source/emails", "source/documents",
-        "code", "data", "llm-doc", "llm-doc/plans", "templates",
+        "code", "data", "llm-doc", "llm-doc/plans", "templates", "commands",
         "system", "system/faults", "system/graph", "system/cache",
         ".claude",
     ]
@@ -123,6 +124,8 @@ enum ProjectScaffolder {
 
         // 7. Doc Gen templates — default subfolders under templates/
         ProjectDocTemplatesSeeder.seedIfNeeded(at: folderURL)
+        // 7b. Doc Gen commands — default subfolders under commands/
+        ProjectDocCommandsSeeder.seedIfNeeded(at: folderURL)
 
         log.info("scaffold complete: \(folderURL.lastPathComponent, privacy: .public)")
     }

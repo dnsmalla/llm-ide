@@ -149,7 +149,15 @@ const HOST = config.host;
 //     existing `agents`), and hook discovery gained a third, named
 //     `hooks/<name>/hook.json` convention alongside the existing two — an
 //     older client simply doesn't decode the new fields.
-const SERVER_API_VERSION = 44;
+//   v45 — POST /generate-doc accepts optional `command` and `prompt` fields
+//     and no longer requires a template: a request with a non-empty
+//     `command` (and no `templateName`/`sections`) generates a document from
+//     that reusable instruction text instead. Additive — an older client
+//     that still always sends templateName + sections behaves exactly as
+//     before. (Authored as v44 on a branch cut before the skills-registry
+//     refactor landed on main and took 44 for its own wire change; renumbered
+//     to 45 at merge so the two formats stay distinguishable.)
+const SERVER_API_VERSION = 45;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

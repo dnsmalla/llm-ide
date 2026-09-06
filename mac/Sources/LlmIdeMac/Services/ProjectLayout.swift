@@ -47,6 +47,13 @@ struct ProjectLayout {
         templatesDir.appendingPathComponent(folderName, isDirectory: true)
     }
 
+    /// `<root>/commands/` — Doc Gen command markdown, one folder per command.
+    var commandsDir: URL { root.appendingPathComponent("commands", isDirectory: true) }
+
+    func commandDir(named folderName: String) -> URL {
+        commandsDir.appendingPathComponent(folderName, isDirectory: true)
+    }
+
     /// Auto Task prompt templates — a FLAT folder of `<slug>.md` files, not
     /// the one-folder-per-template shape Doc Gen uses next door. A different
     /// product with a different unit (a single prompt, not a sectioned

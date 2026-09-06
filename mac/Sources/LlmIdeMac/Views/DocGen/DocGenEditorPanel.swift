@@ -5,8 +5,6 @@ struct DocGenEditorPanel: View {
     let api: LlmIdeAPIClient
 
     @EnvironmentObject private var theme: ThemeStore
-    @EnvironmentObject private var projectStore: ProjectStore
-    @State private var editableContent: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,96 +42,40 @@ struct DocGenEditorPanel: View {
                     RoundedRectangle(cornerRadius: 7)
                         .strokeBorder(theme.current.accent.opacity(0.2), lineWidth: 1)
                 )
-            } else {
+            } else if vm.selectedCommand == nil {
+                // Only shown when NEITHER a template nor a command is picked
+                // yet — a command alone satisfies step 1 (see DocGenTemplateSection),
+                // so this must not render alongside the command badge below.
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.left")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
-                    Text("Choose a template from the left panel")
+                    Text("Choose a template or command from the left panel")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
 
-            Spacer()
+            if let command = vm.selectedCommand {
+                HStack(spacing: 5) {
+                    Image(systemName: "text.badge.checkmark")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Text(command.name)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
 
-            toolbarActions
+            Spacer()
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
         .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    // MARK: - Toolbar action buttons
-
-    @ViewBuilder
-    private var toolbarActions: some View {
-        switch vm.generationState {
-        case .idle, .error:
-            Button { vm.generate(api: api) } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("Generate")
-                        .font(.callout.weight(.semibold))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 7)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(vm.canGenerate ? theme.current.accent : Color.secondary.opacity(0.18))
-                )
-                .foregroundStyle(vm.canGenerate ? .white : Color.secondary.opacity(0.5))
-            }
-            .buttonStyle(.plain)
-            .disabled(!vm.canGenerate)
-            .animation(.easeInOut(duration: 0.15), value: vm.canGenerate)
-
-        case .generating:
-            Button { vm.cancelGeneration() } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "stop.fill").font(.system(size: 10))
-                    Text("Cancel").font(.callout.weight(.medium))
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
-                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-            }
-            .buttonStyle(.plain)
-
-        case .done(let content, _):
-            HStack(spacing: 8) {
-                Button { vm.generate(api: api) } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.clockwise").font(.system(size: 11))
-                        Text("Regenerate").font(.callout)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    let root = projectStore.activeProject
-                        .map { URL(fileURLWithPath: $0.localPath) }
-                    let exportText = editableContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        ? content
-                        : editableContent
-                    vm.exportMarkdown(content: exportText, api: api, projectRoot: root)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.down.circle.fill").font(.system(size: 12))
-                        Text("Export .md").font(.callout.weight(.semibold))
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(theme.current.accent, in: RoundedRectangle(cornerRadius: 8))
-                    .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
-            }
-        }
     }
 
     // MARK: - Content switcher
@@ -155,7 +97,6 @@ struct DocGenEditorPanel: View {
             VStack(spacing: 16) {
                 sourceSummaryCard
                 stepsCard
-                if vm.canGenerate { generateCTAButton }
             }
             .padding(20)
         }
@@ -189,7 +130,7 @@ struct DocGenEditorPanel: View {
                         Text("No sources selected")
                             .font(.callout.weight(.medium))
                             .foregroundStyle(.secondary)
-                        Text("Check files from LLM Doc or Data in the left panel.")
+                        Text("Check files from Code, LLM Doc or Data in the left panel.")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
@@ -252,18 +193,18 @@ struct DocGenEditorPanel: View {
             VStack(spacing: 6) {
                 stepRow(
                     number: "1",
-                    title: "Choose a template",
-                    detail: "Select from the Template section on the left",
-                    done: vm.selectedTemplate != nil)
+                    title: "Choose a template or command",
+                    detail: "Pick either one in the Template & Command section on the left",
+                    done: vm.selectedTemplate != nil || vm.selectedCommand != nil)
                 stepRow(
                     number: "2",
-                    title: "Select sources",
-                    detail: "Check files from LLM Doc or Data on the left",
+                    title: "Select code or doc files or folders",
+                    detail: "Tick files, or a whole folder, in the Sources section on the left",
                     done: !vm.selectedSources.isEmpty)
                 stepRow(
                     number: "3",
-                    title: "Generate",
-                    detail: "Claude will produce a structured document",
+                    title: "Add a prompt and generate",
+                    detail: "Write a short prompt in the panel on the right, then press Generate",
                     done: false)
             }
         }
@@ -310,23 +251,6 @@ struct DocGenEditorPanel: View {
         .animation(.easeInOut(duration: 0.2), value: done)
     }
 
-    private var generateCTAButton: some View {
-        Button { vm.generate(api: api) } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 14, weight: .semibold))
-                Text("Generate Document")
-                    .font(.callout.weight(.semibold))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 13)
-            .background(theme.current.accent, in: RoundedRectangle(cornerRadius: 10))
-            .foregroundStyle(.white)
-        }
-        .buttonStyle(.plain)
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
-    }
-
     // MARK: - Generating view
 
     private var generatingView: some View {
@@ -334,11 +258,9 @@ struct DocGenEditorPanel: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 10) {
                     ProgressView().controlSize(.small)
-                    if let t = vm.selectedTemplate {
-                        Text("Generating \"\(t.name)\" with Claude…")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("Generating \"\(vm.selectedTemplate?.name ?? vm.selectedCommand?.name ?? "document")\" with Claude…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -382,12 +304,16 @@ struct DocGenEditorPanel: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.current.success)
-                Text("Document ready — edit below, then export as Markdown (.md)")
+                Text(vm.isEditing
+                     ? "Editing — press Save in the right panel when you're done"
+                     : "Document ready — press Edit in the right panel to change it")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 HStack(spacing: 4) {
-                    Image(systemName: "pencil").font(.caption2)
-                    Text("Editable").font(.caption2)
+                    Image(systemName: vm.isEditing ? "pencil" : "lock")
+                        .font(.caption2)
+                    Text(vm.isEditing ? "Editable" : "Read-only")
+                        .font(.caption2)
                 }
                 .foregroundStyle(.tertiary)
             }
@@ -412,15 +338,14 @@ struct DocGenEditorPanel: View {
 
             Divider()
 
-            TextEditor(text: Binding(
-                get: { editableContent.isEmpty && !text.isEmpty ? text : editableContent },
-                set: { editableContent = $0 }
-            ))
-            .font(.system(.callout, design: .monospaced))
-            .scrollContentBackground(.hidden)
-            .background(Color(nsColor: .textBackgroundColor))
-            .onAppear { editableContent = text }
-            .onChange(of: text) { _, new in editableContent = new }
+            TextEditor(text: $vm.editedContent)
+                .font(.system(.callout, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .background(Color(nsColor: .textBackgroundColor))
+                .disabled(!vm.isEditing)
+                .opacity(vm.isEditing ? 1 : 0.85)
+                .onAppear { if vm.editedContent.isEmpty { vm.editedContent = text } }
+                .onChange(of: text) { _, new in vm.editedContent = new }
         }
     }
 

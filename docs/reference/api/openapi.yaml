@@ -1108,20 +1108,36 @@ paths:
 
   /generate-doc:
     post:
-      summary: Generate a structured Markdown document from a template and source content
+      summary: Generate a structured Markdown document from a template and/or a command, over source content
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [templateName, sections, sources]
+              description: >-
+                Requires (templateName AND a non-empty sections) OR a
+                non-empty command — either alone satisfies the document-shape
+                requirement, and both may be given together. sources is
+                always required, independent of that either/or.
+              required: [sources]
+              anyOf:
+                - required: [templateName, sections]
+                - required: [command]
               properties:
                 templateName: { type: string, description: 'Document title / template identifier' }
                 sections:
                   type: array
                   items: { type: string }
-                  description: 'Ordered list of section headings (max 30)'
+                  minItems: 1
+                  description: 'Ordered list of section headings (max 30); required together with templateName'
+                command:
+                  type: string
+                  minLength: 1
+                  description: 'Reusable instruction text from a Doc Gen "command" .md file; alone satisfies the templateName+sections requirement'
+                prompt:
+                  type: string
+                  description: 'Freeform one-off instructions from the prompt bar; combined with template/command, never required on its own'
                 sources:
                   type: array
                   items:
@@ -1130,7 +1146,8 @@ paths:
                     properties:
                       name:    { type: string }
                       content: { type: string }
-                  description: 'Source material (max 20 items, 50 000 chars each)'
+                  minItems: 1
+                  description: 'Source material (max 20 items, 50 000 chars each); non-empty is required, not just present'
       responses:
         '200':
           description: Generated markdown document

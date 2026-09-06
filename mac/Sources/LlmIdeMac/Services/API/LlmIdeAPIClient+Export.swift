@@ -51,8 +51,14 @@ extension LlmIdeAPIClient {
     // MARK: - Doc Gen
 
     private struct GenerateDocRequest: Encodable {
-        let templateName: String
-        let sections: [String]
+        // All optional: the server requires a template (name + sections) OR a
+        // command, so a command-only request omits the template fields
+        // entirely. Synthesized Encodable uses encodeIfPresent for Optionals,
+        // so nil fields are absent from the JSON rather than null.
+        let templateName: String?
+        let sections: [String]?
+        let command: String?
+        let prompt: String?
         let sources: [SourceItem]
 
         struct SourceItem: Encodable {
@@ -66,8 +72,10 @@ extension LlmIdeAPIClient {
     }
 
     func generateDoc(
-        templateName: String,
-        sections: [String],
+        templateName: String?,
+        sections: [String]?,
+        command: String?,
+        prompt: String?,
         sources: [(name: String, content: String)]
     ) async throws -> String {
         guard let url = URL(string: baseURL + "/generate-doc") else { throw APIError.invalidURL }
@@ -86,6 +94,8 @@ extension LlmIdeAPIClient {
         let body = GenerateDocRequest(
             templateName: templateName,
             sections: sections,
+            command: command?.isEmpty == false ? command : nil,
+            prompt: prompt?.isEmpty == false ? prompt : nil,
             sources: sources.map { GenerateDocRequest.SourceItem(name: $0.name, content: $0.content) })
         req.httpBody = try AppJSON.encoder.encode(body)
 
@@ -105,16 +115,17 @@ extension LlmIdeAPIClient {
         return resp.content
     }
 
-    /// Write `content` to a `.md` file and return its URL.
-    ///
-    /// - When `projectRoot` is supplied the file is written into
-    ///   `<projectRoot>/data/`, creating the directory if needed.
-    /// - When `projectRoot` is nil the file lands in the user's
-    ///   Downloads folder (existing behaviour for the no-project case).
-    func exportMarkdown(content: String, filename: String, projectRoot: URL? = nil) throws -> URL {
+    /// Write `content` as Markdown. `directory` wins when supplied (Doc Gen's
+    /// configured output folder); otherwise `<projectRoot>/data/`; otherwise
+    /// Downloads. Existing callers pass neither and keep the old behaviour.
+    func exportMarkdown(content: String, filename: String,
+                        projectRoot: URL? = nil, directory: URL? = nil) throws -> URL {
         let fm = FileManager.default
         let baseDir: URL
-        if let root = projectRoot {
+        if let dir = directory {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            baseDir = dir
+        } else if let root = projectRoot {
             let plansDir = ProjectLayout(root: root).dataDir
             try fm.createDirectory(at: plansDir, withIntermediateDirectories: true)
             baseDir = plansDir

@@ -7,7 +7,10 @@ struct DocGenView: View {
     @AppStorage("DOCGEN_SOURCES_VISIBLE") private var sourceVisible = true
     /// Chat open-state is persisted (default open) so the assistant reads as
     /// the primary surface — same pattern as Explorer / Review / Visual. A
-    /// manual close sticks across launches.
+    /// manual close sticks across launches. NOTE: this only hides
+    /// `CodeAssistantPanel` (the chat) — `DocGenPromptBar` (Generate/Edit/Save)
+    /// is the only place those actions live and must always render, so it is
+    /// never gated by this flag. See DocGenView.body below.
     @AppStorage("DOCGEN_CHAT_VISIBLE") private var chatVisible = true
     /// Persisted chat-panel width (HSplitView has no width binding — read it
     /// back via GeometryReader, same pattern as the other sections).
@@ -44,16 +47,42 @@ struct DocGenView: View {
             DocGenEditorPanel(vm: vm, api: api)
                 .frame(minWidth: 320, idealWidth: 460, maxWidth: .infinity)
 
+            // The chat column (prompt bar + CodeAssistantPanel) is the ONLY
+            // resizable HSplitView child besides the editor — present only
+            // while chatVisible. When chat is hidden this HSplitView has a
+            // single child (the editor), and the prompt bar moves OUTSIDE
+            // the split entirely (below) as a fixed-width sibling, same
+            // pattern as the sources column above. HSplitView does not
+            // reliably honor a child's fixed frame (see that comment), so a
+            // fixed-width prompt bar must never be an HSplitView child —
+            // dragging its divider could balloon it past its 260pt cap.
             if chatVisible {
-                CodeAssistantPanel(
-                    api: api,
-                    scope: .docGen,
-                    initialURL: nil,
-                    showFileAttachButtons: true,
-                    showModelPicker: true)
-                    .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
-                    .transition(.move(edge: .trailing))
+                VStack(spacing: 0) {
+                    DocGenPromptBar(vm: vm, api: api)
+                    Divider()
+                    CodeAssistantPanel(
+                        api: api,
+                        scope: .docGen,
+                        initialURL: nil,
+                        showFileAttachButtons: true,
+                        showModelPicker: true)
+                }
+                .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
+                .transition(.move(edge: .trailing))
             }
+            }
+
+            // Chat hidden: the prompt bar still carries the only
+            // Generate/Edit/Save controls in Doc Gen, so it must stay
+            // reachable — as a fixed-width sibling OUTSIDE the HSplitView
+            // above (never inside it; see the comment there). This never
+            // touches `chatPanelWidth`, so toggling chat back on restores
+            // the user's saved chat-column width exactly.
+            if !chatVisible {
+                Divider()
+                DocGenPromptBar(vm: vm, api: api)
+                    .frame(width: 260)
+                    .transition(.move(edge: .trailing))
             }
         }
         .firstLaunchOpenChat(flagKey: "DID_AUTO_OPEN_DOCGEN_CHAT_V1",
