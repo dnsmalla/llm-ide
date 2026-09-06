@@ -19,7 +19,7 @@ fs.writeFileSync(path.join(fakeRepo, 'skills', 'demo', 'SKILL.md'),
 process.env.SKILLS_REPO = fakeRepo;
 
 const { readRegistry, writeRegistry, isValidLlmSource, seedBuiltinOnce,
-  listSources, getSource, BUILTIN_ID, countDiscoverySkills,
+  listSources, getSource, BUILTIN_ID, LEGACY_DEFAULT_SOURCES_ID, countDiscoverySkills,
   countDiscoveryAgents, listDiscoveryAgents, countDiscoveryHooks, listDiscoveryHooks,
   countDiscoveryCommands, listDiscoveryCommands, countDiscoveryTemplates, listDiscoveryTemplates,
   countDiscoveryMcpServers, listDiscoveryMcpServers,
@@ -75,6 +75,21 @@ test('seedBuiltinOnce adds exactly one builtin source pointing at the resolved r
   seedBuiltinOnce();
   const builtins = readRegistry().filter((s) => s.id === BUILTIN_ID);
   assert.equal(builtins.length, 1);
+});
+
+test('seedBuiltinOnce drops the pre-v44 default-sources entry from a persisted registry', () => {
+  // A registry file written before v44 removed default_sources: the entry
+  // points at a directory that no longer exists and must not keep showing
+  // up in the Library as a dead "Default Sources" row.
+  writeRegistry([
+    { id: LEGACY_DEFAULT_SOURCES_ID, name: 'Default Sources', origin: 'local',
+      location: path.join(tmpRoot, 'gone', 'llm_default_sources'), builtin: true },
+  ]);
+  seedBuiltinOnce();
+  assert.deepEqual(readRegistry().map((s) => s.id), [BUILTIN_ID],
+    'legacy entry removed, builtin seeded in its place');
+  seedBuiltinOnce(); // idempotent once clean
+  assert.deepEqual(readRegistry().map((s) => s.id), [BUILTIN_ID]);
 });
 
 test('listSources returns the registered sources', () => {

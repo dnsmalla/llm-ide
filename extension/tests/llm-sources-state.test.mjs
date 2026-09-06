@@ -13,7 +13,7 @@ process.env.NODE_ENV = 'test';
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-state-'));
 process.env.LLMIDE_PLUGIN_DIR = path.join(tmpRoot, 'plugins'); // defaultSourcesDir derives from this
 
-const { listEnabled, setEnabled, pruneOrphans } =
+const { listEnabled, setEnabled, pruneOrphans, migrateLegacyDefaultSources } =
   await import('../llm-sources/state.mjs');
 
 test('first-time user implicitly has the builtin (.skills) source enabled', () => {
@@ -36,6 +36,25 @@ test('pruneOrphans drops entries for unregistered sources', () => {
   setEnabled('user-1', 'stale', true);
   pruneOrphans(new Set(['builtin'])); // only builtin still registered
   assert.deepEqual([...listEnabled('user-1')], ['builtin']);
+});
+
+test('migrateLegacyDefaultSources maps a pre-v44 default-sources entry onto builtin', () => {
+  // State file persisted before v44: `default-sources` no longer exists as a
+  // source. A user who had it on wanted skills, so it becomes builtin — not
+  // an empty set (which would silently leave them with no skills at all).
+  fs.writeFileSync(path.join(tmpRoot, 'llm-sources-state.json'), JSON.stringify({
+    __defaultsSeeded: true,
+    'only-defaults': { enabled: ['default-sources'] },
+    'both':          { enabled: ['builtin', 'default-sources'] },
+    'with-repo':     { enabled: ['my-repo', 'default-sources'] },
+    'untouched':     { enabled: ['my-repo'] },
+  }));
+  assert.equal(migrateLegacyDefaultSources(), true);
+  assert.deepEqual([...listEnabled('only-defaults')], ['builtin']);
+  assert.deepEqual([...listEnabled('both')], ['builtin']);
+  assert.deepEqual([...listEnabled('with-repo')].sort(), ['builtin', 'my-repo']);
+  assert.deepEqual([...listEnabled('untouched')], ['my-repo'], 'users without the legacy id are left alone');
+  assert.equal(migrateLegacyDefaultSources(), false, 'idempotent: nothing left to migrate');
 });
 
 test('cleanup', () => { fs.rmSync(tmpRoot, { recursive: true, force: true }); });

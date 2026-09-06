@@ -1278,7 +1278,9 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   // GET  /auth/me/llm-sources/<id>/discovery → agents/hooks/mcp listing (admin)
   if (method === 'GET' && url.split('?')[0] === '/auth/me/llm-sources') {
     const { listSourcesWithState, seedBuiltinOnce } = await import('../llm-sources/registry.mjs');
+    const { migrateLegacyDefaultSources } = await import('../llm-sources/state.mjs');
     seedBuiltinOnce();
+    migrateLegacyDefaultSources();
     send(res, 200, listSourcesWithState(req.user.id));
     return;
   }

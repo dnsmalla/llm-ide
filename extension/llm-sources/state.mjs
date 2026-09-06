@@ -10,7 +10,7 @@
 
 import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { defaultSourcesDir, BUILTIN_ID } from './registry.mjs';
+import { defaultSourcesDir, BUILTIN_ID, LEGACY_DEFAULT_SOURCES_ID } from './registry.mjs';
 
 function stateFilePath() {
   return join(dirname(defaultSourcesDir()), 'llm-sources-state.json');
@@ -65,6 +65,28 @@ export function setEnabled(userId, sourceId, enabled) {
   all[userId] = { enabled: [...cur].sort() };
   writeAll(all);
   return cur;
+}
+
+// One-shot repair for state persisted before v44. `default-sources` no longer
+// exists as a source, so a user who had it enabled would otherwise be left
+// with an enabled set that names nothing installed — no skills at all, and
+// silently (listEnabled's builtin fallback only applies to users with NO
+// entry). Having the defaults on meant "I want skills", so map it onto the
+// builtin (.skills) source rather than merely deleting it. Idempotent; writes
+// only when something changed. Runs next to seedBuiltinOnce().
+export function migrateLegacyDefaultSources() {
+  const all = readAll();
+  let touched = false;
+  for (const [userId, entry] of Object.entries(all)) {
+    if (userId.startsWith('__') || !entry || !Array.isArray(entry.enabled)) continue;
+    if (!entry.enabled.includes(LEGACY_DEFAULT_SOURCES_ID)) continue;
+    const next = new Set(entry.enabled.filter((s) => s !== LEGACY_DEFAULT_SOURCES_ID));
+    next.add(BUILTIN_ID);
+    all[userId] = { enabled: [...next].sort() };
+    touched = true;
+  }
+  if (touched) writeAll(all);
+  return touched;
 }
 
 export function pruneOrphans(installedIds) {

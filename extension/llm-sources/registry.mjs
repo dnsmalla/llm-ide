@@ -451,19 +451,30 @@ export function countDiscoveryMcpServers(dir) {
 // Ensure the builtin source exists, pointing at the resolved central repo.
 // Idempotent. Does NOT throw if the repo isn't present locally — records the
 // source with location = null so the UI can offer "Install".
+// Registry id of the curated default_sources snapshot that v44 removed. A
+// registry persisted before v44 still carries it, pointing at a directory that
+// no longer exists, so the Library kept listing a dead "Default Sources" row.
+// Dropped at seed time; state.mjs's migrateLegacyDefaultSources() repairs the
+// per-user enable state the same way.
+export const LEGACY_DEFAULT_SOURCES_ID = 'default-sources';
+
 export function seedBuiltinOnce() {
-  const list = readRegistry();
-  if (list.some((s) => s.id === BUILTIN_ID)) return;
-  const repo = resolveCentralSkillsRepo();
-  list.push({
-    id: BUILTIN_ID,
-    name: 'Central Skills',
-    origin: 'builtin',
-    location: repo || null,
-    builtin: true,
-    version: repo ? readVersion(repo) : undefined,
-  });
-  writeRegistry(list);
+  const persisted = readRegistry();
+  const list = persisted.filter((s) => s.id !== LEGACY_DEFAULT_SOURCES_ID);
+  let dirty = list.length !== persisted.length;
+  if (!list.some((s) => s.id === BUILTIN_ID)) {
+    const repo = resolveCentralSkillsRepo();
+    list.push({
+      id: BUILTIN_ID,
+      name: 'Central Skills',
+      origin: 'builtin',
+      location: repo || null,
+      builtin: true,
+      version: repo ? readVersion(repo) : undefined,
+    });
+    dirty = true;
+  }
+  if (dirty) writeRegistry(list);
 }
 
 export function getSource(id) {
