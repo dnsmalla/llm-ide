@@ -12,6 +12,8 @@ struct AppShell: View {
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var templateStore: DocTemplateStore
+    @EnvironmentObject var commandStore: DocCommandStore
+    @EnvironmentObject var docGenOutputStore: DocGenOutputStore
     @State private var shell = ShellState()
     @State private var itemStore = LibraryItemStore()
     @State private var crashReportStore = CrashReportStore()
@@ -891,6 +893,14 @@ struct AppShell: View {
     private func reloadDocTemplatesForActiveProject() {
         let root = projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
         templateStore.reloadProjectTemplates(at: root)
+        // `root` is optional (nil when no project is open); guard the seeder
+        // (which requires a concrete URL) but still pass the optional through
+        // to reloadProjectCommands/activate so closing a project clears them.
+        if let root {
+            ProjectDocCommandsSeeder.seedIfNeeded(at: root)
+        }
+        commandStore.reloadProjectCommands(at: root)
+        docGenOutputStore.activate(projectRoot: root)
         // Auto Task prompts live in the same project (`templates/auto_task/`)
         // and follow the same open/close/switch moments, so they rebind here
         // rather than needing their own observer of the same notification.
