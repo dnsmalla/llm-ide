@@ -31,12 +31,19 @@ struct VisualPromptBar: View {
         ChatEngineRegistry.shared.engine(for: .visual, api: api)
     }
 
-    /// The most recent assistant reply, or nil if there isn't one yet (no
-    /// turn has completed) or the latest one is still streaming — saving a
-    /// partial in-flight reply would write text the model hasn't finished
-    /// composing.
+    /// The most recent assistant reply, or nil if there isn't one yet.
+    ///
+    /// Requires `status == .done` rather than merely excluding `.streaming`:
+    /// `ChatMessage.Status` also has `.stopped` (the user pressed Stop
+    /// mid-reply — `ChatEngine.finishStreamingTurn` keeps the partial
+    /// streamed text in `content`, only the wire encoder adds a "(stopped)"
+    /// marker) and `.failed` (a turn that errored mid-stream, same partial
+    /// `content` left in place, with the error in `metadata.failedError`).
+    /// Both hold genuinely incomplete text — saving one under this feature's
+    /// normal "Save chat output" label would write a truncated document with
+    /// no indication to the user that it isn't what they think it is.
     private var latestAssistantReply: String? {
-        guard let last = chatEngine.messages.last(where: { $0.role == .assistant && $0.status != .streaming }),
+        guard let last = chatEngine.messages.last(where: { $0.role == .assistant && $0.status == .done }),
               !last.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return last.content
     }
