@@ -23,12 +23,6 @@ struct GenerationSaveChatOutputRow: View {
     /// reads the conversation actually on screen for that tab.
     let scope: ChatScope
 
-    /// The reply text last written by `saveChatOutput`, or nil before the
-    /// first save. Gates double-press: pressing Save again for the SAME
-    /// reply is a no-op instead of writing a second `chat-output-1.md` —
-    /// only a genuinely new reply re-arms the button.
-    @State private var lastSavedChatReply: String?
-
     @EnvironmentObject private var outputStore: DocGenOutputStore
     @EnvironmentObject private var projectStore: ProjectStore
     @EnvironmentObject private var theme: ThemeStore
@@ -77,11 +71,11 @@ struct GenerationSaveChatOutputRow: View {
 
     var body: some View {
         let reply = latestAssistantReply
-        let alreadySaved = reply != nil && reply == lastSavedChatReply
+        let alreadySaved = reply != nil && reply == vm.lastSavedChatReply
         return Button {
             guard let reply, !alreadySaved else { return }
             vm.saveChatOutput(content: reply, api: api, config: outputStore.config, projectRoot: projectRoot)
-            lastSavedChatReply = reply
+            vm.lastSavedChatReply = reply
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: alreadySaved ? "checkmark.square" : "square.and.arrow.down.on.square")

@@ -25,8 +25,10 @@ struct VisualSourcePanel: View {
     /// `VisualPromptBar` declares its own `@AppStorage` on this same key to
     /// decide whether to show its "Save chat output" control — that is how
     /// `@AppStorage` sharing works, so each `private` declaration is still
-    /// correct on its own. This panel also mirrors the value onto
-    /// `vm.relaxRequirements`.
+    /// correct on its own. NOTE: this panel only writes the key — the mirror
+    /// onto `vm.relaxRequirements` is owned by `VisualView` (always
+    /// constructed for this tab), not here — see `VisualView.useChatMode`'s
+    /// doc comment and `DocGenSourcePanel`'s identical note.
     @AppStorage("VISUAL_USE_CHAT") private var useChatMode = false
 
     /// See `DocGenSourcePanel.expandedSectionsRaw` for why this is an opt-in
@@ -73,24 +75,30 @@ struct VisualSourcePanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            useChatToggle
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    GenerationSetupSection(isExpanded: sectionExpanded("setup"))
-                    Divider().padding(.vertical, 6)
-                    GenerationTemplateSection(vm: vm, isExpanded: sectionExpanded("template"))
-                    Divider().padding(.vertical, 6)
-                    GenerationSourceTree(
-                        vm: vm, isExpanded: sectionExpanded("sources"),
-                        categories: [.data, .code],
-                        sourceTabStorageKey: "visual.sourceTab",
-                        selectedURL: $selectedURL)
-                    if !unreadableImageSources.isEmpty {
-                        imageSourceWarning
+            // "Use chat" is a run input exactly like Setup/Template/Sources
+            // below — grouped into the SAME `.disabled` region as those (not
+            // a sibling outside it), so it can't be flipped mid-run either.
+            // See `DocGenSourcePanel`'s identical structure.
+            VStack(spacing: 0) {
+                useChatToggle
+                Divider()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        GenerationSetupSection(isExpanded: sectionExpanded("setup"))
+                        Divider().padding(.vertical, 6)
+                        GenerationTemplateSection(vm: vm, isExpanded: sectionExpanded("template"))
+                        Divider().padding(.vertical, 6)
+                        GenerationSourceTree(
+                            vm: vm, isExpanded: sectionExpanded("sources"),
+                            categories: [.data, .code],
+                            sourceTabStorageKey: "visual.sourceTab",
+                            selectedURL: $selectedURL)
+                        if !unreadableImageSources.isEmpty {
+                            imageSourceWarning
+                        }
                     }
+                    .padding(.bottom, 12)
                 }
-                .padding(.bottom, 12)
             }
             .disabled(vm.isBusy)
             .opacity(vm.isBusy ? 0.5 : 1)
@@ -99,8 +107,6 @@ struct VisualSourcePanel: View {
             footer
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { vm.relaxRequirements = useChatMode }
-        .onChange(of: useChatMode) { _, newValue in vm.relaxRequirements = newValue }
     }
 
     // MARK: - Use chat toggle
@@ -119,7 +125,7 @@ struct VisualSourcePanel: View {
             .toggleStyle(.switch)
             .controlSize(.small)
             Text(useChatMode
-                 ? "Template, command and sources are optional — talk to the chat panel and save its reply when you're happy with it."
+                 ? "Template and command are optional — a source is still required. Talk to the chat panel and save its reply when you're happy with it."
                  : "Off: pick a template or command and at least one source, then Generate.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)

@@ -46,6 +46,17 @@ final class GenerationViewModel: ObservableObject {
     /// "Start another" discard confirmation (confirm only when there is a
     /// genuinely unsaved document).
     @Published private(set) var isSaved = false
+    /// The chat reply text last written by `saveChatOutput`, or nil before
+    /// the first save. Gates `GenerationSaveChatOutputRow`'s double-press
+    /// dedupe: pressing Save again for the SAME reply is a no-op instead of
+    /// writing a second `chat-output-1.md` — only a genuinely new reply
+    /// re-arms the button. Lives here (on the view model, which survives for
+    /// the whole tab's lifetime) rather than as `@State` on
+    /// `GenerationSaveChatOutputRow` itself: that row only exists in the view
+    /// tree while "Use chat" is on, so `@State` there was destroyed and
+    /// recreated (silently re-arming the button for an already-saved reply)
+    /// every time the user toggled "Use chat" off and back on.
+    @Published var lastSavedChatReply: String?
 
     /// `Equatable` so a view can `.onChange(of:)` transitions (e.g. Visual's
     /// `VisualCenterPanel`, which resets its own "viewing image" override the
@@ -328,8 +339,8 @@ final class GenerationViewModel: ObservableObject {
     /// document's name, marked an unsaved generated document as saved, and
     /// made "Start another" destroy it with no confirmation. This is a
     /// separate path, deliberately inert with respect to `isSaved`,
-    /// `generationState` and `editedContent` — see `VisualPromptBar`, the
-    /// only caller.
+    /// `generationState` and `editedContent` — see `GenerationSaveChatOutputRow`,
+    /// the only caller, used by both `VisualPromptBar` and `DocGenPromptBar`.
     ///
     /// Filename is fixed and clearly chat-derived (never `outputFilename`),
     /// so it can never collide with — or be mistaken for — the document's

@@ -16,6 +16,17 @@ struct DocGenView: View {
     /// Persisted chat-panel width (HSplitView has no width binding — read it
     /// back via GeometryReader, same pattern as the other sections).
     @AppStorage("DOCGEN_CHAT_PANEL_WIDTH") private var chatPanelWidth: Double = 180
+    /// Owns the sync of "Use chat" into `vm.relaxRequirements` at the level
+    /// that is ALWAYS constructed for this tab — `DocGenView` itself — rather
+    /// than inside `DocGenSourcePanel`, which only exists in the view tree
+    /// while `DOCGEN_SOURCES_VISIBLE` is true. That panel's toggle still
+    /// writes this same key (a second `@AppStorage` on an identical key name
+    /// observes the same underlying value), so flipping it there is
+    /// reflected here even though the panel may not be mounted the next time
+    /// this view appears — e.g. Use chat ON, Sources panel hidden, quit,
+    /// relaunch: the panel is never constructed, but this `onAppear` still
+    /// fires and still applies the persisted value.
+    @AppStorage("DOCGEN_USE_CHAT") private var useChatMode = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -89,5 +100,9 @@ struct DocGenView: View {
         .firstLaunchOpenChat(flagKey: "DID_AUTO_OPEN_DOCGEN_CHAT_V1",
                              width: $chatPanelWidth, visible: $chatVisible)
         }
+        // Sync independent of DocGenSourcePanel's mount state — see
+        // `useChatMode`'s doc comment above.
+        .onAppear { vm.relaxRequirements = useChatMode }
+        .onChange(of: useChatMode) { _, newValue in vm.relaxRequirements = newValue }
     }
 }

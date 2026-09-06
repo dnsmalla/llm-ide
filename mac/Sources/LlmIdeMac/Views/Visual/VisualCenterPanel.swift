@@ -56,11 +56,15 @@ struct VisualCenterPanel: View {
                             title: "Choose a template or command",
                             detail: "Pick either one in the Template & Command section on the left — " +
                                 "optional with Use chat on",
-                            done: vm.selectedTemplate != nil || vm.selectedCommand != nil || vm.relaxRequirements),
+                            // NOTE: intentionally does NOT include `|| vm.relaxRequirements` —
+                            // a checkmark + strikethrough means "you did this", and Use chat
+                            // only makes this step OPTIONAL, not done. See the toolbar hint in
+                            // `GenerationEditorPanel`, which would otherwise contradict this.
+                            done: vm.selectedTemplate != nil || vm.selectedCommand != nil),
                         GenerationChecklistStep(
                             title: "Select files from Data or Code",
                             detail: "Tick a file's checkbox to use it as a source; tapping its NAME " +
-                                "previews it here instead — optional with Use chat on",
+                                "previews it here instead — still required even with Use chat on",
                             done: !vm.selectedSources.isEmpty),
                         GenerationChecklistStep(
                             title: "Add a prompt and generate",
@@ -101,9 +105,9 @@ struct VisualCenterPanel: View {
             if isGenerating {
                 banner(
                     icon: "sparkles",
-                    text: "Generating the document — the image stays visible until it's ready…",
+                    text: "Generating the document…",
                     tint: theme.current.accent,
-                    action: nil)
+                    action: ("Back to progress", { viewingImage = false }))
             } else {
                 banner(
                     icon: "arrow.uturn.backward",

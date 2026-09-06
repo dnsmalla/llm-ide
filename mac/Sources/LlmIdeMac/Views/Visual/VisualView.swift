@@ -35,6 +35,19 @@ struct VisualView: View {
     /// HSplitView has no width binding.
     @AppStorage("VISUAL_CHAT_PANEL_WIDTH") private var chatPanelWidth: Double = 180
 
+    /// Owns the sync of "Use chat" into `vm.relaxRequirements` at the level
+    /// that is ALWAYS constructed for this tab — `VisualView` itself — rather
+    /// than inside `VisualSourcePanel`. Today `treeVisible` is non-persisted
+    /// `@State` (defaults visible every launch), so the panel happens to
+    /// always mount here — but that makes the sync correct by luck, not by
+    /// design; see `DocGenView`, where the equivalent state IS persisted and
+    /// the same panel-only sync went stale across a restart. Owning it here
+    /// makes Visual robust to that same failure mode should `treeVisible`
+    /// ever become persisted. `VisualSourcePanel`'s toggle still writes this
+    /// same key (a second `@AppStorage` on an identical key name observes
+    /// the same underlying value).
+    @AppStorage("VISUAL_USE_CHAT") private var useChatMode = false
+
     var body: some View {
         VStack(spacing: 0) {
             SectionChromeBar(toggles: [
@@ -98,6 +111,10 @@ struct VisualView: View {
         .firstLaunchOpenChat(flagKey: "DID_AUTO_OPEN_VISUAL_CHAT_V1",
                              width: $chatPanelWidth, visible: $chatVisible)
         }
+        // Sync independent of VisualSourcePanel's mount state — see
+        // `useChatMode`'s doc comment above.
+        .onAppear { vm.relaxRequirements = useChatMode }
+        .onChange(of: useChatMode) { _, newValue in vm.relaxRequirements = newValue }
     }
 }
 
