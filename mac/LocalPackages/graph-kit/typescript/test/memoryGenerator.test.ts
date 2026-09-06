@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,6 +9,8 @@ import {
   extractHashtags,
   classify,
   containsWholeWord,
+  strippingFencedBlocks,
+  docIdentity,
 } from "../src/text/memoryGenerator.js";
 import { generateIndex } from "../src/indexGenerator.js";
 
@@ -189,5 +191,64 @@ test("absent frontmatter keys default the way Swift defaults them", () => {
     const [chunk] = generateFromDir(dir).chunks;
     assert.equal(chunk!.graphOnly, false);
     assert.deepEqual(chunk!.relatedModules, []);
+  });
+});
+
+// --------------------------------------------------------------------------
+// Swift parity: fenced code blocks are not scanned
+//
+// Swift strips fences before extracting wikilinks, hashtags, and before the
+// whole-word title fallback. The port scanned raw bodies, so a `[[Foo]]` or
+// `#bar` quoted inside a code sample manufactured edges and tags the document
+// never meant. Caught by scripts/conformance-memory.mjs.
+// --------------------------------------------------------------------------
+
+test("wikilinks and hashtags inside fenced blocks are ignored", () => {
+  withTempVault(
+    {
+      "real.md": "# Real\n\nA target chunk.\n",
+      "doc.md":
+        "# Doc\n\nSee [[Real]] here.\n\n## Sample\n\n```\n[[Ghost]] and #ghosttag\n```\n\nTail.\n",
+    },
+    (dir) => {
+      const { chunks } = generateFromDir(dir);
+      const sample = chunks.find((c) => c.title === "Sample")!;
+      assert.deepEqual(sample.wikiLinks, [], "fenced [[Ghost]] must not be a link");
+      assert.ok(!sample.tags.includes("ghosttag"), "fenced #ghosttag must not be a tag");
+      // The unfenced link on the same document still works.
+      const doc = chunks.find((c) => c.title === "Doc")!;
+      assert.deepEqual(doc.wikiLinks, ["Real"]);
+    },
+  );
+});
+
+test("strippingFencedBlocks handles both fence markers", () => {
+  assert.equal(strippingFencedBlocks("a\n```\nhidden\n```\nb"), "a\nb");
+  assert.equal(strippingFencedBlocks("a\n~~~\nhidden\n~~~\nb"), "a\nb");
+  assert.equal(strippingFencedBlocks("no fences here"), "no fences here");
+});
+
+// --------------------------------------------------------------------------
+// Swift parity: doc ids hash the REAL path
+//
+// Swift derives the id from `URL.path`, which is symlink-resolved. Resolving
+// only `..`/`.` made the two implementations id the same file differently
+// whenever a symlink sat in the tree — on macOS `/var` -> `/private/var` is
+// enough — silently breaking every join on node ids.
+// --------------------------------------------------------------------------
+
+test("doc identity resolves symlinks", () => {
+  withTempVault({ "a.md": "# A\n\nBody.\n" }, (dir) => {
+    const linkDir = mkdtempSync(join(tmpdir(), "gk-link-"));
+    const link = join(linkDir, "linked");
+    try {
+      symlinkSync(dir, link);
+      const direct = docIdentity(join(dir, "a.md"));
+      const viaLink = docIdentity(join(link, "a.md"));
+      assert.equal(viaLink.docID, direct.docID, "same file must get the same id");
+      assert.equal(viaLink.abs, direct.abs);
+    } finally {
+      rmSync(linkDir, { recursive: true, force: true });
+    }
   });
 });

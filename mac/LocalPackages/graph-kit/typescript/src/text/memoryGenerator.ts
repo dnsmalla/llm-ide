@@ -5,7 +5,7 @@
 // Faithful port of the Swift `MemoryGenerator`. v1: no LLM, no embeddings.
 
 import { createHash } from "node:crypto";
-import { readFileSync, statSync, readdirSync } from "node:fs";
+import { readFileSync, statSync, readdirSync, realpathSync } from "node:fs";
 import { EXCLUDED_DIRS } from "../exclusions.js";
 import { join, extname, basename, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -76,13 +76,31 @@ export function docIdentity(docPath: string): {
   docID: string;
   docTitle: string;
 } {
-  const abs = resolve(docPath);
+  // Symlinks are resolved, not just `..`/`.` normalised, because the doc id is
+  // sha256 of this string and Swift's `URL.path` yields the REAL path. Without
+  // realpath the two implementations id the same file differently the moment a
+  // symlink is anywhere in the tree — on macOS `/var` → `/private/var` alone is
+  // enough — and every join on node ids (cross-links, incremental cache reuse,
+  // the merge step) silently stops matching.
+  const abs = realpathOrResolve(docPath);
   return {
     abs,
     fileURL: pathToFileURL(abs).href,
     docID: "doc:" + shortHash(abs),
     docTitle: basename(abs, extname(abs)),
   };
+}
+
+/** Real path when the file exists, plain resolution otherwise. A doc can be
+ *  passed in that no longer exists (a stale cache entry, a caller-supplied
+ *  list); id derivation must stay total rather than throwing. */
+function realpathOrResolve(p: string): string {
+  const abs = resolve(p);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
 }
 
 /** One doc's chunked result — the cacheable unit for incremental updates. */
@@ -188,7 +206,9 @@ export function assembleGraph(docs: DocMeta[]): { graph: CGData; chunks: MemoryC
   const titleByID = new Map(allChunks.map((c) => [c.id, c.title] as const));
   for (const c of allChunks) {
     if (c.wikiLinks.length > 0) continue;
-    const body = c.body.toLowerCase();
+    // Fences stripped here too, matching Swift: an identifier mentioned only
+    // inside a code sample is not a topical reference to another chunk.
+    const body = strippingFencedBlocks(c.body).toLowerCase();
     for (const [otherID, otherTitle] of titleByID) {
       if (otherID === c.id) continue;
       const needle = otherTitle.toLowerCase();
@@ -238,8 +258,12 @@ function chunkDoc(docPath: string, _fileURL: string, docID: string, docTitle: st
     const bounded = body.slice(0, MAX_CHUNK_BODY_CHARS);
     const id = `${docID}::${shortHash(headingStack.join("/"))}:${chunks.length}`;
     const kind = classify(headingStack[headingStack.length - 1], bounded) ?? defaultKind;
-    const tags = mergeTags(frontmatterTags, extractHashtags(bounded));
-    const wikiLinks = extractWikiLinks(bounded);
+    // Scan with fenced code blocks removed, as Swift does. A code sample that
+    // happens to contain `[[Foo]]` or `#bar` is quoting, not authoring: left in,
+    // it manufactures reference edges and tags the document never meant.
+    const scanText = strippingFencedBlocks(bounded);
+    const tags = mergeTags(frontmatterTags, extractHashtags(scanText));
+    const wikiLinks = extractWikiLinks(scanText);
     const headingPath = [...headingStack];
     chunks.push({
       id,
@@ -428,6 +452,30 @@ function kindFromTypeString(s: string): CGNodeKind | null {
 const WIKI_RE = /\[\[([^[\]|\n]+)(?:\|[^[\]\n]*)?\]\]/g;
 const HASHTAG_RE = /(?:^|[\s([])#([A-Za-z][A-Za-z0-9_/-]*)/g;
 const CHECKBOX_RE = /^\s*-\s*\[[ x]\]\s/m;
+
+/**
+ * Drop fenced code blocks so quoted text is not scanned for links or tags.
+ *
+ * Mirrors Swift `MemoryGenerator.strippingFencedBlocks`, including its
+ * limitations: fence toggling matches on the PRESENCE of a marker, not on
+ * matching character or length, so a stray `~~~` inside a ``` fence desyncs the
+ * toggle for the rest of the document; indentation is not considered either.
+ * Kept deliberately identical — a heuristic that differs between the two
+ * implementations is worse than one that is imperfect in the same way in both.
+ */
+export function strippingFencedBlocks(body: string): string {
+  const out: string[] = [];
+  let inFence = false;
+  for (const line of body.split("\n")) {
+    const t = line.trim();
+    if (t.startsWith("```") || t.startsWith("~~~")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence) out.push(line);
+  }
+  return out.join("\n");
+}
 
 export function extractWikiLinks(body: string): string[] {
   const seen = new Set<string>();
