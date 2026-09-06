@@ -47,12 +47,15 @@ struct DocGenView: View {
             DocGenEditorPanel(vm: vm, api: api)
                 .frame(minWidth: 320, idealWidth: 460, maxWidth: .infinity)
 
-            // The prompt bar carries the only Generate/Edit/Save controls in
-            // Doc Gen, so it must render regardless of `chatVisible` — only
-            // the chat below it (CodeAssistantPanel) is toggleable. When chat
-            // is hidden the column collapses to a fixed, non-resizable width
-            // sized for the bar alone, so it neither stretches into empty
-            // space nor overwrites the user's saved chat width.
+            // The chat column (prompt bar + CodeAssistantPanel) is the ONLY
+            // resizable HSplitView child besides the editor — present only
+            // while chatVisible. When chat is hidden this HSplitView has a
+            // single child (the editor), and the prompt bar moves OUTSIDE
+            // the split entirely (below) as a fixed-width sibling, same
+            // pattern as the sources column above. HSplitView does not
+            // reliably honor a child's fixed frame (see that comment), so a
+            // fixed-width prompt bar must never be an HSplitView child —
+            // dragging its divider could balloon it past its 260pt cap.
             if chatVisible {
                 VStack(spacing: 0) {
                     DocGenPromptBar(vm: vm, api: api)
@@ -66,11 +69,20 @@ struct DocGenView: View {
                 }
                 .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
                 .transition(.move(edge: .trailing))
-            } else {
+            }
+            }
+
+            // Chat hidden: the prompt bar still carries the only
+            // Generate/Edit/Save controls in Doc Gen, so it must stay
+            // reachable — as a fixed-width sibling OUTSIDE the HSplitView
+            // above (never inside it; see the comment there). This never
+            // touches `chatPanelWidth`, so toggling chat back on restores
+            // the user's saved chat-column width exactly.
+            if !chatVisible {
+                Divider()
                 DocGenPromptBar(vm: vm, api: api)
                     .frame(width: 260)
                     .transition(.move(edge: .trailing))
-            }
             }
         }
         .firstLaunchOpenChat(flagKey: "DID_AUTO_OPEN_DOCGEN_CHAT_V1",
