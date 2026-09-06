@@ -20,7 +20,7 @@ const tmpDb = path.join(__dirname, '_generate-doc-prompt-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
-const { buildDocPrompt, handleExportRoutes } = await import('../server/export-routes.mjs');
+const { buildDocPrompt, handleExportRoutes, validateDocRequest, buildDocRef } = await import('../server/export-routes.mjs');
 
 function makeReq({ method, url, body, userId = 'u1' }) {
   const chunks = body == null ? [] : [Buffer.from(JSON.stringify(body))];
@@ -111,4 +111,68 @@ test('/generate-doc rejects a command-only body with no sources', async () => {
     res);
   assert.equal(handled, true);
   assert.equal(res.statusCode, 400);
+});
+
+// validateDocRequest is the single source of truth for the /generate-doc
+// accept/reject gate. The accept path (a request that gets THROUGH) can't be
+// driven through the route without reaching runClaude (spawns the Claude
+// CLI), so it is exercised directly here instead.
+test('validateDocRequest: command-only with valid sources is ok', () => {
+  const result = validateDocRequest({ command: 'Summarize.', sources: [{ name: 'a', content: 'b' }] });
+  assert.equal(result.ok, true);
+});
+
+test('validateDocRequest: template-only (name + sections) with valid sources is ok', () => {
+  const result = validateDocRequest({
+    templateName: 'Doc', sections: ['One'], sources: [{ name: 'a', content: 'b' }],
+  });
+  assert.equal(result.ok, true);
+});
+
+test('validateDocRequest: both template and command present is ok', () => {
+  const result = validateDocRequest({
+    templateName: 'Doc', sections: ['One'], command: 'Be terse.',
+    sources: [{ name: 'a', content: 'b' }],
+  });
+  assert.equal(result.ok, true);
+});
+
+test('validateDocRequest: neither template nor command is not ok', () => {
+  const result = validateDocRequest({ sources: [{ name: 'a', content: 'b' }] });
+  assert.equal(result.ok, false);
+});
+
+test('validateDocRequest: valid command but empty sources is not ok', () => {
+  const result = validateDocRequest({ command: 'Summarize.', sources: [] });
+  assert.equal(result.ok, false);
+});
+
+test('validateDocRequest: valid command but missing sources is not ok', () => {
+  const result = validateDocRequest({ command: 'Summarize.' });
+  assert.equal(result.ok, false);
+});
+
+test('validateDocRequest: whitespace-only command is treated as absent', () => {
+  const result = validateDocRequest({ command: '   ', sources: [{ name: 'a', content: 'b' }] });
+  assert.equal(result.ok, false);
+});
+
+// buildDocRef — regression coverage for the command-only ref collision fix
+// (Finding 1 / Ruling R4): a generic 'Document' title for every command-only
+// run must not collapse different commands onto the same KB ref.
+test('buildDocRef: template runs keep the original ref shape unchanged', () => {
+  const ref = buildDocRef({ hasTemplate: true, docTitle: 'Sprint Review', command: '', sourceNames: 'a|b' });
+  assert.equal(ref, 'doc:Sprint Review:a|b');
+});
+
+test('buildDocRef: same command + same sources produce the same ref (update, not stack)', () => {
+  const refA = buildDocRef({ hasTemplate: false, docTitle: 'Document', command: 'Summarize.', sourceNames: 'a|b' });
+  const refB = buildDocRef({ hasTemplate: false, docTitle: 'Document', command: 'Summarize.', sourceNames: 'a|b' });
+  assert.equal(refA, refB);
+});
+
+test('buildDocRef: different command + same sources produce different refs (no clobber)', () => {
+  const refA = buildDocRef({ hasTemplate: false, docTitle: 'Document', command: 'Summarize.', sourceNames: 'a|b' });
+  const refB = buildDocRef({ hasTemplate: false, docTitle: 'Document', command: 'Translate.', sourceNames: 'a|b' });
+  assert.notEqual(refA, refB);
 });

@@ -131,6 +131,12 @@ const HOST = config.host;
 //     a GLM turn on the user's Claude credentials — exactly the silent
 //     fallback the Mac's provider gate promises never happens — so the Mac's
 //     floor (BackendManager.minimumServerApiVersion) must refuse such a server.
+//   v44 — POST /generate-doc accepts optional `command` and `prompt` fields
+//     and no longer requires a template: a request with a non-empty
+//     `command` (and no `templateName`/`sections`) generates a document from
+//     that reusable instruction text instead. Additive — an older client
+//     that still always sends templateName + sections behaves exactly as
+//     before.
 const SERVER_API_VERSION = 44;
 const ENDPOINTS = [
   '/generate-notes',
