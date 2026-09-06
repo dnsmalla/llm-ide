@@ -45,14 +45,18 @@ struct DocGenView: View {
                 .frame(minWidth: 320, idealWidth: 460, maxWidth: .infinity)
 
             if chatVisible {
-                CodeAssistantPanel(
-                    api: api,
-                    scope: .docGen,
-                    initialURL: nil,
-                    showFileAttachButtons: true,
-                    showModelPicker: true)
-                    .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
-                    .transition(.move(edge: .trailing))
+                VStack(spacing: 0) {
+                    DocGenPromptBar(vm: vm, api: api)
+                    Divider()
+                    CodeAssistantPanel(
+                        api: api,
+                        scope: .docGen,
+                        initialURL: nil,
+                        showFileAttachButtons: true,
+                        showModelPicker: true)
+                }
+                .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
+                .transition(.move(edge: .trailing))
             }
             }
         }
