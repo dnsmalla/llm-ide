@@ -3,6 +3,7 @@ import { runClaude, resolveLanguage } from '../providers/runtime.mjs';
 import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
 import { Document, Packer, Paragraph, HeadingLevel, TextRun } from 'docx';
 import * as kb from '../kb/db.mjs';
+import { scanForSecrets } from '../guardrails/scan.mjs';
 
 // Mirror of ai-routes.mjs#ingestGeneratedDoc — kept inline here to avoid
 // a cross-file import cycle. Best-effort, swallows errors so a KB write
@@ -25,6 +26,20 @@ function safeTruncate(s, max) {
 
 function ingestGeneratedDoc({ userId, ref, title, body, meta }) {
   if (!userId || !body) return;
+  // Guard: if the generated content contains anything shaped like a
+  // secret token, skip the KB ingest entirely. Doc Gen can now source
+  // code files (not just notes/data/meetings), so a hard-coded token
+  // quoted from source can end up in the generated output — mirrors
+  // ai-routes.mjs#ingestGeneratedDoc; keep the two scan calls in sync.
+  // Failures in scanForSecrets are treated conservatively — skip ingest.
+  try {
+    if (scanForSecrets(String(body))) {
+      process.stderr.write('[export-routes] ingestGeneratedDoc skipped: possible secret in generated output\n');
+      return;
+    }
+  } catch {
+    return; // scanner threw → safer to skip than to ingest
+  }
   const scopedRef = `u:${userId}:${ref || `gen-${Date.now()}`}`;
   try {
     kb.ingestSources(userId, [{
