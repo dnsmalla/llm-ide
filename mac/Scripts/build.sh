@@ -209,11 +209,13 @@ cd "$PROJ_DIR"
 # this needs no network at all. We then build with the same flag so the build
 # step can't reach out either.
 #
-# NOTE: this used to say graph-kit was a PRIVATE repo needing git credentials.
-# That has not been true since it became a `path:` dependency — SwiftPM never
-# fetches it, it just reads the directory. All three remote dependencies
-# (Yams, Sparkle, SwiftTerm) are public. graph-kit's failure mode is now a
-# missing SUBMODULE, handled separately below.
+# NOTE: graph-kit is a `url:` dependency again (pinned by revision), NOT a
+# `path:` one, so a build no longer depends on the submodule in
+# LocalPackages/graph-kit/ being checked out — SwiftPM fetches and caches the
+# repo itself. The trade-off: it is a PRIVATE repo, so a resolve that actually
+# reaches the network needs git credentials for github.com/dnsmalla. The other
+# three remote dependencies (Yams, Sparkle, SwiftTerm) are public. Once
+# Package.resolved is satisfied from cache, none of this needs network.
 #
 # Only when the cache can't satisfy Package.resolved (fresh checkout, or a
 # deliberate dependency bump) do we fall back to a networked resolve. Set
@@ -243,10 +245,11 @@ if [ -n "${LLMIDE_FEATURES:-}" ]; then
 fi
 if ! swift build -c release --product "$APP_NAME" $SPM_OFFLINE $FEATURE_BUILD_FLAGS; then
   echo -e "${RED}[build] swift build failed.${NC}" >&2
-  echo -e "${RED}[build] If the error mentions LocalPackages/graph-kit/Package.swift not${NC}" >&2
-  echo -e "${RED}[build] existing, the graph-kit SUBMODULE is not checked out. Run:${NC}" >&2
-  echo -e "${RED}[build]   git submodule update --init --recursive mac/LocalPackages/graph-kit${NC}" >&2
-  echo -e "${RED}[build] (or ./setup.sh) and re-run this script.${NC}" >&2
+  echo -e "${RED}[build] If the error mentions graph-kit being unreachable or asks for${NC}" >&2
+  echo -e "${RED}[build] authentication, this machine has no git credentials for the${NC}" >&2
+  echo -e "${RED}[build] PRIVATE repo github.com/dnsmalla/graph-kit. Verify with:${NC}" >&2
+  echo -e "${RED}[build]   git ls-remote https://github.com/dnsmalla/graph-kit.git${NC}" >&2
+  echo -e "${RED}[build] and set up a credential helper (or SSH + url rewrite) first.${NC}" >&2
   exit 1
 fi
 

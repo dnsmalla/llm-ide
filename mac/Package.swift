@@ -230,7 +230,13 @@ let package = Package(
         // GraphCore comes from it). The app still builds: the Graph view
         // reports that no engine is installed and keeps rendering any
         // graph.json already on disk. See Sources/LlmIdeMac/Graph/Engine/.
-        .package(path: "LocalPackages/graph-kit"),
+        //
+        // Resolved from the GitHub remote (not the local submodule checkout
+        // in LocalPackages/graph-kit/) so a build works even when that
+        // submodule was never initialized — SwiftPM fetches/caches it into
+        // .build/checkouts itself. Pinned to the exact commit currently
+        // checked out locally; bump this when graph-kit cuts a new release.
+        .package(url: "https://github.com/dnsmalla/graph-kit.git", revision: "f3151c35f59c5440a48746ae9ebfb5f2adb14f38"),
         .package(path: "../ios_app/SharedProtocol"),
     ],
     targets: [

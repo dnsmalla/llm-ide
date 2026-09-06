@@ -145,8 +145,10 @@ cd extension && npm run server
 Then load `extension/dist/` as an unpacked Chrome extension. Full tutorial: [Record your first meeting](docs/tutorials/01-first-meeting.md).
 
 > Already cloned without `--recurse-submodules`? Run `./setup.sh` — it initializes both
-> submodules (`.skills` and `mac/LocalPackages/graph-kit`). Without the latter the Mac
-> build fails on a missing `LocalPackages/graph-kit/Package.swift`.
+> submodules (`.skills` and `mac/LocalPackages/graph-kit`). The Mac build no longer needs
+> the graph-kit submodule (SwiftPM fetches that package from GitHub itself), but it does
+> need git credentials for the private `dnsmalla/graph-kit` repo on a cold resolve; keep
+> the submodule if you want to edit the engine or run its labs locally.
 
 ---
 

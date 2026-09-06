@@ -84,11 +84,11 @@ if [ -d "$REPO_ROOT/.githooks" ]; then
     echo "✅ git hooks enabled (.githooks)"
 fi
 
-# 4b. graph-kit — the graph engine, consumed as a submodule so this repo and
-# the standalone package cannot drift the way they did while it was vendored.
-# `mac/Package.swift` still references it by path, so an uninitialised
-# submodule fails the Mac build with a confusing "package not found" rather
-# than anything that names the real cause.
+# 4b. graph-kit — the graph engine. `mac/Package.swift` depends on it by URL
+# (pinned by revision), so the Mac build does NOT need this submodule: SwiftPM
+# fetches the package itself. The submodule is still checked out here because
+# it is where you edit the engine and run its labs (graph-layout-lab /
+# graph-engine-lab) against a real working tree.
 if [ -f "$REPO_ROOT/.gitmodules" ] && grep -q 'path = mac/LocalPackages/graph-kit' "$REPO_ROOT/.gitmodules" 2>/dev/null; then
     echo ""
     echo "⚙️  Fetching graph-kit (graph engine submodule)..."
