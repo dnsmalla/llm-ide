@@ -131,7 +131,7 @@ const HOST = config.host;
 //     a GLM turn on the user's Claude credentials — exactly the silent
 //     fallback the Mac's provider gate promises never happens — so the Mac's
 //     floor (BackendManager.minimumServerApiVersion) must refuse such a server.
-const SERVER_API_VERSION = 43;
+const SERVER_API_VERSION = 44;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
