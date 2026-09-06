@@ -6,8 +6,9 @@ import ImageIO
 // Three-panel "Visual" section, mirroring Doc Gen's generation flow:
 //   1. VisualSourcePanel — Setup / Template & Command / Sources (Data +
 //      Code), plus the Visual-only "Use chat" toggle.
-//   2. VisualCenterPanel — the image viewer while idle, the generated
-//      document once a run completes, with a control back to the image.
+//   2. VisualCenterPanel — mirrors Doc Gen's centre panel (toolbar, setup
+//      view, generating skeleton, done/error views) in every state, with a
+//      "View Image" control that switches over to the image viewer.
 //   3. Right — GenerationPromptBar (Generate/Edit/Save, plus "Save chat
 //      output" in Use chat mode) above the shared CodeAssistantPanel, with
 //      the selected file auto-attached so the user can ask about what
@@ -63,7 +64,7 @@ struct VisualView: View {
             }
 
             HSplitView {
-            VisualCenterPanel(vm: vm, selectedURL: $treeSelectedURL)
+            VisualCenterPanel(vm: vm, api: api, selectedURL: $treeSelectedURL)
                 .frame(minWidth: 300, idealWidth: 520, maxWidth: .infinity)
 
             // The chat column (prompt bar + CodeAssistantPanel) is the ONLY

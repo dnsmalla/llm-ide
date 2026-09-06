@@ -53,7 +53,7 @@ struct VisualPromptBar: View {
     /// trim its content, then decide) rather than one chained guard: a
     /// closure predicate combined with `.trimmingCharacters(...).isEmpty`
     /// negation in a single condition is the same type-checker blowup shape
-    /// `DocGenEditorPanel.generatingTitle` was pulled out to avoid — passing
+    /// `GenerationEditorPanel.generatingTitle` was pulled out to avoid — passing
     /// today doesn't mean it stays fast (or under the limit) on a different
     /// toolchain.
     private var latestAssistantReply: String? {
