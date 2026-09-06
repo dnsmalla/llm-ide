@@ -125,7 +125,9 @@ public final class CodeNoteService: ObservableObject {
         // installing a plugin deleted every note on the next generate.
         if scanned.reportsSymbols {
             let changedPaths = scanned.changedPaths
-            await Task.detached(priority: .userInitiated) {
+            // generate() returns the written-note count; only the side effect
+            // matters here.
+            _ = await Task.detached(priority: .userInitiated) {
                 CodeNoteGenerator.generate(scan: result, repoRoot: repoRoot,
                                            changedPaths: changedPaths)
             }.value

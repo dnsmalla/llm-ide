@@ -266,9 +266,12 @@ final class FeatureRebuildService: ObservableObject {
             finalLines += stdoutSplitter.flush()
             finalLines += stderrSplitter.feed(remainingStderr ?? Data())
             finalLines += stderrSplitter.flush()
+            // Snapshot: a `var` captured by the @Sendable closure below is a
+            // Swift 6 error (SendableClosureCaptures); the drain is finished.
+            let drainedLines = finalLines
 
             await MainActor.run {
-                for line in finalLines {
+                for line in drainedLines {
                     self.appendLogLine(line)
                 }
                 if status == 0 {

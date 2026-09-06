@@ -217,7 +217,9 @@ final class MobileControlManager {
                 let fresh = MobilePin.rotateInMemory()
                 Task.detached(priority: .utility) { [weak self] in
                     let persisted = (try? MobilePin.persist(fresh)) != nil
-                    await MainActor.run { self?.pinDidRotate(persisted: persisted) }
+                    // Own capture list: referencing the outer `weak var self`
+                    // from this nested @Sendable closure is a Swift 6 error.
+                    await MainActor.run { [weak self] in self?.pinDidRotate(persisted: persisted) }
                 }
             },
             onClientDisconnected: { [weak self] in
