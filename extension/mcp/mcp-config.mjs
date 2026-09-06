@@ -4,9 +4,10 @@
 import { listMcpPluginsWithState, transportOf } from './state.mjs';
 
 // The MCP servers chat effectively runs with: enabled AND consented plugins,
-// in the exact { mcpServers } shape the claude CLI reads. Shared by
-// buildMcpConfigForUser (the live --mcp-config flag) and the
-// llm_default_sources snapshot so both show the same truth.
+// in the exact { mcpServers } shape the claude CLI reads. Used by
+// buildMcpConfigForUser (the live --mcp-config flag) and by other callers
+// that need the same effective-server truth (llm_agent/runtime/route.mjs,
+// llm_agent/sdk/engine.mjs).
 /**
  * Read a plugin's credential through the caller-supplied reader.
  *

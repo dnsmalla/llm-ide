@@ -560,6 +560,11 @@ final class BackendManager {
     /// 43 = `provider` on /agent/v2/stream (Anthropic-compatible custom
     /// providers on the Agent engine). An older server ignores the field
     /// and would run a GLM turn on the user's Claude credentials.
+    /// v44 deliberately did NOT raise this floor: it removed default_sources
+    /// and added llm-sources discovery fields (Library-pane surface, not the
+    /// chat wire this floor guards), and refresh-default now 404s cleanly
+    /// instead of misbehaving — no chat-path capability silently degrades
+    /// against an older server.
     ///
     /// The server reports its version via `/health.apiVersion`; a live server
     /// below this floor sets `serverVersionTooOld` and writes an actionable

@@ -22,7 +22,28 @@ test('buildHealthPayload exposes schema version and full endpoint capability lis
   assert.equal(payload.schemaVersion, 7);
   assert.ok(payload.uptimeSec >= 4);
   assert.deepEqual(payload.endpoints, ['/generate-notes', '/kb/system/status']);
-  assert.deepEqual(payload.checks, { db: true, claude: true, claudeError: undefined });
+  // skillsAvailable omitted here: undefined !== false, so it reads as available
+  // (a caller unaware of the check, e.g. an older test, still gets 'ok').
+  assert.deepEqual(payload.checks, { db: true, claude: true, claudeError: undefined, skills: true, skillsError: undefined });
+});
+
+test('buildHealthPayload reports degraded and a fix hint when .skills is not initialized', () => {
+  const payload = buildHealthPayload({
+    dbOk: true,
+    claude: { ok: true },
+    migration: { current: 7 },
+    apiVersion: 44,
+    endpoints: ['/generate-notes'],
+    serverStartedAt: Date.now(),
+    skillsAvailable: false,
+  });
+
+  // .skills is the only skill source now (no fallback copy) — see
+  // docs/explanation/invariants.md — so this must degrade the overall
+  // status, not just report a sub-field nobody checks.
+  assert.equal(payload.status, 'degraded');
+  assert.equal(payload.checks.skills, false);
+  assert.match(payload.checks.skillsError, /git submodule update --init \.skills/);
 });
 
 test('buildHealthPayload reports degraded dependencies without dropping the capability list', () => {

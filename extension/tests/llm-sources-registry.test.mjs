@@ -19,8 +19,9 @@ fs.writeFileSync(path.join(fakeRepo, 'skills', 'demo', 'SKILL.md'),
 process.env.SKILLS_REPO = fakeRepo;
 
 const { readRegistry, writeRegistry, isValidLlmSource, seedBuiltinOnce,
-  listSources, getSource, BUILTIN_ID, DEFAULT_SOURCES_ID, defaultSourcesLocation, countDiscoverySkills,
+  listSources, getSource, BUILTIN_ID, countDiscoverySkills,
   countDiscoveryAgents, listDiscoveryAgents, countDiscoveryHooks, listDiscoveryHooks,
+  countDiscoveryCommands, listDiscoveryCommands, countDiscoveryTemplates, listDiscoveryTemplates,
   countDiscoveryMcpServers, listDiscoveryMcpServers,
   sourceDiscoveryDetail } =
   await import('../llm-sources/registry.mjs');
@@ -51,17 +52,15 @@ test('isValidLlmSource also accepts an agents/-only or hooks-manifest-only direc
   assert.ok(isValidLlmSource(mcpOnly));
 });
 
-test('seeding registers default-sources FIRST (dedup preference), pointing at the repo folder, not removable', () => {
-  process.env.LLMIDE_REPO_ROOT = path.join(tmpRoot, 'repo-root');
+test('seedBuiltinOnce seeds exactly one entry (BUILTIN_ID), not removable', () => {
   writeRegistry([]); // start clean
   seedBuiltinOnce();
   const list = readRegistry();
-  assert.equal(list[0].id, DEFAULT_SOURCES_ID, 'default sources must be first in registry order');
-  assert.equal(list[0].location, path.join(tmpRoot, 'repo-root', 'llm_default_sources'));
+  assert.equal(list.length, 1);
+  assert.equal(list[0].id, BUILTIN_ID);
   assert.equal(list[0].builtin, true);
-  const rm = removeSource(DEFAULT_SOURCES_ID);
-  assert.ok(rm.error, 'default-sources must not be removable');
-  delete process.env.LLMIDE_REPO_ROOT;
+  const rm = removeSource(BUILTIN_ID);
+  assert.ok(rm.error, 'builtin (.skills) must not be removable — there is no fallback copy any more');
 });
 
 test('seedBuiltinOnce adds exactly one builtin source pointing at the resolved repo', () => {
@@ -101,6 +100,38 @@ test('countDiscoveryAgents + listDiscoveryAgents read agents/*.md frontmatter', 
   assert.equal(agents.length, 1);
   assert.equal(agents[0].name, 'reviewer');
   assert.equal(agents[0].description, 'reviews code');
+});
+
+test('countDiscoveryCommands + listDiscoveryCommands read commands/*.md frontmatter', () => {
+  fs.mkdirSync(path.join(fakeRepo, 'commands'), { recursive: true });
+  fs.writeFileSync(path.join(fakeRepo, 'commands', 'ship-it.md'),
+    '---\nname: ship-it\ndescription: runs the release checklist\n---\n\nbody\n');
+  fs.writeFileSync(path.join(fakeRepo, 'commands', 'not-a-command.txt'), 'ignored, not .md');
+  assert.equal(countDiscoveryCommands(fakeRepo), 1);
+  const commands = listDiscoveryCommands(fakeRepo);
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0].name, 'ship-it');
+  assert.equal(commands[0].description, 'runs the release checklist');
+});
+
+test('countDiscoveryTemplates + listDiscoveryTemplates read templates/*.md frontmatter', () => {
+  fs.mkdirSync(path.join(fakeRepo, 'templates'), { recursive: true });
+  fs.writeFileSync(path.join(fakeRepo, 'templates', 'incident-report.md'),
+    '---\nname: incident-report\ndescription: post-incident template\n---\n\nbody\n');
+  assert.equal(countDiscoveryTemplates(fakeRepo), 1);
+  const templates = listDiscoveryTemplates(fakeRepo);
+  assert.equal(templates.length, 1);
+  assert.equal(templates[0].name, 'incident-report');
+});
+
+test('isValidLlmSource also accepts a commands/-only or templates/-only directory', () => {
+  const commandsOnly = path.join(tmpRoot, 'commands-only');
+  fs.mkdirSync(path.join(commandsOnly, 'commands'), { recursive: true });
+  assert.ok(isValidLlmSource(commandsOnly));
+
+  const templatesOnly = path.join(tmpRoot, 'templates-only');
+  fs.mkdirSync(path.join(templatesOnly, 'templates'), { recursive: true });
+  assert.ok(isValidLlmSource(templatesOnly));
 });
 
 test('countDiscoveryHooks + listDiscoveryHooks read the Claude-plugin hooks manifest — discovery only', () => {
@@ -156,6 +187,29 @@ test('listDiscoveryHooks unions both conventions and de-duplicates a hook declar
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// The NAMED per-item shape ("same hierarchy as skills/commands/templates"):
+// hooks/<name>/hook.json instead of one flat manifest. Still discovery-only —
+// merges into the SAME output/dedup as the other two conventions.
+test('listDiscoveryHooks also reads the named hooks/<name>/hook.json convention, deduped against the others', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-hooks-named-'));
+  fs.mkdirSync(path.join(dir, 'hooks', 'lint-on-write'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'hooks', 'lint-on-write', 'hook.json'), JSON.stringify({
+    event: 'PreToolUse', matcher: 'Write|Edit', command: './lint.sh', description: 'lints on write',
+  }));
+  // A flat hooks/hooks.json can coexist in the same folder (a directory entry
+  // vs. a file entry under hooks/ — no collision) and a duplicate across the
+  // two conventions must still count once.
+  fs.writeFileSync(path.join(dir, 'hooks', 'hooks.json'), JSON.stringify({
+    Stop: [{ hooks: [{ type: 'command', command: './done.sh' }] }],
+    PreToolUse: [{ matcher: 'Write|Edit', hooks: [{ type: 'command', command: './lint.sh' }] }],
+  }));
+  const hooks = listDiscoveryHooks(dir);
+  assert.equal(countDiscoveryHooks(dir), 2, 'the duplicate PreToolUse/lint.sh hook counts once');
+  assert.ok(hooks.some((h) => h.event === 'Stop' && h.command === './done.sh'));
+  assert.ok(hooks.some((h) => h.event === 'PreToolUse' && h.matcher === 'Write|Edit' && h.command === './lint.sh'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('listDiscoveryHooks tolerates a settings.json with no hooks block, and a malformed one', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-hooks-edge-'));
   fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ permissions: { deny: [] } }));
@@ -199,6 +253,8 @@ test('sourceDiscoveryDetail returns the skills+agents+hooks+mcpServers for a reg
   assert.ok(demo, 'skills/demo must be listed');
   assert.equal(demo.description, 'd');
   assert.ok(Array.isArray(detail.agents));
+  assert.ok(Array.isArray(detail.commands));
+  assert.ok(Array.isArray(detail.templates));
   assert.ok(Array.isArray(detail.hooks));
   assert.ok(Array.isArray(detail.mcpServers));
   assert.equal(sourceDiscoveryDetail('not-a-real-id'), null);

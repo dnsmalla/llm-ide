@@ -32,7 +32,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as yaml from 'js-yaml';
 import { resolveCentralSkillsRepo } from '../core/skills-repo.mjs';
-import { listEnabled, pruneOrphans, DEFAULT_SOURCES_ID } from './state.mjs';
+import { listEnabled, pruneOrphans } from './state.mjs';
 
 // Git operations (clone/fetch/checkout/submodule-update) run async — the
 // server is single-threaded Node, so a *Sync spawn here would freeze every
@@ -49,26 +49,18 @@ let _runGit = execFileAsync;
 export function __setGitRunner(fn) { _runGit = fn ?? execFileAsync; }
 
 export const BUILTIN_ID = 'builtin';
-// The committed llm_default_sources folder at the repo root — a default,
-// non-removable source holding the frozen copy of everything chat uses
-// (see llm_agent/default-snapshot.mjs). Seeded FIRST: registry order is the
-// skill-library dedup preference, so chat reads this copy before any other.
-// Defined in state.mjs (re-exported here) so state.mjs can default new users
-// into it without importing this module back (would be circular).
-export { DEFAULT_SOURCES_ID };
 
 // This file lives at <repoRoot>/extension/llm-sources/registry.mjs, so two
-// directories up from here is always the repo root regardless of cwd.
+// directories up from here is always the repo root regardless of cwd. Used
+// by syncBuiltin() to locate the .skills submodule for `git submodule update`.
 function repoRootFallback() {
   return fileURLToPath(new URL('../..', import.meta.url));
 }
 
-export function defaultSourcesLocation() {
-  const repoRoot = process.env.LLMIDE_REPO_ROOT || repoRootFallback();
-  return join(repoRoot, 'llm_default_sources');
-}
 const LIBRARY_FAMILIES = ['skills', 'runtime'];
 const AGENTS_FAMILY = 'agents';
+const COMMANDS_FAMILY = 'commands';
+const TEMPLATES_FAMILY = 'templates';
 const MAX_DESC = 200;
 // Bounds so one admin-registered hostile/huge source can't OOM or stall the
 // single-threaded server for every tenant via the list/discovery endpoints
@@ -110,15 +102,17 @@ export function writeRegistry(list) {
 }
 
 // A directory is a valid LLM source if it has registry.yaml OR
-// (.claude-plugin/plugin.json + a skills/ directory) OR an agents/, hooks,
-// or MCP manifest of its own — i.e. it contributes at least one
-// discoverable kind.
+// (.claude-plugin/plugin.json + a skills/ directory) OR an agents/,
+// commands/, templates/, hooks, or MCP manifest of its own — i.e. it
+// contributes at least one discoverable kind.
 export function isValidLlmSource(dir) {
   try {
     if (!existsSync(dir)) return false;
     if (existsSync(join(dir, 'registry.yaml'))) return true;
     if (existsSync(join(dir, '.claude-plugin', 'plugin.json')) && existsSync(join(dir, 'skills'))) return true;
     if (existsSync(join(dir, AGENTS_FAMILY))) return true;
+    if (existsSync(join(dir, COMMANDS_FAMILY))) return true;
+    if (existsSync(join(dir, TEMPLATES_FAMILY))) return true;
     // Any hook declaration counts, in either convention — but a settings.json
     // must actually CONTAIN hooks to make a directory a source. Accepting the
     // mere presence of settings.json would make almost any project directory
@@ -251,6 +245,46 @@ export function countDiscoveryAgents(dir) {
   return listDiscoveryAgents(dir).length;
 }
 
+// commands/*.md — one file per named command, same frontmatter shape as
+// SKILL.md/agents' *.md. Discovery-only, like agents/: the IDE surfaces these
+// for the Library UI; a plugin's OWN commands/ (extension/plugins/loader.mjs's
+// expandSlashCommand) is a separate, unrelated mechanism keyed on that
+// plugin's enabled-command state, not this generic per-source catalog.
+function listDiscoveryNamed(dir, family) {
+  const d = join(dir, family);
+  if (!existsSync(d)) return [];
+  let entries;
+  try { entries = readdirSync(d, { withFileTypes: true }); } catch { return []; }
+  const out = [];
+  for (const e of entries) {
+    if (out.length >= MAX_DISCOVERY_ENTRIES) break;
+    if (!e.isFile() || !e.name.endsWith('.md')) continue;
+    const fm = readFrontmatterNameDesc(join(d, e.name));
+    if (!fm) continue;
+    out.push({ name: fm.name, description: fm.description, path: join(d, e.name) });
+  }
+  return out;
+}
+
+export function listDiscoveryCommands(dir) {
+  return listDiscoveryNamed(dir, COMMANDS_FAMILY);
+}
+
+export function countDiscoveryCommands(dir) {
+  return listDiscoveryCommands(dir).length;
+}
+
+// templates/*.md — same shape again (named, frontmatter name+description).
+// Discovery-only: a template is reference content a user pastes/adapts, never
+// auto-injected or executed.
+export function listDiscoveryTemplates(dir) {
+  return listDiscoveryNamed(dir, TEMPLATES_FAMILY);
+}
+
+export function countDiscoveryTemplates(dir) {
+  return listDiscoveryTemplates(dir).length;
+}
+
 // .claude-plugin/hooks/hooks.json (Claude Code plugin-hook manifest) or a
 // top-level hooks/hooks.json fallback — shape:
 //   { "<EventName>": [ { "matcher"?: string, "hooks": [{ "type": "command", "command": string }] } ] }
@@ -284,8 +318,35 @@ function hookManifestCandidates(dir) {
   ];
 }
 
+// hooks/<name>/hook.json — a NAMED, per-item shape ("same hierarchy as
+// skills/commands/templates"): one file per hook, { event, matcher?, command,
+// description? }. A THIRD convention alongside the flat-manifest and
+// settings-key ones above — same inner fields, so it merges into the same
+// output/dedup below. Still DISCOVERY ONLY: reshaping how a hook is named on
+// disk changes nothing about whether it runs (it never does).
+function listNamedHookFiles(dir) {
+  const d = join(dir, 'hooks');
+  if (!existsSync(d)) return [];
+  let entries;
+  try { entries = readdirSync(d, { withFileTypes: true }); } catch { return []; }
+  const out = [];
+  for (const e of entries) {
+    // Bound the WALK itself, not just the final merged result (#47) — every
+    // sibling reader in this file caps inside its loop; without this, a
+    // source with many hooks/<name>/ folders costs one bounded-but-still-up-
+    // to-1MB synchronous read per folder on every list/discovery call.
+    if (out.length >= MAX_DISCOVERY_ENTRIES) break;
+    if (!e.isDirectory()) continue;
+    const file = join(d, e.name, 'hook.json');
+    if (!existsSync(file)) continue;
+    const doc = readBoundedJson(file);
+    if (doc && typeof doc === 'object') out.push(doc);
+  }
+  return out;
+}
+
 /**
- * Every hook a source declares, across both conventions — DISCOVERY ONLY.
+ * Every hook a source declares, across all THREE conventions — DISCOVERY ONLY.
  * Nothing here is ever executed (see the Safety note at the top of this file);
  * the commands are surfaced so the Library UI can show what a source WOULD run
  * if the user wired it into their own Claude Code settings.
@@ -294,7 +355,7 @@ function hookManifestCandidates(dir) {
  * a source may ship a plugin manifest and settings-declared hooks side by side
  * — taking one and dropping the other is how the count ends up wrong. Results
  * are de-duplicated on (event, matcher, command) so a kit that declares the
- * same hook in two places is still counted once.
+ * same hook in two places (any mix of conventions) is still counted once.
  */
 export function listDiscoveryHooks(dir) {
   const out = [];
@@ -317,7 +378,8 @@ export function listDiscoveryHooks(dir) {
         for (const h of hooks) {
           if (typeof h?.command !== 'string') continue;
           // Entry cap (#47) — bound the RESULT too, not just each file, since
-          // this walks up to five manifests per source.
+          // this walks up to five manifests per source (now six, with the
+          // per-item hooks/<name>/ folder merged in below).
           if (out.length >= MAX_DISCOVERY_ENTRIES) return out;
           const command = h.command.slice(0, 200);
           const dedupe = `${event}\u0000${matcher ?? ''}\u0000${command}`;
@@ -328,6 +390,18 @@ export function listDiscoveryHooks(dir) {
       }
     }
   }
+
+  for (const doc of listNamedHookFiles(dir)) {
+    if (typeof doc.event !== 'string' || typeof doc.command !== 'string') continue;
+    if (out.length >= MAX_DISCOVERY_ENTRIES) return out;
+    const matcher = typeof doc.matcher === 'string' ? doc.matcher : undefined;
+    const command = doc.command.slice(0, 200);
+    const dedupe = `${doc.event}\u0000${matcher ?? ''}\u0000${command}`;
+    if (seen.has(dedupe)) continue;
+    seen.add(dedupe);
+    out.push({ event: doc.event, matcher, command });
+  }
+
   return out;
 }
 
@@ -379,19 +453,7 @@ export function countDiscoveryMcpServers(dir) {
 // source with location = null so the UI can offer "Install".
 export function seedBuiltinOnce() {
   const list = readRegistry();
-  let touched = false;
-  // Default sources first (idempotent, unshift) — see DEFAULT_SOURCES_ID.
-  if (!list.some((s) => s.id === DEFAULT_SOURCES_ID)) {
-    list.unshift({
-      id: DEFAULT_SOURCES_ID,
-      name: 'Default Sources',
-      origin: 'local',
-      location: defaultSourcesLocation(),
-      builtin: true,
-    });
-    touched = true;
-  }
-  if (list.some((s) => s.id === BUILTIN_ID)) { if (touched) writeRegistry(list); return; }
+  if (list.some((s) => s.id === BUILTIN_ID)) return;
   const repo = resolveCentralSkillsRepo();
   list.push({
     id: BUILTIN_ID,
@@ -421,6 +483,8 @@ export function snapshotSource(src) {
     version: exists ? readVersion(src.location) : src.version,
     skillCount: exists ? countDiscoverySkills(src.location) : 0,
     agentCount: exists ? countDiscoveryAgents(src.location) : 0,
+    commandCount: exists ? countDiscoveryCommands(src.location) : 0,
+    templateCount: exists ? countDiscoveryTemplates(src.location) : 0,
     hookCount: exists ? countDiscoveryHooks(src.location) : 0,
     mcpCount: exists ? countDiscoveryMcpServers(src.location) : 0,
   };
@@ -489,7 +553,7 @@ export async function addSource({ url, path, ref, name } = {}) {
 
   if (path) {
     if (!existsSync(path)) return { error: 'path does not exist', status: 400 };
-    if (!isValidLlmSource(path)) return { error: 'not a valid LLM source (needs registry.yaml, .claude-plugin/plugin.json + skills/, agents/, a hooks manifest, or an .mcp.json manifest)', status: 400 };
+    if (!isValidLlmSource(path)) return { error: 'not a valid LLM source (needs registry.yaml, .claude-plugin/plugin.json + skills/, agents/, commands/, templates/, a hooks manifest, or an .mcp.json manifest)', status: 400 };
     const id = slugify(name || path.split('/').pop(), existing);
     const src = { id, name: name || id, origin: 'local', location: path, builtin: false, version: readVersion(path) };
     list.push(src); writeRegistry(list);
@@ -567,7 +631,6 @@ export async function updateSource(id) {
 
 export function removeSource(id) {
   if (id === BUILTIN_ID) return { error: 'builtin source cannot be removed', status: 400 };
-  if (id === DEFAULT_SOURCES_ID) return { error: 'default sources cannot be removed', status: 400 };
   const list = readRegistry();
   const idx = list.findIndex((s) => s.id === id);
   if (idx < 0) return { error: 'source not found', status: 404 };
@@ -628,6 +691,8 @@ export function sourceDiscoveryDetail(id) {
   return {
     skills: listDiscoverySkills(src.location),
     agents: listDiscoveryAgents(src.location),
+    commands: listDiscoveryCommands(src.location),
+    templates: listDiscoveryTemplates(src.location),
     hooks: listDiscoveryHooks(src.location),
     mcpServers: listDiscoveryMcpServers(src.location),
   };
