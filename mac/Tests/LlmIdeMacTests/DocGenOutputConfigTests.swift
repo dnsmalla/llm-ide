@@ -30,7 +30,11 @@ final class DocGenOutputConfigTests: XCTestCase {
     }
 
     func testStoreKeepsConfigPerProject() {
-        let store = DocGenOutputStore()
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("doc-gen-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let store = DocGenOutputStore(storeDirectory: tempDir)
         let a = URL(fileURLWithPath: "/tmp/proj-a")
         let b = URL(fileURLWithPath: "/tmp/proj-b")
 
@@ -48,5 +52,33 @@ final class DocGenOutputConfigTests: XCTestCase {
 
     func testSendCopyToEmailDefaultsOff() {
         XCTAssertFalse(DocGenOutputConfig().sendCopyToEmail)
+    }
+
+    func testPreexistingProjectDataSurvivesUpdate() {
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("doc-gen-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // Pre-write a JSON file with project B's settings.
+        let projectB = URL(fileURLWithPath: "/tmp/proj-b")
+        var configB = DocGenOutputConfig()
+        configB.localFolderPath = "/tmp/out-b"
+        let initialData = try! JSONEncoder().encode([projectB.path: configB])
+        try! FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        try! initialData.write(to: tempDir.appendingPathComponent("doc-gen-output.json"))
+
+        // Construct a new store and update project A's config.
+        let store = DocGenOutputStore(storeDirectory: tempDir)
+        let projectA = URL(fileURLWithPath: "/tmp/proj-a")
+        store.activate(projectRoot: projectA)
+        var configA = store.config
+        configA.localFolderPath = "/tmp/out-a"
+        store.update(configA)
+
+        // Verify project B's config was preserved.
+        let savedData = try! Data(contentsOf: tempDir.appendingPathComponent("doc-gen-output.json"))
+        let saved = try! JSONDecoder().decode([String: DocGenOutputConfig].self, from: savedData)
+        XCTAssertEqual(saved[projectB.path]?.localFolderPath, "/tmp/out-b",
+                       "project B's settings must survive after updating project A")
     }
 }

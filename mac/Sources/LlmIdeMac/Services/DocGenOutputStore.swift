@@ -14,8 +14,12 @@ final class DocGenOutputStore: ObservableObject {
     private var byProject: [String: DocGenOutputConfig] = [:]
     private var currentKey: String?
     private var hasBootstrapped = false
+    private let storeDirectory: URL?
 
     private var storeURL: URL {
+        if let dir = storeDirectory {
+            return dir.appendingPathComponent("doc-gen-output.json")
+        }
         guard let support = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return URL(fileURLWithPath: NSTemporaryDirectory())
@@ -24,7 +28,8 @@ final class DocGenOutputStore: ObservableObject {
         return support.appendingPathComponent("com.llmide.macapp/doc-gen-output.json")
     }
 
-    init() {
+    init(storeDirectory: URL? = nil) {
+        self.storeDirectory = storeDirectory
         // Disk read deferred to `bootstrap()` so app init stays cheap — same
         // reasoning as DocTemplateStore.
     }
@@ -40,6 +45,7 @@ final class DocGenOutputStore: ObservableObject {
     /// Point the store at a project. Publishes that project's stored config, or
     /// a fresh default when the project has none yet.
     func activate(projectRoot: URL?) {
+        bootstrap()
         currentKey = projectRoot?.path
         guard let key = currentKey else {
             config = DocGenOutputConfig()
@@ -50,6 +56,7 @@ final class DocGenOutputStore: ObservableObject {
 
     /// Replace the active project's config and persist.
     func update(_ newValue: DocGenOutputConfig) {
+        bootstrap()
         config = newValue
         guard let key = currentKey else { return }
         byProject[key] = newValue
