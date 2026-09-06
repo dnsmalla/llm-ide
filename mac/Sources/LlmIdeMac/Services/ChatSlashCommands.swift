@@ -10,9 +10,8 @@ import Foundation
 /// Scoped deliberately: only commands with a REAL llm-ide equivalent are
 /// declared here. Most of Claude Code's own command set (/login, /desktop,
 /// /teleport, /keybindings, ...) has no llm-ide analogue at all, and showing
-/// them as if they worked would be worse than not showing them — see the
-/// llm_default_sources/commands/commands.json reference catalog for the
-/// full Claude Code list instead (browsable, not wired to any action).
+/// them as if they worked would be worse than not showing them — so they are
+/// simply not declared here at all.
 enum ChatSlashCommands {
 
     // MARK: - Catalog (single source of truth)

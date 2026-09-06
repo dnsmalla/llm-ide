@@ -10,9 +10,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import {
   DISCOVER_SKILL_IDS, WRITE_SKILL_ID, EXECUTE_SKILL_IDS,
@@ -20,9 +19,6 @@ import {
   buildPlanBinding, buildExecuteBinding,
 } from '../llm_agent/runtime/plan-pipeline.mjs';
 import { buildModeSkillsText } from '../core/prompt-framing.mjs';
-
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const REPO_ROOT = join(__dirname, '..', '..');
 
 // --- stage resolution -------------------------------------------------------
 
@@ -147,7 +143,15 @@ test('an unresolvable skill degrades the turn instead of failing it', () => {
 
 // --- the skills the pipeline points at must actually ship -------------------
 
-test('every pipeline skill id is in the committed default-sources snapshot', () => {
+// .skills (BUILTIN_ID) is the ONLY skill source now — no curated allowlist,
+// no committed fallback copy (see docs/explanation/invariants.md). Skipped
+// rather than failed when .skills isn't checked out locally/in CI: it's a
+// private submodule (see .github/workflows/skills-drift.yml's own note),
+// same reasoning that check applies.
+test('every pipeline skill id ships in .skills — no fallback copy exists any more', async (t) => {
+  const { resolveCentralSkillsRepo } = await import('../core/skills-repo.mjs');
+  const repo = resolveCentralSkillsRepo();
+  if (!repo) { t.skip('.skills is not initialized locally — run `git submodule update --init .skills`'); return; }
   const ids = [
     ...Object.values(DISCOVER_SKILL_IDS),
     WRITE_SKILL_ID,
@@ -155,18 +159,9 @@ test('every pipeline skill id is in the committed default-sources snapshot', () 
   ];
   for (const id of ids) {
     const [family, dir] = id.split('/');
-    const file = join(REPO_ROOT, 'llm_default_sources', family, dir, 'SKILL.md');
+    const file = join(repo, family, dir, 'SKILL.md');
     assert.ok(existsSync(file),
-      `${id} is injected by the pipeline but missing from llm_default_sources — `
-      + 'the always-on source every user has, so the mode would run with bindings and no process');
-  }
-});
-
-test('the curated builtin list ships every pipeline skill', () => {
-  const curated = JSON.parse(readFileSync(join(REPO_ROOT, 'extension', 'llm_agent', 'core-builtin-skills.json'), 'utf8'));
-  const names = new Set(curated.skills);
-  for (const id of [...Object.values(DISCOVER_SKILL_IDS), WRITE_SKILL_ID, ...Object.values(EXECUTE_SKILL_IDS)]) {
-    const dir = id.split('/')[1];
-    assert.ok(names.has(dir), `${dir} must stay in core-builtin-skills.json or the snapshot refresh drops it`);
+      `${id} is injected by the pipeline but missing from .skills — `
+      + '.skills is the only skill source now, so the mode would run with bindings and no process');
   }
 });

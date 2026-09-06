@@ -39,12 +39,25 @@ process.env.LLMIDE_PLUGIN_DIR = llmidePluginFixture;
 // resolveCentralSkillsRepo() prefers SKILLS_REPO, then the repo's .skills
 // submodule, then well-known home-dir locations. CI checks out neither the
 // submodule nor those locations, so the builtin source would seed with
-// location=null and the refresh-default test below would see zero input
-// sources (noSources=true). Pinning the env var to a fixture repo makes
-// builtin resolvable identically in every environment.
+// location=null. Pinning the env var to a fixture repo makes builtin
+// resolvable identically in every environment — it's the only always-on
+// source now (no fallback copy), so tests below that list/toggle it need it
+// to actually resolve.
 const skillsRepoFixture = path.join(__dirname, '_skills-repo-fixture');
 process.env.SKILLS_REPO = skillsRepoFixture;
-for (const dir of [claudePluginsFixture, codexHomeFixture, llmidePluginFixture]) {
+// The llm-sources "update" route calls syncBuiltin() for a builtin-origin
+// source (registry.mjs), which runs a REAL `git submodule update --init
+// .skills` under `process.env.LLMIDE_REPO_ROOT || repoRootFallback()`. Every
+// seeded builtin source has origin 'builtin' (seedBuiltinOnce()), so a test
+// below that PUTs /auth/me/llm-sources/update with id 'builtin' hits this for
+// real. Without pinning the env var, repoRootFallback() resolves to the ACTUAL
+// repo root and the command runs against the real .skills checkout — moving
+// its HEAD to whatever the parent repo's index currently pins, discarding any
+// local commit made there. Point it at a fixture dir instead (no .gitmodules
+// needed — the git command just fails harmlessly and is caught).
+const repoRootFixture = path.join(__dirname, '_auth-routes-repo-root-fixture');
+process.env.LLMIDE_REPO_ROOT = repoRootFixture;
+for (const dir of [claudePluginsFixture, codexHomeFixture, llmidePluginFixture, repoRootFixture]) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -53,15 +66,6 @@ fs.mkdirSync(skillsRepoFixture, { recursive: true });
 fs.writeFileSync(path.join(skillsRepoFixture, 'registry.yaml'), 'registryVersion: "3.0.0"\n', 'utf8');
 fs.writeFileSync(path.join(codexHomeFixture, 'config.toml'), '', 'utf8');
 process.env.CODEX_CONFIG_PATH = path.join(codexHomeFixture, 'config.toml');
-// The llm-sources toggle/remove/mcp-consent routes below fire a background
-// scheduleSnapshotRefresh() (server/auth-routes.mjs), which writes to
-// <LLMIDE_REPO_ROOT>/llm_default_sources regardless of LLMIDE_PLUGIN_DIR —
-// without this override it clobbers the real repo's committed snapshot
-// folder with this file's fixture data every time this suite runs.
-const repoRootFixture = path.join(__dirname, '_auth-routes-repo-root-fixture');
-process.env.LLMIDE_REPO_ROOT = repoRootFixture;
-fs.rmSync(repoRootFixture, { recursive: true, force: true });
-fs.mkdirSync(repoRootFixture, { recursive: true });
 
 const kb = await import('../kb/db.mjs');
 const { handleAuth, isAuthRoute } = await import('../server/auth-routes.mjs');
@@ -826,14 +830,17 @@ test('GET /auth/me/codex-plugins/updates detects a newer source version after im
 // GET/toggle are per-user actions any authenticated user may take; add/
 // update/remove are admin-gated (mirrors the plugin routes' split above).
 
-test('GET /auth/me/llm-sources lists the builtin source, enabled defaults to false until a user opts in', async () => {
+test('GET /auth/me/llm-sources lists the builtin source, implicitly enabled for a fresh user', async () => {
   const { user } = await registerAndLogin();
   const res = await callAuth({ method: 'GET', url: '/auth/me/llm-sources', user: { id: user.id } });
   assert.equal(res.statusCode, 200, res._body);
   const builtin = res.json().sources.find((s) => s.id === 'builtin');
   assert.ok(builtin, 'builtin source is seeded');
   assert.equal(builtin.builtin, true);
-  assert.equal(builtin.enabled, false, 'a fresh user has not opted in yet');
+  // .skills is the only always-on source now (no fallback copy) — a fresh
+  // user with no persisted state must default to it being enabled, or every
+  // new install has zero skills. See llm-sources/state.mjs's listEnabled().
+  assert.equal(builtin.enabled, true, 'a fresh user has the builtin source enabled by default');
 });
 
 test('POST /auth/me/llm-sources/toggle is per-user, not admin-gated, and validates the id', async () => {
@@ -853,30 +860,6 @@ test('POST /auth/me/llm-sources/toggle is per-user, not admin-gated, and validat
 
   const list = await callAuth({ method: 'GET', url: '/auth/me/llm-sources', user: u });
   assert.equal(list.json().sources.find((s) => s.id === 'builtin').enabled, true);
-});
-
-// Regression: the refresh-default route used to rebuild the response by hand
-// and DROP the snapshot's `noSources` flag, so the Mac client could never
-// tell a real rebuild from the zero-input guard keeping the old folder — the
-// guard's outcome arrived as a silent no-op. The flag must survive the wire
-// in both states.
-test('POST /auth/me/llm-sources/refresh-default forwards noSources through the wire', async () => {
-  const { user } = await registerAndLogin();
-  const u = { id: user.id };
-
-  // A fresh user's enabled set is implicitly [default-sources] only — zero
-  // INPUT sources, so the guard keeps the existing folder and says so.
-  const kept = await callAuth({ method: 'POST', url: '/auth/me/llm-sources/refresh-default', user: u });
-  assert.equal(kept.statusCode, 200, kept._body);
-  assert.equal(kept.json().noSources, true);
-
-  // With a real input source enabled, the rebuild runs and the flag is false.
-  const on = await callAuth({ method: 'POST', url: '/auth/me/llm-sources/toggle', user: u, body: { id: 'builtin', enabled: true } });
-  assert.equal(on.statusCode, 200, on._body);
-  const rebuilt = await callAuth({ method: 'POST', url: '/auth/me/llm-sources/refresh-default', user: u });
-  assert.equal(rebuilt.statusCode, 200, rebuilt._body);
-  assert.equal(rebuilt.json().noSources, false);
-  assert.ok(rebuilt.json().counts.sources >= 1);
 });
 
 test('llm-sources management routes are open to every authenticated user (no admin concept)', async () => {

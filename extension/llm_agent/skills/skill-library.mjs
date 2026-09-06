@@ -84,7 +84,7 @@ export function listSkillLibrary(userId) {
         if (!e.isDirectory()) continue;
         const skillMd = join(src.location, family, e.name, 'SKILL.md');
         const id = `${family}/${e.name}`;
-        if (seenIds.has(id)) continue; // duplicate across enabled sources (e.g. default-sources + builtin)
+        if (seenIds.has(id)) continue; // duplicate across enabled sources — first enabled source wins
         const fm = readNameDesc(skillMd);
         if (!fm) continue;
         seenIds.add(id);

@@ -131,7 +131,18 @@ const HOST = config.host;
 //     a GLM turn on the user's Claude credentials — exactly the silent
 //     fallback the Mac's provider gate promises never happens — so the Mac's
 //     floor (BackendManager.minimumServerApiVersion) must refuse such a server.
-const SERVER_API_VERSION = 43;
+//   v44 — removed `default_sources`: llm_default_sources/, its curated
+//     core-builtin-skills.json allowlist, and POST /auth/me/llm-sources/
+//     refresh-default are all gone. `.skills` (BUILTIN_ID) is now read
+//     directly, unfiltered, as the sole always-on source — no committed
+//     fallback copy. GET /auth/me/llm-sources no longer seeds a
+//     "Default Sources" row. GET /health gained a `checks.skills` /
+//     `checks.skillsError` pair: false/set means .skills isn't initialized,
+//     so every skill (planning pipeline included) is unavailable until it is
+//     — see docs/explanation/invariants.md. Bumped because an older client
+//     (Mac) still special-cases the `default-sources` id in its Library UI
+//     and still calls the now-410 refresh-default endpoint.
+const SERVER_API_VERSION = 44;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -463,6 +474,13 @@ const server = http.createServer(async (req, res) => {
     // boot and once an hour after.  We don't run it inline because
     // execFile would add ~50ms to every health request.
     const claude = claudeProbeResult();
+    // Cheap existsSync check, not a fresh clone/fetch — resolveCentralSkillsRepo()
+    // is pure path resolution (see core/skills-repo.mjs).
+    let skillsAvailable = false;
+    try {
+      const { resolveCentralSkillsRepo } = await import('./core/skills-repo.mjs');
+      skillsAvailable = !!resolveCentralSkillsRepo();
+    } catch { /* skillsAvailable stays false */ }
     // /health is unauthenticated. Minimal liveness shape only — the
     // verbose detail (pid, env, schema, endpoint list) used to be
     // gated behind ?debug=1 but that was no gate at all: any caller
@@ -475,6 +493,7 @@ const server = http.createServer(async (req, res) => {
       apiVersion: SERVER_API_VERSION,
       endpoints: ENDPOINTS,
       serverStartedAt: SERVER_STARTED_AT,
+      skillsAvailable,
     }));
     return;
   }
@@ -977,21 +996,25 @@ server.listen(PORT, HOST, () => {
     // connected for status updates to flow in.
     startBackgroundOutcomePoller();
 
-    // Rebuild the llm_default_sources snapshot at boot so it reflects the
-    // current enable/consent state even if sources changed while the server
-    // was down. Fire-and-forget: a failure never blocks startup.
+    // Ensure the builtin (.skills) source is registered, and check it's
+    // actually present. There is no fallback copy any more (see
+    // docs/explanation/invariants.md) — .skills IS the skill library, so a
+    // missing submodule means Plan/Assist Plan/Execute have no process skill
+    // to inject. Loud, not silent: an ERROR log at boot (not just /health
+    // going degraded, which nobody watches until something's already wrong).
     void (async () => {
       try {
-        const { seedBuiltinOnce, DEFAULT_SOURCES_ID } = await import('./llm-sources/registry.mjs');
-        const { listStateUserIds, enableDefaultSourcesOnce } = await import('./llm-sources/state.mjs');
-        const { refreshDefaultSnapshot } = await import('./llm_agent/default-snapshot.mjs');
+        const { seedBuiltinOnce } = await import('./llm-sources/registry.mjs');
+        const { resolveCentralSkillsRepo } = await import('./core/skills-repo.mjs');
         seedBuiltinOnce();
-        enableDefaultSourcesOnce(DEFAULT_SOURCES_ID); // one-time: enabled by default
-        for (const uid of listStateUserIds()) {
-          try { refreshDefaultSnapshot(uid); } catch { /* per-user, best-effort */ }
+        if (!resolveCentralSkillsRepo()) {
+          logger.error('skills_repo_missing', {
+            message: '.skills is not initialized — every skill (planning pipeline included) is unavailable until this is fixed.',
+            fix: 'git submodule update --init .skills && bash scripts/install-skills.sh',
+          });
         }
       } catch (err) {
-        logger.warn('default_snapshot_boot_failed', { error: err.message });
+        logger.error('skills_repo_check_failed', { error: err.message });
       }
 })();
   } catch (err) {
