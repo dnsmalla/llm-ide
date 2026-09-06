@@ -42,12 +42,15 @@ struct DocGenEditorPanel: View {
                     RoundedRectangle(cornerRadius: 7)
                         .strokeBorder(theme.current.accent.opacity(0.2), lineWidth: 1)
                 )
-            } else {
+            } else if vm.selectedCommand == nil {
+                // Only shown when NEITHER a template nor a command is picked
+                // yet — a command alone satisfies step 1 (see DocGenTemplateSection),
+                // so this must not render alongside the command badge below.
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.left")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
-                    Text("Choose a template from the left panel")
+                    Text("Choose a template or command from the left panel")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -127,7 +130,7 @@ struct DocGenEditorPanel: View {
                         Text("No sources selected")
                             .font(.callout.weight(.medium))
                             .foregroundStyle(.secondary)
-                        Text("Check files from LLM Doc or Data in the left panel.")
+                        Text("Check files from Code, LLM Doc or Data in the left panel.")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }

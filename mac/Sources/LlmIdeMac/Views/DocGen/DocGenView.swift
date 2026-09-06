@@ -7,7 +7,10 @@ struct DocGenView: View {
     @AppStorage("DOCGEN_SOURCES_VISIBLE") private var sourceVisible = true
     /// Chat open-state is persisted (default open) so the assistant reads as
     /// the primary surface — same pattern as Explorer / Review / Visual. A
-    /// manual close sticks across launches.
+    /// manual close sticks across launches. NOTE: this only hides
+    /// `CodeAssistantPanel` (the chat) — `DocGenPromptBar` (Generate/Edit/Save)
+    /// is the only place those actions live and must always render, so it is
+    /// never gated by this flag. See DocGenView.body below.
     @AppStorage("DOCGEN_CHAT_VISIBLE") private var chatVisible = true
     /// Persisted chat-panel width (HSplitView has no width binding — read it
     /// back via GeometryReader, same pattern as the other sections).
@@ -44,6 +47,12 @@ struct DocGenView: View {
             DocGenEditorPanel(vm: vm, api: api)
                 .frame(minWidth: 320, idealWidth: 460, maxWidth: .infinity)
 
+            // The prompt bar carries the only Generate/Edit/Save controls in
+            // Doc Gen, so it must render regardless of `chatVisible` — only
+            // the chat below it (CodeAssistantPanel) is toggleable. When chat
+            // is hidden the column collapses to a fixed, non-resizable width
+            // sized for the bar alone, so it neither stretches into empty
+            // space nor overwrites the user's saved chat width.
             if chatVisible {
                 VStack(spacing: 0) {
                     DocGenPromptBar(vm: vm, api: api)
@@ -57,6 +66,10 @@ struct DocGenView: View {
                 }
                 .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
                 .transition(.move(edge: .trailing))
+            } else {
+                DocGenPromptBar(vm: vm, api: api)
+                    .frame(width: 260)
+                    .transition(.move(edge: .trailing))
             }
             }
         }

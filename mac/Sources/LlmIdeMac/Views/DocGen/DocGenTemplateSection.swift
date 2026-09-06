@@ -195,7 +195,10 @@ struct DocGenTemplateSection: View {
                         .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
                 }
                 .buttonStyle(.plain)
-                .help("Import a .md command")
+                .disabled(projectStore.activeProject == nil)
+                .help(projectStore.activeProject == nil
+                      ? "Open a project first — commands are stored in its commands/ folder"
+                      : "Import a .md command")
                 .padding(.trailing, 14)
             }
 
