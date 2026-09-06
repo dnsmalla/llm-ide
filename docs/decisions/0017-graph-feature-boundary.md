@@ -75,7 +75,7 @@ decisions (`ProjectLayout`).
   JavaScript only, returning 0 nodes for Swift, Kotlin, and Python.
 - The built-in Swift engine stays as the fallback. Deleting it would leave a
   machine with no Node, or no plugin installed, unable to generate graphs at all.
-- Of the 5522 LOC under `mac/Sources/LlmIdeMac/Graph/`, 2700 is SwiftUI and 809
+- Of the 5522 LOC under `mac/Sources/LlmIdeMac/Graph/`, 2943 is SwiftUI and 809
   is the plugin harness — neither can live in a Node plugin. `BuiltinGraphEngine`
   is already only 70 LOC, so little would actually move.
 - Sizes above are debug builds; release stripping will change them. The

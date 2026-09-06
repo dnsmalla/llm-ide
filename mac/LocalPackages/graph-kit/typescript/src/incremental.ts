@@ -24,7 +24,12 @@ import { scanCode } from "./code/tsScanner.js";
 
 /** Default artifact directory, relative to the scanned source root. */
 export const DEFAULT_OUT_DIR = ".graphkit";
-const CACHE_VERSION = 1;
+// Bumped to 2 when doc identity moved to realpath resolution: the cache is
+// keyed by `fileURL`, which that changed for any tree containing a symlink.
+// Without a bump the first run reports every document as newly added AND
+// every old key as removed — a misleading diff for what is really a
+// one-time re-chunk. A version mismatch discards the cache cleanly.
+const CACHE_VERSION = 2;
 
 interface CacheEntry {
   hash: string;

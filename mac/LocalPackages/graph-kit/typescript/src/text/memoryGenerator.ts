@@ -283,8 +283,20 @@ function chunkDoc(docPath: string, _fileURL: string, docID: string, docTitle: st
     bodyBuf = [];
   };
 
+  let inFence = false;
   for (const line of lines) {
-    const heading = parseHeading(line);
+    // Fence state gates heading detection, as it does in Swift. A `#` line
+    // inside a code fence is sample text, not a section: treated as a heading
+    // it splits the document into a chunk that exists in one implementation and
+    // not the other — and because chunk ids hash the heading path, that changes
+    // NODE IDENTITY, not just content.
+    const fenceMark = line.trim();
+    if (fenceMark.startsWith("```") || fenceMark.startsWith("~~~")) {
+      inFence = !inFence;
+      bodyBuf.push(line);
+      continue;
+    }
+    const heading = inFence ? null : parseHeading(line);
     if (heading) {
       flush();
       while (headingLevels.length > 0 && headingLevels[headingLevels.length - 1]! >= heading.level) {
@@ -315,57 +327,110 @@ interface ParsedFrontmatter {
 
 const EMPTY_FRONTMATTER = { kind: null, tags: [], graphOnly: false, relatedModules: [] };
 
+/**
+ * Minimal YAML-ish frontmatter mapping parser — a port of Swift
+ * `MemoryGenerator.parseSimpleFrontmatterMapping`.
+ *
+ * Only top-level `key: value` lines are read; everything after the first colon
+ * is kept verbatim (descriptions may contain colons), and an INDENTED line is a
+ * continuation of the current key's value.
+ *
+ * That indentation rule is load-bearing, not incidental. Matching a trimmed
+ * line instead promoted keys nested under another mapping to top level — so a
+ * `schema:` block containing `graph-only: true` (a shape skill and agent files
+ * routinely have) made this implementation withhold a document that Swift kept.
+ * It is also what makes a NON-indented `- item` sequence yield an empty value
+ * on both sides rather than a list on one.
+ *
+ * Deliberately not a real YAML parser: Swift avoids Yams here because agent
+ * files carry unquoted colons and nested mappings that can trap it mid-parse
+ * during a background graph build.
+ */
+function parseFrontmatterMapping(block: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  let currentKey: string | null = null;
+  let currentValue = "";
+  const flush = () => {
+    if (currentKey !== null) out[currentKey] = currentValue.trim();
+    currentKey = null;
+    currentValue = "";
+  };
+  for (const line of block.split("\n")) {
+    if (line.startsWith(" ") || line.startsWith("\t")) {
+      if (currentKey !== null) {
+        if (currentValue !== "") currentValue += "\n";
+        currentValue += line.trim();
+      }
+      continue;
+    }
+    flush();
+    const colon = line.indexOf(":");
+    if (colon === -1) continue;
+    const key = line.slice(0, colon).trim();
+    if (!key) continue;
+    currentKey = key.toLowerCase();
+    currentValue = line.slice(colon + 1);
+  }
+  flush();
+  return out;
+}
+
+/**
+ * Interpret a mapping value that may be a YAML block sequence, a flow sequence
+ * or a plain scalar. Port of Swift `normalizeFrontmatterList`.
+ */
+function normalizeFrontmatterList(raw: string | undefined): string[] | string | null {
+  if (raw === undefined) return null;
+  const s = raw.trim();
+  if (!s) return null;
+  // Block sequence: the line parser joined `- item` lines with newlines.
+  if (s.startsWith("- ") || s.startsWith("-\n") || s.includes("\n- ")) {
+    return s
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("-"))
+      .map((l) => unquote(l.slice(1)))
+      .filter((l) => l !== "");
+  }
+  // Flow sequence: [a, b] / ["a", "b"].
+  if (s.startsWith("[") && s.endsWith("]")) {
+    return s
+      .slice(1, -1)
+      .split(",")
+      .map((p) => unquote(p))
+      .filter((p) => p !== "");
+  }
+  return unquote(s);
+}
+
+/** A normalised list value as parts: an array stays as-is, a scalar splits on
+ *  whitespace or comma. Mirrors the shared head of Swift's
+ *  `parseFrontmatterTags` / `parseModuleList`. */
+function listParts(value: string[] | string | null): string[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") return value.split(/[\s,]+/).filter((p) => p !== "");
+  return [];
+}
+
 function stripFrontmatter(text: string): ParsedFrontmatter {
   if (!text.startsWith("---\n")) return { text, ...EMPTY_FRONTMATTER };
   const end = text.indexOf("\n---\n", 4);
   if (end === -1) return { text, ...EMPTY_FRONTMATTER };
   const block = text.slice(4, end);
-  const remaining = text.slice(end + 5);
+  // Trimmed, as Swift trims: the closing fence's trailing newline belongs to
+  // the fence, not the body, so an untrimmed slice gave every chunk of every
+  // frontmatter-bearing document a different body than Swift produced.
+  const remaining = text.slice(end + 5).trim();
 
-  const blockLines = block.split("\n");
-  let rawType = "";
-  let rawTags: string[] = [];
-  let graphOnly = false;
-  let rawModules: string[] = [];
+  const map = parseFrontmatterMapping(block);
+  const rawType = unquote(map["type"] ?? map["kind"] ?? "");
+  const tags = cleanTags(listParts(normalizeFrontmatterList(map["tags"])));
+  const graphOnly = parseBool(map["graph-only"] ?? map["graphonly"] ?? "") ?? false;
+  const relatedModules = cleanModules(
+    listParts(normalizeFrontmatterList(map["related-modules"] ?? map["relatedmodules"])),
+  );
 
-  /** Values may be inline (`[a, b]` / `a, b`) or a YAML block sequence on the
-   *  following `- item` lines. Both forms appear in real docs. */
-  const listValue = (inline: string, from: number): string[] => {
-    if (inline) return splitTagString(inline);
-    const out: string[] = [];
-    for (let j = from + 1; j < blockLines.length; j++) {
-      const lm = /^\s*-\s*(.+?)\s*$/.exec(blockLines[j]!);
-      if (!lm) break;
-      out.push(lm[1]!);
-    }
-    return out;
-  };
-
-  for (let i = 0; i < blockLines.length; i++) {
-    // Hyphens are part of the key: `graph-only` and `related-modules` are the
-    // documented spellings, and a `[A-Za-z_]+` key pattern silently skipped
-    // both — which is how the TypeScript port came to drop them entirely.
-    const m = /^([A-Za-z_-]+)\s*:\s*(.*)$/.exec(blockLines[i]!.trim());
-    if (!m) continue;
-    const key = m[1]!.toLowerCase();
-    const val = m[2]!.trim();
-    if ((key === "type" || key === "kind") && rawType === "") {
-      rawType = val;
-    } else if (key === "tags") {
-      rawTags = listValue(val, i);
-    } else if (key === "graph-only" || key === "graphonly") {
-      graphOnly = parseBool(val) ?? false;
-    } else if (key === "related-modules" || key === "relatedmodules") {
-      rawModules = listValue(val, i);
-    }
-  }
-  return {
-    text: remaining,
-    kind: kindFromTypeString(rawType),
-    tags: cleanTags(rawTags),
-    graphOnly,
-    relatedModules: cleanModules(rawModules),
-  };
+  return { text: remaining, kind: kindFromTypeString(rawType), tags, graphOnly, relatedModules };
 }
 
 /** YAML-ish booleans, matching Swift `MemoryGenerator.parseBool`. */
@@ -407,13 +472,6 @@ function cleanModules(raw: string[]): string[] {
     out.push(cleaned);
   }
   return out;
-}
-
-/** Split an inline tag value: `[a, b]` or `a, b` or `a b`. */
-function splitTagString(raw: string): string[] {
-  let inner = raw.trim();
-  if (inner.startsWith("[") && inner.endsWith("]")) inner = inner.slice(1, -1);
-  return inner.split(/[\s,]+/);
 }
 
 /** Trim, strip leading `#` and surrounding quotes, lowercase, dedupe. */

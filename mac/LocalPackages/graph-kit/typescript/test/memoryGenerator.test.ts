@@ -252,3 +252,68 @@ test("doc identity resolves symlinks", () => {
     }
   });
 });
+
+// --------------------------------------------------------------------------
+// Swift parity: fences gate CHUNKING, not just extraction
+//
+// A `#` line inside a code fence is sample text. Treated as a heading it
+// creates a chunk in one implementation and not the other — and because chunk
+// ids hash the heading path, that changes node identity, not just content.
+// --------------------------------------------------------------------------
+
+test("a heading-looking line inside a fence does not split a chunk", () => {
+  withTempVault(
+    { "a.md": "# Real\n\nBefore.\n\n```\n# Not A Real Heading\n```\n\nAfter.\n" },
+    (dir) => {
+      const { chunks } = generateFromDir(dir);
+      assert.equal(chunks.length, 1, "the fenced heading must not open a chunk");
+      assert.deepEqual(chunks[0]!.headingPath, ["Real"]);
+      assert.ok(chunks[0]!.body.includes("# Not A Real Heading"),
+                "fenced text stays in the body");
+    },
+  );
+});
+
+// --------------------------------------------------------------------------
+// Swift parity: frontmatter indentation means continuation
+//
+// Matching a trimmed line promoted keys nested under another mapping to top
+// level, so a `schema:` block containing `graph-only: true` made this
+// implementation withhold a document that Swift kept. Skill and agent files
+// carry exactly that shape.
+// --------------------------------------------------------------------------
+
+test("keys nested under another mapping are not read as top level", () => {
+  withTempVault(
+    {
+      "a.md":
+        "---\ntype: note\nschema:\n  graph-only: true\n  tags: [sneaky]\n---\n# T\n\nBody.\n",
+    },
+    (dir) => {
+      const [chunk] = generateFromDir(dir).chunks;
+      assert.equal(chunk!.graphOnly, false, "nested graph-only must not apply to the doc");
+      assert.ok(!chunk!.tags.includes("sneaky"), "nested tags must not apply to the doc");
+    },
+  );
+});
+
+test("a non-indented block sequence yields an empty list, as in Swift", () => {
+  withTempVault(
+    { "a.md": "---\nrelated-modules:\n- kb/db.mjs\n---\n# T\n\nBody.\n" },
+    (dir) => {
+      const [chunk] = generateFromDir(dir).chunks;
+      assert.deepEqual(chunk!.relatedModules, []);
+    },
+  );
+});
+
+test("the document text after a frontmatter fence is trimmed", () => {
+  // The trim applies to the document body, not to each chunk: a chunk
+  // legitimately begins with the newline that followed its heading. What it
+  // removes is the trailing newline the closing fence left behind, which is
+  // what made every frontmatter-bearing chunk differ from Swift's.
+  withTempVault({ "a.md": "---\ntype: note\n---\n# T\n\nBody.\n" }, (dir) => {
+    const [chunk] = generateFromDir(dir).chunks;
+    assert.equal(chunk!.body, "\nBody.");
+  });
+});
