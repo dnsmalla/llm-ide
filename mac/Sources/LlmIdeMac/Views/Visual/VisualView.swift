@@ -3,24 +3,30 @@ import ImageIO
 
 // MARK: - VisualView
 //
-// Three-panel "Visual" section:
-//   1. Library file tree (Data + Code) — the same FileTreePanel the
-//      Review pages drive, so anything imported into the library
-//      (presentation assets, datasets, repo folders) shows up here.
-//   2. Image viewer — renders the selected image with a thumbnail
-//      strip of its sibling images for quick flipping.
-//   3. Chat — the shared CodeAssistantPanel, with the selected file
-//      auto-attached so the user can ask about what they're viewing.
+// Three-panel "Visual" section, mirroring Doc Gen's generation flow:
+//   1. VisualSourcePanel — Setup / Template & Command / Sources (Data +
+//      Code), plus the Visual-only "Use chat" toggle.
+//   2. VisualCenterPanel — the image viewer while idle, the generated
+//      document once a run completes, with a control back to the image.
+//   3. Right — GenerationPromptBar (Generate/Edit/Save, plus "Save chat
+//      output" in Use chat mode) above the shared CodeAssistantPanel, with
+//      the selected file auto-attached so the user can ask about what
+//      they're viewing.
 
 struct VisualView: View {
     let api: LlmIdeAPIClient
 
     @EnvironmentObject private var theme: ThemeStore
+    @StateObject private var vm = GenerationViewModel()
     @State private var treeSelectedURL: URL?
     @State private var treeVisible = true
     /// Chat open-state is persisted (default open) so the assistant reads as
     /// the primary surface — same pattern as Explorer / Review / DocGen. A
-    /// manual close sticks across launches.
+    /// manual close sticks across launches. NOTE: this only hides
+    /// `CodeAssistantPanel` (the chat) — `VisualPromptBar` (Generate/Edit/
+    /// Save, and Save chat output) is the only place those actions live and
+    /// must always render, so it is never gated by this flag. See
+    /// `DocGenView.body` for the identical pattern this mirrors.
     @AppStorage("VISUAL_CHAT_VISIBLE") private var chatVisible = true
 
     /// Persists the chat panel width across launches — same
@@ -45,32 +51,47 @@ struct VisualView: View {
                 .help(chatVisible ? "Hide Chat" : "Show Chat")
             }
             Divider()
-            // Fixed-width tree column outside HSplitView (HSplitView doesn't
-            // reliably cap a leading child's width); HSplitView drives only
-            // the image ↔ chat split.
+            // Fixed-width source column outside HSplitView (HSplitView
+            // doesn't reliably cap a leading child's width); HSplitView
+            // drives only the centre ↔ chat split.
             HStack(spacing: 0) {
             if treeVisible {
-                FileTreePanel(title: "LIBRARY",
-                              categories: [.data, .code],
-                              selectedURL: $treeSelectedURL)
+                VisualSourcePanel(vm: vm, api: api)
                     .frame(width: 240)
                     .transition(.move(edge: .leading))
                 Divider()
             }
 
             HSplitView {
-            ImageShowPanel(selectedURL: $treeSelectedURL)
+            VisualCenterPanel(vm: vm, selectedURL: $treeSelectedURL)
                 .frame(minWidth: 300, idealWidth: 520, maxWidth: .infinity)
 
+            // The chat column (prompt bar + CodeAssistantPanel) is the ONLY
+            // resizable HSplitView child besides the centre panel — present
+            // only while chatVisible. When chat is hidden the prompt bar
+            // moves OUTSIDE the split entirely (below) as a fixed-width
+            // sibling — see DocGenView, which this mirrors exactly, for why
+            // a fixed-width prompt bar must never be an HSplitView child.
             if chatVisible {
-                CodeAssistantPanel(api: api,
-                                   scope: .visual,
-                                   initialURL: treeSelectedURL,
-                                   showFileAttachButtons: true,
-                                   showModelPicker: true)
-                    .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
-                    .transition(.move(edge: .trailing))
+                VStack(spacing: 0) {
+                    VisualPromptBar(vm: vm, api: api)
+                    Divider()
+                    CodeAssistantPanel(api: api,
+                                       scope: .visual,
+                                       initialURL: treeSelectedURL,
+                                       showFileAttachButtons: true,
+                                       showModelPicker: true)
+                }
+                .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
+                .transition(.move(edge: .trailing))
             }
+            }
+
+            if !chatVisible {
+                Divider()
+                VisualPromptBar(vm: vm, api: api)
+                    .frame(width: 260)
+                    .transition(.move(edge: .trailing))
             }
         }
         .firstLaunchOpenChat(flagKey: "DID_AUTO_OPEN_VISUAL_CHAT_V1",

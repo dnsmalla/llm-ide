@@ -4,6 +4,12 @@ import Foundation
 @MainActor
 final class GenerationViewModel: ObservableObject {
     @Published var selectedSources: Set<DocGenSource> = []
+    /// Lifts `canGenerate`'s template/command + source requirement. Defaults
+    /// false (Doc Gen's behavior, unchanged) — set true only by Visual's
+    /// "Use chat" mode, where the chat panel is the primary surface and a
+    /// template/command/source is merely optional scaffolding rather than a
+    /// prerequisite. See `VisualSourcePanel`.
+    @Published var relaxRequirements: Bool = false
     @Published var selectedTemplate: DocTemplate?
     /// A reusable instruction. Either a template or a command is enough to
     /// generate; both may be selected together.
@@ -38,7 +44,11 @@ final class GenerationViewModel: ObservableObject {
     /// genuinely unsaved document).
     @Published private(set) var isSaved = false
 
-    enum GenerationState {
+    /// `Equatable` so a view can `.onChange(of:)` transitions (e.g. Visual's
+    /// `VisualCenterPanel`, which resets its own "viewing image" override the
+    /// moment a fresh run starts) without hand-rolling a separate phase enum
+    /// just to observe it.
+    enum GenerationState: Equatable {
         case idle
         case generating
         /// Content is ready. `skipped` lists any source file names that couldn't be read.
@@ -65,7 +75,8 @@ final class GenerationViewModel: ObservableObject {
     private static let maxRevisionSourceChars = 50_000
 
     var canGenerate: Bool {
-        (selectedTemplate != nil || selectedCommand != nil) && !selectedSources.isEmpty
+        if relaxRequirements { return true }
+        return (selectedTemplate != nil || selectedCommand != nil) && !selectedSources.isEmpty
     }
 
     /// True while a run (fresh generate or applied edit) is in flight. Drives
