@@ -21,8 +21,28 @@ const LEAD_SUBJECT_RE = /^(?:project|repo|repository|codebase|app|application)\s
 // whitespace, lowercase, then peel a bounded run of leading filler. Keying on
 // the fact TEXT (not its category) means the same fact never re-enters under a
 // different tag; peeling filler means an obvious paraphrase doesn't either.
+// A stored fact may carry a recency stamp — `… text (t:YYYY-MM-DD)` — written
+// by graphkit/memory-writer.mjs. It is METADATA, not part of the fact, so it
+// must be peeled before the text is keyed: otherwise re-confirming a fact with
+// today's date would produce a different key, land as a SECOND row, and defeat
+// the whole upsert/supersede path. (This is why the stamp is a trailing suffix
+// and not part of the `[category|id]` tag — inside the tag it would corrupt
+// the subject id that factIndex reads.)
+const FACT_STAMP_RE = /\s*\(t:\d{4}-\d{2}-\d{2}\)\s*$/;
+
+export function stripFactStamp(s) {
+  return String(s).replace(FACT_STAMP_RE, '');
+}
+
+/** The stamp's date, or null for a fact stored before stamping existed. */
+export function factStamp(s) {
+  const m = /\(t:(\d{4}-\d{2}-\d{2})\)\s*$/.exec(String(s));
+  return m ? m[1] : null;
+}
+
 export function factKey(s) {
-  let k = String(s).trim().replace(/^\[[^\]]+\]\s*/, '').replace(/\s+/g, ' ').toLowerCase();
+  let k = stripFactStamp(String(s).trim())
+    .replace(/^\[[^\]]+\]\s*/, '').replace(/\s+/g, ' ').toLowerCase();
   for (let i = 0; i < 3; i++) {                 // bounded: at most a few glue words
     const next = k.replace(LEAD_DETERMINER_RE, '');
     if (next === k) break;

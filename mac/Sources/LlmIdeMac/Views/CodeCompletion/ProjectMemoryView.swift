@@ -96,10 +96,22 @@ struct ProjectMemoryView: View {
                 .font(.system(size: 4))
                 .foregroundStyle(theme.current.textMuted)
                 .padding(.top, 7)
-            Text(fact)
-                .font(.system(size: 12))
-                .foregroundStyle(theme.current.text)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(Self.factText(fact))
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.current.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                // A stored fact carries a trailing `(t:YYYY-MM-DD)` recency
+                // stamp (graphkit/memory-writer.mjs) — the server ranks by it
+                // instead of by file position. Shown as a date rather than
+                // left inline, so the row reads as a sentence and not as
+                // internal syntax. Facts written before stamping have none.
+                if let learned = Self.factStamp(fact) {
+                    Text("Learned \(learned)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.current.textMuted)
+                }
+            }
             Spacer(minLength: 4)
             Button { Task { await remove(fact) } } label: {
                 Image(systemName: "trash")
@@ -137,6 +149,22 @@ struct ProjectMemoryView: View {
             resolvedRepo = r.repo
         } catch { self.error = "Couldn't load project memory." }
         loading = false
+    }
+
+    /// The recency stamp a fact carries, or nil for one stored before stamping
+    /// existed. Mirrors `FACT_STAMP_RE` in `extension/core/fact-key.mjs`.
+    static func factStamp(_ fact: String) -> String? {
+        guard let r = fact.range(of: #"\(t:\d{4}-\d{2}-\d{2}\)\s*$"#, options: .regularExpression) else { return nil }
+        // Keep just the date from `(t:YYYY-MM-DD)`.
+        return String(fact[r]).replacingOccurrences(of: #"[()]|t:|\s"#, with: "", options: .regularExpression)
+    }
+
+    /// The fact without its stamp. Display only — `remove(_:)` deliberately
+    /// sends the UNTOUCHED string, and the server peels the stamp itself
+    /// before matching, so trimming here could never desync the two.
+    static func factText(_ fact: String) -> String {
+        guard let r = fact.range(of: #"\s*\(t:\d{4}-\d{2}-\d{2}\)\s*$"#, options: .regularExpression) else { return fact }
+        return String(fact[fact.startIndex..<r.lowerBound])
     }
 
     private func remove(_ fact: String) async {

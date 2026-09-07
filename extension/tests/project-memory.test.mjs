@@ -29,6 +29,12 @@ const memory  = await import('../graphkit/memory.mjs');
 const persist = await import('../llm_agent/runtime/memory-persist.mjs');
 const db      = await import('../kb/db.mjs');
 const users   = await import('../server/users.mjs');
+
+// Facts as stored now carry a `(t:YYYY-MM-DD)` recency stamp (see
+// graphkit/memory-writer.mjs). These round-trip assertions are about upsert,
+// dedup and eviction — not about the metadata — so they read stamp-blind.
+const { stripFactStamp } = await import('../core/fact-key.mjs');
+const factsOf = (root) => writer.readChatMemoryFacts(root).map(stripFactStamp);
 const { handleAgentRoutes } = await import('../routes/agent.mjs');
 
 function reset() {
@@ -79,14 +85,14 @@ test('appendChatMemory upserts by factKey: same index updates IN PLACE, write/re
   reset();
   const u = provision();
   const root = tmpRepo(u, 'append');
-  assert.deepEqual(writer.readChatMemoryFacts(root), []);
+  assert.deepEqual(factsOf(root), []);
   writer.appendChatMemory({ root, facts: ['Uses pnpm', 'Deploys via CI'] });
   const meta = {};
   // 'uses PNPM' has the SAME factKey as 'Uses pnpm' (case/space normalised), so
   // it's an update of that entry — not a duplicate to discard, and not a second
   // row. It keeps position 0; only 'New thing' is appended.
   writer.appendChatMemory({ root, facts: ['uses PNPM', 'New thing'], meta });
-  const facts = writer.readChatMemoryFacts(root);
+  const facts = factsOf(root);
   assert.deepEqual(facts, ['uses PNPM', 'Deploys via CI', 'New thing']);
   assert.equal(meta.added, 1, 'one genuinely new fact');
   assert.equal(meta.updated, 1, 'one existing index updated with new text');
@@ -110,9 +116,9 @@ test('a changed VALUE under the same subject id updates in place, not appends', 
     facts: ['[tooling|server-port] the server binds to port 4000'],
     meta,
   });
-  const facts = writer.readChatMemoryFacts(root);
+  const facts = factsOf(root);
   assert.equal(facts.length, 3, 'no new row');
-  assert.equal(facts[0], '[tooling|server-port] the server binds to port 4000',
+  assert.equal(stripFactStamp(facts[0]), '[tooling|server-port] the server binds to port 4000',
                'updated in place, position preserved');
   assert.equal(meta.updated, 1);
   assert.equal(meta.added, 0);
@@ -138,7 +144,7 @@ test('distinct subject ids stay distinct rows', () => {
     root,
     facts: ['[tooling|server-port] port 3456', '[tooling|test-command] npm test'],
   });
-  assert.equal(writer.readChatMemoryFacts(root).length, 2);
+  assert.equal(factsOf(root).length, 2);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -176,7 +182,7 @@ test('appendChatMemory is a no-op when the incoming fact is byte-identical', () 
   writer.appendChatMemory({ root, facts: ['exactly the same fact'] });
   const meta = {};
   writer.appendChatMemory({ root, facts: ['exactly the same fact'], meta });
-  assert.deepEqual(writer.readChatMemoryFacts(root), ['exactly the same fact']);
+  assert.deepEqual(factsOf(root), ['exactly the same fact']);
   assert.equal(meta.added, 0);
   assert.equal(meta.updated, 0);
   fs.rmSync(root, { recursive: true, force: true });
@@ -192,12 +198,12 @@ test('chat memory left in the legacy tree is read, then migrated forward on writ
   fs.writeFileSync(legacyFile, '# Chat memory\n- Uses pnpm workspaces\n');
 
   // Read falls back to the old location so pre-move facts aren't lost.
-  assert.deepEqual(writer.readChatMemoryFacts(root), ['Uses pnpm workspaces']);
+  assert.deepEqual(factsOf(root), ['Uses pnpm workspaces']);
 
   // The first write materialises everything at the canonical path...
   writer.appendChatMemory({ root, facts: ['Deploys via CI'] });
   const canonical = path.join(root, 'system', 'memory', 'chat-memory.md');
-  assert.deepEqual(writer.readChatMemoryFacts(root), ['Uses pnpm workspaces', 'Deploys via CI']);
+  assert.deepEqual(factsOf(root), ['Uses pnpm workspaces', 'Deploys via CI']);
   assert.ok(fs.existsSync(canonical), 'facts now live at the canonical path');
   // ...and retires the old file, so exactly one copy exists afterwards.
   assert.ok(!fs.existsSync(legacyFile), 'legacy file is removed once carried forward');
@@ -567,7 +573,7 @@ test('writeChatMemoryFacts creates the memory dir if missing', async () => {
   const root = path.join(__dirname, `_pm-atomic-mkdir-${process.pid}`);
   fs.mkdirSync(root, { recursive: true });   // root exists, memory subdir does NOT
   writeChatMemoryFacts(root, ['a durable fact worth keeping']);
-  assert.deepEqual(readChatMemoryFacts(root), ['a durable fact worth keeping']);
+  assert.deepEqual(readChatMemoryFacts(root).map(stripFactStamp), ['a durable fact worth keeping']);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -666,8 +672,8 @@ test('persistTurnMemory writes extracted facts into the allow-listed repo', asyn
     agentContext: { indexedRepos: [{ path: root, name: 'r' }] },
     userId: u, userMessage: 'where is the api client', reply: 'It is in ...', runClaude,
   });
-  assert.deepEqual(result, ['The API client lives in LlmIdeAPIClient.swift']);
-  assert.deepEqual(writer.readChatMemoryFacts(root), result);
+  assert.deepEqual(result.map(stripFactStamp), ['The API client lives in LlmIdeAPIClient.swift']);
+  assert.deepEqual(writer.readChatMemoryFacts(root), result, 'the persisted list IS what was returned');
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -718,7 +724,7 @@ test('GET /kb/agent/project-memory is gated and returns facts for an allow-liste
   let res = mkRes();
   await handleAgentRoutes(mkReq('GET', okUrl), res, { userId: u, url: okUrl });
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body.facts, ['Endpoint-visible fact']);
+  assert.deepEqual(res.body.facts.map(stripFactStamp), ['Endpoint-visible fact']);
   // not allow-listed → empty, never reads disk
   const badUrl = `/kb/agent/project-memory?repo=${encodeURIComponent('/tmp/elsewhere')}`;
   res = mkRes();
@@ -740,7 +746,7 @@ test('GET project-memory resolves the FIRST allow-listed candidate (not blindly 
   const res = mkRes();
   await handleAgentRoutes(mkReq('GET', multiUrl), res, { userId: u, url: multiUrl });
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body.facts, ['Resolved from the allow-listed repo']);
+  assert.deepEqual(res.body.facts.map(stripFactStamp), ['Resolved from the allow-listed repo']);
   assert.equal(res.body.repo, root);
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -756,7 +762,7 @@ test('DELETE /kb/agent/project-memory removes one fact and clears all', async ()
     res, { userId: u, url: '/kb/agent/project-memory' },
   );
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body.facts, ['keep me']);
+  assert.deepEqual(res.body.facts.map(stripFactStamp), ['keep me']);
   // clear all
   res = mkRes();
   await handleAgentRoutes(
@@ -793,7 +799,7 @@ test('DELETE /kb/agent/project-memory deletes only the clicked subject id', asyn
   );
   assert.equal(res.statusCode, 200);
   // Both facts share the factKey "uses sqlite wal"; only the clicked one goes.
-  assert.deepEqual(res.body.facts, ['[perf|store] the project uses SQLite WAL', 'keep me']);
+  assert.deepEqual(res.body.facts.map(stripFactStamp), ['[perf|store] the project uses SQLite WAL', 'keep me']);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -908,7 +914,7 @@ test('persistTurnMemory writes the SAME extracted facts into project memory AND 
     },
     userId: u, userMessage: 'how do I build?', reply: 'run build.sh', runClaude,
   });
-  assert.deepEqual(writer.readChatMemoryFacts(root), ['[tooling|build-cmd] the build runs via build.sh']);
+  assert.deepEqual(factsOf(root), ['[tooling|build-cmd] the build runs via build.sh']);
   assert.deepEqual(sessionMemory.listSessionMemory(u, 'STABLE-CHAT-UUID'), ['[tooling|build-cmd] the build runs via build.sh']);
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -927,7 +933,7 @@ test('project memory outlives its session being deleted — only session memory 
   });
   sessionMemory.deleteSessionMemory(u, 'DOOMED-CHAT');
   assert.deepEqual(sessionMemory.listSessionMemory(u, 'DOOMED-CHAT'), [], 'session memory is gone');
-  assert.deepEqual(writer.readChatMemoryFacts(root), ['[tooling|build-cmd] the build runs via build.sh'],
+  assert.deepEqual(factsOf(root), ['[tooling|build-cmd] the build runs via build.sh'],
     'project memory survives — it is only ever edited via its own viewer, never by session lifecycle');
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -1006,4 +1012,77 @@ test('extractMemories model: chain-derived default; opts.model overrides per tur
     existingFacts: [], runClaude: fake, userId: 'u1',
   });
   assert.equal(seen[1], EXTRACT_MODEL, 'without an override the chain-derived default rides');
+});
+
+// ── per-fact recency (timestamps) ────────────────────────────────────────────
+//
+// Recency used to be a fact's POSITION in the file, and an updated fact kept
+// its original slot. Both consumers of position then read it backwards:
+// selectChatMemoryFacts breaks score ties with `b.index - a.index` ("newer
+// wins"), and writeChatMemoryFacts evicts from the FRONT when over budget.
+// So a fact the model kept re-confirming ranked LOWEST on ties and was the
+// FIRST to be deleted — the exact opposite of what the supersede/UPDATE path
+// was built for.
+//
+// Position stays where it is (diff-friendly, as the writer intended); the
+// recency SIGNAL moves to an explicit `(t:YYYY-MM-DD)` suffix. Day granularity
+// on purpose: a fact re-confirmed twice in one day must not churn the file.
+
+test('factKey/factIndex ignore the timestamp suffix, so identity survives a re-stamp', async () => {
+  const { factKey, factIndex } = await import('../core/fact-key.mjs');
+  // Same fact, different stamp → same identity, or every re-confirmation
+  // would land as a NEW row and the whole upsert path would break.
+  assert.equal(factKey('[db] uses SQLite (t:2026-09-07)'), factKey('[db] uses SQLite (t:2026-01-01)'));
+  assert.equal(factKey('[db] uses SQLite (t:2026-09-07)'), factKey('[db] uses SQLite'));
+  // And for a fact carrying a subject id, the id still wins.
+  assert.equal(factIndex('[db|engine] binds :3456 (t:2026-09-07)'), '#engine');
+  assert.equal(
+    factIndex('[db|engine] binds :4000 (t:2026-02-02)'),
+    factIndex('[db|engine] binds :3456 (t:2026-09-07)'),
+    'a value change with a new stamp is still the same fact',
+  );
+});
+
+test('appendChatMemory stamps new facts and re-stamps updated ones, keeping position', () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'stamp');
+  writer.appendChatMemory({ root, facts: ['[db|engine] binds :3456', '[ci|runner] uses GitHub Actions'] });
+  let facts = writer.readChatMemoryFacts(root);
+  const today = new Date().toISOString().slice(0, 10);
+  assert.ok(facts.every((f) => f.includes(`(t:${today})`)), `new facts stamped: ${JSON.stringify(facts)}`);
+
+  // Update the FIRST fact. It keeps slot 0 (diff-friendly) but must carry a
+  // fresh stamp, which is what makes it rank as recent rather than oldest.
+  writer.appendChatMemory({ root, facts: ['[db|engine] binds :4000'] });
+  facts = writer.readChatMemoryFacts(root);
+  assert.equal(facts.length, 2, 'an update is not a new row');
+  assert.match(facts[0], /binds :4000/, 'updated in place, position preserved');
+  assert.match(facts[0], new RegExp(`\\(t:${today}\\)`), 'and re-stamped');
+});
+
+test('selectChatMemoryFacts ranks by timestamp, not file position', async () => {
+  // The regression: the OLDEST fact sits at index 0, so with position-based
+  // recency it lost every tie; give it the NEWEST stamp and it must now win.
+  const older = '[a|one] alpha shared-token (t:2020-01-01)';
+  const newer = '[b|two] beta shared-token (t:2030-01-01)';
+  // Takes raw file CONTENT (it parses the bullets itself) plus options.
+  const content = `- ${newer}\n- ${older}\n`;
+  const text = memory.selectChatMemoryFacts(content, { userMessage: 'shared-token', room: 10_000 });
+  const posNewer = text.indexOf('beta');
+  const posOlder = text.indexOf('alpha');
+  assert.ok(posNewer >= 0 && posOlder >= 0, `both facts selected: ${text}`);
+  assert.ok(posNewer < posOlder, `the newer-STAMPED fact must rank first, got: ${text}`);
+});
+
+test('an undated fact ranks below a dated one (no migration, self-heals on re-confirm)', async () => {
+  const dated = '[b|two] beta shared-token (t:2026-09-07)';
+  const undated = '[a|one] alpha shared-token';
+  // DATED first, undated second: the old rule broke ties by higher index, so
+  // position favours the UNDATED one here. Ordering them the other way would
+  // let this pass under the old code too, proving nothing.
+  const content = `- ${dated}\n- ${undated}\n`;
+  const text = memory.selectChatMemoryFacts(content, { userMessage: 'shared-token', room: 10_000 });
+  assert.ok(text.indexOf('beta') < text.indexOf('alpha'),
+    `a dated fact outranks an undated one of equal relevance: ${text}`);
 });

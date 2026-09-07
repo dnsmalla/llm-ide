@@ -52,7 +52,18 @@ function memFilePath(root) {
 // this module and the graphkit barrel are their established import path.
 // Imported, not just re-exported: this module calls both internally, and a
 // bare `export … from` would not bind them in local scope.
-import { factKey, factIndex } from '../core/fact-key.mjs';
+import { factKey, factIndex, stripFactStamp } from '../core/fact-key.mjs';
+
+// Local date, not UTC: the stamp is read by a human in the memory viewer, and
+// "learned yesterday" should mean the user's yesterday. Matches the deliberate
+// datetime('now','localtime') choice in the usage tables.
+function todayStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+const withStamp = (fact, stamp) => `${stripFactStamp(fact).trimEnd()} (t:${stamp})`;
 export { factKey, factIndex };
 
 // Pull the `- ` bullet lines out of the markdown body. Pure + exported so the
@@ -177,8 +188,21 @@ export function writeChatMemoryFacts(root, facts) {
 // version won forever.
 //
 // Position is preserved rather than moving an updated fact to the end: it keeps
-// the file diff-friendly, and with a store this large (config.memory.maxFacts)
-// the newest-wins overflow eviction effectively never fires.
+// the file diff-friendly. That decision stands, but the reasoning it shipped
+// with ("the newest-wins overflow eviction effectively never fires") was the
+// weak part — eviction fires at config.memory.maxFacts (1000), which a
+// long-lived project reaches — and it left position doing a job it could not
+// do. Both readers of position treated it as RECENCY and so read an updated
+// fact backwards: selectChatMemoryFacts breaks score ties with
+// `b.index - a.index` ("newer wins"), and writeChatMemoryFacts evicts from the
+// FRONT. A fact the model kept re-confirming therefore ranked LOWEST and was
+// deleted FIRST — the opposite of this path's whole purpose.
+//
+// So position is no longer the recency signal: each fact carries an explicit
+// `(t:YYYY-MM-DD)` stamp, refreshed on add and on update. Day granularity is
+// deliberate — a fact re-confirmed twice in one day must not churn the file —
+// and core/fact-key.mjs peels the stamp before keying, so a re-stamp can never
+// be mistaken for a new fact.
 //
 // `remove` entries are matched by factKey too — the same normalization the
 // index uses — so a paraphrase of a stored fact still removes it. Returns the
@@ -215,18 +239,30 @@ export function appendChatMemory({ root, facts, remove, meta }) {
   });
   let added = 0;
   let updated = 0;
+  // One stamp for the whole batch: every fact in a turn is learned at the same
+  // moment, and re-deriving it per fact could straddle midnight mid-loop.
+  const stamp = todayStamp();
   for (const fact of incoming) {
     const k = factIndex(fact);
     if (!k) continue;
+    const stamped = withStamp(fact, stamp);
     const slot = slotByKey.get(k);
     if (slot === undefined) {
       slotByKey.set(k, merged.length);
-      merged.push(fact);
+      merged.push(stamped);
       added++;
-    } else if (merged[slot] !== fact) {
-      merged[slot] = fact;   // same index, new data → update in place
+    } else if (stripFactStamp(merged[slot]) !== stripFactStamp(fact)) {
+      // Same index, new data → update in place (position preserved) and
+      // re-stamp, so recency reflects the update rather than the first write.
+      merged[slot] = stamped;
       updated++;
     }
+    // A byte-identical restatement stays a NO-OP, deliberately. Re-stamping on
+    // every mention looked like the right "re-confirmation is recency" move
+    // and is in fact self-defeating: the extractor re-emits the same durable
+    // facts most turns, so it would rewrite the whole file constantly AND
+    // converge every stamp on today — erasing the very signal the stamp
+    // exists to carry. The stamp records when a fact was ADDED or CHANGED.
   }
 
   if (added === 0 && updated === 0 && removedCount === 0) {

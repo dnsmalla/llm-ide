@@ -28,6 +28,7 @@ import { homedir } from 'node:os';
 import { userRepoAllowlist } from '../kb/db.mjs';
 import { config } from '../core/config.mjs';
 import { parseChatMemoryFacts } from './memory-writer.mjs';
+import { factStamp } from '../core/fact-key.mjs';
 import { memoryDir, legacyMemoryDir, systemDir, graphIndexFile, SYSTEM_DIR } from './paths.mjs';
 
 // Expand a leading `~`/`~/` to the home directory. The Mac client sends
@@ -289,10 +290,27 @@ export function selectChatMemoryFacts(content, { userMessage = '', room = 0 } = 
       const factToks = factTokenSets[i];
       for (const [t, w] of idf) if (factToks.has(t)) score += w;
     }
-    return { fact, score, index: i };
+    // '' sorts below any real YYYY-MM-DD under localeCompare, which is how
+    // an unstamped legacy fact ends up last among equally-relevant facts.
+    return { fact, score, index: i, stamp: factStamp(fact) || '' };
   });
-  // Most relevant first; newer wins ties (higher original index).
-  scored.sort((a, b) => (b.score - a.score) || (b.index - a.index));
+  // Most relevant first; newer wins ties. Recency is the fact's own
+  // `(t:YYYY-MM-DD)` stamp (graphkit/memory-writer.mjs), NOT its position in
+  // the file. Position was the old proxy and it read an updated fact
+  // backwards: an update keeps its slot on purpose (diff-friendly), so a fact
+  // the model kept correcting or re-confirming held a LOW index and therefore
+  // lost every tie — while the writer's overflow eviction, which drops from
+  // the front, deleted it first. Both now key off the stamp.
+  //
+  // A fact stored before stamping existed has no stamp and sorts last among
+  // equally-relevant facts: we genuinely do not know when it was learned, and
+  // it earns a real date the next time it is added or corrected. That is
+  // deliberately not backfilled — a fabricated date would rank stale facts as
+  // fresh, which is the bug this replaces, pointing the other way.
+  // Same-day (or same-missing) stamps fall back to position, preserving the
+  // previous within-day ordering.
+  scored.sort((a, b) => (b.score - a.score)
+    || (a.stamp === b.stamp ? b.index - a.index : String(b.stamp).localeCompare(String(a.stamp))));
   const chosen = [];
   let used = 0;
   for (const { fact } of scored) {
