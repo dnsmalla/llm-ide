@@ -665,16 +665,25 @@ final class MobileControlManager {
             await server?.send(CommandError(commandId: chat.commandId, message: "Backend not configured"))
             return
         }
-        // The code pipeline has no image path — `ChatTransportInput`/
-        // `runExternalTurn` carry none — so this knowingly removes a working
-        // path: the phone DOES send real image bytes (`chat.images`) today,
-        // and the OLD transport (`AgentAskTransport`) hardcoded `images: []`
-        // server-side, meaning nothing ever actually reached the model
-        // anyway. Refuse visibly instead of silently discarding what looks
-        // like it was sent — the most user-visible consequence of this move.
+        // This knowingly removes a WORKING path, and the loss is real: the
+        // phone sends real image bytes (`chat.images`), and until this branch
+        // they reached the model — `api.askAgent(message:history:images:)`
+        // serialised them as image content blocks to `/kb/agent/ask`, which
+        // `extension/routes/agent.mjs` forwards to `runClaude(..., images)`.
+        // (The spec says otherwise, citing `AgentAskTransport`'s hardcoded
+        // `images: []`; that transport was the MAC sheet's, never the phone's,
+        // and the phone never went through it.) The code pipeline this chat
+        // now runs on carries no images at all — `ChatTransportInput`/
+        // `runExternalTurn` have no image parameter — so refuse visibly
+        // rather than silently discard what the user watched upload.
         guard chat.images.isEmpty else {
+            // Do NOT send the user to the Mac app: neither `MenuBarChatView`
+            // nor `LlmChatSheet` has an attach affordance, and both run the
+            // same image-less transport (see `VisualSourcePanel.swift`, which
+            // states the same fact for Doc Gen's sources).
             await server?.send(Output(commandId: chat.commandId, payload: OutputPayload(
-                stream: "Images aren't supported in this chat yet — send the question as text, or use the Mac app.",
+                stream: "Images aren't supported in this chat — send the question as text. "
+                    + "No LLM-IDE chat surface can send an image to the model right now.",
                 done: true)))
             return
         }

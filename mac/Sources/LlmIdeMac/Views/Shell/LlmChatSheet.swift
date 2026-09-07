@@ -213,9 +213,11 @@ struct LlmChatSheet: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // No longer "shared with the iPhone Chat tab" — that claim
-            // belonged to the old `/kb/agent/ask` transcript. The phone isn't
-            // on this `.quick` engine yet (a later task), so don't overclaim.
+            // Not "shared with the iPhone Chat tab" as a feature claim, even
+            // though it now IS one conversation across the menu bar, this
+            // sheet and the phone: the old wording described the retired
+            // `/kb/agent/ask` transcript, and the useful thing to say in an
+            // empty transcript is what this chat can answer.
             Text("Ask LLM-IDE anything about the active project.")
                 .font(.callout)
                 .foregroundStyle(.secondary)

@@ -154,18 +154,18 @@ struct VisualSourcePanel: View {
                 // attachment budget.
                 //
                 // There is currently NO working way for a user to get an
-                // image to a model from this app, on either Mac chat surface.
+                // image to a model from this app, on ANY chat surface.
                 // /kb/agent/ask does accept real image content blocks
                 // server-side (extension/routes/agent.mjs -> runClaude(...,
-                // images)), and the iPhone's mobile chat does feed it real
-                // images via `MobileControlManager`, but neither
-                // `LlmChatSheet` nor `MenuBarChatView` has an attach
-                // affordance to produce one, and the shared `.quick`
-                // code-pipeline transport they both run on has no image
-                // parameter at all. Do not point a future change at either
-                // Mac chat surface as a working vision path without first
-                // wiring an attach UI there AND carrying the image through
-                // that pipeline.
+                // images)), and the iPhone's mobile chat used to feed it real
+                // images that way — but the phone now shares the Mac's
+                // `.quick` code-pipeline engine, whose transport has no image
+                // parameter at all, so `MobileControlManager.handleChat`
+                // refuses images outright. Neither `LlmChatSheet` nor
+                // `MenuBarChatView` ever had an attach affordance to produce
+                // one. Do not point a future change at any chat surface as a
+                // working vision path without first wiring an attach UI AND
+                // carrying the image through that pipeline.
                 Text("Generate reads sources as text, so \(unreadableImageSources.count == 1 ? "this image" : "these images") will be skipped — image files can't be used as generation sources.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
