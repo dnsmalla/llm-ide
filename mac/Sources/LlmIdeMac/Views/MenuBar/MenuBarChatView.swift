@@ -90,29 +90,17 @@ struct MenuBarChatView: View {
         .onExitCommand { closePopover() }
         .onAppear {
             // Must land before anything below can trigger the engine's first
-            // session load (`handleOnAppearSessions`/pointer read) — set it
-            // late and `.quick` silently falls back to the unsuffixed
-            // pointer key, reloading the PREVIOUS project's conversation on
-            // a project switch. See `ChatEngine+Session.swift`'s `pointerKey`.
-            engine.quickChatProjectId = QuickChatContext.resolve(config: config, projectStore: projectStore)?.projectId
-            // Same guard `CodeAssistantPanel.handleOnAppear` uses: the engine
-            // is shared, so it may already have a session loaded — from a
-            // prior appearance of this popover, from the sheet (Task 6), or
-            // (once Task 8 lands) from the phone. Only run the full resolve-or-mint path
-            // when nothing is loaded yet; otherwise just refresh the list.
-            // Without this call at all, `.quick` never had a session to
-            // persist into: `persistCurrentChat()` no-ops on an empty
-            // `currentSessionIDString`, so every turn lived in memory only
-            // and a relaunch lost the conversation.
-            // `...IfReady()` (not the raw call): the popover can be opened
-            // with no active project, and calling `handleOnAppearSessions()`
-            // unconditionally then reads the `.quick` pointer with a nil
-            // `quickChatProjectId` — see that method's doc comment.
-            if engine.currentSessionIDString.isEmpty {
-                engine.handleOnAppearSessionsIfReady()
-            } else {
-                engine.refreshSessions()
-            }
+            // session load: the engine is registry-cached and shared with the
+            // sheet and the phone, so it may already hold a session — from a
+            // prior appearance of this popover, from the sheet, or from the
+            // phone — possibly for a DIFFERENT project. `attach` owns that
+            // three-case decision for all three surfaces (see its doc
+            // comment); doing it by hand here is what wrote project B's turns
+            // into project A's session file, and what tripped `pointerKey`'s
+            // assertion after a project was closed. Without any call at all,
+            // `.quick` has no session to persist into and every turn lives in
+            // memory only until the popover closes.
+            QuickChatContext.attach(engine, config: config, projectStore: projectStore)
             wireEngine()
             wireVoiceService()
             completion.configure(api: api, repoRoot: nil)
@@ -136,6 +124,17 @@ struct MenuBarChatView: View {
                 voiceState.setRecording(false)
                 voiceService.cancel()
             }
+        }
+        .onChange(of: projectStore.activeProject) { _, _ in
+            // The composer gate above re-evaluates LIVE on `@Published
+            // activeProject`, so without this the gate and the engine
+            // disagree the moment a project is opened, switched or closed
+            // while this popover is on screen: the composer appears (or
+            // stays) while the engine is still wired to the previous
+            // project — or to none, in which case every turn is silently
+            // unpersisted because `persistCurrentChat()` no-ops on an empty
+            // session id. Same shared decision as `.onAppear`.
+            QuickChatContext.attach(engine, config: config, projectStore: projectStore)
         }
         .onChange(of: selectedModelId) { _, _ in wireEngine() }
         .onChange(of: draft) { _, newValue in

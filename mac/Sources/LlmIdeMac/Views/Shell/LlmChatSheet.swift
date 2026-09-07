@@ -87,42 +87,29 @@ struct LlmChatSheet: View {
         .frame(minWidth: 520, idealWidth: 580, minHeight: 480, idealHeight: 560)
         .onAppear {
             // Must land before anything below can trigger the engine's first
-            // session load (`handleOnAppearSessions`/pointer read) — set it
-            // late and `.quick` silently falls back to the unsuffixed
-            // pointer key, reloading the PREVIOUS project's conversation on
-            // a project switch. See `ChatEngine+Session.swift`'s `pointerKey`.
-            engine.quickChatProjectId = QuickChatContext.resolve(config: config, projectStore: projectStore)?.projectId
-            // Same guard `CodeAssistantPanel.handleOnAppear`/`MenuBarChatView`
-            // use: the engine is shared, so it may already have a session
-            // loaded from a prior appearance of this sheet, the menu bar, or
-            // (once Task 8 lands) the phone. Only run the full resolve-or-mint
-            // path when nothing is loaded yet; otherwise just refresh the list.
-            // `...IfReady()` (not the raw call) — this sheet's own `.sheet`
-            // presentation isn't gated on a project, so first appearance can
-            // happen with `quickChatProjectId == nil`; see that method's doc
-            // comment for why the raw call would assert/misbehave then.
-            if engine.currentSessionIDString.isEmpty {
-                engine.handleOnAppearSessionsIfReady()
-            } else {
-                engine.refreshSessions()
-            }
+            // session load: the engine is registry-cached and shared with the
+            // menu bar and the phone, so it may already hold a session — for
+            // a DIFFERENT project than the one active now (close sheet →
+            // switch project → reopen). `attach` owns that three-case
+            // decision for all three surfaces; see its doc comment for what
+            // each case must do and what poking `quickChatProjectId` by hand
+            // got wrong.
+            QuickChatContext.attach(engine, config: config, projectStore: projectStore)
             wireEngine()
             inputFocused = true
         }
         .onChange(of: projectStore.activeProject) { _, _ in
             // The sheet lives in the main window, where switching the active
-            // project mid-conversation is plausible (unlike the menu-bar
-            // popover). `switchQuickChatProject(to:)` is the engine-owned
-            // session-swap sequence for exactly this: it stops the in-flight
-            // turn and persists it under the OLD project's session (the same
-            // prologue `switchSession`/`createNewSession` use) BEFORE
-            // re-pointing at the NEW project and reloading — so a turn in
-            // flight against project A can never land its reply into project
-            // B's session, and B's freshly-loaded chat never inherits A's
-            // transient agent/approval state (see that method's doc comment
-            // on `ChatEngine+Session.swift`).
-            engine.switchQuickChatProject(
-                to: QuickChatContext.resolve(config: config, projectStore: projectStore)?.projectId)
+            // project mid-conversation is plausible. `attach` routes this to
+            // `switchQuickChatProject(to:)`, the engine-owned session-swap
+            // sequence for exactly this: it stops the in-flight turn and
+            // persists it under the OLD project's session (the same prologue
+            // `switchSession`/`createNewSession` use) BEFORE re-pointing at
+            // the NEW project and reloading — so a turn in flight against
+            // project A can never land its reply into project B's session,
+            // and B's freshly-loaded chat never inherits A's transient
+            // agent/approval state.
+            QuickChatContext.attach(engine, config: config, projectStore: projectStore)
         }
         .onChange(of: engine.messages) { oldValue, newValue in
             // Same call `CodeAssistantPanel`/`MenuBarChatView` wire for their

@@ -642,24 +642,14 @@ final class MobileControlManager {
     /// `.onAppear`/`.onChange`, so this collapses both of those into one call
     /// for the phone.
     ///
-    /// Never clobbers a session a Mac window already has loaded: if nothing
-    /// is loaded yet, stamp `quickChatProjectId` and load (mirrors
-    /// `LlmChatSheet.onAppear`); if something IS loaded but for a stale
-    /// project (the Mac switched projects since a window last touched this
-    /// engine), repoint via `switchQuickChatProject(to:)` rather than poking
-    /// `quickChatProjectId` directly (mirrors `LlmChatSheet`'s
-    /// `.onChange(of: projectStore.activeProject)`) — poking it directly
-    /// would leave `currentSessionIDString` pointing at the OLD project's
-    /// session under the NEW project's id, corrupting the per-project
-    /// pointer key on the next persist.
+    /// `QuickChatContext.attach` is that decision, shared with both Mac
+    /// surfaces' `.onAppear`/`.onChange` — including the case this method
+    /// used to be the only correct implementation of: an engine already
+    /// loaded for a STALE project must be repointed via
+    /// `switchQuickChatProject(to:)`, never by poking `quickChatProjectId`.
     private func quickChatEngine(for ctx: QuickChatContext, api: LlmIdeAPIClient) -> ChatEngine {
         let engine = ChatEngineRegistry.shared.engine(for: .quick, api: api)
-        if engine.currentSessionIDString.isEmpty {
-            engine.quickChatProjectId = ctx.projectId
-            engine.handleOnAppearSessionsIfReady()
-        } else if engine.quickChatProjectId != ctx.projectId {
-            engine.switchQuickChatProject(to: ctx.projectId)
-        }
+        QuickChatContext.attach(engine, toProject: ctx.projectId)
         return engine
     }
 

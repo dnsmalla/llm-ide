@@ -55,6 +55,59 @@ struct QuickChatContext {
             + "v\(requiredServerApiVersion) and the running server is v\(apiVersion)."
     }
 
+    /// Point the shared `.quick` engine at `projectId`. ONE answer for all
+    /// three surfaces (menu bar, sheet, phone) — the same reason this type
+    /// exists at all.
+    ///
+    /// No surface may assign `engine.quickChatProjectId` itself. The three
+    /// cases below are not interchangeable, and a surface that pokes the id
+    /// directly gets the third one wrong every time:
+    ///
+    ///  1. **Nothing loaded** (`currentSessionIDString.isEmpty`) — stamp the
+    ///     id and resolve a session. Safe because there is no loaded session
+    ///     to mis-pair with the new id, and `...IfReady()` declines (rather
+    ///     than reading the `.quick` pointer with a nil id) when no project
+    ///     is open.
+    ///  2. **Loaded for a DIFFERENT project** — must go through
+    ///     `switchQuickChatProject(to:)`, which persists the outgoing turn
+    ///     while `quickChatProjectId` still names the OLD project and then
+    ///     re-resolves the new one. Poking the id directly instead leaves
+    ///     `currentSessionIDString` pointing at the OLD project's session
+    ///     under the NEW project's pointer key, so every later turn is
+    ///     appended to the previous project's file — and with a nil id
+    ///     (project CLOSED, not switched) it reaches `pointerKey`'s
+    ///     `assertionFailure` instead.
+    ///  3. **Loaded for the same project** — nothing to swap; just refresh
+    ///     the session list, exactly as both `.onAppear`s used to.
+    ///
+    /// The menu bar and the sheet call this from `.onAppear` AND from
+    /// `.onChange(of: projectStore.activeProject)`: the engine is
+    /// registry-cached and outlives both surfaces, so a project change while
+    /// they are closed — or while the popover is open, where the composer
+    /// gate re-evaluates live on `@Published activeProject` — must reach the
+    /// engine too, or the gate and the engine disagree silently.
+    @MainActor
+    static func attach(_ engine: ChatEngine, toProject projectId: String?) {
+        assert(engine.scope == .quick, "QuickChatContext.attach is for the .quick engine only")
+        if engine.currentSessionIDString.isEmpty {
+            engine.quickChatProjectId = projectId
+            engine.handleOnAppearSessionsIfReady()
+        } else if engine.quickChatProjectId != projectId {
+            engine.switchQuickChatProject(to: projectId)
+        } else {
+            engine.refreshSessions()
+        }
+    }
+
+    /// `attach(_:toProject:)` for a caller that has the stores rather than an
+    /// already-resolved id — i.e. the two Mac surfaces. Resolving inside this
+    /// type is the point: a surface that resolved the project itself could
+    /// resolve it differently from the gate it renders.
+    @MainActor
+    static func attach(_ engine: ChatEngine, config: AppConfig, projectStore: ProjectStore) {
+        attach(engine, toProject: resolve(config: config, projectStore: projectStore)?.projectId)
+    }
+
     /// `WorkspaceRoot.resolve` and `ProjectStore.activeProject` are both
     /// `@MainActor`-isolated (see `WorkspaceRoot.swift` / `ProjectStore.swift`),
     /// so this has to be too.
