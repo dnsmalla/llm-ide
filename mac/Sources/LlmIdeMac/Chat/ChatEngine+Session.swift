@@ -169,6 +169,10 @@ extension ChatEngine {
     /// `messages` itself (like every other session-swap method here) and
     /// returns it for the caller's convenience.
     ///
+    /// `.quick` skips the "fall back to the newest session" step — see the
+    /// inline comment below — and mints fresh instead whenever its
+    /// per-project pointer doesn't resolve.
+    ///
     /// Extracted from `CodeAssistantPanel.handleOnAppear`, which also does
     /// model-picker and initial-attachment setup — that half stays in the view.
     @discardableResult
@@ -184,6 +188,20 @@ extension ChatEngine {
            session.scope == scope {
             messages = session.messages
             onHistoryReplaced(session.messages)
+        } else if scope == .quick {
+            // `.quick`'s "no pointer" case must NOT fall through to the
+            // `sessions.first` branch below: `sessions` is EVERY project's
+            // quick sessions (`ChatSessionStore.list(for:)` doesn't filter by
+            // project — see its doc comment), so on a project's first-ever
+            // quick chat that branch would silently adopt — and `rememberCurrentPointer()`
+            // would then re-point THIS project's pointer at — a different
+            // project's most recently used quick session. That is the exact
+            // cross-project bleed `quickChatProjectId`/the per-project pointer
+            // key exist to stop, reached through the fallback instead of the
+            // pointer read. Always start fresh instead; the pointer read
+            // above is the ONLY legitimate way a `.quick` engine resumes a
+            // session.
+            mintFreshSession()
         } else if let newest = sessions.first {
             currentSessionIDString = newest.id.uuidString
             messages = newest.messages

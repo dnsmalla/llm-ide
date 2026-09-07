@@ -82,6 +82,20 @@ struct MenuBarChatView: View {
             // pointer key, reloading the PREVIOUS project's conversation on
             // a project switch. See `ChatEngine+Session.swift`'s `pointerKey`.
             engine.quickChatProjectId = QuickChatContext.resolve(config: config, projectStore: projectStore)?.projectId
+            // Same guard `CodeAssistantPanel.handleOnAppear` uses: the engine
+            // is shared, so it may already have a session loaded — from a
+            // prior appearance of this popover, or (once Task 6/8 land) from
+            // the sheet or the phone. Only run the full resolve-or-mint path
+            // when nothing is loaded yet; otherwise just refresh the list.
+            // Without this call at all, `.quick` never had a session to
+            // persist into: `persistCurrentChat()` no-ops on an empty
+            // `currentSessionIDString`, so every turn lived in memory only
+            // and a relaunch lost the conversation.
+            if engine.currentSessionIDString.isEmpty {
+                engine.handleOnAppearSessions()
+            } else {
+                engine.refreshSessions()
+            }
             wireEngine()
             wireVoiceService()
             completion.configure(api: api, repoRoot: nil)
@@ -111,6 +125,13 @@ struct MenuBarChatView: View {
             completion.update(draft: newValue)
         }
         .onChange(of: engine.messages) { oldValue, newValue in
+            // Same call `CodeAssistantPanel` wires for its own scopes
+            // (`CodeAssistantPanel.swift:261`) — persists (debounced while a
+            // reply is streaming) and fires the VoiceOver announcement for a
+            // newly-arrived assistant turn. `.quick` had nothing wiring this
+            // at all until now, so a turn was correct in memory but never
+            // reached `ChatSessionStore`.
+            engine.announceAndPersist(oldValue: oldValue, newValue: newValue)
             // No `viewModel.notifyIfTurnFinished(...)` here anymore: that
             // posted `.llmChatTranscriptChanged` to tell other `/kb/agent/ask`
             // listeners (the not-yet-migrated `LlmChatSheet`, the phone
