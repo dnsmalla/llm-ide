@@ -163,15 +163,54 @@ extension ChatEngine {
         UserDefaults.standard.set(currentSessionIDString, forKey: pointerKey)
     }
 
+    /// What to load when the current session is gone — never picked yet (on
+    /// appear), or just deleted. ONE decision point for both callers below.
+    ///
+    /// This used to be hand-rolled separately in `handleOnAppearSessions()`
+    /// and `deleteSession`, and when the `.quick` cross-project-bleed fix
+    /// landed (this task's review, round 1) it was patched into ONLY the
+    /// first copy — `deleteSession` kept the plain `sessions.first` fallback,
+    /// so a user with quick chats in two projects who hit Clear in Project A
+    /// could have `deleteSession` pick Project B's most-recent quick session,
+    /// and the caller's `rememberCurrentPointer()` would then write PROJECT
+    /// B's session id into PROJECT A's own pointer key — reopening the exact
+    /// bleed the round-1 fix closed, through the second call site it missed.
+    /// Two hand-narrowed copies of one fallback is how that happened; this
+    /// helper exists so there is exactly one copy to narrow.
+    ///
+    /// Precondition: `sessions` (via `refreshSessions()`) reflects the
+    /// current on-disk state — both callers refresh immediately before
+    /// calling this.
+    enum SessionFallback {
+        /// Adopt this already-safe-to-adopt session (same scope, and — for
+        /// `.quick` — implicitly the right project, because it never comes
+        /// from the unfiltered `sessions` list for `.quick` at all).
+        case adopt(ChatSession)
+        /// No safe candidate: the caller should `mintFreshSession()`.
+        case mintFresh
+    }
+
+    private func fallbackSessionAfterLoss() -> SessionFallback {
+        // `.quick` must never adopt `sessions.first`: `sessions` comes from
+        // `ChatSessionStore.list(for: scope)`, which is EVERY project's quick
+        // sessions, unfiltered (see that method's doc comment) — adopting one
+        // here, and the caller then calling `rememberCurrentPointer()` on it,
+        // is exactly the cross-project bleed `quickChatProjectId`/the
+        // per-project pointer key exist to stop. Always mint fresh instead;
+        // the per-project pointer read (in `handleOnAppearSessions`) is the
+        // ONLY legitimate way a `.quick` engine resumes a session.
+        guard scope != .quick, let newest = sessions.first else {
+            return .mintFresh
+        }
+        return .adopt(newest)
+    }
+
     /// Resolve which chat this scope should show on appear: migrate any legacy
     /// per-scope file, load the session list, then restore the remembered
-    /// pointer → fall back to the newest session → mint a fresh one. Sets
+    /// pointer → fall back to the newest session (via `fallbackSessionAfterLoss()`,
+    /// which mints fresh instead for `.quick`) → mint a fresh one. Sets
     /// `messages` itself (like every other session-swap method here) and
     /// returns it for the caller's convenience.
-    ///
-    /// `.quick` skips the "fall back to the newest session" step — see the
-    /// inline comment below — and mints fresh instead whenever its
-    /// per-project pointer doesn't resolve.
     ///
     /// Extracted from `CodeAssistantPanel.handleOnAppear`, which also does
     /// model-picker and initial-attachment setup — that half stays in the view.
@@ -188,29 +227,18 @@ extension ChatEngine {
            session.scope == scope {
             messages = session.messages
             onHistoryReplaced(session.messages)
-        } else if scope == .quick {
-            // `.quick`'s "no pointer" case must NOT fall through to the
-            // `sessions.first` branch below: `sessions` is EVERY project's
-            // quick sessions (`ChatSessionStore.list(for:)` doesn't filter by
-            // project — see its doc comment), so on a project's first-ever
-            // quick chat that branch would silently adopt — and `rememberCurrentPointer()`
-            // would then re-point THIS project's pointer at — a different
-            // project's most recently used quick session. That is the exact
-            // cross-project bleed `quickChatProjectId`/the per-project pointer
-            // key exist to stop, reached through the fallback instead of the
-            // pointer read. Always start fresh instead; the pointer read
-            // above is the ONLY legitimate way a `.quick` engine resumes a
-            // session.
-            mintFreshSession()
-        } else if let newest = sessions.first {
-            currentSessionIDString = newest.id.uuidString
-            messages = newest.messages
-            onHistoryReplaced(newest.messages)
-            rememberCurrentPointer()
         } else {
-            // No usable pointer and no saved chats for this scope — start one.
-            // (mintFreshSession clears `messages` itself.)
-            mintFreshSession()
+            switch fallbackSessionAfterLoss() {
+            case .adopt(let newest):
+                currentSessionIDString = newest.id.uuidString
+                messages = newest.messages
+                onHistoryReplaced(newest.messages)
+                rememberCurrentPointer()
+            case .mintFresh:
+                // No usable pointer and no safe saved chat to fall back to —
+                // start one. (mintFreshSession clears `messages` itself.)
+                mintFreshSession()
+            }
         }
         DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
         return messages
@@ -390,7 +418,9 @@ extension ChatEngine {
     }
 
     /// Delete chat `id`. If it was the active chat, switch to the next most
-    /// recent session, or mint a fresh empty one if none remain.
+    /// recent session (via `fallbackSessionAfterLoss()`, which mints fresh
+    /// instead for `.quick` rather than risking a different project's
+    /// session), or mint a fresh empty one if none remain.
     ///
     /// `async` only because of the session-memory forget at the tail. Every
     /// state change below still happens before the first suspension point, so
@@ -404,7 +434,8 @@ extension ChatEngine {
         ChatSessionStore.delete(id: id)
         refreshSessions()
         if wasActive {
-            if let next = sessions.first {
+            switch fallbackSessionAfterLoss() {
+            case .adopt(let next):
                 currentSessionIDString = next.id.uuidString
                 rememberCurrentPointer()
                 resetTransientSessionState()
@@ -412,9 +443,10 @@ extension ChatEngine {
                 messages = next.messages
                 onHistoryReplaced(next.messages)
                 DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
-            } else {
-                // No sessions left for this scope — mint a blank one and
-                // point everything (pointer, defaults, sessions list) at it.
+            case .mintFresh:
+                // No safe session to fall back to for this scope — mint a
+                // blank one and point everything (pointer, defaults, sessions
+                // list) at it.
                 mintFreshSession()
             }
         }
