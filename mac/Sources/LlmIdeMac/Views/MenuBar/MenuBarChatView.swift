@@ -44,7 +44,7 @@ struct MenuBarChatView: View {
         // Resolved from the registry rather than constructed here — see the
         // `engine` property's doc comment. `ChatTransportFactory` (inside the
         // registry) picks the real code-pipeline transport; this view no
-        // longer builds an `AgentAskTransport` at all.
+        // longer builds a meeting-agent transport at all.
         let engine = ChatEngineRegistry.shared.engine(for: .quick, api: api)
         _engine = State(initialValue: engine)
         _viewModel = State(initialValue: LlmChatViewModel(engine: engine))

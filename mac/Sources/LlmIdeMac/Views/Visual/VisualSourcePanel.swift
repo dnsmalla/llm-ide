@@ -154,16 +154,18 @@ struct VisualSourcePanel: View {
                 // attachment budget.
                 //
                 // There is currently NO working way for a user to get an
-                // image to a model from this app, on either chat surface.
+                // image to a model from this app, on either Mac chat surface.
                 // /kb/agent/ask does accept real image content blocks
                 // server-side (extension/routes/agent.mjs -> runClaude(...,
-                // images)), but no Mac client actually feeds it one:
-                // AgentAskTransport.swift:62 hardcodes `images: []` (its own
-                // comment: "the sheet has never supported attaching one"),
-                // and LlmChatSheet.swift has no attach affordance at all. Do
-                // not point a future change at the LLM Chat sheet as a
-                // working vision path without first wiring an attach UI
-                // there AND updating AgentAskTransport to send it.
+                // images)), and the iPhone's mobile chat does feed it real
+                // images via `MobileControlManager`, but neither
+                // `LlmChatSheet` nor `MenuBarChatView` has an attach
+                // affordance to produce one, and the shared `.quick`
+                // code-pipeline transport they both run on has no image
+                // parameter at all. Do not point a future change at either
+                // Mac chat surface as a working vision path without first
+                // wiring an attach UI there AND carrying the image through
+                // that pipeline.
                 Text("Generate reads sources as text, so \(unreadableImageSources.count == 1 ? "this image" : "these images") will be skipped — image files can't be used as generation sources.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)

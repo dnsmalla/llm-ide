@@ -40,9 +40,9 @@ struct LlmChatSheet: View {
     init(api: LlmIdeAPIClient) {
         self.api = api
         // Resolved from the registry rather than constructed here (no more
-        // `ChatEngine(scope: .explorer, transport: AgentAskTransport(api:))`)
-        // — `ChatTransportFactory` (inside the registry) picks the real
-        // code-pipeline transport.
+        // building a `ChatEngine(scope: .explorer, ...)` over the old
+        // meeting-agent transport) — `ChatTransportFactory` (inside the
+        // registry) picks the real code-pipeline transport.
         let engine = ChatEngineRegistry.shared.engine(for: .quick, api: api)
         _engine = State(initialValue: engine)
         _viewModel = State(initialValue: LlmChatViewModel(engine: engine))

@@ -455,7 +455,6 @@ final class LlmIdeAPIClient: @unchecked Sendable {
     }
 }
 
-extension LlmIdeAPIClient: AgentAskSending {}
 // `AgentAskHistoryFetching` (the seam `LlmChatViewModel.loadHistory`/
 // `clearHistory` used to poll `/kb/agent/ask/history` through) was removed in
 // Task 6 along with those methods — the `.quick` engine owns its transcript
