@@ -412,7 +412,7 @@ Native Mac WebSocket server on `:3006` (Bonjour `_llmide._tcp` + PIN pairing). N
 | Invariants (read before changing hot paths) | [docs/explanation/invariants.md](docs/explanation/invariants.md) |
 | API overview | [docs/reference/api/overview.md](docs/reference/api/overview.md) |
 | Project folder layout | [docs/reference/project-layout.md](docs/reference/project-layout.md) |
-| Architecture decisions | [docs/decisions/](docs/decisions/) (ADRs 0001–0016) |
+| Architecture decisions | [docs/decisions/](docs/decisions/) (ADRs 0001–0017) |
 | Central skills install | [docs/how-to/install-central-skills.md](docs/how-to/install-central-skills.md) |
 | Contribute | [docs/how-to/contribute.md](docs/how-to/contribute.md) |
 

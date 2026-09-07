@@ -376,7 +376,7 @@ Comprehensive docs at https://grid-devs.gitlab.io/personal/dinesh/notes-extensio
 - **System architecture** — [`docs/explanation/architecture.md`](docs/explanation/architecture.md)
 - **Engineering invariants** — [`docs/explanation/invariants.md`](docs/explanation/invariants.md)
 - **API reference** — [`docs/reference/api/overview.md`](docs/reference/api/overview.md)
-- **Decisions** — [`docs/decisions/`](docs/decisions/) (ADRs 0001–0016)
+- **Decisions** — [`docs/decisions/`](docs/decisions/) (ADRs 0001–0017)
 - **How-to guides** — [`docs/how-to/`](docs/how-to/)
 
 ### Other root-level guides

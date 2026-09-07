@@ -67,21 +67,22 @@ def build_checks() -> list[tuple[str, object, object, str]]:
     head = migration_head(Path("extension/kb/migrations"))
     api = first_int(server, r"SERVER_API_VERSION\s*=\s*(\d+)")
     body = first_int(config, r"LLMIDE_BODY_LIMIT_MB',\s*(\d+)")
-    # graph-kit version. It is VENDORED at mac/LocalPackages/graph-kit (a
-    # .package(path:) dependency), not a versioned git pin, so there is no
-    # `from:` to read: the newest released CHANGELOG heading in the vendored
-    # copy is the only version the tree actually states.
-    graphkit = first_str(
-        _read("mac/LocalPackages/graph-kit/CHANGELOG.md"),
-        # first_str() runs re.search with NO re.M, so anchor on the newline
-        # rather than ^; [Unreleased] cannot match because \d needs digits.
-        r"\n## \[(\d+\.\d+\.\d+)\]",
-    )
-    # Also lock the MECHANISM: if this ever reverts to a git pin, the vendored
-    # CHANGELOG stops being the source of truth and this check would silently
-    # read a stale file.
-    graphkit_vendored = (
-        "vendored" if "LocalPackages/graph-kit" in package_swift else "git-pin"
+    # graph-kit consumption mechanism. It is a REMOTE dependency pinned by
+    # commit (`.package(url:, revision:)`), NOT the vendored `.package(path:)`
+    # it once was. Two consequences this check encodes: the submodule at
+    # mac/LocalPackages/graph-kit is now only the editing/lab working tree, so
+    # its CHANGELOG is not what the build resolves and must never be read as
+    # the shipped version; and the version itself is a commit sha the spec page
+    # deliberately elides (duplicating a sha in prose guarantees drift), so
+    # there is no version string to compare — the mechanism is what we lock.
+    # A revert to a path dep changes what the page must say, and fails here.
+    graphkit_mechanism = (
+        "url-pin"
+        if re.search(
+            r'\.package\(\s*url:\s*"[^"]*graph-kit\.git"\s*,\s*revision:',
+            package_swift,
+        )
+        else "path-dep"
     )
     # Prometheus uptime metric name — renamed meetnotes_→llmide_; lock the name.
     uptime_metric = first_str(metrics, r"# TYPE (\w+_uptime_seconds) gauge")
@@ -122,12 +123,13 @@ def build_checks() -> list[tuple[str, object, object, str]]:
         ("ADR range — AGENTS.md 'ADRs 0001–NNNN'",
          adr_head, first_int(_read("AGENTS.md"), r"ADRs 0001[–-]0*(\d+)"),
          "AGENTS.md"),
-        ("graph-kit version — macos-app.md dependency table",
-         graphkit, first_str(macos, r"graph-kit \(`GraphKit`\) \| vendored `([\d.]+)`"),
-         "docs/spec/macos-app.md"),
         ("graph-kit consumption mechanism — macos-app.md dependency table",
-         graphkit_vendored,
-         first_str(macos, r"graph-kit \(`GraphKit`\) \| vendored `[\d.]+` \((\w+)\)"),
+         graphkit_mechanism,
+         "url-pin" if re.search(
+             r'graph-kit \(`GraphKit` \+ `GraphCore`\) \| '
+             r'`\.package\(url: "[^"]*graph-kit\.git", revision:',
+             macos,
+         ) else None,
          "docs/spec/macos-app.md"),
         ("uptime metric name — cross-cutting.md Prometheus section",
          uptime_metric, first_str(cross, r"server uptime \(`(\w+_uptime_seconds)`"),

@@ -111,8 +111,8 @@ def test_real_source_extracts_all_profiles() -> None:
     if not real_src.exists():
         pytest.skip("real source not found")
     rows = extract(real_src)
-    # 7 in PROFILES block + 2 appended (authPublic, authRegister) = 9
-    assert len(rows) == 9
+    # 8 in PROFILES block + 2 appended (authPublic, authRegister) = 10
+    assert len(rows) == 10
     names = {r["name"] for r in rows}
     assert "llm" in names
     assert "llmFast" in names
@@ -123,3 +123,4 @@ def test_real_source_extracts_all_profiles() -> None:
     assert "kbExport" in names
     assert "authPublic" in names
     assert "authRegister" in names
+    assert "unknownFallback" in names
