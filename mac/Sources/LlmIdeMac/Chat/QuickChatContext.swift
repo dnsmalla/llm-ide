@@ -107,7 +107,16 @@ struct QuickChatContext {
         var message: String? {
             switch self {
             case .allowed: return nil
-            case .serverTooOld(let v): return unsupportedServerMessage(apiVersion: v)
+            case .serverTooOld(let v):
+                guard let v else {
+                    // It ANSWERED — telling the user to start a server would
+                    // be wrong. A `/health` with no `apiVersion` predates the
+                    // field entirely, so it is far below the floor.
+                    return "The LLM-IDE server answered but didn't report an API version, so it is "
+                        + "older than the v\(requiredServerApiVersion) this chat needs. Restart it "
+                        + "from a current checkout."
+                }
+                return unsupportedServerMessage(apiVersion: v)
             case .unreachable:
                 return "The LLM-IDE server didn't answer, so this message wasn't sent. "
                     + "Check it is running and try again."
@@ -137,17 +146,20 @@ struct QuickChatContext {
     /// the send closure and the picker's label, so the label cannot promise a
     /// model the send doesn't use.
     ///
-    /// An id the CURRENT provider doesn't offer is discarded rather than
-    /// sent: switching provider in Settings resets `config.defaultModelId`
-    /// but leaves an explicit pick naming the old provider's model, which the
-    /// new provider would reject.
-    /// Only the EXPLICIT pick is filtered, and only against a non-empty list.
-    /// `models` is `AICliTool.models`, a static fallback: a provider with no
-    /// key yet returns `[]` (Custom/GLM always do), and a provider WITH a key
-    /// has live `/models` ids the static list never mentions. Filtering
+    /// Only the EXPLICIT pick is filtered, and only against a non-empty list:
+    /// an id the CURRENT provider doesn't offer falls back to the configured
+    /// default rather than being sent to a provider that would reject it.
+    ///
+    /// `models` is `AICliTool.models`, a static per-provider switch: Custom
+    /// and GLM return `[]`, and any provider with a key also has live
+    /// `/models` ids the static list never mentions. Filtering
     /// `defaultModelId` — written from that wider list — against it would send
     /// `nil` for a model the user legitimately configured, which is how a
     /// custom provider ends up answering "Unknown Model".
+    ///
+    /// The surfaces clear `quickChatModelId` when `activeCLI` changes, so an
+    /// unlistable provider (`models == []`) can't inherit the previous
+    /// provider's pick through the empty-list shortcut below.
     static func effectiveModelId(explicit: String?, defaultModelId: String, models: [AIModel]) -> String? {
         if let explicit, !explicit.isEmpty {
             // An empty list means "this provider's models aren't enumerated

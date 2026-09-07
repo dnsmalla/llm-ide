@@ -34,9 +34,11 @@ final class QuickChatContextTests: XCTestCase {
                        "Sonnet")
         XCTAssertEqual(QuickChatContext.modelLabel(modelId: nil, defaultModelId: "", models: models),
                        "Auto")
-        // A model the picker no longer offers must not render as a raw id.
+        // A pick the current provider no longer offers falls back to the
+        // configured default — and the label must say so, because that is
+        // what the turn will carry.
         XCTAssertEqual(QuickChatContext.modelLabel(modelId: "retired", defaultModelId: "sonnet", models: models),
-                       "Auto")
+                       "Sonnet")
     }
 
     /// The label and the send MUST resolve identically — a label reading
@@ -87,5 +89,10 @@ final class QuickChatContextTests: XCTestCase {
         let unreachable = QuickChatContext.SendGate.unreachable.message
         XCTAssertNotNil(unreachable)
         XCTAssertTrue(unreachable?.contains("wasn't sent") == true)
+        // A server that ANSWERED without naming a version must not be told to
+        // start a server — it is running, just far too old.
+        let nameless = QuickChatContext.SendGate.serverTooOld(nil).message
+        XCTAssertTrue(nameless?.contains("answered") == true)
+        XCTAssertFalse(nameless?.contains("Settings → Backend → Start") == true)
     }
 }

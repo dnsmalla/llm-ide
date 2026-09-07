@@ -140,6 +140,27 @@ struct ChatEngineTurnTests {
         #expect(engine.busy == false)
     }
 
+    /// `startTurn` marks the slot taken BEFORE spawning its Task, and that is
+    /// now the only thing closing the quick chat's send-path race: both Mac
+    /// composers re-check `busy` after awaiting a `/health` probe, and on a
+    /// serial main actor the check and this claim cannot be split. If `busy`
+    /// went back to being set inside `runTurn`, two surfaces would each pass
+    /// their check and interleave two turns on one shared engine.
+    ///
+    /// Deliberately NOT `guard !busy` inside `startTurn`: `drainQueueOrRelease`
+    /// calls it while `busy` is still true, so refusing there would drop the
+    /// queued message and wedge the engine (see `queueDrain` below).
+    @Test("startTurn claims the turn slot synchronously, before its Task runs")
+    func startTurnClaimsSlotSynchronously() {
+        let (engine, _) = makeEngine()
+        #expect(engine.busy == false)
+        engine.startTurn("hello")
+        // No await between the call and here: if the claim were left to
+        // `runTurn`, this would still be false.
+        #expect(engine.busy == true)
+        engine.stop()
+    }
+
     @Test("Queue drains after completion, in FIFO order, one per turn")
     func queueDrain() async {
         let (engine, t) = makeEngine()

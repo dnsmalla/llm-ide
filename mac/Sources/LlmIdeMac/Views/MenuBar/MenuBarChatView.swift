@@ -32,6 +32,12 @@ struct MenuBarChatView: View {
     /// Why the last send was refused (server too old, unreachable, or the
     /// shared engine already busy). Cleared when the next send starts.
     @State private var sendRefusal: String?
+    /// The draft as `refuse()` restored it. `.onChange(of: draft)` clears the
+    /// notice only when the draft differs from this — the restore itself is a
+    /// draft change, and clearing on it wiped the message in the same update
+    /// that set it, so the two refusals only the composer can show (busy, and
+    /// "server didn't answer") were never readable.
+    @State private var refusalDraft: String = ""
     @FocusState private var inputFocused: Bool
 
     @State private var voiceService = VoiceInputService()
@@ -143,11 +149,17 @@ struct MenuBarChatView: View {
                 voiceService.cancel()
             }
         }
-        .onChange(of: draft) { _, _ in
-            // A refusal describes the send the user just tried; typing again
-            // means they have moved on, and leaving it there would put a
-            // stale "server didn't answer" over a composer that works.
-            if sendRefusal != nil { sendRefusal = nil }
+        .onChange(of: draft) { _, newValue in
+            // Typing again retires the last refusal — but NOT the restore
+            // that accompanied it (see `refusalDraft`).
+            if sendRefusal != nil, newValue != refusalDraft { sendRefusal = nil }
+        }
+        .onChange(of: config.activeCLI) { _, _ in
+            // A model id belongs to the provider it was picked under (the picker lives here).
+            // `effectiveModelId` keeps a pick when the new provider lists no
+            // models at all, so without this a Custom/GLM turn would carry the
+            // previous provider's id.
+            engine.quickChatModelId = nil
         }
         .onChange(of: projectStore.activeProject) { _, _ in
             // The composer gate above re-evaluates LIVE on `@Published
@@ -831,6 +843,7 @@ struct MenuBarChatView: View {
             // didn't answer, changes nothing at all) reads as a dead button.
             func refuse(_ message: String?) {
                 draft = restoreDraft
+                refusalDraft = restoreDraft
                 pendingDirectives = directives
                 pendingSkillIds = skills
                 sendRefusal = message

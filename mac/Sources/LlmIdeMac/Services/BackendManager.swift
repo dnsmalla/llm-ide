@@ -776,8 +776,8 @@ final class BackendManager {
         recordServerVersionIfChanged(health)
     }
 
-    /// One fresh probe for a caller that is about to SEND, returning the
-    /// version it saw and `nil` when the server didn't answer.
+    /// One fresh probe for a caller that is about to SEND, reporting whether
+    /// the server answered at all and, if so, the version it named.
     ///
     /// Same probe as `refreshServerApiVersion`, minus the cache clearing. The
     /// send path wants a different trade: a healthy-but-busy server that

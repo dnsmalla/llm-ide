@@ -39,6 +39,12 @@ struct LlmChatSheet: View {
     /// Why the last send was refused (server too old, unreachable, or the
     /// shared engine already busy). Cleared when the next send starts.
     @State private var sendRefusal: String?
+    /// The draft as `refuse()` restored it. `.onChange(of: draft)` clears the
+    /// notice only when the draft differs from this — the restore itself is a
+    /// draft change, and clearing on it wiped the message in the same update
+    /// that set it, so the two refusals only the composer can show (busy, and
+    /// "server didn't answer") were never readable.
+    @State private var refusalDraft: String = ""
     @FocusState private var inputFocused: Bool
 
     /// Hand-written rather than memberwise: `viewModel` and `engine` must
@@ -116,9 +122,17 @@ struct LlmChatSheet: View {
             wireEngine()
             inputFocused = true
         }
-        .onChange(of: draft) { _, _ in
-            // Same as the menu bar: typing again retires the last refusal.
-            if sendRefusal != nil { sendRefusal = nil }
+        .onChange(of: draft) { _, newValue in
+            // Typing again retires the last refusal — but NOT the restore
+            // that accompanied it (see `refusalDraft`).
+            if sendRefusal != nil, newValue != refusalDraft { sendRefusal = nil }
+        }
+        .onChange(of: config.activeCLI) { _, _ in
+            // A model id belongs to the provider it was picked under (the engine is shared, so this surface must react too).
+            // `effectiveModelId` keeps a pick when the new provider lists no
+            // models at all, so without this a Custom/GLM turn would carry the
+            // previous provider's id.
+            engine.quickChatModelId = nil
         }
         .onChange(of: projectStore.activeProject) { _, _ in
             // The sheet lives in the main window, where switching the active
@@ -414,6 +428,7 @@ struct LlmChatSheet: View {
             let gate = await QuickChatContext.confirmServerSupportsAsk(backend: backend)
             func refuse(_ message: String?) {
                 draft = text
+                refusalDraft = text
                 sendRefusal = message
             }
             guard case .allowed = gate else { return refuse(gate.message) }
