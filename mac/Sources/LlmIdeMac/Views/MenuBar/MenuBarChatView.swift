@@ -22,7 +22,6 @@ struct MenuBarChatView: View {
     @State private var draft: String = ""
     @State private var confirmingClear = false
     @State private var clearingHistory = false
-    @State private var historyRefreshTask: Task<Void, Never>?
     @State private var popoverWindow: NSWindow?
     @State private var selectedModelId: String? = nil
     @StateObject private var completion = CompletionController()
@@ -88,14 +87,20 @@ struct MenuBarChatView: View {
             completion.configure(api: api, repoRoot: nil)
             inputFocused = true
             Task {
-                await viewModel.loadHistory()
                 await completion.loadMetaIfNeeded()
             }
-            startHistoryRefresh()
+            // No `viewModel.loadHistory()`/history-poll here anymore, and no
+            // `.onReceive(.llmChatTranscriptChanged)` below either. Both used
+            // to re-fetch `/kb/agent/ask/history` and call
+            // `engine.replaceMessages(...)` over whatever `engine.messages`
+            // already held — a table the code-pipeline transport never writes
+            // to, so every fetch came back stale/empty and erased the just-
+            // streamed reply within seconds of it landing. The `.quick` engine
+            // is shared and owns its own transcript now; this view just
+            // renders `engine.messages` and never overwrites it from a second
+            // source.
         }
         .onDisappear {
-            historyRefreshTask?.cancel()
-            historyRefreshTask = nil
             if voiceState.isRecording {
                 voiceState.setRecording(false)
                 voiceService.cancel()
@@ -106,17 +111,16 @@ struct MenuBarChatView: View {
             completion.update(draft: newValue)
         }
         .onChange(of: engine.messages) { oldValue, newValue in
-            viewModel.notifyIfTurnFinished(oldValue: oldValue, newValue: newValue)
+            // No `viewModel.notifyIfTurnFinished(...)` here anymore: that
+            // posted `.llmChatTranscriptChanged` to tell other `/kb/agent/ask`
+            // listeners (the not-yet-migrated `LlmChatSheet`, the phone
+            // bridge) that the SHARED ask-history table changed — which, for
+            // a turn run through the code pipeline, it did not. Posting it
+            // would just cost those listeners a wasted poll of a table this
+            // surface no longer touches.
             if let recovered = viewModel.recoverableDraftAfterFailure(oldValue: oldValue, newValue: newValue) {
                 draft = recovered
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .llmChatTranscriptChanged)) { _ in
-            // Something changed: refresh now AND pull the backoff back to the
-            // floor, so the loop doesn't sit out the rest of a long window
-            // while a conversation is active.
-            viewModel.resetPollBackoff()
-            Task { await viewModel.loadHistory() }
         }
         // The clear confirm is an in-popover overlay, NOT `.alert`: inside a
         // `MenuBarExtra(.window)` panel the system alert PRESENTS but its
@@ -139,7 +143,7 @@ struct MenuBarChatView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Clear the conversation?")
                     .font(.system(size: 14, weight: .semibold))
-                Text("This removes the shared transcript from the server. iPhone and Mac will both start fresh.")
+                Text("This removes this chat's saved conversation and its memory.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -629,17 +633,6 @@ struct MenuBarChatView: View {
         MenuBarChatWindow.orderOut(popoverWindow)
     }
 
-    private func startHistoryRefresh() {
-        historyRefreshTask?.cancel()
-        // Backing-off fallback poll, shared with LlmChatSheet — see
-        // `LlmChatViewModel.PollBackoff`. The pause closure preserves this
-        // surface's own guard against polling over an in-flight clear.
-        viewModel.resetPollBackoff()
-        historyRefreshTask = Task {
-            await viewModel.runHistoryPolling(pauseWhile: { clearingHistory })
-        }
-    }
-
     private func performClearHistory() async {
         guard !clearingHistory else { return }
         clearingHistory = true
@@ -653,8 +646,14 @@ struct MenuBarChatView: View {
         pendingDirectives = []
         voiceState.reset()
         if engine.busy { viewModel.stop() }
-        await viewModel.clearHistory()
-        startHistoryRefresh()
+        // NOT `viewModel.clearHistory()` — that clears the unrelated
+        // `/kb/agent/ask` table this surface no longer reads or writes, then
+        // calls `engine.replaceMessages([])` straight over the shared `.quick`
+        // engine's real transcript. The engine owns this transcript now,
+        // persisted under `ChatSessionStore`, so clearing goes through its own
+        // session lifecycle instead — which also forgets the session's
+        // server-side memory (see `ChatEngine.deleteSession`).
+        await engine.clearCurrentChat()
     }
 
     private func wireEngine() {
