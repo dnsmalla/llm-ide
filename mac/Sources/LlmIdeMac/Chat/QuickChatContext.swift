@@ -218,8 +218,9 @@ struct QuickChatContext {
     }
 
     /// The label a model picker shows for the model that will actually be
-    /// sent — same `effectiveModelId` the closure uses, so a pick the current
-    /// provider no longer offers reads as "Auto" AND sends as Auto.
+    /// sent — same `effectiveModelId` the closure uses, so the label always
+    /// names what the turn carries: a pick the current provider no longer
+    /// offers reads as the configured default, exactly as it sends.
     static func modelLabel(modelId: String?, defaultModelId: String, models: [AIModel]) -> String {
         guard let effective = effectiveModelId(explicit: modelId,
                                                defaultModelId: defaultModelId,
