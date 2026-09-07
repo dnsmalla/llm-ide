@@ -130,7 +130,7 @@ description says to start.
   `src/main.tsx`.
 - **`mac/Sources/LlmIdeMac/`** — SwiftUI app. Sub-divides into
   `Models/`, `Services/`, `Views/`, `ViewModels/`. Services follow
-  the suffix taxonomy in `CONTRIBUTING.md` (`*Store`, `*Service`,
+  the suffix taxonomy in `CLAUDE.md` (`*Store`, `*Service`,
   `*Client`, `*Manager`, `*Mirror`, `*Router`). Start at
   `LlmIdeMacApp.swift`. See [`spec/macos-app.md`](../spec/macos-app.md) for rebuild-grade detail.
 - **`kb/`** — runtime data only: SQLite db, dev secrets, per-user

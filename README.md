@@ -297,7 +297,7 @@ bash scripts/install-skills.sh
 cd extension && npm run sync:skills   # agent tool defs only
 ```
 
-Agent/developer guide: [CLAUDE.md](CLAUDE.md) · Contributor layout: [CONTRIBUTING.md](CONTRIBUTING.md)
+Agent/developer guide: [CLAUDE.md](CLAUDE.md)
 
 ---
 

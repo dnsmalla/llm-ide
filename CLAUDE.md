@@ -382,7 +382,7 @@ Comprehensive docs at https://grid-devs.gitlab.io/personal/dinesh/notes-extensio
 ### Other root-level guides
 
 - [`AGENTS.md`](AGENTS.md) — redirect; points agents at `invariants.md` (do-not-regress list) and `docs/decisions/`
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) / [`FIRST_TIME_SETUP.md`](FIRST_TIME_SETUP.md) / [`CHANGELOG.md`](CHANGELOG.md) — contributor + setup context
+- [`FIRST_TIME_SETUP.md`](FIRST_TIME_SETUP.md) / [`CHANGELOG.md`](CHANGELOG.md) — setup context and release history
 
 ## Branch + Commit Conventions
 
