@@ -29,7 +29,22 @@ extension ChatEngine {
     //     why it moved to the tail of the method).
 
     /// UserDefaults key holding the last-active chat id for this scope.
-    private var pointerKey: String { "chat.current.\(scope.rawValue)" }
+    ///
+    /// The `.quick` scope keys per PROJECT: that chat follows the active
+    /// project, so one global pointer would reload the previous project's
+    /// conversation after a switch — the cross-project bleed `projectId`
+    /// exists to stop, and filtering the session LIST alone does not stop it,
+    /// because the engine loads by pointer, not by list.
+    ///
+    /// The panel scopes keep the unsuffixed key so their existing pointers
+    /// keep resolving; changing them would silently orphan every user's
+    /// current chat on upgrade.
+    private var pointerKey: String {
+        guard scope == .quick, let project = quickChatProjectId else {
+            return "chat.current.\(scope.rawValue)"
+        }
+        return "chat.current.\(scope.rawValue).\(project)"
+    }
 
     /// Persist `messages` into the current UUID session file, deriving a
     /// title from the first user turn if it's still "New chat".

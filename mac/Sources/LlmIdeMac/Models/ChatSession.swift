@@ -5,6 +5,10 @@ import Foundation
 /// this scope. Add a case when a new section gets chat.
 enum ChatScope: String, Codable, CaseIterable {
     case explorer, conflicts, visual, docGen
+    // `quick` is the menu-bar / LLM Chat sheet / iPhone conversation — one shared
+    // session, distinct from the panel scopes so a quick question does not land in
+    // the user's working chat.
+    case quick
 }
 
 /// One persisted Code Assistant chat. Stored as its own
@@ -37,6 +41,16 @@ struct ChatSession: Identifiable, Codable, Equatable {
     /// context-blind fresh SDK session the next turn); the toggle only
     /// governs NEW chats, plus acts as a global kill switch when off.
     var engine: String?
+    /// Project this chat belongs to, or nil for a chat written before project
+    /// identity existed. Optional so every existing session file still decodes
+    /// unchanged — there is no migration step, and a nil id simply means
+    /// "unknown project", which `list(for:projectId:)` treats as belonging to
+    /// none rather than to all.
+    ///
+    /// Without this, a chat that follows the ACTIVE project (the quick chat)
+    /// silently continues against a different repo when the user switches, its
+    /// earlier turns discussing files that no longer exist.
+    var projectId: String?
 
     init(id: UUID = UUID(),
          scope: ChatScope,
@@ -44,7 +58,8 @@ struct ChatSession: Identifiable, Codable, Equatable {
          createdAt: Date = Date(),
          lastUsedAt: Date = Date(),
          messages: [ChatMessage] = [],
-         engine: String? = nil) {
+         engine: String? = nil,
+         projectId: String? = nil) {
         self.id = id
         self.scope = scope
         self.title = title
@@ -52,10 +67,11 @@ struct ChatSession: Identifiable, Codable, Equatable {
         self.lastUsedAt = lastUsedAt
         self.messages = messages
         self.engine = engine
+        self.projectId = projectId
     }
 
     enum CodingKeys: String, CodingKey {
-        case storeVersion, id, scope, title, createdAt, lastUsedAt, messages, history, engine
+        case storeVersion, id, scope, title, createdAt, lastUsedAt, messages, history, engine, projectId
     }
 
     init(from decoder: Decoder) throws {
@@ -68,6 +84,9 @@ struct ChatSession: Identifiable, Codable, Equatable {
         // Optional decode so files persisted before the engine marker
         // existed (every chat today) decode as legacy — nil, never a throw.
         self.engine = try? c.decode(String.self, forKey: .engine)
+        // Optional decode so files persisted before project identity existed
+        // (every chat today) decode as "unknown project" — nil, never a throw.
+        self.projectId = try? c.decode(String.self, forKey: .projectId)
         if let v2Messages = try? c.decode([ChatMessage].self, forKey: .messages) {
             // Already v2 — decode directly, no migration.
             self.storeVersion = (try? c.decode(Int.self, forKey: .storeVersion)) ?? 2
@@ -110,5 +129,6 @@ struct ChatSession: Identifiable, Codable, Equatable {
         try c.encode(lastUsedAt, forKey: .lastUsedAt)
         try c.encode(messages, forKey: .messages)
         try c.encodeIfPresent(engine, forKey: .engine)
+        try c.encodeIfPresent(projectId, forKey: .projectId)
     }
 }

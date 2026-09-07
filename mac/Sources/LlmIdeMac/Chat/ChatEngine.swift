@@ -213,6 +213,12 @@ final class ChatEngine {
     /// `"chat.current.<scope>"` relaunch pointer, and `switchSession`'s
     /// cross-scope guard.
     let scope: ChatScope
+    /// The active project's id, for the `.quick` scope only — set by whoever
+    /// resolves this engine (from `QuickChatContext.projectId`) before the
+    /// first load. Nil means "not a quick chat, or no project yet"; the
+    /// session pointer (`pointerKey`) then falls back to the unsuffixed,
+    /// per-scope key the panel scopes have always used.
+    var quickChatProjectId: String?
 
     /// Delay before a `continueNeeded` reply auto-fires its follow-up turn.
     /// A knob only so tests don't wait 0.8 real seconds; production never
