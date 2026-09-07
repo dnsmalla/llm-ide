@@ -18,6 +18,12 @@ struct LlmChatSheet: View {
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var projectStore: ProjectStore
     @Environment(\.dismiss) private var dismiss
+    // Read-only: whether the server this sheet would talk to knows the
+    // `ask` mode this chat sends. See `QuickChatContext.serverSupportsAsk`.
+    // Inherited from the Window scene's `.environment(backend)` — this sheet
+    // is presented from `AppShell`, itself a child of that scene, not a
+    // separate one (unlike `MenuBarChatView`'s `MenuBarExtra`).
+    @Environment(BackendManager.self) private var backend
 
     // The SAME engine the menu bar and the phone drive — see the type's doc
     // comment above.
@@ -63,6 +69,14 @@ struct LlmChatSheet: View {
             // than send a request that must fail — same gate as the menu bar.
             if QuickChatContext.resolve(config: config, projectStore: projectStore) == nil {
                 Text(QuickChatContext.noProjectMessage)
+                    .font(.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .padding(14)
+            } else if !QuickChatContext.serverSupportsAsk(backend.serverApiVersion) {
+                // Same reasoning as the menu bar's gate (`MenuBarChatView`):
+                // this sheet also sends `mode: "ask"` (`wireEngine()` below),
+                // so an older server must not see the composer either.
+                Text(QuickChatContext.unsupportedServerMessage(apiVersion: backend.serverApiVersion))
                     .font(.caption)
                     .foregroundStyle(theme.current.textMuted)
                     .padding(14)

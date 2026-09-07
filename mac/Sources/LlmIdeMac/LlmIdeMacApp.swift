@@ -469,6 +469,14 @@ public struct LlmIdeMacApp: App {
                 .environmentObject(session)
                 .environmentObject(config)
                 .environmentObject(projectStore)
+                // `MenuBarExtra` is its own Scene — it does NOT inherit the
+                // `.environment(backend)` injected on the `Window` scene's
+                // `ContentView` below, which is exactly the gap the v47
+                // review caught: without this, `MenuBarChatView`'s
+                // `QuickChatContext.serverSupportsAsk` check would crash
+                // resolving `BackendManager.self` (no value in the
+                // environment) rather than ever seeing the real version.
+                .environment(backend)
         } label: {
             Image(systemName: "bubble.left.and.text.bubble.right")
                 .symbolRenderingMode(.hierarchical)

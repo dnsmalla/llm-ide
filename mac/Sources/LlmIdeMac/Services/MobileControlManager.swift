@@ -688,6 +688,19 @@ final class MobileControlManager {
                 done: true)))
             return
         }
+        // The phone has NO approval UI at all, so this is the worst surface
+        // for the unsafe fallback: an older server resolving `ask` to
+        // `execute` would run full act tools with nothing anywhere to
+        // render a card. Checked before resolving/driving the engine, and
+        // reported as a normal Output (never CommandError, matching the
+        // no-project reply below) so the phone renders it as an answer, not
+        // a failure.
+        guard QuickChatContext.serverSupportsAsk(backendManager?.serverApiVersion) else {
+            await server?.send(Output(commandId: chat.commandId, payload: OutputPayload(
+                stream: QuickChatContext.unsupportedServerMessage(apiVersion: backendManager?.serverApiVersion),
+                done: true)))
+            return
+        }
         guard let config, let projectStore,
               let ctx = QuickChatContext.resolve(config: config, projectStore: projectStore) else {
             // A normal reply, NOT a CommandError: the phone renders an error

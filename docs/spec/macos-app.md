@@ -208,7 +208,7 @@ Supervises the local Node `server.mjs` process (`@MainActor @Observable`, lines 
 - `start(nodePath:workingDirectory:)` (line 156) — checks if port 3456 is in use; if so, probes `/health` within 2 s. If healthy, adopts the external server; if not, kills the listener and spawns a fresh process. If the port is free, spawns immediately.
 - `spawn(...)` (line 244) — calls `Process.run()`, stays in `.starting` until `/health` responds, then calls `markRunning(...)` (line 361) which flips to `.running`
 - Auto-restart: up to 3 attempts with backoffs of 1 s, 5 s, 30 s (`restartBackoffsSec`, line 47); skipped on user-initiated stop (`userInitiatedStop` flag)
-- `probeHealthDetail()` (line 517) — 2 s ephemeral URLSession GET to `http://127.0.0.1:3456/health`; also checks `apiVersion` against `minimumServerApiVersion = 47` (line 600)
+- `probeHealthDetail()` (line 517) — 2 s ephemeral URLSession GET to `http://127.0.0.1:3456/health`; also checks `apiVersion` against `minimumServerApiVersion = 43` (line 607). This app-wide floor is deliberately NOT raised for the server's v47 `ask` mode — `Chat/QuickChatContext.swift`'s `serverSupportsAsk`/`requiredServerApiVersion = 47` gates that at the three surfaces that actually send `ask` (`MenuBarChatView`, `LlmChatSheet`, `MobileControlManager`'s `llmide_chat` handler) instead, because `serverVersionTooOld` (below) only ever renders in `LoginView`/`ReconnectView`/`BackendSettingsSection` and never blocks an already-authenticated session from sending one.
 - `stop()` (line 425) — SIGTERMs the spawned process; for adopted externals, uses `lsof -ti :<port>` to find and kill the listener
 
 #### `LiveSessionMirror` (`Services/LiveSessionMirror.swift`)

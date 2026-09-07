@@ -12,6 +12,9 @@ struct MenuBarChatView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var projectStore: ProjectStore
     @Environment(\.openWindow) private var openWindow
+    // Read-only: whether the server this window would talk to knows the
+    // `ask` mode this chat sends. See `QuickChatContext.serverSupportsAsk`.
+    @Environment(BackendManager.self) private var backend
 
     // The SAME engine the LLM Chat sheet and the phone drive: one engine per
     // conversation. Each surface holding its own would mean three engines
@@ -64,6 +67,16 @@ struct MenuBarChatView: View {
             // than send a request that must fail.
             if QuickChatContext.resolve(config: config, projectStore: projectStore) == nil {
                 Text(QuickChatContext.noProjectMessage)
+                    .font(.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .padding(14)
+            } else if !QuickChatContext.serverSupportsAsk(backend.serverApiVersion) {
+                // This surface sends `mode: "ask"` (see `wireEngine()`
+                // below); an older server resolves that to `execute`, giving
+                // this window full act tools with no approval UI to render
+                // them. Hiding the composer is the gate — no path here can
+                // reach `sendDraft()` without it.
+                Text(QuickChatContext.unsupportedServerMessage(apiVersion: backend.serverApiVersion))
                     .font(.caption)
                     .foregroundStyle(theme.current.textMuted)
                     .padding(14)

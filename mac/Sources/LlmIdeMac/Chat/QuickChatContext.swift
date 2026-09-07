@@ -22,6 +22,39 @@ struct QuickChatContext {
         "Open a project to chat about your code. This chat answers from the "
         + "active project's code and memory, so it needs one to be open."
 
+    /// The server `apiVersion` these three surfaces need — `extension/server.mjs`'s
+    /// v47 entry, the `ask` mode. An older server does not recognize `ask` and
+    /// silently resolves it to `execute`, handing full act tools to a window
+    /// whose approvals may have nothing to render them. `BackendManager
+    /// .minimumServerApiVersion` deliberately stays below this (see its doc
+    /// comment): the unsafety is confined to these three `ask`-mode senders,
+    /// so the gate lives here, not at the app-wide floor.
+    static let requiredServerApiVersion = 47
+
+    /// Whether a reported server `apiVersion` is known to support `ask`.
+    ///
+    /// `nil` — not yet probed, or the probe hasn't landed — FAILS CLOSED
+    /// (returns `false`). Treating "unknown" as "supported" would let a turn
+    /// race the first health probe and reach an old server before its
+    /// version is even known, which is the exact unsafe fallback this gate
+    /// exists to prevent.
+    static func serverSupportsAsk(_ apiVersion: Int?) -> Bool {
+        guard let apiVersion else { return false }
+        return apiVersion >= requiredServerApiVersion
+    }
+
+    /// One shared message for all three surfaces (menu bar, sheet, phone) so
+    /// the wording cannot drift between them.
+    static func unsupportedServerMessage(apiVersion: Int?) -> String {
+        guard let apiVersion else {
+            return "This chat needs the LLM-IDE server's API v\(requiredServerApiVersion) or "
+                + "newer, and the running server's version isn't known yet — try again in a "
+                + "moment, or restart the server if this persists."
+        }
+        return "Restart the LLM-IDE server to use this chat — it needs API "
+            + "v\(requiredServerApiVersion) and the running server is v\(apiVersion)."
+    }
+
     /// `WorkspaceRoot.resolve` and `ProjectStore.activeProject` are both
     /// `@MainActor`-isolated (see `WorkspaceRoot.swift` / `ProjectStore.swift`),
     /// so this has to be too.
