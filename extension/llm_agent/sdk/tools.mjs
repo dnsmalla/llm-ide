@@ -14,7 +14,7 @@
 import { tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import * as kb from '../../kb/db.mjs';
-import { entries, abortedResult } from '../tools/registry.mjs';
+import { entries, abortedResult, signalFor } from '../tools/registry.mjs';
 import { globalSkills } from '../skills/index.mjs';
 import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
 import { resolveChatSessionId } from '../../kb/session-memory.mjs';
@@ -114,7 +114,20 @@ export function buildLlmIdeServer(userId, agentContext, currentMessage, {
           if (aborted) outcome = 'aborted';
           else if (result && result.error) outcome = 'error';
         } catch (err) {
-          outcome = 'error';
+          // `aborted` above only catches a Stop that lands BEFORE the call
+          // starts. A long-running call — e.g. `ask-internal`, which threads
+          // `signal` into a nested runAgentLoop/runClaude — can be stopped
+          // MID-EXECUTION: the nested call rejects with an AbortError, which
+          // lands here as a thrown error indistinguishable from a genuine
+          // tool malfunction unless we check for it. That is the exact
+          // misclassification the comment above (on the pre-call `aborted`
+          // check) already warns about, just reached by a different door: a
+          // rejected promise instead of a returned {error} shape. Check the
+          // turn's own signal first (authoritative — it is what the tool
+          // itself observed), and the error's name as a fallback for a
+          // library that surfaces the abort without threading the shared
+          // signal all the way through.
+          outcome = (signalFor(toolCtx)?.aborted || err?.name === 'AbortError') ? 'aborted' : 'error';
           throw err;
         } finally {
           // Telemetry parity with the legacy loop's dispatch point

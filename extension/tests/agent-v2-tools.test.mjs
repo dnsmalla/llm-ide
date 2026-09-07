@@ -410,3 +410,41 @@ test('telemetry: a tool refused because the turn was stopped records outcome abo
   // tool malfunction.
   assert.equal(inv[0].fields.outcome, 'aborted');
 });
+
+// The pre-call check above (`abortedResult`) only covers a Stop that lands
+// BEFORE a tool starts. A LONG-RUNNING call — e.g. ask-internal, which
+// threads `signal` into a nested runAgentLoop/runClaude — can be stopped
+// MID-EXECUTION: the nested call rejects with an AbortError, which the
+// original code's `catch` recorded as outcome:'error' — misreporting the
+// user's own Stop as a tool malfunction, the exact failure mode the
+// pre-call comment already warned about, just reached through the `catch`
+// branch instead of the `aborted` result shape.
+test('telemetry: a tool that aborts MID-EXECUTION (after the signal fires) records outcome aborted, not error', async () => {
+  const { entries } = await import('../llm_agent/tools/registry.mjs');
+  // Monkey-patch a real registry entry's execute with a fake handler that
+  // awaits, then throws an AbortError-named error AFTER the signal fires —
+  // simulating a nested call (ask-internal's runAgentLoop/runClaude) reacting
+  // to Stop mid-flight rather than a pre-call refusal. `entries()` returns
+  // the live array (not a copy), so mutating the found entry's `execute` is
+  // visible to buildLlmIdeServer's mount pass; restored in `finally` so this
+  // doesn't leak into other tests.
+  const entry = entries().find((e) => e.name === 'task-list');
+  const original = entry.execute;
+  const ac = new AbortController();
+  entry.execute = async () => {
+    ac.abort(); // the user's Stop lands WHILE the call is in flight
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const err = new Error('nested call aborted mid-flight');
+    err.name = 'AbortError';
+    throw err;
+  };
+  try {
+    const logs = await captureInfo(() => callV2Tool('task-list', {}, { signal: ac.signal }));
+    const inv = logs.filter((l) => l.event === 'skill_invoked');
+    assert.equal(inv.length, 1, 'logged exactly once');
+    assert.equal(inv[0].fields.outcome, 'aborted',
+      'a mid-call AbortError must not be misreported as a tool malfunction');
+  } finally {
+    entry.execute = original;
+  }
+});
