@@ -84,7 +84,14 @@ extension ChatEngine {
         persistDebounceTask = nil
         guard let id = UUID(uuidString: currentSessionIDString) else { return }
         let capped = Array(messages.suffix(Self.persistedMessageCap))
-        var session = ChatSessionStore.load(id: id) ?? ChatSession(id: id, scope: scope)
+        // The fallback (file missing — deleted under us, or a pointer that
+        // outlived its file) stamps `projectId` the same way
+        // `mintFreshSession()` does, and for the same reason: a `.quick`
+        // session written with `projectId == nil` is invisible to
+        // `ChatSessionStore.list(for:projectId:)`, which reads a nil id as
+        // belonging to NO project rather than to this one.
+        var session = ChatSessionStore.load(id: id)
+            ?? ChatSession(id: id, scope: scope, projectId: scope == .quick ? quickChatProjectId : nil)
         session.scope = scope
         // A straight assignment as of Task 9 — `messages` IS the persisted
         // shape now, so ids/`createdAt`/status/tool steps carry through
@@ -239,9 +246,17 @@ extension ChatEngine {
             currentSessionIDString = UserDefaults.standard.string(forKey: pointerKey) ?? ""
         }
         suppressHistoryAnnounce = true
+        // For `.quick`, the pointer must also resolve to a session belonging
+        // to THIS project. The pointer key is already per-project, so this
+        // only ever fires on a MIS-KEYED pointer — e.g. one written under the
+        // unsuffixed `chat.current.quick` key by a release build that
+        // stripped `pointerKey`'s assertion. Cheap defence in depth: a
+        // mismatch takes the same path as a missing session (mint fresh for
+        // `.quick`) instead of loading another project's conversation.
         if let cur = UUID(uuidString: currentSessionIDString),
            let session = ChatSessionStore.load(id: cur),
-           session.scope == scope {
+           session.scope == scope,
+           scope != .quick || session.projectId == quickChatProjectId {
             resetTransientSessionState()
             messages = session.messages
             onHistoryReplaced(session.messages)
