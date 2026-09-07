@@ -18,7 +18,26 @@ const log = logger.child({ component: 'mode-classify' });
 // resolve to a mode outside MODE_CONFIG, where restrictsTools() returns
 // false and the request runs with full unrestricted execute-equivalent
 // access instead of the intended restriction. See route.mjs's resolvedMode.
-export const MODES = new Set(['plan', 'assist_plan', 'review', 'document', 'execute']);
+//
+// `ask` is the quick chat's mode (menu bar / sheet / phone). It belongs in
+// THIS set — the route's accept-list for a client-SUPPLIED mode string — but
+// deliberately NOT in CLASSIFIABLE_MODES below: those surfaces can be driven
+// while no window is showing them (the popover closes; the phone has no
+// approval UI), so a turn able to park on an approval would hang until the
+// server's park timeout denied it. A panel turn sent with mode: "auto" must
+// never be able to land on 'ask' just because the classifier's underlying
+// call hallucinated the string — that is exactly what two separate sets
+// prevents. Never add a restricted mode to this set without also adding it
+// to mode-personas.mjs's MODE_CONFIG (see the note there).
+export const MODES = new Set(['plan', 'assist_plan', 'review', 'document', 'ask', 'execute']);
+
+// The subset MODES the classifier's own model output may resolve to — exactly
+// the five categories buildPrompt() offers it below. Deliberately narrower
+// than MODES: 'ask' is a real, accepted mode (client-supplied only), but it
+// is not a category the classifier chooses BETWEEN, so it must never be the
+// classifier's answer. Used at the `MODES.has(parsed.mode)` check below in
+// place of MODES for that reason.
+export const CLASSIFIABLE_MODES = new Set(['plan', 'assist_plan', 'review', 'document', 'execute']);
 
 // Fast tier by default: a 5-way mode classification in ≤128 tokens is well
 // within the chain's smallest model, and this call runs SERIALLY before
@@ -58,7 +77,7 @@ export async function classifyCodeAssistMode(message, opts = {}) {
   try {
     const raw = await _runClaude(buildPrompt(message), { userId, model: model || MODEL, maxTokens: 128 });
     const parsed = tryParseJSON(raw);
-    const mode = parsed && MODES.has(parsed.mode) ? parsed.mode : 'execute';
+    const mode = parsed && CLASSIFIABLE_MODES.has(parsed.mode) ? parsed.mode : 'execute';
     return { mode };
   } catch (err) {
     log.warn('mode_classify_failed', { error: err?.message, userId });

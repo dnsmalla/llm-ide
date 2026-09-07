@@ -5,6 +5,8 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES } from '../llm_agent/runtime/mode-personas.mjs';
+import { MODES } from '../llm_agent/runtime/mode-classify.mjs';
+import { v2ToolPolicyForMode } from '../llm_agent/sdk/engine.mjs';
 
 test('personaForMode returns mode-specific text for plan/assist_plan/review/document', () => {
   assert.match(personaForMode('plan'), /PLAN mode/);
@@ -144,4 +146,45 @@ test('load-skill is available in every restricted mode', () => {
   for (const mode of ['plan', 'assist_plan', 'review', 'document']) {
     assert.equal(allowedToolNames(mode).has('load-skill'), true, `${mode} should expose load-skill`);
   }
+});
+
+// `ask` is the quick chat's mode (menu bar / sheet / phone). Those surfaces
+// can be driven while NO window is showing the chat — the menu-bar popover
+// closes, and the phone has no approval UI at all — so a turn that could
+// park on an approval would hang until the server's park timeout denied it.
+// Read-only is therefore not a preference here, it is the thing that makes
+// the surface safe.
+test('ask mode is accepted by the route AND restricts tools', () => {
+  // BOTH halves. Either alone silently yields full unrestricted access:
+  // missing from MODES, the route falls back to execute; missing from
+  // MODE_CONFIG, restrictsTools() is false.
+  assert.ok(MODES.has('ask'), 'route must accept the mode');
+  assert.equal(restrictsTools('ask'), true, 'and must restrict its tools');
+});
+
+test('ask mode cannot reach an act tool', () => {
+  const names = allowedToolNames('ask');
+  assert.ok(names.has('read-file'), 'reading is the point');
+  assert.ok(names.has('find-code'));
+  assert.ok(names.has('project_memory'), 'project memory is why this exists');
+  assert.ok(!names.has('run-bash'), 'no shell');
+  assert.ok(!names.has('update-file'), 'no writes');
+
+  // The v2 path is where it is enforced for the default engine: the act tools
+  // AND the native Bash/Edit/Write must be hard-disallowed, not merely absent
+  // from the allowlist — absence only demotes a tool to a canUseTool consult
+  // that the 'auto' tier would allow (see engine.mjs's own note at ~:812).
+  const policy = v2ToolPolicyForMode('ask');
+  const disallowed = new Set(policy.disallowedTools);
+  assert.ok([...disallowed].some((n) => n.includes('run-bash')), 'run-bash disallowed');
+  for (const native of ['Bash', 'Edit', 'Write']) {
+    assert.ok(disallowed.has(native), `native ${native} disallowed`);
+  }
+});
+
+test('ask mode has a Q&A persona, not a review or document one', () => {
+  const persona = personaForMode('ask');
+  assert.match(persona, /question/i, 'framed as answering questions');
+  assert.ok(!/code-review feedback/i.test(persona), 'not the review persona');
+  assert.ok(!/documentation/i.test(persona), 'not the document persona');
 });
