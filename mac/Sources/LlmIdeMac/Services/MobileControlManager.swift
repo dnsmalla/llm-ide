@@ -658,8 +658,10 @@ final class MobileControlManager {
     /// one conversation across all three surfaces, rather than the phone
     /// silently keeping its own `/kb/agent/ask` transcript after the Mac
     /// surfaces moved onto the code pipeline. Mirrors `handleExploreChat`
-    /// below: cancellation via `registerMobileInflightTask`, `Output`/
-    /// `CommandError` framing, and the `NotificationCenter` post on success.
+    /// below: cancellation via `registerMobileInflightTask` and `Output`/
+    /// `CommandError` framing. (No transcript-changed notification on
+    /// success any more — see `NotificationNames.swift`: the engine owns the
+    /// transcript, so the post had no observers left.)
     private func handleChat(_ chat: LlmIdeChat) async {
         guard let api else {
             await server?.send(CommandError(commandId: chat.commandId, message: "Backend not configured"))
@@ -763,7 +765,6 @@ final class MobileControlManager {
             guard !isMobileCommandCancelled(chat.commandId) else { return }
             await server?.send(Output(commandId: chat.commandId,
                                       payload: OutputPayload(stream: reply, done: true)))
-            NotificationCenter.default.post(name: .llmChatTranscriptChanged, object: nil)
         } catch let error where ChatEngine.isCancellation(error) {
             // Covers a Mac-side Stop too — same as explore_chat below.
             append(.info, "llmide_chat cancelled: \(chat.commandId.prefix(8))")
@@ -1191,7 +1192,6 @@ final class MobileControlManager {
         let engine = quickChatEngine(for: ctx, api: api)
         await engine.clearCurrentChat()
         reply(LlmIdeChatHistoryClearAck(ok: true))
-        NotificationCenter.default.post(name: .llmChatTranscriptChanged, object: nil)
     }
 
     private func handleExploreCancel(data: Data) {

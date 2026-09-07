@@ -116,7 +116,8 @@ struct MenuBarChatView: View {
                 await completion.loadMetaIfNeeded()
             }
             // No `viewModel.loadHistory()`/history-poll here anymore, and no
-            // `.onReceive(.llmChatTranscriptChanged)` below either. Both used
+            // transcript-changed notification observer below either (that
+            // notification is gone entirely now). Both used
             // to re-fetch `/kb/agent/ask/history` and call
             // `engine.replaceMessages(...)` over whatever `engine.messages`
             // already held — a table the code-pipeline transport never writes
@@ -158,9 +159,10 @@ struct MenuBarChatView: View {
             // No `viewModel.notifyIfTurnFinished(...)` here anymore (the
             // method itself is gone, along with `LlmChatViewModel`'s whole
             // `/kb/agent/ask/history` polling — see its header comment):
-            // this used to post `.llmChatTranscriptChanged` to tell other
-            // ask-history listeners the SHARED table changed, which, for a
-            // turn run through the code pipeline, it never did.
+            // this used to post a transcript-changed notification to tell
+            // other ask-history listeners the SHARED table changed, which,
+            // for a turn run through the code pipeline, it never did. The
+            // notification had no observers left and has been removed.
             if let recovered = viewModel.recoverableDraftAfterFailure(oldValue: oldValue, newValue: newValue) {
                 draft = recovered
             }
