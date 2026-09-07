@@ -52,7 +52,9 @@ function memFilePath(root) {
 // this module and the graphkit barrel are their established import path.
 // Imported, not just re-exported: this module calls both internally, and a
 // bare `export … from` would not bind them in local scope.
-import { factKey, factIndex, stripFactStamp } from '../core/fact-key.mjs';
+import {
+  factKey, factIndex, stripFactStamp, factStamp,
+} from '../core/fact-key.mjs';
 
 // Local date, not UTC: the stamp is read by a human in the memory viewer, and
 // "learned yesterday" should mean the user's yesterday. Matches the deliberate
@@ -85,9 +87,33 @@ export function parseChatMemoryFacts(content) {
   return out;
 }
 
+// Oldest→newest ranking shared by BOTH overflow evictors below (fact count
+// and char budget): an unstamped fact is treated as the OLDEST kind there is
+// — we genuinely don't know when it was learned — then ascending stamp date,
+// then ascending original position as the tie-break for a same-day (or
+// same-missing) group. That last rule matches selectChatMemoryFacts' own
+// tie-break convention (graphkit/memory.mjs: `b.index - a.index`, "higher
+// position is newer"), so both readers agree on direction. Returns original
+// indices into `list`, oldest first — NOT a re-sort of `list` itself, so
+// callers can filter the original array and keep survivors in file order.
+function rankOldestFirst(list) {
+  return list
+    .map((f, i) => ({ i, stamp: factStamp(f) }))
+    .sort((a, b) => {
+      if (a.stamp === b.stamp) return a.i - b.i;
+      if (a.stamp === null) return -1;
+      if (b.stamp === null) return 1;
+      return a.stamp < b.stamp ? -1 : 1;
+    })
+    .map((x) => x.i);
+}
+
 // Render a complete chat-memory.md from a fact list (header + bullets), with
-// caps applied: newest facts win when over MAX_FACTS, and the whole file is
-// kept under MAX_FILE_CHARS by dropping from the oldest end. Pure + exported.
+// caps applied: when over MAX_FACTS or MAX_FILE_CHARS, the OLDEST facts by
+// their own `(t:YYYY-MM-DD)` stamp are dropped first (undated facts count as
+// oldest) — never by array position, since an in-place UPDATE deliberately
+// keeps a fact's slot (see appendChatMemory). Survivors keep their original
+// file order (diff-friendly). Pure + exported.
 export function renderChatMemoryFile(facts) {
   let list = (Array.isArray(facts) ? facts : [])
     .map((f) => String(f).trim().slice(0, MAX_FACT_CHARS))
@@ -100,23 +126,37 @@ export function renderChatMemoryFile(facts) {
     seen.add(k);
     return true;
   });
-  if (list.length > MAX_FACTS) list = list.slice(list.length - MAX_FACTS);
-  // Char cap: keep the newest contiguous run of facts that fits, found in one
-  // backward pass (avoids repeatedly re-joining the whole list per dropped
-  // fact, which was O(n^2) once MAX_FACTS grew past a few hundred).
+  // Overflow eviction #1 (fact count). This used to be `list.slice(list.length
+  // - MAX_FACTS)` — a pure position-FIFO trim. Commit 919f4595 claimed "both
+  // readers" of position-as-recency were fixed; this one was not — a fact
+  // re-confirmed today but still sitting near index 0 (updates preserve slot)
+  // was still the first one evicted once the store passed config.memory.max
+  // Facts. Rank by stamp instead and keep the newest MAX_FACTS.
+  if (list.length > MAX_FACTS) {
+    const oldestFirst = rankOldestFirst(list);
+    const keep = new Set(oldestFirst.slice(oldestFirst.length - MAX_FACTS));
+    list = list.filter((_, i) => keep.has(i)); // filtering the ORIGINAL array preserves file order
+  }
+  // Overflow eviction #2 (char budget). Same recency rule as #1, so the two
+  // caps can never disagree about which facts are "old" — walked oldest to
+  // newest and accumulated from the newest end in one pass (no O(n^2)
+  // re-join per dropped fact); only the metric driving the walk changed, from
+  // array position to recency rank.
   const budget = MAX_FILE_CHARS - HEADER.length;
-  let keepFrom = list.length;
+  const oldestFirst = rankOldestFirst(list);
+  let keepCount = 0;
   if (list.length > 0) {
-    keepFrom = list.length - 1;
-    let total = list[keepFrom].length + 2;
-    for (let i = keepFrom - 1; i >= 0; i--) {
-      const added = list[i].length + 2 + 1; // "- " prefix + joining newline
+    keepCount = 1;
+    let total = list[oldestFirst[oldestFirst.length - 1]].length + 2;
+    for (let i = oldestFirst.length - 2; i >= 0; i--) {
+      const added = list[oldestFirst[i]].length + 2 + 1; // "- " prefix + joining newline
       if (total + added > budget) break;
       total += added;
-      keepFrom = i;
+      keepCount++;
     }
   }
-  list = list.slice(keepFrom);
+  const keep = new Set(oldestFirst.slice(oldestFirst.length - keepCount));
+  list = list.filter((_, i) => keep.has(i)); // filtering the ORIGINAL array preserves file order
   const body = list.map((f) => `- ${f}`).join('\n');
   return list.length ? `${HEADER}${body}\n` : '';
 }
@@ -194,9 +234,13 @@ export function writeChatMemoryFacts(root, facts) {
 // long-lived project reaches — and it left position doing a job it could not
 // do. Both readers of position treated it as RECENCY and so read an updated
 // fact backwards: selectChatMemoryFacts breaks score ties with
-// `b.index - a.index` ("newer wins"), and writeChatMemoryFacts evicts from the
-// FRONT. A fact the model kept re-confirming therefore ranked LOWEST and was
-// deleted FIRST — the opposite of this path's whole purpose.
+// `b.index - a.index` ("newer wins"), and renderChatMemoryFile's fact-count
+// evictor dropped `list.slice(list.length - MAX_FACTS)` off the FRONT. A fact
+// the model kept re-confirming therefore ranked LOWEST and was deleted FIRST —
+// the opposite of this path's whole purpose. (The commit that introduced the
+// stamp said it fixed "both readers of position" — it fixed selectChat
+// MemoryFacts and left renderChatMemoryFile's evictor exactly as broken as
+// before; that evictor is now stamp-based too, see rankOldestFirst above.)
 //
 // So position is no longer the recency signal: each fact carries an explicit
 // `(t:YYYY-MM-DD)` stamp, refreshed on add and on update. Day granularity is

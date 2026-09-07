@@ -1086,3 +1086,55 @@ test('an undated fact ranks below a dated one (no migration, self-heals on re-co
   assert.ok(text.indexOf('beta') < text.indexOf('alpha'),
     `a dated fact outranks an undated one of equal relevance: ${text}`);
 });
+
+// ── overflow eviction is stamp-based, not position-based (renderChatMemoryFile) ─
+//
+// 919f4595 fixed selectChatMemoryFacts to rank by stamp instead of position but
+// left renderChatMemoryFile's fact-count evictor doing `list.slice(list.length
+// - MAX_FACTS)` — a pure FIFO trim by array index. Since an UPDATE preserves a
+// fact's slot on purpose, a fact re-confirmed TODAY but still sitting near
+// index 0 was the first one dropped once the store passed
+// config.memory.maxFacts. This test pins the fix directly against
+// renderChatMemoryFile (the pure function the bug lives in) with a small
+// LLMIDE_MEM_MAX_FACTS so it doesn't need to write 1000+ facts — config.mjs
+// reads env once at import time, so the cap must be set in a FRESH child
+// process (same pattern as the "clamps out-of-range env values" test above).
+test('renderChatMemoryFile evicts the OLDEST fact by stamp, not the one at index 0', () => {
+  const r = spawnSync(process.execPath, [
+    '--input-type=module',
+    '-e',
+    `
+    import { renderChatMemoryFile, parseChatMemoryFacts } from './graphkit/memory-writer.mjs';
+    // 5 facts, cap 4 → exactly one eviction. Index 0 carries the NEWEST
+    // stamp of the batch; the rest are undated (unknown age → oldest by
+    // definition). Only an undated fact may be dropped; index 0 must survive
+    // despite sitting at the front of the array.
+    const facts = [
+      'alpha fact (t:2030-01-01)',
+      'beta fact',
+      'gamma fact',
+      'delta fact',
+      'epsilon fact',
+    ];
+    const out = renderChatMemoryFile(facts);
+    console.log(JSON.stringify(parseChatMemoryFacts(out)));
+    `,
+  ], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      LLMIDE_JWT_SECRET: 'a'.repeat(48),
+      LLMIDE_VAULT_KEY: 'b'.repeat(48),
+      NODE_ENV: 'test',
+      LLMIDE_MEM_MAX_FACTS: '4',
+    },
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const kept = JSON.parse(r.stdout.trim().split('\n').pop());
+  assert.equal(kept.length, 4, 'capped to MAX_FACTS');
+  assert.ok(kept.some((f) => f.startsWith('alpha fact')),
+    `the newest-stamped fact at index 0 must survive even though it is oldest by position: ${JSON.stringify(kept)}`);
+  assert.ok(!kept.some((f) => f.startsWith('beta fact')),
+    `the first UNDATED (unknown-age) fact must be the one evicted, not index 0: ${JSON.stringify(kept)}`);
+});
