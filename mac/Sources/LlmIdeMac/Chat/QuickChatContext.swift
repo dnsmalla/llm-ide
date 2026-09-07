@@ -120,15 +120,24 @@ struct QuickChatContext {
     /// they are closed — or while the popover is open, where the composer
     /// gate re-evaluates live on `@Published activeProject` — must reach the
     /// engine too, or the gate and the engine disagree silently.
+    ///
+    /// `refreshSessionListIfUnchanged` is the Mac surfaces' `.onAppear`
+    /// behaviour (re-read the session list on every open). The phone attaches
+    /// on EVERY request — each question, history fetch and clear — and has no
+    /// session list to show, so it passes `false` and skips that disk read.
     @MainActor
-    static func attach(_ engine: ChatEngine, toProject projectId: String?) {
+    static func attach(
+        _ engine: ChatEngine,
+        toProject projectId: String?,
+        refreshSessionListIfUnchanged: Bool = true
+    ) {
         assert(engine.scope == .quick, "QuickChatContext.attach is for the .quick engine only")
         if engine.currentSessionIDString.isEmpty {
             engine.quickChatProjectId = projectId
             engine.handleOnAppearSessionsIfReady()
         } else if engine.quickChatProjectId != projectId {
             engine.switchQuickChatProject(to: projectId)
-        } else {
+        } else if refreshSessionListIfUnchanged {
             engine.refreshSessions()
         }
     }

@@ -649,7 +649,9 @@ final class MobileControlManager {
     /// `switchQuickChatProject(to:)`, never by poking `quickChatProjectId`.
     private func quickChatEngine(for ctx: QuickChatContext, api: LlmIdeAPIClient) -> ChatEngine {
         let engine = ChatEngineRegistry.shared.engine(for: .quick, api: api)
-        QuickChatContext.attach(engine, toProject: ctx.projectId)
+        // No session list on the phone, and this runs per request — skip the
+        // list re-read the Mac surfaces want on every open.
+        QuickChatContext.attach(engine, toProject: ctx.projectId, refreshSessionListIfUnchanged: false)
         return engine
     }
 
