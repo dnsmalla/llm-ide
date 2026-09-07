@@ -1,52 +1,51 @@
 import SwiftUI
 
-/// Global LLM Chat sheet — same `/kb/agent/ask` transcript the iPhone uses via
-/// `llmide_chat`. History is server-persisted so Mac and iPhone stay in sync.
+/// Global LLM Chat sheet — the SAME `.quick` `ChatEngine` `MenuBarChatView`
+/// and the phone drive, resolved via `ChatEngineRegistry`. One conversation,
+/// not a per-surface copy: three engines each owning this scope would be
+/// three engines writing a single session file — the concurrent-holders bug
+/// that already resurrected deleted chats through `persistCurrentChat`.
 ///
-/// As of Task 11, this runs on the same `ChatEngine` the Code Assistant panel
-/// uses — via `AgentAskTransport`, a `ChatTransport` over `/kb/agent/ask`
-/// instead of `/code-assist` — rather than its own hand-rolled
-/// send/transcript state. `send`/`stop`/`loadHistory`/`clearHistory` live on
-/// `LlmChatViewModel` so they're unit-testable without a SwiftUI host.
+/// As of Task 6, this runs on the code pipeline in read-only `ask` mode
+/// (`wireEngine()`), the same as the menu bar — see `MenuBarChatView.swift`
+/// for the worked example this mirrors. `send`/`stop` live on
+/// `LlmChatViewModel` so they're unit-testable without a SwiftUI host; the
+/// transcript itself is `engine.messages` directly, persisted by
+/// `ChatSessionStore` via `engine.announceAndPersist`.
 struct LlmChatSheet: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
+    @EnvironmentObject private var config: AppConfig
+    @EnvironmentObject private var projectStore: ProjectStore
     @Environment(\.dismiss) private var dismiss
 
+    // The SAME engine the menu bar and the phone drive — see the type's doc
+    // comment above.
     @State private var engine: ChatEngine
     @State private var viewModel: LlmChatViewModel
     @State private var draft: String = ""
     @State private var confirmingClear = false
-    @State private var historyRefreshTask: Task<Void, Never>?
+    @State private var clearingHistory = false
     /// Older assistant replies the user tapped to expand. Ids are stable
-    /// across polls (derived from the row's `seq`, see
-    /// `LlmChatViewModel.chatMessage(from:)`), so an expansion survives a
-    /// history refresh instead of snapping shut under the user.
+    /// (the engine's own message ids, not re-derived per poll now that
+    /// there's no poll), so an expansion survives a re-render.
     @State private var manuallyExpanded: Set<UUID> = []
     @FocusState private var inputFocused: Bool
 
     /// Hand-written rather than memberwise: `viewModel` and `engine` must
     /// share the SAME `ChatEngine` instance (the view renders `engine`
-    /// directly; the view model drives its turn lifecycle and its
-    /// server-history polling), and `@State`'s initial value needs `api` to
-    /// build it — `api` isn't in scope for a property initializer.
-    ///
-    /// WARNING: `scope: .explorer` is a borrowed label, not a real scope for
-    /// this chat — this engine never persists a `ChatSession` file (its
-    /// transcript is server-side, via `AgentAskTransport`/`loadHistory`), so
-    /// nothing here actually reads/writes anything keyed by `.explorer`
-    /// today. That's true only as long as no one calls this engine's
-    /// session-file methods (`persistCurrentChat`, `handleOnAppearSessions`,
-    /// `switchSession`, …) — which `LlmChatSheet`/`LlmChatViewModel`
-    /// deliberately never do. A future task wiring persistence onto this
-    /// sheet (Tasks 13/14) must NOT reuse `.explorer` for that — add a
-    /// dedicated `ChatScope` case instead, or it will silently collide with
-    /// the real Explorer panel's saved chats.
+    /// directly; the view model drives its turn lifecycle), and `@State`'s
+    /// initial value needs `api` to resolve it from the registry — `api`
+    /// isn't in scope for a property initializer.
     init(api: LlmIdeAPIClient) {
         self.api = api
-        let engine = ChatEngine(scope: .explorer, transport: AgentAskTransport(api: api))
+        // Resolved from the registry rather than constructed here (no more
+        // `ChatEngine(scope: .explorer, transport: AgentAskTransport(api:))`)
+        // — `ChatTransportFactory` (inside the registry) picks the real
+        // code-pipeline transport.
+        let engine = ChatEngineRegistry.shared.engine(for: .quick, api: api)
         _engine = State(initialValue: engine)
-        _viewModel = State(initialValue: LlmChatViewModel(engine: engine, historyAPI: api))
+        _viewModel = State(initialValue: LlmChatViewModel(engine: engine))
     }
 
     private var combinedError: String? {
@@ -59,42 +58,72 @@ struct LlmChatSheet: View {
             Divider()
             transcriptView
             Divider()
-            inputRow
+            // The code pipeline cannot run without an active project (the
+            // server throws `workspaceRoot is required`), so decline rather
+            // than send a request that must fail — same gate as the menu bar.
+            if QuickChatContext.resolve(config: config, projectStore: projectStore) == nil {
+                Text(QuickChatContext.noProjectMessage)
+                    .font(.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .padding(14)
+            } else {
+                inputRow
+            }
         }
         .frame(minWidth: 520, idealWidth: 580, minHeight: 480, idealHeight: 560)
         .onAppear {
+            // Must land before anything below can trigger the engine's first
+            // session load (`handleOnAppearSessions`/pointer read) — set it
+            // late and `.quick` silently falls back to the unsuffixed
+            // pointer key, reloading the PREVIOUS project's conversation on
+            // a project switch. See `ChatEngine+Session.swift`'s `pointerKey`.
+            engine.quickChatProjectId = QuickChatContext.resolve(config: config, projectStore: projectStore)?.projectId
+            // Same guard `CodeAssistantPanel.handleOnAppear`/`MenuBarChatView`
+            // use: the engine is shared, so it may already have a session
+            // loaded from a prior appearance of this sheet, the menu bar, or
+            // (once Task 8 lands) the phone. Only run the full resolve-or-mint
+            // path when nothing is loaded yet; otherwise just refresh the list.
+            if engine.currentSessionIDString.isEmpty {
+                engine.handleOnAppearSessions()
+            } else {
+                engine.refreshSessions()
+            }
+            wireEngine()
             inputFocused = true
-            Task { await viewModel.loadHistory() }
-            // Backing-off fallback poll, shared with MenuBarChatView — see
-            // `LlmChatViewModel.PollBackoff` for why a 2s heartbeat was never
-            // what kept this transcript in sync.
-            viewModel.resetPollBackoff()
-            historyRefreshTask = Task { await viewModel.runHistoryPolling() }
         }
-        .onDisappear {
-            historyRefreshTask?.cancel()
-            historyRefreshTask = nil
+        .onChange(of: projectStore.activeProject) { _, _ in
+            // The sheet lives in the main window, where switching the active
+            // project mid-conversation is plausible (unlike the menu-bar
+            // popover). A turn in flight against the OLD project must not be
+            // left to land its reply into the NEW project's session file once
+            // `currentSessionIDString` below points at it — the same
+            // corruption class `switchSession`/`deleteSession` guard against
+            // via `resetActiveTurnState()` before ever touching `messages`/the
+            // pointer. So: stop the in-flight turn (synchronously finalizing
+            // its streaming placeholder as `.stopped`) and persist it under
+            // the OLD project's session before switching, rather than letting
+            // it finish into the wrong project.
+            engine.resetActiveTurnState()
+            engine.persistCurrentChat()
+            engine.quickChatProjectId = QuickChatContext.resolve(config: config, projectStore: projectStore)?.projectId
+            engine.currentSessionIDString = ""
+            engine.handleOnAppearSessions()
         }
         .onChange(of: engine.messages) { oldValue, newValue in
-            viewModel.notifyIfTurnFinished(oldValue: oldValue, newValue: newValue)
+            // Same call `CodeAssistantPanel`/`MenuBarChatView` wire for their
+            // own scopes — persists (debounced while a reply is streaming)
+            // and fires the VoiceOver announcement for a newly-arrived
+            // assistant turn. Nothing did this for the sheet's engine before
+            // Task 6; a turn was correct in memory but never reached
+            // `ChatSessionStore`.
+            engine.announceAndPersist(oldValue: oldValue, newValue: newValue)
             // A connectivity/server failure (never a user-initiated stop —
             // that's `.stopped`, not `.failed`) leaves the user's prompt
-            // sent-and-gone with no retry affordance yet (Task 16 owns
-            // that); restoring it into the composer at least means the
-            // words aren't lost. `draft = text` unconditionally, matching
-            // the original sheet's synchronous `catch { draft = text }` —
-            // this can overwrite something the user started typing during
-            // the failed round trip, same as the original did.
+            // sent-and-gone with no retry affordance yet; restoring it into
+            // the composer at least means the words aren't lost.
             if let recovered = viewModel.recoverableDraftAfterFailure(oldValue: oldValue, newValue: newValue) {
                 draft = recovered
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .llmChatTranscriptChanged)) { _ in
-            // Something changed: refresh now AND pull the backoff back to the
-            // floor, so the loop doesn't sit out the rest of a long window
-            // while a conversation is active.
-            viewModel.resetPollBackoff()
-            Task { await viewModel.loadHistory() }
         }
         .confirmationDialog(
             "Clear the conversation?",
@@ -102,16 +131,11 @@ struct LlmChatSheet: View {
             titleVisibility: .visible
         ) {
             Button("Clear", role: .destructive) {
-                // Drop remembered expansions with the transcript they belong
-                // to: message ids are derived from the row's `seq`, so a
-                // stale id could otherwise match a future message and open a
-                // reply the user never expanded.
-                manuallyExpanded.removeAll()
-                Task { await viewModel.clearHistory() }
+                Task { await performClearHistory() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the shared LLM Chat transcript from the server. iPhone and Mac will both start fresh.")
+            Text("This removes this chat's saved conversation and its memory.")
         }
     }
 
@@ -121,19 +145,16 @@ struct LlmChatSheet: View {
                 .foregroundStyle(theme.current.accent)
             Text("llm-chat")
                 .font(.headline)
-            if viewModel.loadingHistory {
+            if clearingHistory {
                 ProgressView().controlSize(.small)
             }
             Spacer()
-            Text("Synced with iPhone")
-                .font(.caption)
-                .foregroundStyle(.secondary)
             Button {
                 confirmingClear = true
             } label: {
                 Label("Clear", systemImage: "trash")
             }
-            .disabled(engine.messages.isEmpty)
+            .disabled(engine.messages.isEmpty || engine.busy || clearingHistory)
             Button("Close") { dismiss() }
                 .keyboardShortcut(.cancelAction)
         }
@@ -187,7 +208,10 @@ struct LlmChatSheet: View {
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Ask LLM-IDE anything. Messages here are shared with the iPhone Chat tab.")
+            // No longer "shared with the iPhone Chat tab" — that claim
+            // belonged to the old `/kb/agent/ask` transcript. The phone isn't
+            // on this `.quick` engine yet (a later task), so don't overclaim.
+            Text("Ask LLM-IDE anything about the active project.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Text("Examples:")
@@ -195,8 +219,8 @@ struct LlmChatSheet: View {
                 .foregroundStyle(.secondary)
                 .padding(.top, 6)
             Group {
-                examplePrompt("Summarize my last meeting notes.")
-                examplePrompt("What should I follow up on this week?")
+                examplePrompt("What does this project do?")
+                examplePrompt("What should I work on next?")
                 examplePrompt("Explain the active project's architecture.")
             }
         }
@@ -243,11 +267,11 @@ struct LlmChatSheet: View {
 
     @ViewBuilder
     private func bubble(for msg: ChatMessage, isExpanded: Bool) -> some View {
-        // The streaming placeholder starts life with empty content (this
-        // transport never streams chunks into it — it's filled in one shot
-        // when the reply lands) — an empty bubble with a name label and
-        // nothing else would flash on screen for no reason. The "Thinking…"
-        // row below the list already covers this turn's in-progress state.
+        // The streaming placeholder starts life with empty content — an
+        // empty bubble with a name label and nothing else would flash on
+        // screen for no reason before the first chunk lands. The
+        // "Thinking…" row below the list already covers this turn's
+        // in-progress state.
         if msg.status == .streaming && msg.content.isEmpty {
             EmptyView()
         } else {
@@ -319,13 +343,7 @@ struct LlmChatSheet: View {
     /// While a turn is running this becomes a Stop control — matching the
     /// Code Assistant composer's `sendButton` (`ChatComposer.swift`), just
     /// without that view's queueing/autonomous-agent affordances, which
-    /// don't apply to this sheet's single-shot `/kb/agent/ask` turns.
-    ///
-    /// WARNING: unlike `/code-assist`, `/kb/agent/ask` has no server-side
-    /// cancel — see `LlmChatViewModel.stop()`'s doc comment. The bubble
-    /// really does show `.stopped` immediately, it just isn't guaranteed to
-    /// stay that way once the next history poll fetches what the server
-    /// finished anyway.
+    /// don't apply to this sheet's single-shot turns.
     private var sendButton: some View {
         Button {
             if engine.busy {
@@ -361,6 +379,50 @@ struct LlmChatSheet: View {
         guard !text.isEmpty else { return }
         draft = ""
         viewModel.send(text)
+    }
+
+    /// Send the project context and the read-only `ask` mode — same shape as
+    /// `MenuBarChatView.wireEngine()`. This sheet has no model picker of its
+    /// own, so `model` always follows the config default rather than a
+    /// per-turn override.
+    private func wireEngine() {
+        engine.resolveTransportInput = { message, history, attachments, skills in
+            let tool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
+            let model = config.defaultModelId.isEmpty ? nil : config.defaultModelId
+            return ChatTransportInput(
+                message: message,
+                history: history,
+                attachments: attachments,
+                skills: skills,
+                // Was nil, which is why this chat could neither read nor write
+                // project memory — the whole point of unifying it.
+                agentContext: QuickChatContext.resolve(config: config, projectStore: projectStore)?.agentContext,
+                language: config.preferredLanguage.isEmpty ? nil : config.preferredLanguage,
+                model: model,
+                provider: ChatTransportInput.makeProvider(selectedProvider: tool.rawValue),
+                // Read-only: this sheet can be dismissed while the menu bar
+                // or the phone drives the same engine, so a turn that could
+                // park on an approval would hang with nothing able to render
+                // the card.
+                mode: "ask"
+            )
+        }
+    }
+
+    /// Clear this chat's saved conversation and its session memory. NOT a
+    /// blind `engine.replaceMessages([])` and NOT the old `/kb/agent/ask`
+    /// table — the engine owns this transcript now, persisted under
+    /// `ChatSessionStore`, so clearing goes through its own session lifecycle
+    /// (`clearCurrentChat()` → `deleteSession`), which also forgets the
+    /// session's server-side memory.
+    private func performClearHistory() async {
+        guard !clearingHistory else { return }
+        clearingHistory = true
+        defer { clearingHistory = false }
+        // Drop remembered expansions with the transcript they belong to.
+        manuallyExpanded.removeAll()
+        if engine.busy { viewModel.stop() }
+        await engine.clearCurrentChat()
     }
 }
 

@@ -114,17 +114,20 @@ extension ChatEngine {
         messages[idx].content = content
     }
 
-    /// Replace `messages` wholesale from an externally-sourced transcript —
-    /// e.g. `LlmChatViewModel.loadHistory()`'s periodic poll of the
-    /// server-persisted `/kb/agent/ask` history. Unlike `switchSession`/
-    /// `handleOnAppearSessions`, this does NOT touch `ChatSessionStore`, the
-    /// current-chat pointer, or transient/agent state — a caller that isn't
-    /// backed by this engine's disk session store (the LLM Chat sheet's
-    /// history lives server-side, not in a `ChatSession` file) just wants the
-    /// in-memory transcript kept in sync with the source of truth. Callers
-    /// are responsible for not calling this mid-turn (would clobber the
-    /// in-flight streaming placeholder) — `busy` is intentionally not
-    /// asserted here so a test can drive it directly.
+    /// Replace `messages` wholesale from an externally-sourced transcript.
+    /// Unlike `switchSession`/`handleOnAppearSessions`, this does NOT touch
+    /// `ChatSessionStore`, the current-chat pointer, or transient/agent state
+    /// — a caller that isn't backed by this engine's disk session store just
+    /// wants the in-memory transcript kept in sync with some other source of
+    /// truth. Callers are responsible for not calling this mid-turn (would
+    /// clobber the in-flight streaming placeholder) — `busy` is intentionally
+    /// not asserted here so a test can drive it directly.
+    ///
+    /// NOTE: `LlmChatSheet`/`MenuBarChatView` (the `.quick` scope) no longer
+    /// call this — as of Task 6 both render `engine.messages` directly and
+    /// never overwrite it from a second source (see `LlmChatViewModel.swift`'s
+    /// header comment). The remaining callers are test doubles that seed a
+    /// transcript directly.
     func replaceMessages(_ msgs: [ChatMessage]) {
         messages = msgs
     }

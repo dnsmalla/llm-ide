@@ -456,4 +456,10 @@ final class LlmIdeAPIClient: @unchecked Sendable {
 }
 
 extension LlmIdeAPIClient: AgentAskSending {}
-extension LlmIdeAPIClient: AgentAskHistoryFetching {}
+// `AgentAskHistoryFetching` (the seam `LlmChatViewModel.loadHistory`/
+// `clearHistory` used to poll `/kb/agent/ask/history` through) was removed in
+// Task 6 along with those methods — the `.quick` engine owns its transcript
+// directly now (`ChatSessionStore`). `listAgentAskHistory`/`clearAgentAskHistory`
+// themselves stay on `LlmIdeAPIClient` (`LlmIdeAPIClient+Agent.swift`) —
+// `MobileControlManager` still calls them directly for the phone's own (not
+// yet migrated) ask-history flow.

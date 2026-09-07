@@ -15,19 +15,23 @@ protocol AgentAskSending: Sendable {
 // `LlmIdeAPIClient.askAgent`'s existing signature already matches
 // `AgentAskSending` above (default parameter values aren't part of a
 // method's type, so they don't block conformance) — no forwarding shim
-// needed. `AgentAskHistoryFetching`, the OTHER seam `LlmChatViewModel`
-// needs (`listAgentAskHistory`/`clearAgentAskHistory`), lives in
-// `LlmChatViewModel.swift` next to its one consumer, with its own
-// `extension LlmIdeAPIClient: AgentAskHistoryFetching {}`.
+// needed.
+//
+// NOTE: as of Task 6, `LlmChatSheet` no longer uses this transport — it runs
+// on the shared `.quick` `ChatEngine` (`ChatEngineRegistry`), same as
+// `MenuBarChatView`. This type stays until Task 7 confirms zero remaining
+// callers and removes it.
 
-/// `ChatTransport` for the LLM Chat sheet's `/kb/agent/ask` endpoint — the
-/// same shared transcript the iPhone's `llmide_chat` uses via
-/// `MobileControlManager`. Unlike `CodeAssistTransport`, `/kb/agent/ask` is a
-/// single buffered call with no SSE progress/chunk events: `roundTrip` never
-/// invokes `onProgress`/`onChunk`, so the engine's streaming placeholder
-/// stays empty for the whole call and is filled in one shot when the reply
-/// lands — exactly like `CodeAssistTransport`'s buffered-fallback path, just
-/// without ever having a streamed path to fall back FROM.
+/// `ChatTransport` over `/kb/agent/ask` — the meeting-agent transcript the
+/// iPhone's `llmide_chat` still uses via `MobileControlManager`. `LlmChatSheet`
+/// and `MenuBarChatView` no longer use this (Tasks 5/6 moved both onto the
+/// shared `.quick` code-pipeline engine); it survives only as long as that
+/// mobile path does. Unlike `CodeAssistTransport`, `/kb/agent/ask` is a single
+/// buffered call with no SSE progress/chunk events: `roundTrip` never invokes
+/// `onProgress`/`onChunk`, so the engine's streaming placeholder stays empty
+/// for the whole call and is filled in one shot when the reply lands —
+/// exactly like `CodeAssistTransport`'s buffered-fallback path, just without
+/// ever having a streamed path to fall back FROM.
 struct AgentAskTransport: ChatTransport {
     let sender: AgentAskSending
 

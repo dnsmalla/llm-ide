@@ -38,8 +38,11 @@ extension Notification.Name {
     /// ⌘⇧L. Observed by AppShell.
     static let openLlmChatSheet = Notification.Name("openLlmChatSheet")
 
-    /// Posted after a message is persisted via `/kb/agent/ask` (Mac sheet
-    /// send or iPhone `llmide_chat` proxy). LlmChatSheet reloads history.
+    /// Posted after a message is persisted via `/kb/agent/ask` (iPhone
+    /// `llmide_chat` proxy, via `MobileControlManager`). As of Task 6 neither
+    /// `LlmChatSheet` nor `MenuBarChatView` listens for this any more — both
+    /// moved to the shared `.quick` code-pipeline engine, which owns its own
+    /// transcript directly and has nothing to reload from this table.
     static let llmChatTranscriptChanged = Notification.Name("llmChatTranscriptChanged")
 
     /// Posted when a custom Auto Task's enabled-state changes via a

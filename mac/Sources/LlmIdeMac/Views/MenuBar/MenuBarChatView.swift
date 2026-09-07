@@ -47,7 +47,7 @@ struct MenuBarChatView: View {
         // longer builds an `AgentAskTransport` at all.
         let engine = ChatEngineRegistry.shared.engine(for: .quick, api: api)
         _engine = State(initialValue: engine)
-        _viewModel = State(initialValue: LlmChatViewModel(engine: engine, historyAPI: api))
+        _viewModel = State(initialValue: LlmChatViewModel(engine: engine))
     }
 
     private var combinedError: String? {
@@ -84,8 +84,8 @@ struct MenuBarChatView: View {
             engine.quickChatProjectId = QuickChatContext.resolve(config: config, projectStore: projectStore)?.projectId
             // Same guard `CodeAssistantPanel.handleOnAppear` uses: the engine
             // is shared, so it may already have a session loaded — from a
-            // prior appearance of this popover, or (once Task 6/8 land) from
-            // the sheet or the phone. Only run the full resolve-or-mint path
+            // prior appearance of this popover, from the sheet (Task 6), or
+            // (once Task 8 lands) from the phone. Only run the full resolve-or-mint path
             // when nothing is loaded yet; otherwise just refresh the list.
             // Without this call at all, `.quick` never had a session to
             // persist into: `persistCurrentChat()` no-ops on an empty
@@ -132,13 +132,12 @@ struct MenuBarChatView: View {
             // at all until now, so a turn was correct in memory but never
             // reached `ChatSessionStore`.
             engine.announceAndPersist(oldValue: oldValue, newValue: newValue)
-            // No `viewModel.notifyIfTurnFinished(...)` here anymore: that
-            // posted `.llmChatTranscriptChanged` to tell other `/kb/agent/ask`
-            // listeners (the not-yet-migrated `LlmChatSheet`, the phone
-            // bridge) that the SHARED ask-history table changed — which, for
-            // a turn run through the code pipeline, it did not. Posting it
-            // would just cost those listeners a wasted poll of a table this
-            // surface no longer touches.
+            // No `viewModel.notifyIfTurnFinished(...)` here anymore (the
+            // method itself is gone, along with `LlmChatViewModel`'s whole
+            // `/kb/agent/ask/history` polling — see its header comment):
+            // this used to post `.llmChatTranscriptChanged` to tell other
+            // ask-history listeners the SHARED table changed, which, for a
+            // turn run through the code pipeline, it never did.
             if let recovered = viewModel.recoverableDraftAfterFailure(oldValue: oldValue, newValue: newValue) {
                 draft = recovered
             }

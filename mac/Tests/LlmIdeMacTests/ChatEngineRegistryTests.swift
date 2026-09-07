@@ -591,8 +591,7 @@ struct ChatEngineRunExternalTurnTests {
 /// for reproducing the mid-round-trip session-switch race
 /// `runExternalTurn`'s post-await `expectedSessionID` re-check guards
 /// against: the engine's active session changes while the transport call is
-/// still suspended. Same shape as `AgentAskTransportTests.swift`'s
-/// `SuspendableHistoryFetcher`, adapted to `ChatTransport`'s signature.
+/// still suspended.
 @MainActor
 final class SuspendableChatTransport: ChatTransport, @unchecked Sendable {
     var result = ChatTransportResult(reply: "the answer", pendingTool: nil, tasks: nil,
