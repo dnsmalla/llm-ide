@@ -94,20 +94,17 @@ struct LlmChatSheet: View {
         .onChange(of: projectStore.activeProject) { _, _ in
             // The sheet lives in the main window, where switching the active
             // project mid-conversation is plausible (unlike the menu-bar
-            // popover). A turn in flight against the OLD project must not be
-            // left to land its reply into the NEW project's session file once
-            // `currentSessionIDString` below points at it — the same
-            // corruption class `switchSession`/`deleteSession` guard against
-            // via `resetActiveTurnState()` before ever touching `messages`/the
-            // pointer. So: stop the in-flight turn (synchronously finalizing
-            // its streaming placeholder as `.stopped`) and persist it under
-            // the OLD project's session before switching, rather than letting
-            // it finish into the wrong project.
-            engine.resetActiveTurnState()
-            engine.persistCurrentChat()
-            engine.quickChatProjectId = QuickChatContext.resolve(config: config, projectStore: projectStore)?.projectId
-            engine.currentSessionIDString = ""
-            engine.handleOnAppearSessions()
+            // popover). `switchQuickChatProject(to:)` is the engine-owned
+            // session-swap sequence for exactly this: it stops the in-flight
+            // turn and persists it under the OLD project's session (the same
+            // prologue `switchSession`/`createNewSession` use) BEFORE
+            // re-pointing at the NEW project and reloading — so a turn in
+            // flight against project A can never land its reply into project
+            // B's session, and B's freshly-loaded chat never inherits A's
+            // transient agent/approval state (see that method's doc comment
+            // on `ChatEngine+Session.swift`).
+            engine.switchQuickChatProject(
+                to: QuickChatContext.resolve(config: config, projectStore: projectStore)?.projectId)
         }
         .onChange(of: engine.messages) { oldValue, newValue in
             // Same call `CodeAssistantPanel`/`MenuBarChatView` wire for their

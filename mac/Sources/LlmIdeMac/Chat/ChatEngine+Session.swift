@@ -212,6 +212,23 @@ extension ChatEngine {
     /// `messages` itself (like every other session-swap method here) and
     /// returns it for the caller's convenience.
     ///
+    /// Like `switchSession`/`deleteSession`, resets transient session state
+    /// (`resetTransientSessionState()`) for whatever chat it lands on — on
+    /// the pointer-found branch AND the `.adopt` fallback branch (the
+    /// `.mintFresh` branch already gets it for free from `mintFreshSession()`
+    /// itself). This was MISSING on both of those branches until code review
+    /// caught it (Task 6 round 1): this method is the "load the incoming
+    /// session" half for a plain first appearance (harmless — a freshly
+    /// resolved engine has nothing stale to reset) AND, since
+    /// `switchQuickChatProject(to:)` below reuses it, for a genuine
+    /// session SWAP while the engine already has live turn/approval state
+    /// from a DIFFERENT chat. Without the reset, that state — an outgoing
+    /// chat's `agent.pendingTool`/`error`/`agent.nudgePrompt`, and critically
+    /// `agentV2Transport`'s recorded `sdkSessionId` — carried into the
+    /// newly-loaded chat, which for the SDK session id specifically means the
+    /// new chat's next turn could RESUME the outgoing chat's server-side
+    /// conversation instead of starting its own.
+    ///
     /// Extracted from `CodeAssistantPanel.handleOnAppear`, which also does
     /// model-picker and initial-attachment setup — that half stays in the view.
     @discardableResult
@@ -225,18 +242,22 @@ extension ChatEngine {
         if let cur = UUID(uuidString: currentSessionIDString),
            let session = ChatSessionStore.load(id: cur),
            session.scope == scope {
+            resetTransientSessionState()
             messages = session.messages
             onHistoryReplaced(session.messages)
         } else {
             switch fallbackSessionAfterLoss() {
             case .adopt(let newest):
                 currentSessionIDString = newest.id.uuidString
+                resetTransientSessionState()
                 messages = newest.messages
                 onHistoryReplaced(newest.messages)
                 rememberCurrentPointer()
             case .mintFresh:
                 // No usable pointer and no safe saved chat to fall back to —
-                // start one. (mintFreshSession clears `messages` itself.)
+                // start one. (mintFreshSession clears `messages` itself, and
+                // calls resetTransientSessionState() internally — do not call
+                // it again here.)
                 mintFreshSession()
             }
         }
@@ -362,6 +383,27 @@ extension ChatEngine {
         return marker
     }
 
+    /// Finalize the in-flight turn and persist the outgoing chat — the shared
+    /// prologue for every path that swaps `currentSessionIDString` away from
+    /// whatever is currently loaded. Finalizes any in-flight stream BEFORE
+    /// persisting — otherwise an unfinished placeholder turn could be written
+    /// to disk (see `resetActiveTurnState`'s doc comment).
+    ///
+    /// Factored out (code review, Task 6 round 1) after this exact two-line
+    /// sequence was hand-duplicated at `createNewSession`, `switchSession`,
+    /// and — before this fix — a THIRD, ad hoc copy in `LlmChatSheet`'s
+    /// project-switch handler that duplicated these two lines but had no way
+    /// to know it also needed to route through the transient-state reset
+    /// `handleOnAppearSessions()`'s loading branches perform (see that
+    /// method's doc comment for the actual bug this closes). One private
+    /// helper means a fourth swap path calls a named operation instead of
+    /// re-deriving "which two engine calls does a session swap start with"
+    /// from scratch.
+    private func stopOutgoingTurnBeforeSwap() {
+        resetActiveTurnState()
+        persistCurrentChat()
+    }
+
     /// Start a new empty chat for this scope. No-op if the current chat is
     /// already an untouched "New chat" (avoids duplicate empty rows from
     /// repeated taps on "+ New chat").
@@ -370,11 +412,7 @@ extension ChatEngine {
             let title = sessions.first(where: { $0.id.uuidString == currentSessionIDString })?.title ?? "New chat"
             if title == "New chat" || title.isEmpty { return }
         }
-        // Finalize any in-flight stream BEFORE persisting — otherwise an
-        // unfinished placeholder turn could be written to disk (see
-        // resetActiveTurnState's doc comment).
-        resetActiveTurnState()
-        persistCurrentChat()
+        stopOutgoingTurnBeforeSwap()
         mintFreshSession()
     }
 
@@ -382,11 +420,7 @@ extension ChatEngine {
     func switchSession(to id: UUID) {
         guard id.uuidString != currentSessionIDString else { return }
         guard let session = ChatSessionStore.load(id: id), session.scope == scope else { return }
-        // Finalize any in-flight stream BEFORE persisting — otherwise an
-        // unfinished placeholder turn could be written to disk (see
-        // resetActiveTurnState's doc comment).
-        resetActiveTurnState()
-        persistCurrentChat()
+        stopOutgoingTurnBeforeSwap()
         currentSessionIDString = id.uuidString
         rememberCurrentPointer()
         resetTransientSessionState()
@@ -396,6 +430,31 @@ extension ChatEngine {
         DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
         ChatSessionStore.save(session)
         refreshSessions()
+    }
+
+    /// Swap `.quick` onto a different project's session — the engine-owned
+    /// counterpart of `switchSession(to:)` for when the identity of the
+    /// INCOMING session isn't a known id but "whatever `newProjectId`'s
+    /// pointer resolves to." Called by `LlmChatSheet`'s
+    /// `.onChange(of: projectStore.activeProject)` — the main window makes a
+    /// project switch mid-conversation plausible, unlike the menu-bar
+    /// popover.
+    ///
+    /// Runs the SAME `stopOutgoingTurnBeforeSwap()` prologue `switchSession`/
+    /// `createNewSession` use, then re-points `quickChatProjectId` and clears
+    /// `currentSessionIDString` so `handleOnAppearSessions()` re-resolves the
+    /// NEW project's pointer from scratch rather than reloading the outgoing
+    /// project's id. `handleOnAppearSessions()` resets transient session
+    /// state for whatever it lands on (see its doc comment) — the same
+    /// guarantee `switchSession`/`deleteSession` give their callers — so the
+    /// caller doesn't need to (and must not — see `resetTransientSessionState`'s
+    /// own doc comment on ordering against `onHistoryReplaced`).
+    func switchQuickChatProject(to newProjectId: String?) {
+        assert(scope == .quick, "switchQuickChatProject called on a non-.quick engine")
+        stopOutgoingTurnBeforeSwap()
+        quickChatProjectId = newProjectId
+        currentSessionIDString = ""
+        handleOnAppearSessions()
     }
 
     /// Load `id` into a BRAND-NEW, otherwise-untouched engine — for a caller
