@@ -251,13 +251,63 @@ export function loadSkills(dir, { requireBase = true, ignore = [] } = {}) {
 
 /// Extract the first non-heading, non-empty prose line from a skill body.
 /// Used as a fallback description when the frontmatter has no `description`.
+// A derived description is MODEL-FACING: it becomes the MCP tool description
+// on the v2 path (sdk/tools.mjs) and the OpenAI function description on the
+// other (runtime/openai-tools.mjs), so it is what the model picks tools by.
+//
+// This used to return the first non-heading LINE, capped at 140 chars. The
+// tool docs are hard-wrapped at ~76 columns, so 13 of the 14 registered tools
+// shipped a sentence FRAGMENT — "Delegate to the LLM-IDE internal agent — the
+// only authority on", "Search the user's knowledge base — meeting
+// transcripts, decisions, action" — and every doc's "When to use" guidance
+// never reached the model at all. `find-code` read properly only because it
+// is the one doc with an explicit frontmatter `description:`.
+//
+// So: compose the intro paragraph plus the sections that actually drive tool
+// SELECTION. "Call shape"/"Result shape"/"Examples" are deliberately excluded
+// — they restate the JSON schema the model already receives, which is pure
+// duplicated cost on every request (they are also the bulk of most docs).
+const DESC_MAX = 1200;
+const DESC_KEEP_SECTIONS = new Set(['when to use', 'when not to use']);
+
+// Cut on a sentence boundary, then a word boundary, never mid-word — a
+// mid-sentence cut is the exact defect this function exists to fix, and a cap
+// that reintroduced it in a new place would be worse than no cap. The `…`
+// tells the reader (and the model) that something was dropped.
+function cutAtSentence(text, max) {
+  if (text.length <= max) return text;
+  const head = text.slice(0, max - 1);
+  const sentenceEnd = Math.max(head.lastIndexOf('. '), head.lastIndexOf('.\n'));
+  // Only honour a sentence break in the back half; a doc whose first sentence
+  // runs past the cap would otherwise be cut to almost nothing.
+  const cut = sentenceEnd > max / 2 ? sentenceEnd + 1 : head.lastIndexOf(' ');
+  return `${head.slice(0, cut > 0 ? cut : head.length).trimEnd()}…`;
+}
+
+const collapse = (s) => s.trim().split(/\s+/).join(' ');
+
 function extractBodyDescription(body) {
   if (typeof body !== 'string') return '';
-  for (const line of body.split('\n')) {
+  const noFences = body.replace(/```[\s\S]*?```/g, '');
+  // Odd indices are the `## ` heading texts, even ones the content between.
+  const parts = noFences.split(/^##\s+(.*)$/m);
+  const intro = parts[0].replace(/^#\s+.*$/m, '').trim().split(/\n\s*\n/)[0] || '';
+
+  const chunks = [];
+  if (intro.trim()) chunks.push(collapse(intro));
+  for (let i = 1; i < parts.length; i += 2) {
+    const heading = (parts[i] || '').trim();
+    if (!DESC_KEEP_SECTIONS.has(heading.toLowerCase().replace(/:$/, ''))) continue;
+    const section = collapse(parts[i + 1] || '');
+    if (section) chunks.push(`${heading}: ${section}`);
+  }
+  if (chunks.length) return cutAtSentence(chunks.join('\n'), DESC_MAX);
+
+  // A body with no intro paragraph at all (only headings, or only a fenced
+  // block) still deserves something: fall back to the old first-line rule.
+  for (const line of noFences.split('\n')) {
     const t = line.trim();
-    if (t && !t.startsWith('#') && !t.startsWith('```') && !t.startsWith('<<<')) {
-      return t.slice(0, 140);
-    }
+    if (t && !t.startsWith('#') && !t.startsWith('<<<')) return t.slice(0, DESC_MAX);
   }
   return '';
 }

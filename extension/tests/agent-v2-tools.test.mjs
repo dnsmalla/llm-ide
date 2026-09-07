@@ -272,3 +272,51 @@ test('an unrecognized schema type throws at mount instead of silently degrading 
     a: { type: 'string' }, b: { type: 'number' }, c: { type: 'boolean' }, d: { type: 'string[]' },
   }));
 });
+
+// The guard that was missing when 13 of 14 tool descriptions shipped as
+// sentence fragments. These strings are how the model chooses tools, and
+// nothing asserted anything about them — the derivation took the first
+// hard-wrapped LINE of each doc body, so the model was picking tools from half
+// a clause ("...the only authority on", "...decisions, action"). Assert what
+// the model actually receives over a real MCP client, not what the loader
+// looks like it should produce.
+test('tool descriptions: every registered tool ships complete, useful guidance', async () => {
+  const { registerUser } = await import('../server/users.mjs');
+  const { getDb } = await import('../kb/db.mjs');
+  const u = registerUser(getDb(), {
+    email: 'v2tools-desc@example.com', password: 'CorrectHorseBattery', displayName: 't',
+  });
+  const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
+  const server = buildLlmIdeServer(u.id, { workspaceRoot: process.cwd() }, 'hi', {});
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.instance.connect(serverTransport);
+  const client = new Client({ name: 'test-client', version: '0.0.0' });
+  await client.connect(clientTransport);
+  try {
+    const { tools } = await client.listTools();
+    assert.ok(tools.length >= 14, `expected the full tool surface, got ${tools.length}`);
+
+    for (const t of tools) {
+      const d = (t.description || '').trim();
+      // A bare name is the `skill.description || entry.name` fallback firing,
+      // which means the doc failed to load or has no usable body.
+      assert.notEqual(d, t.name, `${t.name}: description is just the tool name`);
+      assert.ok(d.length > 40, `${t.name}: description too short to guide selection (${d.length})`);
+      // A fragment means the derivation cut mid-sentence again.
+      assert.match(d, /[.!?…]$/, `${t.name}: description ends mid-sentence: ${JSON.stringify(d.slice(-60))}`);
+      assert.ok(!d.includes('```'), `${t.name}: code fence leaked into the description`);
+      assert.ok(!d.includes('TOOL_CALL'), `${t.name}: call-shape leaked (the schema already covers it)`);
+    }
+
+    // Descriptions ride EVERY model call in a turn, including each tool-call
+    // iteration, so their total size is a real per-turn cost. Pinning it means
+    // a future doc edit cannot silently double the bill: this was ~890 chars
+    // when the descriptions were fragments and ~6.7k once the guidance was
+    // actually delivered, which was a deliberate, measured trade.
+    const total = tools.reduce((n, t) => n + (t.description || '').length, 0);
+    assert.ok(total < 9_000, `tool-schema descriptions grew to ${total} chars — re-check the budget`);
+  } finally {
+    await client.close();
+    await server.instance.close();
+  }
+});
