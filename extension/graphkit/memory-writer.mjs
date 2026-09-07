@@ -108,6 +108,23 @@ function rankOldestFirst(list) {
     .map((x) => x.i);
 }
 
+// Cap a stored line to `maxChars` WITHOUT ever slicing into its trailing
+// `(t:YYYY-MM-DD)` stamp (15 chars). A fact whose TEXT+stamp length landed in
+// [maxChars-14, maxChars-1] used to have the stamp cut mid-string by a blind
+// `.slice(0, maxChars)` — e.g. "...(t:2026-09-0" with no closing paren, which
+// stripFactStamp's regex can't match, so the garbage tail glued itself onto
+// the fact text permanently and stayed visible to both the model and the
+// memory viewer. Strip whatever stamp is present, cap the TEXT, then
+// re-append the stamp — the stamp itself can never be a truncation casualty.
+function capFactPreservingStamp(raw, maxChars) {
+  const s = String(raw).trim();
+  const stamp = factStamp(s);
+  if (stamp === null) return s.slice(0, maxChars);
+  const suffix = ` (t:${stamp})`;
+  const textRoom = Math.max(0, maxChars - suffix.length);
+  return `${stripFactStamp(s).slice(0, textRoom)}${suffix}`;
+}
+
 // Render a complete chat-memory.md from a fact list (header + bullets), with
 // caps applied: when over MAX_FACTS or MAX_FILE_CHARS, the OLDEST facts by
 // their own `(t:YYYY-MM-DD)` stamp are dropped first (undated facts count as
@@ -116,7 +133,7 @@ function rankOldestFirst(list) {
 // file order (diff-friendly). Pure + exported.
 export function renderChatMemoryFile(facts) {
   let list = (Array.isArray(facts) ? facts : [])
-    .map((f) => String(f).trim().slice(0, MAX_FACT_CHARS))
+    .map((f) => capFactPreservingStamp(f, MAX_FACT_CHARS))
     .filter(Boolean);
   // Dedup (keep first occurrence) then keep the NEWEST MAX_FACTS.
   const seen = new Set();

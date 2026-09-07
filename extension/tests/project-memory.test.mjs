@@ -33,7 +33,7 @@ const users   = await import('../server/users.mjs');
 // Facts as stored now carry a `(t:YYYY-MM-DD)` recency stamp (see
 // graphkit/memory-writer.mjs). These round-trip assertions are about upsert,
 // dedup and eviction — not about the metadata — so they read stamp-blind.
-const { stripFactStamp } = await import('../core/fact-key.mjs');
+const { stripFactStamp, factStamp } = await import('../core/fact-key.mjs');
 const factsOf = (root) => writer.readChatMemoryFacts(root).map(stripFactStamp);
 const { handleAgentRoutes } = await import('../routes/agent.mjs');
 
@@ -1137,4 +1137,44 @@ test('renderChatMemoryFile evicts the OLDEST fact by stamp, not the one at index
     `the newest-stamped fact at index 0 must survive even though it is oldest by position: ${JSON.stringify(kept)}`);
   assert.ok(!kept.some((f) => f.startsWith('beta fact')),
     `the first UNDATED (unknown-age) fact must be the one evicted, not index 0: ${JSON.stringify(kept)}`);
+});
+
+// ── stamp corruption on truncation (renderChatMemoryFile / withStamp) ──────────
+//
+// withStamp appends a 15-char " (t:YYYY-MM-DD)" suffix AFTER sanitizeFacts
+// (llm_agent/runtime/memory-extract.mjs) already budgeted the fact to exactly
+// MAX_FACT_CHARS (280). renderChatMemoryFile then re-slices to 280. Any fact
+// whose combined length landed in [266, 279] had its stamp cut mid-string —
+// e.g. "...(t:2026-09-0" with no closing paren — which stripFactStamp's regex
+// cannot match, so the corrupt tail became permanent, visible fact text.
+
+test('appendChatMemory: a fact near the length cap keeps an intact, well-formed stamp', () => {
+  reset();
+  const u = provision('pm-stamp-nearcap@example.test');
+  const root = tmpRepo(u, 'stamp-nearcap');
+  // 279 chars of text: combined with the 15-char stamp this lands squarely in
+  // the corruption band the reviewer identified (a blind slice(0, 280) would
+  // cut off the stamp's last few characters).
+  const fact = 'z'.repeat(279);
+  writer.appendChatMemory({ root, facts: [fact] });
+  const [stored] = writer.readChatMemoryFacts(root);
+  assert.ok(stored, 'fact persisted');
+  assert.ok(stored.length <= 280, `stored line must respect the cap: ${stored.length}`);
+  assert.ok(stored.endsWith(')'), `stamp must not be truncated mid-string: ${JSON.stringify(stored)}`);
+  assert.ok(factStamp(stored), `factStamp must still parse a well-formed date: ${JSON.stringify(stored)}`);
+});
+
+test('appendChatMemory: an overlong fact is capped on TEXT, never on the stamp', () => {
+  reset();
+  const u = provision('pm-stamp-overlong@example.test');
+  const root = tmpRepo(u, 'stamp-overlong');
+  const fact = 'q'.repeat(400);
+  writer.appendChatMemory({ root, facts: [fact] });
+  const [stored] = writer.readChatMemoryFacts(root);
+  const stamp = factStamp(stored);
+  assert.ok(stamp, 'stamp intact on an overlong fact');
+  assert.ok(stored.length <= 280, `total line must still respect the 280 cap: ${stored.length}`);
+  const text = stripFactStamp(stored);
+  assert.equal(text.length, 280 - ` (t:${stamp})`.length,
+    'fact TEXT is capped to leave exact room for the stamp, not the other way round');
 });
