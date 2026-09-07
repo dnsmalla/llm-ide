@@ -708,7 +708,7 @@ export async function runAgentLoop({
     // persistent record is the only way to measure offline which skills
     // actually trigger, how often, and for whom — the data needed to spot a
     // skill that mis-triggers or never fires. One line per dispatch.
-    logger.info('skill_invoked', { skill: skill.name, kind: skill.kind, userId, iteration: i + 1 });
+    logger.audit('skill_invoked', { skill: skill.name, kind: skill.kind, engine: 'legacy', userId, iteration: i + 1 });
 
     if (skill.kind === 'write') {
       // replyMode 'final': the prose immediately before THIS write fence is
@@ -912,7 +912,7 @@ export async function runNativeAgentLoop({
         messages.push({ role: 'tool', tool_call_id: callId, name: tc.name, content: JSON.stringify({ error: validation.error }) });
         continue;
       }
-      logger.info('skill_invoked', { skill: skill.name, kind: skill.kind, userId, iteration: i + 1 });
+      logger.audit('skill_invoked', { skill: skill.name, kind: skill.kind, engine: 'legacy', userId, iteration: i + 1 });
       if (skill.kind === 'write') {
         // One write per turn — surface for client confirmation (pendingTool).
         return { reply: stripFenceRemnants((text || '').trim()), pendingTool: { name: tc.name, arguments: validation.value }, iterations: i + 1, cacheHits: 0 };

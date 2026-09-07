@@ -18,6 +18,7 @@ import { entries, abortedResult } from '../tools/registry.mjs';
 import { globalSkills } from '../skills/index.mjs';
 import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
 import { resolveChatSessionId } from '../../kb/session-memory.mjs';
+import { logger } from '../../core/logger.mjs';
 
 // The .md frontmatter param types this compiler understands. An unrecognized
 // type used to fall through to `z.string()` silently — a skill declaring e.g.
@@ -101,8 +102,51 @@ export function buildLlmIdeServer(userId, agentContext, currentMessage, {
         // in-process server would otherwise run to completion — an
         // `ask-subagent` delegation is a full nested agent loop, so that is
         // real model spend after the user pressed Stop.
+        const startedAt = Date.now();
         const aborted = abortedResult(toolCtx);
-        const result = aborted ?? await Promise.resolve(entry.execute(args, toolCtx));
+        let result;
+        let outcome = 'ok';
+        try {
+          result = aborted ?? await Promise.resolve(entry.execute(args, toolCtx));
+          // `aborted` is checked first because abortedResult returns an
+          // {error} shape: judging by the result alone would report the user's
+          // own Stop as a tool malfunction.
+          if (aborted) outcome = 'aborted';
+          else if (result && result.error) outcome = 'error';
+        } catch (err) {
+          outcome = 'error';
+          throw err;
+        } finally {
+          // Telemetry parity with the legacy loop's dispatch point
+          // (runtime/loop.mjs, same `skill_invoked` event, tagged by engine so
+          // one grep of kb/server.log covers both). v2 emitted nothing, so on
+          // the DEFAULT engine there was no way to answer "is the model
+          // actually calling this tool" — which is the only honest way to
+          // judge a change to tool descriptions, the thing selection depends
+          // on.
+          //
+          // NEVER add args or results here. They carry file contents, shell
+          // commands, KB prose and whatever the user typed; a line in
+          // server.log is not the place for any of it. `ms`/`outcome` are what
+          // the legacy line lacks and what makes a slow or silently-failing
+          // tool visible.
+          //
+          // `audit`, not `info`: the file sink is warn+, so an info line only
+          // ever reaches stdout, which the Mac app swallows into an in-memory
+          // buffer. logger.audit exists for exactly this class of event (its
+          // own docstring cites project_memory making the same mistake) — a
+          // line whose whole purpose is to answer "did this actually happen?"
+          // after the fact. Costs rotation budget, hence the tiny payload.
+          logger.audit('skill_invoked', {
+            skill: entry.name,
+            kind: entry.kind,
+            engine: 'v2',
+            userId,
+            sessionId: toolCtx.sessionId,
+            ms: Date.now() - startedAt,
+            outcome,
+          });
+        }
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       },
       // readOnlyHint must tell the TRUTH per entry: MCP hosts use it to decide

@@ -320,3 +320,93 @@ test('tool descriptions: every registered tool ships complete, useful guidance',
     await server.instance.close();
   }
 });
+
+// ── tool-call telemetry (v2 parity with the legacy loop) ─────────────────────
+//
+// tests/agent-skill-telemetry.test.mjs states the reason this exists: "Selection
+// is 100% description-quality-driven, so we must record which skills actually
+// get invoked (and for whom) to be able to measure triggering quality offline."
+// The legacy loop has emitted `skill_invoked` at its dispatch point all along —
+// v2 emitted NOTHING, so on the default engine there was no way to answer "is
+// the model actually calling this tool", which is precisely the measurement a
+// description change has to be judged by.
+
+// Spy on logger.info for the duration of `fn` — same pattern as the legacy
+// telemetry test.
+async function captureInfo(fn) {
+  const { logger } = await import('../core/logger.mjs');
+  const captured = [];
+  const original = logger.audit;
+  logger.audit = (event, fields) => { captured.push({ event, fields }); };
+  try { await fn(); } finally { logger.audit = original; }
+  return captured;
+}
+
+async function callV2Tool(name, args, opts = {}) {
+  const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
+  const server = buildLlmIdeServer(
+    'user-v2-telemetry',
+    { workspaceRoot: WS, sessionId: 'sess-telemetry' },
+    'what changed?',
+    { renderMemory: () => 'some project memory', ...opts },
+  );
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.instance.connect(serverTransport);
+  const client = new Client({ name: 'test-client', version: '0.0.0' });
+  await client.connect(clientTransport);
+  try { return await client.callTool({ name, arguments: args }); } finally {
+    await client.close();
+    await server.instance.close();
+  }
+}
+
+test('telemetry: a v2 tool call emits one skill_invoked tagged engine v2', async () => {
+  const logs = await captureInfo(() => callV2Tool('project_memory', { focus: 'auth' }));
+  const inv = logs.filter((l) => l.event === 'skill_invoked');
+  assert.equal(inv.length, 1, `exactly one line per call, got ${inv.length}`);
+  const f = inv[0].fields;
+  assert.equal(f.skill, 'project_memory');
+  assert.equal(f.kind, 'read');
+  assert.equal(f.engine, 'v2', 'tagged so one grep covers both engines');
+  assert.equal(f.userId, 'user-v2-telemetry');
+  assert.equal(f.sessionId, 'sess-telemetry');
+  assert.equal(typeof f.ms, 'number', 'duration recorded');
+  assert.equal(f.outcome, 'ok');
+});
+
+test('telemetry: arguments and results are NEVER logged', async () => {
+  // The guard that matters most. Tool args and results carry file contents,
+  // shell commands, KB prose and whatever the user typed — "let's log the args
+  // for debugging" is the well-meant change this exists to stop.
+  const secret = 'SUPER-SECRET-ARGUMENT-VALUE';
+  const logs = await captureInfo(() => callV2Tool('project_memory', { focus: secret }));
+  const dumped = JSON.stringify(logs);
+  assert.ok(!dumped.includes(secret), 'an argument value leaked into the logs');
+  assert.ok(!dumped.includes('some project memory'), 'a tool RESULT leaked into the logs');
+  // And the payload carries only the agreed keys.
+  const f = logs.find((l) => l.event === 'skill_invoked').fields;
+  assert.deepEqual(
+    Object.keys(f).sort(),
+    ['engine', 'kind', 'ms', 'outcome', 'sessionId', 'skill', 'userId'],
+  );
+});
+
+test('telemetry: a failing tool records outcome error, not ok', async () => {
+  const logs = await captureInfo(() => callV2Tool('read-file', { path: 'definitely-not-here.txt' }));
+  const f = logs.find((l) => l.event === 'skill_invoked')?.fields;
+  assert.ok(f, 'a failed call is still an invocation and must be recorded');
+  assert.equal(f.skill, 'read-file');
+  assert.equal(f.outcome, 'error', 'a tool that returns {error} is not "ok"');
+});
+
+test('telemetry: a tool refused because the turn was stopped records outcome aborted', async () => {
+  const ac = new AbortController();
+  ac.abort();
+  const logs = await captureInfo(() => callV2Tool('project_memory', {}, { signal: ac.signal }));
+  const inv = logs.filter((l) => l.event === 'skill_invoked');
+  assert.equal(inv.length, 1, 'logged once, not twice');
+  // Distinguished from a genuine failure: abortedResult returns an {error}
+  // shape, so inspecting the result alone would misreport a user's Stop as a
+  // tool malfunction.
+  assert.equal(inv[0].fields.outcome, 'aborted');
+});

@@ -18,9 +18,9 @@ const SKILLS_DIR = join(__dirname, '..', 'llm_agent', 'global');
 // Spy on logger.info for the duration of `fn`, capturing (event, fields) pairs.
 async function captureInfo(fn) {
   const captured = [];
-  const original = logger.info;
-  logger.info = (event, fields) => { captured.push({ event, fields }); };
-  try { await fn(); } finally { logger.info = original; }
+  const original = logger.audit;
+  logger.audit = (event, fields) => { captured.push({ event, fields }); };
+  try { await fn(); } finally { logger.info = original; logger.audit = original; }
   return captured;
 }
 
@@ -40,6 +40,10 @@ test('logs skill_invoked for a WRITE skill at dispatch', async () => {
   assert.equal(inv.fields.skill, 'update-file');
   assert.equal(inv.fields.kind, 'write');
   assert.equal(inv.fields.userId, 'user-42');
+  // Tagged by engine so ONE grep of kb/server.log covers both this loop and
+  // the v2 MCP server (see tests/agent-v2-tools.test.mjs), which is what makes
+  // "which engine actually calls this tool" answerable.
+  assert.equal(inv.fields.engine, 'legacy');
 });
 
 test('logs skill_invoked for a READ skill at dispatch', async () => {
