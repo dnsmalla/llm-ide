@@ -29,12 +29,20 @@ struct GenerationChecklistStep {
 /// this file existed), while Visual uses it for its "View Image" control —
 /// see `VisualCenterPanel`.
 ///
-/// Lives under `Views/Shared` (never excluded by `mac/Package.swift`)
-/// because `Views/DocGen` IS excluded when the `doc_gen` feature is
-/// compiled out of a lite/min build, and `Views/Visual` (which is never
-/// excluded) depends on this body too — the same reason
+/// Lives under `Views/Shared` because `Views/DocGen` and `Views/Visual` both
+/// render it and they are peers: whichever one owned this body, the other
+/// would have to import across a sibling feature directory. Same reason
 /// `GenerationViewModel`/`GenerationSetupSection`/`GenerationSourceTree`/
 /// `GenerationPromptBar` live here.
+///
+/// NOT for a build-exclusion reason — the two directories are excluded
+/// together when `doc_gen` is compiled out (`mac/Package.swift`), so either
+/// could host this file and it would be present in exactly the builds that
+/// have a consumer. An earlier version of this comment said `Views/Visual`
+/// "is never excluded", which stopped being true when Visual was put behind
+/// the `doc_gen` flag; the replacement then over-corrected and claimed
+/// neither directory *could* own it. Both were wrong, and either would
+/// mislead someone deciding where a new shared view belongs.
 struct GenerationEditorPanel<ToolbarAccessory: View>: View {
     @ObservedObject var vm: GenerationViewModel
     let api: LlmIdeAPIClient

@@ -12,9 +12,11 @@ import SwiftUI
 /// completed-reply filter, the double-press dedupe, the disabled/help text)
 /// is identical, and two copies drifting apart is exactly what the
 /// Doc Gen/Visual `Views/Shared` split exists to prevent. Lives under
-/// `Views/Shared` (never excluded by `mac/Package.swift`) for the same
-/// reason `GenerationViewModel`/`GenerationPromptBar`/etc. do: `Views/Visual`
-/// depends on it and is never excluded, even though `Views/DocGen` is.
+/// `Views/Shared` for the same reason `GenerationViewModel`/
+/// `GenerationPromptBar`/etc. do: `Views/DocGen` and `Views/Visual` are
+/// peers that both render it, so neither should have to import from the
+/// other. (Not a build-exclusion constraint — see `GenerationEditorPanel`
+/// for why that rationale does not apply here.)
 struct GenerationSaveChatOutputRow: View {
     @ObservedObject var vm: GenerationViewModel
     let api: LlmIdeAPIClient

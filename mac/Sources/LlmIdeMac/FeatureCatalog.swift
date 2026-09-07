@@ -181,6 +181,19 @@ enum FeatureCatalog {
         #endif
     }
 
+    /// The Visual tab mirrors Doc Gen's generation flow (same
+    /// `GenerationViewModel`, image sources instead of file sources) and
+    /// rides on the same `.docGen` feature flag — see `ShellState.Section
+    /// .backingFeature`. Excluded together with Doc Gen (`Views/Visual` in
+    /// Package.swift's `libExcludes`).
+    static func visualPane(api: LlmIdeAPIClient) -> AnyView {
+        #if FEATURE_DOCGEN
+        return AnyView(VisualView(api: api))
+        #else
+        return AnyView(EmptyView())
+        #endif
+    }
+
     // MARK: - Terminal
 
     #if FEATURE_TERMINAL

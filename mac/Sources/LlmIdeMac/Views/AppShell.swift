@@ -626,7 +626,14 @@ struct AppShell: View {
                     featureName: "Gantt Timeline",
                     isCompiled: registry.compiledFeatures.contains(.ganttIssues))
             }
-        case .visual:    VisualView(api: api)
+        case .visual:
+            if registry.isEnabled(.docGen) {
+                FeatureCatalog.visualPane(api: api)
+            } else {
+                DisabledFeaturePlaceholderView(
+                    featureName: "Visual",
+                    isCompiled: registry.compiledFeatures.contains(.docGen))
+            }
         case .docGen:
             if registry.isEnabled(.docGen) {
                 FeatureCatalog.docGenPane(api: api)

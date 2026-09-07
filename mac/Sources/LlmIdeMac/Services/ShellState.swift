@@ -163,7 +163,7 @@ extension ShellState.Section {
         case .codeGraph: return .codeGraph3D
         case .autoCode, .loopEngine: return .autoTasks
         case .issues, .gantt: return .ganttIssues
-        case .docGen: return .docGen
+        case .docGen, .visual: return .docGen
         case .explorer, .sourceControl, .search: return .fileExplorer
         default: return nil
         }
