@@ -83,8 +83,12 @@ struct LlmChatSheet: View {
             // loaded from a prior appearance of this sheet, the menu bar, or
             // (once Task 8 lands) the phone. Only run the full resolve-or-mint
             // path when nothing is loaded yet; otherwise just refresh the list.
+            // `...IfReady()` (not the raw call) — this sheet's own `.sheet`
+            // presentation isn't gated on a project, so first appearance can
+            // happen with `quickChatProjectId == nil`; see that method's doc
+            // comment for why the raw call would assert/misbehave then.
             if engine.currentSessionIDString.isEmpty {
-                engine.handleOnAppearSessions()
+                engine.handleOnAppearSessionsIfReady()
             } else {
                 engine.refreshSessions()
             }

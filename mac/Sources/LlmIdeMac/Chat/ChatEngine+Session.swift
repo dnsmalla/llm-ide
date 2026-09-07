@@ -441,20 +441,77 @@ extension ChatEngine {
     /// popover.
     ///
     /// Runs the SAME `stopOutgoingTurnBeforeSwap()` prologue `switchSession`/
-    /// `createNewSession` use, then re-points `quickChatProjectId` and clears
-    /// `currentSessionIDString` so `handleOnAppearSessions()` re-resolves the
-    /// NEW project's pointer from scratch rather than reloading the outgoing
-    /// project's id. `handleOnAppearSessions()` resets transient session
-    /// state for whatever it lands on (see its doc comment) — the same
-    /// guarantee `switchSession`/`deleteSession` give their callers — so the
-    /// caller doesn't need to (and must not — see `resetTransientSessionState`'s
-    /// own doc comment on ordering against `onHistoryReplaced`).
+    /// `createNewSession` use — while `quickChatProjectId` STILL names the
+    /// OUTGOING project, so `persistCurrentChat()` writes to the right file —
+    /// then re-points `quickChatProjectId` and clears `currentSessionIDString`
+    /// so `handleOnAppearSessions()` re-resolves the NEW project's pointer
+    /// from scratch rather than reloading the outgoing project's id.
+    /// `handleOnAppearSessions()` resets transient session state for whatever
+    /// it lands on (see its doc comment) — the same guarantee `switchSession`/
+    /// `deleteSession` give their callers — so the caller doesn't need to
+    /// (and must not — see `resetTransientSessionState`'s own doc comment on
+    /// ordering against `onHistoryReplaced`).
+    ///
+    /// `newProjectId == nil` (the project was CLOSED, not switched) is handled
+    /// separately and does NOT fall through to `handleOnAppearSessions()`:
+    /// that method's first act is reading `pointerKey`, and `pointerKey`'s
+    /// `.quick` branch treats a nil `quickChatProjectId` as a WIRING bug
+    /// (`assertionFailure` — correctly, since a `.quick` engine reading its
+    /// pointer before anyone has resolved a project is a real defect
+    /// elsewhere). "No project is open right now" is a different, entirely
+    /// legitimate runtime state — conflating the two would either crash every
+    /// debug build the instant a user closes their project with this chat
+    /// open, or (release, where the assertion is stripped) silently reload/
+    /// mint a session under the unsuffixed `chat.current.quick` key — the
+    /// exact un-scoped global conversation Task 3's per-project pointer
+    /// exists to forbid. So: finalize the outgoing chat, clear to the
+    /// "nothing loaded" state a fresh engine starts in (`messages = []`,
+    /// `currentSessionIDString = ""`), reset transient state for the same
+    /// reason every other swap does, and STOP — there is no session to look
+    /// up with no project, so nothing calls into `pointerKey` at all. The
+    /// sheet's own no-project gate (`QuickChatContext.resolve(...) == nil`)
+    /// already hides the composer for this state; this just makes sure the
+    /// engine's OWN state matches "nothing is loaded" rather than leaking
+    /// the outgoing project's transcript into a screen with no composer.
     func switchQuickChatProject(to newProjectId: String?) {
         assert(scope == .quick, "switchQuickChatProject called on a non-.quick engine")
         stopOutgoingTurnBeforeSwap()
+        guard let newProjectId else {
+            quickChatProjectId = nil
+            currentSessionIDString = ""
+            messages = []
+            resetTransientSessionState()
+            return
+        }
         quickChatProjectId = newProjectId
         currentSessionIDString = ""
         handleOnAppearSessions()
+    }
+
+    /// Run `handleOnAppearSessions()` only when it's actually safe to read
+    /// the pointer — i.e. not `.quick` with no project resolved yet. Guards
+    /// the exact contract `pointerKey`'s `assertionFailure` protects (see
+    /// `switchQuickChatProject(to:)`'s doc comment for the full reasoning):
+    /// for `.quick`, "no session loaded yet" (`currentSessionIDString.isEmpty`)
+    /// and "safe to resolve the pointer" are NOT the same condition — the
+    /// FIRST appearance of either `MenuBarChatView` or `LlmChatSheet` can
+    /// happen with no active project (the popover is always reachable; the
+    /// sheet's own `.sheet` presentation isn't gated on a project either), and
+    /// both used to call `handleOnAppearSessions()` unconditionally once
+    /// `currentSessionIDString` was empty — hitting the SAME wiring-bug
+    /// assertion `switchQuickChatProject(to: nil)` was fixed to avoid, just
+    /// from the other direction (first appearance vs. project closed
+    /// mid-session). One guard, used by both `.onAppear`s, so a third surface
+    /// can't reintroduce this by hand-copying the unguarded call again.
+    ///
+    /// Every non-`.quick` scope is unaffected: `quickChatProjectId` is never
+    /// set for them, so `scope != .quick` short-circuits this guard to always
+    /// pass, and behavior is identical to calling `handleOnAppearSessions()`
+    /// directly.
+    @discardableResult
+    func handleOnAppearSessionsIfReady() -> [ChatMessage]? {
+        guard scope != .quick || quickChatProjectId != nil else { return nil }
+        return handleOnAppearSessions()
     }
 
     /// Load `id` into a BRAND-NEW, otherwise-untouched engine — for a caller

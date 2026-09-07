@@ -91,8 +91,12 @@ struct MenuBarChatView: View {
             // persist into: `persistCurrentChat()` no-ops on an empty
             // `currentSessionIDString`, so every turn lived in memory only
             // and a relaunch lost the conversation.
+            // `...IfReady()` (not the raw call): the popover can be opened
+            // with no active project, and calling `handleOnAppearSessions()`
+            // unconditionally then reads the `.quick` pointer with a nil
+            // `quickChatProjectId` — see that method's doc comment.
             if engine.currentSessionIDString.isEmpty {
-                engine.handleOnAppearSessions()
+                engine.handleOnAppearSessionsIfReady()
             } else {
                 engine.refreshSessions()
             }
