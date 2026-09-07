@@ -325,9 +325,17 @@ extension ChatEngine {
         // after. Per-turn selection (`AgentV2EngineTransport.selectsV2`)
         // then requires the marker, so later toggle flips never migrate an
         // existing chat between engines.
+        //
+        // `.quick` also stamps `projectId` here: without it every minted
+        // quick-chat session has `projectId == nil` on disk, invisible to
+        // `ChatSessionStore.list(for:projectId:)` (which treats a nil id as
+        // belonging to no project) — the exact overload the sheet's session
+        // list needs. Scoped to `.quick` only; every other scope's minted
+        // session is unaffected.
         let fresh = ChatSession(scope: scope, engine: AgentV2Selection.engineForNewChat(
             resolvedProvider: resolveNewChatProvider(),
-            capableProviders: AgentV2Selection.liveAgentCapableProviders()))
+            capableProviders: AgentV2Selection.liveAgentCapableProviders()),
+            projectId: scope == .quick ? quickChatProjectId : nil)
         ChatSessionStore.save(fresh)
         currentSessionIDString = fresh.id.uuidString
         rememberCurrentPointer()
