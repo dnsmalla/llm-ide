@@ -36,6 +36,9 @@ struct LlmChatSheet: View {
     /// (the engine's own message ids, not re-derived per poll now that
     /// there's no poll), so an expansion survives a re-render.
     @State private var manuallyExpanded: Set<UUID> = []
+    /// Why the last send was refused (server too old, unreachable, or the
+    /// shared engine already busy). Cleared when the next send starts.
+    @State private var sendRefusal: String?
     @FocusState private var inputFocused: Bool
 
     /// Hand-written rather than memberwise: `viewModel` and `engine` must
@@ -84,6 +87,14 @@ struct LlmChatSheet: View {
                     // closed — see `pollServerVersionWhileUnsupported`.
                     .task { await QuickChatContext.pollServerVersionWhileUnsupported(backend: backend) }
             } else {
+                if let refusal = sendRefusal {
+                    Text(refusal)
+                        .font(.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 8)
+                }
                 inputRow
             }
         }
@@ -389,13 +400,23 @@ struct LlmChatSheet: View {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         draft = ""
+        sendRefusal = nil
         // Same fresh-probe re-check the menu bar runs before sending — see
         // `QuickChatContext.confirmServerSupportsAsk`. The draft is restored
-        // on refusal so a swapped-out server never eats the user's message.
+        // and the reason stated on refusal, so a swapped-out or busy server
+        // never eats the user's message or looks like a dead button.
         Task { @MainActor in
-            guard await QuickChatContext.confirmServerSupportsAsk(backend: backend) else {
+            let gate = await QuickChatContext.confirmServerSupportsAsk(backend: backend)
+            func refuse(_ message: String?) {
                 draft = text
-                return
+                sendRefusal = message
+            }
+            guard case .allowed = gate else { return refuse(gate.message) }
+            // Re-check after the probe's suspension, immediately before the
+            // send — the menu bar, this sheet and the phone share one engine
+            // and one turn slot, which `startTurn` claims synchronously.
+            guard !engine.busy else {
+                return refuse("Another message is still being answered. Send this one again in a moment.")
             }
             viewModel.send(text)
         }

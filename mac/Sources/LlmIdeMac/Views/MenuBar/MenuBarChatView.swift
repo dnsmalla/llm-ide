@@ -29,6 +29,9 @@ struct MenuBarChatView: View {
     @StateObject private var completion = CompletionController()
     @State private var pendingSkillIds: [String] = []
     @State private var pendingDirectives: [String] = []
+    /// Why the last send was refused (server too old, unreachable, or the
+    /// shared engine already busy). Cleared when the next send starts.
+    @State private var sendRefusal: String?
     @FocusState private var inputFocused: Bool
 
     @State private var voiceService = VoiceInputService()
@@ -539,6 +542,14 @@ struct MenuBarChatView: View {
                     .padding(.horizontal, 12)
                     .padding(.bottom, 6)
             }
+            if let refusal = sendRefusal {
+                Text(refusal)
+                    .font(.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 6)
+            }
             VStack(alignment: .leading, spacing: 10) {
                 TextField("Type / to use skills", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -786,6 +797,13 @@ struct MenuBarChatView: View {
         }
 
         draft = ""
+        sendRefusal = nil
+        // Everything the composer is about to hand over, kept as it was
+        // BEFORE the directives are folded into the text — a refused send
+        // must restore the field and its chips exactly, not a merged blob
+        // with the chips gone.
+        let restoreDraft = text
+        let directives = pendingDirectives
         if !pendingDirectives.isEmpty {
             text = pendingDirectives.joined(separator: "\n") + "\n\n" + text
             pendingDirectives = []
@@ -799,10 +817,24 @@ struct MenuBarChatView: View {
         // composer disappears on the next body pass (the gate now reads the
         // probed version), so nothing is silently lost.
         Task { @MainActor in
-            guard await QuickChatContext.confirmServerSupportsAsk(backend: backend) else {
-                draft = text
+            let gate = await QuickChatContext.confirmServerSupportsAsk(backend: backend)
+            // Restore the composer exactly as it was and SAY why — a refusal
+            // that only removes the composer (or, when the server merely
+            // didn't answer, changes nothing at all) reads as a dead button.
+            func refuse(_ message: String?) {
+                draft = restoreDraft
+                pendingDirectives = directives
                 pendingSkillIds = skills
-                return
+                sendRefusal = message
+            }
+            guard case .allowed = gate else { return refuse(gate.message) }
+            // Re-check AFTER the probe's suspension, immediately before the
+            // send: the first guard ran before an await, so a second surface
+            // (or the phone) could have taken the engine's single turn slot
+            // meanwhile. `startTurn` claims that slot synchronously, so this
+            // check and the send below cannot be split.
+            guard !engine.busy else {
+                return refuse("Another message is still being answered. Send this one again in a moment.")
             }
             viewModel.send(text, skillIds: skills)
         }

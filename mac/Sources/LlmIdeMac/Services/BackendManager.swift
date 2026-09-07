@@ -776,6 +776,23 @@ final class BackendManager {
         recordServerVersionIfChanged(health)
     }
 
+    /// One fresh probe for a caller that is about to SEND, returning the
+    /// version it saw and `nil` when the server didn't answer.
+    ///
+    /// Same probe as `refreshServerApiVersion`, minus the cache clearing. The
+    /// send path wants a different trade: a healthy-but-busy server that
+    /// misses the 2 s budget must not blank the composer out from under a
+    /// half-typed message — the send is refused either way, so nothing
+    /// unsafe reaches an unknown server, and the surface stays usable when
+    /// the next probe answers. A server that ANSWERS with an older version is
+    /// still recorded, so the gate closes the composer as it should.
+    func probeServerApiVersionPreservingCache() async -> Int? {
+        let health = await Self.probeHealthDetail()
+        guard health.ok else { return nil }
+        recordServerVersionIfChanged(health)
+        return health.apiVersion
+    }
+
     /// Returns true iff some process is currently listening on the
     /// given port. Independent of /health so we can tell "no backend"
     /// from "stale backend".

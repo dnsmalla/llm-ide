@@ -225,12 +225,16 @@ final class ChatEngine {
     /// server's own default).
     ///
     /// It lives on the ENGINE rather than in a view's `@State` because the
-    /// menu bar, the sheet and the phone share one `.quick` engine: when the
+    /// two Mac surfaces share one `.quick` engine: when the
     /// picker was view-local, whichever surface appeared last installed its
     /// own transport closure over the other's, so the popover kept DISPLAYING
     /// the model you picked while its sends silently used the sheet's config
     /// default. One owner, one closure (`QuickChatContext.installTransport`),
     /// and the picker reads and writes it directly.
+    ///
+    /// The PHONE does not read this: `MobileControlManager` passes its own
+    /// model to `runExternalTurn` (`MobileExploreBridge.modelAndProvider`),
+    /// bypassing `resolveTransportInput` entirely.
     ///
     /// In memory for the app run, like the view state it replaces.
     var quickChatModelId: String?
@@ -440,6 +444,16 @@ final class ChatEngine {
     /// Launch a turn as an unstructured Task whose handle Stop can cancel.
     func startTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil,
                    planExecute: Bool = false) {
+        // Claim the single turn slot SYNCHRONOUSLY, exactly as
+        // `runExternalTurn` does for the phone — `runTurn` doesn't set `busy`
+        // until the Task below is scheduled, so a caller that reached here
+        // after an `await` (the quick chat's send-path version probe) could
+        // otherwise interleave a second `runTurn` on this shared engine and
+        // corrupt `messages`/`revealingTurnID`/`runTask` and the session file
+        // it persists. `runTurn` sets `busy` again and its own cleanup
+        // releases it, so claiming early only closes the spawn window.
+        guard !busy else { return }
+        busy = true
         runTask = Task { await runTurn(message, skillIds: skillIds, userMetadata: userMetadata,
                                        planExecute: planExecute) }
     }
@@ -694,6 +708,13 @@ final class ChatEngine {
     }
 
     func sendFollowup() async {
+        // No quick-chat version re-probe here, deliberately: the gate is
+        // per-USER-send (`QuickChatContext.confirmServerSupportsAsk`, called
+        // by both Mac composers), and this continues a turn that already
+        // passed it. Probing again mid-chain would put a loopback GET between
+        // every auto-continue round-trip to close a window measured in the
+        // seconds between two halves of one authorized turn.
+        //
         // Don't fire a second round-trip if one is already in flight.
         // Without this guard, rapid confirms or a manual ⌘↵ during
         // model streaming would stack overlapping /code-assist requests.

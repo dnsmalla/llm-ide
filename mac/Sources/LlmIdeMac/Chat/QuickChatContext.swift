@@ -89,8 +89,34 @@ struct QuickChatContext {
         }
     }
 
+    /// A refused send says which of the two reasons applies, because the
+    /// composer reacts differently to each: an OLDER server is recorded, so
+    /// the gate paragraph replaces the composer on the next body pass, while
+    /// an unreachable one leaves the composer exactly where it was with the
+    /// draft still in it.
+    enum SendGate {
+        case allowed
+        /// The server answered and is too old — `unsupportedServerMessage`
+        /// already describes it, and the composer is about to disappear.
+        case serverTooOld(Int?)
+        /// No answer within the probe's budget. Deliberately does NOT clear
+        /// the cached version: a busy-but-healthy server that misses one
+        /// probe must not blank the composer and strand the draft.
+        case unreachable
+
+        var message: String? {
+            switch self {
+            case .allowed: return nil
+            case .serverTooOld(let v): return unsupportedServerMessage(apiVersion: v)
+            case .unreachable:
+                return "The LLM-IDE server didn't answer, so this message wasn't sent. "
+                    + "Check it is running and try again."
+            }
+        }
+    }
+
     /// Confirm the gate one more time, from a FRESH probe, at the moment a
-    /// surface is about to send. Returns false when the caller must not send.
+    /// surface is about to send.
     ///
     /// The gate the composer renders is checked when the view appears; a
     /// server swapped for an older one WHILE a popover or sheet sits open is
@@ -101,9 +127,29 @@ struct QuickChatContext {
     /// (`MobileControlManager`); this is the same guarantee for the two Mac
     /// surfaces, at one loopback GET per send.
     @MainActor
-    static func confirmServerSupportsAsk(backend: BackendManager) async -> Bool {
-        await backend.refreshServerApiVersion()
-        return serverSupportsAsk(backend.serverApiVersion)
+    static func confirmServerSupportsAsk(backend: BackendManager) async -> SendGate {
+        guard let apiVersion = await backend.probeServerApiVersionPreservingCache() else {
+            return .unreachable
+        }
+        return serverSupportsAsk(apiVersion) ? .allowed : .serverTooOld(apiVersion)
+    }
+
+    /// The model id a quick-chat turn actually sends. ONE resolution shared by
+    /// the send closure and the picker's label, so the label cannot promise a
+    /// model the send doesn't use.
+    ///
+    /// An id the CURRENT provider doesn't offer is discarded rather than
+    /// sent: switching provider in Settings resets `config.defaultModelId`
+    /// but leaves an explicit pick naming the old provider's model, which the
+    /// new provider would reject.
+    static func effectiveModelId(explicit: String?, defaultModelId: String, models: [AIModel]) -> String? {
+        let offered = Set(models.map(\.id))
+        if let explicit, offered.contains(explicit) { return explicit }
+        if !defaultModelId.isEmpty, offered.contains(defaultModelId) { return defaultModelId }
+        // Neither is offered here: let the server pick its own default rather
+        // than send a retired id. `models` is a fallback list before a
+        // provider has a key, so an empty/unknown list means "no opinion".
+        return nil
     }
 
     /// Install the `.quick` engine's transport closure: project context,
@@ -122,14 +168,16 @@ struct QuickChatContext {
     /// change takes effect without re-installing anything.
     @MainActor
     static func installTransport(on engine: ChatEngine, config: AppConfig, projectStore: ProjectStore) {
+        // The closure is non-Sendable and installed from the main actor, so
+        // it inherits that isolation and reads `engine`/`projectStore`
+        // directly — no `MainActor.run` hop. Two hops here would also be two
+        // suspension points, letting a project switch land BETWEEN the model
+        // read and the context read.
         engine.resolveTransportInput = { [weak engine] message, history, attachments, skills in
             let tool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
-            let model = await MainActor.run {
-                engine?.quickChatModelId ?? (config.defaultModelId.isEmpty ? nil : config.defaultModelId)
-            }
-            let context = await MainActor.run {
-                resolve(config: config, projectStore: projectStore)?.agentContext
-            }
+            let model = effectiveModelId(explicit: engine?.quickChatModelId,
+                                         defaultModelId: config.defaultModelId,
+                                         models: tool.models)
             return ChatTransportInput(
                 message: message,
                 history: history,
@@ -137,7 +185,7 @@ struct QuickChatContext {
                 skills: skills,
                 // Was nil before unification, which is why this chat could
                 // neither read nor write project memory.
-                agentContext: context,
+                agentContext: resolve(config: config, projectStore: projectStore)?.agentContext,
                 language: config.preferredLanguage.isEmpty ? nil : config.preferredLanguage,
                 model: model,
                 provider: ChatTransportInput.makeProvider(selectedProvider: tool.rawValue),
@@ -149,11 +197,14 @@ struct QuickChatContext {
         }
     }
 
-    /// The label a model picker shows for `quickChatModelId` — "Auto" when
-    /// neither it nor the config names a model the picker knows.
+    /// The label a model picker shows for the model that will actually be
+    /// sent — same `effectiveModelId` the closure uses, so a pick the current
+    /// provider no longer offers reads as "Auto" AND sends as Auto.
     static func modelLabel(modelId: String?, defaultModelId: String, models: [AIModel]) -> String {
-        let effective = modelId ?? (defaultModelId.isEmpty ? nil : defaultModelId)
-        guard let effective, let model = models.first(where: { $0.id == effective }) else { return "Auto" }
+        guard let effective = effectiveModelId(explicit: modelId,
+                                               defaultModelId: defaultModelId,
+                                               models: models),
+              let model = models.first(where: { $0.id == effective }) else { return "Auto" }
         return model.displayName
     }
 

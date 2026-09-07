@@ -38,4 +38,35 @@ final class QuickChatContextTests: XCTestCase {
         XCTAssertEqual(QuickChatContext.modelLabel(modelId: "retired", defaultModelId: "sonnet", models: models),
                        "Auto")
     }
+
+    /// The label and the send MUST resolve identically — a label reading
+    /// "Auto" while the turn carries a retired id is the exact divergence
+    /// this shared function exists to prevent.
+    func testEffectiveModelIdDropsIdsTheProviderNoLongerOffers() {
+        let models = [AIModel(id: "sonnet", displayName: "Sonnet")]
+        XCTAssertEqual(QuickChatContext.effectiveModelId(explicit: "sonnet",
+                                                         defaultModelId: "", models: models), "sonnet")
+        // Switching provider resets defaultModelId but leaves an explicit
+        // pick naming the OLD provider's model: send Auto, not the retired id.
+        XCTAssertNil(QuickChatContext.effectiveModelId(explicit: "gpt-retired",
+                                                       defaultModelId: "", models: models))
+        XCTAssertEqual(QuickChatContext.effectiveModelId(explicit: nil,
+                                                         defaultModelId: "sonnet", models: models), "sonnet")
+        XCTAssertNil(QuickChatContext.effectiveModelId(explicit: nil,
+                                                       defaultModelId: "also-retired", models: models))
+        XCTAssertNil(QuickChatContext.effectiveModelId(explicit: "sonnet",
+                                                       defaultModelId: "sonnet", models: []))
+    }
+
+    /// A refused send must tell the user which refusal it was: an older
+    /// server takes the composer away, an unreachable one leaves it in place,
+    /// so the two cannot share one message.
+    func testSendGateMessages() {
+        XCTAssertNil(QuickChatContext.SendGate.allowed.message)
+        XCTAssertEqual(QuickChatContext.SendGate.serverTooOld(46).message,
+                       QuickChatContext.unsupportedServerMessage(apiVersion: 46))
+        let unreachable = QuickChatContext.SendGate.unreachable.message
+        XCTAssertNotNil(unreachable)
+        XCTAssertTrue(unreachable?.contains("wasn't sent") == true)
+    }
 }
