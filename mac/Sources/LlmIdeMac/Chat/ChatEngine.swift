@@ -220,6 +220,21 @@ final class ChatEngine {
     /// per-scope key the panel scopes have always used.
     var quickChatProjectId: String?
 
+    /// The model the quick chat sends with, for the `.quick` scope only —
+    /// nil means "Auto" (fall back to `AppConfig.defaultModelId`, then to the
+    /// server's own default).
+    ///
+    /// It lives on the ENGINE rather than in a view's `@State` because the
+    /// menu bar, the sheet and the phone share one `.quick` engine: when the
+    /// picker was view-local, whichever surface appeared last installed its
+    /// own transport closure over the other's, so the popover kept DISPLAYING
+    /// the model you picked while its sends silently used the sheet's config
+    /// default. One owner, one closure (`QuickChatContext.installTransport`),
+    /// and the picker reads and writes it directly.
+    ///
+    /// In memory for the app run, like the view state it replaces.
+    var quickChatModelId: String?
+
     /// Delay before a `continueNeeded` reply auto-fires its follow-up turn.
     /// A knob only so tests don't wait 0.8 real seconds; production never
     /// changes it.

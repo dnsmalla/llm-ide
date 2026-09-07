@@ -26,7 +26,6 @@ struct MenuBarChatView: View {
     @State private var confirmingClear = false
     @State private var clearingHistory = false
     @State private var popoverWindow: NSWindow?
-    @State private var selectedModelId: String? = nil
     @StateObject private var completion = CompletionController()
     @State private var pendingSkillIds: [String] = []
     @State private var pendingDirectives: [String] = []
@@ -152,7 +151,6 @@ struct MenuBarChatView: View {
             // session id. Same shared decision as `.onAppear`.
             QuickChatContext.attach(engine, config: config, projectStore: projectStore)
         }
-        .onChange(of: selectedModelId) { _, _ in wireEngine() }
         .onChange(of: draft) { _, newValue in
             completion.update(draft: newValue)
         }
@@ -584,10 +582,10 @@ struct MenuBarChatView: View {
 
     private var modelMenu: some View {
         Menu {
-            Button("Auto") { selectedModelId = nil }
+            Button("Auto") { engine.quickChatModelId = nil }
             Divider()
             ForEach(modelsForPicker(), id: \.id) { model in
-                Button(model.displayName) { selectedModelId = model.id }
+                Button(model.displayName) { engine.quickChatModelId = model.id }
             }
         } label: {
             HStack(spacing: 4) {
@@ -666,11 +664,9 @@ struct MenuBarChatView: View {
     }
 
     private var selectedModelLabel: String {
-        if let id = selectedModelId ?? (config.defaultModelId.isEmpty ? nil : config.defaultModelId),
-           let model = modelsForPicker().first(where: { $0.id == id }) {
-            return model.displayName
-        }
-        return "Auto"
+        QuickChatContext.modelLabel(modelId: engine.quickChatModelId,
+                                    defaultModelId: config.defaultModelId,
+                                    models: modelsForPicker())
     }
 
     private func modelsForPicker() -> [AIModel] {
@@ -709,27 +705,11 @@ struct MenuBarChatView: View {
         await engine.clearCurrentChat()
     }
 
+    /// Install the shared `.quick` transport closure. Both Mac surfaces call
+    /// the SAME installer, so it no longer matters which appeared last — see
+    /// `QuickChatContext.installTransport`.
     private func wireEngine() {
-        engine.resolveTransportInput = { message, history, attachments, skills in
-            let tool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
-            let model = selectedModelId ?? (config.defaultModelId.isEmpty ? nil : config.defaultModelId)
-            return ChatTransportInput(
-                message: message,
-                history: history,
-                attachments: attachments,
-                skills: skills,
-                // Was nil, which is why this chat could neither read nor write
-                // project memory — the whole point of unifying it.
-                agentContext: QuickChatContext.resolve(config: config, projectStore: projectStore)?.agentContext,
-                language: config.preferredLanguage.isEmpty ? nil : config.preferredLanguage,
-                model: model,
-                provider: ChatTransportInput.makeProvider(selectedProvider: tool.rawValue),
-                // Read-only: this window can be closed while the phone drives
-                // the same engine, so a turn that could park on an approval
-                // would hang with nothing able to render the card.
-                mode: "ask"
-            )
-        }
+        QuickChatContext.installTransport(on: engine, config: config, projectStore: projectStore)
     }
 
     private func wireVoiceService() {
@@ -812,7 +792,20 @@ struct MenuBarChatView: View {
         }
         let skills = pendingSkillIds
         pendingSkillIds = []
-        viewModel.send(text, skillIds: skills)
+        // Re-check the gate from a FRESH probe, not from the value this view
+        // rendered with: a server swapped for an older one while the popover
+        // stayed open would otherwise receive `ask` and resolve it to
+        // `execute`. On refusal the draft goes back in the field and the
+        // composer disappears on the next body pass (the gate now reads the
+        // probed version), so nothing is silently lost.
+        Task { @MainActor in
+            guard await QuickChatContext.confirmServerSupportsAsk(backend: backend) else {
+                draft = text
+                pendingSkillIds = skills
+                return
+            }
+            viewModel.send(text, skillIds: skills)
+        }
     }
 
     private func openMainWindow(section: ShellState.Section) {

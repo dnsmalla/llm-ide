@@ -89,6 +89,74 @@ struct QuickChatContext {
         }
     }
 
+    /// Confirm the gate one more time, from a FRESH probe, at the moment a
+    /// surface is about to send. Returns false when the caller must not send.
+    ///
+    /// The gate the composer renders is checked when the view appears; a
+    /// server swapped for an older one WHILE a popover or sheet sits open is
+    /// invisible to it until the surface is closed and reopened. That window
+    /// is the one place a stale-OPEN gate is unsafe: `ask` reaches a server
+    /// that resolves it to `execute`, giving a surface with no approval UI
+    /// full act tools. The phone already probes before every question
+    /// (`MobileControlManager`); this is the same guarantee for the two Mac
+    /// surfaces, at one loopback GET per send.
+    @MainActor
+    static func confirmServerSupportsAsk(backend: BackendManager) async -> Bool {
+        await backend.refreshServerApiVersion()
+        return serverSupportsAsk(backend.serverApiVersion)
+    }
+
+    /// Install the `.quick` engine's transport closure: project context,
+    /// language, provider, the engine-owned model, and the read-only `ask`
+    /// mode.
+    ///
+    /// ONE closure for both Mac surfaces. `resolveTransportInput` is a single
+    /// mutable hook on a shared engine, so when each surface installed its own
+    /// copy on appear, the last one to appear decided the model for BOTH —
+    /// the popover displayed the model you picked while its sends used the
+    /// sheet's config default. Installing the identical closure from one place
+    /// makes last-writer-wins harmless, and `quickChatModelId` (on the engine)
+    /// makes the model itself shared rather than per-surface.
+    ///
+    /// The closure reads `engine.quickChatModelId` at SEND time, so a picker
+    /// change takes effect without re-installing anything.
+    @MainActor
+    static func installTransport(on engine: ChatEngine, config: AppConfig, projectStore: ProjectStore) {
+        engine.resolveTransportInput = { [weak engine] message, history, attachments, skills in
+            let tool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
+            let model = await MainActor.run {
+                engine?.quickChatModelId ?? (config.defaultModelId.isEmpty ? nil : config.defaultModelId)
+            }
+            let context = await MainActor.run {
+                resolve(config: config, projectStore: projectStore)?.agentContext
+            }
+            return ChatTransportInput(
+                message: message,
+                history: history,
+                attachments: attachments,
+                skills: skills,
+                // Was nil before unification, which is why this chat could
+                // neither read nor write project memory.
+                agentContext: context,
+                language: config.preferredLanguage.isEmpty ? nil : config.preferredLanguage,
+                model: model,
+                provider: ChatTransportInput.makeProvider(selectedProvider: tool.rawValue),
+                // Read-only: either surface can be closed while the phone
+                // drives the same engine, so a turn that could park on an
+                // approval would hang with nothing able to render the card.
+                mode: "ask"
+            )
+        }
+    }
+
+    /// The label a model picker shows for `quickChatModelId` — "Auto" when
+    /// neither it nor the config names a model the picker knows.
+    static func modelLabel(modelId: String?, defaultModelId: String, models: [AIModel]) -> String {
+        let effective = modelId ?? (defaultModelId.isEmpty ? nil : defaultModelId)
+        guard let effective, let model = models.first(where: { $0.id == effective }) else { return "Auto" }
+        return model.displayName
+    }
+
     /// Point the shared `.quick` engine at `projectId`. ONE answer for all
     /// three surfaces (menu bar, sheet, phone) — the same reason this type
     /// exists at all.

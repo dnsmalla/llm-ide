@@ -389,35 +389,24 @@ struct LlmChatSheet: View {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         draft = ""
-        viewModel.send(text)
+        // Same fresh-probe re-check the menu bar runs before sending — see
+        // `QuickChatContext.confirmServerSupportsAsk`. The draft is restored
+        // on refusal so a swapped-out server never eats the user's message.
+        Task { @MainActor in
+            guard await QuickChatContext.confirmServerSupportsAsk(backend: backend) else {
+                draft = text
+                return
+            }
+            viewModel.send(text)
+        }
     }
 
-    /// Send the project context and the read-only `ask` mode — same shape as
-    /// `MenuBarChatView.wireEngine()`. This sheet has no model picker of its
-    /// own, so `model` always follows the config default rather than a
-    /// per-turn override.
+    /// Install the shared `.quick` transport closure — the SAME installer the
+    /// menu bar calls, so the model this sheet sends with is the one the
+    /// popover's picker chose (`ChatEngine.quickChatModelId`) rather than
+    /// whatever the last surface to appear happened to wire.
     private func wireEngine() {
-        engine.resolveTransportInput = { message, history, attachments, skills in
-            let tool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
-            let model = config.defaultModelId.isEmpty ? nil : config.defaultModelId
-            return ChatTransportInput(
-                message: message,
-                history: history,
-                attachments: attachments,
-                skills: skills,
-                // Was nil, which is why this chat could neither read nor write
-                // project memory — the whole point of unifying it.
-                agentContext: QuickChatContext.resolve(config: config, projectStore: projectStore)?.agentContext,
-                language: config.preferredLanguage.isEmpty ? nil : config.preferredLanguage,
-                model: model,
-                provider: ChatTransportInput.makeProvider(selectedProvider: tool.rawValue),
-                // Read-only: this sheet can be dismissed while the menu bar
-                // or the phone drives the same engine, so a turn that could
-                // park on an approval would hang with nothing able to render
-                // the card.
-                mode: "ask"
-            )
-        }
+        QuickChatContext.installTransport(on: engine, config: config, projectStore: projectStore)
     }
 
     /// Clear this chat's saved conversation and its session memory. NOT a
