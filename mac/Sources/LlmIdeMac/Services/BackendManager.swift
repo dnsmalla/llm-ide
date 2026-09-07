@@ -702,12 +702,22 @@ final class BackendManager {
     func recordServerVersion(_ health: HealthProbeResult, adopted: Bool) {
         serverApiVersion = health.apiVersion
         serverVersionTooOld = health.versionTooOld
-        guard health.versionTooOld else { return }
+        guard health.versionTooOld else {
+            // A version that moved UPWARD without a start() — a current server
+            // started from a terminal replacing an old one — cleared the flag
+            // but left the previous "Backend is too old" text in `lastError`,
+            // which Settings → Backend renders unconditionally. Only that
+            // message is ours to retract; any other error stays.
+            if lastError?.hasPrefix(Self.tooOldErrorPrefix) == true {
+                lastError = nil
+            }
+            return
+        }
         let running = health.apiVersion.map(String.init) ?? "unknown"
         let hint = adopted
             ? "It was already running, so the app adopted it instead of starting its own."
             : "It started from the configured server.mjs, which may be an older checkout."
-        let message = "Backend is too old: API v\(running), this app needs v\(Self.minimumServerApiVersion). "
+        let message = "\(Self.tooOldErrorPrefix)\(running), this app needs v\(Self.minimumServerApiVersion). "
             + hint
             + " Restart it (Settings → Backend → Restart) or newer features will fail with 404s."
         append("--- \(message) ---", stream: .info)
@@ -867,11 +877,15 @@ extension BackendManager {
     /// `recordServerVersion`; synthesize a fallback when the flag is set but
     /// `lastError` was cleared elsewhere. Shared by Settings, Login, and
     /// Reconnect so a version mismatch is never visible in only one place.
+    /// Shared head of every "too old" message, so `recordServerVersion` can
+    /// recognise — and retract — its own text once a newer server answers.
+    static let tooOldErrorPrefix = "Backend is too old: API v"
+
     var versionMismatchBannerText: String? {
         if let err = lastError, !err.isEmpty { return err }
         guard serverVersionTooOld else { return nil }
         let running = serverApiVersion.map(String.init) ?? "unknown"
-        return "Backend is too old: API v\(running), this app needs v\(Self.minimumServerApiVersion). "
+        return "\(Self.tooOldErrorPrefix)\(running), this app needs v\(Self.minimumServerApiVersion). "
             + "Restart from a current checkout (Settings → Backend → Kill & Restart)."
     }
 }
