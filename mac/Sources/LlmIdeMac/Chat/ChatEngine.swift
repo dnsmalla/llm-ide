@@ -447,9 +447,8 @@ final class ChatEngine {
     /// Whether `error` is the user's own Stop rather than a failure. Shared by
     /// every turn catch (`runTurn`, `sendFollowup`, `performExternalTurn`)
     /// so they can't drift. Streaming transports throw the raw
-    /// `URLError.cancelled` / `CancellationError`, but the buffered ones —
-    /// `askAgent` behind the LLM Chat sheet and menu-bar chat, and the
-    /// legacy `codeAssist` fallback — go through `LlmIdeAPIClient.send()`,
+    /// `URLError.cancelled` / `CancellationError`, but the buffered legacy
+    /// `codeAssist` fallback goes through `LlmIdeAPIClient.send()`,
     /// which wraps the fetch error as `APIError.network(_)`. Before this
     /// unwrapped that shape, every Stop on those surfaces showed a "Network
     /// error: cancelled" banner and marked the turn `.failed` with a Retry.

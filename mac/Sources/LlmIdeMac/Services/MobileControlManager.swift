@@ -636,41 +636,120 @@ final class MobileControlManager {
         return WorkspaceRoot.resolve(config: config, projectStore: projectStore)
     }
 
-    /// Proxy an llm-ide chat turn through the backend agent. The reply is sent
-    /// back as a nested `Output` payload (`{stream, done:true}`) so the iOS
-    /// receive loop can treat it as a completed command; failures surface as a
-    /// `CommandError` and are mirrored into the Mac log + `lastError`.
+    /// Resolve (creating if needed) the SAME `.quick` `ChatEngine` the menu
+    /// bar and the LLM Chat sheet drive, pointed at the Mac's currently
+    /// active project — there is no SwiftUI view here to do this via
+    /// `.onAppear`/`.onChange`, so this collapses both of those into one call
+    /// for the phone.
+    ///
+    /// Never clobbers a session a Mac window already has loaded: if nothing
+    /// is loaded yet, stamp `quickChatProjectId` and load (mirrors
+    /// `LlmChatSheet.onAppear`); if something IS loaded but for a stale
+    /// project (the Mac switched projects since a window last touched this
+    /// engine), repoint via `switchQuickChatProject(to:)` rather than poking
+    /// `quickChatProjectId` directly (mirrors `LlmChatSheet`'s
+    /// `.onChange(of: projectStore.activeProject)`) — poking it directly
+    /// would leave `currentSessionIDString` pointing at the OLD project's
+    /// session under the NEW project's id, corrupting the per-project
+    /// pointer key on the next persist.
+    private func quickChatEngine(for ctx: QuickChatContext, api: LlmIdeAPIClient) -> ChatEngine {
+        let engine = ChatEngineRegistry.shared.engine(for: .quick, api: api)
+        if engine.currentSessionIDString.isEmpty {
+            engine.quickChatProjectId = ctx.projectId
+            engine.handleOnAppearSessionsIfReady()
+        } else if engine.quickChatProjectId != ctx.projectId {
+            engine.switchQuickChatProject(to: ctx.projectId)
+        }
+        return engine
+    }
+
+    /// Drive a phone chat turn through the SAME shared `.quick` `ChatEngine`
+    /// the menu bar and the LLM Chat sheet drive (`ChatEngineRegistry`) —
+    /// one conversation across all three surfaces, rather than the phone
+    /// silently keeping its own `/kb/agent/ask` transcript after the Mac
+    /// surfaces moved onto the code pipeline. Mirrors `handleExploreChat`
+    /// below: cancellation via `registerMobileInflightTask`, `Output`/
+    /// `CommandError` framing, and the `NotificationCenter` post on success.
     private func handleChat(_ chat: LlmIdeChat) async {
         guard let api else {
             await server?.send(CommandError(commandId: chat.commandId, message: "Backend not configured"))
             return
         }
-        let history = chat.history.map {
-            LlmIdeAPIClient.AgentAskMessage(role: .init(rawValue: $0.role) ?? .user, content: $0.content)
+        // The code pipeline has no image path — `ChatTransportInput`/
+        // `runExternalTurn` carry none — so this knowingly removes a working
+        // path: the phone DOES send real image bytes (`chat.images`) today,
+        // and the OLD transport (`AgentAskTransport`) hardcoded `images: []`
+        // server-side, meaning nothing ever actually reached the model
+        // anyway. Refuse visibly instead of silently discarding what looks
+        // like it was sent — the most user-visible consequence of this move.
+        guard chat.images.isEmpty else {
+            await server?.send(Output(commandId: chat.commandId, payload: OutputPayload(
+                stream: "Images aren't supported in this chat yet — send the question as text, or use the Mac app.",
+                done: true)))
+            return
         }
-        let images = chat.images.map { (mediaType: $0.mediaType, data: $0.data) }
-        // Fold extracted file text into the prompt (mirrors how history is folded server-side).
+        guard let config, let projectStore,
+              let ctx = QuickChatContext.resolve(config: config, projectStore: projectStore) else {
+            // A normal reply, NOT a CommandError: the phone renders an error
+            // as a failure, and "no project is open on the Mac" is an
+            // answer — same no-project gate the menu bar / LLM Chat sheet use.
+            await server?.send(Output(commandId: chat.commandId, payload: OutputPayload(
+                stream: QuickChatContext.noProjectMessage, done: true)))
+            return
+        }
+        let engine = quickChatEngine(for: ctx, api: api)
+        guard let sid = UUID(uuidString: engine.currentSessionIDString) else {
+            // Unreachable in practice — `quickChatEngine` always lands on a
+            // real session — but a CommandError beats a silent hang if a
+            // future change to that resolution ever leaves it empty.
+            await server?.send(CommandError(commandId: chat.commandId, message: "Could not open your chat on the Mac."))
+            return
+        }
+        // Fold extracted file text into the prompt (mirrors how history was
+        // folded server-side under the old transport).
         let message = Self.messageWithFiles(chat.text, files: chat.files)
         // Forward the Mac user's selected provider/model (same source as
         // explore_chat) so a non-Anthropic provider is used instead of the
         // server defaulting to Anthropic → the claude CLI → "not logged in".
         let (model, provider) = MobileExploreBridge.modelAndProvider(config: config)
         do {
-            let reply = try await api.askAgent(message: message, history: history, images: images,
-                                                model: model, provider: provider)
+            let commandId = chat.commandId
+            let reply = try await engine.runExternalTurn(
+                message: message,
+                skillIds: [],
+                attachments: [],
+                agentContext: ctx.agentContext,
+                model: model,
+                provider: provider,
+                // Read-only: the phone has no confirmation channel for a
+                // parked approval card, the same reasoning the menu bar and
+                // LLM Chat sheet's own `mode: "ask"` wiring uses — enforced
+                // server-side.
+                mode: "ask",
+                expectedSessionID: sid,
+                onProgress: { [weak self] label in
+                    guard let self, !self.isMobileCommandCancelled(commandId) else { return }
+                    Task {
+                        guard !self.isMobileCommandCancelled(commandId) else { return }
+                        await self.server?.send(Output(
+                            commandId: commandId,
+                            payload: OutputPayload(stream: label, done: false)))
+                    }
+                }
+            )
             guard !isMobileCommandCancelled(chat.commandId) else { return }
             await server?.send(Output(commandId: chat.commandId,
                                       payload: OutputPayload(stream: reply, done: true)))
             NotificationCenter.default.post(name: .llmChatTranscriptChanged, object: nil)
         } catch let error where ChatEngine.isCancellation(error) {
-            // Covers a Mac-side Stop too: `askAgent` goes through `send()`,
-            // which wraps the cancel as `APIError.network(URLError.cancelled)`
-            // — a bare `is CancellationError` let that fall through to the
-            // generic catch and sent the phone a "cancelled" CommandError.
+            // Covers a Mac-side Stop too — same as explore_chat below.
             append(.info, "llmide_chat cancelled: \(chat.commandId.prefix(8))")
         } catch {
+            // Also covers `ExternalTurnError.busy` (a Mac window mid-stream
+            // on this same shared engine): a typed, sane CommandError rather
+            // than a hang — same as explore_chat's own unhandled-error path.
             guard !isMobileCommandCancelled(chat.commandId) else { return }
-            append(.stderr, "askAgent failed: \(error.localizedDescription)")
+            append(.stderr, "llmide_chat failed: \(error.localizedDescription)")
             lastError = error.localizedDescription
             await server?.send(CommandError(commandId: chat.commandId, message: error.localizedDescription))
         }
@@ -1038,34 +1117,58 @@ final class MobileControlManager {
         cancelMobileInflightTask(commandId: m.commandId)
     }
 
+    /// Route the phone's history request onto `engine.messages` — the
+    /// `.quick` engine's own transcript now IS the phone's chat history
+    /// (`ChatSessionStore`), not the retired `/kb/agent/ask/history` table
+    /// this used to poll. `limit` still bounds the reply size the same way
+    /// the old server-side query parameter did.
     private func handleLlmIdeChatHistoryList(data: Data) async {
-        guard let api else {
+        struct LimitEnvelope: Decodable { let limit: Int? }
+        let limit = max((try? decoder.decode(LimitEnvelope.self, from: data))?.limit ?? 50, 0)
+        guard let api, let config, let projectStore else {
             reply(CommandError(commandId: "llmide_chat_history", message: "Backend not configured"))
             return
         }
-        struct LimitEnvelope: Decodable { let limit: Int? }
-        let limit = (try? decoder.decode(LimitEnvelope.self, from: data))?.limit ?? 50
-        do {
-            let items = try await api.listAgentAskHistory(limit: limit)
-            let messages = items.map { ChatTurn(role: $0.role, content: $0.content) }
-            reply(LlmIdeChatHistoryReply(messages: messages))
-        } catch {
-            reply(CommandError(commandId: "llmide_chat_history", message: error.localizedDescription))
+        guard let ctx = QuickChatContext.resolve(config: config, projectStore: projectStore) else {
+            // No project open → no `.quick` session to read; an empty
+            // transcript rather than an error, since "no history yet" is a
+            // legitimate state (unlike `handleChat`'s no-project decline,
+            // this isn't answering a question the user asked).
+            reply(LlmIdeChatHistoryReply(messages: []))
+            return
         }
+        let engine = quickChatEngine(for: ctx, api: api)
+        // Tool-result rows are internal turn bookkeeping, not part of the
+        // simple back-and-forth the phone renders — filtered the same way
+        // the retired `/kb/agent/ask/history` table (user/assistant rows
+        // only) implicitly was.
+        let turns = engine.messages
+            .filter { $0.role == .user || $0.role == .assistant }
+            .suffix(limit)
+            .map { ChatTurn(role: $0.role.rawValue, content: $0.content) }
+        reply(LlmIdeChatHistoryReply(messages: turns))
     }
 
+    /// Route the phone's "clear" onto `engine.clearCurrentChat()` — the same
+    /// header-trash action the LLM Chat sheet/menu bar use, which also
+    /// forgets the chat's server-side session memory. The retired
+    /// `clearAgentAskHistory()` wiped the wrong (unread) table.
     private func handleLlmIdeChatHistoryClear() async {
         guard let api else {
             reply(CommandError(commandId: "llmide_chat_history_clear", message: "Backend not configured"))
             return
         }
-        do {
-            _ = try await api.clearAgentAskHistory()
+        guard let config, let projectStore,
+              let ctx = QuickChatContext.resolve(config: config, projectStore: projectStore) else {
+            // No project open → nothing to clear; ack rather than error,
+            // mirroring the history-list's no-project behavior above.
             reply(LlmIdeChatHistoryClearAck(ok: true))
-            NotificationCenter.default.post(name: .llmChatTranscriptChanged, object: nil)
-        } catch {
-            reply(CommandError(commandId: "llmide_chat_history_clear", message: error.localizedDescription))
+            return
         }
+        let engine = quickChatEngine(for: ctx, api: api)
+        await engine.clearCurrentChat()
+        reply(LlmIdeChatHistoryClearAck(ok: true))
+        NotificationCenter.default.post(name: .llmChatTranscriptChanged, object: nil)
     }
 
     private func handleExploreCancel(data: Data) {

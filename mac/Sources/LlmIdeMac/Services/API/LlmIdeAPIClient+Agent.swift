@@ -114,94 +114,13 @@ extension LlmIdeAPIClient {
         return r.persona
     }
 
-    struct AgentAskMessage: Codable, Equatable, Identifiable {
-        enum Role: String, Codable { case user, assistant }
-        let id: UUID
-        let role: Role
-        let content: String
-        init(id: UUID = UUID(), role: Role, content: String) {
-            self.id = id; self.role = role; self.content = content
-        }
-        // Server doesn't care about the local UUID; we drop it when wiring.
-    }
-
-    /// Stored history of the Ask-the-Agent transcript. Each row has
-    /// a stable per-user `seq` (oldest first), the role, and the
-    /// message text. Wire shape matches what `appendAgentAskMessage`
-    /// writes server-side.
-    struct AgentAskHistoryItem: Decodable, Identifiable {
-        let seq: Int
-        let role: String
-        let content: String
-        let createdAt: Double
-        var id: Int { seq }
-
-        enum CodingKeys: String, CodingKey {
-            case seq, role, content
-            case createdAt = "created_at"
-        }
-
-        // Explicit memberwise init: like `AgentAskMessage` above, Decodable's
-        // compiler-synthesized `init(from:)` suppresses the automatic
-        // memberwise one, and `LlmChatViewModelTests` needs to construct
-        // fixtures directly rather than round-tripping through JSON.
-        init(seq: Int, role: String, content: String, createdAt: Double) {
-            self.seq = seq
-            self.role = role
-            self.content = content
-            self.createdAt = createdAt
-        }
-    }
-
-    /// Fetch the most recent N persisted Ask-the-Agent turns,
-    /// oldest-first within the page. The sheet uses this on open
-    /// to restore the prior conversation.
-    func listAgentAskHistory(limit: Int = 50) async throws -> [AgentAskHistoryItem] {
-        struct Resp: Decodable { let messages: [AgentAskHistoryItem] }
-        let r: Resp = try await get("/kb/agent/ask/history?limit=\(limit)", authenticated: true)
-        return r.messages
-    }
-
-    /// Wipe the user's Ask-the-Agent transcript server-side. Returns
-    /// the number of rows removed for the optimistic UI line.
-    @discardableResult
-    func clearAgentAskHistory() async throws -> Int {
-        struct Resp: Decodable { let removed: Int }
-        let r: Resp = try await delete("/kb/agent/ask/history", authenticated: true)
-        return r.removed
-    }
-
-    /// Free-text Q&A with the meeting agent. Persona (name +
-    /// voice/focus suffix) is applied server-side so the answer
-    /// matches the in-meeting voice. History is the prior turns of
-    /// this conversation, capped to the last 10 server-side; pass
-    /// whatever the UI has accumulated.
-    ///
-    /// `model`/`provider` forward the user's selected provider so a
-    /// non-Anthropic provider routes through its own API/CLI server-side
-    /// instead of always falling back to the Claude CLI. `nil` leaves the
-    /// server default (Anthropic) in place.
-    func askAgent(message: String, history: [AgentAskMessage] = [],
-                  images: [(mediaType: String, data: String)] = [],
-                  model: String? = nil, provider: String? = nil) async throws -> String {
-        struct WireMsg: Encodable { let role: String; let content: String }
-        struct WireImage: Encodable { let mediaType: String; let data: String }
-        struct Req: Encodable {
-            let message: String
-            let history: [WireMsg]
-            let image: [WireImage]
-            let model: String?
-            let provider: String?
-        }
-        struct Resp: Decodable { let reply: String }
-        let wireHistory = history.map { WireMsg(role: $0.role.rawValue, content: $0.content) }
-        let wireImages = images.map { WireImage(mediaType: $0.mediaType, data: $0.data) }
-        let r: Resp = try await post("/kb/agent/ask",
-                                     body: Req(message: message, history: wireHistory, image: wireImages,
-                                               model: model, provider: provider),
-                                     authenticated: true)
-        return r.reply
-    }
+    // `AgentAskMessage`/`AgentAskHistoryItem`, `listAgentAskHistory`,
+    // `clearAgentAskHistory`, and `askAgent` (the `/kb/agent/ask` +
+    // `/kb/agent/ask/history` trio) were removed here in Task 8: their last
+    // caller, `MobileControlManager`'s `llmide_chat`/history/clear arms,
+    // moved onto the shared `.quick` `ChatEngine` (`ChatEngineRegistry`) —
+    // see the note after `fetch(_:path:)` in `LlmIdeAPIClient.swift` for the
+    // full history of this migration.
 
     // MARK: - Skill catalog ──────────────────────────────────────────────
 
