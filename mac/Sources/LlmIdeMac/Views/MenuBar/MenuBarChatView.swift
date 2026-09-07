@@ -1,15 +1,22 @@
 import SwiftUI
 
 /// Menu-bar llm-agent chat — compact Gemini-style surface matching the iPhone
-/// companion. Uses the same `/kb/agent/ask` transcript as `LlmChatSheet`.
+/// companion. Shares the `.quick` `ChatEngine` (and its code-pipeline
+/// transport) with `LlmChatSheet` and the phone via `ChatEngineRegistry` —
+/// one conversation, not the old `/kb/agent/ask` meeting-agent transcript.
 struct MenuBarChatView: View {
     let api: LlmIdeAPIClient
 
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var projectStore: ProjectStore
     @Environment(\.openWindow) private var openWindow
 
+    // The SAME engine the LLM Chat sheet and the phone drive: one engine per
+    // conversation. Each surface holding its own would mean three engines
+    // writing one session file — the concurrent-holders bug that already
+    // resurrected deleted chats through persistCurrentChat.
     @State private var engine: ChatEngine
     @State private var viewModel: LlmChatViewModel
     @State private var draft: String = ""
@@ -35,7 +42,11 @@ struct MenuBarChatView: View {
 
     init(api: LlmIdeAPIClient) {
         self.api = api
-        let engine = ChatEngine(scope: .explorer, transport: AgentAskTransport(api: api))
+        // Resolved from the registry rather than constructed here — see the
+        // `engine` property's doc comment. `ChatTransportFactory` (inside the
+        // registry) picks the real code-pipeline transport; this view no
+        // longer builds an `AgentAskTransport` at all.
+        let engine = ChatEngineRegistry.shared.engine(for: .quick, api: api)
         _engine = State(initialValue: engine)
         _viewModel = State(initialValue: LlmChatViewModel(engine: engine, historyAPI: api))
     }
@@ -49,13 +60,29 @@ struct MenuBarChatView: View {
             headerBar
             Divider().opacity(0.5)
             contentArea
-            composerSection
+            // The code pipeline cannot run without an active project (the
+            // server throws `workspaceRoot is required`), so decline rather
+            // than send a request that must fail.
+            if QuickChatContext.resolve(config: config, projectStore: projectStore) == nil {
+                Text(QuickChatContext.noProjectMessage)
+                    .font(.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .padding(14)
+            } else {
+                composerSection
+            }
         }
         .frame(width: 380, height: 520)
         .background(Color(nsColor: .windowBackgroundColor))
         .background(MenuBarChatWindowAccessor(window: $popoverWindow))
         .onExitCommand { closePopover() }
         .onAppear {
+            // Must land before anything below can trigger the engine's first
+            // session load (`handleOnAppearSessions`/pointer read) — set it
+            // late and `.quick` silently falls back to the unsuffixed
+            // pointer key, reloading the PREVIOUS project's conversation on
+            // a project switch. See `ChatEngine+Session.swift`'s `pointerKey`.
+            engine.quickChatProjectId = QuickChatContext.resolve(config: config, projectStore: projectStore)?.projectId
             wireEngine()
             wireVoiceService()
             completion.configure(api: api, repoRoot: nil)
@@ -398,21 +425,33 @@ struct MenuBarChatView: View {
                 Text(isUser ? "You" : "LLM-IDE")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(theme.current.textMuted)
-                
-                Text(displayedContent(for: msg))
-                    .font(.subheadline)
-                    .foregroundStyle(theme.current.text)
-                    .textSelection(.enabled)
-                    .multilineTextAlignment(isUser ? .trailing : .leading)
+
+                if isUser {
+                    // User input is plain text — rendered verbatim, no markdown.
+                    Text(displayedContent(for: msg))
+                        .font(.subheadline)
+                        .foregroundStyle(theme.current.text)
+                        .textSelection(.enabled)
+                        .multilineTextAlignment(.trailing)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Self.greetingBlue.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else {
+                    SelfSizingMarkdownView(
+                        markdown: displayedContent(for: msg),
+                        isDark: theme.current.isDark
+                    ) { h in
+                        if engine.bubbleHeights[msg.id] != h { engine.bubbleHeights[msg.id] = h }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: max(engine.bubbleHeights[msg.id] ?? 24, 24))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(
-                        isUser
-                            ? Self.greetingBlue.opacity(0.12)
-                            : Color(nsColor: .controlBackgroundColor)
-                    )
+                    .background(Color(nsColor: .controlBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                
+                }
+
                 if !isUser, msg.status == .stopped {
                     Text("Stopped")
                         .font(.caption2)
@@ -627,11 +666,16 @@ struct MenuBarChatView: View {
                 history: history,
                 attachments: attachments,
                 skills: skills,
-                agentContext: nil,
+                // Was nil, which is why this chat could neither read nor write
+                // project memory — the whole point of unifying it.
+                agentContext: QuickChatContext.resolve(config: config, projectStore: projectStore)?.agentContext,
                 language: config.preferredLanguage.isEmpty ? nil : config.preferredLanguage,
                 model: model,
                 provider: ChatTransportInput.makeProvider(selectedProvider: tool.rawValue),
-                mode: nil
+                // Read-only: this window can be closed while the phone drives
+                // the same engine, so a turn that could park on an approval
+                // would hang with nothing able to render the card.
+                mode: "ask"
             )
         }
     }

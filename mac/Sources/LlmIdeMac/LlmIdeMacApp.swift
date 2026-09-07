@@ -468,6 +468,7 @@ public struct LlmIdeMacApp: App {
                 .environmentObject(theme)
                 .environmentObject(session)
                 .environmentObject(config)
+                .environmentObject(projectStore)
         } label: {
             Image(systemName: "bubble.left.and.text.bubble.right")
                 .symbolRenderingMode(.hierarchical)

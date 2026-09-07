@@ -41,6 +41,16 @@ extension ChatEngine {
     /// current chat on upgrade.
     private var pointerKey: String {
         guard scope == .quick, let project = quickChatProjectId else {
+            // A `.quick` engine reading its pointer before `quickChatProjectId`
+            // is set is wired out of order: whoever resolved this engine
+            // skipped `QuickChatContext.resolve(...)?.projectId` (or set it
+            // too late), and the failure is otherwise silent — no error, no
+            // log, just the previous project's conversation reloading after a
+            // switch. Debug-only, matching `FeatureCatalog`'s precedent for
+            // this class of bug.
+            if scope == .quick {
+                assertionFailure("quickChatProjectId is nil when the .quick pointer is read — set it before the engine's first session load")
+            }
             return "chat.current.\(scope.rawValue)"
         }
         return "chat.current.\(scope.rawValue).\(project)"
