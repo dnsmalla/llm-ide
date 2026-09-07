@@ -80,6 +80,13 @@ struct MenuBarChatView: View {
                     .font(.caption)
                     .foregroundStyle(theme.current.textMuted)
                     .padding(14)
+                    // Re-probe while this text is showing, so the gate can
+                    // OPEN without the user doing anything — the version is
+                    // otherwise only recorded inside `BackendManager.start()`,
+                    // which never runs for a logged-in user with autostart
+                    // off (`node server.mjs` in a terminal). Cancelled with
+                    // the view.
+                    .task { await QuickChatContext.pollServerVersionWhileUnsupported(backend: backend) }
             } else {
                 composerSection
             }

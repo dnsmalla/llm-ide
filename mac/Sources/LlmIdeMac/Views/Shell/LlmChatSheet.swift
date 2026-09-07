@@ -80,6 +80,9 @@ struct LlmChatSheet: View {
                     .font(.caption)
                     .foregroundStyle(theme.current.textMuted)
                     .padding(14)
+                    // Same re-probe the menu bar runs while the gate is
+                    // closed — see `pollServerVersionWhileUnsupported`.
+                    .task { await QuickChatContext.pollServerVersionWhileUnsupported(backend: backend) }
             } else {
                 inputRow
             }

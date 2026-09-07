@@ -255,12 +255,21 @@ final class BackendManager {
     /// downgrades from `.running`; never touches a `.starting`/spawning backend.
     func reconcileHealthAfterFailure() async {
         guard case .running = status else { return }
-        if await Self.probeHealth() == false {
-            append("--- /health re-probe failed; backend marked stopped (was stale .running) ---", stream: .info)
-            adoptedExternal = false
-            pid = nil
-            status = .stopped
+        // Detail, not just reachability: this probe is also the one chance to
+        // notice that the server answering on :3456 is no longer the one whose
+        // `apiVersion` we cached (a terminal restart from an older checkout,
+        // say). A cached version outliving its server is what lets the `ask`
+        // gate stay stale-OPEN — see `refreshServerApiVersion()`.
+        let health = await Self.probeHealthDetail()
+        if health.ok {
+            recordServerVersionIfChanged(health)
+            return
         }
+        append("--- /health re-probe failed; backend marked stopped (was stale .running) ---", stream: .info)
+        adoptedExternal = false
+        pid = nil
+        status = .stopped
+        forgetServerApiVersion()
     }
 
     private func spawn(nodePath: String, workURL: URL) {
@@ -468,6 +477,13 @@ final class BackendManager {
         // back to false once the next non-clean exit is handled, or
         // immediately when the user starts the backend again.
         userInitiatedStop = true
+        // The server we measured is going away on both paths below, so the
+        // cached `apiVersion` stops describing anything. Keeping it is what
+        // lets `QuickChatContext.serverSupportsAsk` answer "yes, v47" for a
+        // server that has been replaced by an older one — the one place in
+        // the quick chat where a stale answer is a safety problem, not a
+        // cosmetic one.
+        forgetServerApiVersion()
         pendingRestartTask?.cancel()
         pendingRestartTask = nil
         if let p = process {
@@ -696,6 +712,58 @@ final class BackendManager {
             + " Restart it (Settings → Backend → Restart) or newer features will fail with 404s."
         append("--- \(message) ---", stream: .info)
         lastError = message
+    }
+
+    /// Record a probe that came from a REPEATED check (the `ask`-gate refresh
+    /// below, the post-failure reconcile) rather than from a start/adopt.
+    ///
+    /// Same recording, minus the noise: `recordServerVersion` appends a log
+    /// line and overwrites `lastError` whenever the server is too old, which
+    /// is right once per start and wrong every 5 seconds while a surface
+    /// polls. An UNCHANGED version therefore records nothing at all — the
+    /// verdict already on screen is the same verdict.
+    private func recordServerVersionIfChanged(_ health: HealthProbeResult) {
+        guard health.apiVersion != serverApiVersion else { return }
+        recordServerVersion(health, adopted: adoptedExternal)
+    }
+
+    /// Drop the cached `/health.apiVersion`, so anything gating on it (the
+    /// quick chat's `ask` mode) fails closed again rather than answering for
+    /// a server that is gone. Deliberately leaves `serverVersionTooOld`/
+    /// `lastError` alone: those are a rendered verdict about the last server
+    /// seen, cleared by the next successful start.
+    private func forgetServerApiVersion() {
+        // `@Observable` invalidates on every set, equal or not, and the
+        // closed-state poll calls through here every few seconds while a
+        // surface waits for a server — so only publish an actual change.
+        guard serverApiVersion != nil else { return }
+        serverApiVersion = nil
+    }
+
+    /// One `/health` probe whose only job is to (re)establish
+    /// `serverApiVersion`.
+    ///
+    /// The version used to be recorded on exactly two paths — `start()`'s
+    /// adopt branch and the spawn path — which left the gate broken in both
+    /// directions. Stale-OPEN: nothing re-probed while the app ran, so a
+    /// server swapped out from a terminal (never through `start()`) kept
+    /// answering "v47" from cache. Stuck-CLOSED: with `backendAutoStart`
+    /// off — the flow `CLAUDE.md` documents (`cd extension && node
+    /// server.mjs`) — `start()` never runs for a logged-in user at all, so
+    /// the version stayed `nil` forever and all three `ask` surfaces were
+    /// dead against a perfectly good v47 server.
+    ///
+    /// Callable from anywhere that wants a fresh answer (the two Mac
+    /// surfaces poll it while they render the closed state; the phone runs
+    /// one before declining). An unreachable server clears the cache instead
+    /// of leaving it: no answer must not read as the last answer.
+    func refreshServerApiVersion() async {
+        let health = await Self.probeHealthDetail()
+        guard health.ok else {
+            forgetServerApiVersion()
+            return
+        }
+        recordServerVersionIfChanged(health)
     }
 
     /// Returns true iff some process is currently listening on the

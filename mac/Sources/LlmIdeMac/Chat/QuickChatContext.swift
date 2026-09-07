@@ -45,14 +45,48 @@ struct QuickChatContext {
 
     /// One shared message for all three surfaces (menu bar, sheet, phone) so
     /// the wording cannot drift between them.
+    ///
+    /// The `nil` branch used to say "try again in a moment", which was a
+    /// promise nothing kept: with `backendAutoStart` off — the flow
+    /// `CLAUDE.md` documents — `start()` never ran, nothing else recorded a
+    /// version, and "in a moment" never arrived. It now names the action that
+    /// actually clears it. The re-check it mentions is real on every surface:
+    /// the two Mac surfaces poll `refreshServerApiVersion()` while this text
+    /// is on screen (`pollServerVersionWhileUnsupported`), and the phone
+    /// probes once per question before declining.
     static func unsupportedServerMessage(apiVersion: Int?) -> String {
         guard let apiVersion else {
             return "This chat needs the LLM-IDE server's API v\(requiredServerApiVersion) or "
-                + "newer, and the running server's version isn't known yet — try again in a "
-                + "moment, or restart the server if this persists."
+                + "newer, and no running server has reported its version. Start it — Settings → "
+                + "Backend → Start, or run `node server.mjs` yourself if you start the server "
+                + "from a terminal. This clears itself once the server answers."
         }
         return "Restart the LLM-IDE server to use this chat — it needs API "
             + "v\(requiredServerApiVersion) and the running server is v\(apiVersion)."
+    }
+
+    /// How long the Mac surfaces wait between `/health` re-probes while they
+    /// are showing `unsupportedServerMessage`. Long enough to be free (a
+    /// loopback GET with a 2 s budget), short enough that starting the server
+    /// in a terminal opens the chat without touching the app.
+    static let closedStateReprobeIntervalNanos: UInt64 = 5_000_000_000
+
+    /// Re-probe the server's `apiVersion` for as long as the caller's task
+    /// lives, stopping as soon as the gate can open.
+    ///
+    /// Attached with `.task` to the CLOSED-state view on both Mac surfaces,
+    /// so it starts when that text appears and is cancelled when it goes
+    /// away. Without it, `serverApiVersion` only ever changed inside
+    /// `BackendManager.start()`/`stop()`, so a user who starts the server
+    /// from a terminal (autostart off) had no way to reach this chat at all
+    /// short of relaunching the app.
+    @MainActor
+    static func pollServerVersionWhileUnsupported(backend: BackendManager) async {
+        while !Task.isCancelled {
+            await backend.refreshServerApiVersion()
+            if serverSupportsAsk(backend.serverApiVersion) { return }
+            try? await Task.sleep(nanoseconds: closedStateReprobeIntervalNanos)
+        }
     }
 
     /// Point the shared `.quick` engine at `projectId`. ONE answer for all

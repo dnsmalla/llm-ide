@@ -685,6 +685,17 @@ final class MobileControlManager {
         // reported as a normal Output (never CommandError, matching the
         // no-project reply below) so the phone renders it as an answer, not
         // a failure.
+        //
+        // One fresh probe before refusing: the phone has no view to poll
+        // from (the Mac surfaces re-probe while they show the closed state),
+        // and with `backendAutoStart` off nothing on the Mac ever records a
+        // version — so without this the phone is dead against a healthy v47
+        // server for the whole life of the app process. Bounded by
+        // `probeHealthDetail`'s own 2 s budget, and only on the path that
+        // would otherwise decline.
+        if !QuickChatContext.serverSupportsAsk(backendManager?.serverApiVersion) {
+            await backendManager?.refreshServerApiVersion()
+        }
         guard QuickChatContext.serverSupportsAsk(backendManager?.serverApiVersion) else {
             await server?.send(Output(commandId: chat.commandId, payload: OutputPayload(
                 stream: QuickChatContext.unsupportedServerMessage(apiVersion: backendManager?.serverApiVersion),
