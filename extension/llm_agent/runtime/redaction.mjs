@@ -11,9 +11,20 @@
 // change to the redaction strategy must apply everywhere at once;
 // loop.mjs, search-kb, ask-internal, and ask-subagent all import this.
 
-const ZWJ = '‍';
+// The implementation now lives in core/utils.mjs as neutralizePromptFences,
+// so this module and sanitizeForPrompt cannot drift apart — which is exactly
+// what the paragraph above warns against, and what did happen: the prompt
+// path was deleting whole `<<<TOKEN>>>` markers, which nested markers could
+// splice back into live sentinels, while this module's neutralising approach
+// was immune the whole time.
+//
+// The non-string passthrough is kept here rather than adopting core's
+// empty-string coercion: callers of redactFence pass values through
+// unchanged (`redactFence(undefined)` must stay `undefined`), whereas
+// sanitizeForPrompt's contract is "always a string".
+import { neutralizePromptFences } from '../../core/utils.mjs';
 
 export function redactFence(s) {
   if (typeof s !== 'string') return s;
-  return s.replaceAll('<<<', `<<${ZWJ}<`).replaceAll('>>>', `>${ZWJ}>>`);
+  return neutralizePromptFences(s);
 }
