@@ -548,6 +548,11 @@ export async function handleAIRoutes(req, res) {
                 if (ev && ev.phase === 'tool') emitTaskProgress();
               },
               onChunk: (text) => writeEvent({ type: 'chunk', text }),
+              // The SAME controller the client-disconnect handler above
+              // aborts — not a second one. Until this was forwarded, a Stop
+              // aborted the model call but left an approved run-bash command
+              // (and its whole process tree) running out its timeout.
+              signal: ac.signal,
             });
             mergeMemoryUsage(usage, out);
             writeEvent({ type: 'done', reply: out.reply, pendingTool: out.pendingTool, usage, mode: out.mode });

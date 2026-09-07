@@ -14,7 +14,7 @@
 import { tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import * as kb from '../../kb/db.mjs';
-import { entries } from '../tools/registry.mjs';
+import { entries, abortedResult } from '../tools/registry.mjs';
 import { globalSkills } from '../skills/index.mjs';
 import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
 import { resolveChatSessionId } from '../../kb/session-memory.mjs';
@@ -70,11 +70,17 @@ function metaFor(entry) {
 
 export function buildLlmIdeServer(userId, agentContext, currentMessage, {
   renderMemory, runClaude, userSkills, userSubagents, internalSkills,
+  // The TURN's cancellation (runAgentV2Turn's `abortController.signal`).
+  // The SDK's own abortController only kills the CLI SUBPROCESS — every tool
+  // mounted here runs in the SERVER process, so without this signal a Stop
+  // left `ask-subagent`/`ask-internal` making model calls (burning quota) and
+  // `run-bash` holding a process group long after the user cancelled.
+  signal,
 } = {}) {
   const readableRoots = buildReadableRoots({ userId, workspaceRoot: agentContext?.workspaceRoot });
   const toolCtx = {
     userId, agentContext, currentMessage, renderMemory, kb, readableRoots,
-    runClaude, userSkills, userSubagents, internalSkills,
+    runClaude, userSkills, userSubagents, internalSkills, signal,
     // Same resolver the legacy loop uses (kb/session-memory.mjs) — a chat's
     // task-create/task-update/task-list calls must key onto the SAME
     // session id across both engines, not a raw agentContext.sessionId.
@@ -90,7 +96,13 @@ export function buildLlmIdeServer(userId, agentContext, currentMessage, {
       meta.description,
       zodSchemaFor(meta.schema),
       async (args) => {
-        const result = await Promise.resolve(entry.execute(args, toolCtx));
+        // Refuse to START once the turn is cancelled. The SDK kills its CLI
+        // subprocess on abort, but a tool call already handed to this
+        // in-process server would otherwise run to completion — an
+        // `ask-subagent` delegation is a full nested agent loop, so that is
+        // real model spend after the user pressed Stop.
+        const aborted = abortedResult(toolCtx);
+        const result = aborted ?? await Promise.resolve(entry.execute(args, toolCtx));
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       },
       // readOnlyHint must tell the TRUTH per entry: MCP hosts use it to decide

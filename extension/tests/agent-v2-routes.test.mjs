@@ -347,13 +347,27 @@ test('stream: SESSION_UNRESUMABLE surfaces as an error event, not a crash', asyn
   const evs = res.sseEvents();
   assert.equal(evs.at(-1).type, 'error');
   assert.equal(evs.at(-1).code, 'SESSION_UNRESUMABLE');
+  // Interrupted and failed turns now bind the session they opened (so a
+  // stopped turn stays resumable), but this path is the deliberate exception:
+  // the RESUME is what failed, so re-binding the id that just proved unusable
+  // would pin the chat to a dead session. The mapping must be left as it was
+  // for the client's fresh:true retry to replace.
+  assert.equal(getOrCreateAgentSession(db, user.id, 'chat-2', 'explorer').sdk_session_id, 'sdk-old');
 });
 
 test('stream: client close aborts the turn and unparks decisions for the live sdk session', async () => {
   const db = getDb();
   const user = newUser('v2route-close@example.com');
   const { promise } = registerDecision({ sdkSessionId: 'sdk-ab', userId: user.id, questions: [] });
-  const fakeTurn = async ({ onEvent, signal }) => {
+  // Asserting on `signal` alone is what let the real bug hide for months: the
+  // signal was always wired (it aborts parked decisions), while the Agent
+  // SDK — which takes `abortController`, not `signal` — got nothing and ran
+  // the stopped turn to completion, tools included. Capture BOTH and require
+  // they be one controller.
+  let turnArgs = null;
+  const fakeTurn = async (args) => {
+    turnArgs = args;
+    const { onEvent, signal } = args;
     onEvent({ type: 'init', sessionId: 'sdk-ab', claudeCodeVersion: '2.1.234', tools: [], capabilities: [] });
     await new Promise((_, reject) => {
       signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
@@ -368,7 +382,14 @@ test('stream: client close aborts the turn and unparks decisions for the live sd
   const res = makeRes();
   const handledP = handleAgentV2Routes(req, res, { runTurn: fakeTurn });
   await new Promise((r) => setImmediate(r)); // let the route reach its runTurn await
+  assert.ok(turnArgs?.abortController instanceof AbortController,
+    'the route must hand the turn an abortController — the Agent SDK ignores a bare signal');
+  assert.equal(turnArgs.signal, turnArgs.abortController.signal,
+    'signal and abortController must be two views of ONE controller');
+  assert.equal(turnArgs.abortController.signal.aborted, false, 'not aborted while the turn is live');
   req.fireClose();
+  assert.equal(turnArgs.abortController.signal.aborted, true,
+    'a client disconnect must abort the controller the SDK holds — this is what makes Stop real');
   assert.equal(await handledP, true);
   // The parked approval settled as aborted NOW, not at its 300 s timeout.
   assert.deepEqual(await promise, { action: 'aborted' });
@@ -376,8 +397,13 @@ test('stream: client close aborts the turn and unparks decisions for the live sd
   assert.equal(evs[0].type, 'init');
   assert.ok(!evs.some((e) => e.type === 'error'), 'a client-side abort is not an error event');
   assert.equal(res.ended, true);
-  // An aborted turn never binds the session it reported.
-  assert.equal(getOrCreateAgentSession(db, user.id, 'chat-ab', 'explorer').sdk_session_id, null);
+  // An aborted turn DOES bind the session it reported. It used to be left
+  // NULL, which permanently orphaned the SDK transcript: a first turn stopped
+  // before it resolved could never be resumed, so every later message in that
+  // chat silently started the model from zero while the UI showed the whole
+  // conversation. The turn was interrupted, but the session it opened is real
+  // and its transcript holds the conversation.
+  assert.equal(getOrCreateAgentSession(db, user.id, 'chat-ab', 'explorer').sdk_session_id, 'sdk-ab');
 });
 
 test('stream: a second turn for the same chat session while one is in flight gets 409, not a race', async () => {

@@ -103,6 +103,26 @@ function deadlineSignal(ms) {
   return { signal: controller.signal, cancel: () => clearTimeout(timer) };
 }
 
+/**
+ * Compose the per-call deadline signal with the TURN's cancellation signal so
+ * EITHER stops the model call.
+ *
+ * The turn signal used to be forwarded only into tool ctx, so a Stop killed a
+ * `run-bash` process but the very next iteration issued a fresh, unabortable
+ * `runClaude` call — up to `maxIterations` more of them (50 on the chat path,
+ * 1000 for the global agent), all after the user cancelled. Composing rather
+ * than replacing keeps a caller-supplied deadline intact: dropping it would
+ * un-bound the one call site that deliberately opted into a clock.
+ *
+ * `AbortSignal.any` is used only when both exist (Node ≥ 20.3; this runtime is
+ * v25) — with one signal it would allocate a needless second listener chain,
+ * and with none it would hand runClaude an empty-array signal that never fires.
+ */
+function combineSignals(deadline, turn) {
+  if (deadline && turn) return AbortSignal.any([deadline, turn]);
+  return deadline ?? turn ?? undefined;
+}
+
 // replyMode: 'final' — a final pass shorter than this falls back to the
 // accumulated narration. prompt.md tells the model to explain a failure
 // BEFORE calling task-update, so a one-line closing ack ("Marked as
@@ -425,6 +445,13 @@ export async function runAgentLoop({
   skills, userMessage, history, agentContext, runClaude, kb, userId, handlers,
   maxIterations, deadlineMs, model, maxTokens, depth = 0, onProgress, onChunk,
   mcpConfig, replyMode = 'accumulated',
+  // The TURN's abort signal (the route's client-disconnect controller), not a
+  // per-call deadline. Three consumers, all required for a Stop to actually
+  // stop work: (1) each tool's ctx, so a tool that owns an OS process —
+  // run-bash — kills it; (2) the top of every iteration, so a cancelled turn
+  // buys no further model call; (3) the model call itself, composed with any
+  // per-call deadline. Absent for callers that have no cancellation (tests).
+  signal,
 }) {
   // replyMode decides what `reply` means on a clean finish:
   //  - 'accumulated' (default): every iteration's text concatenated — the
@@ -518,7 +545,27 @@ export async function runAgentLoop({
     };
   };
 
+  // The user pressed Stop (or the client disconnected). Return the SAME shape a
+  // normal completion returns — reply + pendingTool + counters — carrying
+  // whatever narration the turn had produced. Deliberately not a thrown
+  // AbortError: the route (server/ai-routes.mjs) treats a throw as an error
+  // path and, because the socket is already aborted, suppresses it entirely —
+  // so a throw would silently discard the partial turn AND propagate an
+  // AbortError out of ask-internal/ask-subagent into the OUTER loop, which
+  // would end that turn as a crash rather than a cancellation.
+  const abortedReply = (iters) => {
+    const t = abnormalText();
+    return {
+      reply: t ? `${t}\n\n_(stopped)_` : '_(stopped)_',
+      pendingTool: null, iterations: iters, cacheHits, aborted: true,
+    };
+  };
+
   for (let i = 0; i < cap; i++) {
+    // Cancellation is checked FIRST, before the deadline and before composing
+    // the next prompt: a turn the user already stopped must not spend another
+    // model call, and every iteration is one.
+    if (signal?.aborted) return abortedReply(i);
     // `deadline === null` (the default) means no wall-clock limit at all: the
     // loop runs until it has an answer, hits the iteration cap, or the user
     // cancels. A caller that opted into a finite budget still gets it enforced
@@ -541,8 +588,10 @@ export async function runAgentLoop({
     // one slow call blowing the budget on its own. With no deadline (the
     // default) no signal is created, so nothing interrupts a long model call —
     // runClaude keeps its own last-resort socket hang breaker.
+    // The turn signal rides along with (never instead of) the deadline signal,
+    // so Stop aborts the in-flight model call too — see combineSignals.
     const callDeadline = remaining === null ? null : deadlineSignal(remaining);
-    const callSignal = callDeadline?.signal;
+    const callSignal = combineSignals(callDeadline?.signal, signal);
     let out;
     // Mirror of what the sniffer actually forwarded this call. On an
     // in-flight abort `out` never materializes, so this is the only record
@@ -568,11 +617,14 @@ export async function runAgentLoop({
         // missing the last characters the model actually produced — the
         // flush lands in `streamedThisCall` via the wrapper above, and
         // folding that into preToolText is what carries the aborted
-        // iteration's partial text into the deadline reply the client
-        // overwrites the bubble with.
+        // iteration's partial text into the reply the client overwrites the
+        // bubble with.
         if (sniff) sniff.flush();
         preToolText += streamedThisCall;
-        return deadlineReply(i);
+        // Which of the two composed signals fired decides what the user is
+        // told: their own Stop is not a deadline, and labelling it "reached
+        // the Ns deadline — try again" invited a pointless retry.
+        return signal?.aborted ? abortedReply(i + 1) : deadlineReply(i);
       }
       throw err;
     } finally {
@@ -686,7 +738,7 @@ export async function runAgentLoop({
       // run at. The +1 happens HERE — the single enforcement point — so
       // handler authors forward ctx.depth verbatim and can't forget the
       // increment (forgetting it would silently disable the nesting cap).
-      result = await runReadHandler(skill.name, validation.value, { userId, kb, handlers, depth: depth + 1, emit });
+      result = await runReadHandler(skill.name, validation.value, { userId, kb, handlers, depth: depth + 1, emit, signal });
       if (!result.error) {
         if (readCache.size >= MAX_CACHE_SIZE) {
           readCache.delete(readCache.keys().next().value);
@@ -742,6 +794,7 @@ export async function runNativeAgentLoop({
   systemPrompt, userMessage, history, skills, tools, complete,
   userId, handlers, kb, maxIterations, deadlineMs, depth = 0, onProgress,
   mcpConfig: _mcpConfig, // accepted, unused — MCP-via-native-loop is SP1b
+  signal,                // the turn's abort signal — see runAgentLoop
 }) {
   const emit = (event) => { try { onProgress?.(event); } catch { /* ignore */ } };
   if (depth > MAX_LOOP_DEPTH) throw new Error(`agent loop nesting exceeds depth ${MAX_LOOP_DEPTH}`);
@@ -778,7 +831,17 @@ export async function runNativeAgentLoop({
   }
   messages.push({ role: 'user', content: userMessage });
 
+  // Same contract as the fence loop's abortedReply: a stopped turn returns the
+  // normal shape, not a throw. This loop keeps no narration of its own (each
+  // assistant turn lives in `messages`), so the reply is just the marker.
+  const abortedReply = (iters) => ({
+    reply: '_(stopped)_', pendingTool: null, iterations: iters, cacheHits: 0, aborted: true,
+  });
+
   for (let i = 0; i < cap; i++) {
+    // Cancellation first — see the fence loop. Without this a Stop mid-turn
+    // still bought `cap` more provider calls.
+    if (signal?.aborted) return abortedReply(i);
     // Same contract as runAgentLoop: null = no wall-clock limit (the default).
     const remaining = deadline === null ? null : deadline - (Date.now() - startTs);
     if (remaining !== null && remaining <= 0) return { reply: '_(agent timed out)_', pendingTool: null, iterations: i, cacheHits: 0 };
@@ -787,18 +850,25 @@ export async function runNativeAgentLoop({
     let resp;
     // Same deterministic-deadline reason as the fence loop above.
     const callDeadline = remaining === null ? null : deadlineSignal(remaining);
+    // The turn signal composed in, so Stop aborts the in-flight provider call.
+    // `complete` forwards this into callOpenAI (route.mjs), which passes it to
+    // fetch — previously it was undefined on the chat path, so the request ran
+    // to completion no matter what the user did.
+    const callSignal = combineSignals(callDeadline?.signal, signal);
     try {
       resp = await complete({
         messages,
         tools,
         maxTokens: 2048,
-        // Only when the caller opted into a deadline; undefined otherwise so a
-        // long native tool-calling turn runs to completion.
-        signal: callDeadline?.signal,
+        // Undefined only when the caller opted into neither a deadline nor
+        // cancellation, so a long native tool-calling turn runs to completion.
+        signal: callSignal,
       });
     } catch (err) {
       if (err?.name === 'AbortError' || err?.code === 'ABORT_ERR') {
-        return { reply: '_(agent timed out)_', pendingTool: null, iterations: i, cacheHits: 0 };
+        return signal?.aborted
+          ? abortedReply(i + 1)
+          : { reply: '_(agent timed out)_', pendingTool: null, iterations: i, cacheHits: 0 };
       }
       throw err;
     } finally {
@@ -850,7 +920,7 @@ export async function runNativeAgentLoop({
       emit({ phase: 'tool', tool: skill.name, detail: toolActivityDetail(skill.name, validation.value), iteration: i + 1 });
       let result;
       try {
-        result = await handlers[skill.name](validation.value, { userId, kb, handlers, depth: depth + 1, emit });
+        result = await handlers[skill.name](validation.value, { userId, kb, handlers, depth: depth + 1, emit, signal });
       } catch (err) {
         result = { error: `Tool ${skill.name} threw: ${err.message}` };
       }

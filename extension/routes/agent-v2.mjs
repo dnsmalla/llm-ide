@@ -259,6 +259,30 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     if (ev && ev.type === 'tool_result') emitTaskProgress();
   };
 
+  // Bind/refresh the chat→SDK-session mapping. Called on EVERY exit path that
+  // learned a session id, not just success: a turn interrupted before it
+  // resolved (Stop, or a client disconnect) still created a real SDK session
+  // whose transcript holds this conversation. Binding only on success meant an
+  // interrupted FIRST turn left sdk_session_id NULL forever — that chat could
+  // never resume its model context, so every later message silently started
+  // from zero while the UI still showed the whole transcript.
+  const bindSdkSession = () => {
+    if (!currentSdkSessionId) return;
+    markAgentSessionUsed(db, userId, chatSessionId, {
+      sdkSessionId: currentSdkSessionId, model: resolvedModel ?? model, mode,
+    });
+    // A fresh turn (or an unresumable-session recovery) REPLACES the
+    // recorded SDK session — the old session's transcript then belongs to
+    // no mapping, so session delete could never find it again. Clean it
+    // now. Gated on "no resume was attempted" rather than a bare
+    // id-comparison: today a resumed turn reports the SAME id (verified
+    // live), but if a future SDK resumes-as-fork, an id-only check would
+    // delete the parent transcript holding the conversation's history.
+    if (!resumeSdkSessionId && row.sdk_session_id && row.sdk_session_id !== currentSdkSessionId) {
+      deleteSdkTranscripts(userId, row.sdk_session_id);
+    }
+  };
+
   try {
     const { usageTotals } = await deps.runTurn({
       message,
@@ -277,7 +301,13 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       attachments: body.attachments,
       resumeSdkSessionId: resumeSdkSessionId ?? undefined,
       onEvent,
+      // Two views of ONE controller: `signal` aborts parked approval
+      // decisions, `abortController` is the shape the Agent SDK needs to
+      // actually terminate its CLI subprocess (its Options has no `signal`
+      // member, so passing only the signal let a stopped turn run to
+      // completion, tools included).
       signal: ac.signal,
+      abortController: ac,
       // Auth ladder's last rung (spec §7, the same ladder runClaude uses):
       // after the per-user vault key and ANTHROPIC_API_KEY miss, the SDK
       // subprocess falls back to the operator's ambient claude login. The
@@ -295,19 +325,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     // outputTokens/runs/requestId — cost is not a ledger column, so costUsd
     // is not passed.)
     const meteredModel = resolvedModel ?? model;
-    if (currentSdkSessionId) {
-      markAgentSessionUsed(db, userId, chatSessionId, { sdkSessionId: currentSdkSessionId, model: meteredModel, mode });
-      // A fresh turn (or an unresumable-session recovery) REPLACES the
-      // recorded SDK session — the old session's transcript then belongs to
-      // no mapping, so session delete could never find it again. Clean it
-      // now. Gated on "no resume was attempted" rather than a bare
-      // id-comparison: today a resumed turn reports the SAME id (verified
-      // live), but if a future SDK resumes-as-fork, an id-only check would
-      // delete the parent transcript holding the conversation's history.
-      if (!resumeSdkSessionId && row.sdk_session_id && row.sdk_session_id !== currentSdkSessionId) {
-        deleteSdkTranscripts(userId, row.sdk_session_id);
-      }
-    }
+    bindSdkSession();
     recordUsage(db, {
       userId,
       provider,
@@ -325,20 +343,30 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       // The resumed SDK session is gone (pruned/cleared). Terminal error
       // event carrying the code — the stream has already started, so the
       // "409" is realized here; the client retries the turn with fresh:true.
+      // Deliberately NOT bound here: the resume is what failed, so
+      // currentSdkSessionId is the id that just proved unusable. The client's
+      // fresh:true retry opens a replacement and binds that instead.
       send({
         type: 'error',
         code: 'SESSION_UNRESUMABLE',
         message: err?.message || 'SDK session is no longer resumable',
         retryable: true,
       });
-    } else if (!ac.signal.aborted) {
-      // Provider refusals keep their own code (resolveAgentEngineAuth) so a
-      // client can tell "this provider cannot take the Agent engine" / "the
-      // custom-provider registry hasn't been synced since the server
-      // restarted" apart from a genuine engine failure. Everything else
-      // stays ENGINE_ERROR.
-      const code = PROVIDER_ERROR_CODES.has(err?.code) ? err.code : 'ENGINE_ERROR';
-      send({ type: 'error', code, message: err?.message || 'agent v2 turn failed', retryable: false });
+    } else {
+      // An interrupted (Stop / client disconnect) or failed turn still owns
+      // whatever SDK session it opened, and that session's transcript holds
+      // the conversation so far — bind it so the next message resumes rather
+      // than silently starting the model from zero.
+      bindSdkSession();
+      if (!ac.signal.aborted) {
+        // Provider refusals keep their own code (resolveAgentEngineAuth) so a
+        // client can tell "this provider cannot take the Agent engine" / "the
+        // custom-provider registry hasn't been synced since the server
+        // restarted" apart from a genuine engine failure. Everything else
+        // stays ENGINE_ERROR.
+        const code = PROVIDER_ERROR_CODES.has(err?.code) ? err.code : 'ENGINE_ERROR';
+        send({ type: 'error', code, message: err?.message || 'agent v2 turn failed', retryable: false });
+      }
     }
   }
   if (!res.writableEnded) res.end();

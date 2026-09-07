@@ -39,6 +39,12 @@ const ALL_SUBAGENT_TOOLS = {
  * the subagent's allowed_tools list is non-empty.
  */
 export async function askSubagent(args, ctx) {
+  // Same reason as ask-internal: dispatching a subagent starts a nested agent
+  // loop in this process, which the v2 engine's abortController (it kills only
+  // the CLI subprocess) cannot stop. Never start one for a stopped turn.
+  if (ctx.signal?.aborted) {
+    return { error: 'Cancelled — the user stopped this turn.', pendingTool: null };
+  }
   if (typeof ctx.userId !== 'string' || !ctx.userId) {
     return { error: 'userId is required to invoke a subagent' };
   }
@@ -101,6 +107,10 @@ export async function askSubagent(args, ctx) {
     // cheaper/faster tier.
     model: subagent.model || ctx.defaultModel,
     depth: ctx.depth ?? 1,
+    // The outer turn's cancellation — the sub-loop consults it every iteration
+    // and composes it into each model call, so Stop ends a subagent mid-flight
+    // instead of letting it run out its iteration budget on the user's quota.
+    signal: ctx.signal,
     // No deadline — was 90 s. "Leaf call" bounds how DEEP it can go, not how
     // long the model may legitimately take to answer. Depth (MAX_LOOP_DEPTH) and
     // the iteration cap are the bounds that still apply.

@@ -183,6 +183,56 @@ extension LlmIdeAPIClient {
         ClaudeToolPresentation.progressLabel(phase: phase, tool: tool, detail: detail)
     }
 
+    // MARK: - Stream connect auth (401 → refresh → retry once)
+
+    /// Rotates the access token for a stream connect that came back 401,
+    /// returning the fresh token to re-stamp onto the retry.
+    ///
+    /// Reuses the SAME machinery the non-streaming path uses
+    /// (`SessionStore.attemptRefresh`, which coalesces concurrent callers
+    /// onto one in-flight refresh) rather than a parallel implementation —
+    /// see `LlmIdeAPIClient.send`'s 401 branch.
+    ///
+    /// `nil` means "do not retry": no session store, or — mirroring
+    /// `send`'s own guard — no refresh token to refresh WITH, in which case
+    /// a second connect would just earn a second 401.
+    private func refreshedTokenForStreamRetry() async -> String? {
+        guard let store = _sessionStore else { return nil }
+        let hasRefresh = await MainActor.run { store.refreshToken != nil }
+        guard hasRefresh else { return nil }
+        guard await store.attemptRefresh(via: self) else { return nil }
+        return await MainActor.run { store.accessToken }
+    }
+
+    /// Performs one SSE connect, absorbing an expired access token the way
+    /// every non-streaming call already does: a 401 refreshes the token once
+    /// and re-opens the stream, so a stale token is a silent retry instead of
+    /// a bare status code.
+    ///
+    /// Deliberately scoped to the CONNECT handshake. Once the SSE body starts
+    /// the HTTP status is fixed at 200, so a *mid*-stream 401 cannot occur and
+    /// there is nothing there to re-authenticate. The refused 401 response is
+    /// dropped unread — its body is a short JSON error, never an event stream —
+    /// so the caller always receives a fresh, fully unconsumed byte stream and
+    /// the SSE loop downstream is untouched.
+    ///
+    /// Exactly one retry. A second 401 (or nothing to refresh with) collapses
+    /// to `.noSession`, which surfaces as "Not signed in." — the same signal
+    /// `send` gives for an unrecoverable 401.
+    private func connectAuthedStream(
+        _ req: URLRequest,
+        connect: (URLRequest) async throws -> (URLSession.AsyncBytes, HTTPURLResponse),
+    ) async throws -> (URLSession.AsyncBytes, HTTPURLResponse) {
+        let (bytes, http) = try await connect(req)
+        guard http.statusCode == 401 else { return (bytes, http) }
+        guard let token = await refreshedTokenForStreamRetry() else { throw APIError.noSession }
+        var retryReq = req
+        retryReq.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (retryBytes, retryHTTP) = try await connect(retryReq)
+        if retryHTTP.statusCode == 401 { throw APIError.noSession }
+        return (retryBytes, retryHTTP)
+    }
+
     /// Streaming variant of `codeAssist`. POSTs the same body but with
     /// `Accept: text/event-stream`; the server streams live agent progress
     /// (thinking / tool / writing) via `onProgress`, and the final synthesis
@@ -220,9 +270,14 @@ extension LlmIdeAPIClient {
             tier: tier, history: history, attachments: attachments, skills: skills,
             agentContext: agentContext, mode: mode, planExecute: planExecute ? true : nil))
 
-        let (bytes, response) = try await session(for: "/code-assist").bytes(for: req)
-        guard let http = response as? HTTPURLResponse else {
-            throw APIError.http(status: 0, code: "NO_RESPONSE", message: "No HTTP response", details: nil)
+        // 401 here = the access token expired between turns; refresh and
+        // re-open once (see `connectAuthedStream`) instead of reporting it.
+        let (bytes, http) = try await connectAuthedStream(req) { attempt in
+            let (bytes, response) = try await self.session(for: "/code-assist").bytes(for: attempt)
+            guard let http = response as? HTTPURLResponse else {
+                throw APIError.http(status: 0, code: "NO_RESPONSE", message: "No HTTP response", details: nil)
+            }
+            return (bytes, http)
         }
         guard http.statusCode == 200 else {
             throw APIError.http(status: http.statusCode, code: "HTTP_ERROR",
@@ -390,7 +445,14 @@ extension LlmIdeAPIClient {
         }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (bytes, http) = try await connectAgentV2Stream(req)
+        // Wraps the 409 turn-lock backoff so an expired token is refreshed
+        // and the connect replayed once. Nesting order is deliberate: the
+        // refresh re-enters `connectAgentV2Stream`, so the retried connect
+        // gets its own 409 budget — bounded, because the refresh itself
+        // happens at most once per turn.
+        let (bytes, http) = try await connectAuthedStream(req) { attempt in
+            try await self.connectAgentV2Stream(attempt)
+        }
         guard http.statusCode == 200 else {
             // Validation failures answer as plain JSON before the SSE
             // headers go out — same shape as the legacy stream's guard.
@@ -399,6 +461,22 @@ extension LlmIdeAPIClient {
             if http.statusCode == 409 {
                 throw APIError.http(status: 409, code: "TURN_IN_PROGRESS",
                                     message: "This chat is still working on its previous request — wait for it to finish (or stop it), then send again.",
+                                    details: nil)
+            }
+            // 403 survived the refresh handshake above, so this is not a
+            // stale token — the signed-in user isn't allowed to run this
+            // chat (another account's session row, or a revoked role).
+            if http.statusCode == 403 {
+                throw APIError.http(status: 403, code: "FORBIDDEN",
+                                    message: "This chat belongs to a different account. Sign out and back in, then start a new chat.",
+                                    details: nil)
+            }
+            // The request was accepted but the backend failed to start the
+            // turn — point at the log that actually holds the reason,
+            // matching the tone of `APIError`'s network cases.
+            if http.statusCode >= 500 {
+                throw APIError.http(status: http.statusCode, code: "SERVER_ERROR",
+                                    message: "The server couldn't start this turn (HTTP \(http.statusCode)). Check the Backend log in Settings — is `node server.mjs` still healthy?",
                                     details: nil)
             }
             throw APIError.http(status: http.statusCode, code: "HTTP_ERROR",

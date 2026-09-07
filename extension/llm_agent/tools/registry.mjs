@@ -36,10 +36,38 @@ import { runBashGate, autoGate } from './gates.mjs';
 import { registerDecision, abortDecisionsForSession } from '../sdk/decisions.mjs';
 import { hasAlwaysAllow, setAlwaysAllow } from '../../kb/tool-approvals.mjs';
 
+// The turn's abort signal, wherever the driving engine puts it. v2
+// (sdk/tools.mjs) sets `signal` on its flat toolCtx; the legacy loop nests its
+// per-call ctx under `loopCtx`. Both are the SAME cancellation — the route's
+// client-disconnect controller — so every consumer here reads it through this
+// one accessor rather than picking one shape and silently ignoring the other.
+export function signalFor(ctx) {
+  return ctx?.signal ?? ctx?.loopCtx?.signal;
+}
+
+const ABORTED_ERROR = 'Cancelled — the user stopped this turn before the tool ran.';
+
+/**
+ * `{ error }` when the turn is ALREADY cancelled, else null.
+ *
+ * Applied at both dispatch points (buildDispatch below, and the mounted tool
+ * in sdk/tools.mjs) so no entry can start work after a Stop. It is a returned
+ * error rather than a throw because that is the shape every caller in this
+ * file already handles; a throw would surface as "tool threw" noise on a path
+ * the user deliberately ended.
+ */
+export function abortedResult(ctx) {
+  return signalFor(ctx)?.aborted ? { error: ABORTED_ERROR } : null;
+}
+
 const ENTRIES = [
   {
     name: 'ask-internal',
     kind: 'read',
+    // `signal` matters here as much as it does for run-bash: this handler runs
+    // a full nested agent loop IN THIS PROCESS, so an un-signalled delegation
+    // kept calling the model after the user hit Stop. On v2 the SDK's
+    // abortController only kills its CLI subprocess, never this.
     execute: (args, ctx) => askInternal(args, {
       agentContext: ctx.agentContext,
       runClaude: ctx.runClaude,
@@ -48,6 +76,7 @@ const ENTRIES = [
       depth: ctx.loopCtx?.depth ?? 1,
       internalSkills: { skills: ctx.userSkills, base: ctx.internalSkills?.base },
       model: ctx.internalModel,
+      signal: signalFor(ctx),
     }),
   },
   {
@@ -61,6 +90,7 @@ const ENTRIES = [
       defaultModel: ctx.subagentModel,
       depth: ctx.loopCtx?.depth ?? 1,
       internalSkillsBase: ctx.internalSkills?.base,
+      signal: signalFor(ctx),
     }),
   },
   { name: 'web-search', kind: 'read', execute: (args, ctx) => handleWebSearch(args, { userId: ctx.userId }) },
@@ -111,6 +141,20 @@ const ENTRIES = [
     // approved.)
     gate: (args) => runBashGate(args.command, args.cwd),
     async execute(args, ctx) {
+      // Built once and used for EVERY handleRunBash call below, so a new
+      // approval outcome can't accidentally drop the abort signal.
+      // signalFor reads BOTH engine shapes: `ctx.signal` is v2's flat toolCtx
+      // (set by sdk/tools.mjs from runAgentV2Turn's abortController) and
+      // `ctx.loopCtx.signal` is the legacy loop's per-call ctx. Whichever
+      // engine is driving, an aborted turn has to take the spawned process
+      // group with it rather than leaving an `npm test` running for the rest
+      // of its 120 s timeout. (v2 cannot actually reach run-bash today —
+      // engine.mjs disallows it in both tool policies — but the value is read
+      // through the same accessor as every other entry, so this cannot rot.)
+      const bashCtx = {
+        workspaceRoot: ctx.agentContext?.workspaceRoot,
+        signal: signalFor(ctx),
+      };
       // ONE gate per engine. `ctx.loopCtx` is the discriminator:
       //
       //  - PRESENT  => legacy engine. buildDispatch (below) always nests the
@@ -127,7 +171,7 @@ const ENTRIES = [
       //    no emit channel on v2, so a second parked decision could never be
       //    answered and would hang the full 300 s before denying.
       if (!ctx.loopCtx) {
-        return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
+        return handleRunBash(args, bashCtx);
       }
       // Gate FIRST, always-allow only short-circuits the 'prompt' tier —
       // see the identical fix + rationale in Task 7's canUseTool. Checking
@@ -136,17 +180,16 @@ const ENTRIES = [
       // Judge the command in the directory it will actually run in — the
       // same resolution handleRunBash performs (and refuses when a
       // model-supplied cwd escapes the workspace).
-      const bashCtx = { workspaceRoot: ctx.agentContext?.workspaceRoot };
       const resolvedCwd = resolveBashCwd(args, bashCtx);
       if (resolvedCwd.error) return { error: resolvedCwd.error };
       const decision = runBashGate(args.command, resolvedCwd.cwd, {
         trustedRoots: buildTrustedRoots(ctx.userId),
       });
       if (decision === 'blocked') return { error: 'Command blocked for safety. Confirm destructive operations with the user before running.' };
-      if (decision === 'auto') return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
+      if (decision === 'auto') return handleRunBash(args, bashCtx);
       // decision === 'prompt' — always-allow only matters here.
       if (hasAlwaysAllow(ctx.userId, 'run-bash')) {
-        return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
+        return handleRunBash(args, bashCtx);
       }
       // No live emit channel => no human can ever see this approval. That is
       // exactly the BUFFERED (non-SSE) /code-assist path, which passes no
@@ -173,8 +216,8 @@ const ENTRIES = [
         return { error: 'Failed to surface the approval request.' };
       }
       const outcome = await promise;
-      if (outcome.action === 'always-allow') { setAlwaysAllow(ctx.userId, 'run-bash'); return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot }); }
-      if (outcome.action === 'allow') return handleRunBash(args, { workspaceRoot: ctx.agentContext?.workspaceRoot });
+      if (outcome.action === 'always-allow') { setAlwaysAllow(ctx.userId, 'run-bash'); return handleRunBash(args, bashCtx); }
+      if (outcome.action === 'allow') return handleRunBash(args, bashCtx);
       return { error: 'Command not approved by the user.' };
     },
   },
@@ -209,7 +252,13 @@ export function get(name) {
 export function buildDispatch(ctx) {
   const dispatch = {};
   for (const entry of ENTRIES) {
-    dispatch[entry.name] = (args, loopCtx) => entry.execute(args, { ...ctx, loopCtx });
+    dispatch[entry.name] = (args, loopCtx) => {
+      const callCtx = { ...ctx, loopCtx };
+      // Same "never start after a Stop" guard the mounted v2 tool applies —
+      // the loop checks the signal between iterations, but a tool call it had
+      // already decided on must not begin either.
+      return abortedResult(callCtx) ?? entry.execute(args, callCtx);
+    };
   }
   return dispatch;
 }

@@ -21,6 +21,13 @@ const internalRolePrompt = readFileSync(INTERNAL_ROLE_PROMPT_PATH, 'utf8').trim(
 export const INTERNAL_HANDLERS = { 'search-kb': searchKb };
 
 export async function askInternal(args, ctx) {
+  // A delegation is the most expensive thing this handler can do — a whole
+  // nested agent loop of model calls, in THIS process. Refuse to start one for
+  // a turn the user already stopped. (On v2 the SDK's abortController kills
+  // only its CLI subprocess, so nothing else would have stopped this.)
+  if (ctx.signal?.aborted) {
+    return { error: 'Cancelled — the user stopped this turn.', pendingTool: null };
+  }
   // Build internal's "base" string: role + rules from internal/prompt.md
   // PLUS the fence-shape contract from internal/skills/_base.md. The
   // existing runAgentLoop puts agentContext.base first in the composed
@@ -48,6 +55,12 @@ export async function askInternal(args, ctx) {
     // so internal can run on a different tier than global.
     model: ctx.model,
     depth: ctx.depth ?? 1,
+    // The outer turn's cancellation, so a Stop mid-delegation ends the SUB-loop
+    // too — it checks the signal each iteration and passes it into its model
+    // calls. Without it the sub-loop kept spending after the user cancelled,
+    // and the "the user's cancel propagating through the outer loop" the note
+    // below relies on was never actually wired.
+    signal: ctx.signal,
     // No sub-loop deadline. This used to be 120 s, budgeted against the outer
     // loop's 360 s — and both are gone: a delegation that needs to read several
     // files or search the KB properly is work, and cutting it at two minutes

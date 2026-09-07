@@ -50,7 +50,7 @@ import { expandTilde } from '../../graphkit/memory.mjs';
 import { redactFence } from '../runtime/redaction.mjs';
 import { persistTurnMemory } from '../runtime/memory-persist.mjs';
 import { config } from '../../core/config.mjs';
-import { sanitizeForPrompt } from '../../core/utils.mjs';
+import { neutralizePromptFences } from '../../core/utils.mjs';
 import { selectAttachments, buildSkillsText, buildModeSkillsText } from '../../core/prompt-framing.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { usdCapForModel } from '../../kb/usage.mjs';
@@ -167,9 +167,17 @@ export function agentSdkHomeFor(userId) {
 // read the same as before the extraction.
 const capAttachments = selectAttachments;
 
-// Attachments are DATA: each wrapped in a <<<BEGIN>>>…<<<END>>> fence (the
-// content itself is already fence-stripped by sanitizeForPrompt, so a
-// hostile file cannot close its fence early and inject instructions).
+// Attachments are DATA: each wrapped in a <<<BEGIN>>>…<<<END>>> fence, with
+// the content's own fence sentinels neutralised by sanitizeForPrompt inside
+// selectAttachments (core/prompt-framing.mjs), so a hostile file cannot close
+// its fence early and inject instructions.
+//
+// That last clause was FALSE until the neutralising rewrite (2026-09-07):
+// sanitizeForPrompt deleted whole `<<<TOKEN>>>` markers in a single pass, and
+// deleting an inner marker spliced the remainder into a live outer one — so
+// `<<<E<<<X>>>ND>>>` in an attached file became a real `<<<END>>>`, closing
+// this fence inside the SYSTEM prompt and letting the rest of the file read
+// as trusted framing. See core/utils.mjs neutralizePromptFences.
 function buildAttachmentsText(files) {
   if (!files.length) return '';
   let text = `# Attached files (${files.length})\n`;
@@ -309,7 +317,34 @@ export function buildUserMcpServers(userId, mode, {
   return { servers, allowedTools: Object.keys(servers).map((id) => `mcp__${id}`) };
 }
 
-const MAX_PROMPT_CHARS = 20_000;
+// Was a private, unexplained 20k — ~5k tokens — so any pasted stack trace or
+// log silently lost its tail with nothing on the wire to say so. There was
+// never an argv limit to respect: the SDK feeds the prompt over stdin
+// (--input-format stream-json).
+//
+// Why v2-specific numbers rather than core's product-wide PROMPT_CHAR_CAP
+// (500k): this path targets a 200k-token context, and a character cap has to
+// hold for the language actually in use. Japanese — this product's primary
+// language — runs near ~1 token per character, so 500k chars is ~500k tokens
+// and the API would REJECT the turn outright. Capping at 500k would have
+// turned a degraded answer into a hard ENGINE_ERROR, worse than the silent
+// truncation it replaced.
+//
+// The budget is for the whole turn's untrusted input, NOT the message alone.
+// Capping only the message is how the first version of this got it wrong:
+// attachments default to 200k chars (core/prompt-framing.mjs) and land in the
+// SAME turn's system prompt, so a 120k message cap actually raised the worst
+// case to ~320k chars — the very failure it was meant to prevent. Message and
+// attachments now draw on one budget, message first (see buildEngineOptions).
+//
+// 150k total can't overflow a 200k window even at 1 tok/char, leaving ~50k
+// for the claude_code preset, system context and tool schemas. The 120k
+// message cap is still 6× the old one, and guarantees attachments a 30k
+// floor. core's 500k stays the last-resort guard for every other prompt path;
+// these are the window-aware ones. Revisit if this engine is ever pointed at
+// a 1M-token model — and prefer real token counting to bigger char numbers.
+const V2_TURN_INPUT_CHAR_BUDGET = 150_000;
+const MAX_PROMPT_CHARS = 120_000;
 
 /**
  * Compose SDK query options from a Mac chat request. Pure except for the
@@ -382,7 +417,18 @@ export function buildEngineOptions(
   const additionalDirectories = (Array.isArray(allRoots) ? allRoots : [])
     .filter((dir) => dir !== workspaceRoot);
 
-  const { files, truncatedPaths } = capAttachments(attachments);
+  // Neutralise + measure the message BEFORE attachments, because the two
+  // share one budget (see V2_TURN_INPUT_CHAR_BUDGET) and the message — what
+  // the user actually typed — has first claim on it. Attachments are context
+  // the client added, they already report `truncatedPaths` for the Mac's
+  // data-loss guard, and the message cap guarantees them a floor of
+  // BUDGET - MAX_PROMPT_CHARS, so this can never starve them to zero.
+  const safeMessage = neutralizePromptFences(message);
+  const promptTruncatedChars = Math.max(0, safeMessage.length - MAX_PROMPT_CHARS);
+  const promptChars = Math.min(safeMessage.length, MAX_PROMPT_CHARS);
+  const { files, truncatedPaths } = capAttachments(attachments, {
+    maxTotalChars: Math.max(0, V2_TURN_INPUT_CHAR_BUDGET - promptChars),
+  });
 
   const appendParts = [];
   if (typeof language === 'string' && language) appendParts.push(`Always respond in ${language}.`);
@@ -464,11 +510,34 @@ export function buildEngineOptions(
 
   return {
     queryOptions,
-    prompt: sanitizeForPrompt(message).slice(0, MAX_PROMPT_CHARS),
+    // A truncated message carries its own notice, so the model can say "the
+    // end of that paste is missing" instead of confidently answering half a
+    // file.
+    //
+    // Wrapped in the EXISTING `<<<…>>>` fence convention rather than a new
+    // `[llm-ide: …]` marker, because neutralizePromptFences has broken every
+    // `<<<`/`>>>` run in the user's own text — so this notice cannot be
+    // forged by a message (or a pasted third-party log) that ends with a
+    // lookalike. That guarantee is only true since the neutralising rewrite:
+    // the previous delete-the-whole-marker approach could be defeated by
+    // nesting (`<<<LLM<<<X>>>IDE_NOTICE>>>` deleted down to a REAL
+    // `<<<LLMIDE_NOTICE>>>`), so this comment asserted a property the code
+    // did not have. A bare bracket marker would have been a second
+    // server-voice channel inside user content with none of that protection.
+    // In-band rather than a wire event
+    // because there is no `notice` event on this protocol and the Mac decoder
+    // ignores event types it does not know, so a new type would be inert.
+    prompt: promptTruncatedChars
+      ? `${safeMessage.slice(0, MAX_PROMPT_CHARS)}\n\n<<<LLMIDE_NOTICE>>>\n`
+        + `The message above was cut off by llm-ide: ${safeMessage.length} characters were sent, `
+        + `${MAX_PROMPT_CHARS} kept, ${promptTruncatedChars} missing from the end. `
+        + `Tell the user this happened if the missing part could change your answer.\n<<<LLMIDE_NOTICE_END>>>`
+      : safeMessage,
     meta: {
       mode: resolvedMode,
       model: typeof model === 'string' && model ? model : null,
       truncatedPaths,
+      promptTruncatedChars,
     },
   };
 }
@@ -592,7 +661,15 @@ export async function runAgentV2Turn(
     // first-party Claude, or an Anthropic-compatible `custom:<uuid>`. Anything
     // else is refused by resolveAgentEngineAuth before the SDK spawns.
     provider = AGENT_SDK_PROVIDER,
-    resumeSdkSessionId, onEvent, signal, allowAmbientAuth = false,
+    // `signal` aborts this session's parked approval decisions (below);
+    // `abortController` is the SAME cancellation, in the shape the Agent SDK
+    // requires to actually kill its CLI subprocess. The route passes both
+    // views of its one per-request controller. A caller that passes only
+    // `signal` still denies parked decisions promptly but cannot stop the
+    // subprocess — deliberately not bridged, because synthesising a
+    // controller here would add a second listener to the caller's signal for
+    // the whole turn.
+    resumeSdkSessionId, onEvent, signal, abortController, allowAmbientAuth = false,
     queryFactory = sdkQueryFactory,
   } = {},
   {
@@ -844,10 +921,19 @@ export async function runAgentV2Turn(
     }
   };
 
-  const { queryOptions, prompt } = buildEngineOptions(
+  const { queryOptions, prompt, meta } = buildEngineOptions(
     { userId, mode, model, language, message, skills, agentContext, attachments, planExecute },
     { readSkill, roots, sessionMemory },
   );
+  // `meta` was computed and dropped on the floor here, so a truncated prompt
+  // left no trace anywhere — not on the wire, not in the log. The model is
+  // told in-band (see buildEngineOptions); this is the operator-side record.
+  if (meta.promptTruncatedChars > 0) {
+    console.warn(
+      `[agent-v2] prompt truncated for user ${userId}: ${meta.promptTruncatedChars} chars dropped `
+      + `(cap ${MAX_PROMPT_CHARS}); the model was told in-band`,
+    );
+  }
   // Same validated roots the READ path uses (buildReadableRoots / `roots`) —
   // NOT the raw workspaceRoot string. A raw client-supplied workspaceRoot
   // (e.g. the user's home directory) has not been through isTooBroadRoot or
@@ -903,6 +989,14 @@ export async function runAgentV2Turn(
         userSkills,
         userSubagents,
         internalSkills: { base: internalSkills.base },
+        // The turn's cancellation, in the shape in-process tools consume.
+        // These MCP tools run in the SERVER process, which the SDK's
+        // abortController does not kill — it only terminates the CLI
+        // subprocess. So without this, tools that make their own model calls
+        // (ask-subagent, ask-internal) kept running after the user hit Stop,
+        // burning quota on a turn that was already cancelled. `signal` is the
+        // fallback for a caller that passes only that view.
+        signal: abortController?.signal ?? signal,
       }),
       ...userMcp.servers,
     },
@@ -946,7 +1040,14 @@ export async function runAgentV2Turn(
         }
       : {}),
     ...(resume ? { resume } : {}),
-    ...(signal ? { signal } : {}),
+    // The SDK's Options takes an `abortController`, NOT a `signal`: its
+    // Options type has no `signal` member, so a `signal` key (what this
+    // passed until 2026-09-07) is silently dropped. The symptom was that
+    // Stop closed the socket and denied parked decisions, but the CLI
+    // subprocess ran the turn to completion — still executing Edit/Write/
+    // Bash — and the route's in-flight lock outlived the client's cancel.
+    // ProcessTransport.close() keys off abortController.signal.
+    ...(abortController ? { abortController } : {}),
   });
 
   const usageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0, numTurns: 0, durationMs: 0 };

@@ -105,6 +105,10 @@ export async function handleCodeAssist({
   userId,
   onProgress,               // optional: live status callback (SSE → client)
   onChunk,                  // optional: live text-delta callback (SSE → client), fence-loop only
+  signal,                   // optional: the turn's abort signal (the SSE route's
+                            // client-disconnect controller). Forwarded to the loop so a
+                            // stopped turn also kills a tool's OS process (run-bash).
+                            // Absent on the buffered path, which has no cancel.
   maxIterations: maxIterationsOverride,  // optional: override for tests
   model,                    // resolved model id (from the client) — routes native vs fence loop
   provider,                 // explicit provider id from the client, if any
@@ -482,6 +486,7 @@ export async function handleCodeAssist({
       handlers,
       kb,
       onProgress,
+      signal,
       mcpConfig,
       maxIterations: maxIterationsOverride ?? 50,
       // No deadlineMs: a chat turn is bounded by its call budget and by the
@@ -538,6 +543,7 @@ export async function handleCodeAssist({
       handlers,
       onProgress,
       onChunk,
+      signal,
       model: GLOBAL_AGENT_MODEL,
       mcpConfig,
       // This is the USER-VISIBLE chat turn, so the reply is the final
@@ -570,7 +576,11 @@ export async function handleCodeAssist({
   // recall — no separate retrieval path). Fire-and-forget: it runs after the
   // reply is ready, is never awaited (zero added latency), and persistTurnMemory
   // swallows all of its own errors — the trailing .catch is belt-and-braces.
-  if (out && out.reply) {
+  //
+  // Skipped for an aborted turn: extraction is itself a model call, so a user
+  // who hits Stop would still be billed for one, to learn "durable facts"
+  // from a reply they cancelled mid-sentence.
+  if (out && out.reply && !out.aborted) {
     void persistTurnMemory({
       agentContext,
       userId,
