@@ -580,11 +580,24 @@ final class BackendManager {
     /// settings surface the user has to go looking for; it would not be for
     /// the chat path.
     ///
+    /// v47 DOES raise this floor, unlike v44-v46. The `ask` mode (menu-bar
+    /// quick chat + the LLM Chat sheet, unified onto the code pipeline) is
+    /// not additive in the safe direction: an older server does not
+    /// recognize `ask` and silently resolves it to `execute`, so the quick
+    /// chat would run with FULL act tools in a window whose approvals may
+    /// have nothing to render them. That is a safety degradation, not a
+    /// feature gap — the bar the v44-v46 entries above deliberately did not
+    /// meet. Refusing to talk to the older server (and pointing at the
+    /// existing "Backend is too old… restart" banner) is safer than letting
+    /// any surface degrade, and the realistic failure mode — an orphaned old
+    /// `node server.mjs` still on :3456 — is fixed by the same restart this
+    /// floor already prompts for.
+    ///
     /// The server reports its version via `/health.apiVersion`; a live server
     /// below this floor sets `serverVersionTooOld` and writes an actionable
     /// `lastError` (see `recordServerVersion`), which Settings → Backend,
     /// LoginView and ReconnectView already render.
-    nonisolated static let minimumServerApiVersion = 43
+    nonisolated static let minimumServerApiVersion = 47
 
     struct HealthProbeResult {
         let ok: Bool
