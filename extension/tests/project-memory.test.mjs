@@ -1049,7 +1049,15 @@ test('appendChatMemory stamps new facts and re-stamps updated ones, keeping posi
   const root = tmpRepo(u, 'stamp');
   writer.appendChatMemory({ root, facts: ['[db|engine] binds :3456', '[ci|runner] uses GitHub Actions'] });
   let facts = writer.readChatMemoryFacts(root);
-  const today = new Date().toISOString().slice(0, 10);
+  // LOCAL date, computed the same way memory-writer's todayStamp() computes
+  // it — NOT toISOString(), which is UTC. The two differ for the nine hours
+  // after midnight JST (UTC+9), so a UTC "today" here made this test fail
+  // every morning in the timezone this product is primarily used in. It
+  // passed on the day it was written only because both dates happened to
+  // agree at that hour.
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   assert.ok(facts.every((f) => f.includes(`(t:${today})`)), `new facts stamped: ${JSON.stringify(facts)}`);
 
   // Update the FIRST fact. It keeps slot 0 (diff-friendly) but must carry a
