@@ -2716,6 +2716,66 @@ paths:
                   facts: { type: array, items: { type: string } }
         '404': { description: Repo not on the caller's allow-list, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /kb/agent/tool-approvals:
+    get:
+      summary: The caller's standing "Always Allow" tool grants
+      description: >
+        Lists the per-(user, tool) grants made from the act-tool approval card, newest
+        first. An empty array is the expected, healthy case — nothing has been
+        permanently allowed. Not repo-scoped (a grant is per-user, per-tool), so no
+        allow-list resolution is involved. A grant only ever skips the interactive
+        approval a `prompt`-tier command would park; it can never promote a `blocked`
+        command, because the gate runs first and unconditionally.
+      responses:
+        '200':
+          description: The caller's grants
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approvals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        toolName:  { type: string, description: 'Registry tool name, e.g. `run-bash`' }
+                        grantedAt: { type: string, description: ISO-8601 timestamp the grant was made }
+    delete:
+      summary: Revoke one standing grant, or all of them
+      description: >
+        Revocation only ever removes permission — the tool is not blocked, it simply has
+        to ask for approval again — so unlike the grant path there is nothing to gate.
+        Returns the remaining set so a caller re-renders from the server's own view
+        instead of issuing a follow-up GET that could interleave with another surface's
+        revoke.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                toolName: { type: string, description: The single grant to revoke }
+                all:      { type: boolean, description: Revoke every grant for the caller }
+      responses:
+        '200':
+          description: The remaining grants, and how many rows were removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  approvals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        toolName:  { type: string }
+                        grantedAt: { type: string }
+                  removed: { type: integer }
+        '400': { description: Neither toolName nor all:true supplied, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /kb/agent/session-memory:
     delete:
       summary: Delete everything session memory captured for one chat session
@@ -2983,7 +3043,7 @@ paths:
               type: object
               required: [message, agentContext]
               properties:
-                message:  { type: string, description: 'User message (max 20 000 chars after sanitization)' }
+                message:  { type: string, description: 'User message. Fence sentinels are neutralised, then capped at 120 000 chars; the message and attachments share one 150 000-char turn budget, message first. An over-cap message is truncated and the model is told so in-band, not rejected.' }
                 language: { type: string }
                 model:    { type: string, description: 'Model id from the picker, passed to the SDK verbatim (an Anthropic id, or the custom provider''s own id on a gateway turn); omitted = config default' }
                 provider:

@@ -4,6 +4,8 @@ import Foundation
 //   GET    /kb/agent/commands           → enabled slash-commands ("/" menu)
 //   GET    /kb/agent/project-memory      → auto-captured facts for a repo
 //   DELETE /kb/agent/project-memory      → remove one fact / clear all
+//   GET    /kb/agent/tool-approvals      → standing "Always Allow" grants
+//   DELETE /kb/agent/tool-approvals      → revoke one grant / all of them
 // (Skills for the "/" menu reuse the existing /kb/agent/catalog →
 //  listAgentSkillCatalog in LlmIdeAPIClient+Agent.swift.)
 extension LlmIdeAPIClient {
@@ -105,6 +107,47 @@ extension LlmIdeAPIClient {
             path: "/kb/agent/project-memory", method: "DELETE",
             body: DeleteMemoryBody(repo: repo, fact: nil, all: true, workspaceRoot: workspaceRoot), authenticated: true)
         return resp.facts
+    }
+
+    // MARK: Standing "Always Allow" tool grants
+
+    /// One standing per-(user, tool) grant from the act-tool approval card.
+    /// `grantedAt` is kept as the server's raw ISO-8601 string rather than a
+    /// `Date`: the display format belongs to the view, and the untouched
+    /// string is what a later revoke is matched against server-side.
+    struct ToolApproval: Decodable, Identifiable, Equatable {
+        let toolName: String
+        let grantedAt: String
+        /// The grant is keyed per-(user, tool), so the tool name IS the identity.
+        var id: String { toolName }
+    }
+    private struct ToolApprovalsResponse: Decodable { let approvals: [ToolApproval] }
+    private struct RevokeToolApprovalBody: Encodable { let toolName: String?; let all: Bool? }
+
+    /// The user's standing "Always Allow" grants, newest first. An empty array
+    /// is the expected, healthy case — nothing has been permanently allowed.
+    func toolApprovals() async throws -> [ToolApproval] {
+        let resp: ToolApprovalsResponse = try await get("/kb/agent/tool-approvals", authenticated: true)
+        return resp.approvals
+    }
+
+    /// Revoke one standing grant. Returns the remaining grants so the caller
+    /// re-renders from the server's own view instead of a follow-up GET (which
+    /// could interleave with another surface's revoke and show a stale list).
+    func revokeToolApproval(toolName: String) async throws -> [ToolApproval] {
+        let resp: ToolApprovalsResponse = try await send(
+            path: "/kb/agent/tool-approvals", method: "DELETE",
+            body: RevokeToolApprovalBody(toolName: toolName, all: nil), authenticated: true)
+        return resp.approvals
+    }
+
+    /// Revoke every standing grant; returns [] (the remaining grants).
+    @discardableResult
+    func revokeAllToolApprovals() async throws -> [ToolApproval] {
+        let resp: ToolApprovalsResponse = try await send(
+            path: "/kb/agent/tool-approvals", method: "DELETE",
+            body: RevokeToolApprovalBody(toolName: nil, all: true), authenticated: true)
+        return resp.approvals
     }
 
     private struct ForgetSessionMemoryBody: Encodable {

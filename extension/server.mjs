@@ -157,7 +157,15 @@ const HOST = config.host;
 //     before. (Authored as v44 on a branch cut before the skills-registry
 //     refactor landed on main and took 44 for its own wire change; renumbered
 //     to 45 at merge so the two formats stay distinguishable.)
-const SERVER_API_VERSION = 45;
+//   v46 — GET/DELETE /kb/agent/tool-approvals: the user's standing "Always
+//     Allow" tool grants become listable and revocable (they were write-only,
+//     so a permission to run shell commands could never be withdrawn). Purely
+//     additive — an older client just never calls them — but the endpoint list
+//     changed, so the version moves with it: that list is what drives the
+//     client's stale-server banner, and without a bump a Mac app talking to an
+//     orphaned older server would show "Couldn't load tool permissions"
+//     instead of "restart the server".
+const SERVER_API_VERSION = 46;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -252,6 +260,7 @@ const ENDPOINTS = [
   '/kb/agent/skill-library',
   '/kb/agent/project-memory',
   '/kb/agent/session-memory',
+  '/kb/agent/tool-approvals',
   '/kb/agent/ask',
   '/kb/agent/ask/history',
   '/kb/chat/sessions',

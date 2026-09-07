@@ -566,6 +566,20 @@ final class BackendManager {
     /// instead of misbehaving — no chat-path capability silently degrades
     /// against an older server.
     ///
+    /// v45 (generate-doc `command`/`prompt`) and v46 (GET/DELETE
+    /// /kb/agent/tool-approvals) also deliberately did NOT raise it, for the
+    /// same reason: both are additive and off the chat wire this floor
+    /// guards. Nothing runs with the wrong credentials and no chat capability
+    /// silently degrades, which is the bar for raising the floor.
+    ///
+    /// The cost of not raising it, stated honestly: against a v45 server the
+    /// Settings → Tool permissions card shows a generic "Couldn't load tool
+    /// permissions" (it discards the server's own message) and only inside a
+    /// card that is collapsed by default — so a user on a stale server gets
+    /// no clear "restart the server" signal there. That is acceptable for a
+    /// settings surface the user has to go looking for; it would not be for
+    /// the chat path.
+    ///
     /// The server reports its version via `/health.apiVersion`; a live server
     /// below this floor sets `serverVersionTooOld` and writes an actionable
     /// `lastError` (see `recordServerVersion`), which Settings → Backend,

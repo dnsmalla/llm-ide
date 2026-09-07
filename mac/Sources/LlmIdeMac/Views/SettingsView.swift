@@ -27,8 +27,21 @@ struct SettingsView: View {
                             mobile
                         }
                         PreferencesSettingsSection(api: api)
-                        ProvidersSettingsSection(api: api)
-                        CustomProvidersSection(api: api)
+                        // App-scoped, not project-scoped: an "Always Allow"
+                        // grant is per-(user, tool) and outlives any project,
+                        // so it must be revocable from the Welcome shell too
+                        // (which renders App settings only).
+                        ToolApprovalsSettingsSection(api: api)
+                        // Nested, not appended: `ViewBuilder` takes at most 10
+                        // children per block and this Group had reached exactly
+                        // 10, so the next card added here would have failed to
+                        // type-check with a message that names neither the
+                        // limit nor this line. Add new App cards inside a
+                        // nested Group like this one.
+                        Group {
+                            ProvidersSettingsSection(api: api)
+                            CustomProvidersSection(api: api)
+                        }
                     }
 
                     // Project-scoped settings — only visible when a project is

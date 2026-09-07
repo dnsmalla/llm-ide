@@ -22,6 +22,7 @@ import {
   factIndex,
 } from '../graphkit/index.mjs';
 import { deleteSessionMemory } from '../kb/session-memory.mjs';
+import { listAlwaysAllow, clearAlwaysAllow, clearAllAlwaysAllow } from '../kb/tool-approvals.mjs';
 
 // Vision input for /kb/agent/ask. Accepts a data URL string
 // ("data:image/jpeg;base64,…") or { mediaType, data } objects, one or many.
@@ -411,6 +412,42 @@ export async function handleAgentRoutes(req, res, ctx) {
     }
     if (!root) { sendJSON(res, 200, { facts: [], repo: null }); return true; }
     sendJSON(res, 200, { facts: readChatMemoryFacts(root), repo: root });
+    return true;
+  }
+
+  // GET /kb/agent/tool-approvals
+  //   The user's standing "Always Allow" tool grants, newest first, so a
+  //   settings surface can show what has been permanently permitted.
+  //   { approvals: [{ toolName, grantedAt }] }
+  //
+  //   Not repo-scoped (the grant is per-user, per-tool — see
+  //   kb/tool-approvals.mjs), so no allow-list resolution applies here.
+  if (req.method === 'GET' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/tool-approvals') {
+    sendJSON(res, 200, { approvals: listAlwaysAllow(userId) });
+    return true;
+  }
+
+  // DELETE /kb/agent/tool-approvals   body: { toolName } | { all: true }
+  //   Revoke one standing grant, or all of them. Revocation only ever removes
+  //   permission, so unlike the grant path there is nothing to gate: the worst
+  //   case is the user is asked to approve a tool again.
+  //   { approvals: [...remaining], removed: number }
+  if (req.method === 'DELETE' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/tool-approvals') {
+    const body = parseJSON(await readBody(req, 8 * 1024)) || {};
+    if (body.all === true) {
+      const removed = clearAllAlwaysAllow(userId);
+      sendJSON(res, 200, { approvals: listAlwaysAllow(userId), removed });
+      return true;
+    }
+    if (typeof body.toolName !== 'string' || !body.toolName) {
+      // VALIDATION_FAILED, not an invented code: it is the canonical 400 in
+      // core/errors.mjs and the only 400 code the documented Error schema's
+      // enum admits (docs/reference/api/openapi.yaml).
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'toolName or all:true required' } });
+      return true;
+    }
+    const removed = clearAlwaysAllow(userId, body.toolName) ? 1 : 0;
+    sendJSON(res, 200, { approvals: listAlwaysAllow(userId), removed });
     return true;
   }
 
