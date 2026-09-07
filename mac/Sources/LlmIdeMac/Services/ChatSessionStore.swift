@@ -62,6 +62,15 @@ enum ChatSessionStore {
         return out.sorted { $0.lastUsedAt > $1.lastUsedAt }
     }
 
+    /// Sessions for `scope` belonging to `projectId`.
+    ///
+    /// A session with a nil `projectId` (written before project identity
+    /// existed) belongs to NO project rather than to every one: serving it
+    /// everywhere is the cross-project bleed this parameter exists to stop.
+    static func list(for scope: ChatScope, projectId: String?) -> [ChatSession] {
+        list(for: scope).filter { $0.projectId != nil && $0.projectId == projectId }
+    }
+
     static func load(id: UUID) -> ChatSession? {
         guard let url = fileURL(for: id),
               FileManager.default.fileExists(atPath: url.path),

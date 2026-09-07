@@ -49,6 +49,21 @@ test('classifyCodeAssistMode accepts assist_plan', async () => {
   assert.deepEqual(result, { mode: 'assist_plan' });
 });
 
+// `ask` is a real, route-accepted mode (MODES in mode-classify.mjs) but it is
+// NOT one of the five categories buildPrompt() offers the classifier — it is
+// the quick chat's mode, reachable only via a client-supplied mode string.
+// The classifier validates the model's JSON output against CLASSIFIABLE_MODES,
+// a set deliberately narrower than MODES, so that a panel turn sent with
+// mode: "auto" can never land on 'ask' just because the underlying model
+// call hallucinated the string. If this ever regressed to checking against
+// MODES instead, this test would start asserting { mode: 'ask' } and fail.
+test('classifyCodeAssistMode never returns ask, even if the model emits it', async () => {
+  const result = await classifyCodeAssistMode('do something', {
+    _runClaude: async () => '{"mode": "ask"}',
+  });
+  assert.deepEqual(result, { mode: 'execute' });
+});
+
 // A mocked _runClaude can only prove the JSON round-trips (above) — it can't
 // prove the model would actually pick the right one between plan/assist_plan
 // for a given message. This asserts on the prompt text itself, so a future

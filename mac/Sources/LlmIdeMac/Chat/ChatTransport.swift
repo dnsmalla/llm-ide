@@ -15,9 +15,9 @@ protocol ChatTransport: Sendable {
     /// v2 engines surface mid-turn approval questions (a parked
     /// `AskUserQuestion` the turn blocks on until the user answers via
     /// `POST /agent/v2/decision`). The default below ignores them — legacy
-    /// engines (`CodeAssistTransport`, `AgentAskTransport`, test doubles)
-    /// never produce any, so they compile unchanged and their callers can
-    /// adopt the 4-callback form without caring which engine answered.
+    /// engines (`CodeAssistTransport`, test doubles) never produce any, so
+    /// they compile unchanged and their callers can adopt the 4-callback
+    /// form without caring which engine answered.
     func roundTrip(
         _ input: ChatTransportInput,
         onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,

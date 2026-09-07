@@ -38,9 +38,13 @@ extension Notification.Name {
     /// ⌘⇧L. Observed by AppShell.
     static let openLlmChatSheet = Notification.Name("openLlmChatSheet")
 
-    /// Posted after a message is persisted via `/kb/agent/ask` (Mac sheet
-    /// send or iPhone `llmide_chat` proxy). LlmChatSheet reloads history.
-    static let llmChatTranscriptChanged = Notification.Name("llmChatTranscriptChanged")
+    // `llmChatTranscriptChanged` lived here until the quick chat was
+    // unified. It announced a write to the `/kb/agent/ask` transcript table
+    // so the Mac chat surfaces could re-fetch it; all three surfaces now
+    // share one `.quick` `ChatEngine` that owns its transcript directly, so
+    // the last observer went away and the two remaining posts told nobody.
+    // Removed rather than kept as an "external hook" — nothing outside this
+    // process can observe an in-process NotificationCenter name.
 
     /// Posted when a custom Auto Task's enabled-state changes via a
     /// phone-originated toggle — AutoCodeView observes this to reload its

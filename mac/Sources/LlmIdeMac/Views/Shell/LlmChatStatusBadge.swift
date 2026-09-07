@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// Status-bar chip for the shared LLM Chat surface (Mac sheet + iPhone
-/// `llmide_chat`). Replaces the old meeting-agent badge — no dispatch/stop/run
-/// controls here; tap opens the chat sheet backed by `/kb/agent/ask`.
+/// Status-bar chip for the shared LLM Chat surface (Mac sheet + menu-bar
+/// popover + iPhone `llmide_chat`). Replaces the old meeting-agent badge — no
+/// dispatch/stop/run controls here; tap opens the chat sheet, which runs the
+/// shared `.quick` `ChatEngine` on the code pipeline in read-only `ask` mode,
+/// not the retired `/kb/agent/ask` transcript.
 struct LlmChatStatusBadge: View {
     @EnvironmentObject var theme: ThemeStore
 

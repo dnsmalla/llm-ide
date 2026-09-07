@@ -54,6 +54,22 @@ const MODE_CONFIG = {
             + 'tool — you cannot save the file yourself in this mode; tell the '
             + 'user to switch to Execute mode if they want it written to disk.',
   },
+  // The quick chat's mode (menu bar popover, LLM Chat sheet, iPhone). Those
+  // surfaces can be driven while no window is showing them — the popover
+  // closes, the phone has no approval UI at all — so a turn able to park on
+  // an approval would hang until the server's park timeout denied it.
+  // Read-only is therefore not a preference here, it is what makes the
+  // surface safe. See mode-classify.mjs's MODES for the other half.
+  ask: {
+    persona: 'You are in ASK mode — the user is asking a question about this '
+           + 'project from a quick-chat window, not starting a work session. '
+           + 'Answer directly and concisely, using the read-only tools to ground '
+           + 'the answer in the actual code and in this project\'s memory rather '
+           + 'than guessing. You cannot modify anything in this mode: no file '
+           + 'edits, no shell commands, no git/issue/PR actions. If the user '
+           + 'wants a change made, say so and tell them to ask in the '
+           + 'Code Assistant panel.',
+  },
 };
 
 /**

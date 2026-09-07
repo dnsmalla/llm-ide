@@ -81,6 +81,12 @@ extension ChatEngine {
     /// Mac panel renders the confirmation card — today the one surface that
     /// can act on it. A phone-side confirmation channel is the future work
     /// that would lift this.
+    /// - Parameter mode: Forwarded verbatim to `ChatTransportInput.mode`.
+    ///   Defaults to `nil` (full agentic run) for `explore_chat`'s existing
+    ///   behavior; the phone's `llmide_chat` arm (Task 8) passes `"ask"` —
+    ///   read-only, enforced server-side — since it has no confirmation
+    ///   channel for a parked approval card, the same reasoning the menu bar
+    ///   and LLM Chat sheet's own `mode: "ask"` wiring already uses.
     func runExternalTurn(
         message: String,
         skillIds: [String],
@@ -88,6 +94,7 @@ extension ChatEngine {
         agentContext: AgentContext?,
         model: String?,
         provider: String?,
+        mode: String? = nil,
         expectedSessionID: UUID,
         onProgress: @escaping (String) -> Void
     ) async throws -> String {
@@ -121,7 +128,7 @@ extension ChatEngine {
         let task = Task { [self] in
             try await performExternalTurn(
                 message: message, skillIds: skillIds, attachments: attachments,
-                agentContext: agentContext, model: model, provider: provider,
+                agentContext: agentContext, model: model, provider: provider, mode: mode,
                 expectedSessionID: expectedSessionID, onProgress: onProgress)
         }
         externalRunTask = task
@@ -156,6 +163,7 @@ extension ChatEngine {
         agentContext: AgentContext?,
         model: String?,
         provider: String?,
+        mode: String? = nil,
         expectedSessionID: UUID,
         onProgress: @escaping (String) -> Void
     ) async throws -> String {
@@ -207,7 +215,7 @@ extension ChatEngine {
                 language: nil,
                 model: model,
                 provider: provider,
-                mode: nil
+                mode: mode
             )
             // Same identity stamp as runTurn/sendFollowup — here the bridge
             // already targets this engine's session (the resolver guarantees

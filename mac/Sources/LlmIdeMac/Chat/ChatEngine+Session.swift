@@ -29,7 +29,32 @@ extension ChatEngine {
     //     why it moved to the tail of the method).
 
     /// UserDefaults key holding the last-active chat id for this scope.
-    private var pointerKey: String { "chat.current.\(scope.rawValue)" }
+    ///
+    /// The `.quick` scope keys per PROJECT: that chat follows the active
+    /// project, so one global pointer would reload the previous project's
+    /// conversation after a switch — the cross-project bleed `projectId`
+    /// exists to stop, and filtering the session LIST alone does not stop it,
+    /// because the engine loads by pointer, not by list.
+    ///
+    /// The panel scopes keep the unsuffixed key so their existing pointers
+    /// keep resolving; changing them would silently orphan every user's
+    /// current chat on upgrade.
+    private var pointerKey: String {
+        guard scope == .quick, let project = quickChatProjectId else {
+            // A `.quick` engine reading its pointer before `quickChatProjectId`
+            // is set is wired out of order: whoever resolved this engine
+            // skipped `QuickChatContext.resolve(...)?.projectId` (or set it
+            // too late), and the failure is otherwise silent — no error, no
+            // log, just the previous project's conversation reloading after a
+            // switch. Debug-only, matching `FeatureCatalog`'s precedent for
+            // this class of bug.
+            if scope == .quick {
+                assertionFailure("quickChatProjectId is nil when the .quick pointer is read — set it before the engine's first session load")
+            }
+            return "chat.current.\(scope.rawValue)"
+        }
+        return "chat.current.\(scope.rawValue).\(project)"
+    }
 
     /// Persist `messages` into the current UUID session file, deriving a
     /// title from the first user turn if it's still "New chat".
@@ -59,7 +84,14 @@ extension ChatEngine {
         persistDebounceTask = nil
         guard let id = UUID(uuidString: currentSessionIDString) else { return }
         let capped = Array(messages.suffix(Self.persistedMessageCap))
-        var session = ChatSessionStore.load(id: id) ?? ChatSession(id: id, scope: scope)
+        // The fallback (file missing — deleted under us, or a pointer that
+        // outlived its file) stamps `projectId` the same way
+        // `mintFreshSession()` does, and for the same reason: a `.quick`
+        // session written with `projectId == nil` is invisible to
+        // `ChatSessionStore.list(for:projectId:)`, which reads a nil id as
+        // belonging to NO project rather than to this one.
+        var session = ChatSessionStore.load(id: id)
+            ?? ChatSession(id: id, scope: scope, projectId: scope == .quick ? quickChatProjectId : nil)
         session.scope = scope
         // A straight assignment as of Task 9 — `messages` IS the persisted
         // shape now, so ids/`createdAt`/status/tool steps carry through
@@ -138,11 +170,71 @@ extension ChatEngine {
         UserDefaults.standard.set(currentSessionIDString, forKey: pointerKey)
     }
 
+    /// What to load when the current session is gone — never picked yet (on
+    /// appear), or just deleted. ONE decision point for both callers below.
+    ///
+    /// This used to be hand-rolled separately in `handleOnAppearSessions()`
+    /// and `deleteSession`, and when the `.quick` cross-project-bleed fix
+    /// landed (this task's review, round 1) it was patched into ONLY the
+    /// first copy — `deleteSession` kept the plain `sessions.first` fallback,
+    /// so a user with quick chats in two projects who hit Clear in Project A
+    /// could have `deleteSession` pick Project B's most-recent quick session,
+    /// and the caller's `rememberCurrentPointer()` would then write PROJECT
+    /// B's session id into PROJECT A's own pointer key — reopening the exact
+    /// bleed the round-1 fix closed, through the second call site it missed.
+    /// Two hand-narrowed copies of one fallback is how that happened; this
+    /// helper exists so there is exactly one copy to narrow.
+    ///
+    /// Precondition: `sessions` (via `refreshSessions()`) reflects the
+    /// current on-disk state — both callers refresh immediately before
+    /// calling this.
+    enum SessionFallback {
+        /// Adopt this already-safe-to-adopt session (same scope, and — for
+        /// `.quick` — implicitly the right project, because it never comes
+        /// from the unfiltered `sessions` list for `.quick` at all).
+        case adopt(ChatSession)
+        /// No safe candidate: the caller should `mintFreshSession()`.
+        case mintFresh
+    }
+
+    private func fallbackSessionAfterLoss() -> SessionFallback {
+        // `.quick` must never adopt `sessions.first`: `sessions` comes from
+        // `ChatSessionStore.list(for: scope)`, which is EVERY project's quick
+        // sessions, unfiltered (see that method's doc comment) — adopting one
+        // here, and the caller then calling `rememberCurrentPointer()` on it,
+        // is exactly the cross-project bleed `quickChatProjectId`/the
+        // per-project pointer key exist to stop. Always mint fresh instead;
+        // the per-project pointer read (in `handleOnAppearSessions`) is the
+        // ONLY legitimate way a `.quick` engine resumes a session.
+        guard scope != .quick, let newest = sessions.first else {
+            return .mintFresh
+        }
+        return .adopt(newest)
+    }
+
     /// Resolve which chat this scope should show on appear: migrate any legacy
     /// per-scope file, load the session list, then restore the remembered
-    /// pointer → fall back to the newest session → mint a fresh one. Sets
+    /// pointer → fall back to the newest session (via `fallbackSessionAfterLoss()`,
+    /// which mints fresh instead for `.quick`) → mint a fresh one. Sets
     /// `messages` itself (like every other session-swap method here) and
     /// returns it for the caller's convenience.
+    ///
+    /// Like `switchSession`/`deleteSession`, resets transient session state
+    /// (`resetTransientSessionState()`) for whatever chat it lands on — on
+    /// the pointer-found branch AND the `.adopt` fallback branch (the
+    /// `.mintFresh` branch already gets it for free from `mintFreshSession()`
+    /// itself). This was MISSING on both of those branches until code review
+    /// caught it (Task 6 round 1): this method is the "load the incoming
+    /// session" half for a plain first appearance (harmless — a freshly
+    /// resolved engine has nothing stale to reset) AND, since
+    /// `switchQuickChatProject(to:)` below reuses it, for a genuine
+    /// session SWAP while the engine already has live turn/approval state
+    /// from a DIFFERENT chat. Without the reset, that state — an outgoing
+    /// chat's `agent.pendingTool`/`error`/`agent.nudgePrompt`, and critically
+    /// `agentV2Transport`'s recorded `sdkSessionId` — carried into the
+    /// newly-loaded chat, which for the SDK session id specifically means the
+    /// new chat's next turn could RESUME the outgoing chat's server-side
+    /// conversation instead of starting its own.
     ///
     /// Extracted from `CodeAssistantPanel.handleOnAppear`, which also does
     /// model-picker and initial-attachment setup — that half stays in the view.
@@ -154,20 +246,35 @@ extension ChatEngine {
             currentSessionIDString = UserDefaults.standard.string(forKey: pointerKey) ?? ""
         }
         suppressHistoryAnnounce = true
+        // For `.quick`, the pointer must also resolve to a session belonging
+        // to THIS project. The pointer key is already per-project, so this
+        // only ever fires on a MIS-KEYED pointer — e.g. one written under the
+        // unsuffixed `chat.current.quick` key by a release build that
+        // stripped `pointerKey`'s assertion. Cheap defence in depth: a
+        // mismatch takes the same path as a missing session (mint fresh for
+        // `.quick`) instead of loading another project's conversation.
         if let cur = UUID(uuidString: currentSessionIDString),
            let session = ChatSessionStore.load(id: cur),
-           session.scope == scope {
+           session.scope == scope,
+           scope != .quick || session.projectId == quickChatProjectId {
+            resetTransientSessionState()
             messages = session.messages
             onHistoryReplaced(session.messages)
-        } else if let newest = sessions.first {
-            currentSessionIDString = newest.id.uuidString
-            messages = newest.messages
-            onHistoryReplaced(newest.messages)
-            rememberCurrentPointer()
         } else {
-            // No usable pointer and no saved chats for this scope — start one.
-            // (mintFreshSession clears `messages` itself.)
-            mintFreshSession()
+            switch fallbackSessionAfterLoss() {
+            case .adopt(let newest):
+                currentSessionIDString = newest.id.uuidString
+                resetTransientSessionState()
+                messages = newest.messages
+                onHistoryReplaced(newest.messages)
+                rememberCurrentPointer()
+            case .mintFresh:
+                // No usable pointer and no safe saved chat to fall back to —
+                // start one. (mintFreshSession clears `messages` itself, and
+                // calls resetTransientSessionState() internally — do not call
+                // it again here.)
+                mintFreshSession()
+            }
         }
         DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
         return messages
@@ -254,9 +361,17 @@ extension ChatEngine {
         // after. Per-turn selection (`AgentV2EngineTransport.selectsV2`)
         // then requires the marker, so later toggle flips never migrate an
         // existing chat between engines.
+        //
+        // `.quick` also stamps `projectId` here: without it every minted
+        // quick-chat session has `projectId == nil` on disk, invisible to
+        // `ChatSessionStore.list(for:projectId:)` (which treats a nil id as
+        // belonging to no project) — the exact overload the sheet's session
+        // list needs. Scoped to `.quick` only; every other scope's minted
+        // session is unaffected.
         let fresh = ChatSession(scope: scope, engine: AgentV2Selection.engineForNewChat(
             resolvedProvider: resolveNewChatProvider(),
-            capableProviders: AgentV2Selection.liveAgentCapableProviders()))
+            capableProviders: AgentV2Selection.liveAgentCapableProviders()),
+            projectId: scope == .quick ? quickChatProjectId : nil)
         ChatSessionStore.save(fresh)
         currentSessionIDString = fresh.id.uuidString
         rememberCurrentPointer()
@@ -283,6 +398,27 @@ extension ChatEngine {
         return marker
     }
 
+    /// Finalize the in-flight turn and persist the outgoing chat — the shared
+    /// prologue for every path that swaps `currentSessionIDString` away from
+    /// whatever is currently loaded. Finalizes any in-flight stream BEFORE
+    /// persisting — otherwise an unfinished placeholder turn could be written
+    /// to disk (see `resetActiveTurnState`'s doc comment).
+    ///
+    /// Factored out (code review, Task 6 round 1) after this exact two-line
+    /// sequence was hand-duplicated at `createNewSession`, `switchSession`,
+    /// and — before this fix — a THIRD, ad hoc copy in `LlmChatSheet`'s
+    /// project-switch handler that duplicated these two lines but had no way
+    /// to know it also needed to route through the transient-state reset
+    /// `handleOnAppearSessions()`'s loading branches perform (see that
+    /// method's doc comment for the actual bug this closes). One private
+    /// helper means a fourth swap path calls a named operation instead of
+    /// re-deriving "which two engine calls does a session swap start with"
+    /// from scratch.
+    private func stopOutgoingTurnBeforeSwap() {
+        resetActiveTurnState()
+        persistCurrentChat()
+    }
+
     /// Start a new empty chat for this scope. No-op if the current chat is
     /// already an untouched "New chat" (avoids duplicate empty rows from
     /// repeated taps on "+ New chat").
@@ -291,11 +427,7 @@ extension ChatEngine {
             let title = sessions.first(where: { $0.id.uuidString == currentSessionIDString })?.title ?? "New chat"
             if title == "New chat" || title.isEmpty { return }
         }
-        // Finalize any in-flight stream BEFORE persisting — otherwise an
-        // unfinished placeholder turn could be written to disk (see
-        // resetActiveTurnState's doc comment).
-        resetActiveTurnState()
-        persistCurrentChat()
+        stopOutgoingTurnBeforeSwap()
         mintFreshSession()
     }
 
@@ -303,11 +435,7 @@ extension ChatEngine {
     func switchSession(to id: UUID) {
         guard id.uuidString != currentSessionIDString else { return }
         guard let session = ChatSessionStore.load(id: id), session.scope == scope else { return }
-        // Finalize any in-flight stream BEFORE persisting — otherwise an
-        // unfinished placeholder turn could be written to disk (see
-        // resetActiveTurnState's doc comment).
-        resetActiveTurnState()
-        persistCurrentChat()
+        stopOutgoingTurnBeforeSwap()
         currentSessionIDString = id.uuidString
         rememberCurrentPointer()
         resetTransientSessionState()
@@ -317,6 +445,88 @@ extension ChatEngine {
         DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
         ChatSessionStore.save(session)
         refreshSessions()
+    }
+
+    /// Swap `.quick` onto a different project's session — the engine-owned
+    /// counterpart of `switchSession(to:)` for when the identity of the
+    /// INCOMING session isn't a known id but "whatever `newProjectId`'s
+    /// pointer resolves to." Called by `LlmChatSheet`'s
+    /// `.onChange(of: projectStore.activeProject)` — the main window makes a
+    /// project switch mid-conversation plausible, unlike the menu-bar
+    /// popover.
+    ///
+    /// Runs the SAME `stopOutgoingTurnBeforeSwap()` prologue `switchSession`/
+    /// `createNewSession` use — while `quickChatProjectId` STILL names the
+    /// OUTGOING project, so `persistCurrentChat()` writes to the right file —
+    /// then re-points `quickChatProjectId` and clears `currentSessionIDString`
+    /// so `handleOnAppearSessions()` re-resolves the NEW project's pointer
+    /// from scratch rather than reloading the outgoing project's id.
+    /// `handleOnAppearSessions()` resets transient session state for whatever
+    /// it lands on (see its doc comment) — the same guarantee `switchSession`/
+    /// `deleteSession` give their callers — so the caller doesn't need to
+    /// (and must not — see `resetTransientSessionState`'s own doc comment on
+    /// ordering against `onHistoryReplaced`).
+    ///
+    /// `newProjectId == nil` (the project was CLOSED, not switched) is handled
+    /// separately and does NOT fall through to `handleOnAppearSessions()`:
+    /// that method's first act is reading `pointerKey`, and `pointerKey`'s
+    /// `.quick` branch treats a nil `quickChatProjectId` as a WIRING bug
+    /// (`assertionFailure` — correctly, since a `.quick` engine reading its
+    /// pointer before anyone has resolved a project is a real defect
+    /// elsewhere). "No project is open right now" is a different, entirely
+    /// legitimate runtime state — conflating the two would either crash every
+    /// debug build the instant a user closes their project with this chat
+    /// open, or (release, where the assertion is stripped) silently reload/
+    /// mint a session under the unsuffixed `chat.current.quick` key — the
+    /// exact un-scoped global conversation Task 3's per-project pointer
+    /// exists to forbid. So: finalize the outgoing chat, clear to the
+    /// "nothing loaded" state a fresh engine starts in (`messages = []`,
+    /// `currentSessionIDString = ""`), reset transient state for the same
+    /// reason every other swap does, and STOP — there is no session to look
+    /// up with no project, so nothing calls into `pointerKey` at all. The
+    /// sheet's own no-project gate (`QuickChatContext.resolve(...) == nil`)
+    /// already hides the composer for this state; this just makes sure the
+    /// engine's OWN state matches "nothing is loaded" rather than leaking
+    /// the outgoing project's transcript into a screen with no composer.
+    func switchQuickChatProject(to newProjectId: String?) {
+        assert(scope == .quick, "switchQuickChatProject called on a non-.quick engine")
+        stopOutgoingTurnBeforeSwap()
+        guard let newProjectId else {
+            quickChatProjectId = nil
+            currentSessionIDString = ""
+            messages = []
+            resetTransientSessionState()
+            return
+        }
+        quickChatProjectId = newProjectId
+        currentSessionIDString = ""
+        handleOnAppearSessions()
+    }
+
+    /// Run `handleOnAppearSessions()` only when it's actually safe to read
+    /// the pointer — i.e. not `.quick` with no project resolved yet. Guards
+    /// the exact contract `pointerKey`'s `assertionFailure` protects (see
+    /// `switchQuickChatProject(to:)`'s doc comment for the full reasoning):
+    /// for `.quick`, "no session loaded yet" (`currentSessionIDString.isEmpty`)
+    /// and "safe to resolve the pointer" are NOT the same condition — the
+    /// FIRST appearance of either `MenuBarChatView` or `LlmChatSheet` can
+    /// happen with no active project (the popover is always reachable; the
+    /// sheet's own `.sheet` presentation isn't gated on a project either), and
+    /// both used to call `handleOnAppearSessions()` unconditionally once
+    /// `currentSessionIDString` was empty — hitting the SAME wiring-bug
+    /// assertion `switchQuickChatProject(to: nil)` was fixed to avoid, just
+    /// from the other direction (first appearance vs. project closed
+    /// mid-session). One guard, used by both `.onAppear`s, so a third surface
+    /// can't reintroduce this by hand-copying the unguarded call again.
+    ///
+    /// Every non-`.quick` scope is unaffected: `quickChatProjectId` is never
+    /// set for them, so `scope != .quick` short-circuits this guard to always
+    /// pass, and behavior is identical to calling `handleOnAppearSessions()`
+    /// directly.
+    @discardableResult
+    func handleOnAppearSessionsIfReady() -> [ChatMessage]? {
+        guard scope != .quick || quickChatProjectId != nil else { return nil }
+        return handleOnAppearSessions()
     }
 
     /// Load `id` into a BRAND-NEW, otherwise-untouched engine — for a caller
@@ -347,7 +557,9 @@ extension ChatEngine {
     }
 
     /// Delete chat `id`. If it was the active chat, switch to the next most
-    /// recent session, or mint a fresh empty one if none remain.
+    /// recent session (via `fallbackSessionAfterLoss()`, which mints fresh
+    /// instead for `.quick` rather than risking a different project's
+    /// session), or mint a fresh empty one if none remain.
     ///
     /// `async` only because of the session-memory forget at the tail. Every
     /// state change below still happens before the first suspension point, so
@@ -361,7 +573,8 @@ extension ChatEngine {
         ChatSessionStore.delete(id: id)
         refreshSessions()
         if wasActive {
-            if let next = sessions.first {
+            switch fallbackSessionAfterLoss() {
+            case .adopt(let next):
                 currentSessionIDString = next.id.uuidString
                 rememberCurrentPointer()
                 resetTransientSessionState()
@@ -369,9 +582,10 @@ extension ChatEngine {
                 messages = next.messages
                 onHistoryReplaced(next.messages)
                 DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
-            } else {
-                // No sessions left for this scope — mint a blank one and
-                // point everything (pointer, defaults, sessions list) at it.
+            case .mintFresh:
+                // No safe session to fall back to for this scope — mint a
+                // blank one and point everything (pointer, defaults, sessions
+                // list) at it.
                 mintFreshSession()
             }
         }

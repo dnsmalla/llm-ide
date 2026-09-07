@@ -1,21 +1,30 @@
 import SwiftUI
 
 /// Menu-bar llm-agent chat — compact Gemini-style surface matching the iPhone
-/// companion. Uses the same `/kb/agent/ask` transcript as `LlmChatSheet`.
+/// companion. Shares the `.quick` `ChatEngine` (and its code-pipeline
+/// transport) with `LlmChatSheet` and the phone via `ChatEngineRegistry` —
+/// one conversation, not the old `/kb/agent/ask` meeting-agent transcript.
 struct MenuBarChatView: View {
     let api: LlmIdeAPIClient
 
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var projectStore: ProjectStore
     @Environment(\.openWindow) private var openWindow
+    // Read-only: whether the server this window would talk to knows the
+    // `ask` mode this chat sends. See `QuickChatContext.serverSupportsAsk`.
+    @Environment(BackendManager.self) private var backend
 
+    // The SAME engine the LLM Chat sheet and the phone drive: one engine per
+    // conversation. Each surface holding its own would mean three engines
+    // writing one session file — the concurrent-holders bug that already
+    // resurrected deleted chats through persistCurrentChat.
     @State private var engine: ChatEngine
     @State private var viewModel: LlmChatViewModel
     @State private var draft: String = ""
     @State private var confirmingClear = false
     @State private var clearingHistory = false
-    @State private var historyRefreshTask: Task<Void, Never>?
     @State private var popoverWindow: NSWindow?
     @State private var selectedModelId: String? = nil
     @StateObject private var completion = CompletionController()
@@ -35,9 +44,13 @@ struct MenuBarChatView: View {
 
     init(api: LlmIdeAPIClient) {
         self.api = api
-        let engine = ChatEngine(scope: .explorer, transport: AgentAskTransport(api: api))
+        // Resolved from the registry rather than constructed here — see the
+        // `engine` property's doc comment. `ChatTransportFactory` (inside the
+        // registry) picks the real code-pipeline transport; this view no
+        // longer builds a meeting-agent transport at all.
+        let engine = ChatEngineRegistry.shared.engine(for: .quick, api: api)
         _engine = State(initialValue: engine)
-        _viewModel = State(initialValue: LlmChatViewModel(engine: engine, historyAPI: api))
+        _viewModel = State(initialValue: LlmChatViewModel(engine: engine))
     }
 
     private var combinedError: String? {
@@ -49,47 +62,118 @@ struct MenuBarChatView: View {
             headerBar
             Divider().opacity(0.5)
             contentArea
-            composerSection
+            // The code pipeline cannot run without an active project (the
+            // server throws `workspaceRoot is required`), so decline rather
+            // than send a request that must fail.
+            if QuickChatContext.resolve(config: config, projectStore: projectStore) == nil {
+                Text(QuickChatContext.noProjectMessage)
+                    .font(.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .padding(14)
+            } else if !QuickChatContext.serverSupportsAsk(backend.serverApiVersion) {
+                // This surface sends `mode: "ask"` (see `wireEngine()`
+                // below); an older server resolves that to `execute`, giving
+                // this window full act tools with no approval UI to render
+                // them. Hiding the composer is the gate — no path here can
+                // reach `sendDraft()` without it.
+                Text(QuickChatContext.unsupportedServerMessage(apiVersion: backend.serverApiVersion))
+                    .font(.caption)
+                    .foregroundStyle(theme.current.textMuted)
+                    .padding(14)
+                    // Re-probe while this text is showing, so the gate can
+                    // OPEN without the user doing anything — the version is
+                    // otherwise only recorded inside `BackendManager.start()`,
+                    // which never runs for a logged-in user with autostart
+                    // off (`node server.mjs` in a terminal). Cancelled with
+                    // the view.
+                    .task { await QuickChatContext.pollServerVersionWhileUnsupported(backend: backend) }
+            } else {
+                composerSection
+            }
         }
         .frame(width: 380, height: 520)
         .background(Color(nsColor: .windowBackgroundColor))
         .background(MenuBarChatWindowAccessor(window: $popoverWindow))
         .onExitCommand { closePopover() }
+        // Re-probe once per appearance, whichever way the gate currently
+        // reads. The closed-state `.task` above only runs while the gate is
+        // CLOSED, so without this a gate that is stale-OPEN — the app cached
+        // v47, then the user restarted the server from a terminal on an older
+        // checkout, which never routes through `BackendManager.start()` —
+        // would never be re-checked at all. This bounds that window to one
+        // popover session instead of the life of the app process.
+        .task { await backend.refreshServerApiVersion() }
         .onAppear {
+            // Must land before anything below can trigger the engine's first
+            // session load: the engine is registry-cached and shared with the
+            // sheet and the phone, so it may already hold a session — from a
+            // prior appearance of this popover, from the sheet, or from the
+            // phone — possibly for a DIFFERENT project. `attach` owns that
+            // three-case decision for all three surfaces (see its doc
+            // comment); doing it by hand here is what wrote project B's turns
+            // into project A's session file, and what tripped `pointerKey`'s
+            // assertion after a project was closed. Without any call at all,
+            // `.quick` has no session to persist into and every turn lives in
+            // memory only until the popover closes.
+            QuickChatContext.attach(engine, config: config, projectStore: projectStore)
             wireEngine()
             wireVoiceService()
             completion.configure(api: api, repoRoot: nil)
             inputFocused = true
             Task {
-                await viewModel.loadHistory()
                 await completion.loadMetaIfNeeded()
             }
-            startHistoryRefresh()
+            // No `viewModel.loadHistory()`/history-poll here anymore, and no
+            // transcript-changed notification observer below either (that
+            // notification is gone entirely now). Both used
+            // to re-fetch `/kb/agent/ask/history` and call
+            // `engine.replaceMessages(...)` over whatever `engine.messages`
+            // already held — a table the code-pipeline transport never writes
+            // to, so every fetch came back stale/empty and erased the just-
+            // streamed reply within seconds of it landing. The `.quick` engine
+            // is shared and owns its own transcript now; this view just
+            // renders `engine.messages` and never overwrites it from a second
+            // source.
         }
         .onDisappear {
-            historyRefreshTask?.cancel()
-            historyRefreshTask = nil
             if voiceState.isRecording {
                 voiceState.setRecording(false)
                 voiceService.cancel()
             }
+        }
+        .onChange(of: projectStore.activeProject) { _, _ in
+            // The composer gate above re-evaluates LIVE on `@Published
+            // activeProject`, so without this the gate and the engine
+            // disagree the moment a project is opened, switched or closed
+            // while this popover is on screen: the composer appears (or
+            // stays) while the engine is still wired to the previous
+            // project — or to none, in which case every turn is silently
+            // unpersisted because `persistCurrentChat()` no-ops on an empty
+            // session id. Same shared decision as `.onAppear`.
+            QuickChatContext.attach(engine, config: config, projectStore: projectStore)
         }
         .onChange(of: selectedModelId) { _, _ in wireEngine() }
         .onChange(of: draft) { _, newValue in
             completion.update(draft: newValue)
         }
         .onChange(of: engine.messages) { oldValue, newValue in
-            viewModel.notifyIfTurnFinished(oldValue: oldValue, newValue: newValue)
+            // Same call `CodeAssistantPanel` wires for its own scopes
+            // (`CodeAssistantPanel.swift:261`) — persists (debounced while a
+            // reply is streaming) and fires the VoiceOver announcement for a
+            // newly-arrived assistant turn. `.quick` had nothing wiring this
+            // at all until now, so a turn was correct in memory but never
+            // reached `ChatSessionStore`.
+            engine.announceAndPersist(oldValue: oldValue, newValue: newValue)
+            // No `viewModel.notifyIfTurnFinished(...)` here anymore (the
+            // method itself is gone, along with `LlmChatViewModel`'s whole
+            // `/kb/agent/ask/history` polling — see its header comment):
+            // this used to post a transcript-changed notification to tell
+            // other ask-history listeners the SHARED table changed, which,
+            // for a turn run through the code pipeline, it never did. The
+            // notification had no observers left and has been removed.
             if let recovered = viewModel.recoverableDraftAfterFailure(oldValue: oldValue, newValue: newValue) {
                 draft = recovered
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .llmChatTranscriptChanged)) { _ in
-            // Something changed: refresh now AND pull the backoff back to the
-            // floor, so the loop doesn't sit out the rest of a long window
-            // while a conversation is active.
-            viewModel.resetPollBackoff()
-            Task { await viewModel.loadHistory() }
         }
         // The clear confirm is an in-popover overlay, NOT `.alert`: inside a
         // `MenuBarExtra(.window)` panel the system alert PRESENTS but its
@@ -112,7 +196,7 @@ struct MenuBarChatView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Clear the conversation?")
                     .font(.system(size: 14, weight: .semibold))
-                Text("This removes the shared transcript from the server. iPhone and Mac will both start fresh.")
+                Text("This removes this chat's saved conversation and its memory.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -398,21 +482,33 @@ struct MenuBarChatView: View {
                 Text(isUser ? "You" : "LLM-IDE")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(theme.current.textMuted)
-                
-                Text(displayedContent(for: msg))
-                    .font(.subheadline)
-                    .foregroundStyle(theme.current.text)
-                    .textSelection(.enabled)
-                    .multilineTextAlignment(isUser ? .trailing : .leading)
+
+                if isUser {
+                    // User input is plain text — rendered verbatim, no markdown.
+                    Text(displayedContent(for: msg))
+                        .font(.subheadline)
+                        .foregroundStyle(theme.current.text)
+                        .textSelection(.enabled)
+                        .multilineTextAlignment(.trailing)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Self.greetingBlue.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                } else {
+                    SelfSizingMarkdownView(
+                        markdown: displayedContent(for: msg),
+                        isDark: theme.current.isDark
+                    ) { h in
+                        if engine.bubbleHeights[msg.id] != h { engine.bubbleHeights[msg.id] = h }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: max(engine.bubbleHeights[msg.id] ?? 24, 24))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(
-                        isUser
-                            ? Self.greetingBlue.opacity(0.12)
-                            : Color(nsColor: .controlBackgroundColor)
-                    )
+                    .background(Color(nsColor: .controlBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                
+                }
+
                 if !isUser, msg.status == .stopped {
                     Text("Stopped")
                         .font(.caption2)
@@ -590,17 +686,6 @@ struct MenuBarChatView: View {
         MenuBarChatWindow.orderOut(popoverWindow)
     }
 
-    private func startHistoryRefresh() {
-        historyRefreshTask?.cancel()
-        // Backing-off fallback poll, shared with LlmChatSheet — see
-        // `LlmChatViewModel.PollBackoff`. The pause closure preserves this
-        // surface's own guard against polling over an in-flight clear.
-        viewModel.resetPollBackoff()
-        historyRefreshTask = Task {
-            await viewModel.runHistoryPolling(pauseWhile: { clearingHistory })
-        }
-    }
-
     private func performClearHistory() async {
         guard !clearingHistory else { return }
         clearingHistory = true
@@ -614,8 +699,14 @@ struct MenuBarChatView: View {
         pendingDirectives = []
         voiceState.reset()
         if engine.busy { viewModel.stop() }
-        await viewModel.clearHistory()
-        startHistoryRefresh()
+        // NOT `viewModel.clearHistory()` — that clears the unrelated
+        // `/kb/agent/ask` table this surface no longer reads or writes, then
+        // calls `engine.replaceMessages([])` straight over the shared `.quick`
+        // engine's real transcript. The engine owns this transcript now,
+        // persisted under `ChatSessionStore`, so clearing goes through its own
+        // session lifecycle instead — which also forgets the session's
+        // server-side memory (see `ChatEngine.deleteSession`).
+        await engine.clearCurrentChat()
     }
 
     private func wireEngine() {
@@ -627,11 +718,16 @@ struct MenuBarChatView: View {
                 history: history,
                 attachments: attachments,
                 skills: skills,
-                agentContext: nil,
+                // Was nil, which is why this chat could neither read nor write
+                // project memory — the whole point of unifying it.
+                agentContext: QuickChatContext.resolve(config: config, projectStore: projectStore)?.agentContext,
                 language: config.preferredLanguage.isEmpty ? nil : config.preferredLanguage,
                 model: model,
                 provider: ChatTransportInput.makeProvider(selectedProvider: tool.rawValue),
-                mode: nil
+                // Read-only: this window can be closed while the phone drives
+                // the same engine, so a turn that could park on an approval
+                // would hang with nothing able to render the card.
+                mode: "ask"
             )
         }
     }
