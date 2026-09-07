@@ -1240,6 +1240,10 @@ paths:
                     the user has subagents, executing-plans otherwise). Omitted on
                     every other request.
                 provider:     { type: string, description: 'LLM provider override' }
+                mode:
+                  type: string
+                  enum: [auto, plan, assist_plan, review, document, ask, execute]
+                  description: 'Chat mode; plan/assist_plan map to SDK plan permission mode; ask = read-only quick chat (menu bar / sheet / phone): no file edits, no shell, no git actions'
       responses:
         '200':
           description: Assistant reply
@@ -3057,7 +3061,10 @@ paths:
                     terminal error event coded `PROVIDER_NOT_AGENT_CAPABLE` (no
                     Anthropic-compatible endpoint) or `PROVIDER_UNAVAILABLE`
                     (unregistered / disabled / no key).
-                mode:     { type: string, description: 'Chat mode; plan/assist_plan map to SDK plan permission mode' }
+                mode:
+                  type: string
+                  enum: [auto, plan, assist_plan, review, document, ask, execute]
+                  description: 'Chat mode; plan/assist_plan map to SDK plan permission mode; ask = read-only quick chat (menu bar / sheet / phone): no file edits, no shell, no git actions'
                 planExecute:
                   type: boolean
                   description: >-

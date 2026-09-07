@@ -165,7 +165,13 @@ const HOST = config.host;
 //     client's stale-server banner, and without a bump a Mac app talking to an
 //     orphaned older server would show "Couldn't load tool permissions"
 //     instead of "restart the server".
-const SERVER_API_VERSION = 46;
+//   v47 — `mode: "ask"` accepted on /code-assist and /agent/v2/stream: a
+//     read-only mode for the quick chat (menu bar / sheet / phone). NOT
+//     additive in the safe direction — an older server silently resolves an
+//     unknown mode to `execute`, i.e. FULL act tools for a surface whose
+//     approvals may have no window to render them, so the client must gate on
+//     this version before offering the quick chat rather than degrade.
+const SERVER_API_VERSION = 47;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
