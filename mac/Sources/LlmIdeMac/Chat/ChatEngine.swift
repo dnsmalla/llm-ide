@@ -444,15 +444,21 @@ final class ChatEngine {
     /// Launch a turn as an unstructured Task whose handle Stop can cancel.
     func startTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil,
                    planExecute: Bool = false) {
-        // Claim the single turn slot SYNCHRONOUSLY, exactly as
-        // `runExternalTurn` does for the phone — `runTurn` doesn't set `busy`
+        // Mark the slot taken SYNCHRONOUSLY. `runTurn` doesn't set `busy`
         // until the Task below is scheduled, so a caller that reached here
         // after an `await` (the quick chat's send-path version probe) could
-        // otherwise interleave a second `runTurn` on this shared engine and
-        // corrupt `messages`/`revealingTurnID`/`runTask` and the session file
-        // it persists. `runTurn` sets `busy` again and its own cleanup
-        // releases it, so claiming early only closes the spawn window.
-        guard !busy else { return }
+        // otherwise pass its own `!busy` check and interleave a second
+        // `runTurn` on this shared engine, corrupting `messages`/
+        // `revealingTurnID`/`runTask` and the session file it persists.
+        // `runTurn` sets it again and its tail releases it, so this only
+        // closes the spawn window.
+        //
+        // Deliberately NOT a `guard !busy else { return }`: `drainQueueOrRelease`
+        // calls this while `busy` is still true from the turn that just
+        // finished, so refusing here would silently drop the queued message
+        // AND leave `busy` set forever — a wedged engine, worse than the race.
+        // Callers that must not start a second turn check `busy` themselves,
+        // immediately before calling (see both quick-chat composers).
         busy = true
         runTask = Task { await runTurn(message, skillIds: skillIds, userMetadata: userMetadata,
                                        planExecute: planExecute) }

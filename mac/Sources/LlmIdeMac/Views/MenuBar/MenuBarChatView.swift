@@ -143,6 +143,12 @@ struct MenuBarChatView: View {
                 voiceService.cancel()
             }
         }
+        .onChange(of: draft) { _, _ in
+            // A refusal describes the send the user just tried; typing again
+            // means they have moved on, and leaving it there would put a
+            // stale "server didn't answer" over a composer that works.
+            if sendRefusal != nil { sendRefusal = nil }
+        }
         .onChange(of: projectStore.activeProject) { _, _ in
             // The composer gate above re-evaluates LIVE on `@Published
             // activeProject`, so without this the gate and the engine
@@ -781,6 +787,9 @@ struct MenuBarChatView: View {
     }
 
     private func sendDraft() {
+        // Cleared FIRST, before the early returns below: a slash command or an
+        // empty field still means the user moved on from the refusal.
+        sendRefusal = nil
         guard !engine.busy else { return }
         var text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -797,7 +806,6 @@ struct MenuBarChatView: View {
         }
 
         draft = ""
-        sendRefusal = nil
         // Everything the composer is about to hand over, kept as it was
         // BEFORE the directives are folded into the text — a refused send
         // must restore the field and its chips exactly, not a merged blob

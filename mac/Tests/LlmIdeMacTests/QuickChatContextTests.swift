@@ -46,16 +46,35 @@ final class QuickChatContextTests: XCTestCase {
         let models = [AIModel(id: "sonnet", displayName: "Sonnet")]
         XCTAssertEqual(QuickChatContext.effectiveModelId(explicit: "sonnet",
                                                          defaultModelId: "", models: models), "sonnet")
-        // Switching provider resets defaultModelId but leaves an explicit
-        // pick naming the OLD provider's model: send Auto, not the retired id.
+        // An explicit pick naming the OLD provider's model (it survived a
+        // provider switch) falls back to the configured default.
+        XCTAssertEqual(QuickChatContext.effectiveModelId(explicit: "gpt-retired",
+                                                         defaultModelId: "sonnet", models: models), "sonnet")
         XCTAssertNil(QuickChatContext.effectiveModelId(explicit: "gpt-retired",
                                                        defaultModelId: "", models: models))
         XCTAssertEqual(QuickChatContext.effectiveModelId(explicit: nil,
                                                          defaultModelId: "sonnet", models: models), "sonnet")
-        XCTAssertNil(QuickChatContext.effectiveModelId(explicit: nil,
-                                                       defaultModelId: "also-retired", models: models))
-        XCTAssertNil(QuickChatContext.effectiveModelId(explicit: "sonnet",
-                                                       defaultModelId: "sonnet", models: []))
+        // `defaultModelId` is NEVER filtered: it is written from the live
+        // `/models` list, which the static fallback list doesn't contain.
+        // Filtering it sent nil for a legitimately configured model.
+        XCTAssertEqual(QuickChatContext.effectiveModelId(explicit: nil,
+                                                         defaultModelId: "live-only-id",
+                                                         models: models), "live-only-id")
+        // An empty list means "this provider isn't enumerated here" (Custom,
+        // GLM, or any provider before its key lands) — keep the pick rather
+        // than send nil, which those providers answer as "Unknown Model".
+        XCTAssertEqual(QuickChatContext.effectiveModelId(explicit: "glm-4",
+                                                         defaultModelId: "", models: []), "glm-4")
+        XCTAssertNil(QuickChatContext.effectiveModelId(explicit: nil, defaultModelId: "", models: models))
+    }
+
+    /// The label must describe the model that will actually be sent, even
+    /// when the static list can't name it.
+    func testModelLabelShowsUnlistedIdRatherThanClaimingAuto() {
+        let models = [AIModel(id: "sonnet", displayName: "Sonnet")]
+        XCTAssertEqual(QuickChatContext.modelLabel(modelId: nil, defaultModelId: "live-only-id",
+                                                   models: models), "live-only-id")
+        XCTAssertEqual(QuickChatContext.modelLabel(modelId: nil, defaultModelId: "", models: models), "Auto")
     }
 
     /// A refused send must tell the user which refusal it was: an older

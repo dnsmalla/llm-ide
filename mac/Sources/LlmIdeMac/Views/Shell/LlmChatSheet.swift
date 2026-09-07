@@ -116,6 +116,10 @@ struct LlmChatSheet: View {
             wireEngine()
             inputFocused = true
         }
+        .onChange(of: draft) { _, _ in
+            // Same as the menu bar: typing again retires the last refusal.
+            if sendRefusal != nil { sendRefusal = nil }
+        }
         .onChange(of: projectStore.activeProject) { _, _ in
             // The sheet lives in the main window, where switching the active
             // project mid-conversation is plausible. `attach` routes this to
@@ -396,11 +400,12 @@ struct LlmChatSheet: View {
     /// blank — this sheet doesn't queue a second message like the Code
     /// Assistant composer does.
     private func sendDraft() {
+        // Cleared FIRST, before the guards below — see the menu bar's copy.
+        sendRefusal = nil
         guard !engine.busy else { return }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         draft = ""
-        sendRefusal = nil
         // Same fresh-probe re-check the menu bar runs before sending — see
         // `QuickChatContext.confirmServerSupportsAsk`. The draft is restored
         // and the reason stated on refusal, so a swapped-out or busy server

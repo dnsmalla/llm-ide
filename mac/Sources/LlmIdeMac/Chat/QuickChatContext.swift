@@ -128,10 +128,9 @@ struct QuickChatContext {
     /// surfaces, at one loopback GET per send.
     @MainActor
     static func confirmServerSupportsAsk(backend: BackendManager) async -> SendGate {
-        guard let apiVersion = await backend.probeServerApiVersionPreservingCache() else {
-            return .unreachable
-        }
-        return serverSupportsAsk(apiVersion) ? .allowed : .serverTooOld(apiVersion)
+        let probe = await backend.probeServerApiVersionPreservingCache()
+        guard probe.answered else { return .unreachable }
+        return serverSupportsAsk(probe.apiVersion) ? .allowed : .serverTooOld(probe.apiVersion)
     }
 
     /// The model id a quick-chat turn actually sends. ONE resolution shared by
@@ -142,14 +141,23 @@ struct QuickChatContext {
     /// sent: switching provider in Settings resets `config.defaultModelId`
     /// but leaves an explicit pick naming the old provider's model, which the
     /// new provider would reject.
+    /// Only the EXPLICIT pick is filtered, and only against a non-empty list.
+    /// `models` is `AICliTool.models`, a static fallback: a provider with no
+    /// key yet returns `[]` (Custom/GLM always do), and a provider WITH a key
+    /// has live `/models` ids the static list never mentions. Filtering
+    /// `defaultModelId` — written from that wider list — against it would send
+    /// `nil` for a model the user legitimately configured, which is how a
+    /// custom provider ends up answering "Unknown Model".
     static func effectiveModelId(explicit: String?, defaultModelId: String, models: [AIModel]) -> String? {
-        let offered = Set(models.map(\.id))
-        if let explicit, offered.contains(explicit) { return explicit }
-        if !defaultModelId.isEmpty, offered.contains(defaultModelId) { return defaultModelId }
-        // Neither is offered here: let the server pick its own default rather
-        // than send a retired id. `models` is a fallback list before a
-        // provider has a key, so an empty/unknown list means "no opinion".
-        return nil
+        if let explicit, !explicit.isEmpty {
+            // An empty list means "this provider's models aren't enumerated
+            // here" — no opinion, so keep the pick.
+            if models.isEmpty || models.contains(where: { $0.id == explicit }) { return explicit }
+            // Named a model THIS provider doesn't offer (the pick outlived a
+            // provider switch): fall back to the configured default rather
+            // than send an id the provider will reject.
+        }
+        return defaultModelId.isEmpty ? nil : defaultModelId
     }
 
     /// Install the `.quick` engine's transport closure: project context,
@@ -203,9 +211,11 @@ struct QuickChatContext {
     static func modelLabel(modelId: String?, defaultModelId: String, models: [AIModel]) -> String {
         guard let effective = effectiveModelId(explicit: modelId,
                                                defaultModelId: defaultModelId,
-                                               models: models),
-              let model = models.first(where: { $0.id == effective }) else { return "Auto" }
-        return model.displayName
+                                               models: models) else { return "Auto" }
+        // A live `/models` id (or a custom provider's) won't be in the static
+        // list — show the id itself rather than claim "Auto", which would be
+        // a label describing a different model than the one being sent.
+        return models.first(where: { $0.id == effective })?.displayName ?? effective
     }
 
     /// Point the shared `.quick` engine at `projectId`. ONE answer for all

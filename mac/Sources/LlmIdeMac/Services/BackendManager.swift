@@ -786,11 +786,15 @@ final class BackendManager {
     /// unsafe reaches an unknown server, and the surface stays usable when
     /// the next probe answers. A server that ANSWERS with an older version is
     /// still recorded, so the gate closes the composer as it should.
-    func probeServerApiVersionPreservingCache() async -> Int? {
+    /// `answered` distinguishes "no reply" from "replied without a version":
+    /// a 2xx `/health` with no `apiVersion` is a server that IS there and is
+    /// too old to name itself, not an unreachable one, and the caller must be
+    /// able to say so.
+    func probeServerApiVersionPreservingCache() async -> (answered: Bool, apiVersion: Int?) {
         let health = await Self.probeHealthDetail()
-        guard health.ok else { return nil }
+        guard health.ok else { return (false, nil) }
         recordServerVersionIfChanged(health)
-        return health.apiVersion
+        return (true, health.apiVersion)
     }
 
     /// Returns true iff some process is currently listening on the
