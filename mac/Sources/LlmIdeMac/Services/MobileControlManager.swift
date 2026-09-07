@@ -697,16 +697,18 @@ final class MobileControlManager {
         // no-project reply below) so the phone renders it as an answer, not
         // a failure.
         //
-        // One fresh probe before refusing: the phone has no view to poll
-        // from (the Mac surfaces re-probe while they show the closed state),
-        // and with `backendAutoStart` off nothing on the Mac ever records a
-        // version — so without this the phone is dead against a healthy v47
-        // server for the whole life of the app process. Bounded by
-        // `probeHealthDetail`'s own 2 s budget, and only on the path that
-        // would otherwise decline.
-        if !QuickChatContext.serverSupportsAsk(backendManager?.serverApiVersion) {
-            await backendManager?.refreshServerApiVersion()
-        }
+        // One fresh probe per question, whichever way the cached version
+        // reads. It has to run when the gate looks CLOSED, because the phone
+        // has no view to poll from (the Mac surfaces re-probe while they show
+        // the closed state) and with `backendAutoStart` off nothing on the
+        // Mac ever records a version — without it the phone is dead against a
+        // healthy v47 server for the life of the app process. And it has to
+        // run when the gate looks OPEN, because a cached v47 for a server
+        // since replaced by an older one is the unsafe direction, and the
+        // phone is the surface with no approval UI to catch the result. One
+        // loopback GET with a 2 s budget, against a turn that is about to
+        // take seconds anyway.
+        await backendManager?.refreshServerApiVersion()
         guard QuickChatContext.serverSupportsAsk(backendManager?.serverApiVersion) else {
             await server?.send(Output(commandId: chat.commandId, payload: OutputPayload(
                 stream: QuickChatContext.unsupportedServerMessage(apiVersion: backendManager?.serverApiVersion),

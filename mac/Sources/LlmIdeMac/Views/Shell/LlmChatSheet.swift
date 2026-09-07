@@ -88,6 +88,10 @@ struct LlmChatSheet: View {
             }
         }
         .frame(minWidth: 520, idealWidth: 580, minHeight: 480, idealHeight: 560)
+        // Same once-per-appearance re-probe the menu bar runs, and for the
+        // same reason: the closed-state `.task` above cannot catch a gate
+        // that is stale-OPEN against a server swapped out from a terminal.
+        .task { await backend.refreshServerApiVersion() }
         .onAppear {
             // Must land before anything below can trigger the engine's first
             // session load: the engine is registry-cached and shared with the

@@ -95,6 +95,14 @@ struct MenuBarChatView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .background(MenuBarChatWindowAccessor(window: $popoverWindow))
         .onExitCommand { closePopover() }
+        // Re-probe once per appearance, whichever way the gate currently
+        // reads. The closed-state `.task` above only runs while the gate is
+        // CLOSED, so without this a gate that is stale-OPEN — the app cached
+        // v47, then the user restarted the server from a terminal on an older
+        // checkout, which never routes through `BackendManager.start()` —
+        // would never be re-checked at all. This bounds that window to one
+        // popover session instead of the life of the app process.
+        .task { await backend.refreshServerApiVersion() }
         .onAppear {
             // Must land before anything below can trigger the engine's first
             // session load: the engine is registry-cached and shared with the
