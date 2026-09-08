@@ -738,6 +738,34 @@ struct AgentV2SelectionTests {
         #expect(CodeAssistantPanel.planTitle(from: long).count == 60)
     }
 
+    // A plan-like reply that opens with a sentence of chat preamble before
+    // its heading used to save the FILE under that preamble sentence
+    // instead of the real title (seen for real: "That plan is already
+    // finalized from this conversation — here it is again:" became the
+    // saved plan's filename, three lines above its actual
+    // "# Remove Legacy Install Scripts — Plan" heading).
+    @Test("Plan title derivation skips chat preamble and uses the heading line")
+    func planTitleDerivationSkipsPreamble() {
+        let reply = """
+        That plan is already finalized from this conversation — here it is again:
+
+        # Remove Legacy Install Scripts — Plan
+
+        1. Delete `add-to-project.sh` and `install.sh` from repo root.
+        """
+        #expect(CodeAssistantPanel.planTitle(from: reply) == "Remove Legacy Install Scripts — Plan")
+    }
+
+    // Only a title-bearing ATX heading may outrank the first line: a
+    // tab-indented heading still counts (and the tab must not leak a '#'
+    // into the title), while a shebang and a marks-only line do not.
+    @Test("Plan title derivation: ATX shape only — tab indent ok, shebang and bare hashes skipped")
+    func planTitleDerivationAtxShape() {
+        #expect(CodeAssistantPanel.planTitle(from: "Preamble:\n\n\t# Real Title\n") == "Real Title")
+        #expect(CodeAssistantPanel.planTitle(from: "Run this:\n\n#!/bin/bash\necho hi") == "Run this:")
+        #expect(CodeAssistantPanel.planTitle(from: "Here is the plan:\n\n###\n\n# Real Title") == "Real Title")
+    }
+
     // MARK: - deleteSession cleanup
 
     @Test("deleteSession additionally calls the v2 server-side session delete (best-effort)")

@@ -352,15 +352,33 @@ extension CodeAssistantPanel {
         engine.messages[idx].metadata = meta
     }
 
-    /// Best-effort plan title from a plan-like reply: the first non-empty
-    /// line, leading markdown heading marks stripped, capped to the 60-char
-    /// slug budget `FilesystemSlug` applies. An empty result is fine — the
-    /// resolver's slugify falls back to "untitled-plan".
+    /// Best-effort plan title from a plan-like reply: the first Markdown
+    /// heading line, leading `#`/space marks stripped, capped to the
+    /// 60-char slug budget `FilesystemSlug` applies. Many plan-like replies
+    /// open with a sentence of chat preamble ("Here's the plan:") before
+    /// their `# Heading` — using the first non-empty line unconditionally
+    /// turned that preamble into the saved file's name instead of the
+    /// actual title, so a heading line is preferred when the content has
+    /// one. Falls back to the first non-empty line when there is no
+    /// heading at all. An empty result is fine — the resolver's slugify
+    /// falls back to "untitled-plan".
     static func planTitle(from content: String) -> String {
-        let firstLine = content
-            .components(separatedBy: .newlines)
-            .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
-        let stripped = firstLine.drop(while: { $0 == "#" || $0 == " " })
+        let lines = content.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        let firstLine = lines.first { !$0.isEmpty } ?? ""
+        // A title-bearing heading: 1–6 '#'s, a space, then real content
+        // (the CommonMark ATX shape). The shape check keeps shebangs
+        // ("#!/bin/bash") and marks-only lines ("###") from outranking
+        // the first line.
+        let headingLine = lines.first { line in
+            let hashes = line.prefix(while: { $0 == "#" })
+            guard (1...6).contains(hashes.count) else { return false }
+            let rest = line.dropFirst(hashes.count)
+            return rest.first == " "
+                && !rest.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        let source = headingLine ?? firstLine
+        let stripped = source.drop(while: { $0 == "#" || $0 == " " })
         return String(stripped).trimmingCharacters(in: .whitespaces).prefix(60).description
     }
 }
