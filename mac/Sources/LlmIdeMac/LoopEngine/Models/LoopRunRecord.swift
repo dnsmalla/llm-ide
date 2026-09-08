@@ -15,6 +15,13 @@ enum LoopRunTrigger: String, Codable {
     case chat
     /// `AutoCodeUpdateService`'s scheduled Loop Engineering sweep.
     case autoTask
+    /// Started from the iPhone (`loop_start` / `loop_start_stage`). Runs
+    /// through the same Auto Task machinery as a scheduled sweep, which is
+    /// why these were previously journalled as `.autoTask` — but the risk
+    /// profile is the opposite of unattended: someone asked for it and is
+    /// watching a log tail on their phone. A history that cannot tell the
+    /// two apart cannot answer "which runs went wrong while nobody looked".
+    case phone
 }
 
 /// Whether the edits a repair made stayed inside the code it was allowed to

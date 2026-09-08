@@ -130,14 +130,23 @@ extension LoopEngineView {
         case .regressionSweep:
             return "system/faults/"
         case .shellCommand:
-            let command = stage.command?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if command.isEmpty { return "no command set" }
-            guard let gitRoot = activeGitRootURL else { return command }
+            let raw = stage.command ?? ""
+            // Trimmed for the emptiness test and for DISPLAY only. The
+            // approval check below must use the RAW string, because that is
+            // what the editor's Approve button hashed and what the runner's
+            // preflight will hash (`validCommand` returns the original, it
+            // only trims to test for blankness). Checking a trimmed copy here
+            // made this card read "needs approval" for a command the editor
+            // one pane away showed as Approved and the runner ran happily —
+            // two panes contradicting each other about a security gate.
+            let display = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if display.isEmpty { return "no command set" }
+            guard let gitRoot = activeGitRootURL else { return display }
             // Approval is a real precondition, not a nicety: an unapproved stage
             // stops the run in preflight before any iteration.
-            return approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command)
-                ? command
-                : "\(command) — needs approval"
+            return approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: raw)
+                ? display
+                : "\(display) — needs approval"
         case .skill:
             guard let skillId = stage.skillId, !skillId.isEmpty else { return "no skill chosen" }
             // Show the full data path (skill · input → output) so a redirected
@@ -293,9 +302,15 @@ extension LoopEngineView {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             SectionLabel("SETTINGS")
 
-            Text("Budgets — a run stops at whichever it hits first.")
+            // "between iterations" is the honest wording: the time budget
+            // stops the loop STARTING more work, and never kills a stage
+            // mid-flight (that is the per-stage timeout's job), so a run can
+            // legitimately finish past its limit. Time spent paused does not
+            // count toward it.
+            Text("Budgets — a run stops at whichever it hits first. The time budget is checked between iterations (and never during the first one), so a long iteration can overrun it; paused time is not counted.")
                 .font(Typography.caption)
                 .foregroundStyle(t.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
             LoopBudgetsEditor(maxIterations: $maxIterations,
                               consecutiveFailureStop: $consecutiveFailureStop,
                               wallClockMinutes: $wallClockMinutes,

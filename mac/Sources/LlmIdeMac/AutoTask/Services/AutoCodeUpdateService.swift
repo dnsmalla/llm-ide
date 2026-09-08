@@ -248,6 +248,22 @@ final class AutoCodeUpdateService: ObservableObject {
         return true
     }
 
+    /// How an Auto Task trigger is recorded in the LOOP journal.
+    ///
+    /// Exhaustive over `AutoTaskRunTrigger` rather than a `== .phone` test:
+    /// today only the phone reaches the filtered entry points, but the
+    /// obvious next optimisation ("run only the loop that changed") would
+    /// route the SCHEDULER through them, and collapsing `.cron`/`.pipeline`
+    /// to `.manual` would assert a human was watching an unattended run —
+    /// exactly the distinction `LoopRunTrigger` exists to preserve.
+    private static func loopTrigger(for trigger: AutoTaskRunTrigger) -> LoopRunTrigger {
+        switch trigger {
+        case .phone: return .phone
+        case .manual: return .manual
+        case .cron, .pipeline: return .autoTask
+        }
+    }
+
     /// Body for both filtered loop entry points — the `.loopEngineering` slice
     /// of `runOne(_:)` with a loop and/or stage filter threaded through. Kept
     /// separate for the same reason `runCustomTask(_:)` is: the resolve/guard
@@ -286,7 +302,8 @@ final class AutoCodeUpdateService: ObservableObject {
         didStart = await runLoopEngineeringSweep(projectRoot: resolved.projectRoot,
                                                 gitRoot: resolved.gitRoot,
                                                 projectId: projectStore?.activeProject?.bundle.id,
-                                                onlyStageId: stageId, onlyLoopId: loopId)
+                                                onlyStageId: stageId, onlyLoopId: loopId,
+                                                journalTrigger: Self.loopTrigger(for: trigger))
         statusMessage = "\(AutoTask.loopEngineering.label) — done"
     }
 

@@ -646,9 +646,14 @@ extension AutoCodeUpdateService {
     /// queued. The caller records that as `.skipped`, so a run that never
     /// started can't inherit an earlier run's `taskErrors` entry.
     @discardableResult
+    /// - Parameter journalTrigger: what the run records as its origin.
+    ///   Defaults to `.autoTask` (the scheduled sweep, and every pre-existing
+    ///   caller); the phone's filtered entry points pass `.phone` so their
+    ///   runs are not filed as unattended.
     func runLoopEngineeringSweep(
         projectRoot: String, gitRoot: String, projectId: String?, defaults: UserDefaults = .standard,
-        onlyStageId: String? = nil, onlyLoopId: String? = nil
+        onlyStageId: String? = nil, onlyLoopId: String? = nil,
+        journalTrigger: LoopRunTrigger = .autoTask
     ) async -> Bool {
         guard let api else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no API client wired."
@@ -772,9 +777,10 @@ extension AutoCodeUpdateService {
                 stageRepairer: AgentLoopStageRepairer(api: api),
                 regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
                 skillExecutor: AgentLoopSkillExecutor(api: api),
-                // `.autoTask` is the unattended trigger — the journal must be able to
-                // tell these runs apart from ones a human watched.
-                trigger: .autoTask
+                // The journal must be able to tell an unattended run from one
+                // a human asked for — `.autoTask` for the scheduler, `.phone`
+                // when the request came from the iPhone.
+                trigger: journalTrigger
             )
             // Mirror every line into the shared per-task log as it happens. Before
             // this the buffer only ever received the TERMINAL line below, so the

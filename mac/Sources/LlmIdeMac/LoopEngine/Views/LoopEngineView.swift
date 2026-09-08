@@ -84,6 +84,12 @@ struct LoopEngineView: View {
     /// being silently dropped.
     @State private var extraProtectedGlobs: [String] = []
     @State var selectedStageId: String?
+    /// Log pane filter state. Per-page, deliberately not persisted: a filter
+    /// left on across a relaunch would hide a later run's lines with no
+    /// visible cause.
+    @State private var logFilter = ""
+    @State private var logLevelFilter: LoopEngineRunner.LogLine.Level?
+    @State private var didCopyLog = false
     // The last run's terminal status is NOT view state — the toolbar reads
     // `runner.status` directly. A @State copy written from the run-completion
     // callback silently vanished whenever the page was re-created mid-run
@@ -139,7 +145,8 @@ struct LoopEngineView: View {
     /// "last written" line. Read from disk rather than the note index so an
     /// unindexed/hand-deleted note cannot make the row lie.
     @State var lastSummaryNoteName: String?
-    /// This loop's own display name — editable (see Task 9, not yet done).
+    /// This loop's own display name, edited by the OVERVIEW section's first
+    /// field and saved like any other edit.
     @State var loopName: String = ""
     /// This loop's free-text goal/acceptance-criteria — `nil`/empty for
     /// every loop that has never set one, which is byte-identical to
@@ -590,7 +597,17 @@ struct LoopEngineView: View {
 
             if stages[index].kind == .shellCommand {
                 Text("Command").font(Typography.caption).foregroundStyle(t.textMuted)
-                TextField("e.g. swift test", text: Binding(
+                // SINGLE LINE, deliberately — do not "improve" this to
+                // `axis: .vertical` to make long commands readable. A newline
+                // is a command separator to `/bin/sh -c`, so
+                // "swift build\nswift test" runs both and reports only the
+                // LAST exit code: the build fails, the tests pass against a
+                // stale binary, and the stage goes green on a repo that does
+                // not compile. A single-line field refuses newline input,
+                // which is the only thing standing between this editor and a
+                // silent false pass. `&&` is the way to chain, and the
+                // wizard's field is single-line for the same reason.
+                TextField("e.g. swift test && swift build", text: Binding(
                     get: { stages[index].command ?? "" },
                     set: { stages[index].command = $0 }
                 ))
@@ -702,6 +719,16 @@ struct LoopEngineView: View {
     private var logPane: some View {
         let t = theme.current
         let inspecting = inspectedPastRun != nil || pastRunInspectLoadFailed
+        // Filtered ONCE per render and threaded down. `visibleLog` is a
+        // computed filter over up to 2 000 lines, and this pane read it five
+        // times per body evaluation (count badge, copy button's disabled
+        // state and help, empty-state guard, ForEach, onChange) — with a
+        // filter active that is five passes of `lowercased()` per line for
+        // every line appended during a run.
+        // `[]` while inspecting a past run: neither the copy button nor the
+        // live list is rendered then, so filtering up to 2 000 lines for a
+        // pane that cannot show them is pure waste.
+        let visible = inspecting ? [] : visibleLog
         return VStack(spacing: 0) {
             HStack {
                 SectionLabel(inspecting ? "RUN DETAIL" : "RUN LOG")
@@ -725,6 +752,21 @@ struct LoopEngineView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                 } else {
+                    // A run's log is the artifact a user takes to a bug
+                    // report or a chat; without this it could only be
+                    // selected line by line in a 320pt-wide pane.
+                    Button {
+                        copyLog()
+                    } label: {
+                        Image(systemName: didCopyLog ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 10))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(visible.isEmpty)
+                    .help(logFilter.isEmpty && logLevelFilter == nil
+                          ? "Copy the whole log"
+                          : "Copy the \(visible.count) matching line(s)")
                     Button("Clear") { runner.clearLog() }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -736,6 +778,7 @@ struct LoopEngineView: View {
             Divider().background(t.border)
             if !inspecting {
                 liveRunHeader
+                logFilterBar(visible)
             }
             if pastRunInspectLoadFailed {
                 Text("Could not load this run's journal record.")
@@ -755,19 +798,36 @@ struct LoopEngineView: View {
                                     .foregroundStyle(t.textMuted)
                                     .padding(Spacing.lg)
                             }
-                            ForEach(runner.log) { line in
+                            if !runner.log.isEmpty, visible.isEmpty {
+                                Text("No lines match.")
+                                    .font(Typography.caption)
+                                    .foregroundStyle(t.textMuted)
+                                    .padding(Spacing.lg)
+                            }
+                            ForEach(visible) { line in
                                 logRow(line).id(line.id)
                             }
                         }
                         .padding(.horizontal, Spacing.md)
                         .padding(.vertical, 4)
                     }
-                    .onChange(of: runner.log.count) { _, _ in
-                        if let last = runner.log.last {
-                            withAnimation(.linear(duration: 0.1)) {
-                                proxy.scrollTo(last.id, anchor: .bottom)
-                            }
-                        }
+                    // TWO keys, because either alone misses a real case, and
+                    // both are keyed on the VISIBLE lines (scrolling to
+                    // `runner.log.last` while a filter is on targets an id
+                    // that is not in the list — a silent no-op):
+                    //
+                    // - `count` alone misses "same count, different set"
+                    //   (editing a filter so a different 5 lines match).
+                    // - `last?.id` alone misses "different count, same last
+                    //   line" — and that is the common one: a failed run's
+                    //   final line is an error, so it is last both with the
+                    //   problems filter on and off. Turning the filter off
+                    //   would leave the pane at the top of 2 000 lines.
+                    .onChange(of: visible.count) { _, _ in
+                        scrollToNewest(visible, proxy: proxy)
+                    }
+                    .onChange(of: visible.last?.id) { _, _ in
+                        scrollToNewest(visible, proxy: proxy)
                     }
                 }
             }
@@ -838,6 +898,97 @@ struct LoopEngineView: View {
                 }
                 .frame(maxHeight: 160)
             }
+        }
+    }
+
+    /// Text search + level filter over the live log. A loop run emits a line
+    /// per stage per iteration plus a 500-char excerpt per failure, so by the
+    /// time something goes wrong the interesting line is far above the fold
+    /// in a pane 320pt wide.
+    /// Scrolls the log pane to its newest visible line. Shared by both
+    /// `onChange` keys so the two can never drift apart.
+    private func scrollToNewest(_ visible: [LoopEngineRunner.LogLine],
+                                proxy: ScrollViewProxy) {
+        guard let last = visible.last else { return }
+        withAnimation(.linear(duration: 0.1)) {
+            proxy.scrollTo(last.id, anchor: .bottom)
+        }
+    }
+
+    /// - Parameter visible: the already-filtered lines, passed in rather than
+    ///   re-derived so one render filters the log once.
+    @ViewBuilder
+    private func logFilterBar(_ visible: [LoopEngineRunner.LogLine]) -> some View {
+        let t = theme.current
+        if !runner.log.isEmpty {
+            HStack(spacing: 4) {
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(.system(size: 9))
+                    .foregroundStyle(t.textMuted)
+                TextField("Filter", text: $logFilter)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 10))
+                // Only warn/error are worth a one-tap filter: "info" is
+                // almost every line, so a full segmented control would spend
+                // the width to offer a no-op.
+                Button {
+                    logLevelFilter = (logLevelFilter == nil) ? .warn : nil
+                } label: {
+                    Text("problems")
+                        .font(.system(size: 9, weight: .medium))
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(logLevelFilter == nil ? t.textMuted : t.accent4)
+                .help("Show only warnings and errors")
+                Text("\(visible.count)/\(runner.log.count)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(t.textMuted)
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, 4)
+            Divider().background(t.border)
+        }
+    }
+
+    /// The log lines the filter bar admits. `warn` as the level filter means
+    /// "warn and error" — a user asking for problems wants both, and the two
+    /// are one tap apart in severity, not in intent.
+    var visibleLog: [LoopEngineRunner.LogLine] {
+        let needle = logFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return runner.log.filter { line in
+            if let level = logLevelFilter {
+                let admitted: Bool = switch level {
+                case .warn: line.level == .warn || line.level == .error
+                case .error: line.level == .error
+                case .info: true
+                }
+                guard admitted else { return false }
+            }
+            guard !needle.isEmpty else { return true }
+            return line.text.lowercased().contains(needle)
+        }
+    }
+
+    /// Copies what is on screen, not the raw buffer: a filtered view is the
+    /// user's current question, and copying 2 000 unfiltered lines when three
+    /// are shown would be the wrong answer to a press of this button.
+    private func copyLog() {
+        let text = visibleLog
+            .map { "\(AppDateFormatter.hourMinuteSecond($0.at))  \($0.text)" }
+            .joined(separator: "\n")
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        didCopyLog = true
+        // The checkmark is the only feedback a copy gets; it has to go back on
+        // its own or the button lies about the next press. `@MainActor` on the
+        // Task is required, not decorative: this view is not main-actor
+        // isolated and the package builds in Swift 5 language mode, so a bare
+        // `Task {}` would mutate `@State` from the cooperative pool with no
+        // diagnostic.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            didCopyLog = false
         }
     }
 

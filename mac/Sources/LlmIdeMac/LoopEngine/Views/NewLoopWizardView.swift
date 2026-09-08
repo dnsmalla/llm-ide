@@ -209,9 +209,13 @@ struct NewLoopWizardView: View {
                 }
                 Divider().background(t.border)
                 SectionLabel("BUDGETS")
-                Text("A run stops at whichever it hits first.")
+                // Same wording as the Loop page's SETTINGS caption — this is
+                // where the budget is set FIRST, so it is the surface that
+                // most needs to be honest about when the time limit applies.
+                Text("A run stops at whichever it hits first. The time budget is checked between iterations (and never during the first one), so a long iteration can overrun it; paused time is not counted.")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
                 LoopBudgetsEditor(maxIterations: $budgets.maxIterations,
                                   consecutiveFailureStop: $budgets.consecutiveFailureStop,
                                   wallClockMinutes: LoopBudgetsEditor.wallClockMinutes($budgets),

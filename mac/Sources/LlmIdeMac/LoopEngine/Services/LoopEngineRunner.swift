@@ -191,6 +191,11 @@ final class LoopEngineRunner: ObservableObject {
     private let scopeGuard: RepairScopeGuarding
     private let trigger: LoopRunTrigger
 
+    /// Stages already warned about an unparseable failure count this run —
+    /// the notice is per stage, not per iteration, or a 10-iteration run
+    /// would repeat it ten times.
+    private var unrecognisedRunnerStages: Set<String> = []
+
     /// Accumulated journal state for the in-flight run. Instance state rather
     /// than a `run`-local `var` only because the per-stage helpers below append
     /// to it; `@MainActor` makes that safe.
@@ -436,6 +441,7 @@ final class LoopEngineRunner: ObservableObject {
         runMaxIterations = config.maxIterations
         runWallClockBudget = config.wallClockBudgetSeconds
         stageStates = [:]
+        unrecognisedRunnerStages = []
         // Must be reset per run, not only in the defer: a run that ended while
         // paused would otherwise leave `paused == true`, and the NEXT run
         // would hold at its first stage boundary forever with no visible
@@ -502,8 +508,21 @@ final class LoopEngineRunner: ObservableObject {
         for stage in orderedStages {
             switch stage.kind {
             case .shellCommand:
+                if let problem = Self.commandProblem(stage) {
+                    // Full explanation to the log, short form to the status —
+                    // see `CommandProblem` for the five surfaces the status
+                    // string lands in.
+                    appendLog(.error, "  [\(stage.name)] \(problem.detail)")
+                    return await finish(.error(problem.status),
+                                        config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
+                                        projectId: projectId, startedAt: startedAt,
+                                        loopId: loopId, loopName: loopName)
+                }
                 guard let command = Self.validCommand(stage) else {
-                    return await finish(.error("Stage \"\(stage.name)\" has no command"),
+                    // Unreachable: `commandProblem` above returns non-nil for
+                    // exactly the cases `validCommand` rejects. Fail closed
+                    // rather than force-unwrap.
+                    return await finish(.error("Stage \"\(stage.name)\" has no runnable command"),
                                         config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
@@ -695,12 +714,22 @@ final class LoopEngineRunner: ObservableObject {
         // force-unwrapping.
         guard let command = Self.validCommand(stage) else {
             stageStates[stage.id] = .failed
-            return .terminate(.error("Stage \"\(stage.name)\" has no command"))
+            // Same rule and same wording as preflight — a command that became
+            // unrunnable mid-run (an edit landing between preflight and here)
+            // must fail closed with the reason, not a generic error.
+            let problem = Self.commandProblem(stage)
+            if let problem { appendLog(.error, "  [\(stage.name)] \(problem.detail)") }
+            return .terminate(.error(problem?.status
+                                     ?? "Stage \"\(stage.name)\" has no runnable command"))
         }
 
         let startedAt = Date()
         let timeout = stage.timeoutSeconds.map(TimeInterval.init) ?? stageTimeout
         let outcome: VerifyOutcome
+        // A timed-out stage's `output` is a synthesized sentence, not the
+        // runner's own output, so nothing can be concluded from the parser
+        // failing to score it — see the unrecognised-runner notice below.
+        var didTimeOut = false
         do {
             outcome = try await verifier.verify(command: command, repoRoot: gitRoot, timeout: timeout)
         } catch is CancellationError {
@@ -717,6 +746,7 @@ final class LoopEngineRunner: ObservableObject {
             // not a fatal run-ending error. Only a genuine launch failure below is
             // fatal.
             outcome = VerifyOutcome(exitCode: -1, output: "stage timed out after \(seconds)s")
+            didTimeOut = true
         } catch VerifyError.stoppedForResources(let reason) {
             // Explicitly NOT the timeout path above: a resource stop must not be
             // scored as a stage failure, because a failing stage is what triggers
@@ -748,7 +778,28 @@ final class LoopEngineRunner: ObservableObject {
         stageStates[stage.id] = .failed
         let score = StageOutputParser.parseFailureCount(outcome.output)
         let excerpt = String(outcome.output.suffix(500))
-        let scoreNote = score.map { " · \($0) failing" } ?? ""
+        // An unrecognised runner is not a neutral fact: it silently downgrades
+        // the loop's stall detector from "did the failure COUNT shrink" to
+        // "is the output byte-identical", which cannot see thrashing at all.
+        // Said once per stage per run, not every iteration.
+        let scoreNote: String
+        if let score {
+            scoreNote = " · \(score) failing"
+        } else if didTimeOut {
+            // The parser was handed "stage timed out after Ns", not the
+            // runner's output — blaming the runner's FORMAT here would
+            // libel a format we may well recognise (XCTest's, say), and
+            // would spend the once-per-run notice on a false claim,
+            // suppressing the accurate one for a genuinely unparseable
+            // stage later in the same run.
+            scoreNote = " · timed out before reporting"
+        } else {
+            scoreNote = " · failure count not recognised"
+            if !unrecognisedRunnerStages.contains(stage.id) {
+                unrecognisedRunnerStages.insert(stage.id)
+                appendLog(.warn, "  [\(stage.name)] this runner's output has no failure count we recognise — progress is judged by comparing output instead, which cannot tell a changing failure from a shrinking one")
+            }
+        }
         appendLog(.warn, "  [\(stage.name)] FAILED (exit \(outcome.exitCode))\(scoreNote): \(excerpt)")
 
         let verdict = progress.record(key: stage.id, score: score, hash: Self.hash(outcome.output))
@@ -1139,14 +1190,61 @@ final class LoopEngineRunner: ObservableObject {
         onLog?(line)
     }
 
-    /// Returns the stage's command when non-nil and non-blank; nil
-    /// otherwise. A missing/empty command is a config error, distinct
-    /// from a stage that ran and failed.
-    private static func validCommand(_ stage: LoopStage) -> String? {
+    /// A config problem with a stage command, in the two lengths the app
+    /// needs it.
+    ///
+    /// `status` becomes `LoopEngineStatus.error`'s payload, and that string
+    /// is NOT log text: it is the journal's `statusSummary`, the run-summary
+    /// note's TITLE, a notification body, and a row in both the desktop and
+    /// phone run lists (where it wraps rather than truncates). Every other
+    /// terminal status is a handful of words, so a paragraph here would push
+    /// the other runs off a 320pt pane and produce a 200-character note
+    /// title. The explanation goes in `detail`, which is logged once — one
+    /// line above, where the user is already looking.
+    private struct CommandProblem {
+        let status: String
+        let detail: String
+    }
+
+    /// Why `stage`'s command cannot be run, or `nil` when it can be.
+    ///
+    /// The multi-line rule is a correctness gate, not tidiness. `sh -c`
+    /// treats a newline as a command SEPARATOR and yields only the last
+    /// line's exit code, so `swift build⏎swift test` runs both and reports
+    /// the tests' status: the build fails, the tests pass against a stale
+    /// binary, and the stage goes green on a repo that does not compile. A
+    /// verification harness that can be made to pass by a failing first line
+    /// is not a verification harness.
+    ///
+    /// Enforced HERE rather than in the editor because the editor is not the
+    /// only writer: a single-line `TextField` still accepts a pasted newline
+    /// (measured — AppKit's field editor does not filter them), and
+    /// `system/loop.json` can be hand-edited or arrive from a template.
+    /// Preflight is the one place every route passes through.
+    private static func commandProblem(_ stage: LoopStage) -> CommandProblem? {
         guard let command = stage.command,
               !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { return nil }
-        return command
+        else {
+            let message = "Stage \"\(stage.name)\" has no command"
+            return CommandProblem(status: message, detail: message)
+        }
+        // `\.isNewline`, not just "\n": a CRLF paste would otherwise leave a
+        // trailing \r that `sh` reads as part of the last word, and the
+        // Unicode line separators corrupt the command just as thoroughly.
+        guard !command.contains(where: \.isNewline) else {
+            return CommandProblem(
+                status: "Stage \"\(stage.name)\" has a multi-line command — see the log",
+                detail: "Stage \"\(stage.name)\" has a multi-line command. `sh -c` reports only the last line's exit code, so a failing first line would pass silently — chain the steps with `&&` on one line instead.")
+        }
+        return nil
+    }
+
+    /// Returns the stage's command when it is runnable; nil otherwise. One
+    /// rule, shared with `commandProblem` above, so the preflight message and
+    /// the runtime guard can never disagree about what is runnable.
+    private static func validCommand(_ stage: LoopStage) -> String? {
+        guard commandProblem(stage) == nil else { return nil }
+        return stage.command
     }
 
     /// Hashes failure output after stripping duration-shaped and hex
