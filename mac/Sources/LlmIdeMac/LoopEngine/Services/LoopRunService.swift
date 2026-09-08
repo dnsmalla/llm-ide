@@ -128,6 +128,29 @@ final class LoopRunService: ObservableObject {
         tasks[Self.key(projectId: projectId, loopId: loopId)]?.cancel()
     }
 
+    /// Stops whatever desktop run is in flight for ANY loop of `projectId`.
+    /// For callers that address a project rather than a loop — the phone,
+    /// which only ever sees the Primary loop but whose Stop must not leave a
+    /// desktop run for a different loop of the same project going.
+    func stopAll(projectId: String) {
+        let prefix = "\(projectId)::"
+        for (key, task) in tasks where key.hasPrefix(prefix) {
+            task.cancel()
+        }
+    }
+
+    /// Hold the loop's run at its next stage boundary. Only meaningful for a
+    /// run this service owns; the runner itself refuses unless it is
+    /// executing (see `LoopEngineRunner.pause`).
+    func pause(projectId: String, loopId: String) {
+        runners[Self.key(projectId: projectId, loopId: loopId)]?.pause()
+    }
+
+    /// Release a hold placed by `pause`.
+    func resume(projectId: String, loopId: String) {
+        runners[Self.key(projectId: projectId, loopId: loopId)]?.resume()
+    }
+
     /// One report per finished desktop run: the activity feed (previously
     /// only the Auto Task path reported there) and, when the app is in the
     /// background, a user notification.

@@ -555,8 +555,13 @@ enum FeatureCatalog {
         mobile.autoTaskBridge = MobileAutoTaskBridge(
             manager: mobile, autoCode: service,
             settings: settings, logStore: taskLog)
-        mobile.loopBridge = MobileLoopBridge(
-            manager: mobile, autoCode: service)
+        let loopBridge = MobileLoopBridge(manager: mobile, autoCode: service)
+        // So the phone's Stop reaches desktop-initiated runs too, not only
+        // the scheduler's. Assigned after init (rather than an init
+        // parameter) because this wiring function is called from BOTH boot
+        // paths and must stay tolerant of either order.
+        loopBridge.runService = loopRunService
+        mobile.loopBridge = loopBridge
         #endif
     }
 }

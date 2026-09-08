@@ -70,6 +70,20 @@ struct LoopStageAttempt: Codable, Equatable {
     var score: Int?
     /// True when the loop asked the agent to repair this failure.
     var repairAttempted: Bool
+    /// Wall-clock seconds the repair agent took, when one ran.
+    ///
+    /// This is the run's real cost signal. Per-request token counts and money
+    /// are NOT obtainable on this path — the `/code-assist` response carries
+    /// no usage block, and the default Claude CLI transport has no token data
+    /// at all — so the honest measure of "what did this repair cost" is the
+    /// time it took and how many attempts it needed. `nil` when no repair ran
+    /// and on every record written before this field existed.
+    var repairDurationSeconds: Double?
+    /// Which repair this was for this stage in this run (1-based), against the
+    /// `maxRepairsPerStage` budget in the config snapshot. Previously only the
+    /// terminal `.repairBudgetExhausted` status hinted at repair spend, and
+    /// only for the stage that ran out.
+    var repairAttemptIndex: Int?
     /// Repo-relative paths the repair changed, when the guard could enumerate them.
     var changedPaths: [String]
     var scopeVerdict: RepairScopeVerdict
@@ -77,7 +91,9 @@ struct LoopStageAttempt: Codable, Equatable {
     init(stageId: String, stageName: String, kind: LoopStage.Kind,
          severity: LoopStageSeverity, startedAt: Date, durationSeconds: Double,
          exitCode: Int32?, passed: Bool, outputTail: String, outputHash: String?,
-         score: Int?, repairAttempted: Bool = false, changedPaths: [String] = [],
+         score: Int?, repairAttempted: Bool = false,
+         repairDurationSeconds: Double? = nil, repairAttemptIndex: Int? = nil,
+         changedPaths: [String] = [],
          scopeVerdict: RepairScopeVerdict = .notChecked) {
         self.stageId = stageId
         self.stageName = stageName
@@ -91,6 +107,8 @@ struct LoopStageAttempt: Codable, Equatable {
         self.outputHash = outputHash
         self.score = score
         self.repairAttempted = repairAttempted
+        self.repairDurationSeconds = repairDurationSeconds
+        self.repairAttemptIndex = repairAttemptIndex
         self.changedPaths = changedPaths
         self.scopeVerdict = scopeVerdict
     }

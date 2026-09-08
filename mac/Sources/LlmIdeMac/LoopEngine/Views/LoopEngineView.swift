@@ -169,6 +169,11 @@ struct LoopEngineView: View {
     /// from disk instead, precisely because this copy can be stale.
     @State var isPrimaryLoop = false
 
+    /// How many past runs the history list shows. One constant, so the header's
+    /// "latest N" badge cannot claim a different cap than `loadPastRuns`
+    /// actually applies.
+    static let pastRunDisplayLimit = 15
+
     /// Reads `<projectRoot>/system/loop-runs/` for the "past runs" list. A
     /// separate instance from the runner's own journal is fine — the file layout
     /// is the contract, and this one only ever reads.
@@ -526,6 +531,16 @@ struct LoopEngineView: View {
                 // other terminal status.
                 Button("Stop") { stopRun() }
                     .controlSize(.small)
+                // Between-stages hold, not a mid-stage suspend — the label
+                // and help text say so, because pausing a compiler is not
+                // something this can (or should) do.
+                Button(runner.paused ? "Resume" : "Pause") {
+                    if runner.paused { resumeRun() } else { pauseRun() }
+                }
+                .controlSize(.small)
+                .help(runner.paused
+                      ? "Continue with the next stage"
+                      : "Hold the loop once the current stage finishes")
             } else if runner.waitingInQueue {
                 Button("Leave queue") { stopRun() }
                     .controlSize(.small)
@@ -538,7 +553,13 @@ struct LoopEngineView: View {
             // needs — with the PREVIOUS run's stale summary.
             if runner.waitingInQueue, let gitRoot = activeGitRootURL {
                 let ahead = LoopEngineRunner.queuedRunCount(gitRoot: gitRoot)
-                Text(ahead > 0 ? "Waiting — \(ahead + 1) in line" : "Waiting for the current run")
+                // A paused run keeps the repo's lock, so say so — otherwise
+                // this reads as an unexplained indefinite wait, and the fix
+                // (resume the other loop) is invisible.
+                let waitText = LoopEngineRunner.isPausedRun(gitRoot: gitRoot)
+                    ? "Waiting — the current run is paused"
+                    : (ahead > 0 ? "Waiting — \(ahead + 1) in line" : "Waiting for the current run")
+                Text(waitText)
                     .font(Typography.caption)
                     .foregroundStyle(.orange)
             } else if !runner.running, let status = runner.status {
@@ -767,6 +788,18 @@ struct LoopEngineView: View {
                 HStack {
                     SectionLabel("PAST RUNS")
                     Spacer()
+                    // Says whether this is the whole history or a window onto
+                    // it — the list is capped, and silently showing 15 of 60
+                    // reads as "this loop has only ever run 15 times". At the
+                    // cap it cannot tell "exactly 15 exist" from "more do",
+                    // so the label claims only what is true either way.
+                    Text(pastRuns.count >= Self.pastRunDisplayLimit
+                         ? "latest \(pastRuns.count)" : "\(pastRuns.count)")
+                        .font(Typography.caption)
+                        .foregroundStyle(t.textMuted)
+                        .help(pastRuns.count >= Self.pastRunDisplayLimit
+                              ? "Newest \(Self.pastRunDisplayLimit) shown; older runs stay in system/loop-runs/"
+                              : "Every run of this loop found in the journal")
                 }
                 .padding(.horizontal, Spacing.lg)
                 .padding(.vertical, Spacing.sm)
@@ -784,7 +817,7 @@ struct LoopEngineView: View {
                                             .font(.system(size: 11))
                                             .foregroundStyle(t.text)
                                             .fixedSize(horizontal: false, vertical: true)
-                                        Text("\(AppDateFormatter.hourMinuteSecond(entry.startedAt)) · \(entry.trigger.rawValue) · \(entry.iterationsUsed) iter · \(Int(entry.durationSeconds))s")
+                                        Text("\(Self.runStamp(entry.startedAt)) · \(entry.trigger.rawValue) · \(entry.iterationsUsed) iter · \(Int(entry.durationSeconds))s")
                                             .font(.system(size: 9, design: .monospaced))
                                             .foregroundStyle(t.textMuted)
                                     }
@@ -820,12 +853,31 @@ struct LoopEngineView: View {
         if runner.running || runner.waitingInQueue {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.small)
+                    // A paused run is not making progress, so the spinner
+                    // would be a lie — swap it for a static hold glyph.
+                    if runner.paused {
+                        Image(systemName: "pause.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(t.accent4)
+                    } else {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
                     if runner.waitingInQueue {
                         Text("Queued")
                             .font(Typography.captionStrong)
                             .foregroundStyle(t.accent4)
+                    } else if runner.paused {
+                        // Names the stage that finished, not the iteration:
+                        // the hold is at a stage boundary, so iteration N is
+                        // typically still mid-flight with stages to go, and
+                        // "paused after iteration N" would claim otherwise.
+                        Text(runner.currentStageName.map { "Paused after \($0)" }
+                             ?? "Paused")
+                            .font(Typography.captionStrong)
+                            .foregroundStyle(t.accent4)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     } else {
                         Text("Iteration \(runner.iteration)/\(runner.runMaxIterations)")
                             .font(Typography.captionStrong)
@@ -843,8 +895,14 @@ struct LoopEngineView: View {
                         // A TimelineView tick, not published runner state — the
                         // runner has no use for a once-a-second clock itself.
                         TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                            Text(Self.elapsedLabel(from: startedAt, now: timeline.date,
-                                                   budget: runner.runWallClockBudget))
+                            // Working elapsed, matching what the runner's
+                            // budget check measures — a raw clock would read
+                            // "1:20:00 / 30:00" beside the word "Paused" for
+                            // a run that is nowhere near its limit.
+                            Text(Self.elapsedLabel(
+                                working: runner.workingElapsed(since: startedAt,
+                                                               asOf: timeline.date),
+                                budget: runner.runWallClockBudget))
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundStyle(t.textMuted)
                         }
@@ -853,7 +911,9 @@ struct LoopEngineView: View {
                 if let startedAt = runner.runStartedAt,
                    let budget = runner.runWallClockBudget {
                     TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                        ProgressView(value: min(timeline.date.timeIntervalSince(startedAt) / budget, 1))
+                        // Same working-elapsed basis as the label above.
+                        ProgressView(value: min(
+                            runner.workingElapsed(since: startedAt, asOf: timeline.date) / budget, 1))
                             .controlSize(.small)
                             .tint(t.accent)
                     }
@@ -912,13 +972,28 @@ struct LoopEngineView: View {
         }
     }
 
-    /// "m:ss" (or "h:mm:ss") elapsed, with the budget appended when one
-    /// bounds the run — e.g. "12:07 / 60:00".
-    private static func elapsedLabel(from startedAt: Date, now: Date,
+    /// "m:ss" (or "h:mm:ss") of WORKING time, with the budget appended when
+    /// one bounds the run — e.g. "12:07 / 60:00".
+    private static func elapsedLabel(working: TimeInterval,
                                      budget: TimeInterval?) -> String {
-        let elapsed = clockLabel(max(0, now.timeIntervalSince(startedAt)))
+        let elapsed = clockLabel(working)
         guard let budget else { return elapsed }
         return "\(elapsed) / \(clockLabel(budget))"
+    }
+
+    /// Run timestamp: "14:03:22" for a run from today, "Apr 3 14:03" for an
+    /// older one. Not `internal` by accident — the past-run inspector lives in
+    /// another file (Swift `private` is file-scoped), and both surfaces must
+    /// stamp runs identically. A time-only stamp made yesterday's run
+    /// indistinguishable from this morning's in a 15-row history.
+    static func runStamp(_ date: Date) -> String {
+        guard !Calendar.current.isDateInToday(date) else {
+            return AppDateFormatter.hourMinuteSecond(date)
+        }
+        // Seconds dropped for older runs — the date costs the width, and
+        // second-precision stops mattering once "which day" is the question.
+        let hhmm = AppDateFormatter.hourMinuteSecond(date).prefix(5)
+        return "\(AppDateFormatter.monthDay(date)) \(hhmm)"
     }
 
     private static func clockLabel(_ seconds: TimeInterval) -> String {
@@ -1220,6 +1295,16 @@ struct LoopEngineView: View {
         runService.stop(projectId: projectId, loopId: loopId)
     }
 
+    private func pauseRun() {
+        guard let projectId = activeProjectId else { return }
+        runService.pause(projectId: projectId, loopId: loopId)
+    }
+
+    private func resumeRun() {
+        guard let projectId = activeProjectId else { return }
+        runService.resume(projectId: projectId, loopId: loopId)
+    }
+
     /// True in the window where the service has admitted a run but the runner
     /// has not yet flipped `running`/`waitingInQueue` (the Task hasn't begun).
     /// The Run button disables on this too, so a double-click can't reach the
@@ -1355,7 +1440,9 @@ struct LoopEngineView: View {
         // every loop's runs, so filtering down to this loop must not starve
         // the list.
         let recent = journal.recentRuns(root: root, limit: 60)
-        pastRuns = Array(recent.filter { $0.loopId == loopId || ($0.loopId == nil && isPrimaryLoop) }.prefix(15))
+        pastRuns = Array(recent
+            .filter { $0.loopId == loopId || ($0.loopId == nil && isPrimaryLoop) }
+            .prefix(Self.pastRunDisplayLimit))
         lastSummaryNoteName = Self.newestSummaryNoteName(projectRoot: root)
         refreshInspectedPastRun(projectRoot: root)
     }

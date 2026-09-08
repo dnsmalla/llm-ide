@@ -24,6 +24,13 @@ import SharedProtocol
 final class MobileLoopBridge: MobileFeatureBridge {
     weak var manager: MobileControlManager?
     var autoCode: AutoCodeUpdateService?
+    /// Owner of DESKTOP-initiated runs. Without it `loop_stop` reached only
+    /// the scheduler's runner, so a run the user started on the Mac kept
+    /// going — the phone reported "Stop requested", the run ignored it, and
+    /// `loop_status_list` (which reads the process-wide guard, so it sees
+    /// desktop runs) kept answering "running". Weak: the bridge must not
+    /// keep an app-level service alive.
+    weak var runService: LoopRunService?
 
     /// True while a run this bridge triggered is in flight. Purely for
     /// reporting — the authority on whether a loop is running is the runner's
@@ -141,6 +148,14 @@ final class MobileLoopBridge: MobileFeatureBridge {
                 return true
             }
             autoCode.stop()
+            // Also cancel any desktop-initiated run for the active project.
+            // `stopAll` rather than the Primary loop's id: the phone only
+            // ever shows Primary, but Stop meaning "stop the loop that is
+            // running" is the only reading a user has — leaving a different
+            // loop's desktop run going would look like Stop did nothing.
+            if let projectId = manager?.projectStore?.activeProject?.bundle.id {
+                runService?.stopAll(projectId: projectId)
+            }
             loopStartedHere = false
             manager?.append(.info, "loop_stop requested from phone")
             manager?.reply(LoopAck(accepted: true, message: "Stop requested."))

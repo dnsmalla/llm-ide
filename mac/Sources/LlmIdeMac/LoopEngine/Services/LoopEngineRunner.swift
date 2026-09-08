@@ -70,6 +70,56 @@ final class LoopEngineRunner: ObservableObject {
     @Published private(set) var runMaxIterations = 0
     @Published private(set) var runWallClockBudget: TimeInterval?
 
+    /// True while the run is holding between stages at the user's request.
+    ///
+    /// A pause takes effect at the next STAGE BOUNDARY, never mid-stage: a
+    /// stage is somebody's build or test suite, and suspending one (SIGSTOP on
+    /// a compiler, a half-written build directory) is a good way to corrupt
+    /// the very thing being verified. So `pause()` is honest about what it
+    /// does — the current stage runs to completion, then the loop holds.
+    @Published private(set) var paused = false
+    /// Seconds this run spent paused. Excluded from the wall-clock budget:
+    /// a user pausing to read a failure must not spend the run's time budget
+    /// doing it, or a long pause would silently end the run as
+    /// `.wallClockExceeded` with nothing having been running.
+    @Published private(set) var pausedSeconds: TimeInterval = 0
+    private var pauseStartedAt: Date?
+
+    /// Paused seconds INCLUDING a pause still in progress.
+    ///
+    /// `pausedSeconds` only folds in a pause when it is released, so any
+    /// display or budget arithmetic that used it directly would charge the
+    /// current pause to the run — the very thing `pausedSeconds` exists to
+    /// prevent. Takes `now` rather than reading the clock so a caller
+    /// already redrawing on a timeline uses that tick's instant.
+    func pausedSeconds(asOf now: Date) -> TimeInterval {
+        pausedSeconds + (pauseStartedAt.map { max(0, now.timeIntervalSince($0)) } ?? 0)
+    }
+
+    /// Working (non-paused) seconds this run has spent — what the wall-clock
+    /// budget is actually measured against, and what the live header shows.
+    func workingElapsed(since startedAt: Date, asOf now: Date) -> TimeInterval {
+        max(0, now.timeIntervalSince(startedAt) - pausedSeconds(asOf: now))
+    }
+
+    /// Git roots whose in-flight run is holding at a pause.
+    ///
+    /// A pause keeps the run's `LoopRunQueue` lock — the hold is inside the
+    /// critical section — so anything waiting on the same repo waits until
+    /// the pause is released. Queued surfaces read this to say so instead of
+    /// showing an unexplained "waiting for the current run" forever.
+    @MainActor private static var pausedRootKeys: Set<String> = []
+
+    /// Whether the run currently holding `gitRoot` is paused.
+    @MainActor
+    static func isPausedRun(gitRoot: URL) -> Bool {
+        pausedRootKeys.contains(gitRoot.resolvingSymlinksInPath().path)
+    }
+
+    /// The lock key this run holds, for the paused-roots registry. Set at
+    /// admission; `nil` between runs.
+    private var lockRootKeyForPause: String?
+
     /// Optional mirror for every log line this runner emits, so a surface that
     /// does not own the runner can still follow a run.
     ///
@@ -232,6 +282,48 @@ final class LoopEngineRunner: ObservableObject {
 
     func clearLog() { log.removeAll() }
 
+    /// Ask the run to hold at the next stage boundary. No-op unless a run is
+    /// executing — a queued run has nothing to pause (it is already waiting),
+    /// and pausing "the next run" is not a thing a Pause button should mean.
+    func pause() {
+        guard running, !paused else { return }
+        paused = true
+        pauseStartedAt = Date()
+        if let lockRootKeyForPause {
+            Self.pausedRootKeys.insert(lockRootKeyForPause)
+        }
+        appendLog(.warn, "Pausing — the loop will hold once the current stage finishes. Other runs on this repo wait until you resume.")
+    }
+
+    /// Release a hold. Safe to call when not paused.
+    func resume() {
+        guard paused else { return }
+        paused = false
+        if let pauseStartedAt {
+            pausedSeconds += Date().timeIntervalSince(pauseStartedAt)
+        }
+        pauseStartedAt = nil
+        if let lockRootKeyForPause {
+            Self.pausedRootKeys.remove(lockRootKeyForPause)
+        }
+        appendLog(.info, "Resumed")
+    }
+
+    /// Blocks while `paused`, returning immediately when the run is not
+    /// paused (the overwhelmingly common case, so it must cost nothing).
+    ///
+    /// Deliberately a poll rather than a stored continuation: a continuation
+    /// parked here has to be resumed from a cancellation handler running off
+    /// this actor, and getting that wrong deadlocks a run permanently — the
+    /// exact failure a Pause button must never have. A 200 ms wake-up while
+    /// explicitly paused is free, and `Task.sleep` throwing on cancellation
+    /// is what lets Stop end a paused run.
+    private func holdWhilePaused() async {
+        while paused && !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+    }
+
     /// What the loop should do after one stage finished.
     private enum StageDecision: Equatable {
         /// Move on to the next stage — the stage passed, or it failed but is
@@ -344,6 +436,14 @@ final class LoopEngineRunner: ObservableObject {
         runMaxIterations = config.maxIterations
         runWallClockBudget = config.wallClockBudgetSeconds
         stageStates = [:]
+        // Must be reset per run, not only in the defer: a run that ended while
+        // paused would otherwise leave `paused == true`, and the NEXT run
+        // would hold at its first stage boundary forever with no visible
+        // cause.
+        paused = false
+        pausedSeconds = 0
+        pauseStartedAt = nil
+        lockRootKeyForPause = lockRootKey
         currentRunContext = RunContext(config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                                        projectId: projectId, startedAt: startedAt,
                                        loopId: loopId, loopName: loopName)
@@ -353,6 +453,15 @@ final class LoopEngineRunner: ObservableObject {
             // outcome stays available until the next run resets it.
             currentStageName = nil
             runStartedAt = nil
+            // A run must never end still holding a pause — see the reset at
+            // run start for what that would do to the following run.
+            paused = false
+            pauseStartedAt = nil
+            // Must be cleared here too: a run cancelled while paused releases
+            // the queue lock via this same defer, and leaving the key behind
+            // would make every later run on this repo look paused.
+            Self.pausedRootKeys.remove(lockRootKey)
+            lockRootKeyForPause = nil
             Self.unregisterActiveLoop(rootKey: mainRootKey, loopId: loopId)
             currentRunContext = nil
             LoopRunQueue.release(rootKey: lockRootKey)
@@ -449,8 +558,13 @@ final class LoopEngineRunner: ObservableObject {
             // run must always get one complete pass, because a budget small
             // enough to expire during startup would otherwise make the loop a
             // confusing no-op rather than a fast failure.
+            // Working elapsed, not raw: time the user spent holding the run is
+            // not time the run spent working, and charging it to the budget
+            // would end a paused run for "exceeding" a limit nothing was
+            // consuming. Same accessor the live header uses, so the number the
+            // user watches is the number this decides on.
             if iteration >= 1, let budget = config.wallClockBudgetSeconds,
-               Date().timeIntervalSince(startedAt) > budget {
+               workingElapsed(since: startedAt, asOf: Date()) > budget {
                 appendLog(.warn, "Time budget of \(Int(budget))s exceeded after \(iteration) iteration(s)")
                 status = .givenUp(reason: .wallClockExceeded)
                 break iterationLoop
@@ -465,6 +579,16 @@ final class LoopEngineRunner: ObservableObject {
                 orderedStages.map { ($0.id, LiveStageState.pending) })
 
             for stage in orderedStages {
+                // The stage boundary is where a pause takes effect (see
+                // `pause()`), and it is also the only place a Stop pressed
+                // BETWEEN stages was previously invisible until the next
+                // iteration — the verifier notices cancellation mid-stage,
+                // but nothing checked before starting the following one.
+                await holdWhilePaused()
+                if Task.isCancelled {
+                    status = .aborted
+                    break iterationLoop
+                }
                 currentStageName = stage.name
                 stageStates[stage.id] = .running
                 let decision: StageDecision
@@ -670,6 +794,11 @@ final class LoopEngineRunner: ObservableObject {
             attempt: used + 1, previousScore: verdict.previousScore, currentScore: score,
             improved: verdict.improved, streak: verdict.streak)
 
+        // Timed around the guard, not just the agent call: the scope check's
+        // two `git status` runs are part of what a repair costs in wall clock,
+        // and splitting them out would report a repair as faster than the run
+        // actually waited.
+        let repairStartedAt = Date()
         let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot,
                                            scopeGlobs: scopeGlobs) {
             try await stageRepairer.repair(
@@ -679,6 +808,8 @@ final class LoopEngineRunner: ObservableObject {
                                                        reservedForTruncation: AgentLoopStageRepairer.maxFailureOutputChars),
                 evidence: evidence, repoRoot: gitRoot)
         }
+        let repairDuration = Date().timeIntervalSince(repairStartedAt)
+        let repairIndex = used + 1
 
         // The repair finished either way; the stage itself is still failed —
         // the next iteration's re-run (or the terminal status) says whether
@@ -689,13 +820,16 @@ final class LoopEngineRunner: ObservableObject {
         switch guarded {
         case .failed(let error):
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
-                   passed: false, output: outcome.output, score: score, repairAttempted: true)
+                   passed: false, output: outcome.output, score: score, repairAttempted: true,
+                   repairDuration: repairDuration, repairIndex: repairIndex)
             if error is CancellationError { return .terminate(.aborted) }
-            appendLog(.error, "  [\(stage.name)] repair error: \(error.localizedDescription)")
+            appendLog(.error, "  [\(stage.name)] repair \(repairIndex) failed after \(Int(repairDuration))s: \(error.localizedDescription)")
             return .terminate(.error(error.localizedDescription))
         case .completed(let verdictScope, let violations, let changed):
+            appendLog(.info, "  [\(stage.name)] repair \(repairIndex)/\(config.maxRepairsPerStage) took \(Int(repairDuration))s")
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, score: score, repairAttempted: true,
+                   repairDuration: repairDuration, repairIndex: repairIndex,
                    changedPaths: changed, scopeVerdict: verdictScope)
             if let terminal = scopeTermination(stage: stage, config: config,
                                               verdict: verdictScope, violations: violations) {
@@ -867,7 +1001,9 @@ final class LoopEngineRunner: ObservableObject {
     /// crashing on an empty array.
     private func record(_ stage: LoopStage, startedAt: Date, duration: Double,
                         exitCode: Int32?, passed: Bool, output: String, score: Int?,
-                        repairAttempted: Bool = false, changedPaths: [String] = [],
+                        repairAttempted: Bool = false,
+                        repairDuration: Double? = nil, repairIndex: Int? = nil,
+                        changedPaths: [String] = [],
                         scopeVerdict: RepairScopeVerdict = .notChecked) {
         guard !iterationRecords.isEmpty else { return }
         iterationRecords[iterationRecords.count - 1].attempts.append(
@@ -876,7 +1012,9 @@ final class LoopEngineRunner: ObservableObject {
                 severity: stage.severity, startedAt: startedAt, durationSeconds: duration,
                 exitCode: exitCode, passed: passed, outputTail: output,
                 outputHash: passed ? nil : Self.hash(output), score: score,
-                repairAttempted: repairAttempted, changedPaths: changedPaths,
+                repairAttempted: repairAttempted,
+                repairDurationSeconds: repairDuration, repairAttemptIndex: repairIndex,
+                changedPaths: changedPaths,
                 scopeVerdict: scopeVerdict))
     }
 
