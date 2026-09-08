@@ -1028,10 +1028,24 @@ final class ChatEngine {
             return
         }
         self.agent.pendingTool = pendingTool
+        // A tool-restricted turn (Plan / Assist Plan / Review / Document /
+        // Ask) can never do plan work, and the server answers it with a
+        // stub `tasks: [], continueNeeded: false` regardless of real
+        // pending work (task-session-context.mjs) — so a clarifying
+        // question sent mid-execution in one of those modes must not
+        // settle the tracker.
+        let restrictedModes: Set<String> = [
+            CodeAssistMode.plan.rawValue, CodeAssistMode.assistPlan.rawValue,
+            CodeAssistMode.review.rawValue, CodeAssistMode.document.rawValue,
+            "ask",
+        ]
+        let modeRestrictsTools = mode.map(restrictedModes.contains) ?? false
         if let newTasks = tasks {
             agent.agentPendingTasks = newTasks
-            updatePlanExecution(with: newTasks, continueNeeded: continueNeeded)
-        } else if continueNeeded == false {
+            if !modeRestrictsTools {
+                updatePlanExecution(with: newTasks, continueNeeded: continueNeeded)
+            }
+        } else if continueNeeded == false, !modeRestrictsTools {
             updatePlanExecution(with: agent.agentPendingTasks, continueNeeded: continueNeeded)
         }
         if continueNeeded == true && !agent.agentStopRequested {
@@ -1117,9 +1131,22 @@ final class ChatEngine {
         if !tasks.isEmpty { tracker.lastTasks = tasks }
         if tasks.contains(where: { $0.status == .failed }) {
             tracker.phase = .failed
-        } else if !tasks.isEmpty,
-                  !tasks.contains(where: { $0.status == .pending || $0.status == .inProgress }),
-                  continueNeeded != true {
+        } else if !tasks.contains(where: { $0.status == .pending || $0.status == .inProgress }),
+                  continueNeeded != true,
+                  // A plan executed via direct tool calls (bash/file edits)
+                  // without ever touching the session task-list leaves
+                  // `tasks` empty for the whole run — an empty list must be
+                  // able to finish here too, or the tracker never leaves
+                  // `.running` and the card spins forever under the turn's
+                  // own already-delivered final answer. But an empty list
+                  // carries no evidence of its own, so it settles the
+                  // tracker only when the turn itself ended the chain:
+                  // `continueNeeded` came back an explicit false (an
+                  // external turn's hard-coded nil means "don't chain", not
+                  // "the chain ended") and no proposal is parked waiting
+                  // for an answer (a legacy update-file/bash card mid-plan
+                  // also arrives with an empty list).
+                  !tasks.isEmpty || (continueNeeded == false && agent.pendingTool == nil) {
             tracker.phase = .finished
         }
         agent.planExecution = tracker

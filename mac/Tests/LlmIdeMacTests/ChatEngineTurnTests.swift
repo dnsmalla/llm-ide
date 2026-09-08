@@ -270,6 +270,84 @@ struct ChatEngineTurnTests {
         #expect(engine.agent.planExecution?.lastTasks.count == 2)
     }
 
+    // A plan run purely through bash/file-edit tool calls never touches the
+    // session task-list, so the server's `tasks` array stays empty for the
+    // whole chain. An explicit `continueNeeded == false` means the chain is
+    // over — an empty list must finish the tracker too, or the running card
+    // spins forever under the turn's own already-delivered final answer.
+    @Test("No session tasks were ever created, but continueNeeded false still finishes the plan tracker")
+    func noTasksStillFinishesPlanExecution() async {
+        let (engine, t) = makeEngine()
+        engine.agent.planExecution = runningTracker()
+        t.result = .init(
+            reply: "Verified: deletions confirmed, tests pass.",
+            pendingTool: nil,
+            tasks: [],
+            continueNeeded: false, usage: nil, mode: nil)
+        await engine.runTurn("execute the plan")
+        #expect(engine.agent.planExecution?.phase == .finished)
+    }
+
+    // The other call site: a v2 turn where no `tasks` event ever arrived
+    // (tasks nil) but the chain explicitly ended. Same rule as above.
+    @Test("A nil task list with an explicit continueNeeded false also finishes the plan tracker")
+    func nilTasksWithChainEndFinishesPlanExecution() async {
+        let (engine, t) = makeEngine()
+        engine.agent.planExecution = runningTracker()
+        t.result = .init(
+            reply: "done",
+            pendingTool: nil,
+            tasks: nil,
+            continueNeeded: false, usage: nil, mode: nil)
+        await engine.runTurn("execute the plan")
+        #expect(engine.agent.planExecution?.phase == .finished)
+    }
+
+    // An empty list carries no evidence of its own, so it may only settle
+    // the tracker when the turn itself ended the chain. Three turns that
+    // did NOT end it must leave the tracker running:
+    // a parked proposal (legacy update-file mid-plan arrives with an empty
+    // list), a nil continueNeeded (an external turn's hard-coded nil means
+    // "don't chain", not "the chain ended"), and a tool-restricted mode
+    // (the server answers Plan/Review/Document/Ask turns with a stub
+    // `tasks: [], continueNeeded: false` regardless of real pending work).
+    @Test("An empty task list without a real chain end never settles the tracker")
+    func emptyTasksWithoutChainEndKeepPlanExecutionRunning() async {
+        // Parked proposal.
+        let (engine1, t1) = makeEngine()
+        engine1.agent.planExecution = runningTracker()
+        t1.result = .init(
+            reply: "step 1 needs this edit",
+            pendingTool: PendingTool(name: "update-file",
+                                     arguments: .init(raw: Data("{}".utf8))),
+            tasks: [],
+            continueNeeded: false, usage: nil, mode: nil)
+        await engine1.runTurn("execute the plan")
+        #expect(engine1.agent.planExecution?.phase == .running)
+
+        // Nil continueNeeded (external turn).
+        let (engine2, t2) = makeEngine()
+        engine2.agent.planExecution = runningTracker()
+        t2.result = .init(
+            reply: "answered from the phone",
+            pendingTool: nil,
+            tasks: [],
+            continueNeeded: nil, usage: nil, mode: nil)
+        await engine2.runTurn("quick question")
+        #expect(engine2.agent.planExecution?.phase == .running)
+
+        // Tool-restricted mode's stub response.
+        let (engine3, t3) = makeEngine()
+        engine3.agent.planExecution = runningTracker()
+        t3.result = .init(
+            reply: "here's what that step means",
+            pendingTool: nil,
+            tasks: [],
+            continueNeeded: false, usage: nil, mode: "plan")
+        await engine3.runTurn("clarifying question mid-run")
+        #expect(engine3.agent.planExecution?.phase == .running)
+    }
+
     @Test("A failed task stops the plan tracker even while other steps remain")
     func failedTaskStopsPlanExecution() async {
         let (engine, t) = makeEngine()
