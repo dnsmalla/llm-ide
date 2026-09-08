@@ -239,6 +239,7 @@ enum FeatureCatalog {
     private static var autoTaskTemplates: AutoTaskTemplateStore?
     private static var autoTaskSkills: AutoTaskSkillCatalog?
     private static var autoTaskLogStore: TaskLogStore?
+    private static var loopRunService: LoopRunService?
     #endif
 
     /// Build + wire the ENTIRE Auto Task / Loop stack (scheduler + settings +
@@ -311,11 +312,19 @@ enum FeatureCatalog {
         // on RegressionRunner.
         service.activity = activity
 
+        // Desktop Loop runs live here (not on the Loop page) so a run — and
+        // its Stop handle, live log, and completion report — survives the
+        // page being closed or the project being switched.
+        let loopRuns = LoopRunService(api: api)
+        loopRuns.activity = activity
+        loopRuns.logStore = taskLog
+
         autoTaskSettings = settings
         autoCodeService = service
         autoTaskTemplates = templates
         autoTaskSkills = skills
         autoTaskLogStore = taskLog
+        loopRunService = loopRuns
 
         // Wire the Auto Task + Loop feature bridges onto the mobile manager
         // so the phone can query scheduler state (`auto_task_list`), toggle
@@ -333,13 +342,13 @@ enum FeatureCatalog {
         #endif
     }
 
-    /// Inject the five Auto Task / Loop environment objects (identity when
+    /// Inject the six Auto Task / Loop environment objects (identity when
     /// compiled out).
     static func installAutoTaskEnvironment(_ view: AnyView) -> AnyView {
         #if FEATURE_AUTOTASK
         guard let settings = autoTaskSettings, let service = autoCodeService,
               let templates = autoTaskTemplates, let skills = autoTaskSkills,
-              let logStore = autoTaskLogStore else {
+              let logStore = autoTaskLogStore, let loopRuns = loopRunService else {
             // bootAutoTask() wires these statics before any view can call
             // this — reaching here means the environment was installed
             // before boot, not that Auto Tasks is absent.
@@ -351,7 +360,8 @@ enum FeatureCatalog {
             .environmentObject(service)
             .environmentObject(templates)
             .environmentObject(skills)
-            .environmentObject(logStore))
+            .environmentObject(logStore)
+            .environmentObject(loopRuns))
         #else
         return view
         #endif

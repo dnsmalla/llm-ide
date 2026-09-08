@@ -50,29 +50,24 @@ struct LoopEngineView: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
-    /// The shared per-task log. This page owns its runner, so without mirroring
-    /// into here a run started FROM THIS PAGE was invisible to every other
-    /// surface — including the iPhone, which can see that a run is in flight
-    /// (the runner's process-wide guard) but had no lines to show for it.
-    @EnvironmentObject var logStore: TaskLogStore
+    /// App-lifetime owner of desktop Loop runs — start/stop route through it
+    /// so a run, its Stop handle, and its completion report (notification +
+    /// activity feed) all survive this page being closed mid-run.
+    @EnvironmentObject var runService: LoopRunService
 
-    /// Owns the run — a `@StateObject` (not a locally-constructed value
-    /// per run) so its `@Published log`/`running`/`iteration` actually
-    /// drive the log pane live while a run is in progress, matching the
-    /// standard `@StateObject`-for-live-run-UI pattern.
-    /// Building a fresh `LoopEngineRunner` inside `runLoop()` instead
-    /// would mean SwiftUI never observes it, and the log pane would sit
-    /// empty for the run's entire duration (up to `stageTimeout` per
-    /// stage) before dumping everything at once at the end.
-    @StateObject private var runner: LoopEngineRunner
+    /// This loop's long-lived runner, borrowed from `LoopRunService` (keyed
+    /// there by project + loop). `@ObservedObject`, not `@StateObject`: the
+    /// service owns the instance and this page only renders its `@Published`
+    /// live state — which is what lets a run keep its visible log across a
+    /// page or project switch instead of dying with the view that started it.
+    @ObservedObject var runner: LoopEngineRunner
 
     /// Shared verify-command allowlist — consulted by the detail pane's
-    /// "Approve command" button and, via the SAME instance handed to
-    /// `runner` at construction, at verify time. Must be one shared
-    /// instance (not two separate `VerifyApprovalStore()`s) so an
-    /// approval made here is visible to the runner's own preflight —
-    /// harmless in practice since both read/write the same UserDefaults
-    /// key, but keeping one instance avoids relying on that coincidence.
+    /// "Approve command" button. The SAME instance every runner is
+    /// constructed with (`LoopRunService.approvals`), so an approval made
+    /// here is visible to the runner's own preflight — harmless in practice
+    /// since all instances read/write the same UserDefaults key, but keeping
+    /// one instance avoids relying on that coincidence.
     let approvals: VerifyApprovalStore
 
     @State var stages: [LoopStage] = []
@@ -89,7 +84,11 @@ struct LoopEngineView: View {
     /// being silently dropped.
     @State private var extraProtectedGlobs: [String] = []
     @State var selectedStageId: String?
-    @State private var lastStatus: LoopEngineStatus?
+    // The last run's terminal status is NOT view state — the toolbar reads
+    // `runner.status` directly. A @State copy written from the run-completion
+    // callback silently vanished whenever the page was re-created mid-run
+    // (loop switch and back): the callback wrote into the torn-down view's
+    // state box while the live page kept nil.
     @State private var didRejectLastRun = false
     @State private var skillCatalog: [LlmIdeAPIClient.SkillLibraryEntry] = []
     @State private var skillsLoaded = false
@@ -99,12 +98,6 @@ struct LoopEngineView: View {
     @State var selectedPastRunId: String?
     @State var inspectedPastRun: LoopRunRecord?
     @State var pastRunInspectLoadFailed = false
-    /// The in-flight `Task { await runLoop() }`, held only so Stop has
-    /// something to cancel. `runner.running` alone can't be acted on — it's
-    /// a `@Published` observation, not a handle — and cancelling this Task
-    /// is what makes `Task.isCancelled` true everywhere down the call tree
-    /// `runner.run` awaits through, including inside `ShellFaultVerifier`.
-    @State private var runTask: Task<Void, Never>?
     /// Debounced autosave of the current config (see `scheduleAutosave`).
     @State private var autosaveTask: Task<Void, Never>?
     /// The not-yet-written autosave payload. Held separately from the task so a
@@ -181,26 +174,16 @@ struct LoopEngineView: View {
     /// is the contract, and this one only ever reads.
     private let journal = FileLoopRunJournal()
 
-    init(api: LlmIdeAPIClient, loopId: String) {
+    /// `runner` and `approvals` come from `LoopRunService` (the home view
+    /// resolves them — an `@EnvironmentObject` is not readable in a View's
+    /// own init). The runner-construction that used to live here moved to
+    /// `LoopRunService.runner(projectId:loopId:)` unchanged.
+    init(api: LlmIdeAPIClient, loopId: String,
+         runner: LoopEngineRunner, approvals: VerifyApprovalStore) {
         self.api = api
         self.loopId = loopId
-        let approvals = VerifyApprovalStore()
+        self.runner = runner
         self.approvals = approvals
-        // Same transport/model tier the regression sweep uses for its own
-        // prompter/judge/repairer — Loop Engineering's stage repair is a
-        // multi-file code edit, so the full chat model is used, not the
-        // sub-model tier (mirrors AgentLoopStageRepairer's own doc
-        // comment). Hardcoded, not read from AppConfig: @EnvironmentObject
-        // values aren't populated yet during a View's own init.
-        let prompter = CodeAssistPrompter(api: api, agent: "claude_code")
-        let regressionRunner = RegressionRunner(
-            prompter: prompter, judge: CodeAssistJudge(api: api),
-            verifier: ShellFaultVerifier(), repairer: AgentFaultRepairer(api: api))
-        _runner = StateObject(wrappedValue: LoopEngineRunner(
-            stageRepairer: AgentLoopStageRepairer(api: api),
-            regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
-            skillExecutor: AgentLoopSkillExecutor(api: api),
-            approvals: approvals))
     }
 
     var body: some View {
@@ -221,23 +204,31 @@ struct LoopEngineView: View {
         // AppShell only recreates section views on a section switch, not
         // on a project switch. Mirrors GraphMemorySettingsSection's
         // `.task(id: projectStore.activeProject?.bundle.id)` pattern.
-        .onAppear {
-            // Same buffer the Auto Tasks page and the phone read. Page-driven
-            // runs therefore appear in that log too: it is one loop with one
-            // activity trail, and this page keeps its own richer log pane.
-            runner.onLog = { [weak logStore] line in
-                logStore?.append(AutoTask.loopEngineering.rawValue, line.text,
-                                 level: line.level == .error ? .error : .info)
-            }
-        }
+        // (The runner's log mirror into the shared task log is wired by
+        // LoopRunService at runner creation, not per page appearance, so it
+        // survives this page being closed mid-run.)
         .task(id: reloadKey) {
             selectedStageId = nil
-            runner.clearLog()
-            lastStatus = nil
+            // The runner is long-lived now: opening the page of a loop whose
+            // run is still in flight must show that run's live log, not wipe
+            // it. Clearing stays for the idle case so a revisit starts clean.
+            if !runner.running && !runner.waitingInQueue {
+                runner.clearLog()
+            }
             didRejectLastRun = false
             clearPastRunInspection()
             loadConfig()
             Task { await loadSkillsIfNeeded() }
+        }
+        // Past Runs refresh on run end, observed — not a completion callback.
+        // A callback captured at Run-press time writes into whatever view
+        // existed THEN; this page can be torn down and re-created mid-run
+        // (switch loop and back), and the re-created page observes the same
+        // long-lived runner, so this fires on whichever instance is live.
+        .onChange(of: runner.running) { _, isRunning in
+            if !isRunning {
+                loadPastRuns()
+            }
         }
         // Debounced autosave: before this, edits lived only in @State and a
         // project switch silently discarded them — the Save button sits at
@@ -520,31 +511,45 @@ struct LoopEngineView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .disabled(runner.running || runner.waitingInQueue
+            // `isStartPending` covers the one main-actor turn between pressing
+            // Run and the runner's own `running`/`waitingInQueue` flipping —
+            // without it a fast double-click reached the service's refusal
+            // path and reported "already busy" for a run that DID start.
+            .disabled(runner.running || runner.waitingInQueue || isStartPending
                       || !stages.contains(where: \.enabled) || activeGitRootURL == nil)
             if runner.running {
-                // Cancelling `runTask` makes `Task.isCancelled` true on the
-                // same task `runner.run` is awaiting on, which is how a
-                // shell-command stage in progress actually notices — see
-                // `ShellFaultVerifier`. The runner reports `.aborted` and
-                // still journals the run, same as any other terminal status.
-                Button("Stop") { runTask?.cancel() }
+                // The service owns the run's Task; cancelling it makes
+                // `Task.isCancelled` true on the same task `runner.run` is
+                // awaiting on, which is how a shell-command stage in progress
+                // actually notices — see `ShellFaultVerifier`. The runner
+                // reports `.aborted` and still journals the run, same as any
+                // other terminal status.
+                Button("Stop") { stopRun() }
                     .controlSize(.small)
             } else if runner.waitingInQueue {
-                Button("Leave queue") { runTask?.cancel() }
+                Button("Leave queue") { stopRun() }
                     .controlSize(.small)
             }
-            if let lastStatus {
-                Text(lastStatus.summary)
-                    .font(Typography.caption)
-                    .foregroundStyle(theme.current.textMuted)
-            } else if didRejectLastRun {
-                Text("This runner was already busy")
-                    .font(Typography.caption)
-                    .foregroundStyle(.orange)
-            } else if runner.waitingInQueue, let gitRoot = activeGitRootURL {
+            // Queue position first, then the last terminal status ONLY when
+            // idle: `runner.status` persists across runs now (the runner is
+            // long-lived and clears it only after admission), so an
+            // unconditional `if let status` would shadow this queue caption —
+            // and the queue position is the one thing a user waiting in line
+            // needs — with the PREVIOUS run's stale summary.
+            if runner.waitingInQueue, let gitRoot = activeGitRootURL {
                 let ahead = LoopEngineRunner.queuedRunCount(gitRoot: gitRoot)
                 Text(ahead > 0 ? "Waiting — \(ahead + 1) in line" : "Waiting for the current run")
+                    .font(Typography.caption)
+                    .foregroundStyle(.orange)
+            } else if !runner.running, let status = runner.status {
+                Text(status.summary)
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.textMuted)
+            } else if !runner.running, didRejectLastRun {
+                // Defensive only: with the Run button disabled on
+                // `isStartPending` and startRun's own guard, the remaining
+                // writer is the runner's own admission refusal.
+                Text("This runner was already busy")
                     .font(Typography.caption)
                     .foregroundStyle(.orange)
             }
@@ -708,6 +713,9 @@ struct LoopEngineView: View {
             .padding(.horizontal, Spacing.lg)
             .padding(.vertical, Spacing.sm)
             Divider().background(t.border)
+            if !inspecting {
+                liveRunHeader
+            }
             if pastRunInspectLoadFailed {
                 Text("Could not load this run's journal record.")
                     .font(Typography.caption)
@@ -798,6 +806,129 @@ struct LoopEngineView: View {
                 .frame(maxHeight: 160)
             }
         }
+    }
+
+    /// Live pipeline header shown while a run is in flight or queued:
+    /// iteration count, current stage, elapsed time against the wall-clock
+    /// budget, and one chip per stage with its live state. Reads the runner's
+    /// published run-snapshot fields (`runMaxIterations`, `runWallClockBudget`)
+    /// rather than this page's editable config state, so it describes the run
+    /// actually executing even after the user edits budgets mid-run.
+    @ViewBuilder
+    private var liveRunHeader: some View {
+        let t = theme.current
+        if runner.running || runner.waitingInQueue {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    if runner.waitingInQueue {
+                        Text("Queued")
+                            .font(Typography.captionStrong)
+                            .foregroundStyle(t.accent4)
+                    } else {
+                        Text("Iteration \(runner.iteration)/\(runner.runMaxIterations)")
+                            .font(Typography.captionStrong)
+                            .foregroundStyle(t.text)
+                        if let stage = runner.currentStageName {
+                            Text("· \(stage)")
+                                .font(Typography.caption)
+                                .foregroundStyle(t.textMuted)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    Spacer(minLength: 4)
+                    if let startedAt = runner.runStartedAt {
+                        // A TimelineView tick, not published runner state — the
+                        // runner has no use for a once-a-second clock itself.
+                        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                            Text(Self.elapsedLabel(from: startedAt, now: timeline.date,
+                                                   budget: runner.runWallClockBudget))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(t.textMuted)
+                        }
+                    }
+                }
+                if let startedAt = runner.runStartedAt,
+                   let budget = runner.runWallClockBudget {
+                    TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                        ProgressView(value: min(timeline.date.timeIntervalSince(startedAt) / budget, 1))
+                            .controlSize(.small)
+                            .tint(t.accent)
+                    }
+                }
+                if !runner.stageStates.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            ForEach(sortedStages.filter { runner.stageStates[$0.id] != nil }) { stage in
+                                stageChip(stage, state: runner.stageStates[stage.id] ?? .pending)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.sm)
+            Divider().background(t.border)
+        }
+    }
+
+    @ViewBuilder
+    private func stageChip(_ stage: LoopStage,
+                           state: LoopEngineRunner.LiveStageState) -> some View {
+        let color = chipColor(state)
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 5, height: 5)
+            Text(stage.name)
+                .font(.system(size: 9, weight: .medium))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(color.opacity(0.12), in: Capsule())
+        .foregroundStyle(state == .pending ? theme.current.textMuted : color)
+        .help(chipHelp(state))
+    }
+
+    private func chipColor(_ state: LoopEngineRunner.LiveStageState) -> Color {
+        let t = theme.current
+        switch state {
+        case .pending:   return t.textMuted
+        case .running:   return t.accent
+        case .repairing: return t.accent4
+        case .passed:    return t.success
+        case .failed:    return t.danger
+        }
+    }
+
+    private func chipHelp(_ state: LoopEngineRunner.LiveStageState) -> String {
+        switch state {
+        case .pending:   return "Waiting to run this iteration"
+        case .running:   return "Running now"
+        case .repairing: return "Failed — repair in progress"
+        case .passed:    return "Passed this iteration"
+        case .failed:    return "Failed this iteration"
+        }
+    }
+
+    /// "m:ss" (or "h:mm:ss") elapsed, with the budget appended when one
+    /// bounds the run — e.g. "12:07 / 60:00".
+    private static func elapsedLabel(from startedAt: Date, now: Date,
+                                     budget: TimeInterval?) -> String {
+        let elapsed = clockLabel(max(0, now.timeIntervalSince(startedAt)))
+        guard let budget else { return elapsed }
+        return "\(elapsed) / \(clockLabel(budget))"
+    }
+
+    private static func clockLabel(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds)
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let secs = total % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, secs)
+            : String(format: "%d:%02d", minutes, secs)
     }
 
     @ViewBuilder
@@ -1023,14 +1154,79 @@ struct LoopEngineView: View {
         stages[index].enabled = enabled
     }
 
-    /// Kick off a run on `runTask` — the Run button and the per-stage
-    /// "Run this stage only" both go through here so Stop always has one
-    /// task to cancel.
+    /// Kick off a run through `LoopRunService` — the Run button and the
+    /// per-stage "Run this stage only" both go through here so Stop always
+    /// has one owner (the service) to ask.
+    ///
+    /// - Parameter stage: when set, run just this one stage (forced enabled)
+    ///   under the current budgets — the ⋯ menu's "Run this stage only", for
+    ///   debugging one stage without paying for the whole pipeline. The saved
+    ///   config is still the FULL current one; the single-stage list exists
+    ///   only for this run.
     func startRun(only stage: LoopStage? = nil) {
-        runTask = Task {
-            await runLoop(only: stage)
-            runTask = nil
+        // `gitRoot` is `LoopEngineRunner.run`'s non-optional parameter, so a
+        // run must not start until a real git working tree is resolved —
+        // guards against running git-dependent stages with no working tree.
+        guard let projectId = activeProjectId,
+              let context = workspaceContext,
+              let gitRoot = context.gitRoot
+        else { return }
+        // Fail-closed twin of the Run button's `isStartPending` disable —
+        // "Run this stage only" lives in a menu the disable doesn't cover.
+        guard !runService.isRunning(projectId: projectId, loopId: loopId) else { return }
+        // Only after every refusal path: a refused start must not close the
+        // journal record the user was reading.
+        clearPastRunInspection()
+        // Run implicitly saves the current stage list — but only when it's
+        // safe to: an explicit "Save" always persists (user intent), while
+        // this auto-save must not silently lock in a bare-Regression list
+        // that `loadConfig()` deliberately left unsaved (see
+        // `LoopEngineConfig.shouldPersist`).
+        if isSafeToPersistImplicitly(currentLoop) {
+            saveConfig()
         }
+        var runConfig = currentConfig
+        if let solo = stage {
+            guard let soloed = LoopStage.soloing(runConfig.stages, id: solo.id) else {
+                // Refuse rather than fall through: running the WHOLE pipeline
+                // when one stage was asked for is the worst possible fallback.
+                // Unreachable today (solo comes from the live stages array),
+                // kept fail-closed per LoopStage.soloing's contract.
+                didRejectLastRun = true
+                return
+            }
+            runConfig.stages = soloed
+        }
+        didRejectLastRun = false
+        runService.start(projectId: projectId, loopId: loopId, loopName: loopName,
+                         config: runConfig, faultsRoot: context.projectRoot,
+                         gitRoot: gitRoot,
+                         goal: goal.isEmpty ? nil : goal,
+                         acceptanceCriteria: acceptanceCriteria.isEmpty ? nil : acceptanceCriteria,
+                         scopeGlobs: scopeGlobs) { result in
+            // The terminal status is read from `runner.status` and the Past
+            // Runs refresh rides `.onChange(of: runner.running)` — both
+            // survive this view being re-created mid-run, which this captured
+            // struct's @State writes would not (they land in the torn-down
+            // view's state box as silent no-ops).
+            didRejectLastRun = (result == nil)
+        }
+    }
+
+    /// Cancel this loop's in-flight (or queued) run via the service that owns
+    /// its Task.
+    private func stopRun() {
+        guard let projectId = activeProjectId else { return }
+        runService.stop(projectId: projectId, loopId: loopId)
+    }
+
+    /// True in the window where the service has admitted a run but the runner
+    /// has not yet flipped `running`/`waitingInQueue` (the Task hasn't begun).
+    /// The Run button disables on this too, so a double-click can't reach the
+    /// service's refusal path.
+    private var isStartPending: Bool {
+        guard let projectId = activeProjectId else { return false }
+        return runService.isRunning(projectId: projectId, loopId: loopId)
     }
 
     /// Whether implicit persistence (autosave, Run's implicit save) may write
@@ -1260,56 +1456,4 @@ struct LoopEngineView: View {
         newTemplateSummary = ""
     }
 
-    /// - Parameter single: when set, run just this one stage (forced enabled)
-    ///   under the current budgets — the ⋯ menu's "Run this stage only", for
-    ///   debugging one stage without paying for the whole pipeline. The saved
-    ///   config is still the FULL current one; the single-stage list exists
-    ///   only for this run.
-    @MainActor
-    private func runLoop(only single: LoopStage? = nil) async {
-        clearPastRunInspection()
-        // `gitRoot` is `LoopEngineRunner.run`'s non-optional parameter, so a
-        // run must not start until a real git working tree is resolved —
-        // guards against running git-dependent stages with no working tree.
-        guard let projectId = activeProjectId,
-              let context = workspaceContext,
-              let gitRoot = context.gitRoot
-        else { return }
-        // Run implicitly saves the current stage list — but only when it's
-        // safe to: an explicit "Save" always persists (user intent), while
-        // this auto-save must not silently lock in a bare-Regression list
-        // that `loadConfig()` deliberately left unsaved (see
-        // `LoopEngineConfig.shouldPersist`). Once a real config already
-        // exists for this project, overwriting it here is fine even if the
-        // in-memory `stages` happens to be Regression-only right now — that
-        // reflects a real edit (e.g. the user removed the Test stage), not
-        // an unconfirmed auto-detection.
-        if isSafeToPersistImplicitly(currentLoop) {
-            saveConfig()
-        }
-        var runConfig = currentConfig
-        if let solo = single {
-            guard let soloed = LoopStage.soloing(runConfig.stages, id: solo.id) else {
-                // Refuse rather than fall through: running the WHOLE pipeline
-                // when one stage was asked for is the worst possible fallback.
-                // Unreachable today (solo comes from the live stages array),
-                // kept fail-closed per LoopStage.soloing's contract.
-                didRejectLastRun = true
-                return
-            }
-            // "Run this stage only" — see LoopStage.soloing for why the full
-            // stage list is kept with the others disabled.
-            runConfig.stages = soloed
-        }
-        let result = await runner.run(config: runConfig, faultsRoot: context.projectRoot,
-                                      gitRoot: gitRoot, projectId: projectId,
-                                      loopId: loopId, loopName: loopName,
-                                      goal: goal.isEmpty ? nil : goal,
-                                      acceptanceCriteria: acceptanceCriteria.isEmpty ? nil : acceptanceCriteria,
-                                      scopeGlobs: scopeGlobs)
-        lastStatus = result
-        didRejectLastRun = (result == nil)
-        // The run just journalled itself; re-read so the list reflects it.
-        loadPastRuns()
-    }
 }

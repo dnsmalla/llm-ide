@@ -43,6 +43,33 @@ final class LoopEngineRunner: ObservableObject {
     @Published private(set) var status: LoopEngineStatus?
     @Published private(set) var iteration = 0
 
+    /// Live state of one stage within the in-flight run, for a pipeline
+    /// display. Distinct from the journal's `LoopStageAttempt` (durable,
+    /// per-attempt) — this is the ephemeral "what is happening right now"
+    /// signal the log lines alone could not provide.
+    enum LiveStageState: Equatable {
+        case pending, running, repairing, passed, failed
+    }
+
+    /// Per-stage live state, keyed by stage id. Reset to `.pending` at the
+    /// top of every iteration (the loop re-runs every stage from the top, and
+    /// the display must say so); left holding the final states after a run —
+    /// available to any post-run surface (today's header hides itself when
+    /// the run ends, so nothing renders them yet) until the next run resets it.
+    @Published private(set) var stageStates: [String: LiveStageState] = [:]
+    /// Name of the stage executing (or repairing) right now, `nil` between
+    /// stages and between runs.
+    @Published private(set) var currentStageName: String?
+    /// When the in-flight run started, `nil` between runs — the elapsed-time
+    /// and budget displays derive from this rather than a published timer, so
+    /// the runner never ticks state it has no use for itself.
+    @Published private(set) var runStartedAt: Date?
+    /// The in-flight run's own budgets, snapshotted at start. Published (not
+    /// read from the page's editable state) so the display describes the run
+    /// actually executing even after the user edits the config mid-run.
+    @Published private(set) var runMaxIterations = 0
+    @Published private(set) var runWallClockBudget: TimeInterval?
+
     /// Optional mirror for every log line this runner emits, so a surface that
     /// does not own the runner can still follow a run.
     ///
@@ -286,6 +313,11 @@ final class LoopEngineRunner: ObservableObject {
         defer { waitingInQueue = false }
         do {
             try await LoopRunQueue.acquire(rootKey: lockRootKey)
+            // Cleared HERE, not only by the defer: the defer runs at function
+            // exit, which left a run that had to queue reporting "waiting"
+            // for its entire execution — every consumer (the toolbar label,
+            // the live header) showed "Queued" over a run that was running.
+            waitingInQueue = false
         } catch {
             if let lease = worktreeLease {
                 await LoopWorktreeManager.finish(lease)
@@ -308,11 +340,19 @@ final class LoopEngineRunner: ObservableObject {
         iteration = 0
         iterationRecords = []
         let startedAt = Date()
+        runStartedAt = startedAt
+        runMaxIterations = config.maxIterations
+        runWallClockBudget = config.wallClockBudgetSeconds
+        stageStates = [:]
         currentRunContext = RunContext(config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                                        projectId: projectId, startedAt: startedAt,
                                        loopId: loopId, loopName: loopName)
         defer {
             running = false
+            // `stageStates` is deliberately NOT cleared: the final per-stage
+            // outcome stays available until the next run resets it.
+            currentStageName = nil
+            runStartedAt = nil
             Self.unregisterActiveLoop(rootKey: mainRootKey, loopId: loopId)
             currentRunContext = nil
             LoopRunQueue.release(rootKey: lockRootKey)
@@ -419,8 +459,14 @@ final class LoopEngineRunner: ObservableObject {
             iteration += 1
             iterationRecords.append(LoopIterationRecord(index: iteration))
             appendLog(.info, "Iteration \(iteration)/\(config.maxIterations)")
+            // Every iteration re-runs every stage from the top — the pipeline
+            // display must show that, not keep last iteration's verdicts.
+            stageStates = Dictionary(uniqueKeysWithValues:
+                orderedStages.map { ($0.id, LiveStageState.pending) })
 
             for stage in orderedStages {
+                currentStageName = stage.name
+                stageStates[stage.id] = .running
                 let decision: StageDecision
                 switch stage.kind {
                 case .regressionSweep:
@@ -488,6 +534,7 @@ final class LoopEngineRunner: ObservableObject {
         appendLog(outcome.passed ? .info : .warn, "  [\(stage.name)] \(line)")
 
         if outcome.passed {
+            stageStates[stage.id] = .passed
             record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
                    passed: true, output: "", score: 0)
             // A pass restarts the stall watch so a later failure in the same run
@@ -496,6 +543,7 @@ final class LoopEngineRunner: ObservableObject {
             return .proceed
         }
 
+        stageStates[stage.id] = .failed
         let verdict = progress.record(key: stage.id, score: outcome.regressed, hash: Self.hash(line))
         record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
                passed: false, output: line, score: outcome.regressed)
@@ -522,6 +570,7 @@ final class LoopEngineRunner: ObservableObject {
         // becomes invalid by the time we get here, fail closed instead of
         // force-unwrapping.
         guard let command = Self.validCommand(stage) else {
+            stageStates[stage.id] = .failed
             return .terminate(.error("Stage \"\(stage.name)\" has no command"))
         }
 
@@ -531,6 +580,12 @@ final class LoopEngineRunner: ObservableObject {
         do {
             outcome = try await verifier.verify(command: command, repoRoot: gitRoot, timeout: timeout)
         } catch is CancellationError {
+            // Terminate paths must not leave the state stuck at `.running` —
+            // the retained post-run states would then claim a stage was still
+            // executing after the run ended. `.pending`, not `.failed`: a
+            // cancelled stage produced no verdict, and asserting failure
+            // would bake the wrong answer into any post-run display.
+            stageStates[stage.id] = .pending
             return .terminate(.aborted)
         } catch VerifyError.timedOut(let seconds) {
             // A timeout means the stage never confirmed passing — treat it like an
@@ -545,21 +600,28 @@ final class LoopEngineRunner: ObservableObject {
             // while the machine is already under critical memory pressure. End the
             // run and say why.
             appendLog(.warn, "  [\(stage.name)] \(reason)")
+            // `.pending`, not `.failed` — a resource stop is deliberately not
+            // scored as a stage failure (see the comment above), and the live
+            // state must not contradict that.
+            stageStates[stage.id] = .pending
             return .terminate(.error(reason))
         } catch {
             appendLog(.error, "  [\(stage.name)] error: \(error.localizedDescription)")
+            stageStates[stage.id] = .failed
             return .terminate(.error(error.localizedDescription))
         }
         let duration = Date().timeIntervalSince(startedAt)
 
         if outcome.exitCode == 0 {
             appendLog(.info, "  [\(stage.name)] passed")
+            stageStates[stage.id] = .passed
             record(stage, startedAt: startedAt, duration: duration, exitCode: 0,
                    passed: true, output: "", score: StageOutputParser.parseFailureCount(outcome.output))
             progress.clear(key: stage.id)
             return .proceed
         }
 
+        stageStates[stage.id] = .failed
         let score = StageOutputParser.parseFailureCount(outcome.output)
         let excerpt = String(outcome.output.suffix(500))
         let scoreNote = score.map { " · \($0) failing" } ?? ""
@@ -602,6 +664,7 @@ final class LoopEngineRunner: ObservableObject {
         }
 
         appendLog(.info, "  [\(stage.name)] repairing…")
+        stageStates[stage.id] = .repairing
         repairsUsed[stage.id] = used + 1
         let evidence = RepairEvidence(
             attempt: used + 1, previousScore: verdict.previousScore, currentScore: score,
@@ -616,6 +679,12 @@ final class LoopEngineRunner: ObservableObject {
                                                        reservedForTruncation: AgentLoopStageRepairer.maxFailureOutputChars),
                 evidence: evidence, repoRoot: gitRoot)
         }
+
+        // The repair finished either way; the stage itself is still failed —
+        // the next iteration's re-run (or the terminal status) says whether
+        // the repair worked, and a chip stuck on "repairing" would claim
+        // otherwise.
+        stageStates[stage.id] = .failed
 
         switch guarded {
         case .failed(let error):
@@ -657,6 +726,7 @@ final class LoopEngineRunner: ObservableObject {
 
         switch guarded {
         case .failed(let error):
+            stageStates[stage.id] = .failed
             record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
                    passed: false, output: error.localizedDescription, score: nil)
             if error is CancellationError { return .terminate(.aborted) }
@@ -671,6 +741,7 @@ final class LoopEngineRunner: ObservableObject {
             // recording it as passed would render as a clean row directly above
             // the violation it caused in the run summary.
             let clean = violations.isEmpty
+            stageStates[stage.id] = clean ? .passed : .failed
             record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
                    passed: clean, output: clean ? "" : "touched a protected or out-of-scope path(s): \(violations.joined(separator: ", "))",
                    score: nil, changedPaths: changed, scopeVerdict: verdictScope)
@@ -914,9 +985,19 @@ final class LoopEngineRunner: ObservableObject {
         return header + trimmedText
     }
 
+    /// Ceiling for the in-memory live log. Runners are app-lifetime now
+    /// (owned by `LoopRunService`), so an unbounded log would accumulate for
+    /// as long as the app stays open. Mirrors `TaskLogStore`'s own cap.
+    private static let maxLogLines = 2000
+
     private func appendLog(_ level: LogLine.Level, _ text: String) {
         let line = LogLine(at: Date(), level: level, text: text)
         log.append(line)
+        if log.count > Self.maxLogLines {
+            // Trim in one chunk, not per append — removeFirst(1) per line
+            // would make every append past the cap O(n).
+            log.removeFirst(log.count - Self.maxLogLines + Self.maxLogLines / 10)
+        }
         onLog?(line)
     }
 

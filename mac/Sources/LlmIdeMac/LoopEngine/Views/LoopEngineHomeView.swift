@@ -22,6 +22,11 @@ struct LoopEngineHomeView: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
+    /// Owns every desktop Loop run and each loop's long-lived runner —
+    /// resolved here (the workspace view can't read the environment in its
+    /// own init) and observed so `activeKeys` changes re-render the list's
+    /// running indicator the moment a run starts or ends.
+    @EnvironmentObject var runService: LoopRunService
 
     @State private var loops: [LoopDefinition] = []
     @State private var selectedLoopId: String?
@@ -40,9 +45,16 @@ struct LoopEngineHomeView: View {
             loopListPane
                 .frame(width: 220)
             Divider()
-            if let selectedLoopId {
-                LoopEngineView(api: api, loopId: selectedLoopId)
-                    .id(selectedLoopId)
+            if let selectedLoopId, let projectId = activeProjectId {
+                LoopEngineView(api: api, loopId: selectedLoopId,
+                               runner: runService.runner(projectId: projectId,
+                                                         loopId: selectedLoopId),
+                               approvals: runService.approvals)
+                    // Keyed by project AND loop: loop ids are UUIDs so a
+                    // cross-project collision is theoretical, but the runner
+                    // handed in above is project-scoped and the view identity
+                    // must match it.
+                    .id("\(projectId)::\(selectedLoopId)")
             } else {
                 emptyState
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -52,6 +64,11 @@ struct LoopEngineHomeView: View {
         .navigationTitle("Loop")
         .task(id: activeProjectId) {
             reloadLoops()
+            // The user is looking at the Loop page — the one surface that can
+            // put a loop on the schedule — so this is the foreground moment
+            // to secure notification permission for the scheduled runs that
+            // will later finish unattended (their notify path never prompts).
+            LoopRunNotifier.prepareAuthorization()
         }
         .sheet(isPresented: $isPresentingNewLoopWizard) {
             NewLoopWizardView(
@@ -168,6 +185,15 @@ struct LoopEngineHomeView: View {
     }
 
     private func isRunning(_ loop: LoopDefinition) -> Bool {
+        // The service covers desktop runs LIVE (its activeKeys is @Published,
+        // so the dot updates the moment a run starts or ends). The static
+        // check stays as the fallback for runs this service doesn't own —
+        // the Auto Task scheduler's and worktree runs — which only refresh
+        // on the next unrelated render, as before.
+        if let projectId = activeProjectId,
+           runService.isRunning(projectId: projectId, loopId: loop.id) {
+            return true
+        }
         guard let gitRoot = workspaceContext?.gitRoot else { return false }
         return LoopEngineRunner.isLoopActive(loopId: loop.id, gitRoot: gitRoot)
     }
@@ -253,6 +279,13 @@ struct LoopEngineHomeView: View {
     /// check.
     private func deleteLoop(_ loop: LoopDefinition) {
         guard loops.count > 1, !loop.isDefault else { return }
+        // Cancel any in-flight run FIRST: deleting the row unmounts the only
+        // page holding a Stop button, and the service's Task would otherwise
+        // keep the repo's run lock and keep issuing paid repair calls with
+        // nothing in the UI able to reach it.
+        if let projectId = activeProjectId {
+            runService.stop(projectId: projectId, loopId: loop.id)
+        }
         mutateStore { store in
             store.loops.removeAll { $0.id == loop.id }
             // Deleting the Primary loop promotes the next one — a project must

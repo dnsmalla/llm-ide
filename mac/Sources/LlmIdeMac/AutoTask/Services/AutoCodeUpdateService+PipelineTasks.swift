@@ -854,6 +854,13 @@ extension AutoCodeUpdateService {
             detail: ["iterations": totalIterations, "loops": targets.count],
             link: ShellState.Section.loopEngine.rawValue
         )
+        // Same background-only banner desktop runs get from LoopRunService —
+        // a scheduled run finishing while the user is elsewhere was previously
+        // silent outside the activity feed.
+        LoopRunNotifier.notify(
+            title: passed == targets.count ? "Loop auto task finished"
+                                           : "Loop auto task needs attention",
+            body: "\(passed)/\(targets.count) loop(s) passed · \(totalIterations) iteration(s)")
         return reachedTerminal
     }
 
