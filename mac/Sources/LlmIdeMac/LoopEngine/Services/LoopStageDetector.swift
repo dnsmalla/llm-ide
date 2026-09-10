@@ -233,20 +233,68 @@ enum LoopStageDetector {
 
     /// One suggested command for the stage editor's "Suggestions" picker,
     /// with a short label naming where it came from.
+    ///
+    /// `isPrimary` is true for every marker-based candidate (they are
+    /// test/build-shaped by construction) and for a Makefile target whose
+    /// OWN name marks it as verify-shaped (`isLikelyCheckTarget`); false for
+    /// every other real Makefile target, which the picker still offers, just
+    /// behind a "More targets" submenu rather than flat alongside the ones
+    /// that plausibly belong in a Verify stage.
     struct DetectedCommand: Identifiable, Equatable {
         var id: String { "\(label)|\(command)" }
         let label: String
         let command: String
+        var isPrimary: Bool = true
     }
 
-    /// The one Makefile target excluded from `detectCommandCandidates`: it
-    /// starts a local dev server and never exits, so a Loop stage running it
-    /// would hang the whole run forever (stages have no default timeout).
-    /// Every OTHER real target is offered — the Command field is free text
-    /// already, so hiding a target the user could type by hand protects
-    /// nothing; this one specifically breaks a run in a way nothing else on
-    /// the list can.
+    /// The one Makefile target excluded from `detectCommandCandidates`
+    /// entirely (not just demoted to "More targets"): it starts a local dev
+    /// server and never exits, which a stage's own `timeoutSeconds` would
+    /// eventually cut off if set — but the field defaults to nil (no limit),
+    /// so this is the one name worth never suggesting at all rather than
+    /// trusting every caller to have set a budget first.
     private static let nonTerminatingMakeTargets: Set<String> = ["docs-serve"]
+
+    /// Name components that mark a Makefile target as verify/build-shaped —
+    /// `docs-check` and `test-mac` both contain one. A Loop Verify stage
+    /// exists to prove something is still true; a target that always exits 0
+    /// regardless of the repo's state (a setup step like `hooks`, a cleanup
+    /// step like `clean`) would make a Verify stage that can never fail, so
+    /// those still show up (nothing here is hidden) but only behind "More
+    /// targets", not flat alongside the ones that actually check something.
+    private static let primaryMakeTargetKeywords: Set<String> = [
+        "test", "check", "lint", "verify", "build", "regression", "ci",
+    ]
+
+    private static func isLikelyCheckTarget(_ name: String) -> Bool {
+        name.split(separator: "-").contains { primaryMakeTargetKeywords.contains(String($0)) }
+    }
+
+    /// `makefile` with every `define … endef` block removed.
+    ///
+    /// Those blocks hold arbitrary text — canned recipes, and very commonly a
+    /// `help:` banner. The target pattern accepts several space-separated
+    /// names before the colon (real Makefile syntax: `foo bar: dep`), which
+    /// means a column-0 prose line inside such a block parses as a target
+    /// list: "Usage: make test" would offer `make Usage`. Nothing outside a
+    /// define block can produce that, so dropping the blocks is enough.
+    private static func strippingDefineBlocks(_ makefile: String) -> String {
+        var kept: [Substring] = []
+        var inDefine = false
+        for line in makefile.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if inDefine {
+                if trimmed == "endef" { inDefine = false }
+                continue
+            }
+            if trimmed == "define" || trimmed.hasPrefix("define ") {
+                inDefine = true
+                continue
+            }
+            kept.append(line)
+        }
+        return kept.joined(separator: "\n")
+    }
 
     /// Every command candidate detectable at `gitRoot`, for the stage
     /// editor's picker.
@@ -304,23 +352,36 @@ enum LoopStageDetector {
         }
 
         if let makefile = try? String(contentsOf: gitRoot.appendingPathComponent("Makefile"), encoding: .utf8) {
-            // A bare `name:` at column 0: excludes `.PHONY:` (leading `.`),
-            // indented recipe lines, and variable assignments (`FOO := bar`,
-            // which this pattern's required trailing bare colon cannot
-            // match against `:=`).
-            let targetPattern = try? NSRegularExpression(pattern: #"(?m)^([A-Za-z][A-Za-z0-9_-]*):"#)
-            let ns = makefile as NSString
+            let scannable = strippingDefineBlocks(makefile)
+            // One or more space-separated target names at column 0, then a
+            // bare colon: excludes `.PHONY:` (leading `.`), indented recipe
+            // lines, pattern rules (`%.o: %.c` — `^` cannot start mid-line,
+            // and `%` matches nothing here), and every assignment flavour
+            // (`FOO := bar`, `FOO ::= bar`, `FOO :::= bar`) via the
+            // `(?!:*=)` lookahead — a plain `:=` lookahead let the
+            // POSIX-simple `::=` form through as a target named FOO.
+            let targetPattern = try? NSRegularExpression(
+                pattern: #"(?m)^([A-Za-z][A-Za-z0-9_.-]*(?:[ \t]+[A-Za-z][A-Za-z0-9_.-]*)*)[ \t]*(?!:*=):"#)
+            let ns = scannable as NSString
             var seen = Set<String>()
-            targetPattern?.enumerateMatches(in: makefile, range: NSRange(location: 0, length: ns.length)) { match, _, _ in
-                guard let match, let range = Range(match.range(at: 1), in: makefile) else { return }
-                let target = String(makefile[range])
-                guard seen.insert(target).inserted, !nonTerminatingMakeTargets.contains(target) else { return }
-                candidates.append(DetectedCommand(label: "Makefile", command: "make \(target)"))
+            targetPattern?.enumerateMatches(in: scannable, range: NSRange(location: 0, length: ns.length)) { match, _, _ in
+                guard let match, let range = Range(match.range(at: 1), in: scannable) else { return }
+                // A line can name several targets sharing one recipe
+                // (`foo bar: baz`) — each is a real, independently runnable
+                // target, not one target literally named "foo bar".
+                // `split(whereSeparator:)` omits empty subsequences, so a
+                // double space between two names yields two tokens, not three.
+                for token in scannable[range].split(whereSeparator: { $0 == " " || $0 == "\t" }) {
+                    let target = String(token)
+                    guard seen.insert(target).inserted, !nonTerminatingMakeTargets.contains(target) else { continue }
+                    candidates.append(DetectedCommand(label: "Makefile", command: "make \(target)",
+                                                      isPrimary: isLikelyCheckTarget(target)))
+                }
             }
         }
 
-        guard !stageName.isEmpty else { return candidates }
-        let needle = stageName.lowercased()
+        let needle = stageName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return candidates }
         let matched = candidates.filter { $0.command.lowercased().contains(needle) }
         let unmatched = candidates.filter { !$0.command.lowercased().contains(needle) }
         return matched + unmatched

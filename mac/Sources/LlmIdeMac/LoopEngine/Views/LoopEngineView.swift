@@ -616,8 +616,24 @@ struct LoopEngineView: View {
                     .font(.system(size: 11, design: .monospaced))
 
                     if let gitRoot = activeGitRootURL {
-                        commandSuggestionsMenu(gitRoot: gitRoot, stageName: stages[index].name) { command in
-                            stages[index].command = command
+                        commandSuggestionsMenu(gitRoot: gitRoot, stageName: stages[index].name) { candidate in
+                            stages[index].command = candidate.command
+                            // A NON-primary pick is an unknown quantity: it is
+                            // whatever else the Makefile happens to define, so
+                            // it could be a dev server or a watcher that never
+                            // exits, and `timeoutSeconds` defaults to nil (no
+                            // limit) — the run would hang rather than fail one
+                            // stage. Primaries are deliberately left unbounded:
+                            // `isLikelyCheckTarget` has already vouched for
+                            // them, and they are exactly the long ones (a cold
+                            // `make regression` here builds three app configs).
+                            // A timeout is scored as a stage FAILURE, so
+                            // capping those would dispatch an LLM repair
+                            // against healthy code — worse than the hang this
+                            // guards. Never overrides a value the user chose.
+                            if !candidate.isPrimary, stages[index].timeoutSeconds == nil {
+                                stages[index].timeoutSeconds = 1800
+                            }
                         }
                     }
                 }
@@ -734,19 +750,51 @@ struct LoopEngineView: View {
     /// size to run fresh per menu construction — the same cost/caching
     /// trade-off `activeGitRootURL` above already makes for this view.
     @ViewBuilder
-    private func commandSuggestionsMenu(gitRoot: URL, stageName: String, onSelect: @escaping (String) -> Void) -> some View {
+    private func commandSuggestionsMenu(
+        gitRoot: URL, stageName: String,
+        onSelect: @escaping (LoopStageDetector.DetectedCommand) -> Void
+    ) -> some View {
         let candidates = LoopStageDetector.detectCommandCandidates(gitRoot: gitRoot, stageName: stageName)
+        // `isPrimary` false is every OTHER real Makefile target — setup and
+        // cleanup steps (`hooks`, `clean`, `docs-deps`) that exit 0
+        // unconditionally. Nothing here is hidden, but a Verify stage's
+        // whole point is to prove something is still true, so those go
+        // behind "More targets" instead of sitting flat next to the ones
+        // that actually check something.
+        let primary = candidates.filter(\.isPrimary)
+        let other = candidates.filter { !$0.isPrimary }
         Menu {
             if candidates.isEmpty {
+                // Reachable on purpose: the button is deliberately NOT
+                // `.disabled` when empty, or this explanation — the only
+                // thing that tells the user detection ran and found nothing
+                // — could never be read.
                 Text("No test/build tooling detected in this repo.")
             } else {
-                ForEach(candidates) { candidate in
+                ForEach(primary) { candidate in
                     Button {
-                        onSelect(candidate.command)
+                        onSelect(candidate)
                     } label: {
                         Text(candidate.command)
                         Text(candidate.label)
                     }
+                }
+                if !other.isEmpty {
+                    Menu("More targets") {
+                        ForEach(other) { candidate in
+                            Button {
+                                onSelect(candidate)
+                            } label: {
+                                Text(candidate.command)
+                                Text(candidate.label)
+                            }
+                        }
+                    }
+                    // `.borderlessButton` on the OUTER menu propagates through
+                    // the environment, and it has no submenu rendering — an
+                    // inherited style here risks a submenu that silently never
+                    // opens, taking every demoted target with it.
+                    .menuStyle(.automatic)
                 }
             }
         } label: {
@@ -755,7 +803,7 @@ struct LoopEngineView: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .help("Suggested commands detected in this repo")
-        .disabled(candidates.isEmpty)
+        .accessibilityLabel("Suggested commands")
     }
 
     // MARK: - Log pane
