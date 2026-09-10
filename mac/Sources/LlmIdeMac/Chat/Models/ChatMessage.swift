@@ -32,11 +32,37 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         let tool: String?
         let at: Date
 
-        init(id: UUID = UUID(), label: String, tool: String?, at: Date = Date()) {
+        // --- v2-only, and OPTIONAL because this type is persisted ------------
+        //
+        // Steps written before these fields existed must keep decoding, which
+        // optionals give for free (a missing key decodes as nil). The legacy
+        // engine never populates them: its wire carries no tool arguments or
+        // output at all, so a legacy step is `nil` here rather than "".
+        // `ChatMessageConformance` pins both halves of that in the lab.
+
+        /// The tool call's arguments, as the JSON the model emitted.
+        let args: String?
+        /// The tool's output, capped server-side at 20k chars.
+        let resultText: String?
+        /// Whether that output is an error rather than a result.
+        let isError: Bool?
+
+        init(
+            id: UUID = UUID(),
+            label: String,
+            tool: String?,
+            at: Date = Date(),
+            args: String? = nil,
+            resultText: String? = nil,
+            isError: Bool? = nil
+        ) {
             self.id = id
             self.label = label
             self.tool = tool
             self.at = at
+            self.args = args
+            self.resultText = resultText
+            self.isError = isError
         }
 
         /// SF Symbol matching the action — carried over verbatim from the

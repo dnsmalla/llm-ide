@@ -51,6 +51,24 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--decode" {
 
 print("chat-contract-lab")
 
+// ChatMessage.ToolStep is PERSISTED (sessions/<uuid>.json), so widening it is a
+// schema migration: a step written before the new fields existed must still
+// decode, and a step written after must round-trip.
+do {
+    let legacy = Data(#"{"id":"1B4E28BA-2FA1-11D2-883F-0016D3CCE4A1","label":"Reading","tool":"Read","at":768000000}"#.utf8)
+    expect(ChatMessageConformance.decodesToolStep(legacy), "a ToolStep written before the new fields still decodes")
+
+    let widened = Data(#"{"id":"1B4E28BA-2FA1-11D2-883F-0016D3CCE4A1","label":"Reading","tool":"Read","at":768000000,"args":"{\"file_path\":\"/a.swift\"}","resultText":"import SwiftUI","isError":false}"#.utf8)
+    expect(ChatMessageConformance.decodesToolStep(widened), "a ToolStep carrying the new fields decodes")
+
+    let report = ChatMessageConformance.toolStepFields(forJSON: widened)
+    expect(report?.contains("args") == true, "args survives the round trip")
+    expect(report?.contains("resultText") == true, "resultText survives the round trip")
+    expect(report?.contains("isError") == true, "isError survives the round trip")
+    expect(ChatMessageConformance.toolStepFields(forJSON: legacy)?.isEmpty == true,
+           "a legacy step reports no v2 fields rather than defaulting to empty strings")
+}
+
 // ChatStreamBuffer — the coalescing arithmetic, independent of scheduling.
 do {
     let a = UUID(), b = UUID()
