@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-ide.local/schema/agent-v2.schema.json",
+  "title": "agent/v2 SSE wire event",
+  "description": "One `data:` payload on GET/POST /agent/v2/stream. Every variant sets additionalProperties:false ON PURPOSE — a field added server-side must be added here in the same edit, which is what makes scripts/conformance-agent-v2.mjs able to notice that the Mac does not decode it. See SCHEMA.md.",
+  "type": "object",
+  "required": ["type"],
+  "oneOf": [
+    {
+      "title": "init",
+      "additionalProperties": false,
+      "required": ["type", "sessionId", "claudeCodeVersion", "model", "tools", "capabilities", "mcpServers"],
+      "properties": {
+        "type": { "const": "init" },
+        "sessionId": { "type": ["string", "null"] },
+        "claudeCodeVersion": { "type": ["string", "null"] },
+        "model": { "type": ["string", "null"] },
+        "tools": { "type": "array", "items": { "type": "string" } },
+        "capabilities": { "type": "array", "items": { "type": "string" } },
+        "mcpServers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "name": { "type": ["string", "null"] }, "status": { "type": ["string", "null"] } }
+          }
+        }
+      }
+    },
+    {
+      "title": "delta",
+      "additionalProperties": false,
+      "required": ["type", "text"],
+      "properties": { "type": { "const": "delta" }, "text": { "type": "string" } }
+    },
+    {
+      "title": "tool_use_start",
+      "additionalProperties": false,
+      "required": ["type", "id", "name"],
+      "properties": {
+        "type": { "const": "tool_use_start" },
+        "id": { "type": ["string", "null"] },
+        "name": { "type": ["string", "null"] }
+      }
+    },
+    {
+      "title": "tool_args_delta",
+      "additionalProperties": false,
+      "required": ["type", "index", "partialJson"],
+      "properties": {
+        "type": { "const": "tool_args_delta" },
+        "index": { "type": "integer" },
+        "partialJson": { "type": "string" }
+      }
+    },
+    {
+      "title": "tool_result",
+      "additionalProperties": false,
+      "required": ["type", "toolUseId", "isError", "text", "truncated"],
+      "properties": {
+        "type": { "const": "tool_result" },
+        "toolUseId": { "type": ["string", "null"] },
+        "isError": { "type": "boolean" },
+        "text": { "type": "string" },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    {
+      "title": "usage",
+      "additionalProperties": false,
+      "required": ["type", "inputTokens", "outputTokens", "cacheReadTokens"],
+      "properties": {
+        "type": { "const": "usage" },
+        "inputTokens": { "type": "integer" },
+        "outputTokens": { "type": "integer" },
+        "cacheReadTokens": { "type": "integer" }
+      }
+    },
+    {
+      "title": "result",
+      "additionalProperties": false,
+      "required": ["type", "subtype", "costUsd", "numTurns", "durationMs", "sessionId", "stopReason"],
+      "properties": {
+        "type": { "const": "result" },
+        "subtype": { "type": ["string", "null"] },
+        "costUsd": { "type": ["number", "null"] },
+        "numTurns": { "type": ["integer", "null"] },
+        "durationMs": { "type": ["integer", "null"] },
+        "sessionId": { "type": ["string", "null"] },
+        "stopReason": { "type": ["string", "null"] }
+      }
+    },
+    {
+      "title": "sdk",
+      "additionalProperties": false,
+      "required": ["type", "sdkType", "subtype", "raw"],
+      "properties": {
+        "type": { "const": "sdk" },
+        "sdkType": { "type": ["string", "null"] },
+        "subtype": { "type": ["string", "null"] },
+        "raw": {}
+      }
+    },
+    {
+      "title": "approval_request (ToolApproval)",
+      "additionalProperties": false,
+      "required": ["type", "requestId", "kind", "toolName", "argsSummary"],
+      "properties": {
+        "type": { "const": "approval_request" },
+        "requestId": { "type": "string" },
+        "kind": { "const": "ToolApproval" },
+        "toolName": { "type": "string" },
+        "argsSummary": { "type": ["string", "null"] },
+        "args": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Only for Bash / Edit / Write — engine.mjs approvalArgsFor. Absent for every other gated tool.",
+          "properties": {
+            "command": { "type": "string" },
+            "filePath": { "type": "string" },
+            "oldString": { "type": "string" },
+            "newString": { "type": "string" },
+            "replaceAll": { "type": "boolean" },
+            "contentPreview": { "type": "string" },
+            "totalChars": { "type": "integer" },
+            "exists": { "type": "boolean" },
+            "truncated": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    {
+      "title": "approval_request (AskUserQuestion)",
+      "additionalProperties": false,
+      "required": ["type", "requestId", "kind", "questions"],
+      "properties": {
+        "type": { "const": "approval_request" },
+        "requestId": { "type": "string" },
+        "kind": { "const": "AskUserQuestion" },
+        "questions": {
+          "type": "array",
+          "description": "PASSED THROUGH FROM THE SDK VERBATIM (engine.mjs:906). This is the one place the wire IS the SDK's shape, so an SDK rename lands here first — see SCHEMA.md.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["question", "options", "multiSelect"],
+            "properties": {
+              "question": { "type": "string" },
+              "header": { "type": "string" },
+              "multiSelect": { "type": "boolean" },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["label"],
+                  "properties": {
+                    "label": { "type": "string" },
+                    "description": { "type": "string" },
+                    "preview": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "approval_resolved",
+      "additionalProperties": false,
+      "required": ["type", "requestId", "outcome"],
+      "properties": {
+        "type": { "const": "approval_resolved" },
+        "requestId": { "type": "string" },
+        "outcome": { "type": "string" }
+      }
+    },
+    {
+      "title": "mode_set",
+      "additionalProperties": false,
+      "required": ["type", "mode"],
+      "properties": { "type": { "const": "mode_set" }, "mode": { "type": "string" } }
+    },
+    {
+      "title": "tasks",
+      "additionalProperties": false,
+      "required": ["type", "tasks", "continueNeeded"],
+      "properties": {
+        "type": { "const": "tasks" },
+        "tasks": { "type": "array", "items": { "$ref": "#/$defs/task" } },
+        "continueNeeded": { "type": "boolean" }
+      }
+    },
+    {
+      "title": "tasks_progress",
+      "additionalProperties": false,
+      "required": ["type", "tasks"],
+      "properties": {
+        "type": { "const": "tasks_progress" },
+        "tasks": { "type": "array", "items": { "$ref": "#/$defs/task" } }
+      }
+    },
+    {
+      "title": "error",
+      "additionalProperties": false,
+      "required": ["type", "code", "message", "retryable"],
+      "properties": {
+        "type": { "const": "error" },
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" }
+      }
+    }
+  ],
+  "$defs": {
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "status"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "status": { "type": "string" }
+      }
+    }
+  }
+}

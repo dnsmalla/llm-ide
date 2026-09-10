@@ -1,0 +1,1 @@
+{"type":"approval_request","requestId":"7c1e4a90-2b6d-4f83-a55c-91e0d3f7b248","kind":"ToolApproval","toolName":"Edit","argsSummary":"mac/Sources/LlmIdeMac/Chat/Engine/ChatEngine.swift","args":{"filePath":"/repo/mac/Sources/LlmIdeMac/Chat/Engine/ChatEngine.swift","oldString":"var busy = false","newString":"var busy = true","replaceAll":false}}
