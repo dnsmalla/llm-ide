@@ -47,6 +47,16 @@ final class ChatEngine {
         /// other messages ahead of it. A flag on the engine would be spent
         /// by whichever turn drained first.
         var planExecute: Bool = false
+        /// Snapshot of the composer's attachments AT ENQUEUE TIME, when the
+        /// caller has one to give (nil for callers — like "Execute plan" —
+        /// that never passed one and mean "read whatever the live composer
+        /// holds when this turn actually runs", the pre-existing behavior).
+        /// The composer clears its live `attachmentState.attachments` right
+        /// after enqueueing (so a chip is one-shot per message, not a
+        /// standing attachment) — without this snapshot, a queued turn would
+        /// pick up whatever the composer holds when it FINALLY runs, which by
+        /// then may be empty or belong to a different, later message.
+        var attachments: [LlmIdeAPIClient.CodeAttachment]?
     }
 
     // MARK: - Observable state (moved 1:1 from the panel)
@@ -443,7 +453,7 @@ final class ChatEngine {
 
     /// Launch a turn as an unstructured Task whose handle Stop can cancel.
     func startTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil,
-                   planExecute: Bool = false) {
+                   planExecute: Bool = false, attachments: [LlmIdeAPIClient.CodeAttachment]? = nil) {
         // Mark the slot taken SYNCHRONOUSLY. `runTurn` doesn't set `busy`
         // until the Task below is scheduled, so a caller that reached here
         // after an `await` (the quick chat's send-path version probe) could
@@ -461,7 +471,7 @@ final class ChatEngine {
         // immediately before calling (see both quick-chat composers).
         busy = true
         runTask = Task { await runTurn(message, skillIds: skillIds, userMetadata: userMetadata,
-                                       planExecute: planExecute) }
+                                       planExecute: planExecute, attachments: attachments) }
     }
 
     /// Cancel the in-flight turn — panel-driven (`runTask`) or phone-driven
@@ -497,16 +507,16 @@ final class ChatEngine {
     /// Queue a message the user sent while a turn was running. Drained FIFO,
     /// one per turn, by `runTurn`'s tail.
     func enqueue(_ text: String, skillIds: [String], userMetadata: ChatMessage.Metadata? = nil,
-                 planExecute: Bool = false) {
+                 planExecute: Bool = false, attachments: [LlmIdeAPIClient.CodeAttachment]? = nil) {
         queued.append(.init(text: text, skillIds: skillIds, userMetadata: userMetadata,
-                            planExecute: planExecute))
+                            planExecute: planExecute, attachments: attachments))
     }
 
     /// Run one user turn end-to-end. On completion it drains `queued` (if any)
     /// as a FRESH task — an unstructured `Task {}` does NOT inherit the current
     /// task's cancellation, so a stopped turn still lets the queued message run.
     func runTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil,
-                 planExecute: Bool = false) async {
+                 planExecute: Bool = false, attachments: [LlmIdeAPIClient.CodeAttachment]? = nil) async {
         onTurnStart()
         onRecordPrompt(message)
         onNudge(message)
@@ -562,8 +572,12 @@ final class ChatEngine {
                 // A background turn (auto-continue on a parked engine) must
                 // not pick up the files staged in the composer of whatever
                 // chat is on screen NOW — those belong to the displayed
-                // chat's next message.
-                persistsUnobserved ? [] : attachmentsForTurn(),
+                // chat's next message. `attachments` is the snapshot the
+                // caller (submit()/drainQueueOrRelease) took at send/enqueue
+                // time; only a caller with none passed (e.g. the plain
+                // auto-continue "Continue working..." turn) falls back to
+                // reading the live composer state.
+                persistsUnobserved ? [] : (attachments ?? attachmentsForTurn()),
                 skillIds
             )
             stampOwnIdentity(&input)
@@ -647,7 +661,7 @@ final class ChatEngine {
         if !queued.isEmpty {
             let next = queued.removeFirst()
             startTurn(next.text, skillIds: next.skillIds, userMetadata: next.userMetadata,
-                      planExecute: next.planExecute)
+                      planExecute: next.planExecute, attachments: next.attachments)
         } else {
             busy = false
             runTask = nil

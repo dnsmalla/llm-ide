@@ -3,7 +3,7 @@ import os.log
 
 extension LlmIdeAPIClient {
 
-    struct CodeAttachment: Codable, Identifiable {
+    struct CodeAttachment: Codable, Identifiable, Equatable {
         let path: String                // display label, may be ~/-prefixed
         let content: String
         var id: String { path }

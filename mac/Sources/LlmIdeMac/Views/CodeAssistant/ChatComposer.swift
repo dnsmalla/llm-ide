@@ -828,11 +828,24 @@ extension CodeAssistantPanel {
         }
         attachmentState.selectedSkills = []
         let outgoing = directives.isEmpty ? msg : directives.joined(separator: "\n") + "\n\n" + msg
+        // Snapshot the attached-file chips for THIS message before clearing
+        // them below — `engine` reads attachments asynchronously (on the next
+        // turn it runs, possibly after a queue drain), so passing this fixed
+        // snapshot through keeps the files tied to the message they were
+        // attached for, instead of racing against the clear just below.
+        let attachmentsSnapshot = attachmentState.attachments
         if engine.busy {
-            engine.enqueue(outgoing, skillIds: skillIds)
+            engine.enqueue(outgoing, skillIds: skillIds, attachments: attachmentsSnapshot)
         } else {
-            engine.startTurn(outgoing, skillIds: skillIds)
+            engine.startTurn(outgoing, skillIds: skillIds, attachments: attachmentsSnapshot)
         }
+        // Consume the file chips one-shot for THIS message too — same
+        // reasoning as `selectedSkills` above: a double-clicked/attached file
+        // should ride exactly the next message sent, not silently reattach to
+        // every later turn. `autoAttachedPath` resets alongside so reopening
+        // the same file re-triggers auto-attach for a future message.
+        attachmentState.attachments = []
+        autoAttachedPath = nil
     }
 
     /// ↑ in the composer: walk back through previously-sent prompts. Returns
