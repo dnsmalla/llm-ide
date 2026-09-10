@@ -131,6 +131,32 @@ final class ChatEngineRegistry {
         Set(background.filter { $0.value.busy }.keys)
     }
 
+    /// Every engine — displayed or parked — currently blocked on an approval,
+    /// oldest park order first (background) then displayed order.
+    ///
+    /// `ChatMessageList` only renders `engine.pendingApproval` for the ONE
+    /// engine its own panel currently displays, gated to that engine's last
+    /// turn. Switch scopes, or switch sessions within a scope while the
+    /// outgoing chat is busy (which parks it, per `switchDisplayedSession`),
+    /// and the approval keeps existing in memory but stops being rendered
+    /// anywhere — invisible until the server's 15-minute expiry
+    /// (`sdk/decisions.mjs`), holding that chat's turn lock the whole time.
+    /// This is read by `AppShell`'s toolbar indicator so the user has a way
+    /// back to it regardless of which section they are looking at.
+    var pendingApprovals: [(scope: ChatScope, sessionID: UUID, state: AgentV2ApprovalState)] {
+        var result: [(scope: ChatScope, sessionID: UUID, state: AgentV2ApprovalState)] = []
+        for id in backgroundOrder {
+            guard let engine = background[id], let state = engine.pendingApproval else { continue }
+            result.append((engine.scope, id, state))
+        }
+        for scope in ChatScope.allCases {
+            guard let engine = displayed[scope], let state = engine.pendingApproval,
+                  let id = UUID(uuidString: engine.currentSessionIDString) else { continue }
+            result.append((scope, id, state))
+        }
+        return result
+    }
+
     /// Switch `scope`'s displayed chat to `sessionID` and return the engine
     /// the panel should render from now on — which may be a DIFFERENT
     /// instance than the one it was rendering. The caller re-points its own

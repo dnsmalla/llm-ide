@@ -231,6 +231,35 @@ struct LlmChatSheet: View {
                             .foregroundStyle(theme.current.danger)
                             .padding(.horizontal, 10)
                     }
+                    // The `.quick` engine is shared with the menu-bar window and
+                    // the phone; this sheet used to never read `pendingApproval`,
+                    // so a parked approval on this engine was invisible
+                    // everywhere until the server's 15-minute expiry. See
+                    // `ChatMessageList`'s identical block for why it's keyed by
+                    // requestId (a second approval must not inherit the
+                    // previous card's @State).
+                    if let approvalState = engine.pendingApproval {
+                        if approvalState.approval.kind == "ToolApproval" {
+                            ToolApprovalCard(
+                                state: approvalState,
+                                onDecide: { action in
+                                    await engine.submitToolDecision(action: action)
+                                }
+                            )
+                            .id(approvalState.approval.requestId)
+                            .padding(.horizontal, 10)
+                        } else {
+                            ApprovalQuestionCard(
+                                state: approvalState,
+                                onSubmit: { answers in
+                                    await engine.submitApproval(answers: answers)
+                                },
+                                onDismiss: { engine.dismissApproval() }
+                            )
+                            .id(approvalState.approval.requestId)
+                            .padding(.horizontal, 10)
+                        }
+                    }
                 }
                 .padding(14)
             }

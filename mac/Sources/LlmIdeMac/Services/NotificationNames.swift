@@ -104,4 +104,29 @@ extension Notification.Name {
     /// close, switch). Observers: code-assist context refresh, code
     /// graph rebuilds, etc.
     static let activeProjectChanged = Notification.Name("activeProjectChanged")
+
+    // MARK: - Chat approvals
+
+    /// Posted by AppShell's pending-approval toolbar button (see
+    /// `ChatEngineRegistry.pendingApprovals`) right after it swaps the
+    /// target session into `ChatEngineRegistry.displayed` and sets
+    /// `shell.section`. `object` is a `PendingApprovalReveal`.
+    ///
+    /// That registry swap alone is enough for a panel that mounts AFTER
+    /// this posts (a section the user wasn't already looking at) — its
+    /// `init` reads the now-updated `ChatEngineRegistry.engine(for:)`. It is
+    /// NOT enough for a panel that is already mounted and showing a
+    /// DIFFERENT session in the same scope: its `@State` engine reference
+    /// was captured at mount and nothing else tells it to re-fetch. Every
+    /// `CodeAssistantPanel` observes this and, when the scope matches its
+    /// own, calls its own `switchToSession(_:)` — the same path its session
+    /// picker uses, which re-points `@State` at whatever the registry now
+    /// holds and re-wires hooks onto it.
+    static let revealPendingApprovalSession = Notification.Name("revealPendingApprovalSession")
+}
+
+/// Payload for `.revealPendingApprovalSession`.
+struct PendingApprovalReveal {
+    let scope: ChatScope
+    let sessionID: UUID
 }

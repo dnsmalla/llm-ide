@@ -270,6 +270,15 @@ struct CodeAssistantPanel: View {
             .onReceive(NotificationCenter.default.publisher(for: .customProvidersChanged)) { _ in
                 modelState.customProviders = CustomProvider.loadAll()
             }
+            // AppShell's pending-approval toolbar button already primed the
+            // registry with this session as `scope`'s displayed engine; if
+            // this panel is the one already on screen for that scope,
+            // nothing else would tell it. `switchToSession` is a no-op
+            // when `id` is already what this panel shows.
+            .onReceive(NotificationCenter.default.publisher(for: .revealPendingApprovalSession)) { note in
+                guard let reveal = note.object as? PendingApprovalReveal, reveal.scope == scope else { return }
+                switchToSession(reveal.sessionID)
+            }
             .onChange(of: useAgentV2) { _, enabled in
                 // Swap the shared engine's transport to match the toggle.
                 // `setTransport` refuses mid-turn (the in-flight round-trip

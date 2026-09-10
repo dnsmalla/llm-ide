@@ -248,10 +248,59 @@ struct AppShell: View {
                     .accessibilityLabel("Back to projects")
                 }
             }
+            if !ChatEngineRegistry.shared.pendingApprovals.isEmpty {
+                ToolbarItem(placement: .primaryAction) {
+                    pendingApprovalButton
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 HeaderAccountMenu()
             }
         }
+    }
+
+    /// Jumps to the oldest chat still blocked on an approval, wherever it is
+    /// — a different section, or a session parked off-screen within the
+    /// current one. Tapping again after that one clears reaches the next.
+    /// See `ChatEngineRegistry.pendingApprovals`'s doc comment for why this
+    /// exists: without it, an approval on anything but the one chat you
+    /// happen to be looking at is invisible until the server gives up on it.
+    private var pendingApprovalButton: some View {
+        let count = ChatEngineRegistry.shared.pendingApprovals.count
+        return Button {
+            revealOldestPendingApproval()
+        } label: {
+            Label("\(count) pending approval\(count == 1 ? "" : "s")", systemImage: "exclamationmark.bubble")
+                .labelStyle(.iconOnly)
+                .overlay(alignment: .topTrailing) {
+                    Text("\(count)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(3)
+                        .background(Circle().fill(.orange))
+                        .offset(x: 8, y: -8)
+                }
+        }
+        .help("\(count) chat\(count == 1 ? "" : "s") waiting on your approval")
+        .accessibilityLabel("\(count) pending approval\(count == 1 ? "" : "s")")
+    }
+
+    private func revealOldestPendingApproval() {
+        guard let target = ChatEngineRegistry.shared.pendingApprovals.first else { return }
+        if target.scope == .quick {
+            showLlmChatSheet = true
+            return
+        }
+        guard let section = target.scope.shellSection else { return }
+        _ = ChatEngineRegistry.shared.switchDisplayedSession(scope: target.scope, to: target.sessionID, api: api)
+        shell.section = section
+        // Covers the case `shell.section` was already `section`: no section
+        // change means no view rebuild, so the already-mounted panel would
+        // otherwise keep rendering the session it had before this call. See
+        // `.revealPendingApprovalSession`'s doc comment.
+        NotificationCenter.default.post(
+            name: .revealPendingApprovalSession,
+            object: PendingApprovalReveal(scope: target.scope, sessionID: target.sessionID))
     }
 
     /// AppEnvironment for Connections / email ingest when no project is open.
