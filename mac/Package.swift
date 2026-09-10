@@ -136,7 +136,7 @@ if mobileIncluded {
     featureDefines.append(.define("FEATURE_MOBILE"))
 } else {
     // File-level excludes (not a single folder): Mobile Control's 16-file
-    // unit is scattered across Services/, Views/Settings/, Chat/,
+    // unit is scattered across Services/, Views/Settings/, Chat/Session/,
     // AutoTask/Services/, and LoopEngine/Services/ (see the plan's Verified
     // facts — the 16th file counted in the audit, Services/MobileFeatureBridge.swift,
     // is the seam PROTOCOL and stays core). The two bridge files below live
@@ -158,7 +158,7 @@ if mobileIncluded {
         "Services/MobileWorkspaceSearch.swift",
         "Services/PairingThrottle.swift",
         "Views/Settings/MobileControlSettingsSection.swift",
-        "Chat/ExplorerMobileEngineResolver.swift",
+        "Chat/Session/ExplorerMobileEngineResolver.swift",
     ])
     if autoTasksIncluded {
         libExcludes.append(contentsOf: [
