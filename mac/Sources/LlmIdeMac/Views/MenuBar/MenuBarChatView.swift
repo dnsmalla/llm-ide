@@ -767,7 +767,7 @@ struct MenuBarChatView: View {
     /// the SAME installer, so it no longer matters which appeared last — see
     /// `QuickChatContext.installTransport`.
     private func wireEngine() {
-        QuickChatContext.installTransport(on: engine, config: config, projectStore: projectStore)
+        QuickChatContext.installTransport(on: engine, config: config, projectStore: projectStore, api: api)
     }
 
     private func wireVoiceService() {

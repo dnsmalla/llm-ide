@@ -476,7 +476,7 @@ struct LlmChatSheet: View {
     /// popover's picker chose (`ChatEngine.quickChatModelId`) rather than
     /// whatever the last surface to appear happened to wire.
     private func wireEngine() {
-        QuickChatContext.installTransport(on: engine, config: config, projectStore: projectStore)
+        QuickChatContext.installTransport(on: engine, config: config, projectStore: projectStore, api: api)
     }
 
     /// Clear this chat's saved conversation and its session memory. NOT a

@@ -248,11 +248,6 @@ struct AppShell: View {
                     .accessibilityLabel("Back to projects")
                 }
             }
-            if !ChatEngineRegistry.shared.pendingApprovals.isEmpty {
-                ToolbarItem(placement: .primaryAction) {
-                    pendingApprovalButton
-                }
-            }
             ToolbarItem(placement: .primaryAction) {
                 HeaderAccountMenu()
             }
@@ -558,6 +553,14 @@ struct AppShell: View {
         ToolbarItemGroup(placement: .primaryAction) {
             ForEach(toolSections, id: \.self) { section in
                 ToolbarToolButton(section: section)
+            }
+        }
+        // Chats exist only once a project is open, which is exactly the
+        // state this toolbar (not welcomeShell's) is attached to — see
+        // `pendingApprovalButton`'s doc comment.
+        if !ChatEngineRegistry.shared.pendingApprovals.isEmpty {
+            ToolbarItem(placement: .primaryAction) {
+                pendingApprovalButton
             }
         }
         ToolbarItem(placement: .primaryAction) {

@@ -174,7 +174,7 @@ struct QuickChatContext {
 
     /// Install the `.quick` engine's transport closure: project context,
     /// language, provider, the engine-owned model, and the read-only `ask`
-    /// mode.
+    /// mode. Also wires the three approval-decision closures — see below.
     ///
     /// ONE closure for both Mac surfaces. `resolveTransportInput` is a single
     /// mutable hook on a shared engine, so when each surface installed its own
@@ -187,7 +187,7 @@ struct QuickChatContext {
     /// The closure reads `engine.quickChatModelId` at SEND time, so a picker
     /// change takes effect without re-installing anything.
     @MainActor
-    static func installTransport(on engine: ChatEngine, config: AppConfig, projectStore: ProjectStore) {
+    static func installTransport(on engine: ChatEngine, config: AppConfig, projectStore: ProjectStore, api: LlmIdeAPIClient) {
         // The closure is non-Sendable and installed from the main actor, so
         // it inherits that isolation and reads `engine`/`projectStore`
         // directly — no `MainActor.run` hop. Two hops here would also be two
@@ -214,6 +214,32 @@ struct QuickChatContext {
                 // approval would hang with nothing able to render the card.
                 mode: "ask"
             )
+        }
+        // Without these three, the engine's defaults (`{ _, _, _ in false }`)
+        // answer every Submit/Allow/Deny with a failure — the card the quick
+        // chat now renders would be visible but permanently unusable. `ask`
+        // mode strips native Edit/Write/Bash from the model's context
+        // entirely (`v2ToolPolicyForMode`), so `ToolApproval` cannot arise
+        // here, but `AskUserQuestion` is exempt from that gating
+        // (`sdk/engine.mjs`'s explicit `toolName !== 'AskUserQuestion'`
+        // bypass) and CAN — this wiring is for that case. Identical to
+        // `CodeAssistantPanel.wireEngine()`'s; kept here instead of letting
+        // each surface duplicate it, same reasoning as the transport closure
+        // above.
+        engine.postApprovalDecision = { requestId, sdkSessionId, answers in
+            try await api.agentV2Decision(requestId: requestId,
+                                          sdkSessionId: sdkSessionId,
+                                          answers: answers)
+        }
+        engine.postToolDecision = { requestId, sdkSessionId, action in
+            try await api.agentV2ToolDecision(requestId: requestId,
+                                              sdkSessionId: sdkSessionId,
+                                              action: action)
+        }
+        engine.postLegacyToolDecision = { requestId, sessionId, action in
+            try await api.codeAssistDecision(requestId: requestId,
+                                             sessionId: sessionId,
+                                             action: action)
         }
     }
 
