@@ -364,7 +364,7 @@ Backoff strategy (`backoffNanos`, lines 353–356): `0.4 × 2^(attempt-1)` secon
 
 ### The `pendingTool` → `toolResult` flow (Code Assistant)
 
-**Sources:** `Views/CodeAssistantPanel.swift`, `Services/API/LlmIdeAPIClient+CodeAssist.swift`, `Agent/Models/AgentTypes.swift`
+**Sources:** `Chat/Views/Panel/CodeAssistantPanel.swift`, `Services/API/LlmIdeAPIClient+CodeAssist.swift`, `Agent/Models/AgentTypes.swift`
 
 The Code Assistant sends a `POST /code-assist` request and receives a `CodeAssistResponse` (defined in `LlmIdeAPIClient+CodeAssist.swift`, lines 52–61). The response carries an optional `pendingTool: PendingTool?`.
 
@@ -399,7 +399,7 @@ The Code Assistant sends a `POST /code-assist` request and receives a `CodeAssis
 
 #### git-op capability
 
-**Sources:** `Agent/Models/AgentTypes.swift`, `Services/RepoManager.swift`, `Views/CodeAssistantPanel.swift`, `Views/GitOpSheet.swift`
+**Sources:** `Agent/Models/AgentTypes.swift`, `Services/RepoManager.swift`, `Chat/Views/Panel/CodeAssistantPanel.swift`, `Views/GitOpSheet.swift`
 
 The `git-op` tool gives the Code Assistant agent the ability to run git operations on the active repository.
 
@@ -410,7 +410,7 @@ The `git-op` tool gives the Code Assistant agent the ability to run git operatio
 - `GitOpArgs: Codable` — `{ op: GitOp, message?, branch?, ref?, mode?, slug? }`.
 - `PendingTool.gitOpArgs` — accessor on `PendingTool` that decodes `GitOpArgs` when `name == "git-op"`.
 
-**Confirmation tier** (`Views/CodeAssistantPanel.swift`):
+**Confirmation tier** (`Chat/Views/Panel/CodeAssistantPanel.swift`):
 
 - **Read-tier ops** (`status`, `log`, `diff`, `branch`) — auto-run without any confirmation sheet.
 - **Safe-write and destructive ops** — surface `GitOpSheet` before execution. Destructive ops additionally show a red warning banner inside the sheet so the user understands the operation is irreversible.
@@ -430,7 +430,7 @@ There is no separate `/code-assist/tool-result` endpoint. The tool result is com
 
 #### Chat Stop, message queue, and reply collapse
 
-**Source:** `Views/CodeAssistantPanel.swift`
+**Source:** `Chat/Views/Panel/CodeAssistantPanel.swift`
 
 **Stop control:** while a turn is running, a Stop button (also triggered by Esc, line 1224) is visible in the chat input area. Tapping it cancels the in-flight `Task` handle stored at line 56 (`@State private var runTask: Task<Void, Never>?`, cancel sites lines 1636 / 1961). Cancellation is a clean stop — no error bubble — after which the queue is drained (line 1634–1641).
 
@@ -488,7 +488,7 @@ The table below maps every Apple-only dependency to its source location and a po
 | Port listener lookup | `/usr/sbin/lsof -ti :<port> -sTCP:LISTEN` launched via `Process` | `Services/BackendManager.swift:BackendManager.killExternalListener()` (line 457) | REPLACE |
 | Terminal emulator | SwiftTerm `LocalProcessTerminalView` | `Views/Terminal/TerminalSessionView.swift:TerminalSessionView` (line 8) | REPLACE |
 | Auto-update | Sparkle (`SPUStandardUpdaterController`, `SUFeedURL`, `SUPublicEDKey`) | `Services/UpdateService.swift:UpdateService` | REPLACE |
-| App-support paths | `FileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)` | `Services/LibraryItemStore.swift` (line 32) — `LLM-IDE/library_items.json`; `Services/ChatSessionStore.swift` (line 17) — `LLM-IDE/sessions/<uuid>.json`; `Models/Config.swift` (line 19) — corrupt-config stash under `LLM-IDE/` | ABSTRACT |
+| App-support paths | `FileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)` | `Services/LibraryItemStore.swift` (line 32) — `LLM-IDE/library_items.json`; `Chat/Session/ChatSessionStore.swift` (line 17) — `LLM-IDE/sessions/<uuid>.json`; `Models/Config.swift` (line 19) — corrupt-config stash under `LLM-IDE/` | ABSTRACT |
 | Screen recording probe | `CGPreflightScreenCaptureAccess()` | `Services/PermissionsService.swift:PermissionsService.refreshScreenRecording()` (line 33) | REPLACE |
 | System Settings deep links | `x-apple.systempreferences:…` URL scheme via `NSWorkspace.shared.open` | `Services/PermissionsService.swift:PermissionsService.openSystemSettings(pane:)` (line 89) | REPLACE |
 

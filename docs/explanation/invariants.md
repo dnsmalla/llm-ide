@@ -385,7 +385,7 @@ Run through this against a real meeting before merging:
 
 ---
 
-## macOS Code Assistant panel (`mac/Sources/LlmIdeMac/Views/CodeAssistant/CodeAssistantPanel.swift`, `HistoryTextEditor.swift`)
+## macOS Code Assistant panel (`mac/Sources/LlmIdeMac/Chat/Views/Panel/CodeAssistantPanel.swift`, `Chat/Views/Panel/HistoryTextEditor.swift`)
 
 ### ✅ MUST preserve
 

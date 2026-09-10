@@ -140,6 +140,16 @@ llm-ide/
 │   │   │   ├── Models/  #   LoopDefinition, stages, config store, templates, status
 │   │   │   ├── Services/#   LoopEngineRunner, journal, repairers, guards, parsers
 │   │   │   └── Views/   #   LoopEngineView(+panes), wizard, budget editors
+│   │   ├── Chat/        # ALL chat code, one folder (same shape as AutoTask/):
+│   │   │   ├── Models/  #   ChatMessage, ChatSession
+│   │   │   ├── Engine/  #   ChatEngine(+History/+PanelWrites/+ExternalTurn),
+│   │   │   │            #   ChatAutoChainPolicy
+│   │   │   ├── Session/ #   ChatEngine+Session, ChatSessionStore, QuickChatContext,
+│   │   │   │            #   ExplorerMobileEngineResolver
+│   │   │   ├── Transport/#  ChatTransport, AgentV2Selection (ClaudeLink/ owns the v2 wire)
+│   │   │   ├── Services/#   ChatEngineRegistry, slash commands, voice state, module
+│   │   │   └── Views/   #   Panel/ (CodeAssistant), Quick/ (menu bar + sheet),
+│   │   │                #   Shared/ (approval cards, AgentV2ApprovalState)
 │   │   ├── Models/      # Data models
 │   │   ├── Services/    # Long-lived work (*Service, *Store, *Client, *Manager, *Router);
 │   │   │                #   also RepoFileWatcher, RepoGraphLocator, and Memory/ (core-owned

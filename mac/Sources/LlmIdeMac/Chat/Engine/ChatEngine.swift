@@ -27,7 +27,8 @@ import Foundation
 /// ChatEngine+History.swift, panel-driven writes in
 /// ChatEngine+PanelWrites.swift, the phone-driven turn surface in
 /// ChatEngine+ExternalTurn.swift, and the auto-chain policy types in
-/// ChatEngine+AutoChain.swift. Because extensions can't hold stored
+/// ChatAutoChainPolicy.swift (free types, not an extension — hence the
+/// name). Because extensions can't hold stored
 /// properties (and Swift's `private` is file-scoped), the state those files
 /// mutate is internal rather than `private(set)` — still engine-owned by
 /// convention: nothing outside ChatEngine's own files writes it.
