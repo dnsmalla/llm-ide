@@ -140,7 +140,8 @@ The map key is the sanitized speaker name string. A separate module-level `sessi
 A large case-insensitive regex anchored to the start of the string. Rejects strings that begin with known Meet/Teams/Zoom UI labels, including button names (`present`, `mute`, `unmute`, `camera`, `record`, `share`), navigation words (`chevron_right`, `chevron_left`, `expand_more`), and meeting-info phrases (`joining info`, `save transcript`, `secure video`, `new meeting`). Applied to both `speaker` and `text`.
 
 Excerpt (representative — not exhaustive):
-```
+
+```text
 /^(present|mute|unmute|camera|more|chat|…|loading\s+invitees|contributors|just\s+you|\d+\s+joined|save\s+transcript|…)/i
 ```
 
@@ -148,7 +149,7 @@ Excerpt (representative — not exhaustive):
 
 Matches Material Symbol icon names as whole words. Rejects strings that contain icon identifiers such as `frame_person`, `visual_effects`, `closed_caption`, `format_size`, `keyboard_arrow`, `more_vert`, `call_end`, `back_hand`, `mic`, `videocam`, and others. Applied to both `speaker` and `text`.
 
-```
+```text
 /\b(frame_person|visual_effects|closed_caption|format_size|keyboard_arrow|more_vert|call_end|back_hand|mic|videocam|computer|reaction|settings|lock_person|chat|apps|info|mood|raise|stop_circle|filter|chevron_right|chevron_left|expand_more|expand_less|content_copy|arrow_back|arrow_forward|open_in_new|check_circle|cancel|navigate_next|navigate_before)\b/i
 ```
 
@@ -156,7 +157,7 @@ Matches Material Symbol icon names as whole words. Rejects strings that contain 
 
 Strips the Material Symbol `groups` word that Meet prepends to speaker labels when 3+ speakers are active simultaneously. Applied to raw DOM text **before** validation, not inside `isValidCaption()`.
 
-```
+```text
 /^groups\b\s*/i
 ```
 
@@ -164,7 +165,7 @@ Strips the Material Symbol `groups` word that Meet prepends to speaker labels wh
 
 Removes the English combined-speaker suffix from a speaker label so a grouped utterance is attributed to the primary speaker rather than a synthetic `"Alice & 6 others"` label.
 
-```
+```text
 /\s*[&＆]\s*\d+\s*(others?|more)\b.*$/i
 ```
 
@@ -172,7 +173,7 @@ Removes the English combined-speaker suffix from a speaker label so a grouped ut
 
 Japanese equivalent — strips suffixes of the form `他N名` or `ほかNさん`.
 
-```
+```text
 /\s*(他|ほか)\s*\d+\s*(名|人|さん)?\b.*$/
 ```
 
@@ -317,7 +318,7 @@ The `chatMessages` key retains the most recent `MAX_STORED_MESSAGES = 200` messa
 
 After a successful injection, the service worker does **not** use a fixed sleep. Instead it polls with PING up to 5 attempts with 150 ms between each attempt (`service-worker.ts:158–169`):
 
-```
+```javascript
 for (let attempt = 0; attempt < 5; attempt++) {
   // try chrome.tabs.sendMessage(tabId, { type: MsgType.PING })
   await new Promise((r) => setTimeout(r, 150));
@@ -446,7 +447,7 @@ The access token is kept **in memory only** (`session.accessToken`, `lib/config.
 
 `extension/vite.config.ts:1–42`. The build chain is:
 
-```
+```text
 tsc --noEmit          ← type-check gate (extension/package.json:13)
 vite build            ← bundles + emits dist/
 ```
@@ -496,7 +497,7 @@ The side panel API (`sidePanel`) requires Chrome ≥ 116, which matches `minimum
 
 **Host permissions** (`manifest.json:15–26`) cover the three supported platforms:
 
-```
+```text
 https://meet.google.com/*
 https://teams.microsoft.com/{l,_,v2}/*
 https://teams.live.com/{_,v2}/*
@@ -516,7 +517,7 @@ Three scripts are declared under a single `content_scripts` entry, injected at `
 
 **Content Security Policy** (`manifest.json:34–36`):
 
-```
+```text
 script-src 'self' 'wasm-unsafe-eval';
 object-src 'none';
 base-uri 'none';
@@ -537,6 +538,7 @@ The CSP restricts `connect-src` to loopback only, consistent with the `isSafeSer
 ---
 
 ## Regeneration checklist
+
 - [x] Every governed symbol/endpoint/table/prompt is present with its exact shape (no "etc.", no "see code").
 - [x] Every magic number, timeout, cap, regex, and crypto parameter is stated.
 - [x] Spot-check: the MsgType enum, the caption-scraper constants/filters, and the chrome.storage shapes were rebuilt from this page and match source.

@@ -18,7 +18,7 @@ it already contains `system/project.json` or is completely empty
 
 ## Canonical tree
 
-```
+```text
 <project>/
 ├── source/        raw inputs (your Sources)
 │   ├── meetings/    YYYY/MM/<ts>-<slug>.md
@@ -71,7 +71,7 @@ and the Library UI labels the section "LLM Doc".
 
 ### Structure
 
-```
+```text
 <project>/llm-doc/
 ├── meetings/      <YYYY>/<MM>/<filename>.docx + .md
 ├── emails/        <YYYY>/<MM>/<filename>.md
@@ -130,7 +130,7 @@ writers, and the Library scanner all resolve here.
 
 ### Structure
 
-```
+```text
 <project>/source/
 ├── meetings/    YYYY/MM/<file>.md     raw transcripts (MeetingFileStore)
 ├── emails/      YYYY/MM/<file>        raw emails (EmailSource via InboxStore)

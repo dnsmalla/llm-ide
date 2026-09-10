@@ -11,7 +11,7 @@ status: stable
 
 The Mac↔server wire format (the `/agent/v2/stream` SSE vocabulary, decision bodies, `/code-assist` events) is **ours**, defined by `extension/llm_agent/sdk/events.mjs` and versioned by `SERVER_API_VERSION` — it does not change when the SDK does. The linker is drawn so both endpoints of that vocabulary sit inside linker files:
 
-```
+```text
 Claude Agent SDK / claude CLI
         │  (only the server linker touches these)
         ▼

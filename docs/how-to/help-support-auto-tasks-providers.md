@@ -71,12 +71,14 @@ Auto Tasks is an **automation system** that monitors your meetings for action it
 - **Detects merge conflicts** and other issues
 
 **When is it useful?**
+
 - You want continuous quality checks without manual intervention
 - Your team needs consistent code review feedback
 - You want to catch regressions before merging
 - You need issue status to stay in sync across tools
 
 **When should you skip it?**
+
 - Your team prefers manual code review processes
 - You don't use automated testing
 - Your workflow doesn't need documentation generation
@@ -84,6 +86,7 @@ Auto Tasks is an **automation system** that monitors your meetings for action it
 ## What are Repository Providers?
 
 LLM-IDE integrates with **GitHub** and **GitLab** to:
+
 - Manage issues and tasks
 - Create code branches and commits
 - Display timeline/Gantt views
@@ -111,6 +114,7 @@ LLM-IDE enforces that **only one provider is active at a time** because:
 **Q: What happens if my repository working tree is dirty (has uncommitted changes)?**
 
 A: Auto Tasks has two modes:
+
 - **Auto-stash OFF (default):** Auto Tasks skip if there are uncommitted changes (safe)
 - **Auto-stash ON:** Auto Tasks stash your changes, run, then restore (riskier but thorough)
 
@@ -119,6 +123,7 @@ Choose based on your workflow. If you work with uncommitted changes frequently, 
 **Q: How often should Auto Tasks run?**
 
 A: Default is every 60 minutes. Recommendations:
+
 - **5–15 min** for high-velocity teams (continuous deployment)
 - **30–60 min** for standard development
 - **2–4 hours** for async/distributed teams
@@ -127,6 +132,7 @@ A: Default is every 60 minutes. Recommendations:
 **Q: What if Auto Tasks fail?**
 
 A: Each task logs failures to its own log file. Click **Settings → Auto Tasks → Reveal Logs** to inspect what went wrong. Common issues:
+
 - Repository token expired → regenerate and update credentials
 - Clone path doesn't exist → verify the path
 - No meetings in lookback window → increase the lookback count/days
@@ -135,6 +141,7 @@ A: Each task logs failures to its own log file. Click **Settings → Auto Tasks 
 **Q: Can Auto Tasks create issues or merge requests automatically?**
 
 A: It depends on the task:
+
 - **Review Code task** — Comments on MRs/PRs (doesn't create them)
 - **Generate Doc task** — Can suggest doc changes (manual approval needed)
 - **Create Issue task** — Can open issues for review findings (if enabled)
@@ -144,6 +151,7 @@ For security, most destructive operations require review before executing.
 **Q: Does Auto Tasks work offline?**
 
 A: No. Auto Tasks need:
+
 1. Connection to your repository (GitHub/GitLab API)
 2. Connection to LLM-IDE server (for AI model calls)
 3. Local repository clone (for git operations)
@@ -157,6 +165,7 @@ A: Yes! Toggle **Enabled** to OFF. All your settings are saved. Re-enable anytim
 **Q: I have both GitHub and GitLab. Which should I use?**
 
 A: Choose based on:
+
 - **GitHub:** If you're on GitHub.com or GitHub Enterprise; best for open source
 - **GitLab:** If you're on GitLab.com or self-hosted; required for Gantt view
 - **Either:** If you just need issues + code review (both work equally well)
@@ -180,6 +189,7 @@ A: Yes, but you might need to specify a custom endpoint URL (e.g., `https://gith
 **Q: How do I rotate my credentials safely?**
 
 A: For both providers:
+
 1. Generate a new token on GitHub/GitLab (same scopes as before)
 2. Copy the new token
 3. Update **Settings → [GitHub|GitLab] → API Token**

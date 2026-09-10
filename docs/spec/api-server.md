@@ -33,7 +33,7 @@ The following source files together constitute the server and its API:
 
 Every inbound HTTP request passes through these stages **in order** (`extension/server.mjs:185–529`):
 
-1. **CORS headers set** (`server.mjs:186`) — `setCORS()` runs unconditionally before any other logic. Never echoes `*`; see [§7 Limits & guards](#7-limits--guards).
+1. **CORS headers set** (`server.mjs:186`) — `setCORS()` runs unconditionally before any other logic. Never echoes `*`; see [§7 Limits and guards](#7-limits-and-guards).
 2. **Request-ID & per-request logger** (`server.mjs:194–200`) — `X-Request-ID` is read from the client header (validated: max 128 chars, CR/LF/NUL stripped) or generated fresh. A child logger carrying `{ requestId, method, url }` is attached as `req.log`.
 3. **Response-finish instrumentation** (`server.mjs:203–217`) — a `res.on('finish')` listener records duration + status, calls `recordHttpRequest()`.
 4. **OPTIONS short-circuit** (`server.mjs:219–223`) — preflight requests return `200` immediately.
@@ -90,11 +90,11 @@ Coverage is verified by `docs/_scripts/check_api_coverage.py`: every URL in the 
 
 The error envelope shape is defined in `extension/core/errors.mjs:17–91` and serialized by `sendError()` (`errors.mjs:67`). `details` is only present when `err.details !== undefined` (`errors.mjs:73`).
 
-See [§4 Auth + token lifecycle](#4-auth--token-lifecycle) for auth endpoint contracts and [§5 Error codes](#5-error-codes) for the full error-code table.
+See [§4 Auth and token lifecycle](#4-auth-and-token-lifecycle-rebuild-grade) for auth endpoint contracts and [§5 Error codes](#5-error-codes) for the full error-code table.
 
 ---
 
-## 4. Auth + token lifecycle (rebuild-grade)
+## 4. Auth and token lifecycle (rebuild-grade)
 
 ### JWT algorithm and claims
 
@@ -158,7 +158,7 @@ Source: `extension/server/jwt.mjs`.
 
 Defined in `extension/server/auth.mjs` (the `PUBLIC_PATHS` set):
 
-```
+```text
 GET  /
 GET  /health
 GET  /launch-app   (and /launch-app?…)
@@ -251,7 +251,7 @@ Bucket state is saved to `rate_limit_buckets` in SQLite on auth-GC intervals and
 
 ---
 
-## 7. Limits & guards
+## 7. Limits and guards
 
 ### JSON body limit
 

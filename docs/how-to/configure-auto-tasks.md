@@ -5,6 +5,7 @@ Auto Tasks is a powerful automation feature that automatically runs code reviews
 ## Overview
 
 Auto Tasks enable the LLM-IDE to:
+
 - **Review code** — Analyze commits for quality and best practices
 - **Review documentation** — Check doc completeness and consistency  
 - **Review conflicts** — Detect merge conflicts and issues
@@ -16,6 +17,7 @@ Auto Tasks enable the LLM-IDE to:
 ## Prerequisites
 
 Before enabling Auto Tasks, ensure:
+
 1. **A linked repository** — GitHub or GitLab project with a local clone
 2. **Repository credentials** — Valid API token for your provider (GitHub PAT or GitLab token)
 3. **Meeting data** — At least one captured meeting with action items (for lookback scanning)
@@ -46,6 +48,7 @@ Once saved, the other provider automatically deactivates. Only one provider can 
 - **Expiry:** Set an expiration date and rotate before it expires
 
 **Get your GitHub token:**
+
 1. Go to [github.com/settings/tokens](https://github.com/settings/tokens)
 2. Click **Generate new token (classic)**
 3. Select scopes: `repo`, `workflow`
@@ -60,6 +63,7 @@ Once saved, the other provider automatically deactivates. Only one provider can 
 - **Expiry:** Set an expiration date and rotate before it expires
 
 **Get your GitLab token:**
+
 1. Go to [gitlab.com/-/user_settings/personal_access_tokens](https://gitlab.com/-/user_settings/personal_access_tokens)
 2. Click **Add new token**
 3. Select scopes: `api`, `read_repository`
@@ -96,6 +100,7 @@ In **Settings → Auto Tasks → Run automatically**, enable the tasks you want:
 - **Update Plan Status** — Polls plan outcome status (optional)
 
 **Regression-specific options** (if enabled):
+
 - **Attempt repair on regression** — Try to auto-fix broken tests
 - **Auto-reopen regressed faults** — Flag issues that re-broke
 - **Verify timeout (seconds)** — Max time per test verification (default 120s)
@@ -226,11 +231,13 @@ Scans meetings from the **last N days** (ignoring count).
 ### When to Switch
 
 Switch to **"by age"** if:
+
 - Your team has inconsistent meeting frequency
 - You want to ensure no old action items are missed
 - You work async with batched meetings
 
 Keep **"by count"** if:
+
 - Your team meets regularly (e.g., daily standup + planning)
 - You want to limit scope to recent activity
 - You process meetings continuously
@@ -272,6 +279,7 @@ To run immediately without waiting for the next interval:
 ### In-App Status
 
 **Settings → Auto Tasks** shows:
+
 - Current status (Idle / Running / Disabled)
 - Last run time and summary (created, implemented, failed)
 - Live streaming of task findings as they complete
@@ -279,6 +287,7 @@ To run immediately without waiting for the next interval:
 ### Menu Bar Summary
 
 When Auto Tasks are enabled, the menu bar shows:
+
 - Number of enabled tasks
 - Last run stats
 - Quick toggle to enable/disable
@@ -288,7 +297,7 @@ When Auto Tasks are enabled, the menu bar shows:
 
 Click **Reveal Logs** to open the auto-task log folder:
 
-```
+```text
 ~/Library/Logs/llm-ide/
 ├── auto-task-review-code.log
 ├── auto-task-review-doc.log
@@ -300,6 +309,7 @@ Click **Reveal Logs** to open the auto-task log folder:
 ```
 
 Each log contains:
+
 - Task run timestamp
 - Meeting actions scanned
 - Findings (issues, suggestions, repairs attempted)
@@ -312,6 +322,7 @@ Each log contains:
 **Cause:** Auto Tasks can't find an active GitHub or GitLab configuration.
 
 **Fix:**
+
 1. Go to **Settings → GitHub** or **Settings → GitLab**
 2. Enter your credentials and verify
 3. Ensure the **local clone path** exists and is readable
@@ -322,6 +333,7 @@ Each log contains:
 **Cause:** The app might be closed, or the timer didn't start.
 
 **Fix:**
+
 1. Ensure LLM-IDE is open
 2. Go to **Settings → Auto Tasks**
 3. Check that **Enabled** is ON
@@ -332,11 +344,13 @@ Each log contains:
 ### Tasks run but find no actions
 
 **Possible causes:**
+
 - No meetings captured in your lookback window
 - Meetings exist but contain no action items
 - Lookback window is too narrow
 
 **Fix:**
+
 1. Verify you have recent captured meetings
 2. Increase the lookback count or days
 3. Check that your meeting capture is working (see [debug-captions-not-appearing.md](./debug-captions-not-appearing.md))
@@ -347,6 +361,7 @@ Each log contains:
 **Cause:** When auto-stash is ON, Git couldn't cleanly restore your changes.
 
 **Fix:**
+
 1. Your changes are safe in `git stash`
 2. Run `git stash pop` to recover them
 3. Resolve any merge conflicts manually
@@ -357,6 +372,7 @@ Each log contains:
 **Cause:** Test verification timed out or subprocess failed.
 
 **Fix:**
+
 1. Check the regression log for the specific error
 2. Increase **Verify timeout** in Settings (default 120s)
 3. Ensure your test environment is properly configured
@@ -386,6 +402,7 @@ Each log contains:
 ### GitHub Integration
 
 Auto Tasks can:
+
 - Open issues for code review findings
 - Comment on pull requests
 - Update issue status
@@ -396,6 +413,7 @@ Auto Tasks can:
 ### GitLab Integration
 
 Auto Tasks can:
+
 - Create merge request comments
 - Create issues for findings
 - Update issue labels and status
@@ -430,6 +448,7 @@ Auto Tasks are designed to be lightweight:
 | Update Plan Status | 5–15s | Low (API calls) |
 
 **Tips to reduce load:**
+
 - Disable unused tasks
 - Increase run interval (e.g., 2 hours instead of 30 min)
 - Use **by age** lookback instead of large counts
@@ -439,4 +458,3 @@ Auto Tasks are designed to be lightweight:
 
 - Review [configure-github-gitlab.md](./configure-github-gitlab.md) for detailed provider setup
 - Check [troubleshooting](../reference/error-codes.md) for specific error codes
-- See [CLAUDE.md](../../CLAUDE.md) under "Auto Task Feature Audit" for internal architecture

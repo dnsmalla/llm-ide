@@ -320,7 +320,7 @@ fast failure rather than a confusing no-op.
 journal is what survives, written beneath the project root that already holds the
 fault reports:
 
-```
+```text
 system/loop-runs/index.jsonl          # one LoopRunIndexEntry per line, append-only
 system/loop-runs/2026-08/<runId>.json # the full LoopRunRecord
 ```

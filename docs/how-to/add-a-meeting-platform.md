@@ -15,7 +15,7 @@ Make LLM-IDE capture captions from a platform the scraper does not yet know abou
 2. **Add a reader function** in `extension/src/content/caption-scraper.ts`. It must return at most one block per speaker (the outermost / latest), filter UI noise, and use only content-based validation.
 3. **Wire it into `detectPlatform()`** with a hostname match (e.g., `webex.com`).
 4. **Add the host to `host_permissions` and `content_scripts.matches`** in `extension/manifest.json`.
-5. **Test with multi-speaker, screen-share, and short JA captions** — see the testing checklist in [invariants](../explanation/invariants.md#testing-checklist-before-merging-caption--transcript--llm-changes).
+5. **Test with multi-speaker, screen-share, and short JA captions** — see the testing checklist in [invariants](../explanation/invariants.md#testing-checklist-before-merging-caption-transcript-llm-changes).
 
 ## Verification
 

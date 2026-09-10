@@ -4,7 +4,7 @@ One-page cheat sheet for common operations.
 
 ## Auto Tasks Quick Setup
 
-```
+```text
 Settings → Auto Tasks
 
 1. Toggle "Enabled" to ON
@@ -39,7 +39,7 @@ Settings → Auto Tasks
 
 ## GitHub Quick Setup
 
-```
+```text
 Settings → GitHub
 
 1. Enter org/project: owner/repo (e.g., acme/web-app)
@@ -50,14 +50,15 @@ Settings → GitHub
 ```
 
 **Get a GitHub token:**
-1. Go to https://github.com/settings/tokens
+
+1. Go to <https://github.com/settings/tokens>
 2. Click "Generate new token (classic)"
 3. Scopes: `repo`, `workflow`
 4. Copy token immediately
 
 ## GitLab Quick Setup
 
-```
+```text
 Settings → GitLab
 
 1. Enter group/project: group/subgroup/project (e.g., acme/backend/api)
@@ -68,7 +69,8 @@ Settings → GitLab
 ```
 
 **Get a GitLab token:**
-1. Go to https://gitlab.com/-/user_settings/personal_access_tokens
+
+1. Go to <https://gitlab.com/-/user_settings/personal_access_tokens>
 2. Click "Add new token"
 3. Scopes: `api`, `read_repository`
 4. Copy token immediately
@@ -77,7 +79,7 @@ Settings → GitLab
 
 When you set a provider, the other one **deactivates automatically**:
 
-```
+```text
 GitHub configured? → GitLab deactivates
 GitLab configured? → GitHub deactivates
 
@@ -89,7 +91,7 @@ Switch anytime: just configure the other one.
 
 ### Scheduled (Default)
 
-```
+```text
 Enabled = ON → Timer runs every N minutes
 Only while app is open
 Check status in menu bar
@@ -98,7 +100,7 @@ Results logged automatically
 
 ### Manual
 
-```
+```text
 Settings → Auto Tasks → "Run Now"
 Runs immediately (bypasses timer)
 Wait for completion in UI
@@ -109,7 +111,7 @@ Check "Reveal Logs" for details
 
 ### By Count (Default)
 
-```
+```text
 Scan the last 5 meetings (regardless of date)
 Best for: consistent meeting frequency
 Example: Daily standup + planning → lookback 3–5
@@ -117,14 +119,15 @@ Example: Daily standup + planning → lookback 3–5
 
 ### By Age
 
-```
+```text
 Scan all meetings from last 7 days
 Best for: irregular meeting schedule
 Example: Weekly planning + ad-hoc meetings → lookback 7 days
 ```
 
 **Switch modes:**
-```
+
+```text
 Settings → Auto Tasks → "Scan last" → toggle "by count" / "by age"
 ```
 
@@ -132,7 +135,7 @@ Settings → Auto Tasks → "Scan last" → toggle "by count" / "by age"
 
 ### In Settings
 
-```
+```text
 Settings → Auto Tasks
 ├── Status: "Idle" / "Running" / "Disabled"
 ├── Last run: X minutes ago
@@ -143,7 +146,7 @@ Settings → Auto Tasks
 
 ### Menu Bar
 
-```
+```text
 Menu bar shows:
 ├── Auto Tasks status
 ├── Number of enabled tasks
@@ -155,7 +158,7 @@ Click to expand popover with full details
 
 ### Detailed Logs
 
-```
+```text
 Click "Reveal Logs"
 Folder: ~/Library/Logs/llm-ide/
 
@@ -198,7 +201,7 @@ Each log contains: timestamps, findings, errors
 
 ### First-Time Setup
 
-```
+```text
 1. Configure repository (GitHub or GitLab)
    Settings → [GitHub|GitLab] → Enter credentials → Verify & Save
    
@@ -215,7 +218,7 @@ Each log contains: timestamps, findings, errors
 
 ### Rotate Credentials
 
-```
+```text
 1. Generate new token (GitHub/GitLab)
 2. Copy token
 3. Settings → [GitHub|GitLab] → Paste new token
@@ -225,7 +228,7 @@ Each log contains: timestamps, findings, errors
 
 ### Switch Providers (GitHub ↔ GitLab)
 
-```
+```text
 1. Settings → [New Provider]
 2. Enter credentials
 3. Click "Verify & Save"
@@ -235,7 +238,7 @@ Each log contains: timestamps, findings, errors
 
 ### Enable Regression Testing
 
-```
+```text
 1. Settings → Auto Tasks
 2. Toggle "Regression" to ON
 3. (Optional) Toggle "Attempt repair on regression" ON

@@ -39,8 +39,8 @@ Source: [`../explanation/security-model.md`](../explanation/security-model.md).
 
 | Control | Shape | Authoritative detail |
 |---|---|---|
-| **Network isolation** | Binds `127.0.0.1` by default; CORS allowlist echoes origin only for `chrome-extension://`, `localhost`, `127.0.0.1`, `[::1]` — never `*`; non-loopback binding requires `LLMIDE_ALLOW_REMOTE=1` | [`api-server.md` §7](api-server.md#7-limits--guards) |
-| **Identity** | JWT HS256, bcrypt cost 12, opaque refresh tokens (SHA-256 stored, never plaintext), per-refresh rotation, clock skew ±2 s (`jwt.mjs:14`) | [`api-server.md` §4](api-server.md#4-auth--token-lifecycle-rebuild-grade) |
+| **Network isolation** | Binds `127.0.0.1` by default; CORS allowlist echoes origin only for `chrome-extension://`, `localhost`, `127.0.0.1`, `[::1]` — never `*`; non-loopback binding requires `LLMIDE_ALLOW_REMOTE=1` | [`api-server.md` §7](api-server.md#7-limits-and-guards) |
+| **Identity** | JWT HS256, bcrypt cost 12, opaque refresh tokens (SHA-256 stored, never plaintext), per-refresh rotation, clock skew ±2 s (`jwt.mjs:14`) | [`api-server.md` §4](api-server.md#4-auth-and-token-lifecycle-rebuild-grade) |
 | **Vault** | AES-256-GCM + HKDF-SHA256, 11 allow-listed keys (`vault.mjs:110–137`): `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl`, `slack.botToken`, `email.imapPassword`, `claude.apiKey`, `openai.apiKey`, `google.apiKey`, `custom.apiKey`, `custom.baseUrl` | [`knowledge-base.md` §6](knowledge-base.md#6-vault-crypto) |
 | **Guardrails** | Secret/PII/destructive scanners in `extension/guardrails/rules.mjs`; applied at submit and again at approval | [`../reference/guardrail-rules.md`](../reference/guardrail-rules.md) |
 | **Prompt injection** | Tool-result fences (`<<<TOOL_RESULT>>>`/`<<<END_TOOL_RESULT>>>` wrapping each result; forged `<<<TOOL_CALL>>>` blocks rejected) + ZWJ redaction of any `<<<`/`>>>` markers in embedded external text (`redaction.mjs:16–18`); server-side `sanitizeForPrompt()` (`extension/core/utils.mjs:72–76`) strips fence markers and hard-caps at 500 000 chars | [`agent-runtime.md` §3](agent-runtime.md#3-fence-protocol) |

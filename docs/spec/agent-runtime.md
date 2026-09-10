@@ -11,7 +11,7 @@ This is the rebuild-grade contract for the agent runtime; verbatim prompts are l
 
 The following files are governed by this document.
 
-**Core runtime loop and protocol**
+### Core runtime loop and protocol
 
 - `extension/llm_agent/runtime/loop.mjs` — iteration engine, prompt assembly, caching, depth guard
 - `extension/llm_agent/runtime/fence.mjs` — fence parser and argument validator
@@ -19,7 +19,7 @@ The following files are governed by this document.
 - `extension/llm_agent/runtime/model-tier.mjs` — per-tier model resolution
 - `extension/llm_agent/runtime/route.mjs` — `/code-assist` orchestrator; wires global loop, handlers, skill views
 
-**Read handlers (server-executed)**
+### Read handlers (server-executed)
 
 - `extension/llm_agent/runtime/handlers/ask-internal.mjs`
 - `extension/llm_agent/runtime/handlers/ask-subagent.mjs`
@@ -28,7 +28,7 @@ The following files are governed by this document.
 - `extension/llm_agent/runtime/handlers/web-search.mjs` — web search; backed by `extension/providers/web-client.mjs`
 - `extension/llm_agent/runtime/handlers/fetch-url.mjs` — URL fetch (SSRF-guarded); same backend
 
-**Skill loading and registry**
+### Skill loading and registry
 
 - `extension/llm_agent/skills/loader.mjs` — parses and validates skill `.md` files
 - `extension/llm_agent/skills/registry.mjs` — core/plugin skill state, per-user views, catalog
@@ -44,7 +44,7 @@ The following files are governed by this document.
 - `extension/llm_agent/internal/context/app-capabilities.md` — static app-capabilities section
 - `extension/llm_agent/internal/context/compose.mjs` and `render-*.mjs` — internal context renderers
 
-**Covered in a later section (named here for completeness)**
+### Covered in a later section (named here for completeness)
 
 - `extension/providers/runtime.mjs`
 - `extension/agents/dispatcher.mjs`
@@ -132,14 +132,14 @@ Source: `extension/llm_agent/runtime/fence.mjs`
 
 The two sentinel strings (fence.mjs:5–6):
 
-```
+```text
 <<<TOOL_CALL>>>
 <<<END_TOOL_CALL>>>
 ```
 
 The tool-result sentinels embedded by the loop (loop.mjs:111):
 
-```
+```text
 <<<TOOL_RESULT>>>
 <<<END_TOOL_RESULT>>>
 ```
@@ -589,6 +589,7 @@ When the circuit is open, `pollTask` returns a synthetic `state: 'unknown'` resu
 ---
 
 ## Regeneration checklist
+
 - [x] Every governed symbol/endpoint/table/prompt is present with its exact shape (no "etc.", no "see code").
 - [x] Every magic number, timeout, cap, regex, and crypto parameter is stated.
 - [x] Spot-check: the loop algorithm, fence sentinels, sub-model cascade, and runClaude paths were rebuilt from this page and match source.

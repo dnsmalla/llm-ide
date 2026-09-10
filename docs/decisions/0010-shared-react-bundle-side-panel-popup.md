@@ -21,4 +21,4 @@ The floating popup is a `type: 'popup'` Chrome window that mounts the same `src/
 - **Positive:** features land once; both surfaces get them.
 - **Positive:** CSS adapts to the resized window via `flex-wrap` and media queries.
 - **Negative:** every new piece of UI state must persist through `chrome.storage.local` or broadcast — local React state alone will not sync.
-- **Locked in:** see [invariants — floating popup, useChat persistence](../explanation/invariants.md#floating-popup-chromewindowscreate).
+- **Locked in:** see [invariants — pop-out, useChat persistence](../explanation/invariants.md#pop-out-native-app).

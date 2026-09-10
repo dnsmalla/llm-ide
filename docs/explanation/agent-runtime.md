@@ -24,8 +24,8 @@ It is not the meeting agent (that is a separate loop in `extension/agents/meetin
 
 The Code Assistant is deliberately split into two agents that share a single iteration engine (`runtime/loop.mjs`):
 
-- **Global** — the front-line agent. Its prompt ([`extension/llm_agent/global/prompt.md`](../../extension/llm_agent/global/prompt.md)) is lean: a role description plus a single delegation skill (`ask-internal`). General engineering questions are answered directly; anything that requires live system state is delegated.
-- **Internal** — the system-aware specialist. Its prompt ([`extension/llm_agent/internal/prompt.md`](../../extension/llm_agent/internal/prompt.md)) loads the full `agentContext` snapshot (active GitLab project, indexed code repos, recent issues, recent meetings, app capabilities) plus the action skills. It either answers in prose or emits a write-tool fence to be confirmed on the client.
+- **Global** — the front-line agent. Its prompt (`extension/llm_agent/global/prompt.md`) is lean: a role description plus a single delegation skill (`ask-internal`). General engineering questions are answered directly; anything that requires live system state is delegated.
+- **Internal** — the system-aware specialist. Its prompt (`extension/llm_agent/internal/prompt.md`) loads the full `agentContext` snapshot (active GitLab project, indexed code repos, recent issues, recent meetings, app capabilities) plus the action skills. It either answers in prose or emits a write-tool fence to be confirmed on the client.
 
 Both agents run the same `runAgentLoop` function. The split exists because loading the full system context on every request — even pure general engineering questions — is expensive. The front door stays lean; the context cost is paid only when the internal agent is actually delegated to. See [agent-tools.md](agent-tools.md) for the design rationale.
 
@@ -57,8 +57,8 @@ The full skill catalog — all global, internal, and plugin skills — is in [`.
 
 Verbatim prompts (the authoritative source; do not rely on paraphrases in docs):
 
-- [`extension/llm_agent/global/prompt.md`](../../extension/llm_agent/global/prompt.md) — global agent role and rules
-- [`extension/llm_agent/internal/prompt.md`](../../extension/llm_agent/internal/prompt.md) — internal agent role and rules
+- `extension/llm_agent/global/prompt.md` — global agent role and rules
+- `extension/llm_agent/internal/prompt.md` — internal agent role and rules
 
 ## How it fits together
 

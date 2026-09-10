@@ -122,7 +122,7 @@ Quit whatever holds the port, then **Start** Mobile Control again.
 
 ## Architecture
 
-```
+```text
 iPhone (ios_app)
     │  Bonjour + ws://<mac>:3006/ws
     │  {"type":"pairing","pin":"…","deviceId":"…"} once, then {"token":"…"}

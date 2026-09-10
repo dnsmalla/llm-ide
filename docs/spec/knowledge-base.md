@@ -13,7 +13,7 @@ Rebuild-grade contract for the KB subsystem. Every claim here is verified agains
 
 This spec governs the following files:
 
-**Storage layer**
+### Storage layer
 
 | File | Role |
 |---|---|
@@ -30,7 +30,7 @@ This spec governs the following files:
 | `extension/kb/project-export.mjs` | `exportProject()` |
 | `extension/kb/usage.mjs` | Model usage metering + same-provider auto-fallback: `DEFAULT_CHAINS`, window math, `recordUsage()`, `getLimits()`/`setLimits()`, `flagQuota()`, `resolveModel()` (with `preferModel`), `usageSummary()`, and the in-memory `recordRateLimits()`/`getRateLimits()` API rate-limit snapshot |
 
-**Migrations**
+### Migrations
 
 | File | Role |
 |---|---|
@@ -75,7 +75,7 @@ Notable tables added in recent migrations:
   `extension/kb/issue-schedule.mjs`; routes `GET`/`PUT`/`DELETE /kb/issue-schedule`
   in `extension/routes/issue-schedule.mjs`.
 
-**Model usage limits — resolution**
+### Model usage limits — resolution
 
 `resolveModel(db, userId, provider, now, { preferModel })` walks the provider's
 enabled chain in priority order: it returns the first model under its
@@ -88,7 +88,7 @@ only stepped **down** when constrained — never upgraded past what was asked.
 dispatch layer only overrides the caller's model when engaged, so configuring no
 caps changes nothing. Source: `extension/kb/usage.mjs`.
 
-**HTTP routing**
+### HTTP routing
 
 | File | Role |
 |---|---|
@@ -106,7 +106,7 @@ used by the Auto Tasks path), `POST /kb/usage/record` (record a run from the Mac
 CLI path), and `GET /kb/usage/ratelimits?provider=` (latest provider
 API-rate-limit snapshot; API-key mode only).
 
-**Vault**
+### Vault
 
 | File | Role |
 |---|---|
@@ -133,7 +133,7 @@ That page is generated from `extension/kb/migrations/*.sql` and must not be edit
 
 Set once per connection inside `getDb()` (`extension/kb/db.mjs:54–62`):
 
-```
+```sql
 PRAGMA journal_mode = WAL
 PRAGMA synchronous = NORMAL
 PRAGMA foreign_keys = ON
@@ -151,7 +151,7 @@ On graceful shutdown (`closeDb()`), the server calls `PRAGMA wal_checkpoint(TRUN
 
 Non-integer primary keys are minted by `genId(prefix)` (`extension/kb/db.mjs:427–435`):
 
-```
+```javascript
 `${prefix}-${Date.now().toString(36)}-${crypto.randomBytes(12).toString('base64url')}`
 ```
 
@@ -186,7 +186,7 @@ Defined at `migrations.mjs:42–49`:
 
 FNV-1a 32-bit over the full UTF-8 file text (`migrations.mjs:64–75`):
 
-```
+```text
 let h = 0x811c9dc5;
 for each char: h ^= charCode; h = Math.imul(h, 0x01000193);
 return (h >>> 0).toString(16).padStart(8, '0');
@@ -302,6 +302,7 @@ When `buildMatchExpr(q)` returns `null` (empty string, non-string, or all tokens
 **`kind` filter values** (`db.mjs:175`, `db.mjs:262–263`):
 
 The `search()` function accepts the following `kind` values:
+
 - Entity kinds: `'meeting'`, `'action'`, `'decision'`, `'blocker'`
 - Plan kinds: `'plan'`, `'task'`
 - Outcome kind: `'outcome'`
@@ -327,7 +328,7 @@ Source: `extension/server/vault.mjs`.
 
 `vault.mjs:49–52` (function `deriveDataKey`):
 
-```
+```text
 data_key = HKDF-SHA256(
   ikm    = config.vaultKey (the LLMIDE_VAULT_KEY env var, interpreted as a Buffer),
   salt   = Buffer.from(String(userId)),
@@ -361,7 +362,7 @@ AES-256-GCM (`vault.mjs:58`): `crypto.createCipheriv('aes-256-gcm', key, iv)`.
 
 `vault.mjs:110–137`. Any `setSecret` / `getSecret` call with a key not in this set throws `Error('Unknown vault key: <key>')`:
 
-```
+```text
 'github.token'
 'backlog.apiKey'
 'linear.apiKey'
@@ -391,6 +392,7 @@ Ciphertext is stored as `BLOB` in `user_secrets(user_id, secret_key, ciphertext)
 ---
 
 ## Regeneration checklist
+
 - [x] Every governed symbol/endpoint/table/prompt is present with its exact shape (no "etc.", no "see code").
 - [x] Every magic number, timeout, cap, regex, and crypto parameter is stated.
 - [x] Spot-check: the `meetings`/`search` schema, `buildMatchExpr`, the migration protocol, and the vault byte-layout were rebuilt from this page and match source.

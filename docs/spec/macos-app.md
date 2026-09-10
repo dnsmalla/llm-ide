@@ -127,6 +127,7 @@ The Library section gets a 3-column layout (sidebar | list | detail). All other 
 The app's lifecycle can exclude features at compile time via `LLMIDE_FEATURES` environment variable, reducing binary size and startup overhead for non-engineers. `Package.swift` reads `LLMIDE_FEATURES` (comma-separated feature names; unset defaults to all enabled) via `ProcessInfo` and appends excluded features' source folders to the `LlmIdeMacLib` target's `exclude:` list, while defining `.define("FEATURE_<NAME>")` for each included feature. **Only one file uses `#if` preprocessor conditionals: `FeatureCatalog.swift`**, which registers compiled-in feature modules and exposes their view factories. All other code accesses features through catalog-provided protocols or notifications, decoupling the main codebase from feature presence. A feature compiled out still gets a row in Settings → Workspace, but shows "Not installed" in place of its toggle.
 
 Seven features are excludable at build time:
+
 - **`codeGraph3D`** — Code graph layout, rendering, memory/Q&A stores (Phase 2a)
 - **`fileExplorer`** — File navigator, source control view, search; omits help topics for search and source control (Phase 2b)
 - **`ganttIssues`** — Issues board and Gantt timeline (Phase 2b)
@@ -368,6 +369,7 @@ Backoff strategy (`backoffNanos`, lines 353–356): `0.4 × 2^(attempt-1)` secon
 The Code Assistant sends a `POST /code-assist` request and receives a `CodeAssistResponse` (defined in `LlmIdeAPIClient+CodeAssist.swift`, lines 52–61). The response carries an optional `pendingTool: PendingTool?`.
 
 `PendingTool` (`Agent/Models/AgentTypes.swift`, line 40) has:
+
 - `name: String` — the tool name (e.g. `"update-file"`, `"create-gitlab-issue"`, `"comment-gitlab-issue"`, `"trigger-review-code"`)
 - `arguments: AnyArguments` — raw JSON payload stored as `Data`, decoded lazily into typed structs via accessor properties (`updateFileArgs`, `createIssueArgs`, etc.)
 
@@ -389,6 +391,7 @@ The Code Assistant sends a `POST /code-assist` request and receives a `CodeAssis
 7. `pendingTool` is set to `nil` (line 1810) after write; if the follow-up response contains another `pendingTool`, the cycle repeats.
 
 **Other tool names** follow the same card → sheet → confirm → synthetic-turn → follow-up pattern:
+
 - `"create-gitlab-issue"` / `"create-github-issue"` → `CreateIssueSheet` → calls `GitLabClient` or `GitHubClient` → synthetic `(executed create-issue → #N ...)` turn
 - `"comment-gitlab-issue"` → `CommentIssueSheet` → calls `client.createNote(...)`
 - `"trigger-review-code"` → `TriggerReviewCodeSheet`
@@ -570,6 +573,7 @@ All five are declared `.copy(...)` so SwiftPM copies them verbatim into `Content
 `mac/build_app.sh` is a backward-compat shim (line 3) that delegates to three sub-scripts in order: `Scripts/build.sh` → `Scripts/sign.sh` → `Scripts/dmg.sh`. For a full notarized release, `Scripts/release.sh` adds a `Scripts/notarize.sh` phase between sign and DMG. Dev DMGs built via `build_app.sh` carry `LLMIDESourceRoot` in their Info.plist; only `release.sh` sets `LLMIDE_OMIT_SOURCE_ROOT=1` to omit it.
 
 **`Scripts/build.sh`:**
+
 1. Reads the version string from `mac/VERSION` (line 19) — single source of truth for both the Info.plist `CFBundleShortVersionString` and the DMG filename.
 2. Assembles the `.app` bundle skeleton (`Contents/MacOS/`, `Contents/Resources/`).
 3. Generates `AppIcon.icns` from `app_logo.png` using `sips` + `iconutil` (line 41).
@@ -600,7 +604,7 @@ All five are declared `.copy(...)` so SwiftPM copies them verbatim into `Content
 
 Declared in `Package.swift` lines 41–60. Depends on the main `LlmIdeMac` target. The `Tests/LlmIdeMacTests/` path is excluded from the `README-skipped-tests.md` file. The target requires unsafe Swift flags pointing at `/Library/Developer/CommandLineTools/Library/Developer/Frameworks` to link the Swift Testing framework:
 
-```
+```text
 -F /Library/Developer/CommandLineTools/Library/Developer/Frameworks
 -Xfrontend -disable-cross-import-overlays
 ```
@@ -658,6 +662,7 @@ This feature pairs with the backend `activity` table and module documented in [`
 ---
 
 ## §10 Regeneration checklist
+
 - [x] Every governed contract (service interfaces, IPC, platform-coupling points, capture pipeline) is present with verified `file:symbol` citations.
 - [x] Every coupling point names its Apple-only API and a portability tag.
 - [x] Spot-check: the app lifecycle, the API client auth/refresh flow, and the AX capture path were rebuilt from this page and match source.

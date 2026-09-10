@@ -65,7 +65,8 @@ LLM-IDE needs these permissions:
   - Needed for: triggering CI/CD on auto-task fixes (optional)
 
 Recommended scopes for most users:
-```
+
+```text
 ✓ repo (includes: repo:status, repo_deployment, public_repo)
 ✓ workflow
 ```
@@ -80,6 +81,7 @@ Recommended scopes for most users:
 ### Verify Your Configuration
 
 After saving, LLM-IDE will:
+
 1. Check token validity
 2. Fetch your available repositories
 3. Verify the local clone path exists
@@ -99,24 +101,28 @@ After saving, LLM-IDE will:
 Once configured, GitHub enables:
 
 #### Issues View
+
 - List all open/closed issues in your repo
 - Filter by assignee, label, milestone
 - Create new issues from meeting action items
 - Update issue status during Auto Tasks runs
 
 #### Code Workflows
+
 - Create feature branches
 - Commit code changes
 - Open pull requests
 - Request reviews
 
 #### Auto Tasks
+
 - Review code on PRs
 - Comment with findings
 - Update issue status
 - Trigger workflows (if `workflow` scope enabled)
 
 #### Gantt View
+
 - Fully supported — the same timeline GitLab gets (zoom, filters, milestones)
 - GitHub issues carry no start/due date, so LLM-IDE stores them for you: right-click a row → **Edit Schedule…** to set start, due, estimate and blocking issues
 - Issues in a milestone fall back to the milestone's due date until you schedule them
@@ -155,12 +161,14 @@ LLM-IDE needs these permissions:
   - Needed for: clone operations, file access
 
 Recommended scopes:
-```
+
+```text
 ✓ api
 ✓ read_repository
 ```
 
 **Optional for advanced features:**
+
 - `write_repository` — Create branches, commits, MRs (for Code Workflows)
 
 #### Step 3: Copy & Store
@@ -179,6 +187,7 @@ If CLI auth fails after rotating a token, re-save in **Settings → GitLab**; th
 ### Verify Your Configuration
 
 After saving, LLM-IDE will:
+
 1. Check token validity
 2. Fetch your available projects
 3. Verify the local clone path
@@ -198,24 +207,28 @@ After saving, LLM-IDE will:
 Once configured, GitLab enables:
 
 #### Issues View
+
 - List all open/closed issues in your project
 - Filter by assignee, labels, milestones
 - Create new issues from meeting action items
 - Update issue status and assignee
 
 #### Merge Requests
+
 - View open/closed MRs
 - Add review comments
 - Approve/request changes
 - Trigger pipelines
 
 #### Auto Tasks
+
 - Review code on MRs
 - Comment with findings
 - Create/update issues
 - Auto-create branches for fixes
 
 #### Gantt View
+
 - Shows project timeline with milestones
 - Uses GitLab's native issue due dates and milestone start/due dates
 
@@ -290,6 +303,7 @@ If you don't see these fields, contact support — your instance may need specia
 **Cause:** Your credentials are no longer valid.
 
 **Fix:**
+
 1. Generate a new token on GitHub/GitLab
 2. Ensure it hasn't expired
 3. Verify required scopes are selected
@@ -301,6 +315,7 @@ If you don't see these fields, contact support — your instance may need specia
 **Cause:** LLM-IDE can't access the repo with your token.
 
 **Fixes:**
+
 - **Check the project path:**
   - GitHub: `owner/repo` (e.g., `microsoft/vscode`)
   - GitLab: `group/subgroup/project` (e.g., `gitlab-org/gitaly`)
@@ -313,9 +328,11 @@ If you don't see these fields, contact support — your instance may need specia
 **Cause:** The local directory where the repo is cloned isn't accessible.
 
 **Fix:**
+
 1. Verify the path exists: `ls /path/to/repo`
 2. Ensure it's readable: `ls -la /path/to/repo`
 3. If it doesn't exist, clone it first:
+
    ```bash
    # GitHub
    git clone https://github.com/owner/repo /path/to/repo
@@ -323,6 +340,7 @@ If you don't see these fields, contact support — your instance may need specia
    # GitLab
    git clone https://gitlab.com/group/project /path/to/repo
    ```
+
 4. Update LLM-IDE with the correct path
 5. Click **Verify & Save**
 
@@ -331,6 +349,7 @@ If you don't see these fields, contact support — your instance may need specia
 **Cause:** Might be a transient issue or state corruption.
 
 **Fix:**
+
 1. Close and reopen LLM-IDE
 2. Try switching again
 3. If still stuck, clear provider settings and reconfigure
@@ -341,6 +360,7 @@ If you don't see these fields, contact support — your instance may need specia
 **Cause:** No issue in the selected project has a date to place it on the timeline.
 
 **Fix:**
+
 1. GitLab — set a due date on an issue, or start/due dates on a milestone
 2. GitHub — right-click an issue row → **Edit Schedule…** and set a start or due date
 3. Uncheck **Hide undated** in the filter bar to see every issue regardless of dates
@@ -369,12 +389,14 @@ If you don't see these fields, contact support — your instance may need specia
 ### Issues View with Active Provider
 
 **GitHub:**
+
 - Shows all repositories you have access to
 - Can filter by owner, stars, language
 - Create/update issues in real-time
 - Comments visible in-app
 
 **GitLab:**
+
 - Shows all projects you're a member of
 - Can filter by visibility, language, topic
 - Create/update issues and MRs
@@ -385,12 +407,14 @@ If you don't see these fields, contact support — your instance may need specia
 One timeline serves both providers — same chart, same controls.
 
 **Gantt features:**
+
 - Day / week / month zoom, today marker, weekend shading
 - Milestone markers across the timeline
 - Filters: search, state, milestone, assignee, label, date range
 - Legend chips that toggle open / closed / overdue
 
 **Where the dates come from:**
+
 - **GitLab** — the issue's native due date, plus milestone start/due dates
 - **GitHub** — GitHub has no per-issue dates, so LLM-IDE stores start, due,
   estimate and blocking issues locally. Right-click a row → **Edit Schedule…**
