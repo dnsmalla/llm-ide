@@ -22,6 +22,9 @@ struct MenuBarChatView: View {
     // resurrected deleted chats through persistCurrentChat.
     @State private var engine: ChatEngine
     @State private var viewModel: LlmChatViewModel
+    /// Measured bubble heights for THIS surface only (the sheet renders the
+    /// same `.quick` engine at another width). See `BubbleHeightCache`.
+    @State private var bubbleHeights = BubbleHeightCache()
     @State private var draft: String = ""
     @State private var confirmingClear = false
     @State private var clearingHistory = false
@@ -547,10 +550,10 @@ struct MenuBarChatView: View {
                         markdown: displayedContent(for: msg),
                         isDark: theme.current.isDark
                     ) { h in
-                        if engine.bubbleHeights[msg.id] != h { engine.bubbleHeights[msg.id] = h }
+                        bubbleHeights[msg.id] = h
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(height: max(engine.bubbleHeights[msg.id] ?? 24, 24))
+                    .frame(height: bubbleHeights.height(for: msg.id, min: 24))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(Color(nsColor: .controlBackgroundColor))

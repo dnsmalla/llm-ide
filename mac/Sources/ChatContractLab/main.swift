@@ -52,6 +52,18 @@ do {
     expect(buf.isEmpty && buf.take() == nil, "discard() drops without publishing")
 }
 
+// BubbleHeightCache — per-view geometry, never shared through the engine.
+do {
+    let cache = BubbleHeightCache()
+    let id = UUID()
+    expect(cache[id] == nil, "unmeasured id has no height")
+    expect(cache.height(for: id, min: 24) == 24, "unmeasured id falls back to min")
+    cache[id] = 80
+    expect(cache.height(for: id, min: 24) == 80, "measured height wins over min")
+    cache[id] = 10
+    expect(cache.height(for: id, min: 24) == 24, "min floors a smaller measurement")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {
