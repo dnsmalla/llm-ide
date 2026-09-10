@@ -141,6 +141,7 @@ graph-gates: graph-kit-checkout
 .PHONY: chat-gates
 chat-gates:
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run chat-contract-lab
+	node scripts/conformance-agent-v2.mjs
 
 # Enable the repo's git hooks (.githooks/). The pre-push hook runs the
 # regression gate before any push that touches mac/. Run once per clone.

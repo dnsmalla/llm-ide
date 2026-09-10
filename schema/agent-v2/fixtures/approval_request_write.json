@@ -1,0 +1,1 @@
+{"type":"approval_request","requestId":"9e8d7c6b-5a41-4302-b1f0-3d2c1b0a9f88","kind":"ToolApproval","toolName":"Write","argsSummary":"schema/agent-v2/SCHEMA.md","args":{"filePath":"/repo/schema/agent-v2/SCHEMA.md","contentPreview":"# agent/v2 wire contract\n","totalChars":4127,"exists":false}}

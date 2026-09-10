@@ -1,0 +1,1 @@
+{"type":"approval_request","requestId":"1a5f3b78-4c92-4e01-8d6a-2b7c9e04f513","kind":"ToolApproval","toolName":"Bash","argsSummary":"swift build --product LlmIdeMac","args":{"command":"swift build --product LlmIdeMac","truncated":false}}
