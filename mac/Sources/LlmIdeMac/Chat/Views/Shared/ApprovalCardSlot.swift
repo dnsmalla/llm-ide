@@ -27,8 +27,13 @@ struct ApprovalCardSlot: View {
     /// Per-surface spacing. The panel and menu bar inset the top; the sheet
     /// insets the sides. Defaults to the panel's, the copy the other two cited.
     var insets = EdgeInsets(top: 4, leading: 0, bottom: 0, trailing: 0)
-    /// The panel animates the card in; the other two do not.
-    var transition: AnyTransition = .identity
+    /// The panel declares `.opacity`; the other two declared nothing at all.
+    ///
+    /// `nil` means "apply no `.transition` modifier" — NOT `.identity`. An
+    /// unmodified insertion already defaults to `.opacity` in SwiftUI, so
+    /// defaulting this to `.identity` would have quietly given the menu bar and
+    /// the sheet a different animation from the one they had.
+    var transition: AnyTransition?
 
     var body: some View {
         Group {
@@ -46,6 +51,22 @@ struct ApprovalCardSlot: View {
         // card's @State (for the question card, its selection).
         .id(state.approval.requestId)
         .padding(insets)
-        .transition(transition)
+        .modifier(OptionalTransition(transition))
+    }
+}
+
+/// Applies `.transition` only when one was asked for, so a caller that
+/// declared none keeps SwiftUI's own default rather than being pinned to
+/// `.identity`.
+private struct OptionalTransition: ViewModifier {
+    let transition: AnyTransition?
+    init(_ transition: AnyTransition?) { self.transition = transition }
+
+    func body(content: Content) -> some View {
+        if let transition {
+            content.transition(transition)
+        } else {
+            content
+        }
     }
 }

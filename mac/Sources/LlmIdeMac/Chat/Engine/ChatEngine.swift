@@ -162,8 +162,13 @@ final class ChatEngine {
     var persistsUnobserved = false
     /// Measured render height per assistant turn, keyed by MESSAGE id, so each
     /// markdown web-view bubble can be sized to its content in the scroll list.
-    /// Written by the VIEW (`ChatMessageList`), so it stays publicly settable
-    /// rather than `private(set)`. Stays a dictionary — unlike the tool
+    /// Written by the VIEWS — `ChatMessageList` and `MenuBarChatView` — so it
+    /// stays publicly settable rather than `private(set)`. Those two never
+    /// share a `ChatEngine` (the panel is only built for `.conflicts` /
+    /// `.explorer` / `.docGen` / `.visual`, the menu bar only for `.quick`, and
+    /// `ChatEngineRegistry` keys by scope), so the shared dictionary is safe
+    /// today — but it is view geometry on a model object, and a future `.quick`
+    /// panel would make the two clobber each other. Stays a dictionary — unlike the tool
     /// steps/mode that moved onto `ChatMessage` in Task 9, a measured render
     /// height is view geometry, not chat data, and must never be persisted.
     /// (It is also more correct now than it was: `ChatMessage.id` is stable
@@ -930,7 +935,18 @@ final class ChatEngine {
         // A chunk for a different turn means the previous turn is done
         // receiving text; the buffer lands its batch rather than appending
         // across the boundary, and hands it back here to publish.
-        if let boundary = streamBuffer.append(id, text) { publish(boundary) }
+        //
+        // Cancelling the timer here is load-bearing, not tidiness: the old code
+        // reached this boundary through `flushPendingChunks()`, which nils
+        // `chunkFlushTask`, so the guard below then opened a FRESH coalescing
+        // window for the new turn. Without the cancel, the new turn's first
+        // batch would flush on the old turn's deadline — up to
+        // `chunkCoalesceNanos` early.
+        if let boundary = streamBuffer.append(id, text) {
+            chunkFlushTask?.cancel()
+            chunkFlushTask = nil
+            publish(boundary)
+        }
         guard chunkFlushTask == nil else { return }
         chunkFlushTask = Task { [chunkCoalesceNanos] in
             try? await Task.sleep(nanoseconds: chunkCoalesceNanos)

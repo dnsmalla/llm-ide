@@ -140,13 +140,15 @@ llm-ide/
 │   │   │   ├── Models/  #   LoopDefinition, stages, config store, templates, status
 │   │   │   ├── Services/#   LoopEngineRunner, journal, repairers, guards, parsers
 │   │   │   └── Views/   #   LoopEngineView(+panes), wizard, budget editors
-│   │   ├── Chat/        # ALL chat code, one folder (same shape as AutoTask/):
+│   │   ├── Chat/        # ALL chat code, one folder. Like Graph/ (not AutoTask/)
+│   │   │                #   it splits further than Models/Services/Views:
 │   │   │   ├── Models/  #   ChatMessage, ChatSession
 │   │   │   ├── Engine/  #   ChatEngine(+History/+PanelWrites/+ExternalTurn),
-│   │   │   │            #   ChatAutoChainPolicy
+│   │   │   │            #   ChatAutoChainPolicy, ChatStreamBuffer
 │   │   │   ├── Session/ #   ChatEngine+Session, ChatSessionStore, QuickChatContext,
 │   │   │   │            #   ExplorerMobileEngineResolver
-│   │   │   ├── Transport/#  ChatTransport, AgentV2Selection (ClaudeLink/ owns the v2 wire)
+│   │   │   ├── Transport/#  ChatTransport + AgentV2Selection, which today also
+│   │   │   │            #   holds AgentV2EngineTransport (moving to ClaudeLink/)
 │   │   │   ├── Services/#   ChatEngineRegistry, slash commands, voice state, module
 │   │   │   └── Views/   #   Panel/ (CodeAssistant), Quick/ (menu bar + sheet),
 │   │   │                #   Shared/ (approval cards, AgentV2ApprovalState)
@@ -346,6 +348,7 @@ ios_app/MyApp/Services/
 - **Claude linker** — [`docs/explanation/claude-linker.md`](docs/explanation/claude-linker.md): the two layers (`extension/llm_agent/sdk/` + `extension/providers/`, `mac/…/ClaudeLink/`) that own ALL Claude SDK/CLI knowledge; SDK updates edit only these
 - **KB operations** — `extension/kb/db.mjs` (every state-mutating helper takes `userId` first)
 - **Graph generation** — [`extension/graph_generation/README.md`](extension/graph_generation/README.md): the engine contract, how a plugin supplies one, and how to unplug the compiled-in engine. Everything graph lives in `mac/LocalPackages/graph-kit/` — a **git submodule** of `github.com/dnsmalla/graph-kit` (one folder, two products: `GraphCore` always linked, `GraphKit` unpluggable) — and `mac/Sources/LlmIdeMac/Graph/` (app side). Changes to the engine are commits in that repo; land them there, then bump **both** pins here — the `revision:` on the `.package(url:)` in `mac/Package.swift` (what the build actually resolves) and the submodule gitlink (the local working tree)
+- **Chat slice** — `mac/Sources/LlmIdeMac/Chat/` (see the structure tree above). Logic lifted out of `ChatEngine` is asserted by `make chat-gates` → `cd mac && swift run chat-contract-lab`, an executable for the same reason the graph labs are: **this toolchain has no XCTest, so `make regression` skips `swift test` entirely** (`test-mac` guards it behind `HAS_XCTEST`) and `swift build --build-tests` fails too. A type the lab asserts must be `public` — the lab is a separate target, and `@testable import` is test-target-only
 - **Graph layout** — `mac/LocalPackages/graph-kit/Sources/GraphCore/Layout/GraphLayoutEngine.swift` is the single entry point. Verify any change with `cd mac/LocalPackages/graph-kit && swift run -c release graph-layout-lab --compare` (this toolchain has no XCTest, so the gate is an executable). **Never prune edges to make a dense graph legible** — weight them (`EdgeWeight`) and filter at render; the previous `capDegree(6)` deleted 82–100% of dependency edges
 - **Caption capture** — `extension/src/content/caption-scraper.ts` → `extension/src/sidepanel/hooks/useTranscript.ts`
 - **Central skills kit** — `.skills/` submodule + `docs/how-to/install-central-skills.md`

@@ -119,6 +119,14 @@ struct CodeAssistantPanel: View {
     /// User-added model ids, keyed by provider id, JSON in AppStorage. Lets
     /// the user run a model the built-in/live lists don't include (e.g. a
     /// brand-new release) — it's sent as-is and routed by id prefix.
+    ///
+    /// **DO NOT DELETE — this has no readers but it is not dead.** The value is
+    /// read and written by `CodeAssistantModelState.customModelIds(for:)` /
+    /// `addCustomModel(_:provider:config:)` through `UserDefaults.standard`
+    /// directly, which registers no SwiftUI dependency. This property is what
+    /// subscribes the panel to that key, so the model picker re-renders after
+    /// "Add model…". Removing it as an unused variable would silently break
+    /// that refresh.
     @AppStorage("MEETNOTES_CUSTOM_MODELS") var customModelsRaw = "{}"
     /// Sheet/popover presentation flags — see CodeAssistantSheetState's
     /// doc comment for why these are grouped apart from the fragile

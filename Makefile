@@ -140,7 +140,7 @@ graph-gates: graph-kit-checkout
 # all. Wired into `regression` because a gate nothing runs is a gate in name only.
 .PHONY: chat-gates
 chat-gates:
-	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run -c release chat-contract-lab
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run chat-contract-lab
 
 # Enable the repo's git hooks (.githooks/). The pre-push hook runs the
 # regression gate before any push that touches mac/. Run once per clone.
