@@ -60,7 +60,16 @@ test('GET /kb/usage/limits returns the built-in chains by default', async () => 
   assert.equal(res.statusCode, 200);
   const body = res.json();
   assert.ok(body.chains.anthropic.length >= 3);
-  assert.equal(body.chains.anthropic[0].model, 'claude-opus-4-8');
+  // Read from the one source rather than restating an id here: the previous
+  // hard-coded 'claude-opus-4-8' was one of the three divergent lists this
+  // file is now the client of. See schema/models/anthropic-models.json.
+  const anthropicModels = JSON.parse(
+    fs.readFileSync(new URL('../../schema/models/anthropic-models.json', import.meta.url), 'utf8'),
+  );
+  assert.deepEqual(
+    body.chains.anthropic.map((m) => m.model),
+    anthropicModels.chain.map((c) => c.id),
+  );
 });
 
 test('PUT /kb/usage/limits saves caps; GET reflects them', async () => {

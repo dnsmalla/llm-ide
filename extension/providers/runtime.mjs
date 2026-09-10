@@ -2,6 +2,7 @@
 // extraction, and language directive.  Kept in its own module so
 // planner/risk/code-sync don't each grow their own subtle copy.
 
+import { readFileSync } from 'node:fs';
 import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
@@ -45,7 +46,14 @@ const CLAUDE_TIMEOUT_MS = undefined;
 // something is genuinely broken and retrying is correct.
 const SOCKET_HANG_BREAKER_MS = 1_800_000;
 
-const DEFAULT_MODEL = process.env.LLMIDE_MODEL || 'claude-sonnet-4-6';
+// Claude model ids live in schema/models/anthropic-models.json — the one source
+// shared with kb/usage.mjs and (via scripts/conformance-agent-v2.mjs)
+// ClaudeLink/ClaudeCLI.swift. The literal that used to sit here was
+// 'claude-sonnet-4-6', which the Mac's own retiredModelIds maps away: the
+// server's default was a model the client considered retired.
+const DEFAULT_MODEL = process.env.LLMIDE_MODEL || JSON.parse(
+  readFileSync(new URL('../../schema/models/anthropic-models.json', import.meta.url), 'utf8'),
+).default;
 // Floor for the context-overflow retry: halving the output budget below
 // this produces summaries/answers too truncated to be useful, so we
 // stop retrying and surface the error instead.

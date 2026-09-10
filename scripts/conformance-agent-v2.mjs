@@ -235,6 +235,57 @@ for (const [type, where] of emitted) {
   note(`"${type}" is emitted at ${where} but is not in the schema`);
 }
 
+// ------------------------------------------------------------ model ids
+//
+// The fourth drift class: Claude model ids. Node now reads
+// schema/models/anthropic-models.json directly; Swift keeps a literal list
+// (a build-time resource would complicate the feature-reduced builds), so the
+// two are reconciled HERE rather than by convention. Before this, three lists
+// disagreed and the server's own DEFAULT_MODEL was an id the Mac retired.
+
+const MODELS_PATH = join(ROOT, 'schema/models/anthropic-models.json');
+const CLAUDE_CLI_PATH = join(ROOT, 'mac/Sources/LlmIdeMac/ClaudeLink/ClaudeCLI.swift');
+const models = JSON.parse(readFileSync(MODELS_PATH, 'utf8'));
+const swiftSource = readFileSync(CLAUDE_CLI_PATH, 'utf8');
+
+const swiftPicker = [...swiftSource.matchAll(/AIModel\(id:\s*"([^"]+)"/g)].map((m) => m[1]);
+const jsonPicker = models.models.map((m) => m.id);
+if (swiftPicker.join(',') !== jsonPicker.join(',')) {
+  note(`ClaudeCLI.fallbackModels [${swiftPicker}] does not match anthropic-models.json models [${jsonPicker}]`);
+}
+
+const retiredBlock = swiftSource.slice(swiftSource.indexOf('retiredModelIds'));
+const swiftRetired = Object.fromEntries(
+  [...retiredBlock.matchAll(/"([^"]+)":\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]),
+);
+for (const [from, to] of Object.entries(models.retired)) {
+  if (swiftRetired[from] !== to) note(`retired "${from}" → "${to}" in JSON but "${swiftRetired[from] ?? 'absent'}" in ClaudeCLI.swift`);
+}
+for (const from of Object.keys(swiftRetired)) {
+  if (!(from in models.retired)) note(`ClaudeCLI.retiredModelIds has "${from}" which anthropic-models.json does not`);
+}
+
+// The server's chain and the Mac's picker are different lists (see the JSON's
+// _comment). What must hold is that the DEFAULT is a chain entry — anything
+// else means the server's fallback ladder cannot reach its own default.
+const chainIds = models.chain.map((c) => c.id);
+if (!chainIds.includes(models.default)) {
+  note(`default "${models.default}" is not in the chain [${chainIds}]`);
+}
+if (models.chain.filter((c) => c.fast).length > 1) note('more than one chain entry is flagged fast');
+
+// KNOWN, REPORTED, NOT YET DECIDED — printed every run so it cannot rot
+// quietly. These are ids the server calls that the Mac coerces away; making
+// them agree changes which model actually answers, so it is the user's call,
+// not this gate's. See the JSON's OPEN DECISION note.
+const retiredInChain = chainIds.filter((id) => id in models.retired);
+if (retiredInChain.length) {
+  console.log(`  note: chain still uses ${retiredInChain.length} id(s) the Mac retires — ${retiredInChain.join(', ')}`);
+  if (models.default in models.retired) {
+    console.log(`  note: the server default "${models.default}" is one of them (→ ${models.retired[models.default]})`);
+  }
+}
+
 // ---------------------------------------------------------------- report
 
 if (fail.length) {

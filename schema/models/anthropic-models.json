@@ -1,0 +1,63 @@
+{
+  "_comment": [
+    "The single source for Anthropic model ids. Before this file there were three",
+    "lists that disagreed: ClaudeLink/ClaudeCLI.swift (picker + retired map),",
+    "extension/kb/usage.mjs (fallback chain), and extension/providers/runtime.mjs",
+    "(DEFAULT_MODEL). Node reads this file; Swift keeps a literal list and",
+    "scripts/conformance-agent-v2.mjs asserts the two agree.",
+    "",
+    "`models` is the PICKER (what a user may choose, Mac-side). `chain` is the",
+    "server's metering fallback order. They are different concerns and need not",
+    "be equal -- but see the OPEN DECISION below.",
+    "",
+    "OPEN DECISION: two of the three `chain` entries are keys in `retired`, i.e.",
+    "the server calls models the Mac coerces away, and `default` is one of them.",
+    "Values are left AS THE SERVER HAS THEM so this change is behaviour-neutral;",
+    "the gate REPORTS the condition rather than silently picking. Flipping the",
+    "chain to the picker's ids is a 3-line edit here plus ~12 test updates."
+  ],
+  "default": "claude-sonnet-4-6",
+  "models": [
+    {
+      "id": "claude-opus-5",
+      "label": "Opus 5"
+    },
+    {
+      "id": "claude-sonnet-5",
+      "label": "Sonnet 5"
+    },
+    {
+      "id": "claude-haiku-4-5",
+      "label": "Haiku 4.5",
+      "fast": true
+    },
+    {
+      "id": "claude-fable-5",
+      "label": "Fable 5"
+    },
+    {
+      "id": "claude-opus-4-8",
+      "label": "Opus 4.8"
+    }
+  ],
+  "chain": [
+    {
+      "id": "claude-opus-4-8",
+      "label": "Opus 4.8"
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "label": "Sonnet 4.6"
+    },
+    {
+      "id": "claude-haiku-4-5-20251001",
+      "label": "Haiku 4.5",
+      "fast": true
+    }
+  ],
+  "retired": {
+    "claude-opus-4-7": "claude-opus-4-8",
+    "claude-sonnet-4-6": "claude-sonnet-5",
+    "claude-haiku-4-5-20251001": "claude-haiku-4-5"
+  }
+}

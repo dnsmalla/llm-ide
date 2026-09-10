@@ -14,6 +14,8 @@
 // All functions are best-effort on the write side: a metering failure must
 // never throw into the model call that triggered it (mirrors activity.mjs).
 
+import { readFileSync } from 'node:fs';
+
 // ---------------------------------------------------------------------------
 // Built-in fallback chains. Order = default priority (lower index tried first).
 // Same-provider only by design — we never auto-switch providers. `custom` has
@@ -25,12 +27,22 @@
 // o3-mini, a reasoning model whose thinking tokens eat a small
 // max_completion_tokens budget and return empty content for structured
 // prompts).
+// The anthropic chain is NOT written here: Claude model ids live in
+// schema/models/anthropic-models.json, the one source shared with
+// providers/runtime.mjs and (via the conformance gate) ClaudeLink/ClaudeCLI.swift.
+// Three hand-kept copies previously disagreed — the server's own default was an
+// id the Mac treated as retired.
+const ANTHROPIC_MODELS = JSON.parse(
+  readFileSync(new URL('../../schema/models/anthropic-models.json', import.meta.url), 'utf8'),
+);
+const anthropicChain = ANTHROPIC_MODELS.chain.map((entry) => (
+  entry.fast
+    ? { model: entry.id, label: entry.label, fast: true }
+    : { model: entry.id, label: entry.label }
+));
+
 const DEFAULT_CHAINS = {
-  anthropic: [
-    { model: 'claude-opus-4-8',            label: 'Opus 4.8' },
-    { model: 'claude-sonnet-4-6',          label: 'Sonnet 4.6' },
-    { model: 'claude-haiku-4-5-20251001',  label: 'Haiku 4.5', fast: true },
-  ],
+  anthropic: anthropicChain,
   openai: [
     { model: 'gpt-4o',       label: 'GPT-4o' },
     { model: 'gpt-4o-mini',  label: 'GPT-4o mini', fast: true },
