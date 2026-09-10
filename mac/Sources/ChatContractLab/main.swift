@@ -26,8 +26,31 @@ func expect(_ condition: Bool, _ label: String) {
 
 print("chat-contract-lab")
 
-// Placeholder proving the harness reports failure correctly. Task 10 replaces it.
-expect(true, "harness reports failures")
+// ChatStreamBuffer — the coalescing arithmetic, independent of scheduling.
+do {
+    let a = UUID(), b = UUID()
+    var buf = ChatStreamBuffer()
+
+    expect(buf.isEmpty, "new buffer is empty")
+    expect(buf.append(a, "he") == nil, "same-turn append returns no batch")
+    expect(buf.append(a, "llo") == nil, "second same-turn append returns no batch")
+
+    let taken = buf.take()
+    expect(taken?.id == a && taken?.text == "hello", "take() returns the joined batch")
+    expect(buf.isEmpty, "take() drains the buffer")
+    expect(buf.take() == nil, "take() on an empty buffer returns nil")
+
+    // A chunk for a different turn must land the previous turn's text first,
+    // never append across the boundary.
+    _ = buf.append(a, "first")
+    let boundary = buf.append(b, "second")
+    expect(boundary?.id == a && boundary?.text == "first", "turn change flushes the previous turn")
+    expect(buf.take()?.text == "second", "the new turn's text is buffered, not lost")
+
+    _ = buf.append(a, "dropme")
+    buf.discard()
+    expect(buf.isEmpty && buf.take() == nil, "discard() drops without publishing")
+}
 
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")

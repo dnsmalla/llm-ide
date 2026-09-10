@@ -100,18 +100,13 @@ final class ChatEngine {
     // MARK: - Chunk coalescing
 
     /// Text that has arrived from the transport but is not yet written into
-    /// `messages`. The server emits one SSE `chunk` per model text delta —
-    /// 5-20 characters — so a normal reply arrives as a thousand-plus
-    /// callbacks. Writing each one straight into `messages` published a
-    /// thousand SwiftUI invalidations, a thousand `WKWebView` document
-    /// reloads, and (via the panel's `.onChange(of: engine.messages)`) a
-    /// thousand synchronous session-file read/write pairs, all on the
-    /// MainActor. Batching them at `chunkCoalesceNanos` cuts every one of
-    /// those to ~20/second without changing what the user ends up seeing.
-    var pendingChunkText = ""
-    /// The turn `pendingChunkText` belongs to. A chunk for a different turn
-    /// flushes the buffer first, so text can never land on the wrong message.
-    var pendingChunkTurnID: UUID?
+    /// `messages`, and the turn it belongs to.
+    ///
+    /// The batching rules (join within a turn, flush at a turn boundary, drop
+    /// on discard) live in `ChatStreamBuffer` so they can be asserted by
+    /// `chat-contract-lab` without a running app. Only the *scheduling* below
+    /// is engine-bound. See that type for why per-delta writes were costly.
+    var streamBuffer = ChatStreamBuffer()
     /// The in-flight coalescing delay, if one is scheduled.
     var chunkFlushTask: Task<Void, Never>?
     /// How long chunks accumulate before being published. ~50 ms reads as
@@ -927,17 +922,15 @@ final class ChatEngine {
     /// into `messages` at most once per `chunkCoalesceNanos`.
     ///
     /// This is deliberately NOT a straight `messages[idx].content += text`
-    /// anymore: see `pendingChunkText` for what a per-delta write costs. The
+    /// anymore: see `ChatStreamBuffer` for what a per-delta write costs. The
     /// buffer is published by `flushPendingChunks()`, which every exit from a
     /// turn calls before it reads or overwrites the turn's content — so no
     /// caller can observe a partially-drained stream.
     func appendStreamedChunk(_ id: UUID, _ text: String) {
         // A chunk for a different turn means the previous turn is done
-        // receiving text; land its buffer before starting a new one rather
-        // than appending across the boundary.
-        if let pending = pendingChunkTurnID, pending != id { flushPendingChunks() }
-        pendingChunkTurnID = id
-        pendingChunkText += text
+        // receiving text; the buffer lands its batch rather than appending
+        // across the boundary, and hands it back here to publish.
+        if let boundary = streamBuffer.append(id, text) { publish(boundary) }
         guard chunkFlushTask == nil else { return }
         chunkFlushTask = Task { [chunkCoalesceNanos] in
             try? await Task.sleep(nanoseconds: chunkCoalesceNanos)
@@ -955,22 +948,8 @@ final class ChatEngine {
     func flushPendingChunks() {
         chunkFlushTask?.cancel()
         chunkFlushTask = nil
-        guard !pendingChunkText.isEmpty, let id = pendingChunkTurnID else {
-            pendingChunkText = ""
-            return
-        }
-        let batch = pendingChunkText
-        pendingChunkText = ""
-        guard let idx = messages.firstIndex(where: { $0.id == id }) else {
-            pendingChunkTurnID = nil
-            return
-        }
-        messages[idx].content += batch
-        // Incremental, not `content.count` — see `revealedCount`. Combining
-        // marks at a batch boundary can make this drift a character or two
-        // above the true grapheme count, which is harmless: nothing slices
-        // the content by it, it only has to move when the stream moves.
-        revealedCount += batch.count
+        guard let batch = streamBuffer.take() else { return }
+        publish(batch)
     }
 
     /// Drop buffered chunks without publishing them. For the one case where
@@ -981,8 +960,20 @@ final class ChatEngine {
     func discardPendingChunks() {
         chunkFlushTask?.cancel()
         chunkFlushTask = nil
-        pendingChunkText = ""
-        pendingChunkTurnID = nil
+        streamBuffer.discard()
+    }
+
+    /// Append a drained batch to its turn. A batch whose turn has since gone
+    /// (deleted, or a session switch) is dropped, matching the previous
+    /// `firstIndex` guard.
+    private func publish(_ batch: (id: UUID, text: String)) {
+        guard let idx = messages.firstIndex(where: { $0.id == batch.id }) else { return }
+        messages[idx].content += batch.text
+        // Incremental, not `content.count` — see `revealedCount`. Combining
+        // marks at a batch boundary can make this drift a character or two
+        // above the true grapheme count, which is harmless: nothing slices
+        // the content by it, it only has to move when the stream moves.
+        revealedCount += batch.text.count
     }
 
     /// Finalize a streaming turn: fires the VoiceOver announcement exactly
