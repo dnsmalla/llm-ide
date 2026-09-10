@@ -160,6 +160,16 @@ final class ChatEngine {
     /// end is a no-op — the whole background turn would finish in memory and
     /// never reach disk. With this set, the turn-end funnel writes directly.
     var persistsUnobserved = false
+    /// Measured render height per assistant turn, keyed by MESSAGE id, so each
+    /// markdown web-view bubble can be sized to its content in the scroll list.
+    /// Written by the VIEW (`ChatMessageList`), so it stays publicly settable
+    /// rather than `private(set)`. Stays a dictionary — unlike the tool
+    /// steps/mode that moved onto `ChatMessage` in Task 9, a measured render
+    /// height is view geometry, not chat data, and must never be persisted.
+    /// (It is also more correct now than it was: `ChatMessage.id` is stable
+    /// across a save/reload, where `CodeAssistTurn.id` was minted fresh on
+    /// every decode.)
+    var bubbleHeights: [UUID: CGFloat] = [:]
     /// While `true`, the panel's `handleHistoryChange` persists but skips the
     /// VoiceOver announcement. Set around bulk history loads and around the
     /// streaming placeholder append so an empty turn isn't read aloud.

@@ -491,12 +491,8 @@ struct LlmChatSheet: View {
 /// Assistant bubble's markdown render, isolated into its own view so its
 /// measured content height is local `@State` — per bubble instance, NOT
 /// cached into a shared dictionary keyed by message id (that's
-/// `BubbleHeightCache`, which the panel and the menu bar each own an instance
-/// of; this sheet scrolls its `ScrollView` natively and has no need for one).
-///
-/// This sheet was always right: the cache used to live on `ChatEngine`, which
-/// the panel and the menu bar SHARED, so those two clobbered each other's
-/// measurements for the same message at different widths.
+/// `ChatEngine.bubbleHeights`, the main panel's Task 15 concern; this sheet
+/// scrolls its `ScrollView` natively and has no need for it).
 private struct AssistantBubbleContent: View {
     let markdown: String
     let isDark: Bool

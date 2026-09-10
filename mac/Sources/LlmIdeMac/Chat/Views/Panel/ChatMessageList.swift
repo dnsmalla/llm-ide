@@ -15,16 +15,11 @@ import SwiftUI
 /// (no more `"_(stopped)_"` suffix in the text), and tool steps / the reply
 /// mode are read off the message instead of out of engine-side dictionaries.
 struct ChatMessageList: View {
-    /// Measured bubble heights for THIS surface only. Never on the engine —
-    /// the menu bar renders the same `.quick` engine at a different width, and
-    /// a shared dictionary made the two clobber each other. See
-    /// `BubbleHeightCache`.
-    @State private var bubbleHeights = BubbleHeightCache()
     /// The chat itself: `messages`, the busy/status line, the live-streaming
-    /// cursor (`revealingTurnID`/`revealedCount`), and the error banner it can
-    /// dismiss. A reference type (`@Observable`), so reading its properties in
-    /// `body` tracks them without any Binding. Bubble heights are NOT here —
-    /// see `bubbleHeights` above.
+    /// cursor (`revealingTurnID`/`revealedCount`), the measured bubble heights
+    /// this view writes back, and the error banner it can dismiss. A reference
+    /// type (`@Observable`), so reading its properties in `body` tracks them
+    /// without any Binding.
     let engine: ChatEngine
     let showModelPicker: Bool
     let pendingTool: PendingTool?
@@ -658,10 +653,10 @@ struct ChatMessageList: View {
                                 markdown: displayedContent(for: turn),
                                 isDark: theme.current.isDark
                             ) { h in
-                                bubbleHeights[turn.id] = h
+                                if engine.bubbleHeights[turn.id] != h { engine.bubbleHeights[turn.id] = h }
                             }
                             .frame(maxWidth: 720, alignment: .leading)
-                            .frame(height: bubbleHeights.height(for: turn.id, min: 24))
+                            .frame(height: max(engine.bubbleHeights[turn.id] ?? 24, 24))
                             // Older expanded replies can be collapsed again; the
                             // latest stays open and shows no collapse control.
                             if turn.id != lastAssistantTurnId {
