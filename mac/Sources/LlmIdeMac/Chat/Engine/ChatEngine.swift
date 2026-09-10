@@ -168,9 +168,11 @@ final class ChatEngine {
     /// `.explorer` / `.docGen` / `.visual`, the menu bar only for `.quick`, and
     /// `ChatEngineRegistry` keys by scope), so the shared dictionary is safe
     /// today — but it is view geometry on a model object, and a future `.quick`
-    /// panel would make the two clobber each other. Stays a dictionary — unlike the tool
-    /// steps/mode that moved onto `ChatMessage` in Task 9, a measured render
-    /// height is view geometry, not chat data, and must never be persisted.
+    /// panel would make the two clobber each other.
+    ///
+    /// Stays a dictionary — unlike the tool steps/mode that moved onto
+    /// `ChatMessage` in Task 9, a measured render height is view geometry, not
+    /// chat data, and must never be persisted.
     /// (It is also more correct now than it was: `ChatMessage.id` is stable
     /// across a save/reload, where `CodeAssistTurn.id` was minted fresh on
     /// every decode.)
