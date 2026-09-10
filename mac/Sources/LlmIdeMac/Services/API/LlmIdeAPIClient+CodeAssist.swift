@@ -164,7 +164,51 @@ extension LlmIdeAPIClient {
         let phase: String?
         let tool: String?
         let detail: String?
+
+        // --- v2-only tool payload -------------------------------------------
+        //
+        // The legacy /code-assist stream carries none of this and never will:
+        // its progress events are `{phase, tool, detail}` and the tool's
+        // arguments and output stay server-side. The v2 wire DOES send all of
+        // it (`tool_args_delta`, `tool_result.text/isError/truncated`), and
+        // `AgentV2Transport` used to drop every field on the floor because this
+        // struct — the shared shape both engines hand to `ChatEngine` — had
+        // nowhere to put them.
+        //
+        // All optional, all defaulted, so every legacy construction site is
+        // unchanged and a legacy progress event is still exactly `{label,
+        // phase, tool, detail}` with four nils behind it.
+
+        /// The tool call's assembled arguments, as the JSON the model emitted.
+        let args: String?
+        /// The tool's output, already capped server-side (20k chars).
+        let resultText: String?
+        /// Whether that output is an error rather than a result.
+        let isError: Bool?
+        /// Whether the server truncated `resultText` at its cap.
+        let truncated: Bool?
+
         var isTool: Bool { phase == "tool" }
+
+        init(
+            label: String,
+            phase: String? = nil,
+            tool: String? = nil,
+            detail: String? = nil,
+            args: String? = nil,
+            resultText: String? = nil,
+            isError: Bool? = nil,
+            truncated: Bool? = nil
+        ) {
+            self.label = label
+            self.phase = phase
+            self.tool = tool
+            self.detail = detail
+            self.args = args
+            self.resultText = resultText
+            self.isError = isError
+            self.truncated = truncated
+        }
     }
 
     /// Delegating shims — the tool-name vocabulary (llm-ide tools + the
