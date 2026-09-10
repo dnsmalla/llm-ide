@@ -30,11 +30,17 @@ jobs:
         working-directory: mac
     steps:
       - uses: actions/checkout@v7
-        with:
-          # graph-kit is a submodule and mac/Package.swift references it
-          # by path; without this the build fails with a "package not
-          # found" that never mentions submodules.
-          submodules: recursive
+
+      - name: Init graph-kit submodule
+        # mac/Package.swift references graph-kit by path, so it must be
+        # checked out or the build fails with a "package not found" that
+        # never mentions submodules. Scoped to this one submodule ONLY —
+        # `submodules: recursive` on checkout also pulls in `.skills`
+        # (dnsmalla/skills), which is unrelated to the mac build and, if
+        # that repo ever goes private/missing, takes the whole job down
+        # at the checkout step before a single line of app code runs.
+        working-directory: .
+        run: git submodule update --init mac/LocalPackages/graph-kit
 
       - name: Select latest stable Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
