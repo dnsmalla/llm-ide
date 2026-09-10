@@ -637,7 +637,8 @@ export function approvalArgsFor(toolName, input) {
  * or the registry expires/aborts (deny with a no-answer message). The SDK's
  * per-call abort signal AND the turn-level `signal` both abort the session's
  * parked decisions, so an aborted turn denies a pending approval immediately
- * instead of lingering to the registry's 300 s timeout. Any other tool is
+ * instead of lingering to the registry's timeout (DEFAULT_TIMEOUT_MS in
+ * ./decisions.mjs). Any other tool is
  * denied read-only-style.
  *
  * Throws `Error{code:'SESSION_UNRESUMABLE'}` when `resumeSdkSessionId` was
@@ -885,7 +886,8 @@ export async function runAgentV2Turn(
     const sessionId = currentSdkSessionId;
     const { requestId, promise } = registerDecision({ sdkSessionId: sessionId, userId, questions: input.questions });
     // An aborted turn denies the parked approval NOW, not at the registry's
-    // 300 s timeout: the SDK hands canUseTool a per-call abort signal
+    // Registry timeout (./decisions.mjs DEFAULT_TIMEOUT_MS): the SDK hands
+    // canUseTool a per-call abort signal
     // (CanUseTool in sdk.d.ts), and the turn-level signal covers callers
     // that pass none. Session granularity is deliberate — one question at a
     // time per turn. Listeners come off the moment the decision settles

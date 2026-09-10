@@ -467,7 +467,8 @@ export async function handleAIRoutes(req, res) {
           const ac = new AbortController();
           // A dropped panel must also unpark any run-bash ToolApproval this
           // turn left waiting — otherwise the decision sits for the registry's
-          // full 300 s with nobody left to answer it. Mirrors what
+          // full registry timeout (llm_agent/sdk/decisions.mjs
+          // DEFAULT_TIMEOUT_MS) with nobody left to answer it. Mirrors what
           // routes/agent-v2.mjs does on its own SSE close, against the SAME
           // session key run-bash's execute parks under (agentContext.sessionId
           // — also the `legacySessionId` the Mac card posts back).

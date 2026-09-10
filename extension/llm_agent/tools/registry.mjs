@@ -169,7 +169,9 @@ const ENTRIES = [
       //    function, canUseTool has already returned 'allow' for this exact
       //    invocation. Re-gating here would be redundant AND broken — there is
       //    no emit channel on v2, so a second parked decision could never be
-      //    answered and would hang the full 300 s before denying.
+      //    answered and would hang the registry's full timeout before
+      //    denying (DEFAULT_TIMEOUT_MS in ../sdk/decisions.mjs — 15 minutes,
+      //    not the 300 s this comment used to claim).
       if (!ctx.loopCtx) {
         return handleRunBash(args, bashCtx);
       }
@@ -194,7 +196,8 @@ const ENTRIES = [
       // No live emit channel => no human can ever see this approval. That is
       // exactly the BUFFERED (non-SSE) /code-assist path, which passes no
       // onProgress at all (server/ai-routes.mjs): parking there would hang the
-      // turn for the registry's full 300 s and then deny anyway. Fail fast
+      // turn for the registry's full timeout (see ../sdk/decisions.mjs
+      // DEFAULT_TIMEOUT_MS) and then deny anyway. Fail fast
       // with an actionable message instead.
       if (typeof ctx.loopCtx.emit !== 'function') {
         return { error: 'This command needs interactive approval — please use a message that streams a live response.' };
