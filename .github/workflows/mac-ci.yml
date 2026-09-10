@@ -29,18 +29,18 @@ jobs:
       run:
         working-directory: mac
     steps:
+      # No `submodules:` here on purpose. `mac/Package.swift` resolves
+      # graph-kit from its GitHub remote by pinned revision (see the
+      # `.package(url:...)` comment there) specifically so a build works
+      # even when the `LocalPackages/graph-kit` submodule was never
+      # initialized — SwiftPM fetches it into `.build/checkouts` itself.
+      # `submodules: recursive` used to be set here on the belief that the
+      # build needed the local checkout; it doesn't, and the flag also
+      # pulls in EVERY other submodule including `.skills`
+      # (dnsmalla/skills) — unrelated to the mac build, and the reason
+      # this job's checkout step failed outright for days once that repo
+      # stopped being reachable.
       - uses: actions/checkout@v7
-
-      - name: Init graph-kit submodule
-        # mac/Package.swift references graph-kit by path, so it must be
-        # checked out or the build fails with a "package not found" that
-        # never mentions submodules. Scoped to this one submodule ONLY —
-        # `submodules: recursive` on checkout also pulls in `.skills`
-        # (dnsmalla/skills), which is unrelated to the mac build and, if
-        # that repo ever goes private/missing, takes the whole job down
-        # at the checkout step before a single line of app code runs.
-        working-directory: .
-        run: git submodule update --init mac/LocalPackages/graph-kit
 
       - name: Select latest stable Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
