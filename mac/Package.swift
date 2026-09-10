@@ -227,6 +227,11 @@ let package = Package(
     products: [
         .executable(name: "LlmIdeMac", targets: ["LlmIdeMacMain"]),
         .library(name: "LlmIdeMacLib", targets: ["LlmIdeMacLib"]),
+        // Assertion gate for the Chat slice. An EXECUTABLE, not a test target,
+        // because a Command-Line-Tools-only toolchain has no XCTest and
+        // `swift test` is skipped there (see the Makefile's HAS_XCTEST guard) —
+        // same rationale as graph-kit's graph-layout-lab / graph-engine-lab.
+        .executable(name: "chat-contract-lab", targets: ["ChatContractLab"]),
     ],
     dependencies: [
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"),
@@ -294,6 +299,11 @@ let package = Package(
             name: "LlmIdeMacMain",
             dependencies: ["LlmIdeMacLib"],
             path: "Sources/LlmIdeMacMain"
+        ),
+        .executableTarget(
+            name: "ChatContractLab",
+            dependencies: ["LlmIdeMacLib"],
+            path: "Sources/ChatContractLab"
         ),
         .testTarget(
             name: "LlmIdeMacTests",

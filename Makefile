@@ -100,7 +100,7 @@ endif
 # CSV's `status` column is the release checklist.
 # graph-kit-checkout goes FIRST: it is a one-line precondition, and failing it
 # after four Mac builds (many minutes in) is the wrong place to learn about it.
-regression: graph-kit-checkout test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates
+regression: graph-kit-checkout test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates
 
 # The graph verification gates. These are plain executables precisely so they
 # run where `swift test` cannot (a Command-Line-Tools-only toolchain has no
@@ -133,6 +133,14 @@ graph-gates: graph-kit-checkout
 	cd mac/LocalPackages/graph-kit && swift run -c release graph-layout-lab
 	cd mac/LocalPackages/graph-kit && swift run -c release graph-engine-lab
 	cd mac/LocalPackages/graph-kit && node scripts/conformance-memory.mjs
+
+# The Chat slice's assertion gate. An executable for the same reason the graph
+# labs are: this toolchain has no XCTest, so `test-mac` above skips `swift test`
+# entirely — pure logic lifted out of ChatEngine would otherwise have no gate at
+# all. Wired into `regression` because a gate nothing runs is a gate in name only.
+.PHONY: chat-gates
+chat-gates:
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run -c release chat-contract-lab
 
 # Enable the repo's git hooks (.githooks/). The pre-push hook runs the
 # regression gate before any push that touches mac/. Run once per clone.
