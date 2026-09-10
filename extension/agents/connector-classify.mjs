@@ -13,10 +13,16 @@
 // decodes exactly { category, noteWorthy, summary, todos[{title,detail,due,priority}] }.
 
 import { runClaude as defaultRunClaude, tryParseJSON } from '../providers/runtime.mjs';
+import { readFileSync } from 'node:fs';
+
+// The one source for Claude model ids — see schema/models/anthropic-models.json.
+const ANTHROPIC_DEFAULT_MODEL = JSON.parse(
+  readFileSync(new URL('../../schema/models/anthropic-models.json', import.meta.url), 'utf8'),
+).default;
 
 const MODEL = process.env.LLMIDE_CONNECTOR_CLASSIFY_MODEL
            || process.env.LLMIDE_MODEL
-           || 'claude-sonnet-4-6';
+           || ANTHROPIC_DEFAULT_MODEL;
 
 // Source-neutral. `chatter` and `noise` are the connector equivalents of
 // email's bulk categories: a "👍" sticky or an empty frame is real content

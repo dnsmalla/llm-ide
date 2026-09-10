@@ -2,13 +2,19 @@
 // Retries once with a stricter prompt if the first attempt isn't parseable.
 
 import { runClaude as defaultRunClaude, tryParseJSON } from '../providers/runtime.mjs';
+import { readFileSync } from 'node:fs';
+
+// The one source for Claude model ids — see schema/models/anthropic-models.json.
+const ANTHROPIC_DEFAULT_MODEL = JSON.parse(
+  readFileSync(new URL('../../schema/models/anthropic-models.json', import.meta.url), 'utf8'),
+).default;
 
 // Prefer the summarize-specific model override, fall back to the global
 // model env-var, then the hard-coded default.  This keeps summarize.mjs
 // in sync with the rest of the agent layer which all obey LLMIDE_MODEL.
 const MODEL = process.env.LLMIDE_SUMMARIZE_MODEL
            || process.env.LLMIDE_MODEL
-           || 'claude-sonnet-4-6';
+           || ANTHROPIC_DEFAULT_MODEL;
 
 function buildPrompt({ transcript, title, language, started_at, duration_seconds, participants }, { strict = false } = {}) {
   const meta = JSON.stringify({ title, started_at, duration_seconds, participants, language });

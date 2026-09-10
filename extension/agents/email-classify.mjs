@@ -4,6 +4,12 @@
 // Modeled on agents/summarize.mjs.
 
 import { runClaude as defaultRunClaude, tryParseJSON } from '../providers/runtime.mjs';
+import { readFileSync } from 'node:fs';
+
+// The one source for Claude model ids — see schema/models/anthropic-models.json.
+const ANTHROPIC_DEFAULT_MODEL = JSON.parse(
+  readFileSync(new URL('../../schema/models/anthropic-models.json', import.meta.url), 'utf8'),
+).default;
 
 // Default to the same model summarize uses (proven to work with whatever
 // provider/key the deployment has) — a wrong/inaccessible model surfaces as a
@@ -11,7 +17,7 @@ import { runClaude as defaultRunClaude, tryParseJSON } from '../providers/runtim
 // model (e.g. a Haiku) where that model is available.
 const MODEL = process.env.LLMIDE_EMAIL_CLASSIFY_MODEL
            || process.env.LLMIDE_MODEL
-           || 'claude-sonnet-4-6';
+           || ANTHROPIC_DEFAULT_MODEL;
 
 const CATEGORIES = new Set([
   'personal', 'work', 'action_request', 'meeting',
