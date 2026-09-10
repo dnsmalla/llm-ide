@@ -607,12 +607,20 @@ struct LoopEngineView: View {
                 // which is the only thing standing between this editor and a
                 // silent false pass. `&&` is the way to chain, and the
                 // wizard's field is single-line for the same reason.
-                TextField("e.g. swift test && swift build", text: Binding(
-                    get: { stages[index].command ?? "" },
-                    set: { stages[index].command = $0 }
-                ))
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11, design: .monospaced))
+                HStack(spacing: 6) {
+                    TextField("e.g. swift test && swift build", text: Binding(
+                        get: { stages[index].command ?? "" },
+                        set: { stages[index].command = $0 }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11, design: .monospaced))
+
+                    if let gitRoot = activeGitRootURL {
+                        commandSuggestionsMenu(gitRoot: gitRoot, stageName: stages[index].name) { command in
+                            stages[index].command = command
+                        }
+                    }
+                }
 
                 if let gitRoot = activeGitRootURL {
                     if let command = stages[index].command, !command.isEmpty {
@@ -712,6 +720,42 @@ struct LoopEngineView: View {
                         ), in: 0...3600, step: 30)
             }
         }
+    }
+
+    /// A "Suggestions" dropdown beside the Command field: every command
+    /// `LoopStageDetector.detectCommandCandidates` finds at `gitRoot`, most
+    /// relevant to `stageName` first. Picking one calls `onSelect` with the
+    /// raw command string — the field itself is untouched otherwise, so
+    /// nothing here can introduce the newline the field's own comment
+    /// guards against.
+    ///
+    /// Detection is real filesystem I/O (a couple of `fileExists` checks, a
+    /// small JSON parse, a Makefile scan) but cheap enough on files this
+    /// size to run fresh per menu construction — the same cost/caching
+    /// trade-off `activeGitRootURL` above already makes for this view.
+    @ViewBuilder
+    private func commandSuggestionsMenu(gitRoot: URL, stageName: String, onSelect: @escaping (String) -> Void) -> some View {
+        let candidates = LoopStageDetector.detectCommandCandidates(gitRoot: gitRoot, stageName: stageName)
+        Menu {
+            if candidates.isEmpty {
+                Text("No test/build tooling detected in this repo.")
+            } else {
+                ForEach(candidates) { candidate in
+                    Button {
+                        onSelect(candidate.command)
+                    } label: {
+                        Text(candidate.command)
+                        Text(candidate.label)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "list.bullet")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Suggested commands detected in this repo")
+        .disabled(candidates.isEmpty)
     }
 
     // MARK: - Log pane

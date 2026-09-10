@@ -231,6 +231,101 @@ enum LoopStageDetector {
         return nil
     }
 
+    /// One suggested command for the stage editor's "Suggestions" picker,
+    /// with a short label naming where it came from.
+    struct DetectedCommand: Identifiable, Equatable {
+        var id: String { "\(label)|\(command)" }
+        let label: String
+        let command: String
+    }
+
+    /// The one Makefile target excluded from `detectCommandCandidates`: it
+    /// starts a local dev server and never exits, so a Loop stage running it
+    /// would hang the whole run forever (stages have no default timeout).
+    /// Every OTHER real target is offered — the Command field is free text
+    /// already, so hiding a target the user could type by hand protects
+    /// nothing; this one specifically breaks a run in a way nothing else on
+    /// the list can.
+    private static let nonTerminatingMakeTargets: Set<String> = ["docs-serve"]
+
+    /// Every command candidate detectable at `gitRoot`, for the stage
+    /// editor's picker.
+    ///
+    /// Unlike `detectTestCommand` (first match only — used to seed a NEW
+    /// stage's default so a fresh Test stage gets exactly one sane guess),
+    /// this returns every marker that matched plus every real Makefile
+    /// target, so an EXISTING stage's field can offer alternatives instead
+    /// of the one guess a fresh stage got. A repo can be both a Swift and a
+    /// Node project (this one is), or have several relevant Makefile
+    /// targets, and the first-match detector would never surface the others.
+    ///
+    /// `stageName`, when non-empty, moves any candidate whose command
+    /// contains the stage's own name (case-insensitively) to the front —
+    /// editing a stage named "Regression" sees `make regression` first, one
+    /// named "Lint" sees `make lint`/`npm run lint` first — without hiding
+    /// anything else the repo actually has.
+    static func detectCommandCandidates(gitRoot: URL, stageName: String = "") -> [DetectedCommand] {
+        let fm = FileManager.default
+        var candidates: [DetectedCommand] = []
+
+        if fm.fileExists(atPath: gitRoot.appendingPathComponent("Package.swift").path) {
+            candidates.append(DetectedCommand(label: "Package.swift", command: "swift test"))
+            candidates.append(DetectedCommand(label: "Package.swift", command: "swift build"))
+        }
+
+        if let data = try? Data(contentsOf: gitRoot.appendingPathComponent("package.json")),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let scripts = obj["scripts"] as? [String: Any] {
+            // "npm test" is npm's own shorthand for the "test" script; every
+            // other script needs "npm run <name>". Restricted to script
+            // names a verify stage would plausibly run to completion — not
+            // "dev"/"start"/"server", which never exit, for the same reason
+            // `nonTerminatingMakeTargets` excludes `docs-serve` below.
+            if scripts["test"] != nil {
+                candidates.append(DetectedCommand(label: "package.json", command: "npm test"))
+            }
+            for name in ["lint", "type-check", "build"] where scripts[name] != nil {
+                candidates.append(DetectedCommand(label: "package.json", command: "npm run \(name)"))
+            }
+        }
+
+        let pytestMarkers = ["pytest.ini", "pyproject.toml", "setup.cfg"]
+        for marker in pytestMarkers {
+            let path = gitRoot.appendingPathComponent(marker)
+            guard fm.fileExists(atPath: path.path) else { continue }
+            if marker == "pytest.ini" {
+                candidates.append(DetectedCommand(label: marker, command: "pytest"))
+                break
+            }
+            if let contents = try? String(contentsOf: path, encoding: .utf8), contents.contains("pytest") {
+                candidates.append(DetectedCommand(label: marker, command: "pytest"))
+                break
+            }
+        }
+
+        if let makefile = try? String(contentsOf: gitRoot.appendingPathComponent("Makefile"), encoding: .utf8) {
+            // A bare `name:` at column 0: excludes `.PHONY:` (leading `.`),
+            // indented recipe lines, and variable assignments (`FOO := bar`,
+            // which this pattern's required trailing bare colon cannot
+            // match against `:=`).
+            let targetPattern = try? NSRegularExpression(pattern: #"(?m)^([A-Za-z][A-Za-z0-9_-]*):"#)
+            let ns = makefile as NSString
+            var seen = Set<String>()
+            targetPattern?.enumerateMatches(in: makefile, range: NSRange(location: 0, length: ns.length)) { match, _, _ in
+                guard let match, let range = Range(match.range(at: 1), in: makefile) else { return }
+                let target = String(makefile[range])
+                guard seen.insert(target).inserted, !nonTerminatingMakeTargets.contains(target) else { return }
+                candidates.append(DetectedCommand(label: "Makefile", command: "make \(target)"))
+            }
+        }
+
+        guard !stageName.isEmpty else { return candidates }
+        let needle = stageName.lowercased()
+        let matched = candidates.filter { $0.command.lowercased().contains(needle) }
+        let unmatched = candidates.filter { !$0.command.lowercased().contains(needle) }
+        return matched + unmatched
+    }
+
     // MARK: - Default loops
 
     /// Which default LOOP owns each default STAGE key. The authority the split
