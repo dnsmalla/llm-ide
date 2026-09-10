@@ -64,6 +64,31 @@ do {
     expect(cache.height(for: id, min: 24) == 24, "min floors a smaller measurement")
 }
 
+// QuickChatSendPolicy — the ENTRY checks both quick surfaces ran separately.
+//
+// Note there are two distinct busy checks in the original flow and they behave
+// differently: the entry guard returns SILENTLY, while the re-check after the
+// server probe shows `busyMessage`. Only the entry gate is modelled here; the
+// post-probe re-check stays at the call site with the async work it guards.
+do {
+    let policy = QuickChatSendPolicy()
+
+    expect(policy.entryGate(draft: "hi", busy: false) == .proceed("hi"), "idle engine proceeds with trimmed text")
+    expect(policy.entryGate(draft: "  hi  ", busy: false) == .proceed("hi"), "surrounding whitespace is trimmed")
+    expect(policy.entryGate(draft: "", busy: false) == .ignore, "empty draft is a silent no-op")
+    expect(policy.entryGate(draft: "   \n ", busy: false) == .ignore, "whitespace-only draft is a silent no-op")
+
+    // Busy is checked BEFORE emptiness in both originals, and returns with no
+    // message — the refusal notice belongs to the post-probe re-check only.
+    expect(policy.entryGate(draft: "hi", busy: true) == .ignore, "busy at entry is SILENT, not a refusal")
+    expect(policy.entryGate(draft: "", busy: true) == .ignore, "busy + empty is also silent")
+
+    expect(
+        QuickChatSendPolicy.busyMessage == "Another message is still being answered. Send this one again in a moment.",
+        "the busy message is verbatim from both originals"
+    )
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

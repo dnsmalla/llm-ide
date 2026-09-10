@@ -825,9 +825,13 @@ struct MenuBarChatView: View {
         // Cleared FIRST, before the early returns below: a slash command or an
         // empty field still means the user moved on from the refusal.
         sendRefusal = nil
-        guard !engine.busy else { return }
-        var text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        // Entry gate shared with the sheet (`QuickChatSendPolicy`). Everything
+        // below it — slash commands, directives, skill ids — is this surface's
+        // own; the sheet deliberately does not have it.
+        guard case .proceed(let trimmed) = QuickChatSendPolicy().entryGate(draft: draft, busy: engine.busy) else {
+            return
+        }
+        var text = trimmed
 
         if ChatSlashCommands.isClearCommand(text) {
             draft = ""
@@ -878,7 +882,7 @@ struct MenuBarChatView: View {
             // meanwhile. `startTurn` claims that slot synchronously, so this
             // check and the send below cannot be split.
             guard !engine.busy else {
-                return refuse("Another message is still being answered. Send this one again in a moment.")
+                return refuse(QuickChatSendPolicy.busyMessage)
             }
             viewModel.send(text, skillIds: skills)
         }

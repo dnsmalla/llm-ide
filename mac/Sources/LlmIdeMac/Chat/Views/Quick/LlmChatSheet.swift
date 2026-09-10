@@ -434,11 +434,14 @@ struct LlmChatSheet: View {
     /// blank — this sheet doesn't queue a second message like the Code
     /// Assistant composer does.
     private func sendDraft() {
-        // Cleared FIRST, before the guards below — see the menu bar's copy.
+        // Cleared FIRST, before the gate below — see the menu bar's copy.
         sendRefusal = nil
-        guard !engine.busy else { return }
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        // Entry gate shared with the menu bar: busy first (silently), then
+        // emptiness. See `QuickChatSendPolicy` for why the busy check here
+        // shows nothing while the one after the probe does.
+        guard case .proceed(let text) = QuickChatSendPolicy().entryGate(draft: draft, busy: engine.busy) else {
+            return
+        }
         draft = ""
         // Same fresh-probe re-check the menu bar runs before sending — see
         // `QuickChatContext.confirmServerSupportsAsk`. The draft is restored
@@ -455,9 +458,7 @@ struct LlmChatSheet: View {
             // Re-check after the probe's suspension, immediately before the
             // send — the menu bar, this sheet and the phone share one engine
             // and one turn slot, which `startTurn` claims synchronously.
-            guard !engine.busy else {
-                return refuse("Another message is still being answered. Send this one again in a moment.")
-            }
+            guard !engine.busy else { return refuse(QuickChatSendPolicy.busyMessage) }
             viewModel.send(text)
         }
     }
