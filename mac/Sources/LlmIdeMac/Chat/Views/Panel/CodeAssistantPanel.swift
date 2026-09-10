@@ -255,7 +255,7 @@ struct CodeAssistantPanel: View {
                 showProjectMemorySheet
             }
             .task { await refreshRecentIssuesLoop() }
-            .task { await loadModels(for: AICliTool(rawValue: config.activeCLI) ?? .claudeCode) }
+            .task { await modelState.loadModels(for: AICliTool(rawValue: config.activeCLI) ?? .claudeCode, api: api) }
             .onAppear { handleOnAppear() }
             .onChange(of: engine.messages) { oldValue, newValue in
                 engine.announceAndPersist(oldValue: oldValue, newValue: newValue)

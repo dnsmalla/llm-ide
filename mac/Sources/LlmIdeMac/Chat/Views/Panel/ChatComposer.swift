@@ -497,7 +497,7 @@ extension CodeAssistantPanel {
             Menu {
                 // Built-in tools
                 ForEach(providerChoices) { tool in
-                    Button { switchProvider(.builtIn(tool)) } label: {
+                    Button { modelState.switchProvider(.builtIn(tool), config: config, api: api) } label: {
                         Label(tool.displayName, systemImage: tool.icon)
                     }
                 }
@@ -505,7 +505,7 @@ extension CodeAssistantPanel {
                     Divider()
                     // Custom providers
                     ForEach(customProviderChoices) { provider in
-                        Button { switchProvider(.custom(provider)) } label: {
+                        Button { modelState.switchProvider(.custom(provider), config: config, api: api) } label: {
                             Label(provider.name, systemImage: "network")
                         }
                     }
@@ -526,7 +526,7 @@ extension CodeAssistantPanel {
             // Model picker. Truncate label aggressively when compact so
             // the chip stays one capsule wide instead of wrapping.
             Menu {
-                ForEach(modelsForCurrentProvider()) { model in
+                ForEach(modelState.modelsForCurrentProvider()) { model in
                     Button(model.displayName) {
                         modelState.selectedModel = model.id
                         // Persist the pick so surfaces that read AppConfig —
@@ -574,7 +574,7 @@ extension CodeAssistantPanel {
                 // left them diverged: the id was then filed under the Settings
                 // provider while the composer displayed a different one, so
                 // `modelsFor` never listed the model the user had just added.
-                addCustomModel(id, provider: currentTool.provider)
+                modelState.addCustomModel(id, provider: currentTool.provider, config: config)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -618,120 +618,10 @@ extension CodeAssistantPanel {
         chipMenu($modelState.selectedMode)
     }
     func currentModelDisplayName(for cli: AICliTool) -> String {
-        let models = modelsFor(cli)
+        let models = modelState.models(for: cli)
         return models.first(where: { $0.id == modelState.selectedModel })?.displayName
             ?? models.first?.displayName
             ?? modelState.selectedModel
-    }
-
-    /// Models for the currently selected provider (built-in or custom).
-    func modelsForCurrentProvider() -> [AIModel] {
-        if modelState.selectedProvider.starts(with: "custom:") {
-            // Custom provider: return its models list
-            if let custom = modelState.customProviders.first(where: { "custom:\($0.id)" == modelState.selectedProvider }) {
-                return custom.models
-            }
-            return []
-        } else {
-            // Built-in provider
-            if let cli = AICliTool(rawValue: modelState.selectedProvider) {
-                return modelsFor(cli)
-            }
-            return []
-        }
-    }
-
-    /// `/model <query>` — real, direct action (not a fake reference entry):
-    /// resolves `query` against the current provider's known models (exact
-    /// id/displayName match first, substring fallback) and sets it the same
-    /// way tapping a model-picker chip menu item does, including the
-    /// `config.defaultModelId` sync for built-in providers (see the model
-    /// picker Menu in this file) so the iPhone chat proxy sees the change
-    /// too. There is no way to programmatically open the picker's native
-    /// SwiftUI Menu itself (see ChatSlashCommands.swift's header note on
-    /// scope), so a bare "/model" with no argument just explains usage.
-    func applyModelCommand(_ query: String) {
-        guard !query.isEmpty else {
-            engine.error = "Usage: /model <name> — e.g. /model sonnet, /model gpt-5"
-            return
-        }
-        let candidates = modelsForCurrentProvider()
-        let q = query.lowercased()
-        guard let match = candidates.first(where: { $0.id.lowercased() == q || $0.displayName.lowercased() == q })
-            ?? candidates.first(where: { $0.id.lowercased().contains(q) || $0.displayName.lowercased().contains(q) })
-        else {
-            let available = candidates.map(\.displayName).joined(separator: ", ")
-            engine.error = "No model matching \"\(query)\" for the current provider.\(available.isEmpty ? "" : " Available: \(available)")"
-            return
-        }
-        modelState.selectedModel = match.id
-        if !modelState.selectedProvider.starts(with: "custom:") {
-            config.defaultModelId = match.id
-        }
-    }
-
-    /// Models to offer for a provider: the live list when we've fetched one,
-    /// otherwise the built-in static list (keeps the picker populated when no
-    /// key is set or the fetch failed), plus any user-added custom ids.
-    func modelsFor(_ cli: AICliTool) -> [AIModel] {
-        let base = (modelState.liveModels[cli.provider]?.isEmpty == false) ? modelState.liveModels[cli.provider]! : cli.models
-        let baseIds = Set(base.map(\.id))
-        let custom = customModels(for: cli.provider)
-            .filter { !baseIds.contains($0) }
-            .map { AIModel(id: $0, displayName: $0) }
-        return base + custom
-    }
-
-    /// User-added model ids for a provider (decoded from AppStorage JSON).
-    func customModels(for provider: String) -> [String] {
-        let dict = (try? JSONDecoder().decode([String: [String]].self,
-                                              from: Data(customModelsRaw.utf8))) ?? [:]
-        return dict[provider] ?? []
-    }
-
-    /// Append a custom model id for a provider and select it.
-    func addCustomModel(_ id: String, provider: String) {
-        var dict = (try? JSONDecoder().decode([String: [String]].self,
-                                              from: Data(customModelsRaw.utf8))) ?? [:]
-        var list = dict[provider] ?? []
-        if !list.contains(id) { list.append(id) }
-        dict[provider] = list
-        if let data = try? JSONEncoder().encode(dict), let s = String(data: data, encoding: .utf8) {
-            customModelsRaw = s
-        }
-        modelState.selectedModel = id
-        // Persist so the iPhone chat proxy forwards this model too (see the
-        // model-picker Button above). addCustomModel is only reachable from the
-        // built-in "Add model…" alert, so modelState.selectedProvider is a built-in tool.
-        if !modelState.selectedProvider.starts(with: "custom:") {
-            config.defaultModelId = id
-        }
-    }
-
-    /// Fetch the provider's live chat models (best-effort; silent on failure).
-    func loadModels(for cli: AICliTool) async {
-        guard let ids = try? await api.listProviderModels(cli.provider), !ids.isEmpty else { return }
-        modelState.liveModels[cli.provider] = ids.map { AIModel(id: $0, displayName: $0) }
-    }
-
-    /// Switch the active model provider and reset the selected model.
-    func switchProvider(_ provider: ProviderSwitch) {
-        switch provider {
-        case .builtIn(let tool):
-            modelState.selectedProvider = tool.rawValue
-            modelState.selectedModel = tool.defaultModelId
-            config.activeCLI = tool.rawValue
-            config.defaultModelId = tool.defaultModelId
-            Task { await loadModels(for: tool) }
-        case .custom(let customProvider):
-            modelState.selectedProvider = "custom:\(customProvider.id)"
-            modelState.selectedModel = customProvider.models.first?.id ?? ""
-        }
-    }
-
-    enum ProviderSwitch {
-        case builtIn(AICliTool)
-        case custom(CustomProvider)
     }
 
     /// Single source of truth for composer text-area height.  Caps
@@ -805,7 +695,12 @@ extension CodeAssistantPanel {
             return
         }
         if let modelQuery = ChatSlashCommands.modelArgument(msg) {
-            applyModelCommand(modelQuery)
+            // `resolveModelCommand` returns the message to show and never
+            // touches the engine itself; the composer decides that usage help
+            // and "no such model" surface in the same place a turn error does.
+            if let feedback = modelState.resolveModelCommand(modelQuery, config: config) {
+                engine.error = feedback
+            }
             return
         }
 

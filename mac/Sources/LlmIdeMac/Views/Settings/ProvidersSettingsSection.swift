@@ -15,7 +15,7 @@ struct ProvidersSettingsSection: View {
     private var providers: [ProviderCatalog.Entry] { ProviderCatalog.all }
 
     /// The composer's user-added model ids, keyed by backend provider id — the
-    /// same store `ChatComposer.addCustomModel` writes. Read here so this
+    /// same store `CodeAssistantModelState.addCustomModel` writes. Read here so this
     /// picker offers the same set the composer does (see `modelOptions`).
     @AppStorage("MEETNOTES_CUSTOM_MODELS") private var customModelsRaw = "{}"
 
