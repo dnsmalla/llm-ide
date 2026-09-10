@@ -129,42 +129,25 @@ struct ChatMessageList: View {
                             // retry. NOT gated on the turn's origin — the
                             // Mac panel owns the shared engine, so a
                             // phone-driven turn's approval renders here too.
-                            // `kind` distinguishes the two P2 shapes: a
-                            // "ToolApproval" (either engine's gated run-bash,
-                            // Tasks 7-8) renders the deny/allow/always-allow
-                            // card; anything else (only "AskUserQuestion"
-                            // today, v2-only, P1) renders the existing
-                            // question form — never both for one approval.
+                            // The `kind` dispatch itself lives in
+                            // `ApprovalCardSlot`, shared with the menu bar and
+                            // the quick-chat sheet. Only the GATE below is this
+                            // surface's own: it renders inside a per-turn
+                            // ForEach, so it must pick the last assistant turn.
                             if let approvalState = engine.pendingApproval,
                                turn.id == history.last?.id,
                                turn.role == .assistant {
-                                if approvalState.approval.kind == "ToolApproval" {
-                                    ToolApprovalCard(
-                                        state: approvalState,
-                                        onDecide: { action in
-                                            await engine.submitToolDecision(action: action)
-                                        }
-                                    )
-                                    // Keyed by requestId: a second approval must
-                                    // not inherit the previous card's @State.
-                                    .id(approvalState.approval.requestId)
-                                    .padding(.top, 4)
-                                    .transition(.opacity)
-                                } else {
-                                    ApprovalQuestionCard(
-                                        state: approvalState,
-                                        onSubmit: { answers in
-                                            await engine.submitApproval(answers: answers)
-                                        },
-                                        onDismiss: { engine.dismissApproval() }
-                                    )
-                                    // Keyed by requestId: a second approval must
-                                    // not inherit the previous card's @State
-                                    // selection.
-                                    .id(approvalState.approval.requestId)
-                                    .padding(.top, 4)
-                                    .transition(.opacity)
-                                }
+                                ApprovalCardSlot(
+                                    state: approvalState,
+                                    onToolDecision: { action in
+                                        await engine.submitToolDecision(action: action)
+                                    },
+                                    onSubmitAnswers: { answers in
+                                        await engine.submitApproval(answers: answers)
+                                    },
+                                    onDismiss: { engine.dismissApproval() },
+                                    transition: .opacity
+                                )
                             }
                             // v2 plan-like RESULT turns: no save-plan
                             // pendingTool ever arrives (the plan IS the
