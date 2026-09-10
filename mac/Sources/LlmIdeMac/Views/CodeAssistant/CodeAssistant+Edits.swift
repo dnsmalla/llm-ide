@@ -10,8 +10,22 @@ extension CodeAssistantPanel {
 
     /// Attachments in the resolver's own currency, so `ProposedEditResolver`
     /// stays independent of the API client's types.
+    ///
+    /// Sourced from the turn's own attachments FIRST, then the composer's
+    /// current chips: an `update-file` proposal arrives mid-turn, by which
+    /// point the composer has already cleared the chips it sent (they are
+    /// one-shot per message). Resolving against the sent content is also the
+    /// more correct of the two — it's the text the agent was actually shown,
+    /// rather than whatever has since been staged for the NEXT message.
     var editableAttachments: [ProposedEditResolver.KnownFile] {
-        attachmentState.attachments.map { .init(path: $0.path, content: $0.content) }
+        var files = engine.currentTurnAttachments.map {
+            ProposedEditResolver.KnownFile(path: $0.path, content: $0.content)
+        }
+        let known = Set(files.map(\.path))
+        files += attachmentState.attachments
+            .filter { !known.contains($0.path) }
+            .map { .init(path: $0.path, content: $0.content) }
+        return files
     }
 
     /// Resolve a proposal against the attachment list and the open project.

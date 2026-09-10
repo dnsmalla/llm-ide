@@ -314,6 +314,18 @@ final class ChatEngine {
     /// passed `[]`.
     var attachmentsForTurn: () -> [LlmIdeAPIClient.CodeAttachment] = { [] }
 
+    /// The files that actually rode the turn currently in flight — the
+    /// composer clears its own chips the moment a message is sent (one-shot,
+    /// like the skill chips), so this is what everything DOWNSTREAM of the
+    /// send must read instead of the composer's live list: `update-file`
+    /// resolution against the content the agent was shown
+    /// (`editableAttachments`), and the auto-continue turns of a multi-turn
+    /// chain, which would otherwise lose the file after turn 1 because
+    /// attachments aren't replayed through `packHistory`.
+    /// Overwritten by each new user turn (a message sent with no files
+    /// snapshots an empty list, which is the reset).
+    var currentTurnAttachments: [LlmIdeAPIClient.CodeAttachment] = []
+
     /// Packs `messages` for the wire — `[ChatMessage]` in, wire turns out.
     /// Defaults to the engine's own `historyForRequest` (set in `init`, since
     /// a property initializer can't reference `self`) rather than a bare
@@ -566,18 +578,21 @@ final class ChatEngine {
             // historyForRequest); the server applies its own prompt-aware
             // budget on top.
             let recent = packHistory(messages)
+            // A background turn (auto-continue on a parked engine) must not
+            // pick up the files staged in the composer of whatever chat is on
+            // screen NOW — those belong to the displayed chat's next message.
+            // `attachments` is the snapshot its caller took at send/enqueue
+            // time (the composer clears its chips right after sending, so a
+            // live read here would come up empty); a caller with none to give
+            // falls back to reading the composer as before.
+            let turnAttachments = persistsUnobserved ? [] : (attachments ?? attachmentsForTurn())
+            // Published so the rest of the turn — edit resolution, the
+            // auto-continue chain — can see what this turn was actually sent.
+            currentTurnAttachments = turnAttachments
             var input = await resolveTransportInput(
                 message,
                 Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
-                // A background turn (auto-continue on a parked engine) must
-                // not pick up the files staged in the composer of whatever
-                // chat is on screen NOW — those belong to the displayed
-                // chat's next message. `attachments` is the snapshot the
-                // caller (submit()/drainQueueOrRelease) took at send/enqueue
-                // time; only a caller with none passed (e.g. the plain
-                // auto-continue "Continue working..." turn) falls back to
-                // reading the live composer state.
-                persistsUnobserved ? [] : (attachments ?? attachmentsForTurn()),
+                turnAttachments,
                 skillIds
             )
             stampOwnIdentity(&input)
@@ -1083,7 +1098,12 @@ final class ChatEngine {
                     // ability to cancel the REAL chain (this closure would
                     // reassign runTask out from under it via startTurn).
                     guard !self.busy else { return }
-                    self.startTurn("Continue working on your pending tasks.")
+                    // Carry the chain's files forward explicitly: they aren't
+                    // replayed through `packHistory`, and the composer that
+                    // supplied them cleared its chips when the first message
+                    // was sent, so a live read here would find nothing.
+                    self.startTurn("Continue working on your pending tasks.",
+                                   attachments: self.currentTurnAttachments)
                 }
             }
         } else {

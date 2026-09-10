@@ -841,9 +841,13 @@ extension CodeAssistantPanel {
         }
         // Consume the file chips one-shot for THIS message too — same
         // reasoning as `selectedSkills` above: a double-clicked/attached file
-        // should ride exactly the next message sent, not silently reattach to
-        // every later turn. `autoAttachedPath` resets alongside so reopening
-        // the same file re-triggers auto-attach for a future message.
+        // should ride exactly the message it was attached for, not silently
+        // re-send itself on every later turn (the same conclusion
+        // `applyPendingEdit` already reached for a file it had just written).
+        // Downstream readers use `engine.currentTurnAttachments` instead.
+        // `autoAttachedPath` goes with them: it names a chip that no longer
+        // exists, and leaving it set would make the next `initialURL` change
+        // try to retire an attachment that is already gone.
         attachmentState.attachments = []
         autoAttachedPath = nil
     }

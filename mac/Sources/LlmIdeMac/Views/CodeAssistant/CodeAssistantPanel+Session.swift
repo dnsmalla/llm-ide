@@ -153,7 +153,15 @@ extension CodeAssistantPanel {
             in: editableAttachments,
             allowBasenameFallback: allowBasenameFallback
         ) else { return nil }
-        return attachmentState.attachments.first { $0.path == known.path }
+        // Same order as `editableAttachments`, and for the same reason: the
+        // match came out of that list, so looking it back up in the composer's
+        // chips alone would return nil for every file already sent (they are
+        // cleared on send). A nil here reads to callers as "the agent named a
+        // file the user never attached" — which would, among other things,
+        // drop the truncated-file guard that keeps a whole-file rewrite from
+        // auto-applying over content the agent only saw the head of.
+        return engine.currentTurnAttachments.first { $0.path == known.path }
+            ?? attachmentState.attachments.first { $0.path == known.path }
     }
 
     /// Writes the user-approved content to disk, then refreshes the
@@ -197,6 +205,10 @@ extension CodeAssistantPanel {
         // the pre-write content, so the line-delta math below is unaffected.
         if edit.source == .attachment {
             attachmentState.attachments.removeAll { PathUtils.canonicalise($0.path) == absolute }
+            // And from the in-flight turn's copy, or the auto-continue turns
+            // of this same chain would keep re-sending the PRE-write content
+            // of the file that was just written.
+            engine.currentTurnAttachments.removeAll { PathUtils.canonicalise($0.path) == absolute }
             if let auto = autoAttachedPath, PathUtils.canonicalise(auto) == absolute {
                 autoAttachedPath = nil
             }

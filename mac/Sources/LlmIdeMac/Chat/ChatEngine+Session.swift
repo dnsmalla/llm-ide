@@ -343,6 +343,8 @@ extension ChatEngine {
         agent.planExecution = nil
         agent.agentIsAutonomous = false
         agent.agentStopRequested = false
+        // The files the last turn carried belong to the chat being left.
+        currentTurnAttachments = []
         sessionEpoch += 1
         // Composer/attachment state the panel still owns (Task 14 moves it).
         // Order against the engine-owned resets above is immaterial — the two

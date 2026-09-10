@@ -95,10 +95,17 @@ extension CodeAssistantPanel {
         let userMeta = ChatMessage.Metadata(
             planExecuteDisplay: "Execute plan: \(displayTitle)\(stepSuffix)"
         )
+        // Snapshot the files as of THIS click, like the composer's submit():
+        // a plan enqueued behind a running turn would otherwise read the
+        // composer live when it finally drains, by which point a message sent
+        // in between has cleared the chips (or staged different ones).
+        let attachmentsSnapshot = attachmentState.attachments
         if engine.busy {
-            engine.enqueue(outgoing, skillIds: skillIds, userMetadata: userMeta, planExecute: true)
+            engine.enqueue(outgoing, skillIds: skillIds, userMetadata: userMeta, planExecute: true,
+                           attachments: attachmentsSnapshot)
         } else {
-            engine.startTurn(outgoing, skillIds: skillIds, userMetadata: userMeta, planExecute: true)
+            engine.startTurn(outgoing, skillIds: skillIds, userMetadata: userMeta, planExecute: true,
+                             attachments: attachmentsSnapshot)
         }
     }
 
