@@ -1,6 +1,6 @@
 import AppKit
 import Foundation
-import UserNotifications
+@preconcurrency import UserNotifications
 
 /// Posts a macOS user notification when a Loop run reaches a terminal status.
 ///

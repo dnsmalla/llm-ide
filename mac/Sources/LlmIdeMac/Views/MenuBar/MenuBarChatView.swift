@@ -870,7 +870,7 @@ struct MenuBarChatView: View {
             // Restore the composer exactly as it was and SAY why — a refusal
             // that only removes the composer (or, when the server merely
             // didn't answer, changes nothing at all) reads as a dead button.
-            func refuse(_ message: String?) {
+            @MainActor func refuse(_ message: String?) {
                 draft = restoreDraft
                 refusalDraft = restoreDraft
                 pendingDirectives = directives

@@ -455,7 +455,7 @@ struct LlmChatSheet: View {
         // never eats the user's message or looks like a dead button.
         Task { @MainActor in
             let gate = await QuickChatContext.confirmServerSupportsAsk(backend: backend)
-            func refuse(_ message: String?) {
+            @MainActor func refuse(_ message: String?) {
                 draft = text
                 refusalDraft = text
                 sendRefusal = message
