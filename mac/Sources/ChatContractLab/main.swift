@@ -24,6 +24,31 @@ func expect(_ condition: Bool, _ label: String) {
     }
 }
 
+// `--decode <dir>`: the Swift half of scripts/conformance-agent-v2.mjs. Prints
+// one JSON line per fixture saying whether it decoded and which fields the
+// Swift types actually kept. Exits 0 even on a decode failure — the Node runner
+// owns the pass/fail policy, this mode only reports.
+if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--decode" {
+    let dir = URL(fileURLWithPath: CommandLine.arguments[2])
+    let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+        .filter { $0.hasSuffix(".json") }
+        .sorted()
+    for name in files {
+        let url = dir.appendingPathComponent(name)
+        guard let data = try? Data(contentsOf: url) else {
+            print(#"{"file":"\#(name)","decoded":false,"error":"unreadable"}"#)
+            continue
+        }
+        if let captured = AgentV2Conformance.fieldReport(forJSON: data) {
+            let list = captured.sorted().map { "\"\($0)\"" }.joined(separator: ",")
+            print(#"{"file":"\#(name)","decoded":true,"captured":[\#(list)]}"#)
+        } else {
+            print(#"{"file":"\#(name)","decoded":false,"error":"AgentV2Event.decode returned nil"}"#)
+        }
+    }
+    exit(0)
+}
+
 print("chat-contract-lab")
 
 // ChatStreamBuffer — the coalescing arithmetic, independent of scheduling.
