@@ -109,4 +109,3 @@ export async function generateMeetingNotesStream(
     externalSignal?.removeEventListener('abort', onExternalAbort);
   }
 }
-
