@@ -46,6 +46,35 @@ final class GenerationViewModel: ObservableObject {
     /// "Start another" discard confirmation (confirm only when there is a
     /// genuinely unsaved document).
     @Published private(set) var isSaved = false
+    /// The document file `save` last wrote, or nil before the first save of
+    /// this tab's session. Deliberately NOT cleared by `resetToIdle()`: a
+    /// successful save now returns the panel to the setup view immediately,
+    /// and this is what the setup view shows so the user still sees WHERE the
+    /// document went. Cleared when the next generation starts, so the notice
+    /// never outlives the document it describes.
+    @Published private(set) var lastSavedDocument: URL?
+    /// Sources that could not be read for the document `lastSavedDocument`
+    /// names. Snapshotted at save time because `resetToIdle()` clears the live
+    /// `unreadableSourceNames`, and the saved notice is then the only place
+    /// left that can say the saved document was built from an incomplete set.
+    @Published private(set) var lastSavedSkippedSources: [String] = []
+    /// The project `lastSavedDocument` was saved into. The model is owned by
+    /// `GenerationRegistry`, so it outlives both the view and the active
+    /// project; the setup view shows the notice only while this still matches
+    /// the open project, rather than offering Open/Reveal on another
+    /// project's file. Derived state beats a notification here — a project
+    /// can also be re-linked in place (`ProjectStore.setLinkedRepo` posts
+    /// `.activeProjectChanged` for the SAME project), which should not make
+    /// the notice vanish.
+    @Published private(set) var lastSavedProjectRoot: URL?
+
+    /// Drop the setup view's "Saved …" row. Separate from `resetToIdle()`,
+    /// which deliberately keeps it.
+    func clearSavedDocumentNotice() {
+        lastSavedDocument = nil
+        lastSavedSkippedSources = []
+        lastSavedProjectRoot = nil
+    }
     /// The chat reply text last written by `saveChatOutput`, or nil before
     /// the first save. Gates `GenerationSaveChatOutputRow`'s double-press
     /// dedupe: pressing Save again for the SAME reply is a no-op instead of
@@ -124,6 +153,10 @@ final class GenerationViewModel: ObservableObject {
         generationTask?.cancel()
         preRevisionDocument = nil // this is a fresh generation, not a revision
         editError = nil
+        // The setup view's "Saved to …" notice describes the PREVIOUS
+        // document; a new run replaces it, so drop it here rather than let it
+        // sit under an unrelated result.
+        clearSavedDocumentNotice()
         generationState = .generating
         unreadableSourceNames = []
 
@@ -302,9 +335,14 @@ final class GenerationViewModel: ObservableObject {
     /// (still writing a real file, so `isSaved`/dedupe behavior stay
     /// genuinely covered) without popping a Finder window from a headless
     /// test run.
+    ///
+    /// Returns whether the write succeeded, so the caller can return the
+    /// panel to its setup view on success (and leave the document on screen
+    /// when the write failed and the user still has unsaved work).
+    @discardableResult
     func save(content: String, api: LlmIdeAPIClient,
               config: DocGenOutputConfig, projectRoot: URL? = nil,
-              revealInFinder: Bool = true) {
+              revealInFinder: Bool = true) -> Bool {
         do {
             let url = try api.exportMarkdown(
                 content: content,
@@ -312,6 +350,9 @@ final class GenerationViewModel: ObservableObject {
                 projectRoot: projectRoot,
                 directory: config.resolvedDirectory(projectRoot: projectRoot))
             isSaved = true
+            lastSavedDocument = url
+            lastSavedSkippedSources = unreadableSourceNames.sorted()
+            lastSavedProjectRoot = projectRoot
             if revealInFinder {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             }
@@ -321,11 +362,13 @@ final class GenerationViewModel: ObservableObject {
             if projectRoot != nil {
                 NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
             }
+            return true
         } catch {
             let alert = NSAlert()
             alert.messageText = "Save Failed"
             alert.informativeText = error.localizedDescription
             alert.runModal()
+            return false
         }
     }
 

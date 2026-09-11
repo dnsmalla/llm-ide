@@ -185,10 +185,19 @@ struct GenerationPromptBar: View {
             .opacity(vm.isSaved ? 0.5 : 1)
 
             Button {
-                vm.save(content: vm.editedContent,
-                        api: api,
-                        config: outputStore.config,
-                        projectRoot: projectRoot)
+                // A saved document is finished work: the panel returns to the
+                // setup view so the next generation can start, instead of
+                // leaving a read-only copy on screen that can no longer be
+                // edited or saved. The file itself is reported by the setup
+                // view's "Saved to …" row (`vm.lastSavedDocument`), which
+                // survives this reset. Only on success — a failed write still
+                // has unsaved work to keep on screen.
+                if vm.save(content: vm.editedContent,
+                           api: api,
+                           config: outputStore.config,
+                           projectRoot: projectRoot) {
+                    vm.resetToIdle()
+                }
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "square.and.arrow.down.fill").font(.system(size: 11))

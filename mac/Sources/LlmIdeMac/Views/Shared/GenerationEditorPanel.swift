@@ -53,6 +53,13 @@ struct GenerationEditorPanel<ToolbarAccessory: View>: View {
     let toolbarAccessory: () -> ToolbarAccessory
 
     @EnvironmentObject private var theme: ThemeStore
+    @EnvironmentObject private var projectStore: ProjectStore
+
+    /// The same expression `GenerationPromptBar` saves against, so the notice
+    /// is compared with the root the file was actually written under.
+    private var currentProjectRoot: URL? {
+        projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
+    }
 
     /// Rendered preview vs raw markdown. Defaults to the preview, matching the
     /// Library's convention for the same content type — see
@@ -174,11 +181,54 @@ struct GenerationEditorPanel<ToolbarAccessory: View>: View {
     private var setupView: some View {
         ScrollView {
             VStack(spacing: 16) {
+                // Saving returns the panel here immediately, so this row is
+                // the only thing left saying where the document went. Shown
+                // only while the project it was saved into is still the open
+                // one — see `GenerationViewModel.lastSavedProjectRoot`.
+                if let saved = vm.lastSavedDocument,
+                   vm.lastSavedProjectRoot == currentProjectRoot {
+                    savedNotice(saved)
+                }
                 sourceSummaryCard
                 stepsCard
             }
             .padding(20)
         }
+    }
+
+    private func savedNotice(_ url: URL) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(theme.current.success)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Saved \(url.lastPathComponent)")
+                    .font(.callout.weight(.medium))
+                Text(url.deletingLastPathComponent().path)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                // The done view's skipped-sources warning goes away with the
+                // document; the saved file was still built without these, so
+                // the record follows it here.
+                if !vm.lastSavedSkippedSources.isEmpty {
+                    Text("\(vm.lastSavedSkippedSources.count) source\(vm.lastSavedSkippedSources.count == 1 ? " was" : "s were") skipped: \(vm.lastSavedSkippedSources.joined(separator: ", "))")
+                        .font(.caption)
+                        .foregroundStyle(theme.current.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 8)
+            Button("Open") { NSWorkspace.shared.open(url) }
+                .controlSize(.small)
+            Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                .controlSize(.small)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.current.success.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
 
     // Sources summary
