@@ -113,6 +113,11 @@ struct MarkdownDetailView: View {
 struct MarkdownWebView: NSViewRepresentable {
     let markdown: String
     let isDark: Bool
+    /// Draw ```mermaid fences as diagrams. Off by default so the Library's
+    /// file preview and anything else reusing this view are unchanged; see
+    /// `MarkdownRenderer.html(for:isDark:compact:enableMermaid:)` for why it is
+    /// opt-in rather than always on.
+    var enableMermaid: Bool = false
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -131,7 +136,7 @@ struct MarkdownWebView: NSViewRepresentable {
     }
 
     private func buildHTML() -> String {
-        MarkdownRenderer.html(for: markdown, isDark: isDark)
+        MarkdownRenderer.html(for: markdown, isDark: isDark, enableMermaid: enableMermaid)
     }
 }
 

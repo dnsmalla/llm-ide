@@ -44,6 +44,32 @@ public enum GenerationConformance {
         return doc !== visual
     }
 
+    // MARK: - Markdown preview gating
+
+    /// Whether the renderer would ship the mermaid bundle for this input.
+    ///
+    /// The invariant worth pinning is the NEGATIVE one: mermaid must stay out of
+    /// the chat renderer. It draws asynchronously while `renderMarkdown` returns
+    /// a synchronous height, so a chat bubble measured by
+    /// `SelfSizingMarkdownView` would be sized before the diagram existed — and
+    /// it is 3.4 MB for the web view to parse on every reply.
+    public static func previewShipsMermaid(markdown: String, enabled: Bool) -> Bool {
+        // Look for the BUNDLE, not for `mermaid.initialize` — that call lives in
+        // the template unconditionally, guarded by `if (!window.mermaid)`, so
+        // searching for it reports true for every document. (It did, and the
+        // assertions caught it.)
+        guard !Mermaid.js.isEmpty else { return false }
+        let fingerprint = String(Mermaid.js.prefix(400))
+        return MarkdownRenderer.html(for: markdown, isDark: false, enableMermaid: enabled)
+            .contains(fingerprint)
+    }
+
+    /// Whether the renderer detects a mermaid fence at all — independent of
+    /// whether the caller asked for it.
+    public static func detectsMermaidFence(_ markdown: String) -> Bool {
+        MarkdownRenderer.needsMermaid(markdown)
+    }
+
     @MainActor
     public static func resetDropsModels() -> Bool {
         GenerationRegistry.shared.reset()

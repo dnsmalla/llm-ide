@@ -282,6 +282,11 @@ let package = Package(
                 // Resources/monaco/ except by re-running that script — edit
                 // Resources/monaco-src/ instead for the hand-authored parts.
                 .copy("Resources/monaco"),
+                // Vendored by Scripts/build-mermaid-bundle.mjs, same rationale
+                // as monaco/highlight.js: the markdown preview is a WKWebView
+                // rendering a LOCAL html string, so a remote <script> would put
+                // diagram rendering at the mercy of the network.
+                .copy("Resources/mermaid"),
             ],
             swiftSettings: [
                 // Gates the compiled-in graph engine. An explicit define rather

@@ -51,6 +51,30 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--decode" {
 
 print("chat-contract-lab")
 
+// Markdown preview gating. The generated doc is where a ```mermaid dependency
+// graph turns up, but the same renderer draws every chat reply — where an async
+// diagram would land after the synchronous height measurement.
+do {
+    let withFence = "# Doc\n\n```mermaid\ngraph TD\n  A-->B\n```\n"
+    let withoutFence = "# Doc\n\n```swift\nlet x = 1\n```\n"
+
+    expect(GenerationConformance.detectsMermaidFence(withFence), "a mermaid fence is detected")
+    expect(!GenerationConformance.detectsMermaidFence(withoutFence), "a swift fence is not mistaken for mermaid")
+
+    // THE invariant: opting out keeps mermaid out, fence or no fence.
+    expect(!GenerationConformance.previewShipsMermaid(markdown: withFence, enabled: false),
+           "chat's renderer ships no mermaid even when the text contains a diagram")
+
+    // And opting in does not ship 3.4 MB to a document that has no diagram.
+    expect(!GenerationConformance.previewShipsMermaid(markdown: withoutFence, enabled: true),
+           "a document with no diagram ships no mermaid even when enabled")
+
+    // …and the positive case, so the assertions above cannot all be satisfied
+    // by the feature simply never working.
+    expect(GenerationConformance.previewShipsMermaid(markdown: withFence, enabled: true),
+           "the generation preview DOES ship mermaid for a document with a diagram")
+}
+
 // GenerationRegistry — a running generation must outlive the view that started
 // it. The reported bug was that leaving the Doc Gen section and coming back
 // showed "not generating" while the server had actually finished the job: the

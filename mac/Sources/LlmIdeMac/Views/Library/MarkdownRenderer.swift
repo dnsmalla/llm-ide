@@ -11,7 +11,15 @@ enum MarkdownRenderer {
     /// + Atom One theme used by `HljsWebView` (file/diff previews) — inlined
     /// here too so this stays offline-safe, and get a copy button — but only
     /// when the text actually has a fence; see `needsHighlighting`.
-    static func html(for markdown: String, isDark: Bool, compact: Bool = false) -> String {
+    /// - Parameter enableMermaid: render ```mermaid fences as diagrams.
+    ///   OFF by default and opt-in per call site, deliberately. mermaid renders
+    ///   ASYNCHRONOUSLY, while `renderMarkdown` returns `document.body.scrollHeight`
+    ///   synchronously — so a chat reply measured by `SelfSizingMarkdownView`
+    ///   would be sized before the diagram existed. It is also 3.4 MB for the
+    ///   web view to parse. Only the generation preview, which scrolls itself
+    ///   and needs no measured height, asks for it.
+    static func html(for markdown: String, isDark: Bool, compact: Bool = false,
+                     enableMermaid: Bool = false) -> String {
         let bg             = isDark ? "#1e1e1e" : "#ffffff"
         let fg             = isDark ? "#d4d4d4" : "#1a1a1a"
         let codeBg         = isDark ? "#2d2d2d" : "#f5f5f5"
@@ -65,7 +73,20 @@ enum MarkdownRenderer {
                                   with: Self.needsHighlighting(markdown) ? Hljs.themeCSS(isDark: isDark) : "")
             .replacingOccurrences(of: "{{hljsJS}}",
                                   with: Self.needsHighlighting(markdown) ? Hljs.js : "")
+            // Same gating as the highlighter above, and for a stronger reason:
+            // mermaid is ~3.4 MB. Ship it only when the caller opted in AND the
+            // document actually contains a mermaid fence.
+            .replacingOccurrences(of: "{{mermaidJS}}",
+                                  with: (enableMermaid && Self.needsMermaid(markdown)) ? Mermaid.js : "")
+            .replacingOccurrences(of: "{{mermaidTheme}}", with: Mermaid.theme(isDark: isDark))
             .replacingOccurrences(of: "{{content}}", with: escaped)
+    }
+
+    /// Whether `markdown` contains a ```mermaid fence, and so needs the mermaid
+    /// bundle shipped with the document. Matches the fence the renderer itself
+    /// emits as `<code class="language-mermaid">`.
+    static func needsMermaid(_ markdown: String) -> Bool {
+        markdown.range(of: "```mermaid", options: .caseInsensitive) != nil
     }
 
     /// Whether `markdown` contains a fenced code block, and so needs the
@@ -134,6 +155,9 @@ enum MarkdownRenderer {
     .copy-btn.copied { color: #3fb950; border-color: #3fb950; opacity: 1; }
     .code-block pre { margin: 0; padding: 12px 14px; overflow-x: auto; background: transparent; }
     .code-block pre code.hljs { padding: 0; background: transparent; }
+    .mermaid-figure { margin: 14px 0; padding: 12px; overflow-x: auto; text-align: center;
+                      background: {{codeBg}}; border: 1px solid {{border}}; border-radius: 8px; }
+    .mermaid-figure svg { max-width: 100%; height: auto; }
     code { font-family: 'SF Mono', Menlo, Monaco, monospace; font-size: 12.5px; }
     p > code, li > code, td > code, th > code { background: {{codeBg}}; padding: 2px 5px; border-radius: 4px; }
     blockquote { border-left: 3px solid {{border}}; margin: 0 0 14px; padding: 4px 16px;
@@ -149,6 +173,9 @@ enum MarkdownRenderer {
     </head>
     <body>
     <div id="content"></div>
+    <script>
+    {{mermaidJS}}
+    </script>
     <script>
     {{hljsJS}}
     </script>
@@ -270,8 +297,35 @@ enum MarkdownRenderer {
       if (window.hljs) {
         document.querySelectorAll('.code-block pre code').forEach((el) => { try { hljs.highlightElement(el); } catch (e) {} });
       }
+      renderMermaid();
       return document.body.scrollHeight;
     }
+    // Replace each ```mermaid block with its drawn diagram. Async by nature, so
+    // it runs AFTER renderMarkdown has returned its height — which is why
+    // mermaid is opt-in and off for the height-measured chat renderer.
+    //
+    // `textContent` rather than innerHTML: parseMarkdown escaped the source, and
+    // mermaid needs the raw arrows back. A block that fails to parse is left
+    // exactly as it was, so a malformed diagram still shows its source.
+    function renderMermaid() {
+      if (!window.mermaid) return;
+      try {
+        mermaid.initialize({ startOnLoad: false, theme: '{{mermaidTheme}}', securityLevel: 'strict' });
+      } catch (e) { return; }
+      document.querySelectorAll('.code-block pre code.language-mermaid').forEach((el, i) => {
+        const holder = el.closest('.code-block');
+        if (!holder) return;
+        try {
+          mermaid.render('mermaid-svg-' + i, el.textContent).then((out) => {
+            const fig = document.createElement('div');
+            fig.className = 'mermaid-figure';
+            fig.innerHTML = out.svg;
+            holder.replaceWith(fig);
+          }).catch(() => {});
+        } catch (e) {}
+      });
+    }
+
     window.__renderMarkdown = renderMarkdown;
     renderMarkdown(raw);
     function copyCodeBlock(btn) {
