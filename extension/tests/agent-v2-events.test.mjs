@@ -41,7 +41,9 @@ test('mapSdkMessage: stream deltas map to delta / tool_use_start / tool_args_del
   );
   assert.deepEqual(
     mapSdkMessage({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: 'tool_use', id: 'tu_1', name: 'mcp__llmide__kb_search' } } }),
-    [{ type: 'tool_use_start', id: 'tu_1', name: 'mcp__llmide__kb_search' }],
+    // `index` mirrors the block index tool_args_delta carries — it is how a
+    // partial-args delta is matched to its tool call. See schema/agent-v2/.
+    [{ type: 'tool_use_start', index: 0, id: 'tu_1', name: 'mcp__llmide__kb_search' }],
   );
   // No explicit index (single-tool turn) defaults to block index 0.
   assert.deepEqual(

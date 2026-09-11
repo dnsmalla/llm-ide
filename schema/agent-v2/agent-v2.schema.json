@@ -36,9 +36,10 @@
     {
       "title": "tool_use_start",
       "additionalProperties": false,
-      "required": ["type", "id", "name"],
+      "required": ["type", "index", "id", "name"],
       "properties": {
         "type": { "const": "tool_use_start" },
+        "index": { "type": "integer" },
         "id": { "type": ["string", "null"] },
         "name": { "type": ["string", "null"] }
       }

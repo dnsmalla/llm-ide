@@ -51,6 +51,30 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--decode" {
 
 print("chat-contract-lab")
 
+// ClaudeToolPresentation.salientArgument — the v2 half of what the legacy
+// server does in loop.mjs toolActivityDetail. A tool line reads "Reading
+// Foo.swift", not a bare "Reading", only because of this.
+do {
+    func s(_ tool: String?, _ args: String?) -> String? {
+        AgentV2Conformance.salientArgument(tool: tool, argsJSON: args)
+    }
+
+    expect(s("Read", #"{"file_path":"/repo/mac/Sources/Foo.swift"}"#) == "Sources/Foo.swift",
+           "a path shows its last two segments, not the absolute path")
+    expect(s("read-file", #"{"path":"a/b/c/d.swift"}"#) == "c/d.swift",
+           "llm-ide's own `path` key works alongside the SDK's file_path")
+    expect(s("Bash", #"{"command":"swift build"}"#) == "swift build",
+           "a command is shown whole, not path-split")
+    expect(s("Grep", #"{"pattern":"TODO"}"#) == "TODO", "a search pattern is picked")
+    expect(s("Read", nil) == nil, "no args → no detail")
+    expect(s("Read", "") == nil, "empty args → no detail")
+    expect(s("Read", "not json") == nil, "unparseable args → no detail, not a crash")
+    expect(s("Read", #"{"file_path":"   "}"#) == nil, "a whitespace-only value is not a detail")
+    expect(s("Bash", #"{"command":"\#(String(repeating: "x", count: 200))"}"#)?.count == 81,
+           "an overlong value is capped at 80 plus the ellipsis")
+    expect(s("Bash", #"{"command":"a\n\nb"}"#) == "a b", "whitespace runs collapse to one space")
+}
+
 // ChatMessage.ToolStep is PERSISTED (sessions/<uuid>.json), so widening it is a
 // schema migration: a step written before the new fields existed must still
 // decode, and a step written after must round-trip.

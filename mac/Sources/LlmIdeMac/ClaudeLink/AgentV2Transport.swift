@@ -231,6 +231,13 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         // toolUseId → wire name, so a nameless tool_result can still report
         // which tool finished.
         var toolNames: [String: String] = [:]
+        // Block index → tool-use id. `tool_args_delta` is keyed by index and
+        // `tool_result` by id; `tool_use_start` is the only event carrying both,
+        // which is why the server had to start sending `index` on it.
+        var toolIndexToUseId: [Int: String] = [:]
+        // Tool-use id → arguments assembled so far. Emptied as each result
+        // lands, so a long turn does not accumulate every call's arguments.
+        var pendingArgs: [String: String] = [:]
 
         try await streamer.agentV2Stream(body) { event in
             // `tasks` may arrive after `result` — same ordering as legacy
@@ -262,21 +269,43 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
             case .delta(let text):
                 reply += text
                 onChunk(text)
-            case .toolUseStart(let id, let name):
+            case .toolUseStart(let index, let id, let name):
                 if let id, let name { toolNames[id] = name }
+                // Remember which block index this call occupies: arg deltas
+                // are keyed by index, results by tool-use id, and this is the
+                // only event carrying both.
+                if let id { toolIndexToUseId[index] = id }
                 self.fireToolProgress(name, onProgress: onProgress)
+            case .toolArgsDelta(let index, let partialJson):
+                // Accumulate. The model emits arguments as a JSON string in
+                // fragments, so a single delta is not parseable on its own.
+                if let useId = toolIndexToUseId[index] {
+                    pendingArgs[useId, default: ""] += partialJson
+                }
             case .toolResult(let payload):
-                self.fireToolProgress(payload.toolUseId.flatMap { toolNames[$0] },
-                                      onProgress: onProgress)
-            case .toolArgsDelta:
-                // Live arg assembly for an open tool card. `ChatTransport`
-                // has no channel for it (legacy progress carries no args);
-                // Task 11's card UI grows its own surface if it ever needs
-                // streaming args.
-                break
+                let name = payload.toolUseId.flatMap { toolNames[$0] }
+                let args = payload.toolUseId.flatMap { pendingArgs.removeValue(forKey: $0) }
+                self.fireToolProgress(
+                    name,
+                    // `detail` is the salient argument — "Reading Foo.swift"
+                    // rather than a bare "Reading". The legacy wire has the
+                    // server pick it (loop.mjs toolActivityDetail); on v2 the
+                    // arguments arrive whole, so the linker picks it here.
+                    detail: ClaudeToolPresentation.salientArgument(tool: name, argsJSON: args),
+                    args: args,
+                    resultText: payload.text,
+                    isError: payload.isError,
+                    truncated: payload.truncated,
+                    onProgress: onProgress
+                )
             case .usage:
-                // Token counts have no legacy `Usage` field (see class doc);
-                // consumed here so the mapping decision is explicit.
+                // Still dropped, but now for a real reason rather than for lack
+                // of a field: token counts are PER TURN, and `AgentProgress` is
+                // a per-tool-step event. They belong on the turn's
+                // `ChatMessage.Metadata` alongside cost — see
+                // docs/superpowers/plans/2026-09-11-linker-contract-and-v2-data.md
+                // Task 10 Step 4, which leaves that placement open rather than
+                // inventing a UI for it here.
                 break
             case .approvalRequest(let approval):
                 onApproval(approval)
@@ -329,13 +358,22 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
     /// no parsed salient argument for a tool call, only raw arg deltas.
     private func fireToolProgress(
         _ tool: String?,
+        detail: String? = nil,
+        args: String? = nil,
+        resultText: String? = nil,
+        isError: Bool? = nil,
+        truncated: Bool? = nil,
         onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void
     ) {
         onProgress(LlmIdeAPIClient.AgentProgress(
-            label: LlmIdeAPIClient.progressLabel(phase: "tool", tool: tool),
+            label: LlmIdeAPIClient.progressLabel(phase: "tool", tool: tool, detail: detail),
             phase: "tool",
             tool: tool,
-            detail: nil
+            detail: detail,
+            args: args,
+            resultText: resultText,
+            isError: isError,
+            truncated: truncated
         ))
     }
 }

@@ -183,7 +183,7 @@ enum AgentV2Event: Sendable, Equatable {
     /// `{"type":"delta","text":…}` — streamed assistant text.
     case delta(String)
     /// `{"type":"tool_use_start","id":…,"name":…}` — open a tool card.
-    case toolUseStart(id: String?, name: String?)
+    case toolUseStart(index: Int, id: String?, name: String?)
     /// `{"type":"tool_args_delta","index":…,"partialJson":…}` — live args
     /// assembly; the index disambiguates concurrent tool calls in one turn.
     case toolArgsDelta(index: Int, partialJson: String)
@@ -231,7 +231,7 @@ enum AgentV2Event: Sendable, Equatable {
         case "delta":
             return Self.payload(DeltaWire.self, data).map { .delta($0.text) }
         case "tool_use_start":
-            return Self.payload(ToolUseStartWire.self, data).map { .toolUseStart(id: $0.id, name: $0.name) }
+            return Self.payload(ToolUseStartWire.self, data).map { .toolUseStart(index: $0.index, id: $0.id, name: $0.name) }
         case "tool_args_delta":
             return Self.payload(ToolArgsDeltaWire.self, data).map { .toolArgsDelta(index: $0.index, partialJson: $0.partialJson) }
         case "tool_result":
@@ -271,7 +271,9 @@ enum AgentV2Event: Sendable, Equatable {
     // Wire fragments for the scalar-carrying cases. Private to this file —
     // callers consume the enum, never these.
     private struct DeltaWire: Decodable { let text: String }
-    private struct ToolUseStartWire: Decodable { let id: String?; let name: String? }
+    // `index` is the block index shared with tool_args_delta — it is how a
+    // partial-args delta is matched to the tool call it belongs to.
+    private struct ToolUseStartWire: Decodable { let index: Int; let id: String?; let name: String? }
     private struct ToolArgsDeltaWire: Decodable { let index: Int; let partialJson: String }
     private struct ApprovalResolvedWire: Decodable { let requestId: String; let outcome: String }
     private struct ModeSetWire: Decodable { let mode: String }

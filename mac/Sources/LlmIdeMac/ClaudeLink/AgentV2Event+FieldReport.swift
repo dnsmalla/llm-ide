@@ -26,6 +26,13 @@ public enum AgentV2Conformance {
     public static func fieldReport(forJSON data: Data) -> [String]? {
         AgentV2Event.decode(fromJSON: data)?.decodedFieldNames()
     }
+
+    /// The salient-argument picker, exposed for the lab. Pure string logic with
+    /// two presentation rules (path-tail, 80-char cap) that are easy to break
+    /// silently, and the v2 counterpart of the server's `toolActivityDetail`.
+    public static func salientArgument(tool: String?, argsJSON: String?) -> String? {
+        ClaudeToolPresentation.salientArgument(tool: tool, argsJSON: argsJSON)
+    }
 }
 
 extension AgentV2Event {
@@ -42,7 +49,7 @@ extension AgentV2Event {
             return ["text"]
 
         case .toolUseStart:
-            return ["id", "name"]
+            return ["index", "id", "name"]
 
         case .toolArgsDelta:
             return ["index", "partialJson"]

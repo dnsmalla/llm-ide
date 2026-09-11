@@ -120,3 +120,54 @@ enum ClaudeToolPresentation {
         return "Always Allow \(name)"
     }
 }
+
+// MARK: - Salient argument
+
+extension ClaudeToolPresentation {
+    /// The one argument worth showing beside a tool's verb — "Reading
+    /// Foo.swift" rather than a bare "Reading".
+    ///
+    /// The legacy wire has the SERVER pick this (`toolActivityDetail` in
+    /// `llm_agent/runtime/loop.mjs`) and sends it as `detail`. The v2 wire
+    /// sends the arguments whole instead, so the choice is made here — and it
+    /// is made in the linker, next to the tool-name vocabulary, so the two
+    /// engines' tool lines read identically.
+    ///
+    /// Deliberately mirrors the server's key order and its two presentation
+    /// rules: a path shows only its last two segments (an absolute path gets
+    /// truncated from the wrong end in a narrow chat column), and the result is
+    /// capped so a line can never carry a file body or a diff.
+    ///
+    /// SDK built-ins use snake_case argument names (`file_path`) while
+    /// llm-ide's own tools use `path`/`file`; both are accepted.
+    static func salientArgument(tool: String?, argsJSON: String?) -> String? {
+        guard let argsJSON, !argsJSON.isEmpty,
+              let data = argsJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+
+        let keysInPriorityOrder = [
+            "file_path", "path", "file",          // Read / Edit / Write / read-file
+            "pattern", "query", "q",              // Grep / Glob / search-kb
+            "command",                            // Bash / run-bash
+            "url", "branch", "question", "prompt",
+        ]
+        var picked: String?
+        for key in keysInPriorityOrder {
+            if let value = object[key] as? String, !value.trimmingCharacters(in: .whitespaces).isEmpty {
+                picked = value.trimmingCharacters(in: .whitespaces)
+                break
+            }
+        }
+        guard let raw = picked else { return nil }
+
+        let normalized = normalizedToolName(tool ?? "")
+        let isPathish = ["read-file", "list-files", "update-file", "read", "edit", "write", "multiedit"]
+            .contains(normalized) || raw.contains("/")
+        let shown = isPathish
+            ? raw.split(separator: "/").suffix(2).joined(separator: "/")
+            : raw
+        let collapsed = shown.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return collapsed.count > 80 ? String(collapsed.prefix(80)) + "…" : collapsed
+    }
+}

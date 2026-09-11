@@ -53,7 +53,16 @@ export function mapSdkMessage(msg) {
     if (ev.type === 'content_block_start') {
       const block = ev.content_block;
       if (block?.type === 'tool_use') {
-        return [{ type: 'tool_use_start', id: block.id ?? null, name: block.name ?? null }];
+        // `index` is the same block index `tool_args_delta` carries. Without it
+        // the client cannot tell WHICH open tool call a partial-args delta
+        // belongs to, so it could not assemble arguments at all — which is why
+        // the Mac used to drop them. See schema/agent-v2/SCHEMA.md.
+        return [{
+          type: 'tool_use_start',
+          index: ev.index ?? 0,
+          id: block.id ?? null,
+          name: block.name ?? null,
+        }];
       }
       return [];
     }
