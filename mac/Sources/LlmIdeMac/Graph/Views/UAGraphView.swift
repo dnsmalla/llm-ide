@@ -896,10 +896,22 @@ struct UAGraphView: View {
     }
 
     /// True when the selected node has a real on-disk file we can hand
-    /// to FileDetailView. Memory chunks render their own body text
-    /// inline because they're a *section* of a doc, not the whole file.
+    /// to FileDetailView.
+    ///
+    /// Only `.memoryChunk` is excluded, and only because a chunk is a *section*
+    /// of a document — it renders its own body inline, since handing the whole
+    /// file to the viewer would not show the section the user clicked.
+    ///
+    /// `.memoryDoc` used to be excluded alongside it, which was an
+    /// over-generalisation of that reasoning: a memoryDoc IS the whole file.
+    /// `MemoryGenerator` emits exactly one per document with the document's own
+    /// URL (`metadata["fileURL"] = doc.absoluteString`) and then emits the
+    /// chunks separately. Excluding it meant selecting a `.md` document in the
+    /// graph fell through to the bare connectivity summary, and the only way to
+    /// read the file was "Open" — which reveals it in Finder. The document's
+    /// content was unreachable in-app.
     private func shouldRenderFileDetail(for node: CGNode) -> Bool {
-        guard node.kind != .memoryChunk, node.kind != .memoryDoc,
+        guard node.kind != .memoryChunk,
               let urlString = node.metadata["fileURL"],
               let url = URL(string: urlString) else { return false }
         return FileManager.default.fileExists(atPath: url.path)
