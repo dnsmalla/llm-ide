@@ -317,6 +317,49 @@ do {
     )
 }
 
+// PlanEditPolicy — the rules behind the plan actions on a v2 plan reply
+// (Save / Edit / Refine). Edit writes only the FILE, so these three pure
+// rules are all that stands between a user's edits and llm-doc/plans/.
+do {
+    expect(PlanEditPolicy.refineSeed(title: "Cache warmup") == "Revise the plan \"Cache warmup\": ",
+           "the refine seed names the plan the button belongs to")
+    expect(PlanEditPolicy.refineSeed(title: "") == "Revise the plan: ",
+           "an untitled plan seeds the bare instruction, not empty quotes")
+    expect(PlanEditPolicy.refineSeed(title: "  ") == "Revise the plan: ",
+           "a whitespace-only title counts as no title")
+
+    // Only the body can block the save: a blank title falls back below.
+    expect(PlanEditPolicy.canSave(content: "# Plan\n1. do it") == true, "a plan with a body saves")
+    expect(PlanEditPolicy.canSave(content: "") == false, "an emptied body must not write an empty plan file")
+    expect(PlanEditPolicy.canSave(content: " \n\t ") == false, "a whitespace-only body is empty too")
+
+    expect(PlanEditPolicy.resolvedTitle(edited: "Renamed", derived: "Derived") == "Renamed",
+           "the user's title wins when they left one")
+    expect(PlanEditPolicy.resolvedTitle(edited: "   ", derived: "Derived") == "Derived",
+           "a blanked title falls back to the one derived from the reply")
+    expect(PlanEditPolicy.resolvedTitle(edited: "  Trimmed  ", derived: "Derived") == "Trimmed",
+           "the saved title is trimmed — it becomes a filename slug")
+
+    // The write guard. `messageInTranscript` is the one that isn't obvious:
+    // the saved flag is stored ON the message, so a write for a message that
+    // is gone (the edit sheet outlived its session) would be UNRECORDED and a
+    // second write could follow it.
+    expect(PlanEditPolicy.refusal(hasPendingTool: false, alreadySaved: false, messageInTranscript: true) == nil,
+           "a live unsaved plan with no pending tool writes")
+    expect(PlanEditPolicy.refusal(hasPendingTool: true, alreadySaved: false, messageInTranscript: true) == .pendingTool,
+           "a pending proposal owns the turn")
+    expect(PlanEditPolicy.refusal(hasPendingTool: false, alreadySaved: true, messageInTranscript: true) == .alreadySaved,
+           "an already-saved plan is never written twice")
+    expect(PlanEditPolicy.refusal(hasPendingTool: false, alreadySaved: false, messageInTranscript: false) == .messageGone,
+           "a write that cannot be recorded is refused, not silently repeated")
+    // Precedence: the pending tool is reported first — it is the one the user
+    // can act on.
+    expect(PlanEditPolicy.refusal(hasPendingTool: true, alreadySaved: true, messageInTranscript: false) == .pendingTool,
+           "the pending tool outranks the other refusals")
+    expect(PlanEditPolicy.refusal(hasPendingTool: false, alreadySaved: true, messageInTranscript: false) == .alreadySaved,
+           "already-saved outranks a missing message")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

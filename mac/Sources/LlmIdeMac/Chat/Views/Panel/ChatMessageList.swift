@@ -63,6 +63,12 @@ struct ChatMessageList: View {
     /// engine the plan IS the reply, so saving is a client-side action on
     /// that reply rather than a tool proposal the loop confirms).
     let onSavePlanFromMessage: (ChatMessage) -> Void
+    /// Wraps `CodeAssistantPanel.beginPlanEdit(from:)` — opens the plan in the
+    /// hand-edit sheet instead of saving the agent's text as-is.
+    let onEditPlanFromMessage: (ChatMessage) -> Void
+    /// Wraps `CodeAssistantPanel.refinePlanInChat(from:)` — stays in a
+    /// plan-like mode and seeds the composer with a revision instruction.
+    let onRefinePlanFromMessage: (ChatMessage) -> Void
     /// Wraps `CodeAssistantPanel.executeSavedPlan(_:messageId:)` — the PlanSavedCard's
     /// "Execute plan" action (switch to Execute mode, attach the plan file).
     let onExecutePlan: (UUID, ChatMessage.ToolResultPayload) -> Void
@@ -158,16 +164,42 @@ struct ChatMessageList: View {
                                    v2Selected: engine.usesAgentV2Engine,
                                    hasPendingTool: pendingTool != nil,
                                    planSaved: turn.metadata?.planSaved == true) {
-                                Button {
-                                    onSavePlanFromMessage(turn)
-                                } label: {
-                                    Label("Save Plan", systemImage: "square.and.arrow.down")
-                                        .font(Typography.caption)
+                                HStack(spacing: 8) {
+                                    Button {
+                                        onSavePlanFromMessage(turn)
+                                    } label: {
+                                        Label("Save Plan", systemImage: "square.and.arrow.down")
+                                            .font(Typography.caption)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .help("Save this plan to llm-doc/plans/ in the open project")
+                                    // Edit = fix the plan BY HAND before it is
+                                    // written; Refine = ask the agent for
+                                    // another revision. Both were previously
+                                    // reachable only AFTER saving (the
+                                    // PlanSavedCard), which forced a wrong
+                                    // plan onto disk first.
+                                    Button {
+                                        onEditPlanFromMessage(turn)
+                                    } label: {
+                                        Label("Edit", systemImage: "pencil")
+                                            .font(Typography.caption)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .help("Edit this plan yourself, then save it")
+                                    Button {
+                                        onRefinePlanFromMessage(turn)
+                                    } label: {
+                                        Label("Refine", systemImage: "arrow.triangle.2.circlepath")
+                                            .font(Typography.caption)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .help("Ask the agent to revise this plan in chat")
                                 }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
                                 .padding(.top, 4)
-                                .help("Save this plan to llm-doc/plans/ in the open project")
                             }
                         }
                         if let pe = planExecution, pe.phase == .finished || pe.phase == .failed {

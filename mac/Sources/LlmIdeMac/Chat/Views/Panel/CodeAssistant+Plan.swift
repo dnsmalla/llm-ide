@@ -272,7 +272,69 @@ extension CodeAssistantPanel {
             modelState.selectedMode = .plan
         }
         if draft.isEmpty {
-            draft = payload.planTitle.map { "Revise the plan \"\($0)\": " } ?? "Revise the plan: "
+            draft = PlanEditPolicy.refineSeed(title: payload.planTitle ?? "")
+        }
+    }
+
+    /// The "Refine in chat" action on a v2 plan-like RESULT turn — the
+    /// pre-save twin of `editSavedPlanInChat`. Nothing is written: the mode
+    /// stays plan-like and the composer is seeded, so the next turn produces
+    /// a revised plan the user can then save (or edit by hand).
+    @MainActor
+    func refinePlanInChat(from message: ChatMessage) {
+        if modelState.selectedMode != .plan && modelState.selectedMode != .assistPlan {
+            modelState.selectedMode = .plan
+        }
+        if draft.isEmpty {
+            draft = PlanEditPolicy.refineSeed(title: Self.planTitle(from: message.content))
+        } else {
+            // Never overwrite something the user typed. Saying so matters
+            // more here than on the saved-plan card: with a draft in the
+            // composer the only visible effect is a mode change, which reads
+            // as a dead button.
+            attachNotice = "Kept what you typed — add your revision instruction to the message and send it."
+        }
+    }
+
+    /// The "Edit" action on a v2 plan-like RESULT turn: open the reply in an
+    /// editable sheet so the user can fix the plan BY HAND before it is
+    /// written. Nothing is saved until the sheet's own Save.
+    @MainActor
+    func beginPlanEdit(from message: ChatMessage) {
+        // The same guards the write itself applies, checked up front so the
+        // user isn't handed an editor for a plan that can't be saved. Reported
+        // rather than silently ignored — the row's Save button reports the
+        // same conditions.
+        if let refusal = PlanEditPolicy.refusal(
+            hasPendingTool: engine.agent.pendingTool != nil,
+            alreadySaved: planSavedFlag(for: message.id) == true,
+            messageInTranscript: engine.messages.contains(where: { $0.id == message.id }))
+        {
+            attachNotice = Self.planWriteRefusalMessage(refusal)
+            return
+        }
+        sheets.planEditTarget = PlanEditTarget(
+            messageId: message.id,
+            title: Self.planTitle(from: message.content),
+            content: message.content)
+    }
+
+    /// Commit the edit sheet: write the EDITED title/body through the same
+    /// resolver→write→PlanSavedCard path the plain Save uses. Only the file
+    /// (and the resulting card) carries the edits — the assistant message is
+    /// left as the agent wrote it, so the local transcript keeps agreeing
+    /// with the v2 engine's server-side history.
+    @MainActor
+    func savePlanEdits(_ target: PlanEditTarget, title: String, content: String) async -> SavePlanResult {
+        switch await writePlan(title: title, content: content, messageId: target.messageId) {
+        case .success:
+            return .success
+        // The sheet reports EVERY refusal inline — unlike the button, a user
+        // who just hit Save in a dialog needs to know nothing was written.
+        case .refused(let refusal):
+            return .failure(Self.planWriteRefusalMessage(refusal))
+        case .failure(let message):
+            return .failure(message)
         }
     }
 
@@ -304,25 +366,78 @@ extension CodeAssistantPanel {
     /// ack, which v2's isn't).
     @MainActor
     func savePlanFromMessage(_ message: ChatMessage) async {
-        guard engine.agent.pendingTool == nil else { return }
-        // Already saved — read the LIVE message, not the captured copy, and
-        // refuse a repeat write.
-        guard planSavedFlag(for: message.id) != true else { return }
+        switch await writePlan(
+            title: Self.planTitle(from: message.content),
+            content: message.content,
+            messageId: message.id)
+        {
+        case .success, .refused(.alreadySaved):
+            // Already-saved stays SILENT here: the optimistic flag is set
+            // before SwiftUI can retire the row, so a double-click lands on
+            // this branch routinely — the save it duplicates succeeded, and a
+            // red banner for it would be a lie.
+            break
+        case .refused(let refusal):
+            attachNotice = Self.planWriteRefusalMessage(refusal)
+        case .failure(let failure):
+            engine.error = failure
+        }
+    }
+
+    /// User-facing wording for a refused plan write. One table so the button,
+    /// the Edit sheet and the Edit action can't describe the same refusal
+    /// three different ways.
+    static func planWriteRefusalMessage(_ refusal: PlanEditPolicy.WriteRefusal) -> String {
+        switch refusal {
+        case .pendingTool:
+            return "Resolve the pending action card first, then save the plan."
+        case .alreadySaved:
+            return "This plan has already been saved."
+        case .messageGone:
+            return "This plan's chat message is gone — reopen the plan and save it again."
+        }
+    }
+
+    /// The one write behind BOTH v2 plan actions (plain Save and the edit
+    /// sheet's Save): guard, flag, write, un-flag on failure. Kept in one
+    /// place so the edit path can never acquire a different double-save rule
+    /// than the plain one.
+    @MainActor
+    private func writePlan(title: String, content: String, messageId: UUID) async -> PlanWriteOutcome {
+        // All three guards read the LIVE transcript, not a captured copy.
+        // `messageInTranscript` is not cosmetic: `setPlanSavedFlag` is a
+        // no-op for a message that isn't there, so writing anyway would
+        // leave the save UNRECORDED and a second one could follow.
+        if let refusal = PlanEditPolicy.refusal(
+            hasPendingTool: engine.agent.pendingTool != nil,
+            alreadySaved: planSavedFlag(for: messageId) == true,
+            messageInTranscript: engine.messages.contains(where: { $0.id == messageId }))
+        {
+            return .refused(refusal)
+        }
         // Flag OPTIMISTICALLY, before the await: the write can be slow, and
         // a double-click landing in that window would otherwise save twice
         // and append two identical PlanSavedCards. Reverted on failure so
         // the button comes back for a retry.
-        setPlanSavedFlag(true, for: message.id)
-        let args = PendingTool.SavePlanArgs(
-            title: Self.planTitle(from: message.content),
-            content: message.content)
-        switch await confirmSavePlan(args, finalContent: message.content, followUp: .none) {
+        setPlanSavedFlag(true, for: messageId)
+        let args = PendingTool.SavePlanArgs(title: title, content: content)
+        switch await confirmSavePlan(args, finalContent: content, followUp: .none) {
         case .success:
-            break // the optimistic flag stands — the affordance is retired
-        case .failure(let failure):
-            setPlanSavedFlag(nil, for: message.id)
-            engine.error = failure
+            return .success
+        case .failure(let message):
+            setPlanSavedFlag(nil, for: messageId)
+            return .failure(message)
         }
+    }
+
+    /// `SavePlanResult` plus the refusals that are not failures — a refused
+    /// write wrote nothing AND changed nothing, which each caller reports
+    /// differently (the button stays quiet on a duplicate click; the sheet
+    /// says so inline).
+    enum PlanWriteOutcome {
+        case success
+        case refused(PlanEditPolicy.WriteRefusal)
+        case failure(String)
     }
 
     @MainActor

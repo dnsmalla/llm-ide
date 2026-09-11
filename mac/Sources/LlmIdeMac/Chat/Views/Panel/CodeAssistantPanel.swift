@@ -332,6 +332,11 @@ struct CodeAssistantPanel: View {
             .sheet(isPresented: $sheets.showingCreatePRSheet) {
                 showingCreatePRSheetContent
             }
+            .sheet(item: $sheets.planEditTarget) { target in
+                PlanEditSheet(target: target) { title, content in
+                    await savePlanEdits(target, title: title, content: content)
+                }
+            }
             .sheet(isPresented: $sheets.showLibraryPicker) {
                 showLibraryPickerContent
             }
@@ -379,6 +384,8 @@ struct CodeAssistantPanel: View {
                 onSavePlanFromMessage: { message in
                     Task { await savePlanFromMessage(message) }
                 },
+                onEditPlanFromMessage: { message in beginPlanEdit(from: message) },
+                onRefinePlanFromMessage: { message in refinePlanInChat(from: message) },
                 onExecutePlan: { messageId, payload in executeSavedPlan(payload, messageId: messageId) },
                 onEditPlan: { messageId, payload in editSavedPlanInChat(payload, messageId: messageId) }
             )
@@ -472,7 +479,15 @@ struct CodeAssistantPanel: View {
         engine.autoChain = { pendingTool, usage in
             await autoChainPendingAction(pendingTool, usage: usage)
         }
-        engine.onHistoryReplaced = { rebuildSentPrompts(from: $0) }
+        engine.onHistoryReplaced = { history in
+            rebuildSentPrompts(from: history)
+            // An open plan-edit draft names a message in the transcript that
+            // was just replaced — its Save would land in the NEW chat. This
+            // is the one hook every wholesale swap goes through (session
+            // switch, new chat, the phone's explore_chat), including the
+            // idle ones that never reach `adoptEngine`.
+            sheets.planEditTarget = nil
+        }
         engine.onResetActiveTurnExtra = { expandedTurns.removeAll() }
         engine.onResetTransientStateExtra = {
             sentPrompts = []; historyIndex = nil; draftStash = ""
@@ -481,6 +496,12 @@ struct CodeAssistantPanel: View {
             attachmentState.selectedSkills.removeAll()
             autoAttachedPath = nil
             attachNotice = nil
+            // Belongs with `draft` and the attachments: an open plan-edit
+            // draft names a message in the transcript being replaced. This
+            // hook's call sites are a SUPERSET of `onHistoryReplaced`'s —
+            // `mintFreshSession` ("+ New chat", the delete/appear mintFresh
+            // fallbacks) clears `messages` without firing that one.
+            sheets.planEditTarget = nil
         }
         engine.forgetSessionMemory = { id in
             _ = try? await api.forgetSessionMemory(sessionId: id)
@@ -559,6 +580,10 @@ struct CodeAssistantPanel: View {
         // `switchSession` applies around its own history swap.
         next.suppressHistoryAnnounce = true
         DispatchQueue.main.async { next.suppressHistoryAnnounce = false }
+        // Same reason as `handleActiveRepoChange`: the draft names a message
+        // in the OUTGOING transcript, and its Save appends the saved-plan card
+        // to whatever `engine` holds at write time.
+        sheets.planEditTarget = nil
         engine = next
         wireEngine()
         // A parked engine's `sessions` list was last refreshed when it went
@@ -630,6 +655,10 @@ struct CodeAssistantPanel: View {
         engine.agent.qaSaveError = nil
         autoAttachedPath = nil
         attachNotice = nil
+        // The open plan-edit draft belongs to the repo we just left: its Save
+        // resolves `llm-doc/plans/` against the LIVE `activeRepoRoot`, so
+        // leaving it up would write the old project's plan into the new one.
+        sheets.planEditTarget = nil
     }
 
     func handleInitialURLChange(_ newURL: URL?) {
