@@ -2,7 +2,14 @@ import SwiftUI
 
 struct DocGenView: View {
     let api: LlmIdeAPIClient
-    @StateObject private var vm = GenerationViewModel()
+    /// Resolved from `GenerationRegistry`, NOT constructed here. Owning it
+    /// with `@StateObject private var vm = GenerationViewModel()` meant a
+    /// generation started in this section became unreachable the moment the
+    /// user switched away: AppShell renders sections from a `switch`, so this
+    /// view is destroyed and a later visit built a fresh, empty model while the
+    /// work itself carried on writing into the old one. Same fix, same reason,
+    /// as `ChatEngineRegistry` for chat.
+    @StateObject private var vm = GenerationRegistry.shared.model(for: .docGen)
     /// Sources panel visible by default so template + Library pickers are discoverable.
     @AppStorage("DOCGEN_SOURCES_VISIBLE") private var sourceVisible = true
     /// Chat open-state is persisted (default open) so the assistant reads as

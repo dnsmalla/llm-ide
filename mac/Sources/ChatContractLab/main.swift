@@ -51,6 +51,23 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--decode" {
 
 print("chat-contract-lab")
 
+// GenerationRegistry — a running generation must outlive the view that started
+// it. The reported bug was that leaving the Doc Gen section and coming back
+// showed "not generating" while the server had actually finished the job: the
+// view owned the model via @StateObject, so returning built a brand new one.
+// The registry is @MainActor; top-level code here runs on the main thread but is
+// not statically isolated, so state that fact rather than hopping.
+MainActor.assumeIsolated {
+    expect(GenerationConformance.sameModelAcrossVisits(scope: "docGen"),
+           "the same scope returns the SAME model across view teardown and rebuild")
+    expect(GenerationConformance.sameModelAcrossVisits(scope: "visual"),
+           "the visual surface behaves the same way")
+    expect(GenerationConformance.distinctModelsPerScope(),
+           "Doc Gen and Visual get DIFFERENT models, so both can generate at once")
+    expect(GenerationConformance.resetDropsModels(),
+           "reset() clears them, so sign-out starts clean")
+}
+
 // ToolStepMergePolicy — the regression that widening the v2 progress event
 // caused, and the reason recordProgress can no longer dedupe on label alone.
 do {
