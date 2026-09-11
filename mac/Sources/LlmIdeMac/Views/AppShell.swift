@@ -437,16 +437,22 @@ struct AppShell: View {
             // fresh scan, so the index follows the active project.
             bindLibraryStore()
             reloadDocTemplatesForActiveProject()
-            // Generation state is per-project in everything but name: the
-            // selected template belongs to the old project's template list,
-            // `selectedSources` holds absolute file URLs under the old root,
-            // and `editedContent` is the old project's document — which `save()`
-            // would then write into the NEW project's directory. The old
-            // view-owned lifetime discarded all of that by accident whenever the
-            // user left the section; registry ownership has to do it on purpose.
-            GenerationRegistry.shared.reset()
         }
         .task(id: projectStore.activeProject?.localPath) {
+            // Keyed on the PATH, not on `.activeProjectChanged`: ProjectStore
+            // also posts that notification for a repo-link change with the
+            // project unchanged, and dropping generation state there would
+            // reproduce the very symptom this branch fixes — a run in flight,
+            // then an empty model on return — through a rarer door.
+            //
+            // Generation state is per-project in all but name: `selectedTemplate`
+            // is a value from the old project's list, `selectedSources` holds
+            // absolute URLs under the old root, and `editedContent` is the old
+            // project's document, which `save()` would write into the NEW
+            // project's directory. The old view-owned lifetime discarded all of
+            // that by accident on every section switch; registry ownership has
+            // to do it deliberately. Covers close too (path → nil).
+            GenerationRegistry.shared.reset()
             reloadDocTemplatesForActiveProject()
         }
         // Ingest the open project's code into the KB so the agent can SEARCH it

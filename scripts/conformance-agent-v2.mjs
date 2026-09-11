@@ -350,10 +350,18 @@ for (const rel of [
     .split('\n')
     .filter((l) => !l.trimStart().startsWith('//'))
     .join('\n');
-  if (/@StateObject[^\n]*=\s*GenerationViewModel\s*\(/.test(src)) {
-    note(`${rel} constructs its own GenerationViewModel — resolve it from GenerationRegistry.shared.model(for:) instead, or a generation stops being visible after a section switch`);
+  // Forbid CONSTRUCTION outright, and require the exact resolve. The first
+  // version keyed on `@StateObject ... = GenerationViewModel(` and on the file
+  // merely MENTIONING the registry somewhere — review defeated both at once
+  // with `@State private var vm = GenerationViewModel()` plus an unused
+  // computed property that referenced the registry. A different wrapper, an
+  // explicit `init`, a `Self.freshModel()` helper, or a line break before the
+  // `=` all slipped through. Neither view names the type outside a `///`
+  // comment, which the strip above already removes, so a blanket ban is exact.
+  if (/GenerationViewModel\s*\(/.test(src)) {
+    note(`${rel} constructs a GenerationViewModel — resolve it from GenerationRegistry.shared.model(for:) instead, or a generation stops being visible after a section switch`);
   }
-  if (!/GenerationRegistry\.shared\.model\(for:/.test(src)) {
+  if (!/@StateObject\s+private\s+var\s+vm\s*=\s*GenerationRegistry\.shared\.model\(for:/.test(src)) {
     note(`${rel} no longer resolves its view model from GenerationRegistry`);
   }
 }
