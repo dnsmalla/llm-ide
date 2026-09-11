@@ -437,6 +437,14 @@ struct AppShell: View {
             // fresh scan, so the index follows the active project.
             bindLibraryStore()
             reloadDocTemplatesForActiveProject()
+            // Generation state is per-project in everything but name: the
+            // selected template belongs to the old project's template list,
+            // `selectedSources` holds absolute file URLs under the old root,
+            // and `editedContent` is the old project's document — which `save()`
+            // would then write into the NEW project's directory. The old
+            // view-owned lifetime discarded all of that by accident whenever the
+            // user left the section; registry ownership has to do it on purpose.
+            GenerationRegistry.shared.reset()
         }
         .task(id: projectStore.activeProject?.localPath) {
             reloadDocTemplatesForActiveProject()

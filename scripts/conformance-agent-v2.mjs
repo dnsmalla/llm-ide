@@ -327,6 +327,37 @@ if (retiredInChain.length) {
   }
 }
 
+// --------------------------------------------------- generation ownership
+//
+// The Doc Gen / Visual generation surfaces must RESOLVE their view model from
+// GenerationRegistry, never construct one. Owning it with
+// `@StateObject private var vm = GenerationViewModel()` is the bug: AppShell
+// renders sections from a `switch`, so leaving the section destroyed the model
+// and returning built a fresh, empty one while the generation itself carried on
+// writing into the old object.
+//
+// A source check rather than a behavioural one because there is no UI test
+// harness here and `swift test` does not run on this toolchain. It is crude, but
+// it fails on exactly the edit that reintroduces the bug — which the registry's
+// own unit assertions do not.
+for (const rel of [
+  'mac/Sources/LlmIdeMac/Views/DocGen/DocGenView.swift',
+  'mac/Sources/LlmIdeMac/Views/Visual/VisualView.swift',
+]) {
+  // Strip comments first: the fix's own explanatory doc comment QUOTES the
+  // broken line, and a naive scan flags it — which it did, on the first run.
+  const src = readFileSync(join(ROOT, rel), 'utf8')
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('//'))
+    .join('\n');
+  if (/@StateObject[^\n]*=\s*GenerationViewModel\s*\(/.test(src)) {
+    note(`${rel} constructs its own GenerationViewModel — resolve it from GenerationRegistry.shared.model(for:) instead, or a generation stops being visible after a section switch`);
+  }
+  if (!/GenerationRegistry\.shared\.model\(for:/.test(src)) {
+    note(`${rel} no longer resolves its view model from GenerationRegistry`);
+  }
+}
+
 // ---------------------------------------------------------------- report
 
 if (fail.length) {

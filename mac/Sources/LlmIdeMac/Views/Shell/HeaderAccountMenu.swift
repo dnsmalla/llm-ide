@@ -53,20 +53,12 @@ struct HeaderAccountMenu: View {
                             // connected". Use the option below to drop those.
                             session.clear()
                             ChatSessionStore.clear()
-                            // In-memory generation state is registry-held now so
-                            // a running generation survives a section switch —
-                            // which also means it would survive a sign-out and
-                            // show the previous user their predecessor's
-                            // document. It did not persist before, and it must
-                            // not start to.
-                            GenerationRegistry.shared.reset()
                         }
                     }
                     Button("Sign out and disconnect all accounts", role: .destructive) {
                         Task { @MainActor in
                             session.clear()
                             ChatSessionStore.clear()
-                            GenerationRegistry.shared.reset()
                             KeychainStore.wipeAllSecrets()
                         }
                     }

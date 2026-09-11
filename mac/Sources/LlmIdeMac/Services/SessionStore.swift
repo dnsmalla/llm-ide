@@ -132,6 +132,18 @@ final class SessionStore: ObservableObject {
         refreshToken = nil
         lastError = nil
         KeychainStore.deleteToken(host: host)
+        // In-memory generation state is registry-held so a running generation
+        // survives a section switch — which also means it now outlives a sign
+        // out, and would show the next account its predecessor's document,
+        // sources and template. It did not persist before this became
+        // registry-owned and must not start to.
+        //
+        // HERE rather than at the call sites: there are four
+        // (HeaderAccountMenu's two buttons, BackendSettingsSection.saveServer,
+        // ReconnectView), and the first version of this fix remembered only
+        // two. A server change in particular is a plausible move to a
+        // different org's account.
+        GenerationRegistry.shared.reset()
     }
 
     @MainActor

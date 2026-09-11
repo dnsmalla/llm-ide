@@ -14,9 +14,14 @@ public enum GenerationConformance {
 
     /// Resolving the same scope twice returns the identical object.
     ///
-    /// This IS the bug, stated positively. Before the fix each visit built a
-    /// fresh `GenerationViewModel`, so an in-flight generation's state was
-    /// unreachable the moment the user came back.
+    /// **This is the registry's precondition, NOT the bug.** The bug was that
+    /// `DocGenView`/`VisualView` CONSTRUCTED a model instead of resolving one;
+    /// reverting them to `@StateObject private var vm = GenerationViewModel()`
+    /// leaves every assertion in this file green, which was demonstrated in
+    /// review. What guards the view side is the source check in
+    /// `scripts/conformance-agent-v2.mjs` (`generationViewOwnership`) — there is
+    /// no UI test harness here to do better, and `swift test` does not run on
+    /// this toolchain at all.
     @MainActor
     public static func sameModelAcrossVisits(scope raw: String) -> Bool {
         guard let scope = scope(raw) else { return false }
