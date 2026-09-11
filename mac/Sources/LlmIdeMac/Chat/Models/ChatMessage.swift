@@ -65,24 +65,11 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
             self.isError = isError
         }
 
-        /// SF Symbol matching the action — carried over verbatim from the
-        /// deleted `CodeAssistantPanel.ToolStep.icon` so the transcript
-        /// renders identically to before.
-        var icon: String {
-            switch tool {
-            case "read-file", "get-issue":            return "doc.text"
-            case "list-files", "list-issues":         return "list.bullet"
-            case "search-kb":                         return "books.vertical"
-            case "web-search":                        return "globe"
-            case "fetch-url":                         return "link"
-            case "bash", "run-bash":                  return "terminal"
-            case "git-op":                            return "arrow.triangle.branch"
-            case "update-file":                       return "pencil"
-            case "ask-internal", "ask-subagent":      return "sparkles"
-            case "task-create", "task-update", "task-list": return "checklist"
-            default:                                  return "wrench.and.screwdriver"
-            }
-        }
+        /// SF Symbol for this step. Delegates to the linker, which owns the tool-name vocabulary for
+        /// BOTH engines. This was a second, independent table keyed on the raw
+        /// wire name, so SDK built-ins rendered as a generic wrench next to a
+        /// correctly-resolved verb.
+        var icon: String { ClaudeToolPresentation.icon(for: tool) }
     }
 
     /// Structured shape of a `role == .toolResult` message: what kind of

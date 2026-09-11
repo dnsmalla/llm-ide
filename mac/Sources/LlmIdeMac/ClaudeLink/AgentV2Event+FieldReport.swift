@@ -33,6 +33,18 @@ public enum AgentV2Conformance {
     public static func salientArgument(tool: String?, argsJSON: String?) -> String? {
         ClaudeToolPresentation.salientArgument(tool: tool, argsJSON: argsJSON)
     }
+
+    /// The tool → SF Symbol table, exposed for the lab. `AgentProgressLabelTests`
+    /// asserts the same mapping, but it is an XCTest file and this toolchain
+    /// cannot even compile those — so the lab is where these actually run.
+    public static func icon(for tool: String?) -> String {
+        ClaudeToolPresentation.icon(for: tool)
+    }
+
+    /// The tool → verb table, same reasoning.
+    public static func verb(for tool: String?) -> String {
+        ClaudeToolPresentation.verb(tool)
+    }
 }
 
 extension AgentV2Event {

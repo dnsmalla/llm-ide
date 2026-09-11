@@ -51,6 +51,37 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--decode" {
 
 print("chat-contract-lab")
 
+// ClaudeToolPresentation.icon / verb — ONE table for both engines.
+//
+// These mirror AgentProgressLabelTests, which is an XCTest file this toolchain
+// cannot compile, let alone run. Asserting them here is the difference between
+// a checked mapping and a decorative one.
+do {
+    let icon = AgentV2Conformance.icon(for:)
+
+    expect(icon("read-file") == "doc.text", "read-file → doc.text")
+    expect(icon("bash") == "terminal", "bash → terminal")
+    expect(icon("run-bash") == "terminal", "run-bash → terminal")
+    expect(icon("update-file") == "pencil", "update-file → pencil")
+    expect(icon("git-op") == "arrow.triangle.branch", "git-op → branch")
+    expect(icon("web-search") == "globe", "web-search → globe")
+    expect(!icon("something-new").isEmpty, "an unmapped tool still gets an icon, not a blank slot")
+    expect(!icon(nil).isEmpty, "a nil tool still gets an icon")
+
+    // The regression this move fixes: the old table was keyed on the RAW wire
+    // name, so every SDK built-in fell through to the generic wrench while the
+    // verb beside it resolved correctly.
+    expect(icon("Read") == "doc.text", "the SDK's Read shares read-file's icon")
+    expect(icon("Bash") == "terminal", "the SDK's Bash shares bash's icon")
+    expect(icon("Edit") == "pencil", "the SDK's Edit shares update-file's icon")
+    expect(icon("mcp__llmide__read-file") == "doc.text", "an MCP-prefixed name normalizes first")
+    expect(icon("Read") != "wrench.and.screwdriver", "SDK built-ins no longer fall through to the wrench")
+
+    // Verb and icon must agree about what a tool IS — the old split let them
+    // disagree on the same transcript row.
+    expect(AgentV2Conformance.verb(for: "Bash").hasPrefix("Running"), "Bash's verb still says Running")
+}
+
 // ClaudeToolPresentation.salientArgument — the v2 half of what the legacy
 // server does in loop.mjs toolActivityDetail. A tool line reads "Reading
 // Foo.swift", not a bare "Reading", only because of this.

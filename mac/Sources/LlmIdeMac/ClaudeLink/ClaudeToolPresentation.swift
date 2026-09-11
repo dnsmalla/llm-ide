@@ -45,8 +45,6 @@ enum ClaudeToolPresentation {
         case "bash":          return "Running"
         case "git-op":        return "Git"
         case "update-file":   return "Editing"
-        case "list-issues":   return "Listing issues"
-        case "get-issue":     return "Reading issue"
         case "task-create", "task-update", "task-list": return "Planning"
         // SDK built-ins (v2 engine). Same verbs as their llm-ide analogues
         // above, so a chat reads identically whichever engine ran the turn.
@@ -57,6 +55,10 @@ enum ClaudeToolPresentation {
         case "grep":          return "Searching"
         case "websearch":     return "Searching the web"
         case "webfetch":      return "Fetching a page"
+        // Real SDK tool names, currently unreachable: neither is in
+        // `V2_BUILTIN_ALLOWED_TOOLS` (engine.mjs), so `canUseTool` denies them.
+        // Kept rather than deleted — allowing either server-side should not
+        // also silently degrade its label to the "Using Task" fallback.
         case "task":          return "Delegating to a subagent"
         case "todowrite":     return "Planning"
         case "bashoutput":    return "Reading command output"
@@ -169,5 +171,38 @@ extension ClaudeToolPresentation {
             : raw
         let collapsed = shown.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         return collapsed.count > 80 ? String(collapsed.prefix(80)) + "…" : collapsed
+    }
+}
+
+// MARK: - Icon
+
+extension ClaudeToolPresentation {
+    /// SF Symbol for a tool, keyed on the NORMALIZED name so the SDK's
+    /// built-ins (`Read`, `Bash`, `Edit`) and llm-ide's own kebab-case tools
+    /// share one table.
+    ///
+    /// This used to live on `ChatMessage.ToolStep` as a second, independent
+    /// switch keyed on the RAW wire name — so every SDK built-in fell through
+    /// to the generic wrench while the verb beside it, resolved here, correctly
+    /// said "Running". One event, two tables, two levels of knowledge, one row
+    /// of the transcript.
+    static func icon(for tool: String?) -> String {
+        switch normalizedToolName(tool ?? "") {
+        case "read-file", "read":                       return "doc.text"
+        case "list-files", "glob":                      return "list.bullet"
+        case "find-code", "grep":                        return "magnifyingglass"
+        case "search-kb":                                return "books.vertical"
+        case "web-search", "websearch":                  return "globe"
+        case "fetch-url", "webfetch":                    return "link"
+        case "bash", "run-bash", "bashoutput", "killshell": return "terminal"
+        case "git-op":                                   return "arrow.triangle.branch"
+        case "update-file", "edit", "write", "multiedit", "notebookedit": return "pencil"
+        case "ask-internal", "ask-subagent", "task":     return "sparkles"
+        case "task-create", "task-update", "task-list", "todowrite": return "checklist"
+        case "project_memory":                           return "brain"
+        case "load-skill", "slashcommand":               return "sparkle"
+        case "exitplanmode":                             return "checkmark.seal"
+        default:                                         return "wrench.and.screwdriver"
+        }
     }
 }
