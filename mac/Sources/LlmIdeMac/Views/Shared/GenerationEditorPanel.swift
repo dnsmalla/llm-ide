@@ -54,6 +54,12 @@ struct GenerationEditorPanel<ToolbarAccessory: View>: View {
 
     @EnvironmentObject private var theme: ThemeStore
 
+    /// Rendered preview vs raw markdown. Defaults to the preview, matching the
+    /// Library's convention for the same content type — see
+    /// `EditableTextDetailView`: "Code/markdown open in the rendered/highlighted
+    /// Preview by default."
+    @State private var isPreview = true
+
     init(vm: GenerationViewModel,
          api: LlmIdeAPIClient,
          sourcesEmptyHint: String,
@@ -132,6 +138,17 @@ struct GenerationEditorPanel<ToolbarAccessory: View>: View {
             }
 
             Spacer()
+
+            if case .done = vm.generationState {
+                Picker("", selection: $isPreview) {
+                    Text("Preview").tag(true)
+                    Text("Raw").tag(false)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 150)
+                .help("Preview renders the markdown; Raw shows the exact text that gets saved.")
+            }
 
             toolbarAccessory()
         }
@@ -404,14 +421,39 @@ struct GenerationEditorPanel<ToolbarAccessory: View>: View {
             // the document is prompt-driven — see the Edit button in
             // `GenerationPromptBar`, which sends the current text back through
             // `/generate-doc` with the user's instruction as the prompt.
-            TextEditor(text: $vm.editedContent)
-                .font(.system(.callout, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .background(Color(nsColor: .textBackgroundColor))
-                .disabled(true)
-                .opacity(0.85)
-                .onAppear { if vm.editedContent.isEmpty { vm.editedContent = text } }
-                .onChange(of: text) { _, new in vm.editedContent = new }
+            //
+            // This used to be `TextEditor(...).disabled(true)`, which is why a
+            // long document could not be read: `.disabled` puts `isEnabled`
+            // false into the environment, and that stops the editor's scroll
+            // view responding as well as its text accepting input. Read-only was
+            // the right intent; disabling the whole control was the wrong means.
+            Group {
+                if isPreview {
+                    // A WKWebView, so it scrolls natively and renders fenced
+                    // code through the bundled highlight.js. Same renderer the
+                    // Library uses for a .md file.
+                    // Mermaid ON here specifically: a generated architecture
+                    // doc is exactly where a ```mermaid dependency graph shows
+                    // up, this panel scrolls itself (so the async render does
+                    // not disturb a measured height), and the fence-gating in
+                    // MarkdownRenderer keeps the 3.4 MB bundle out of documents
+                    // that have no diagram.
+                    MarkdownWebView(markdown: vm.editedContent,
+                                    isDark: theme.current.isDark,
+                                    enableMermaid: true)
+                } else {
+                    ScrollView {
+                        Text(vm.editedContent)
+                            .font(.system(.callout, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                    }
+                    .background(Color(nsColor: .textBackgroundColor))
+                }
+            }
+            .onAppear { if vm.editedContent.isEmpty { vm.editedContent = text } }
+            .onChange(of: text) { _, new in vm.editedContent = new }
         }
     }
 
