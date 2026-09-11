@@ -51,6 +51,33 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--decode" {
 
 print("chat-contract-lab")
 
+#if FEATURE_GRAPH
+// Graph detail policy: does a node show its own body, or its file?
+//
+// Wrapped in #if because `Graph/` is build-excludable — in build-mac-lite/min
+// these types do not exist. The lab target gets the same `featureDefines` as the
+// library so the block simply vanishes there.
+//
+// The rule had lived as a `private` method on a View since the repo's initial
+// commit, reachable by no test, which is how it came to exclude `.memoryDoc`
+// unnoticed: selecting a .md document in the graph showed no content at all.
+do {
+    let inline = GraphNodeDisplayPolicy.rendersOwnBodyInline(kindRawValue:)
+
+    expect(inline("memoryChunk") == true,
+           "a chunk is a SECTION of a document, so it renders its own body")
+    expect(inline("memoryDoc") == false,
+           "a doc IS the whole file, so it renders in the file viewer")
+
+    // Everything else names a file, or a place in one — both belong to the viewer.
+    for kind in ["file", "docPage", "symbol", "function", "classType", "module", "noteFact"] {
+        expect(inline(kind) == false, "\(kind) renders its file, not an inline body")
+    }
+
+    expect(inline("notAKind") == nil, "an unknown kind is nil, not a silent false")
+}
+#endif
+
 // Markdown escaping — the security control, not a formatting nicety.
 //
 // The document body is LLM-authored text about the user's private source, and it

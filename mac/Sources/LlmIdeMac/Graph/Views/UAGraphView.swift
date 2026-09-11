@@ -910,8 +910,17 @@ struct UAGraphView: View {
     /// graph fell through to the bare connectivity summary, and the only way to
     /// read the file was "Open" — which reveals it in Finder. The document's
     /// content was unreachable in-app.
+    /// The line to scroll to, for nodes that name a position inside a file.
+    /// `nil` for whole-file nodes, which open at the top.
+    private func revealTarget(for node: CGNode) -> MonacoRevealRequest? {
+        guard let raw = node.metadata["line"],
+              let line = Int(raw.hasPrefix("L") ? raw.dropFirst() : Substring(raw)),
+              line > 0 else { return nil }
+        return MonacoRevealRequest(line: line)
+    }
+
     private func shouldRenderFileDetail(for node: CGNode) -> Bool {
-        guard node.kind != .memoryChunk,
+        guard !GraphNodeDisplayPolicy.rendersOwnBodyInline(node.kind),
               let urlString = node.metadata["fileURL"],
               let url = URL(string: urlString) else { return false }
         return FileManager.default.fileExists(atPath: url.path)
@@ -1027,7 +1036,11 @@ struct UAGraphView: View {
             } else if shouldRenderFileDetail(for: node),
                       let urlString = node.metadata["fileURL"],
                       let url = URL(string: urlString) {
-                FileDetailView(url: url)
+                // `StructureGraphBuilder` stamps symbol/class/function nodes
+                // with "line": "L<n>" alongside fileURL. Without passing it the
+                // viewer opens at line 1, so clicking a function landed the
+                // user at the top of the file. `SearchView` does the same.
+                FileDetailView(url: url, revealTarget: revealTarget(for: node))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let urlString = node.metadata["fileURL"],
                       let url = URL(string: urlString),

@@ -308,7 +308,13 @@ let package = Package(
         .executableTarget(
             name: "ChatContractLab",
             dependencies: ["LlmIdeMacLib"],
-            path: "Sources/ChatContractLab"
+            path: "Sources/ChatContractLab",
+            // Same defines as the library, so an assertion about a
+            // build-excludable feature can be wrapped in the matching `#if` and
+            // simply vanish from the reduced builds. Without this the lab could
+            // assert nothing about Graph at all — naming a Graph type would
+            // break build-mac-lite/min, where `Graph/` is excluded.
+            swiftSettings: featureDefines
         ),
         .testTarget(
             name: "LlmIdeMacTests",
