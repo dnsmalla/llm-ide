@@ -130,6 +130,11 @@ struct MarkdownWebView: NSViewRepresentable {
         // has always done this; the same hardening belongs here now that the
         // generation preview renders LLM-authored markdown by default.
         webView.navigationDelegate = context.coordinator
+        context.coordinator.reload = { [markdown, isDark, enableMermaid] web in
+            web.loadHTMLString(
+                MarkdownRenderer.html(for: markdown, isDark: isDark, enableMermaid: enableMermaid),
+                baseURL: nil)
+        }
         load(into: webView, context: context)
         return webView
     }
@@ -151,6 +156,11 @@ struct MarkdownWebView: NSViewRepresentable {
     }
 
     private func load(into webView: WKWebView, context: Context) {
+        context.coordinator.reload = { [markdown, isDark, enableMermaid] web in
+            web.loadHTMLString(
+                MarkdownRenderer.html(for: markdown, isDark: isDark, enableMermaid: enableMermaid),
+                baseURL: nil)
+        }
         context.coordinator.lastMarkdown = markdown
         context.coordinator.lastDark = isDark
         context.coordinator.lastMermaid = enableMermaid
@@ -161,6 +171,24 @@ struct MarkdownWebView: NSViewRepresentable {
         var lastMarkdown: String?
         var lastDark: Bool?
         var lastMermaid: Bool?
+
+        /// The system can kill a WKWebView's content process under memory
+        /// pressure, which blanks the view. The unconditional reload this class
+        /// replaced repainted it by accident on the next SwiftUI pass; with the
+        /// guard, the cache still matches and the pane would stay blank
+        /// indefinitely. Reload directly rather than only invalidating the
+        /// cache — a next pass may never come.
+        ///
+        /// This view is the most exposed in the app to that kill, since it can
+        /// host a 3.4 MB mermaid document.
+        var reload: ((WKWebView) -> Void)?
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            lastMarkdown = nil
+            lastDark = nil
+            lastMermaid = nil
+            reload?(webView)
+        }
 
         // The initial loadHTMLString is allowed; a user-initiated link click
         // opens externally. Mirrors SelfSizingMarkdownView.Coordinator.

@@ -1,3 +1,7 @@
+// NOTE: these assertions ALSO live in `mac/Sources/ChatContractLab/main.swift`,
+// and that is the copy that actually executes. This file is swift-testing on a
+// toolchain with no XCTest, so `make regression` skips it entirely — treat the
+// lab as authoritative and keep the two in step when changing the escaping.
 import Testing
 import Foundation
 @testable import LlmIdeMacLib
