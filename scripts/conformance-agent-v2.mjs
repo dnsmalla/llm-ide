@@ -39,7 +39,7 @@ const FIXTURE_DIR = join(ROOT, 'schema/agent-v2/fixtures');
 // decode. Every entry needs a reason — and the matching row in SCHEMA.md.
 // REMOVE an entry the moment the Swift side starts decoding the field; a stale
 // entry here is how a fixed drift silently reopens.
-const ALLOWED_UNDECODED = {
+const ALLOWED_UNDECODED = Object.freeze({
   'sdk.json': {
     subtype: 'Observation channel only — the Mac keeps sdkType. AgentV2Event.swift SdkWire.',
     raw: 'Same: the raw SDK message is not modelled on the Mac.',
@@ -50,7 +50,7 @@ const ALLOWED_UNDECODED = {
   'approval_request_question.json': {
     'questions.options.preview': 'REAL DRIFT: the SDK sends option previews, AgentV2ApprovalOption has no field for them, so they cannot render.',
   },
-};
+});
 
 const fail = [];
 const note = (msg) => fail.push(msg);
@@ -154,6 +154,17 @@ for (const name of fixtures) {
   docs.set(name, { doc, variant, present });
 }
 
+// A duplicate variant title would merge two variants' coverage sets and let an
+// unexercised field pass unnoticed — the key must be unique for the check below
+// to mean anything.
+const titles = schema.oneOf.map((v) => v.title);
+for (const t of new Set(titles)) {
+  if (titles.filter((x) => x === t).length > 1) note(`two schema variants share the title "${t}" — COVERAGE keys on it`);
+}
+for (const [i, v] of schema.oneOf.entries()) {
+  if (!v.title) note(`schema.oneOf[${i}] has no title — COVERAGE cannot key on it`);
+}
+
 // 2. COVERAGE — a declared path no fixture exercises is checked only in theory.
 for (const variant of schema.oneOf) {
   for (const path of schemaPaths(variant)) {
@@ -190,10 +201,10 @@ for (const [name, { present }] of docs) {
   if (!row.decoded) { note(`${name}: Swift failed to decode — ${row.error}`); continue; }
 
   const captured = new Set(row.captured);
-  const allowed = ALLOWED_UNDECODED[name] || {};
+  const allowed = Object.hasOwn(ALLOWED_UNDECODED, name) ? ALLOWED_UNDECODED[name] : {};
   for (const path of present) {
     if (captured.has(path)) continue;
-    if (path in allowed) continue;
+    if (Object.hasOwn(allowed, path)) continue;   // NOT `in` — that walks Object.prototype
     note(`${name}: server sends "${path}" but Swift does not keep it (add the field, or explain it in ALLOWED_UNDECODED)`);
   }
   for (const path of Object.keys(allowed)) {
@@ -207,6 +218,23 @@ for (const [name, { present }] of docs) {
 
 // 4. ROSTER — every emitted `type:` literal must be in the schema.
 const known = new Set(schema.oneOf.map((v) => v.properties?.type?.const).filter(Boolean));
+
+// Object literals carrying a `type` key that are NOT wire events. Keep this
+// SMALL and explicit: an unrecognised literal fails the gate, which is the
+// point — a new emitter cannot appear unnoticed.
+const NON_WIRE_TYPE_LITERALS = new Set([
+  // SDK/provider input shapes — these are built to be sent TO a model, never
+  // written to our SSE stream.
+  'local',                    // sdk/engine.mjs — plugin mount descriptor
+  'preset',                   // sdk/engine.mjs — systemPrompt: { type: 'preset' }
+  'function',                 // runtime/openai-tools.mjs — OpenAI tool definition
+  'web_fetch_tool_result',    // runtime/handlers/fetch-url.mjs — Anthropic content block
+  'web_fetch_result',
+  'web_search_tool_result',   // runtime/handlers/web-search.mjs — Anthropic content block
+  'web_search_result',
+  // JSON-Schema fragments inside tool definitions.
+  'text', 'object', 'string', 'boolean', 'number', 'integer', 'array',
+]);
 // Scoped to the agent/v2 wire only. `server/ai-routes.mjs` serves the LEGACY
 // /code-assist stream, whose vocabulary (chunk, done, progress, spike_*) is a
 // different contract with a different client path — SCHEMA.md's "Not covered"
@@ -222,7 +250,13 @@ function walk(dir) {
     if (entry.isDirectory()) { walk(full); continue; }
     if (!entry.name.endsWith('.mjs')) continue;
     const text = readFileSync(full, 'utf8');
-    for (const m of text.matchAll(/(?:send|onEvent\?\.|writeEvent)\(\{\s*type:\s*'([a-z_]+)'/g)) {
+    // Match an object LITERAL whose first key is `type` — `{ type: 'init'`.
+    // The previous pattern keyed on the CALL (`send({ type:`), which missed the
+    // eight variants events.mjs produces by RETURNING array literals from
+    // mapSdkMessage: the roster had never once inspected the core of the
+    // vocabulary. A leading `{` also excludes comparisons (`msg.type ===
+    // 'system'`), which are SDK INPUT types, not wire events.
+    for (const m of text.matchAll(/\{\s*type:\s*'([a-z_]+)'/g)) {
       if (!emitted.has(m[1])) emitted.set(m[1], full.slice(ROOT.length + 1));
     }
   }
@@ -231,8 +265,15 @@ for (const g of EMITTER_GLOBS) walk(join(ROOT, g));
 
 const ROSTER_EXEMPT = new Set();
 for (const [type, where] of emitted) {
-  if (known.has(type) || ROSTER_EXEMPT.has(type)) continue;
-  note(`"${type}" is emitted at ${where} but is not in the schema`);
+  if (known.has(type) || ROSTER_EXEMPT.has(type) || NON_WIRE_TYPE_LITERALS.has(type)) continue;
+  note(`"${type}" is built as a { type: '...' } literal at ${where} but is not in the schema. `
+    + `If it reaches the SSE stream, add it to the schema and a fixture; if it never does, add it to NON_WIRE_TYPE_LITERALS.`);
+}
+
+// The roster must actually SEE the core vocabulary. This guards the bug the
+// check itself had: a pattern matching nothing still reported success.
+for (const core of ['init', 'delta', 'tool_use_start', 'tool_args_delta', 'tool_result', 'usage', 'result']) {
+  if (!emitted.has(core)) note(`ROSTER found no emitter for "${core}" — the scan pattern is broken, not the code`);
 }
 
 // ------------------------------------------------------------ model ids

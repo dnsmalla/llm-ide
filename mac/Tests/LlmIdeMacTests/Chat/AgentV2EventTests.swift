@@ -64,13 +64,13 @@ struct AgentV2EventTests {
     @Test("tool_use_start decodes id and name")
     func toolUseStart() {
         #expect(decode(#"{"type":"tool_use_start","id":"tu_1","name":"read-file"}"#)
-                == .toolUseStart(id: "tu_1", name: "read-file"))
+                == .toolUseStart(index: 0, id: "tu_1", name: "read-file"))
     }
 
     @Test("tool_use_start tolerates null id/name (block.id ?? null)")
     func toolUseStartNulls() {
         #expect(decode(#"{"type":"tool_use_start","id":null,"name":null}"#)
-                == .toolUseStart(id: nil, name: nil))
+                == .toolUseStart(index: 0, id: nil, name: nil))
     }
 
     @Test("tool_args_delta decodes index + partialJson")

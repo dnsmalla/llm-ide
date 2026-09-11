@@ -903,10 +903,46 @@ final class ChatEngine {
         // or loaded from disk.
         guard progress.isTool, let turnID = revealingTurnID,
               let idx = messages.firstIndex(where: { $0.id == turnID }) else { return }
-        // The loop re-emits on every iteration; a repeat of the same
-        // action back-to-back is noise, not a second step.
-        if messages[idx].toolSteps.last?.label == progress.label { return }
-        messages[idx].toolSteps.append(.init(label: progress.label, tool: progress.tool))
+        // Three-way, because v2 reports one tool call TWICE — once when it
+        // opens (`tool_use_start`) and once when it finishes (`tool_result`,
+        // which is the only one carrying the arguments and the output). The
+        // old label-only dedupe worked solely because both used to produce the
+        // same label; once the result started naming the file they diverged and
+        // every call recorded two rows. See `ToolStepMergePolicy`.
+        let last = messages[idx].toolSteps.last
+        switch ToolStepMergePolicy.decide(
+            lastTool: last?.tool,
+            lastLabel: last?.label,
+            lastHasResult: last?.resultText != nil,
+            incomingTool: progress.tool,
+            incomingLabel: progress.label,
+            incomingHasResult: progress.resultText != nil
+        ) {
+        case .ignore:
+            return
+        case .completeLast:
+            // Keep the step's identity and timestamp — this is the same call
+            // finishing, not a new one — and take the richer label, which by
+            // now includes the salient argument.
+            let open = messages[idx].toolSteps[messages[idx].toolSteps.count - 1]
+            messages[idx].toolSteps[messages[idx].toolSteps.count - 1] = .init(
+                id: open.id,
+                label: progress.label,
+                tool: open.tool,
+                at: open.at,
+                args: progress.args,
+                resultText: progress.resultText,
+                isError: progress.isError
+            )
+        case .append:
+            messages[idx].toolSteps.append(.init(
+                label: progress.label,
+                tool: progress.tool,
+                args: progress.args,
+                resultText: progress.resultText,
+                isError: progress.isError
+            ))
+        }
     }
 
     /// Begin a new streaming assistant turn: appends a `.streaming`

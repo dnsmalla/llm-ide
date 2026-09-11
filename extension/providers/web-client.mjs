@@ -14,6 +14,15 @@
 
 import { spawnCli, minimalCliEnv, anthropicWebCliArgs, assertSafeBaseUrlResolved } from './providers.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
+import { readFileSync } from 'node:fs';
+
+// The one source for Claude model ids (schema/models/anthropic-models.json).
+// providers/** is exempt from the ESLint literal ban because it routes by id
+// PREFIX — but a DEFAULT is not routing, and this one was the fourth
+// hand-kept copy of an id the Mac treats as retired.
+const anthropicDefaultModel = () => JSON.parse(
+  readFileSync(new URL('../../schema/models/anthropic-models.json', import.meta.url), 'utf8'),
+).default;
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const ANTHROPIC_TIMEOUT_MS = 45_000;
@@ -29,7 +38,7 @@ const WEB_FETCH_TOOL_TYPE  = process.env.LLMIDE_WEB_FETCH_TOOL  || 'web_fetch_20
 // Model used for the native web-tool calls. Reuses the app-wide LLMIDE_MODEL so
 // the search sub-call obeys the same model policy as the rest of the agent.
 function webModel() {
-  return process.env.LLMIDE_SEARCH_MODEL || process.env.LLMIDE_MODEL || 'claude-sonnet-4-6';
+  return process.env.LLMIDE_SEARCH_MODEL || process.env.LLMIDE_MODEL || anthropicDefaultModel();
 }
 
 // POST a single Messages request and walk pause_turn turns (server-tool loops

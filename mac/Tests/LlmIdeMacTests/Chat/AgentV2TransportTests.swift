@@ -223,7 +223,7 @@ struct AgentV2TransportTests {
         stream.events = [
             .init_(AgentV2Init(sessionId: "sdk-1", claudeCodeVersion: nil, model: nil,
                                tools: [], capabilities: [], mcpServers: [])),
-            .toolUseStart(id: "t-1", name: "read-file"),
+            .toolUseStart(index: 0, id: "t-1", name: "read-file"),
             .toolResult(AgentV2ToolResult(toolUseId: "t-1", isError: false,
                                           text: "contents", truncated: false)),
             .toolResult(AgentV2ToolResult(toolUseId: "unknown", isError: false,

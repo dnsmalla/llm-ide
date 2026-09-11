@@ -274,6 +274,13 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 // Remember which block index this call occupies: arg deltas
                 // are keyed by index, results by tool-use id, and this is the
                 // only event carrying both.
+                // Against a server predating `index` on this event, every call
+                // decodes as index 0 (see ToolUseStartWire). Single-tool turns —
+                // the overwhelming majority — still attribute correctly; two
+                // CONCURRENT calls on such a server would both claim 0 and the
+                // later one wins, so its arguments could be shown against the
+                // wrong row. Display-only, and strictly better than the previous
+                // behaviour of discarding every argument.
                 if let id { toolIndexToUseId[index] = id }
                 self.fireToolProgress(name, onProgress: onProgress)
             case .toolArgsDelta(let index, let partialJson):
@@ -354,8 +361,13 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
     }
 
     /// One tool progress tick, labelled with the shared legacy conventions
-    /// (`progressLabel` → `toolVerb`), detail always nil — the v2 wire has
-    /// no parsed salient argument for a tool call, only raw arg deltas.
+    /// (`progressLabel` → `toolVerb`).
+    ///
+    /// Fired TWICE per call: once when it opens (name only) and once when it
+    /// finishes (with `detail`, `args` and the result). `ChatEngine`'s
+    /// `ToolStepMergePolicy` collapses the pair into one transcript row — it
+    /// used to dedupe on label alone, which silently stopped working the moment
+    /// the second tick started naming the file.
     private func fireToolProgress(
         _ tool: String?,
         detail: String? = nil,

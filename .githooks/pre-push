@@ -49,7 +49,12 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     else
         files=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || echo mac/)
     fi
-    if printf '%s\n' "$files" | grep -q '^mac/'; then
+    # `schema/` and `scripts/` carry the Mac↔server wire contract and the gate
+    # that checks it (make chat-gates → conformance-agent-v2.mjs). The contract
+    # spans BOTH sides, so a change to either must run the gate — matching only
+    # '^mac/' meant a wire field added under extension/ skipped the very check
+    # that exists to catch it.
+    if printf '%s\n' "$files" | grep -qE '^(mac/|schema/|scripts/conformance-)'; then
         mac_changed=1
     fi
     if printf '%s\n' "$files" | grep -q '^extension/'; then

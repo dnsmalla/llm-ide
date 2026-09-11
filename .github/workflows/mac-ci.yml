@@ -8,10 +8,22 @@ on:
     branches: [main]
     paths:
       - 'mac/**'
+      # The agent/v2 wire contract and its gate live outside mac/, and the
+      # contract's other end is in extension/. A wire field added under
+      # extension/llm_agent/sdk/ that the Mac does not decode is exactly what
+      # the gate catches — so those paths must start this workflow too.
+      - 'schema/**'
+      - 'scripts/conformance-agent-v2.mjs'
+      - 'extension/llm_agent/sdk/**'
+      - 'extension/routes/agent-v2.mjs'
       - '.github/workflows/mac-ci.yml'
   pull_request:
     paths:
       - 'mac/**'
+      - 'schema/**'
+      - 'scripts/conformance-agent-v2.mjs'
+      - 'extension/llm_agent/sdk/**'
+      - 'extension/routes/agent-v2.mjs'
       - '.github/workflows/mac-ci.yml'
 
 concurrency:
@@ -58,6 +70,16 @@ jobs:
 
       - name: Build (debug)
         run: swift build
+
+      # The agent/v2 wire contract gate. It is NOT part of `swift test` — it is
+      # an executable plus a Node runner (`make chat-gates`), built that way so
+      # it also runs on a Command-Line-Tools-only machine where XCTest, and so
+      # `swift test`, does not exist at all. Runs from the repo root because the
+      # runner reads schema/ and shells back into mac/.
+      - name: Wire contract gate (chat-gates)
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: make chat-gates
 
       # The raw job log is admin-only on this repository, while check-run
       # annotations and artifacts are readable by anyone with the run URL — so

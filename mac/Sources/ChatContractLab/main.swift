@@ -51,6 +51,38 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--decode" {
 
 print("chat-contract-lab")
 
+// ToolStepMergePolicy — the regression that widening the v2 progress event
+// caused, and the reason recordProgress can no longer dedupe on label alone.
+do {
+    let d = ToolStepMergePolicy.decide
+
+    // v2: a call opens, then finishes. ONE row, completed in place.
+    expect(d(nil, nil, false, "Read", "Reading", false) == .append,
+           "the first step of a turn is appended")
+    expect(d("Read", "Reading", false, "Read", "Reading Foo.swift", true) == .completeLast,
+           "the result for the open step completes it rather than adding a second row")
+
+    // The exact shape that regressed: same tool, diverging labels, result
+    // present. Before the fix this fell through to .append and every v2 tool
+    // call persisted two rows.
+    expect(d("Read", "Reading", false, "Read", "Reading Foo.swift", true) != .append,
+           "a result never appends a second row for the call it belongs to")
+
+    // Legacy: never carries a result, so only the original label-dedupe can fire.
+    expect(d("read-file", "Reading a.swift", false, "read-file", "Reading a.swift", false) == .ignore,
+           "a back-to-back legacy repeat is still ignored")
+    expect(d("read-file", "Reading a.swift", false, "read-file", "Reading b.swift", false) == .append,
+           "a legacy step for a different file is still a new row")
+
+    // Two DIFFERENT tools must never collapse into one another.
+    expect(d("Read", "Reading", false, "Bash", "Running swift build", true) == .append,
+           "a different tool's result never completes the previous tool's step")
+
+    // An already-completed step is not overwritten by the next call's result.
+    expect(d("Read", "Reading Foo.swift", true, "Read", "Reading Bar.swift", true) == .append,
+           "a second call to the same tool appends rather than overwriting the finished one")
+}
+
 // Wire backward compatibility. A NEWER Mac frequently talks to an OLDER server
 // in this repo — a stale `node server.mjs` keeps :3456 and the fresh app adopts
 // it. An event field added server-side must therefore decode as ABSENT, not as

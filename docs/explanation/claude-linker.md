@@ -9,7 +9,9 @@ status: stable
 
 ## The boundary
 
-The Mac↔server wire format (the `/agent/v2/stream` SSE vocabulary, decision bodies, `/code-assist` events) is **ours**, defined by `extension/llm_agent/sdk/events.mjs` and versioned by `SERVER_API_VERSION` — it does not change when the SDK does. The linker is drawn so both endpoints of that vocabulary sit inside linker files:
+The Mac↔server wire format (the `/agent/v2/stream` SSE vocabulary, decision bodies, `/code-assist` events) is **ours** and versioned by `SERVER_API_VERSION` — it does not change when the SDK does, with one documented exception (`approval_request.questions`, passed through verbatim).
+
+The agent/v2 vocabulary is declared by `schema/agent-v2/agent-v2.schema.json` and gated by `scripts/conformance-agent-v2.mjs`, which diffs what the server emits against what the Mac actually decodes. It is **not** defined by `extension/llm_agent/sdk/events.mjs` alone: that file produces 8 of the 15 variants, and four more are emitted from outside the linker. See `schema/agent-v2/SCHEMA.md` for the emitter map. The linker is drawn so both endpoints of that vocabulary sit inside linker files:
 
 ```text
 Claude Agent SDK / claude CLI
