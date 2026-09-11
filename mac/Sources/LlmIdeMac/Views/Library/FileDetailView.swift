@@ -23,6 +23,7 @@ struct FileDetailView: View {
         Group {
             switch fileKind {
             case .markdown:  MarkdownDetailView(url: url, revealTarget: revealTarget)
+            case .html:      HtmlDetailView(url: url, revealTarget: revealTarget)
             case .pdf:       PDFDetailView(url: url)
             case .image:     ImageDetailView(url: url)
             case .code:      CodeDetailView(url: url, revealTarget: revealTarget)
@@ -61,17 +62,22 @@ struct FileDetailView: View {
         }
     }
 
-    private enum FileKind { case markdown, pdf, image, code, quicklook }
+    private enum FileKind { case markdown, html, pdf, image, code, quicklook }
 
     private var fileKind: FileKind {
         switch url.pathExtension.lowercased() {
         case "md", "markdown":
             return .markdown
+        // A document, not source: previewed as the page it is, with Raw one
+        // toggle away — the same deal `.md` gets. See `HtmlPreviewWebView`
+        // for what a previewed document is allowed to do.
+        case "html", "htm":
+            return .html
         case "pdf":
             return .pdf
         case "png", "jpg", "jpeg", "gif", "tiff", "bmp", "webp", "heic", "svg":
             return .image
-        case "swift", "py", "js", "ts", "jsx", "tsx", "html", "css",
+        case "swift", "py", "js", "ts", "jsx", "tsx", "css",
              "json", "yaml", "yml", "toml", "sh", "bash", "zsh", "rb", "go",
              "rs", "kt", "java", "cpp", "c", "h", "m", "mm",
              "txt", "log", "csv", "tsv", "xml", "ini", "env", "gitignore",
@@ -105,8 +111,33 @@ struct MarkdownDetailView: View {
         // ignores the reveal; Edit mode's MonacoEditorView still honours it.
         EditableTextDetailView(url: url, startInPreview: true, language: "markdown",
                                revealTarget: revealTarget) { content, _ in
-            MarkdownWebView(markdown: content, isDark: theme.current.isDark)
+            // Mermaid on, matching the generation preview: a full-page
+            // document preview scrolls itself, so the async diagram render has
+            // no measured height to disturb — the reason it stays off is only
+            // for the self-sizing chat bubble (see `MarkdownRenderer.html`).
+            // A ```mermaid fence used to render as a code block here and as a
+            // diagram in Doc Gen, for the same file.
+            MarkdownWebView(markdown: content, isDark: theme.current.isDark,
+                            enableMermaid: true)
         }
+    }
+}
+
+// MARK: - HTML (rendered page, Raw one toggle away)
+
+/// An `.html` file is both a document and source, so it gets the code view's
+/// whole deal — git gutter, Raw/Edit toggle, search line-jump — with the
+/// rendered page standing in for highlighted source as the default preview.
+struct HtmlDetailView: View {
+    let url: URL
+    var revealTarget: MonacoRevealRequest? = nil
+
+    var body: some View {
+        CodeDetailView(
+            url: url,
+            revealTarget: revealTarget,
+            documentPreview: { content in AnyView(HtmlPreviewWebView(html: content)) }
+        )
     }
 }
 
@@ -274,6 +305,15 @@ struct ImageDetailView: View {
 struct CodeDetailView: View {
     let url: URL
     var revealTarget: MonacoRevealRequest? = nil
+    /// A rendered view of the file to show INSTEAD of the highlighted source,
+    /// for extensions that are documents as well as text (`.html` — see
+    /// `HtmlDetailView`). Everything else this view owns still applies: the
+    /// git gutter, the post-save gutter refresh, and the Raw/Edit toggle.
+    ///
+    /// Ignored while a `revealTarget` is pending: a search hit names a LINE,
+    /// and a rendered page has no line to scroll to — so a click from Search
+    /// opens the source, exactly as it does for any other code file.
+    var documentPreview: ((String) -> AnyView)? = nil
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var config: AppConfig
     @EnvironmentObject private var projectStore: ProjectStore
@@ -290,18 +330,22 @@ struct CodeDetailView: View {
             decorations: changedLines,
             revealTarget: revealTarget
         ) { content, reveal in
-            // The reveal MUST reach the preview too: code files open in
-            // preview (startInPreview: true above), so a search-result click
-            // lands here first. Before this, the preview's MonacoEditorView
-            // took no revealRequest at all and the click simply never
-            // scrolled.
-            MonacoEditorView(
-                content: .constant(content),
-                language: MonacoLanguageMap.id(for: url.pathExtension),
-                decorations: changedLines,
-                revealRequest: reveal,
-                readOnly: true
-            )
+            if let documentPreview, revealTarget == nil {
+                documentPreview(content)
+            } else {
+                // The reveal MUST reach the preview too: code files open in
+                // preview (startInPreview: true above), so a search-result
+                // click lands here first. Before this, the preview's
+                // MonacoEditorView took no revealRequest at all and the click
+                // simply never scrolled.
+                MonacoEditorView(
+                    content: .constant(content),
+                    language: MonacoLanguageMap.id(for: url.pathExtension),
+                    decorations: changedLines,
+                    revealRequest: reveal,
+                    readOnly: true
+                )
+            }
         }
         .task(id: url) { await refreshGutter() }
     }

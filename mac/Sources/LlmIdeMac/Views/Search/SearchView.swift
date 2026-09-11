@@ -292,7 +292,22 @@ struct SearchView: View {
 
     @ViewBuilder private var editorPane: some View {
         VStack(spacing: 0) {
-            if !tabs.isEmpty { EditorTabBar(tabs: $tabs, activeTab: $activeTab); Divider() }
+            if !tabs.isEmpty {
+                // Picking a tab BY HAND ends the pending reveal: it belongs to
+                // the search result that opened the file, not to the tab. Left
+                // standing it never expires, which for a file whose preview is
+                // a rendered document (`.html` — see `HtmlDetailView`) meant
+                // the rendered page could never be reached again, because the
+                // reveal keeps that pane on the source.
+                EditorTabBar(tabs: $tabs, activeTab: Binding(
+                    get: { activeTab },
+                    set: { picked in
+                        activeTab = picked
+                        revealTarget = nil
+                        revealTargetURL = nil
+                    }))
+                Divider()
+            }
             if let activeTab {
                 FileDetailView(url: activeTab,
                                revealTarget: activeTab == revealTargetURL ? revealTarget : nil)
