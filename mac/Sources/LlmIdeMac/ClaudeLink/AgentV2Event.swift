@@ -273,7 +273,28 @@ enum AgentV2Event: Sendable, Equatable {
     private struct DeltaWire: Decodable { let text: String }
     // `index` is the block index shared with tool_args_delta — it is how a
     // partial-args delta is matched to the tool call it belongs to.
-    private struct ToolUseStartWire: Decodable { let index: Int; let id: String?; let name: String? }
+    //
+    // DEFAULTED, not required, and that is load-bearing: servers older than the
+    // commit that added it send `{type, id, name}` only. A non-optional `Int`
+    // here made the whole event fail to decode against such a server, so no
+    // tool card opened at all — and this repo hits exactly that pairing
+    // routinely (a stale `node server.mjs` still holding :3456 while a fresh
+    // Mac app adopts it). 0 is the right default: it is the index a
+    // single-tool-call turn actually has, so argument assembly still works.
+    private struct ToolUseStartWire: Decodable {
+        let index: Int
+        let id: String?
+        let name: String?
+
+        enum CodingKeys: String, CodingKey { case index, id, name }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            index = try c.decodeIfPresent(Int.self, forKey: .index) ?? 0
+            id = try c.decodeIfPresent(String.self, forKey: .id)
+            name = try c.decodeIfPresent(String.self, forKey: .name)
+        }
+    }
     private struct ToolArgsDeltaWire: Decodable { let index: Int; let partialJson: String }
     private struct ApprovalResolvedWire: Decodable { let requestId: String; let outcome: String }
     private struct ModeSetWire: Decodable { let mode: String }

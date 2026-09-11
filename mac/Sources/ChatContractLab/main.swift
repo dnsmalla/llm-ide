@@ -51,6 +51,20 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--decode" {
 
 print("chat-contract-lab")
 
+// Wire backward compatibility. A NEWER Mac frequently talks to an OLDER server
+// in this repo — a stale `node server.mjs` keeps :3456 and the fresh app adopts
+// it. An event field added server-side must therefore decode as ABSENT, not as
+// a decode failure that silently drops the whole event.
+do {
+    let oldToolUseStart = Data(#"{"type":"tool_use_start","id":"tu_1","name":"Read"}"#.utf8)
+    expect(AgentV2Conformance.fieldReport(forJSON: oldToolUseStart) != nil,
+           "tool_use_start from a server predating `index` still decodes")
+
+    let newToolUseStart = Data(#"{"type":"tool_use_start","index":2,"id":"tu_1","name":"Read"}"#.utf8)
+    expect(AgentV2Conformance.fieldReport(forJSON: newToolUseStart)?.contains("index") == true,
+           "tool_use_start from a current server keeps `index`")
+}
+
 // ClaudeToolPresentation.icon / verb — ONE table for both engines.
 //
 // These mirror AgentProgressLabelTests, which is an XCTest file this toolchain
