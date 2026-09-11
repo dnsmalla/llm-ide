@@ -11,7 +11,11 @@
 // Only `mermaid.min.js` is copied — NOT the 13 MB source map beside it, which
 // is the bulk of the package and useless in a shipped bundle.
 //
-// Usage: cd mac && npm install mermaid@11 --no-save && node Scripts/build-mermaid-bundle.mjs
+// Version PINNED to 11.17.2, not a `@11` range: mermaid bundles its own
+// DOMPurify, and that is the control that makes `securityLevel: 'strict'`
+// actually sanitise the SVG this app injects with innerHTML. A range would let
+// a re-run six months from now silently swap the security control out.
+// Usage: cd mac && npm install mermaid@11.17.2 --no-save && node Scripts/build-mermaid-bundle.mjs
 
 import { existsSync, mkdirSync, copyFileSync, rmSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +29,7 @@ const out = path.join(outDir, 'mermaid.min.js');
 
 if (!existsSync(src)) {
   console.error('mermaid not installed. Run:');
-  console.error('  cd mac && npm install mermaid@11 --no-save && node Scripts/build-mermaid-bundle.mjs');
+  console.error('  cd mac && npm install mermaid@11.17.2 --no-save && node Scripts/build-mermaid-bundle.mjs');
   process.exit(1);
 }
 

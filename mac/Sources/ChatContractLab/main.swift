@@ -51,6 +51,34 @@ if CommandLine.arguments.count >= 3, CommandLine.arguments[1] == "--decode" {
 
 print("chat-contract-lab")
 
+// Markdown escaping — the security control, not a formatting nicety.
+//
+// The document body is LLM-authored text about the user's private source, and it
+// is embedded inside a JS template literal (`const raw = \`…\``) in a page the
+// WKWebView executes. A raw backtick or ${…} would break out of that literal.
+// MarkdownRendererEscapingTests asserts exactly this and has never run once —
+// it is a swift-testing file on a toolchain with no XCTest.
+do {
+    let line = GenerationConformance.renderedTemplateLiteralLine(for: "a ` b ${c} d \\ e")
+    expect(line != nil, "the rendered document has a template-literal line to inspect")
+    expect(line?.contains("\\`") == true, "a backtick is escaped, so it cannot close the literal")
+    expect(line?.contains("\\${c}") == true, "${…} is escaped, so it cannot interpolate")
+
+    // `</script` ends the HTML script-data state regardless of JS string
+    // context, so it has to be broken up in the SOURCE.
+    let closing = GenerationConformance.renderedTemplateLiteralLine(for: "</script>")
+    expect(closing?.contains("</script") == false, "no literal </script sequence survives into the page")
+
+    // The escaping runs over the WHOLE body before fences are parsed, so a
+    // diagram's source is covered by the same rule — but it lands on a LATER
+    // line of the literal, which is why this checks the full document rather
+    // than the `const raw = ` line. (Asserting on that line alone reported a
+    // failure that was my mistake, not the renderer's.)
+    let fenced = GenerationConformance.renderedHTML(for: "```mermaid\nA-->B `x` ${y}\n```")
+    expect(fenced.contains("\\`x\\`"), "a backtick inside a mermaid fence is escaped too")
+    expect(fenced.contains("\\${y}"), "${…} inside a mermaid fence is escaped too")
+}
+
 // Markdown preview gating. The generated doc is where a ```mermaid dependency
 // graph turns up, but the same renderer draws every chat reply — where an async
 // diagram would land after the synchronous height measurement.

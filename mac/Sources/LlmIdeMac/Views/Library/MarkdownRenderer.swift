@@ -194,7 +194,11 @@ enum MarkdownRenderer {
       const codeBlocks = [];
       html = html.replace(/```(\\w*)\\n?([\\s\\S]*?)```/g, (_, lang, code) => {
         const idx = codeBlocks.length;
-        const langAttr = lang ? ' class="language-' + lang + '"' : '';
+        // Lowercased: class selectors are case-sensitive in standards mode, so
+        // ```Mermaid used to satisfy the (case-insensitive) bundle gate and then
+        // match no selector — shipping 3.4 MB to render nothing. Lowercase is
+        // also what highlight.js's language table expects.
+        const langAttr = lang ? ' class="language-' + lang.toLowerCase() + '"' : '';
         const langLabel = lang ? '<span class="code-block-lang">' + lang + '</span>' : '<span></span>';
         codeBlocks.push(
           '<div class="code-block">' +

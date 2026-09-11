@@ -64,6 +64,27 @@ public enum GenerationConformance {
             .contains(fingerprint)
     }
 
+    /// The rendered document's `const raw = \`…\`` line — the JS template
+    /// literal the markdown body is embedded in.
+    ///
+    /// Ported from `MarkdownRendererEscapingTests.swift`, which asserts the same
+    /// thing and has never once run: it is an XCTest/swift-testing file, and
+    /// this toolchain has no XCTest. That escaping is the control standing
+    /// between LLM-authored document text and script execution inside the
+    /// preview's WKWebView, so it needs a gate that actually executes.
+    public static func renderedTemplateLiteralLine(for markdown: String) -> String? {
+        MarkdownRenderer.html(for: markdown, isDark: false)
+            .components(separatedBy: "\n")
+            .first { $0.hasPrefix("const raw = ") }
+    }
+
+    /// The whole rendered document. For assertions about MULTI-LINE content:
+    /// `renderedTemplateLiteralLine` returns only the first line of the
+    /// template literal, so anything on a later line is invisible to it.
+    public static func renderedHTML(for markdown: String) -> String {
+        MarkdownRenderer.html(for: markdown, isDark: false)
+    }
+
     /// Whether the renderer detects a mermaid fence at all — independent of
     /// whether the caller asked for it.
     public static func detectsMermaidFence(_ markdown: String) -> Bool {

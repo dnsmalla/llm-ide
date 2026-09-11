@@ -119,20 +119,63 @@ struct MarkdownWebView: NSViewRepresentable {
     /// opt-in rather than always on.
     var enableMermaid: Bool = false
 
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.setValue(false, forKey: "drawsBackground")
-        load(into: webView)
+        // Links in the document open in the browser instead of navigating this
+        // pane to an arbitrary page inside the app. `SelfSizingMarkdownView`
+        // has always done this; the same hardening belongs here now that the
+        // generation preview renders LLM-authored markdown by default.
+        webView.navigationDelegate = context.coordinator
+        load(into: webView, context: context)
         return webView
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
-        load(into: nsView)
+        // Reload ONLY when an input actually changed. This used to reload
+        // unconditionally, which was survivable while the document was ~122 KB
+        // of highlight.js — but the generation panel shares one
+        // `@ObservedObject` with its prompt bar, so every keystroke in the
+        // "revise this document" field re-rendered the body. That rebuilt and
+        // re-parsed a 3.4 MB string AND reset the web view's scroll to the top,
+        // partly reintroducing the very "cannot read to the end" bug this view
+        // was brought in to fix. `SelfSizingMarkdownView` already guards the
+        // identical operation the identical way.
+        guard context.coordinator.lastMarkdown != markdown
+                || context.coordinator.lastDark != isDark
+                || context.coordinator.lastMermaid != enableMermaid else { return }
+        load(into: nsView, context: context)
     }
 
-    private func load(into webView: WKWebView) {
+    private func load(into webView: WKWebView, context: Context) {
+        context.coordinator.lastMarkdown = markdown
+        context.coordinator.lastDark = isDark
+        context.coordinator.lastMermaid = enableMermaid
         webView.loadHTMLString(buildHTML(), baseURL: nil)
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var lastMarkdown: String?
+        var lastDark: Bool?
+        var lastMermaid: Bool?
+
+        // The initial loadHTMLString is allowed; a user-initiated link click
+        // opens externally. Mirrors SelfSizingMarkdownView.Coordinator.
+        func webView(_ webView: WKWebView,
+                     decidePolicyFor navigationAction: WKNavigationAction,
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            if navigationAction.navigationType == .linkActivated,
+               let url = navigationAction.request.url,
+               url.scheme == "http" || url.scheme == "https" || url.scheme == "mailto" {
+                NSWorkspace.shared.open(url)
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
+        }
     }
 
     private func buildHTML() -> String {
