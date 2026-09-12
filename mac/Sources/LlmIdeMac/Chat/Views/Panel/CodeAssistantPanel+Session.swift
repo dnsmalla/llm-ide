@@ -9,6 +9,41 @@ import AppKit
 /// panel-owned services — and reaches the chat through the engine.
 extension CodeAssistantPanel {
 
+    /// One-tap escape from "I asked for a plan and got an Execute turn".
+    ///
+    /// Offered, not applied: `releaseStickyMode` refuses to take back a mode
+    /// the user picked, and that rule is what stops a planning chat from
+    /// hijacking every later message. This surfaces the mismatch instead of
+    /// silently resolving it — the switch is one click, and so is keeping the
+    /// mode you chose.
+    @ViewBuilder
+    func planSwitchBanner() -> some View {
+        let t = theme.current
+        HStack(spacing: Spacing.sm) {
+            Image(systemName: "list.bullet.clipboard")
+                .foregroundStyle(t.accent)
+            Text("This reads as a planning request, but the mode is \(modelState.selectedMode.label) — it will start working instead of planning.")
+                .font(Typography.caption).foregroundStyle(t.text)
+                .lineLimit(2).truncationMode(.tail)
+            Spacer(minLength: 8)
+            Button("Switch to Plan") {
+                modelState.selectedMode = .plan
+                planSwitchDismissed = true
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            Button("Keep \(modelState.selectedMode.label)") {
+                planSwitchDismissed = true
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, Spacing.md).padding(.vertical, 6)
+        .background(t.accent.opacity(0.08))
+        .overlay(Rectangle().frame(height: 1).foregroundStyle(t.border), alignment: .top)
+        .overlay(Rectangle().frame(height: 1).foregroundStyle(t.border), alignment: .bottom)
+    }
+
     @ViewBuilder
     func nudgeBanner(prompt: String) -> some View {
         let t = theme.current

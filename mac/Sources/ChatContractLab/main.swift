@@ -818,6 +818,46 @@ do {
            "a review is not a fix")
 }
 
+// PlanRequestPolicy — the composer's one-tap escape from "I asked for a plan
+// and got an Execute turn". The chip costs attention every time it is wrong,
+// so it fires only on an explicit ASK, never on the word "plan" appearing.
+do {
+    expect(PlanRequestPolicy.looksLikePlanRequest("i want a plan to remove the dead code."),
+           "the message that started this: an explicit ask")
+    expect(PlanRequestPolicy.looksLikePlanRequest("Write me a plan for the migration"),
+           "write me a plan")
+    expect(PlanRequestPolicy.looksLikePlanRequest("デッドコードを消すプランを作って"),
+           "Japanese asks count — JA is the primary UI language")
+    expect(PlanRequestPolicy.looksLikePlanRequest("計画を立ててください"),
+           "計画を立てる is the same ask")
+
+    expect(!PlanRequestPolicy.looksLikePlanRequest("execute the plan"),
+           "acting on an existing plan is not asking for one")
+    expect(!PlanRequestPolicy.looksLikePlanRequest("I plan to refactor this later"),
+           "\"plan\" as a verb about oneself is not a request")
+    expect(!PlanRequestPolicy.looksLikePlanRequest("the plan is saved already"),
+           "naming a plan is not asking for one")
+    expect(!PlanRequestPolicy.looksLikePlanRequest("プランを実行して"),
+           "nor in Japanese")
+    expect(!PlanRequestPolicy.looksLikePlanRequest(""),
+           "an empty composer offers nothing")
+
+    // WHERE it is offered. Auto would classify the request into Plan by
+    // itself, so the chip there would be pure noise.
+    expect(PlanRequestPolicy.offersPlanSwitch(draft: "i want a plan to X", currentMode: "execute"),
+           "Execute answers a planning request as work — offer the switch")
+    expect(PlanRequestPolicy.offersPlanSwitch(draft: "i want a plan to X", currentMode: "document"),
+           "so does any other non-plan mode")
+    expect(!PlanRequestPolicy.offersPlanSwitch(draft: "i want a plan to X", currentMode: "auto"),
+           "Auto re-decides per turn and will reach Plan on its own")
+    expect(!PlanRequestPolicy.offersPlanSwitch(draft: "i want a plan to X", currentMode: "plan"),
+           "already in Plan")
+    expect(!PlanRequestPolicy.offersPlanSwitch(draft: "i want a plan to X", currentMode: "assist_plan"),
+           "Assist Plan plans too")
+    expect(!PlanRequestPolicy.offersPlanSwitch(draft: "fix the failing test", currentMode: "execute"),
+           "ordinary work in Execute is exactly right — say nothing")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

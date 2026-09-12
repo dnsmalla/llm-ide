@@ -124,6 +124,11 @@ struct CodeAssistantPanel: View {
     /// Transient notice shown when a picked/selected file can't be attached
     /// (e.g. an image or binary). Prevents the silent drop on the Visual page.
     @State var attachNotice: String?
+    /// The plan-switch offer has been answered for the draft in the composer.
+    /// Reset when the draft is cleared (sent, or wiped), so the next request
+    /// is judged on its own — but NOT on every keystroke, or "Keep Execute"
+    /// would be undone by the next character typed.
+    @State var planSwitchDismissed = false
     /// Model/provider selection — see CodeAssistantModelState's doc comment.
     @State var modelState = CodeAssistantModelState()
     /// User-added model ids, keyed by provider id, JSON in AppStorage. Lets
@@ -263,6 +268,11 @@ struct CodeAssistantPanel: View {
                 // An Esc-dismissed ghost stays dismissed only for the draft
                 // it was dismissed on; any edit re-arms prediction.
                 ghostDismissed = false
+                // The plan-switch answer survives editing (see the flag's
+                // doc) and is re-armed only by an empty composer — which is
+                // what sending leaves behind, so the next request is judged
+                // fresh.
+                if newValue.isEmpty { planSwitchDismissed = false }
                 if historyIndex == nil {
                     completion.update(draft: newValue)
                 } else {
@@ -407,6 +417,13 @@ struct CodeAssistantPanel: View {
                 attachmentBar
             }
             if let attachNotice { attachNoticeBar(attachNotice) }
+            // Sits directly above the composer's mode chip, so the mismatch
+            // and the control that fixes it are on screen together.
+            if !planSwitchDismissed,
+               PlanRequestPolicy.offersPlanSwitch(
+                   draft: draft, currentMode: modelState.selectedMode.rawValue) {
+                planSwitchBanner()
+            }
             if agentV2ProviderBlocked { agentV2ProviderHintBar }
             if let prompt = engine.agent.nudgePrompt, activeRepoRoot != nil {
                 nudgeBanner(prompt: prompt)
