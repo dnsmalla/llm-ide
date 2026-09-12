@@ -788,6 +788,18 @@ do {
     expect(PlanReviewPolicy.verdict(from: restated) == .changesRequested,
            "the LAST marker line wins, not the echoed instruction")
 
+    // The release rule the finish card now depends on. Commit used to reach
+    // `dismissPlanExecution` on its common "nothing to commit" path and
+    // release the picker as a side effect; with Commit gone, the RUN's end
+    // has to do it or the chat answers "I want a plan to…" as an Execute turn.
+    let runStagesNow: Set<String> = ["execute", "plan", "assist_plan"]
+    expect(AgentV2Selection.releasesStickyMode(current: "execute", releasing: runStagesNow),
+           "a settled run hands Execute back to Auto without waiting for Dismiss")
+    expect(!AgentV2Selection.releasesStickyMode(current: "auto", releasing: runStagesNow),
+           "releasing Auto changes nothing")
+    expect(!AgentV2Selection.releasesStickyMode(current: "review", releasing: runStagesNow),
+           "a run never set Code Review, so settling must not take it away")
+
     expect(!PlanReviewPolicy.allowsPush(reviewed: false),
            "Push stays locked until a review has run")
     expect(PlanReviewPolicy.allowsPush(reviewed: true),

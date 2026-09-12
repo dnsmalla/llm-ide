@@ -307,6 +307,25 @@ final class ChatEngine {
         ChatTransportInput.makeProvider(selectedProvider: AppConfig.shared.activeCLI)
     }
 
+    /// Called when a plan run SETTLES — the tracker leaving `.running` for
+    /// `.finished` or `.failed`, by any route.
+    ///
+    /// The picker follows the resolved mode and stays there, and the
+    /// lifecycle is what hands it back (`releaseStickyMode`). That release
+    /// used to ride on `dismissPlanExecution`, which the finish card's
+    /// **Commit** button reached on both of its paths — and "nothing to
+    /// commit" was the common one, so an execution normally released the
+    /// picker as a side effect of a button people pressed anyway. Commit is
+    /// gone (Review / Push / Dismiss replaced it) and Push is gated behind a
+    /// review, so Dismiss became the only release — a button that reads as
+    /// informational and goes unpressed. The chat then answered every later
+    /// message as an Execute turn, including "I want a plan to…".
+    ///
+    /// The end of the RUN is the honest moment to release, not the dismissal
+    /// of the card that reports it: the card's own actions are about git, not
+    /// about what the next message should be classified as.
+    var onPlanExecutionSettled: () -> Void = {}
+
     /// Called when a post-execution REVIEW turn ends without landing a
     /// verdict — stopped, cancelled, or failed.
     ///
@@ -1134,6 +1153,7 @@ final class ChatEngine {
             if var tracker = agent.planExecution, tracker.phase == .running {
                 tracker.phase = .failed
                 agent.planExecution = tracker
+                onPlanExecutionSettled()
             }
             // Same reasoning for a post-execution REVIEW turn, which runs
             // against an already-settled tracker and so is untouched by the
@@ -1281,6 +1301,7 @@ final class ChatEngine {
             tracker.phase = .finished
         }
         agent.planExecution = tracker
+        if tracker.phase != .running { onPlanExecutionSettled() }
     }
 
 }

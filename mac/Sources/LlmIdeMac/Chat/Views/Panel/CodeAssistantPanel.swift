@@ -498,6 +498,12 @@ struct CodeAssistantPanel: View {
         // Panel-owned because `autoChainPendingAction` — which spends it — is.
         engine.onTurnStart = { autoGitOpsThisTurn = 0 }
         engine.onPlanReviewReleased = { releasePlanReviewTurn() }
+        // The run is over — hand the picker back so the next message is
+        // classified on its own merits. Releases ONLY the modes a run sets;
+        // a mode the user picked by hand is untouched (see releaseStickyMode).
+        engine.onPlanExecutionSettled = {
+            releaseStickyMode(from: [.execute, .plan, .assistPlan])
+        }
         engine.onRecordPrompt = { _ = session.record(prompt: $0) }
         engine.onNudge = { prompt in
             if session.shouldNudge(for: prompt) { engine.agent.nudgePrompt = prompt }
