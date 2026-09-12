@@ -264,6 +264,16 @@ export function buildExecuteBinding({ skillName, hasSubagents } = {}) {
     + 'wrong, say so and stop rather than substituting your own plan.\n'
     + '- **Tracking.** Use `task-create` once per plan step up front and '
     + '`task-update` as each completes, in place of whatever todo/ledger '
-    + 'mechanism the skill names.\n'
+    + 'mechanism the skill names. This is not optional bookkeeping: the '
+    + 'progress card the user watches is driven by it, and without it the app '
+    + 'cannot tell a finished plan from a turn that stopped after step 1.\n'
+    + '- **Finish the plan.** Pressing Execute was the go-ahead for EVERY step. '
+    + 'Work through all of them in this turn; do not stop after one to ask '
+    + '"ready for the next?". Ask (with `AskUserQuestion`) only when a step '
+    + 'needs a decision the plan does not settle.\n'
+    + '- **Stay on the current branch.** Do not check out, create or switch '
+    + 'branches unless a plan step says so — a commit made after a checkout '
+    + 'lands where the user is not looking, and the working tree they review '
+    + 'afterwards no longer holds your changes.\n'
     + `${FACTS_CLAUSE}`;
 }

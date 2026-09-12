@@ -152,6 +152,21 @@ test('execute binding tells the model which execution skill it got, and why', ()
   assert.match(without, /ignore any\s+instruction to switch/);
 });
 
+test('execute binding demands the whole plan, task tracking, and the current branch', () => {
+  // A live run did exactly one step, asked "Ready to proceed with Task 2?",
+  // never called task-create, and committed on `main` after a checkout —
+  // so the finish card claimed all 7 steps done and the Commit button found
+  // a clean tree on the feature branch. Each line here names one of those.
+  for (const hasSubagents of [true, false]) {
+    const binding = buildExecuteBinding({ skillName: 'executing-plans', hasSubagents });
+    assert.match(binding, /Finish the plan/);
+    assert.match(binding, /do not stop after one to ask/);
+    assert.match(binding, /progress card .* is driven by it/s);
+    assert.match(binding, /Stay on the current branch/);
+    assert.match(binding, /Do not check out, create or switch/);
+  }
+});
+
 test('every binding carries the cheap-facts rule', () => {
   for (const binding of [
     buildPlanBinding('plan', { skillName: 'brainstorming' }),
