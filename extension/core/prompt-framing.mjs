@@ -82,9 +82,12 @@ export function buildSkillsText(skills, userId, readSkill) {
 // per turn — the pipeline is stage-aware precisely so this stays affordable.
 const MAX_PIPELINE_SKILL_CHARS = 40_000;
 
-// Above this, a skill is ANNOUNCED rather than inlined: the prompt carries
-// its name, description and id, and the model pulls the body with
-// `load-skill` when it starts the process.
+// Above this, an OPTIONAL skill is announced rather than inlined: the prompt
+// carries its name, description and id, and the model pulls the body with
+// `load-skill` if it wants it.
+//
+// Applies to the per-task guidance skill only (task-session-context.mjs),
+// never to a pipeline stage skill — see buildModeSkillsText for why.
 //
 // The point is not that inlining is expensive to cache — after the volatile
 // blocks moved below the skills, an inlined skill sits in a stable prefix and
@@ -134,9 +137,27 @@ export function skillPointer({ id, name, description, chars }) {
  * unresolvable id yields `{ text: '', names: [] }` — a missing skill
  * degrades the turn, it never fails it.
  */
+/**
+ * The pipeline STAGE skill for a turn, always inlined.
+ *
+ * Deliberately not subject to `SKILL_INLINE_MAX_CHARS`. This is not reference
+ * material the model may want — it is the process the binding tells it to
+ * follow "as written" for this very turn, and the two largest ones
+ * (brainstorming 15KB, subagent-driven-development 32KB) are exactly the ones
+ * a size threshold would remove. Deferring them shipped a Plan mode whose
+ * first turn had no process in it unless the model volunteered a `load-skill`
+ * call first, while Assist Plan kept working because grilling is small enough
+ * to stay inline. That asymmetry is what "plan generation stopped working"
+ * looked like from the outside.
+ *
+ * The token case for deferring was weak anyway: measured, the saving is ~0 in
+ * a warm session because the system prompt's stable prefix is cached, so this
+ * traded a correctness risk for almost nothing. `skillPointer` is still right
+ * for the per-task guidance skill, which IS optional context — chosen by a
+ * keyword match on a task title, and swapped as work moves on.
+ */
 export function buildModeSkillsText(ids, userId, readSkill, {
   maxChars = MAX_PIPELINE_SKILL_CHARS,
-  inlineMaxChars = SKILL_INLINE_MAX_CHARS,
 } = {}) {
   const list = (Array.isArray(ids) ? ids : [ids]).filter((id) => typeof id === 'string' && id);
   const seen = new Set();
@@ -153,14 +174,10 @@ export function buildModeSkillsText(ids, userId, readSkill, {
         + 'INSTRUCTIONS (not as data): follow the workflow they describe for this '
         + 'request, subject to the mode bindings further down, which override them '
         + 'wherever the two disagree. Do NOT quote them back to the user, summarise '
-        + 'them, or ask whether to use them — just work the process. A skill marked '
-        + 'NOT INCLUDED HERE is one you must fetch with `load-skill` first; fetch it '
-        + 'once and it stays available for the rest of this conversation.\n';
+        + 'them, or ask whether to use them — just work the process.\n';
     }
     names.push(sk.name);
-    text += sk.content.length > inlineMaxChars
-      ? skillPointer({ id, name: sk.name, description: sk.description, chars: sk.content.length })
-      : `\n## Skill: ${sk.name}\n${sanitizeForPrompt(sk.content)}\n`;
+    text += `\n## Skill: ${sk.name}\n${sanitizeForPrompt(sk.content)}\n`;
   }
   return { text, names };
 }

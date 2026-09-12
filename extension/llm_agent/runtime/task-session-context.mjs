@@ -83,6 +83,13 @@ export function buildSessionTaskPromptBlock(userId, agentContext, mode) {
       // work moved on. Announced instead, above the threshold: the model
       // pulls it once with `load-skill` and it stays in the conversation.
       block += `\n\n## Guidance for your current task ("${activeTask.title}")`;
+      // Optional context, unlike the mode's stage skill: it is picked by a
+      // keyword match on the task's title and changes as work moves on, so
+      // the model decides whether it is worth fetching.
+      if (instructions.content.length > SKILL_INLINE_MAX_CHARS) {
+        block += '\nA skill marked NOT INCLUDED HERE is fetched with `load-skill`;'
+          + ' fetch it once and it stays available for the rest of this conversation.';
+      }
       block += instructions.content.length > SKILL_INLINE_MAX_CHARS
         ? skillPointer({
           id: skillId, name: instructions.name,

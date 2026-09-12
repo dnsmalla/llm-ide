@@ -103,12 +103,17 @@ test('the volatile blocks are the LAST things in the prompt', async () => {
   }
 });
 
-test('a skill over the inline threshold is announced, not inlined', async () => {
-  // The heavy process skills (brainstorming ~15KB, subagent-driven-development
-  // ~32KB, the ~10KB per-task guidance skills) used to be pasted into the
-  // system prompt on every request, whether or not the turn had any use for
-  // them — and the system prompt is rebuilt from scratch each time, so those
-  // bytes are paid again in full whenever the cache is cold.
+test('the pipeline stage skill is ALWAYS inlined, however large', async () => {
+  // Regression: a size threshold used to defer it, so Plan mode's first turn
+  // carried a pointer to brainstorming (15KB) instead of the process, and an
+  // execute-plan turn with subagents carried a pointer to
+  // subagent-driven-development (32KB). Assist Plan kept working only because
+  // grilling is small enough to stay inline — which is what made the breakage
+  // look like "assist plan behaves differently".
+  //
+  // This is the process the binding tells the model to follow for THIS turn.
+  // It is not reference material, and it must not depend on the model
+  // volunteering a `load-skill` call before it does anything.
   const user = registerUser(getDb(), { email: 'order-3@example.com', password: 'CorrectHorseBattery', displayName: 't' });
   const heavy = {
     readSkill: (id) => ({
@@ -117,8 +122,6 @@ test('a skill over the inline threshold is announced, not inlined', async () => 
       content: 'S'.repeat(HEAVY_CHARS),
     }),
     roots: () => [], sessionMemory: () => [],
-    // Non-empty → the pipeline picks subagent-driven-development, the 32KB
-    // worst case, rather than the small inline executing-plans skill.
     getSubagents: () => new Set(['some-agent']),
   };
   const append = buildEngineOptions(
@@ -128,12 +131,9 @@ test('a skill over the inline threshold is announced, not inlined', async () => 
     heavy,
   ).queryOptions.systemPrompt.append;
 
-  assert.ok(append.length < 8_000,
-    `the heavy skill must not be inlined; append was ${append.length} chars`);
-  assert.match(append, /NOT INCLUDED HERE/);
-  // The exact id matters: a model retyping a bare name gets an unknown-id miss.
-  assert.match(append, /load-skill` with the id `skills\/subagent-driven-development`/);
-  assert.match(append, /Dispatch each plan task to a subagent/,
-    'the description rides along so the model knows whether it needs the skill at all');
-  assert.doesNotMatch(append, /S{200}/, 'and none of the body is present');
+  assert.ok(append.length > HEAVY_CHARS,
+    `the stage skill must be inlined whole; append was only ${append.length} chars`);
+  assert.match(append, /## Skill: subagent-driven-development/);
+  assert.doesNotMatch(append, /NOT INCLUDED HERE/,
+    'a stage skill is never announced — the turn has no process without it');
 });
