@@ -155,6 +155,21 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <string>LLM IDE converts your spoken words into text for the chat composer.</string>
     <key>NSScreenCaptureDescription</key>
     <string>LLM IDE can capture audio from a single meeting app (Zoom, Teams, etc.) when its in-app captions are not exposed.</string>
+    <!-- Local network access, for Mobile Control. macOS 15 (Sequoia) brought
+         iOS-style local-network privacy to the Mac: an app that advertises a
+         Bonjour service or accepts inbound LAN connections is gated behind a
+         user prompt, and WITHOUT these two keys the prompt is either never
+         shown or shown with no explanation — the iPhone then simply fails to
+         discover the Mac, with no error anywhere. MobileBonjourAdvertiser
+         publishes _llmide._tcp and MobileWebSocketServer listens on :3006
+         (or the next free port up to +9), so both keys are load-bearing.
+         Traffic to 127.0.0.1 is exempt and unaffected. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>LLM IDE lets your iPhone find this Mac on your local network so you can chat, browse the explorer, and run auto tasks from your phone.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_llmide._tcp</string>
+    </array>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsLocalNetworking</key>

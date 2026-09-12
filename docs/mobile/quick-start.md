@@ -100,6 +100,11 @@ reinstall from `ios_app/MyApp.xcodeproj`, pair again. The current app shows a
 - Confirm Mobile Control **Running** on the Mac
 - Same Wi-Fi or Tailscale on both devices
 - `dns-sd -B _llmide._tcp local.` — or use manual IP + PIN
+- **macOS 15 (Sequoia) and later:** System Settings → Privacy & Security →
+  **Local Network** must have llm-ide enabled. Sequoia gates Bonjour
+  advertising behind this prompt; if it was dismissed, the Mac keeps
+  reporting Mobile Control as Running while being completely invisible to the
+  phone. Toggling llm-ide off and on there re-arms it.
 
 ### Pairing fails (wrong PIN)
 

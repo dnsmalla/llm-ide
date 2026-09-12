@@ -57,6 +57,16 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
     <string>LLM IDE uses the microphone for chat voice input and as a fallback transcription source when caption scraping is unavailable.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>LLM IDE converts your spoken words into text for the chat composer.</string>
+    <!-- Kept in sync with Scripts/build.sh: without these, a dev build on
+         macOS 15+ silently fails iPhone discovery (see the longer note
+         there). Worth carrying in this minimal dev plist precisely so that
+         "works when I run it locally, broken in the release" can't happen. -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>LLM IDE lets your iPhone find this Mac on your local network so you can chat, browse the explorer, and run auto tasks from your phone.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_llmide._tcp</string>
+    </array>
 </dict>
 </plist>
 PLIST
