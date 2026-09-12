@@ -360,6 +360,35 @@ do {
            "already-saved outranks a missing message")
 }
 
+// Sticky-mode release — the picker follows the resolved mode and then STAYS
+// there, which keeps a mode specific to the work. The cost is that it never
+// leaves on its own: a chat that planned something answered every later
+// message as a planner. The lifecycle releases it back to Auto, the only
+// setting that re-decides the next turn.
+do {
+    let planStages: Set<String> = ["plan", "assist_plan"]
+    expect(AgentV2Selection.releasesStickyMode(current: "plan", releasing: planStages),
+           "a saved plan hands Plan back to Auto")
+    expect(AgentV2Selection.releasesStickyMode(current: "assist_plan", releasing: planStages),
+           "and Assist Plan too")
+    expect(!AgentV2Selection.releasesStickyMode(current: "auto", releasing: planStages),
+           "Auto is already released; releasing it again would be a change that changes nothing")
+    // The guard that matters: a mode the user picked by hand is not the
+    // flow's to undo. Saving a plan while in Execute leaves Execute alone.
+    expect(!AgentV2Selection.releasesStickyMode(current: "execute", releasing: planStages),
+           "a save never overrules a deliberately-picked Execute")
+    expect(!AgentV2Selection.releasesStickyMode(current: "review", releasing: planStages),
+           "nor any other mode outside the stage being released")
+    // The end of a RUN releases the mode that run set, and nothing else.
+    let runStages: Set<String> = ["execute", "plan", "assist_plan"]
+    expect(AgentV2Selection.releasesStickyMode(current: "execute", releasing: runStages),
+           "a finished run hands Execute back")
+    expect(!AgentV2Selection.releasesStickyMode(current: "review", releasing: runStages),
+           "but still not a mode the run never set")
+    expect(AgentV2Selection.autoMode == "auto",
+           "the release target is the wire value the server classifies on")
+}
+
 // PlanExecutionSummaryPolicy — what the finish card may claim. The tracker
 // finishes when the turn ends with nothing pending, which is ALSO what a
 // one-step-then-"ready for step 2?" turn looks like; the card said "All 7

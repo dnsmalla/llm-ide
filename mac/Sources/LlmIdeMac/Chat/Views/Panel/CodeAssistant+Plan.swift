@@ -458,6 +458,35 @@ extension CodeAssistantPanel {
         }
     }
 
+    /// Hand the mode picker back to Auto once a piece of work is finished.
+    ///
+    /// The picker follows the mode the server resolves and then STAYS there,
+    /// which is what makes a mode specific to the work being done. The cost
+    /// is that it never leaves on its own: a chat that planned something
+    /// stayed in Plan, so every later message — "thanks", "what does this
+    /// do?" — was answered by a planner carrying brainstorming, until the
+    /// user reached up and changed it. In practice nobody does; the mode is
+    /// set once at the start and then forgotten.
+    ///
+    /// So the lifecycle releases it. Auto rather than a fixed mode, because
+    /// Auto is the only setting that RE-DECIDES: the next message is
+    /// classified on its own merits, and a follow-up that is itself a
+    /// planning request lands back in Plan by the same route it did the first
+    /// time. The price is one classification call on the next turn, which is
+    /// the price of the picker being automatic at all.
+    ///
+    /// Only releases a mode the FLOW set. A user who deliberately picked
+    /// Execute (or anything outside `modes`) keeps it — this exists to undo
+    /// stickiness, never to overrule a choice.
+    @MainActor
+    func releaseStickyMode(from modes: Set<CodeAssistMode> = [.plan, .assistPlan]) {
+        guard AgentV2Selection.releasesStickyMode(
+            current: modelState.selectedMode.rawValue,
+            releasing: Set(modes.map(\.rawValue)))
+        else { return }
+        modelState.selectedMode = .auto
+    }
+
     /// User-facing wording for a refused plan write. One table so the button,
     /// the Edit sheet and the Edit action can't describe the same refusal
     /// three different ways.

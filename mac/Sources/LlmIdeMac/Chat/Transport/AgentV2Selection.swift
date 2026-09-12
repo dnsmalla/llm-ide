@@ -186,6 +186,36 @@ public enum AgentV2Selection {
         return sessionIsPlanning && !sessionHasSavedPlan
     }
 
+    /// Whether a sticky mode should be handed back to Auto now that the work
+    /// that set it is finished.
+    ///
+    /// The picker follows the mode the server resolved and then STAYS there,
+    /// which is what keeps a mode specific to the work being done. The cost
+    /// is that it never leaves on its own: a chat that planned something
+    /// answered every later message as a planner — "thanks", "what does this
+    /// do?" — until the user reached up and changed it, which in practice
+    /// nobody does. The mode is set once at the start and forgotten.
+    ///
+    /// Auto rather than a fixed mode, because Auto is the only setting that
+    /// RE-DECIDES: the next message is classified on its own merits, so a
+    /// follow-up that is itself a planning request lands back in Plan by the
+    /// same route it did the first time.
+    ///
+    /// Keyed on the mode's raw string, like `planLikeModes` — that is the
+    /// mode's identity on the wire and in message metadata, and it keeps this
+    /// rule assertable without making the SwiftUI-facing `CodeAssistMode`
+    /// (and the chip protocol it conforms to) public.
+    ///
+    /// Releases only a mode the FLOW set. A user who deliberately picked
+    /// something outside `releasing` keeps it: this undoes stickiness, it
+    /// never overrules a choice.
+    public static func releasesStickyMode(current: String, releasing: Set<String>) -> Bool {
+        current != autoMode && releasing.contains(current)
+    }
+
+    /// The one mode that re-decides per turn; the target of every release.
+    public static let autoMode = "auto"
+
     /// Whether this transcript has ever run a plan-like turn — the session
     /// half of the content signal above. Cheap enough to compute once per
     /// render of the list (one pass over the messages' metadata).

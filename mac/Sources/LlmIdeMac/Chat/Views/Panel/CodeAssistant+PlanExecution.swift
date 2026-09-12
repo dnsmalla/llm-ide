@@ -21,6 +21,10 @@ extension CodeAssistantPanel {
     @MainActor
     func dismissPlanExecution() {
         engine.agent.planExecution = nil
+        // The run is over, however it ended — hand the picker back so the
+        // next message is classified on its own merits instead of staying an
+        // Execute turn forever. See `releaseStickyMode`.
+        releaseStickyMode(from: [.execute, .plan, .assistPlan])
     }
 
     @MainActor
@@ -55,6 +59,8 @@ extension CodeAssistantPanel {
             dismissPlanExecution()
             return
         }
+        // Committing is the end of the run too; `dismissPlanExecution` below
+        // releases the mode on the success path.
         guard await svc.commit(root: root, message: message) else {
             engine.error = svc.state.opError ?? svc.state.error ?? "Commit failed."
             return

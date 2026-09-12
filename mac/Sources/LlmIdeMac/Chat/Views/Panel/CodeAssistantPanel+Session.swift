@@ -277,6 +277,12 @@ extension CodeAssistantPanel {
             exitCode: nil, command: nil, output: nil, url: plan.absolutePath,
             isFailure: false, planTitle: plan.title, planContent: finalContent)
         await engine.acknowledge(payload, followUp: followUp)
+        // A plan is on disk, so the planning stage is over. Hand the picker
+        // back to Auto (see `releaseStickyMode`) — placed here, the single
+        // write every save path funnels through, so the v2 "Save Plan"
+        // action, the edit sheet's Save and the legacy `save-plan` proposal
+        // all release by the same rule instead of three of them drifting.
+        releaseStickyMode()
         return .success
     }
 
