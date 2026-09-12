@@ -90,11 +90,12 @@ test('plan binding keeps the saved document out of the chat reply', () => {
 
 test('plan binding routes the skills\' questions through AskUserQuestion', () => {
   // Stage 1 of both plan skills IS questioning the user, and both are written
-  // for a plain terminal agent, so they say to ask in prose. Here that ends
-  // the turn with dead text: the app renders an AskUserQuestion call as a card
-  // the user answers by choosing, and the answer returns inside the same turn.
+  // for a plain terminal agent, so they say to ask in prose. On the Agent
+  // engine that ends the turn with dead text: the app renders an
+  // AskUserQuestion call as a card the user answers by choosing, and the
+  // answer returns inside the same turn.
   for (const mode of ['plan', 'assist_plan']) {
-    const binding = buildPlanBinding(mode, { skillName: 'brainstorming' });
+    const binding = buildPlanBinding(mode, { skillName: 'brainstorming', engine: 'agent' });
     assert.match(binding, /AskUserQuestion/);
     assert.match(binding, /never in prose/);
     // The card's own limits — a model that sends 9 options or a 30-character
@@ -153,6 +154,36 @@ test('each plan mode hands off to writing-plans at its own skill\'s finish line'
   assert.doesNotMatch(assist, /approved the design/,
     'and must not wait on a design that stage does not produce');
   assert.ok(assist.includes(WRITE_SKILL_ID));
+});
+
+test('no binding names AskUserQuestion on the engine that lacks it', () => {
+  // The classic engine's registry (llm_agent/tools/registry.mjs) mounts
+  // ask-internal, ask-subagent, the read tools, the task tools and run-bash —
+  // there is no AskUserQuestion. Naming it there did not produce a card, it
+  // produced the model DRAWING one in prose ("Question 1 of N", options
+  // A/B/C, recommendation first), which is the clause's own spec rendered as
+  // text. Both bindings reach both engines, so both are checked.
+  for (const mode of ['plan', 'assist_plan']) {
+    const legacy = buildPlanBinding(mode, { skillName: 'brainstorming' });
+    assert.doesNotMatch(legacy, /AskUserQuestion/);
+    // Still told HOW to ask — the channel it has, with the cost named, so it
+    // batches a round instead of asking one question per turn.
+    assert.match(legacy, /Asking ends the turn here/);
+    assert.match(legacy, /one round in one\s+reply/);
+  }
+  // Execute asks too, when a step needs a decision the plan does not settle.
+  // That sentence named the tool unconditionally, which is the path a plan
+  // request typed while still in Execute mode takes.
+  const legacyExec = buildExecuteBinding({ skillName: 'executing-plans', hasSubagents: false });
+  assert.doesNotMatch(legacyExec, /AskUserQuestion/);
+  assert.match(legacyExec, /no question tool/);
+  const agentExec = buildExecuteBinding({
+    skillName: 'executing-plans', hasSubagents: false, engine: 'agent' });
+  assert.match(agentExec, /AskUserQuestion/);
+  // Both still carry the rule the tool name was attached to.
+  for (const b of [legacyExec, agentExec]) {
+    assert.match(b, /Ask only when a step needs a decision/);
+  }
 });
 
 test('plan binding asks for ONE document per piece of work, on both engines', () => {

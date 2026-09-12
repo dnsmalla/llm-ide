@@ -437,7 +437,7 @@ export function buildEngineOptions(
     : { text: '', names: [] };
 
   const persona = planExecute && pipelineSkillNames.length
-    ? buildExecuteBinding({ skillName: pipelineSkillNames[0], hasSubagents })
+    ? buildExecuteBinding({ skillName: pipelineSkillNames[0], hasSubagents, engine: 'agent' })
     // `engine: 'agent'` — this engine mounts no save-plan tool; the plan is
     // the reply and the Mac saves it, so the binding must say so.
     : personaForMode(resolvedMode, { skillName: pipelineSkillNames[0], engine: 'agent', planWrite });

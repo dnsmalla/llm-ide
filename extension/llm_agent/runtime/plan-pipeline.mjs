@@ -202,19 +202,33 @@ const REPLY_BREVITY_CLAUSE =
 
 // Both plan skills open by QUESTIONING the user — that is the whole of
 // stage 1 — and the skills, written for a plain terminal agent, say to ask in
-// prose. Here prose is the wrong channel: this app renders an
+// prose. On the Agent engine prose is the wrong channel: this app renders an
 // `AskUserQuestion` call as an answerable card (header, 2-4 labelled options,
 // optional multi-select) whose answer returns to the model inside the SAME
 // turn. A question typed into the reply instead just ends the turn — the user
 // has to retype an answer in the composer, and the model then has to parse
 // prose into the decision it already knew how to enumerate.
-const QUESTION_CLAUSE =
+const QUESTION_CLAUSE_AGENT =
   '- **Ask with `AskUserQuestion`, never in prose.** Where the skill says to '
   + 'ask your human partner, call that tool: the app draws an answerable card '
   + 'and the answer returns inside this same turn. A question typed into your '
   + 'reply only ends the turn. One call per round (up to 4 questions), each '
   + 'with a header of at most 12 characters and 2-4 labelled options, your '
   + 'recommendation first; set `multiSelect` when answers are not exclusive.';
+
+// The classic engine has NO `AskUserQuestion`: its registry mounts
+// `ask-internal`, `ask-subagent`, the read tools, the task tools and
+// `run-bash`, and that is the whole list. Naming the tool here anyway does
+// not get a card — it gets the model DRAWING one in prose, because that is
+// the only way left to obey: "Question 1 of N", options A/B/C, recommendation
+// first — the clause above, rendered as text. So this engine is told what it
+// actually has: ask in the reply, the way the skill already says to.
+const QUESTION_CLAUSE_LEGACY =
+  '- **Asking ends the turn here.** You have no question tool on this engine, '
+  + 'so a question goes in your reply and the user answers in the composer — '
+  + 'ask the way the skill says to. Because each round costs a turn, ask only '
+  + 'what changes what you do next, put the questions of one round in one '
+  + 'reply, and say which answer you would pick.';
 
 /**
  * When stage 1 is finished and the model should move on to writing the plan.
@@ -275,6 +289,10 @@ export function buildPlanBinding(mode, { skillName, engine = 'legacy', planWrite
   const artifactClauses = engine === 'agent'
     ? `${ONE_DOCUMENT_CLAUSE}\n${AGENT_ARTIFACT_CLAUSE}\n`
     : `${ONE_DOCUMENT_CLAUSE}\n${ARTIFACT_CLAUSE}\n${REPLY_BREVITY_CLAUSE}\n`;
+  // Which question channel exists is an engine fact, exactly like the
+  // artifact channel above. This clause used to be shared, which is how a
+  // classic-engine turn came to be told to call a tool it was never given.
+  const questionClause = engine === 'agent' ? QUESTION_CLAUSE_AGENT : QUESTION_CLAUSE_LEGACY;
   return `You are in ${modeLabel} mode. ${named.charAt(0).toUpperCase()}${named.slice(1)} `
     + 'in the skills block above is your process for this turn — follow it as '
     + 'written. The bindings below are the parts of this environment that skill '
@@ -284,7 +302,7 @@ export function buildPlanBinding(mode, { skillName, engine = 'legacy', planWrite
     + 'from there. A fresh request starts at that skill\'s beginning; do not '
     + 'skip ahead to a finished plan because the request sounds simple.\n'
     + writingClause(mode, planWrite)
-    + `${QUESTION_CLAUSE}\n`
+    + `${questionClause}\n`
     + artifactClauses
     + `${FACTS_CLAUSE}\n`
     + '- **No other write tool.** File edits, shell commands, git operations '
@@ -297,7 +315,7 @@ export function buildPlanBinding(mode, { skillName, engine = 'legacy', planWrite
  * the plan is approved and attached, and the injected skill (chosen by
  * `executeSkillId`) is how to work through it.
  */
-export function buildExecuteBinding({ skillName, hasSubagents } = {}) {
+export function buildExecuteBinding({ skillName, hasSubagents, engine = 'legacy' } = {}) {
   const named = skillName ? `The **${skillName}** skill` : 'The skill';
   return 'You are executing a plan the user already approved and saved. '
     + `${named} in the skills block above is your process — follow it as `
@@ -319,8 +337,15 @@ export function buildExecuteBinding({ skillName, hasSubagents } = {}) {
     + 'cannot tell a finished plan from a turn that stopped after step 1.\n'
     + '- **Finish the plan.** Pressing Execute was the go-ahead for EVERY step. '
     + 'Work through all of them in this turn; do not stop after one to ask '
-    + '"ready for the next?". Ask (with `AskUserQuestion`) only when a step '
-    + 'needs a decision the plan does not settle.\n'
+    + '"ready for the next?". Ask only when a step needs a decision the plan '
+    + 'does not settle'
+    // Same engine fact as the plan binding's question clause: only the Agent
+    // engine has the tool. Naming it on the classic engine is what made an
+    // Execute turn hand-draw an options card in the chat.
+    + (engine === 'agent'
+      ? ' — with `AskUserQuestion`, so the answer returns inside this turn.\n'
+      : ', and expect that question to end the turn: you have no question tool '
+        + 'on this engine, so it goes in your reply.\n')
     + '- **Stay on the current branch.** Do not check out, create or switch '
     + 'branches unless a plan step says so — a commit made after a checkout '
     + 'lands where the user is not looking, and the working tree they review '
