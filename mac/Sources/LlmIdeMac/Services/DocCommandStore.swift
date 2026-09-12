@@ -151,11 +151,15 @@ final class DocCommandStore: ObservableObject {
         let dir = ProjectLayout(root: root).commandDir(named: folderName)
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let body = command.rawContent?.isEmpty == false
-                ? command.rawContent!
-                : DocCommand.markdownBody(name: command.name, instruction: command.instruction)
-            try body.write(to: dir.appendingPathComponent("command.md"),
-                           atomically: true, encoding: .utf8)
+            // `renderedMarkdown()` — the same call `writeProjectTemplate` makes —
+            // rather than rebuilding the body here: the local version dropped
+            // `surface`, so a command written without raw content came back
+            // from the next scan as a Doc Gen command and vanished from the
+            // Visual menu. Unreachable today (every caller passes stamped
+            // content), which is exactly why it would have gone unnoticed.
+            try command.renderedMarkdown().write(
+                to: dir.appendingPathComponent("command.md"),
+                atomically: true, encoding: .utf8)
         } catch {
             logger.error("write command \(folderName, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
         }
