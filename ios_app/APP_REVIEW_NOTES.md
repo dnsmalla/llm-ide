@@ -30,7 +30,8 @@ streamed replies, explorer sessions, Auto Tasks (toggles work), and Loop
 offline — it opens no network connection and stores nothing. Replies in demo
 mode are canned and are labelled "Demo reply."
 
-To leave demo mode, use the **⋯** menu → **Disconnect**.
+To leave demo mode, tap the **⋯** button in the top-right of the home screen
+and choose **Close Connection**. That returns you to the first screen.
 
 ## Permissions, and why each is requested
 
