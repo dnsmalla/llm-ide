@@ -264,6 +264,33 @@ function queryTokens(userMessage) {
 export function selectChatMemoryFacts(content, { userMessage = '', room = 0 } = {}) {
   const facts = parseChatMemoryFacts(content);
   if (facts.length === 0 || room <= 0) return '';
+  const scored = rankFactsByRelevance(facts, { userMessage });
+  const chosen = [];
+  let used = 0;
+  for (const fact of scored) {
+    const line = `- ${fact}`;
+    const cost = line.length + (chosen.length > 0 ? 1 : 0); // +1 for the joining newline
+    if (used + cost > room) continue;   // skip; a later shorter fact may still fit
+    chosen.push(line);
+    used += cost;
+  }
+  // `chosen` is already in relevance order, so the agent sees the most
+  // relevant facts first.
+  return chosen.join('\n');
+}
+
+/**
+ * Rank facts by relevance to `userMessage`, most relevant first. Pure.
+ *
+ * Lifted out of `selectChatMemoryFacts` so the memory EXTRACTOR can use the
+ * same ranking: it shows the model a slice of what is already known, and a
+ * blind `.slice(0, N)` there meant the facts most likely to be contradicted
+ * by the current turn were the ones least likely to be shown. One ranker,
+ * two callers — the alternative was a second scoring implementation that
+ * would drift.
+ */
+export function rankFactsByRelevance(facts, { userMessage = '' } = {}) {
+  if (!Array.isArray(facts) || facts.length === 0) return [];
   const q = queryTokens(userMessage);
   // IDF weighting: a query token carried by few facts is far more
   // discriminating than one carried by most ("pnpm" vs "uses"). With ~100
@@ -311,18 +338,7 @@ export function selectChatMemoryFacts(content, { userMessage = '', room = 0 } = 
   // previous within-day ordering.
   scored.sort((a, b) => (b.score - a.score)
     || (a.stamp === b.stamp ? b.index - a.index : String(b.stamp).localeCompare(String(a.stamp))));
-  const chosen = [];
-  let used = 0;
-  for (const { fact } of scored) {
-    const line = `- ${fact}`;
-    const cost = line.length + (chosen.length > 0 ? 1 : 0); // +1 for the joining newline
-    if (used + cost > room) continue;   // skip; a later shorter fact may still fit
-    chosen.push(line);
-    used += cost;
-  }
-  // `chosen` is already in relevance order (scored is sorted), so the agent
-  // sees the most relevant facts first.
-  return chosen.join('\n');
+  return scored.map((e) => e.fact);
 }
 
 export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) {

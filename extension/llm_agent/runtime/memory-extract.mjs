@@ -29,6 +29,7 @@
 import { tryParseJSON } from '../../providers/runtime.mjs';
 import { fastModelFor } from '../../kb/usage.mjs';
 import { factKey, factIndex } from '../../graphkit/memory-writer.mjs';
+import { rankFactsByRelevance } from '../../graphkit/memory.mjs';
 
 // Fast tier by default: extraction is a 512-token classification-style call
 // that runs fire-and-forget after EVERY turn — on the CLI path it measured
@@ -45,7 +46,21 @@ const MAX_SESSION_FACTS = 6;
 const MAX_FACT_CHARS = 280;
 // Keep the inputs bounded so a huge turn can't blow the extractor's budget.
 const MAX_INPUT_CHARS = 6_000;
-const MAX_EXISTING_LISTED = 60;
+// How many already-known facts the model is shown.
+//
+// Was 60. This call runs after EVERY substantive turn, so this list is a
+// per-turn tax that grows as the project learns: measured at ~2.1K input
+// tokens with an empty memory, ~3.4K at 20 facts and ~6.1K at 60 — the
+// extractor's cost tripling purely because it had learned more. 20 keeps the
+// list bounded, and pairing it with relevance ranking (below) makes the
+// smaller list BETTER targeted than the larger blind one was: the facts most
+// likely to be revised by this turn are the ones now shown.
+//
+// The cost of showing fewer is bounded. The model may only supersede facts it
+// was shown, so a fact outside the 20 cannot be retired this turn — but it
+// also cannot be duplicated, because `appendChatMemory` upserts by factIndex
+// against the FULL on-disk list regardless of what was shown.
+const MAX_EXISTING_LISTED = 20;
 
 function clip(s, n) {
   s = typeof s === 'string' ? s : '';
@@ -215,9 +230,26 @@ export function isWorthExtracting({ userMessage, reply }) {
   return true;
 }
 
+/**
+ * The already-known facts to show this turn: the most relevant
+ * `MAX_EXISTING_LISTED`, ranked against the user's message with the same
+ * scorer the prompt-injection path uses (graphkit/memory.mjs).
+ *
+ * One selection, computed once. It used to be made twice — `buildPrompt`
+ * sliced for the prompt and `extractMemories` sliced again for
+ * `sanitizeSuperseded` — with a comment warning that the two MUST agree or a
+ * superseded claim could be validated against a fact the model was never
+ * shown. Two call sites that must agree is a bug waiting for an edit; now
+ * there is one.
+ */
+function selectExistingForPrompt(existingFacts, userMessage) {
+  const all = Array.isArray(existingFacts) ? existingFacts : [];
+  if (all.length <= MAX_EXISTING_LISTED) return all;
+  return rankFactsByRelevance(all, { userMessage }).slice(0, MAX_EXISTING_LISTED);
+}
+
 function buildPrompt({ userMessage, reply, existingFacts }) {
   const existing = (Array.isArray(existingFacts) ? existingFacts : [])
-    .slice(0, MAX_EXISTING_LISTED)
     .map((f) => `- ${f}`)
     .join('\n') || '(none yet)';
   return [
@@ -294,15 +326,13 @@ export async function extractMemories({ userMessage, reply, existingFacts, runCl
     if (meta && typeof meta === 'object') { meta.approxTokens = 0; meta.skipped = true; }
     return empty;
   }
-  // Only validate "superseded" claims against facts the model actually SAW —
-  // buildPrompt slices to MAX_EXISTING_LISTED, and sanitizeSuperseded must use
-  // the identical slice, or a claim could exactly factKey-match a fact that
-  // was never shown in this prompt (still requires an exact match, so not a
-  // blind-guess hole, but the "only retire what it was shown" guarantee must
-  // hold against what was ACTUALLY shown, not the full on-disk list).
-  const shownFacts = (Array.isArray(existingFacts) ? existingFacts : []).slice(0, MAX_EXISTING_LISTED);
+  // The facts the model is actually shown — and therefore the only ones it
+  // may retire. `sanitizeSuperseded` is validated against this exact list, so
+  // the "only retire what it was shown" guarantee holds by construction
+  // rather than by two slices happening to match.
+  const shownFacts = selectExistingForPrompt(existingFacts, userMessage);
   try {
-    const prompt = buildPrompt({ userMessage, reply, existingFacts });
+    const prompt = buildPrompt({ userMessage, reply, existingFacts: shownFacts });
     const raw = await runClaude(prompt, {
       userId,
       model: model || EXTRACT_MODEL,

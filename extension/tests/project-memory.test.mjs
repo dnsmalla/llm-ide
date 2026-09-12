@@ -309,15 +309,19 @@ test('extractMemories drops superseded entries that match no existing fact', asy
   assert.deepEqual(out.superseded, [], 'only verbatim-known facts may be superseded');
 });
 
-test('extractMemories rejects a superseded claim matching a fact past MAX_EXISTING_LISTED (60)', async () => {
-  // buildPrompt only shows the model the first 60 existingFacts; sanitizeSuperseded
-  // must validate against that same slice, not the full on-disk list — otherwise a
-  // claim could exactly factKey-match a fact the model never saw (index 60, 0-based,
-  // i.e. the 61st fact, which falls just past the 60-fact slice).
-  const unseenFact = 'fact number 60 the project uses an unseen legacy tool';
+test('extractMemories rejects a superseded claim for a fact outside the shown slice', async () => {
+  // The model may only retire facts it was SHOWN, so sanitizeSuperseded must
+  // validate against the shown selection rather than the full on-disk list.
+  //
+  // The fixture inverted when selection became relevance-ranked: it used to
+  // put the unshown fact at index 60 (past a blind first-60 slice), but with
+  // no query-token match the ranking degrades to newest-first, which makes
+  // the LAST fact the most likely to be shown and the OLDEST the one left
+  // out. The property under test is unchanged; only which fact is unshown is.
   const existingFacts = Array.from({ length: 61 }, (_, i) => (
-    i === 60 ? unseenFact : `fact number ${i} distinct project convention`
+    `fact number ${i} distinct project convention`
   ));
+  const unseenFact = existingFacts[0];   // oldest → outside the 20 shown
   const fake = async () => JSON.stringify({ facts: [], superseded: [unseenFact] });
   const out = await extract.extractMemories({
     userMessage: 'real question', reply: 'real reply',
@@ -1300,4 +1304,38 @@ test('GET /kb/agent/session-memory lists a chat\'s facts and requires sessionId'
   await handleAgentRoutes(mkReq('GET', badUrl), res, { userId: u, url: badUrl });
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.error.code, 'SESSION_ID_REQUIRED');
+});
+
+// ── the extractor's known-facts list is bounded and relevance-ranked ──────
+//
+// This call runs after every substantive turn, and the known-facts list was a
+// blind `.slice(0, 60)` of everything stored — so its cost grew as the
+// project learned: ~2.1K input tokens with an empty memory, ~6.1K at the cap.
+// It is now the 20 most relevant, which is both cheaper and better targeted.
+test('extraction shows at most 20 known facts, and the most relevant ones', async () => {
+  const many = Array.from({ length: 60 }, (_, i) => `[convention|key-${i}] Fact number ${i} about widgets`);
+  many.push('[tooling|pnpm] The project uses pnpm workspaces for dependency management');
+  let prompt = '';
+  await extract.extractMemories({
+    userMessage: 'how does pnpm handle our workspaces?',
+    reply: 'It links them.',
+    existingFacts: many,
+    userId: 'u',
+    runClaude: async (p) => { prompt = p; return '{"facts":[],"session":[],"superseded":[]}'; },
+  });
+  const shown = prompt.split('\n').filter((l) => l.startsWith('- [')).length;
+  assert.equal(shown, 20, 'the list is capped');
+  assert.match(prompt, /pnpm workspaces/, 'the fact this turn is about must be shown, not lost at index 60');
+});
+
+test('with fewer facts than the cap, every one is still shown', async () => {
+  let prompt = '';
+  await extract.extractMemories({
+    userMessage: 'q', reply: 'a',
+    existingFacts: ['[tooling|a] Alpha', '[tooling|b] Beta'],
+    userId: 'u',
+    runClaude: async (p) => { prompt = p; return '{"facts":[],"session":[],"superseded":[]}'; },
+  });
+  assert.match(prompt, /Alpha/);
+  assert.match(prompt, /Beta/);
 });
