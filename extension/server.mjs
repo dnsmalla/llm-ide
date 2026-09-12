@@ -171,7 +171,14 @@ const HOST = config.host;
 //     unknown mode to `execute`, i.e. FULL act tools for a surface whose
 //     approvals may have no window to render them, so the client must gate on
 //     this version before offering the quick chat rather than degrade.
-const SERVER_API_VERSION = 47;
+//   v48 — `permissionMode: "bypass" | "manual"` accepted on /agent/v2/stream:
+//     the chat's own Manual/Bypass chip, which until now the Agent engine
+//     never saw (the legacy loop applies it client-side). Degrades in BOTH
+//     directions, and only one of them is safe: an older server ignoring
+//     "bypass" merely keeps asking, but one ignoring "manual" keeps letting
+//     stored always-allow rows auto-run tools the user asked to be consulted
+//     about. A client that wants "manual" honoured must check this version.
+const SERVER_API_VERSION = 48;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

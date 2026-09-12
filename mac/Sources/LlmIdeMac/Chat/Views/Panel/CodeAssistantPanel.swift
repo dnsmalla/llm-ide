@@ -40,6 +40,16 @@ enum EditAcceptanceMode: String, CaseIterable, Identifiable, ChipMenuOption {
             ? "Bypass review — apply file edits (attached files, or anything in the open project) and run proposed shell commands immediately, no popup"
             : "Manual review — Apply / Review diff / Skip each file edit in the chat, and tap to run each proposed command"
     }
+
+    /// What this setting means to the Agent engine, which approves tools
+    /// server-side and so has to be TOLD (the legacy loop applies the same
+    /// setting client-side, in `ChatAutoChainPolicy`).
+    ///
+    /// `bypass` skips the approval prompt for anything that would park one;
+    /// it does not lift the server's hard rails — a blocklisted command and
+    /// a write outside the workspace are still refused. `manual` asks every
+    /// time, including for tools previously marked "always allow".
+    var agentPermissionMode: String { self == .auto ? "bypass" : "manual" }
 }
 
 struct CodeAssistantPanel: View {
@@ -463,7 +473,11 @@ struct CodeAssistantPanel: View {
                 model: modelState.selectedModel.isEmpty ? nil : modelState.selectedModel,
                 provider: ChatTransportInput.makeProvider(
                     selectedProvider: modelState.selectedProvider),
-                mode: modelState.selectedMode.rawValue)
+                mode: modelState.selectedMode.rawValue,
+                // Read live, per turn, like the mode above: the chip is a
+                // setting the user can change between messages, and the
+                // agent has to follow the one on screen when they send.
+                permissionMode: editMode.agentPermissionMode)
         }
         // Fresh budget of auto-run git ops for this user turn (commit→push→…).
         // Panel-owned because `autoChainPendingAction` — which spends it — is.

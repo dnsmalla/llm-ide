@@ -670,6 +670,21 @@ export async function runAgentV2Turn(
     // subprocess — deliberately not bridged, because synthesising a
     // controller here would add a second listener to the caller's signal for
     // the whole turn.
+    // The chat's own permission setting, forwarded per turn by the client:
+    //   'bypass' — the user asked for allow-all. Every tool that would park
+    //              an approval runs instead. The hard safety rails are NOT
+    //              part of this: a 'blocked' gate decision and the
+    //              write-containment check still refuse, because those are
+    //              about what may happen to the machine, not about how much
+    //              confirming the user wants to do.
+    //   'manual' — ask every time. Stored always-allow rows (kb/
+    //              tool-approvals.mjs) stop short-circuiting the prompt, so
+    //              the setting means what it says. The 'auto' tier is
+    //              untouched: those are the read-only/safe operations, and
+    //              prompting for them would make the mode unusable.
+    //   absent   — an older client that sends no setting; the server's own
+    //              policy applies exactly as before.
+    permissionMode = null,
     resumeSdkSessionId, onEvent, signal, abortController, allowAmbientAuth = false,
     queryFactory = sdkQueryFactory,
   } = {},
@@ -808,6 +823,14 @@ export async function runAgentV2Turn(
   // DB-trusted indexed repos, resolved once per turn: the only places a test
   // runner may execute unprompted (tools/gates.mjs TEST_RUNNER_PATTERNS).
   const trustedRoots = buildTrustedRoots(userId);
+  // The chat's permission setting, read once per turn. `allowAll` skips the
+  // approval PROMPT only — every caller below still runs its gate first, and
+  // a 'blocked' decision is final in both modes.
+  const allowAll = permissionMode === 'bypass';
+  const askEveryTime = permissionMode === 'manual';
+  // Always-allow rows short-circuit the prompt tier — unless this turn asked
+  // to be asked every time.
+  const alwaysAllowed = (name) => !askEveryTime && hasAlwaysAllow(userId, name);
   const canUseTool = async (toolName, input, callOpts) => {
     const registryName = toolName.startsWith('mcp__llmide__') ? toolName.slice('mcp__llmide__'.length) : null;
     const entry = registryName ? registryGet(registryName) : null;
@@ -824,7 +847,9 @@ export async function runAgentV2Turn(
         // so relative path tokens are judged against that directory.
         const decision = runBashGate(input?.command, workspaceRoot, { trustedRoots });
         if (decision === 'blocked') return { behavior: 'deny', message: 'Command blocked for safety.' };
-        if (decision === 'auto' || hasAlwaysAllow(userId, 'Bash')) {
+        // `allowAll` is checked AFTER the blocklist, never before it: the
+        // user asked not to be interrupted, not to disable the safety rail.
+        if (decision === 'auto' || allowAll || alwaysAllowed('Bash')) {
           return { behavior: 'allow', updatedInput: input };
         }
         return awaitToolApproval({
@@ -836,7 +861,9 @@ export async function runAgentV2Turn(
       if (writePathGate(input?.file_path, allowedWriteRoots) === 'blocked') {
         return { behavior: 'deny', message: `${toolName} refused: the target must stay inside the project workspace.` };
       }
-      if (hasAlwaysAllow(userId, toolName)) return { behavior: 'allow', updatedInput: input };
+      // Containment first, then the user's setting: allow-all means "don't
+      // ask me about edits", never "write outside the workspace".
+      if (allowAll || alwaysAllowed(toolName)) return { behavior: 'allow', updatedInput: input };
       return awaitToolApproval({
         toolName, argsSummary: String(input?.file_path ?? ''),
         args: approvalArgsFor(toolName, input), input, callSignal: callOpts?.signal,
@@ -860,14 +887,16 @@ export async function runAgentV2Turn(
       // bypass the blocklist entirely for every later command under that
       // same tool name. always-allow only ever shortcuts the PROMPT tier
       // (below) — skipping the interactive approval, never the gate itself.
+      // The chat's allow-all setting obeys the same rule for the same
+      // reason: it is checked after this line, never before it.
       const decision = entry.gate(input);
       if (decision === 'blocked') return { behavior: 'deny', message: 'Command blocked for safety.' };
       if (decision === 'auto') return { behavior: 'allow', updatedInput: input };
-      // decision === 'prompt' — always-allow (kb/tool-approvals.mjs) skips
-      // straight to auto-run here, exactly as it would after a live
-      // 'always-allow' answer below; a fresh 'prompt' decision genuinely
-      // blocks on a human when no such row exists.
-      if (hasAlwaysAllow(userId, entry.name)) return { behavior: 'allow', updatedInput: input };
+      // decision === 'prompt' — allow-all, or an always-allow row (kb/
+      // tool-approvals.mjs), skips straight to auto-run here, exactly as it
+      // would after a live 'always-allow' answer below; a fresh 'prompt'
+      // decision genuinely blocks on a human when neither applies.
+      if (allowAll || alwaysAllowed(entry.name)) return { behavior: 'allow', updatedInput: input };
       // Genuinely block on a human decision, parked
       // the same way an AskUserQuestion is (requestId, approval_request/
       // approval_resolved events, abort-on-disconnect).

@@ -37,6 +37,11 @@ import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 // what actually ran. Keep the two in sync.
 const DEFAULT_MODE = 'execute';
 
+// Permission settings a client may send (the Mac chat's Manual / Bypass
+// chip). Validated here rather than in the engine so an unknown string can
+// never be mistaken for one of them — it degrades to the server's own policy.
+const PERMISSION_MODES = new Set(['bypass', 'manual']);
+
 // Leading-slash plugin commands expand exactly like the legacy loop
 // (llm_agent/runtime/route.mjs): the enabled command set for THIS user,
 // then template expansion before the turn runs. Default seam so tests can
@@ -297,6 +302,11 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       // already-approved plan, so the pipeline injects the execution
       // skill (llm_agent/runtime/plan-pipeline.mjs).
       planExecute: body.planExecute === true,
+      // The chat's own permission chip (Manual / Bypass), forwarded per turn
+      // so the agent follows the setting the user is looking at. Anything
+      // else — including absent, which is what an older client sends — means
+      // "no instruction", and the server's own approval policy applies.
+      permissionMode: PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : null,
       agentContext,
       attachments: body.attachments,
       resumeSdkSessionId: resumeSdkSessionId ?? undefined,

@@ -66,6 +66,18 @@ struct ChatTransportInput: Sendable {
     /// existing call site, which passes nothing.
     var planExecute: Bool = false
 
+    /// The chat's permission chip for this turn: `"bypass"` (allow all) or
+    /// `"manual"` (ask every time), from `EditAcceptanceMode`.
+    ///
+    /// The legacy loop has always applied this setting CLIENT-side, in
+    /// `ChatAutoChainPolicy`. The Agent engine decides tool approvals
+    /// server-side, so until this field existed the chip simply did not
+    /// reach it: a chat set to Bypass still parked approval cards, and one
+    /// set to Manual still auto-ran anything the user had once marked
+    /// "always allow". `var` with a default so the memberwise init stays
+    /// source-compatible with call sites that pass nothing.
+    var permissionMode: String? = nil
+
     /// Determine the provider string to send: `custom:<uuid>` verbatim for a
     /// custom provider, or the built-in tool's `provider` for everything else.
     /// Moved verbatim from `CodeAssistantPanel+Session.swift`'s

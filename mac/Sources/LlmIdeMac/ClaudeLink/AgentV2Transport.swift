@@ -226,6 +226,10 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         // Only sent when true — an older server ignores the field, and a
         // false is indistinguishable from absent to the route.
         if input.planExecute { body["planExecute"] = true }
+        // The chat's Manual/Bypass chip. Omitted when nil — the route treats
+        // missing as "no instruction" and applies its own policy, so an
+        // older client is unchanged.
+        if let permissionMode = input.permissionMode { body["permissionMode"] = permissionMode }
         if let agentContext = input.agentContext,
            let data = try? JSONEncoder().encode(agentContext),
            let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
