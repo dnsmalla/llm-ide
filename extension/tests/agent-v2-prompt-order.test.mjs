@@ -29,11 +29,16 @@ const { registerUser } = await import('../server/users.mjs');
 const { getDb } = await import('../kb/db.mjs');
 const { tasks } = await import('../llm_agent/runtime/handlers/session-tasks.mjs');
 
-const SKILL_CHARS = 32_000;
+// Just under SKILL_INLINE_MAX_CHARS, so this fixture's skill is INLINED —
+// which is what makes it a test of ordering. A skill over the threshold is
+// announced instead of inlined (see the deferral test at the bottom), and
+// would prove nothing about where inline text sits.
+const SKILL_CHARS = 3_900;
 const deps = {
   readSkill: (id) => ({ name: id, content: 'S'.repeat(SKILL_CHARS) }),
   roots: () => [], sessionMemory: () => [], getSubagents: () => new Set(),
 };
+const HEAVY_CHARS = 32_000;
 
 function commonPrefix(a, b) {
   let i = 0;
@@ -54,7 +59,11 @@ test('a task-update does not invalidate the pipeline skill in the cached prefix'
   const before = build();
   const skillAt = before.indexOf('# Skills to apply');
   assert.ok(skillAt >= 0, 'the fixture must actually inject a skill, or this test proves nothing');
-  assert.ok(before.length > SKILL_CHARS, 'and it must be the large block this is about');
+  // Assert the BODY is present, not the absence of the pointer phrase — the
+  // skills-block header mentions "NOT INCLUDED HERE" unconditionally, to
+  // explain the marker, so searching for it proves nothing.
+  assert.match(before, /S{500}/,
+    'this fixture must be inlined, or the ordering it checks is not being exercised');
 
   const [first] = tasks.listTasks(user.id, 'chat-order-1');
   tasks.updateTask(user.id, 'chat-order-1', first.id, { status: 'completed' });
@@ -92,4 +101,39 @@ test('the volatile blocks are the LAST things in the prompt', async () => {
     assert.ok(at(volatileBlock) > skill,
       `${volatileBlock} must sit below the skills — it changes between turns`);
   }
+});
+
+test('a skill over the inline threshold is announced, not inlined', async () => {
+  // The heavy process skills (brainstorming ~15KB, subagent-driven-development
+  // ~32KB, the ~10KB per-task guidance skills) used to be pasted into the
+  // system prompt on every request, whether or not the turn had any use for
+  // them — and the system prompt is rebuilt from scratch each time, so those
+  // bytes are paid again in full whenever the cache is cold.
+  const user = registerUser(getDb(), { email: 'order-3@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  const heavy = {
+    readSkill: (id) => ({
+      name: 'subagent-driven-development', id,
+      description: 'Dispatch each plan task to a subagent and review the result.',
+      content: 'S'.repeat(HEAVY_CHARS),
+    }),
+    roots: () => [], sessionMemory: () => [],
+    // Non-empty → the pipeline picks subagent-driven-development, the 32KB
+    // worst case, rather than the small inline executing-plans skill.
+    getSubagents: () => new Set(['some-agent']),
+  };
+  const append = buildEngineOptions(
+    { userId: user.id, mode: 'execute', message: 'go', planExecute: true,
+      agentContext: { workspaceRoot: process.cwd(), sessionId: 'a3', chatSessionId: 'chat-order-3' },
+      skills: [], attachments: [] },
+    heavy,
+  ).queryOptions.systemPrompt.append;
+
+  assert.ok(append.length < 8_000,
+    `the heavy skill must not be inlined; append was ${append.length} chars`);
+  assert.match(append, /NOT INCLUDED HERE/);
+  // The exact id matters: a model retyping a bare name gets an unknown-id miss.
+  assert.match(append, /load-skill` with the id `skills\/subagent-driven-development`/);
+  assert.match(append, /Dispatch each plan task to a subagent/,
+    'the description rides along so the model knows whether it needs the skill at all');
+  assert.doesNotMatch(append, /S{200}/, 'and none of the body is present');
 });

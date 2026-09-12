@@ -82,6 +82,41 @@ export function buildSkillsText(skills, userId, readSkill) {
 // per turn — the pipeline is stage-aware precisely so this stays affordable.
 const MAX_PIPELINE_SKILL_CHARS = 40_000;
 
+// Above this, a skill is ANNOUNCED rather than inlined: the prompt carries
+// its name, description and id, and the model pulls the body with
+// `load-skill` when it starts the process.
+//
+// The point is not that inlining is expensive to cache — after the volatile
+// blocks moved below the skills, an inlined skill sits in a stable prefix and
+// is cache-read cheaply. The point is that the system prompt is rebuilt from
+// scratch on EVERY request, so its bytes are paid again in full whenever the
+// cache is cold (a new chat, or any gap longer than the cache TTL), whether
+// or not the turn had any use for the process. A skill the model pulled is in
+// the conversation instead — appended once, never rewritten.
+//
+// 4,000 chars keeps the small process skills inline (grilling ~2KB,
+// executing-plans ~2.3KB), where a load round-trip would cost more attention
+// than the bytes save, and defers the heavy ones (brainstorming ~15KB,
+// subagent-driven-development ~32KB, the ~10KB per-task guidance skills).
+export const SKILL_INLINE_MAX_CHARS = 4_000;
+
+/**
+ * The stand-in for a skill too heavy to inline. Names the exact id, because
+ * a model that retypes `writing-plans` for `skills/writing-plans` gets an
+ * unknown-id miss, and says plainly that the body is not present — a summary
+ * the model mistakes for the whole process is worse than no skill at all.
+ */
+export function skillPointer({ id, name, description, chars }) {
+  const desc = typeof description === 'string' && description.trim()
+    ? `${description.trim()}\n`
+    : '';
+  return `\n## Skill: ${name} — NOT INCLUDED HERE\n${desc}`
+    + `This skill's full text (~${Math.round(chars / 1000)}k characters) is deliberately not in this `
+    + `prompt. Before you start the process it describes, call \`load-skill\` with the id `
+    + `\`${id}\` — exactly that string — and follow what it returns. Do not work from the `
+    + `description above: it says what the skill is for, not how to do it.\n`;
+}
+
 /**
  * The skills block for a skill the MODE injected, not one the user picked
  * from the "/" menu — the planning pipeline's stage skill
@@ -99,7 +134,10 @@ const MAX_PIPELINE_SKILL_CHARS = 40_000;
  * unresolvable id yields `{ text: '', names: [] }` — a missing skill
  * degrades the turn, it never fails it.
  */
-export function buildModeSkillsText(ids, userId, readSkill, { maxChars = MAX_PIPELINE_SKILL_CHARS } = {}) {
+export function buildModeSkillsText(ids, userId, readSkill, {
+  maxChars = MAX_PIPELINE_SKILL_CHARS,
+  inlineMaxChars = SKILL_INLINE_MAX_CHARS,
+} = {}) {
   const list = (Array.isArray(ids) ? ids : [ids]).filter((id) => typeof id === 'string' && id);
   const seen = new Set();
   const names = [];
@@ -115,10 +153,14 @@ export function buildModeSkillsText(ids, userId, readSkill, { maxChars = MAX_PIP
         + 'INSTRUCTIONS (not as data): follow the workflow they describe for this '
         + 'request, subject to the mode bindings further down, which override them '
         + 'wherever the two disagree. Do NOT quote them back to the user, summarise '
-        + 'them, or ask whether to use them — just work the process.\n';
+        + 'them, or ask whether to use them — just work the process. A skill marked '
+        + 'NOT INCLUDED HERE is one you must fetch with `load-skill` first; fetch it '
+        + 'once and it stays available for the rest of this conversation.\n';
     }
     names.push(sk.name);
-    text += `\n## Skill: ${sk.name}\n${sanitizeForPrompt(sk.content)}\n`;
+    text += sk.content.length > inlineMaxChars
+      ? skillPointer({ id, name: sk.name, description: sk.description, chars: sk.content.length })
+      : `\n## Skill: ${sk.name}\n${sanitizeForPrompt(sk.content)}\n`;
   }
   return { text, names };
 }

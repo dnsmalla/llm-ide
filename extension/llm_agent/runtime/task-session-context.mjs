@@ -9,6 +9,7 @@ import { resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { restrictsTools } from './mode-personas.mjs';
 import { classifyTaskType } from './task-skill-routing.mjs';
 import { readSkillInstructions } from '../skills/skill-library.mjs';
+import { SKILL_INLINE_MAX_CHARS, skillPointer } from '../../core/prompt-framing.mjs';
 
 /** Tasks + continueNeeded for one turn's HTTP/SSE response. */
 export function taskTurnResponse(userId, agentContext, mode) {
@@ -75,7 +76,19 @@ export function buildSessionTaskPromptBlock(userId, agentContext, mode) {
     const skillId = classifyTaskType(activeTask.title);
     const instructions = skillId ? readSkillInstructions(skillId, userId) : null;
     if (instructions) {
-      block += `\n\n## Guidance for your current task ("${activeTask.title}")\n${instructions.content}`;
+      // The per-task guidance skills are the heaviest thing in this block
+      // (systematic-debugging and test-driven-development are ~10KB each),
+      // and this block is rebuilt on every turn from whichever task is
+      // active — so inlining re-sent a different 10KB skill each time the
+      // work moved on. Announced instead, above the threshold: the model
+      // pulls it once with `load-skill` and it stays in the conversation.
+      block += `\n\n## Guidance for your current task ("${activeTask.title}")`;
+      block += instructions.content.length > SKILL_INLINE_MAX_CHARS
+        ? skillPointer({
+          id: skillId, name: instructions.name,
+          description: instructions.description, chars: instructions.content.length,
+        })
+        : `\n${instructions.content}`;
     }
   }
   return block;

@@ -135,7 +135,10 @@ export function readSkillInstructions(id, userId, { maxChars = MAX_SKILL_CHARS }
   try {
     const raw = readFileSync(entry.path, 'utf8');
     const cap = Number.isFinite(maxChars) && maxChars > 0 ? Math.min(maxChars, MAX_PIPELINE_SKILL_CHARS) : MAX_SKILL_CHARS;
-    return { id: entry.id, name: entry.name, content: raw.slice(0, cap) };
+    // `description` rides along for the deferred-skill pointer card
+    // (core/prompt-framing.mjs): a skill too heavy to inline is announced by
+    // name + description + id, and the model pulls the body with load-skill.
+    return { id: entry.id, name: entry.name, description: entry.description, content: raw.slice(0, cap) };
   } catch {
     return null;
   }
