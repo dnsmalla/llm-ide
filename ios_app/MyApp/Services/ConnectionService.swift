@@ -356,6 +356,23 @@ final class ConnectionService: ObservableObject {
                 guard let self, !Task.isCancelled else { return }
                 guard self.connectionStatus == .connected else { continue }
                 if Date().timeIntervalSince(self.lastAck) > Self.heartbeatTimeout {
+                    // Demo mode has no socket that can die: `DemoResponder`
+                    // is in-process and answers every heartbeat. The only way
+                    // to exceed the timeout here is the app having been
+                    // suspended in the background, so the gap is elapsed
+                    // wall-clock, not a dead peer — and tearing down on it
+                    // STRANDED the user. `scheduleReconnect` needs
+                    // `directIP`, which the demo deliberately has none of, so
+                    // it returns immediately; `ContentView` meanwhile keeps
+                    // showing the home screen (it routes on `isDemo`) and
+                    // both of its recovery paths skip demo on purpose. The
+                    // result was a live-looking screen with nothing behind
+                    // it and no way back — which an App Store reviewer who
+                    // backgrounds the app for half a minute would hit.
+                    if self.isDemo {
+                        self.lastAck = Date()
+                        continue
+                    }
                     // Connection is silently dead — force a reconnect.
                     self.invalidateSocket()
                     self.connectionStatus = .disconnected
