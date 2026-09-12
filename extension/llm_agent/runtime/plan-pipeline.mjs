@@ -155,6 +155,22 @@ const REPLY_BREVITY_CLAUSE =
   + 'Do not ask which execution mode to use either — the app picks inline vs '
   + 'subagent itself when the user presses Execute.';
 
+// Both plan skills open by QUESTIONING the user — that is the whole of
+// stage 1 — and the skills, written for a plain terminal agent, say to ask in
+// prose. Here prose is the wrong channel: this app renders an
+// `AskUserQuestion` call as an answerable card (header, 2-4 labelled options,
+// optional multi-select) whose answer returns to the model inside the SAME
+// turn. A question typed into the reply instead just ends the turn — the user
+// has to retype an answer in the composer, and the model then has to parse
+// prose into the decision it already knew how to enumerate.
+const QUESTION_CLAUSE =
+  '- **Ask with `AskUserQuestion`, never in prose.** Where the skill says to '
+  + 'ask your human partner, call that tool: the app draws an answerable card '
+  + 'and the answer returns inside this same turn. A question typed into your '
+  + 'reply only ends the turn. One call per round (up to 4 questions), each '
+  + 'with a header of at most 12 characters and 2-4 labelled options, your '
+  + 'recommendation first; set `multiSelect` when answers are not exclusive.';
+
 /**
  * The mode persona for a plan-like mode: a short binding block that frames
  * the injected stage-1 skill and names the stage transitions. Kept free of
@@ -179,6 +195,7 @@ export function buildPlanBinding(mode, { skillName } = {}) {
     + `call \`load-skill\` with \`${WRITE_SKILL_ID}\` and follow what it returns `
     + 'to write the implementation plan. Do not write the plan from memory, and '
     + 'do not load it before there is an approved design to turn into one.\n'
+    + `${QUESTION_CLAUSE}\n`
     + `${ARTIFACT_CLAUSE}\n`
     + `${REPLY_BREVITY_CLAUSE}\n`
     + `${FACTS_CLAUSE}\n`

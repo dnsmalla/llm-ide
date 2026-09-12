@@ -41,7 +41,17 @@ for (const mode of ['plan', 'assist_plan']) {
     assert.ok(!/❓/.test(persona), 'the question format belongs to the grilling skill, not the persona');
     // Bindings only — a small fraction of the 15-32 KB skills they frame.
     // A regression here means someone started re-describing the process.
-    assert.ok(persona.length < 3000, `binding should stay short, was ${persona.length} chars`);
+    //
+    // Raised 3000 → 3600 when the AskUserQuestion clause landed. The old
+    // bound had 11 characters of headroom left, so it had stopped measuring
+    // "is this still a binding?" and started meaning "nothing may be added".
+    // What it is really guarding against is PARAPHRASE of the skill's own
+    // process; the clause that pushed it over describes how this app renders
+    // a question, which is precisely the environment fact a skill cannot
+    // know — see plan-pipeline.mjs's own definition of a binding. The two
+    // explicit paraphrase checks above are the sharper guard; this one stays
+    // as the blunt backstop it was meant to be.
+    assert.ok(persona.length < 3600, `binding should stay short, was ${persona.length} chars`);
   });
 }
 

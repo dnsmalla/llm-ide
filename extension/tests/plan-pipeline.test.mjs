@@ -88,6 +88,23 @@ test('plan binding keeps the saved document out of the chat reply', () => {
   }
 });
 
+test('plan binding routes the skills\' questions through AskUserQuestion', () => {
+  // Stage 1 of both plan skills IS questioning the user, and both are written
+  // for a plain terminal agent, so they say to ask in prose. Here that ends
+  // the turn with dead text: the app renders an AskUserQuestion call as a card
+  // the user answers by choosing, and the answer returns inside the same turn.
+  for (const mode of ['plan', 'assist_plan']) {
+    const binding = buildPlanBinding(mode, { skillName: 'brainstorming' });
+    assert.match(binding, /AskUserQuestion/);
+    assert.match(binding, /never in prose/);
+    // The card's own limits — a model that sends 9 options or a 30-character
+    // header gets a question the card cannot draw as specified.
+    assert.match(binding, /at most 12 characters/);
+    assert.match(binding, /2-4 labelled options/);
+    assert.match(binding, /multiSelect/);
+  }
+});
+
 test('execute binding tells the model which execution skill it got, and why', () => {
   const withAgents = buildExecuteBinding({ skillName: 'subagent-driven-development', hasSubagents: true });
   assert.match(withAgents, /ask-subagent/);
