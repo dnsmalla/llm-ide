@@ -7,7 +7,7 @@ applies_to: docs, extension, mac
 
 ## Goal
 
-Wire the pinned [dnsmalla/skills](https://github.com/dnsmalla/skills) kit so Claude Code, Cursor, Codex, `.agents`, and Gemini all see the same SKILL.md catalogue — with no vendored copies in this repo.
+Wire the pinned [dnsmalla/agent-kit](https://github.com/dnsmalla/agent-kit) kit so Claude Code, Cursor, Codex, `.agents`, and Gemini all see the same SKILL.md catalogue — with no vendored copies in this repo.
 
 ## Background
 
@@ -44,7 +44,7 @@ This calls `.skills/scripts/install.sh` with tools `claude cursor codex agents g
 If you prefer the marketplace instead of (or in addition to) project symlinks:
 
 ```text
-/plugin marketplace add dnsmalla/skills
+/plugin marketplace add dnsmalla/agent-kit
 /plugin install skills@dnsmalla-skills
 ```
 

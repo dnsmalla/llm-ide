@@ -2,7 +2,7 @@
 # Wire the central skills kit (.skills submodule) into every AI tool this
 # project uses: Claude Code, Cursor, Codex, open `.agents`, and Gemini.
 #
-# Skills are authored once in dnsmalla/skills and consumed here as relative
+# Skills are authored once in dnsmalla/agent-kit and consumed here as relative
 # symlinks (no vendored copies). Agent-loop tool DEFINITIONS still sync via
 # `cd extension && npm run sync:skills` — this script is for the SKILL.md
 # process/domain catalogue that Claude/Cursor/Codex discover.

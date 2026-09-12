@@ -11,4 +11,4 @@ If you are an automated agent looking for the "do not change these things" list,
 
 **GitLab auth:** one path only — LLM-IDE Settings → GitLab. Terminal agents use [`scripts/gitlab.sh`](scripts/gitlab.sh); see [`.cursor/rules/gitlab-single-auth.mdc`](.cursor/rules/gitlab-single-auth.mdc). Never ask for separate `glab auth login`.
 
-Process skills are **not** edited in this repo. Author them in [dnsmalla/skills](https://github.com/dnsmalla/skills), bump `.skills`, then run `bash scripts/install-skills.sh`.
+Process skills are **not** edited in this repo. Author them in [dnsmalla/agent-kit](https://github.com/dnsmalla/agent-kit), bump `.skills`, then run `bash scripts/install-skills.sh`.

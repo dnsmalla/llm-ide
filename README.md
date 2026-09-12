@@ -289,7 +289,7 @@ make docs-serve            # localhost:8000
 make docs-check            # links, frontmatter, API coverage
 ```
 
-Central agent skills live in the [`.skills`](https://github.com/dnsmalla/skills) submodule. Refresh after pull:
+Central agent skills live in the [`.skills`](https://github.com/dnsmalla/agent-kit) submodule. Refresh after pull:
 
 ```bash
 git submodule update --init --recursive .skills

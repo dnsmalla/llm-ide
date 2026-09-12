@@ -1,4 +1,4 @@
-// Locates the central skills repo (dnsmalla/skills) on disk. Pure path
+// Locates the central skills repo (dnsmalla/agent-kit) on disk. Pure path
 // resolution — no DB, no network — so it lives in core: the skill library
 // (llm_agent/skills), the LLM-sources registry (llm-sources/registry.mjs),
 // and project skill installation (kb/install-project-skills.mjs) all need it,

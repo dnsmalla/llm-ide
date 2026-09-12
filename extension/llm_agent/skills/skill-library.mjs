@@ -1,4 +1,4 @@
-// The central skills repo (dnsmalla/skills) as a discovery catalog for the
+// The central skills repo (dnsmalla/agent-kit) as a discovery catalog for the
 // chat "/" menu. The agent only LOADS the agent-globals/agent-tools families
 // (those have handlers it can invoke); but the repo is the center of all
 // skills, and the IDE surfaces the rest — the `skills/` library family and the

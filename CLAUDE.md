@@ -95,7 +95,7 @@ LLM-IDE is a **local-first AI meeting intelligence system** comprising four surf
 
 ```
 llm-ide/
-├── .skills/             # git submodule → dnsmalla/skills (single source of truth)
+├── .skills/             # git submodule → dnsmalla/agent-kit (single source of truth)
 ├── scripts/install-skills.sh  # symlink kit into Claude/Cursor/Codex/.agents/Gemini
 ├── extension/           # Chrome extension + local server
 │   ├── core/            # Framework-free primitives (config, utils, errors, logger)
@@ -166,7 +166,7 @@ llm-ide/
 ### Central skills (all agents)
 
 Process/domain `SKILL.md` skills are **not** authored in this repo. They live in the
-[`.skills`](https://github.com/dnsmalla/skills) submodule. After clone/pull:
+[`.skills`](https://github.com/dnsmalla/agent-kit) submodule. After clone/pull:
 
 ```bash
 git submodule update --init --recursive .skills

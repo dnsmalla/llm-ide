@@ -58,7 +58,7 @@ jobs:
       # `submodules: recursive` used to be set here on the belief that the
       # build needed the local checkout; it doesn't, and the flag also
       # pulls in EVERY other submodule including `.skills`
-      # (dnsmalla/skills) — unrelated to the mac build, and the reason
+      # (dnsmalla/agent-kit) — unrelated to the mac build, and the reason
       # this job's checkout step failed outright for days once that repo
       # stopped being reachable.
       - uses: actions/checkout@v7

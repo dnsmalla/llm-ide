@@ -2,7 +2,7 @@
 # Refresh the agent-loop tool DEFINITIONS from the central skills repo.
 #
 # The tool .md files (name/kind/schema + the prompt body) are authored centrally
-# in dnsmalla/skills (the `agent-tools/` family), NOT here. This mirrors them into
+# in dnsmalla/agent-kit (the `agent-tools/` family), NOT here. This mirrors them into
 # llm_agent/internal/skills/ so the server loads the canonical set. The read-tool
 # HANDLERS (llm_agent/runtime/handlers/*.mjs) stay local and are resolved by name.
 #
@@ -28,7 +28,7 @@ elif [ -d "$HOME/Desktop/skills/agent-tools" ]; then
 else
     cache="$HOME/.cache/dnsmalla-skills"
     if [ -d "$cache/.git" ]; then git -C "$cache" fetch --tags --depth 1 origin
-    else git clone --depth 1 https://github.com/dnsmalla/skills.git "$cache"; fi
+    else git clone --depth 1 https://github.com/dnsmalla/agent-kit.git "$cache"; fi
     # Optional pin for reproducible builds: SKILLS_REF=<tag|branch|sha>.
     # Defaults to the latest main.
     ref="${SKILLS_REF:-}"
