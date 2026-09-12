@@ -105,6 +105,43 @@ test('plan binding routes the skills\' questions through AskUserQuestion', () =>
   }
 });
 
+test('plan binding asks for ONE document per piece of work, on both engines', () => {
+  // The upstream skills write a design doc and then a plan that cites it; an
+  // earlier binding preserved that with "Design"/"Plan" title suffixes, which
+  // put the same work in two dated files under llm-doc/plans/ with nothing
+  // tying them together — and Execute only ever attached one of them.
+  for (const engine of ['legacy', 'agent']) {
+    for (const mode of ['plan', 'assist_plan']) {
+      const binding = buildPlanBinding(mode, { skillName: 'brainstorming', engine });
+      assert.match(binding, /One document per piece of work/);
+      assert.match(binding, /title is the file/);
+      assert.match(binding, /Never add "Design"\/"Plan"/);
+      assert.doesNotMatch(binding, /land in separate files/);
+    }
+  }
+});
+
+test('the Agent engine binding puts the document in the reply — it has no save-plan tool', () => {
+  // sdk/engine.mjs mounts no save-plan (registry.mjs has no such entry; the
+  // Mac's Save Plan action writes the reply). The legacy clauses told that
+  // engine to call a tool it lacked AND to keep the document out of the reply,
+  // its only channel.
+  const agent = buildPlanBinding('plan', { skillName: 'brainstorming', engine: 'agent' });
+  assert.match(agent, /The document is your reply/);
+  assert.match(agent, /starting with its `#` title on the first line/);
+  assert.doesNotMatch(agent, /Every document goes through `save-plan`/);
+  assert.doesNotMatch(agent, /Do not restate the document in your reply/);
+  assert.doesNotMatch(agent, /`save-plan` is the only action/);
+  // The dead-end question the upstream skill ends with is suppressed on
+  // both engines.
+  assert.match(agent, /Do not ask which execution mode/);
+
+  const legacy = buildPlanBinding('plan', { skillName: 'brainstorming' });
+  assert.match(legacy, /Every document goes through `save-plan`/);
+  assert.match(legacy, /Do not restate the document in your reply/);
+  assert.doesNotMatch(legacy, /The document is your reply/);
+});
+
 test('execute binding tells the model which execution skill it got, and why', () => {
   const withAgents = buildExecuteBinding({ skillName: 'subagent-driven-development', hasSubagents: true });
   assert.match(withAgents, /ask-subagent/);

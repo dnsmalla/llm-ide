@@ -125,19 +125,53 @@ const FACTS_CLAUSE =
 // Stated as a redirect rather than a prohibition: "you cannot commit" leaves
 // a model that was told to write a spec file with nowhere to put it, and it
 // then either invents a tool call or silently drops the artifact.
+//
+// ONE document per piece of work. The upstream skills produce two files (a
+// design doc, then a plan that cites it), and an earlier version of this
+// clause preserved that split with "Design"/"Plan" title suffixes. In this
+// app that put the same work in two dated files under llm-doc/plans/ with
+// nothing tying them together, and the Execute action only ever attached
+// one of them. The design notes and the implementation plan are now
+// SECTIONS of the same document, the title is its identity across the
+// design → write phases, and re-saving under that title updates the file in
+// place — which is what the Mac's resolver does with a repeated title.
+const ONE_DOCUMENT_CLAUSE =
+  '- **One document per piece of work.** Where the skill writes a design doc '
+  + 'and then a separate plan, write ONE document — design decisions first, '
+  + 'the implementation plan after. Fix the title at the design stage and keep '
+  + 'it when you write the plan: the title is the file, and saving under it '
+  + 'again updates that file in place. Never add "Design"/"Plan" to a title to '
+  + 'make two files.';
+
 const ARTIFACT_CLAUSE =
   '- **Every document goes through `save-plan`.** You have no filesystem '
   + 'write access, no git, and no worktrees here. Wherever the skill says to '
-  + 'write a file to a path (a design doc, a spec, the plan itself), call '
-  + '`save-plan` instead — it always writes into `llm-doc/plans/` in the open '
-  + 'project, derives the filename from the title you give it, and saves '
-  + 'immediately with no confirmation step. Give a design/spec a title ending '
-  + '"Design" and the implementation plan a title ending "Plan" so the two land '
-  + 'in separate files. Skip any instruction to `git commit`, create a branch, '
-  + 'or set up a worktree — say what you would have committed and move on. '
-  + 'Because the save is immediate and irreversible, call it only for a '
-  + 'document that is actually finished and approved, and say in your reply '
-  + 'that you saved it and where.';
+  + 'write a file to a path, call `save-plan` instead — it always writes into '
+  + '`llm-doc/plans/` in the open project, derives the filename from the '
+  + 'title, and saves immediately with no confirmation step. Skip any '
+  + 'instruction to `git commit`, create a branch, or set up a worktree — say '
+  + 'what you would have committed and move on. Because the save is immediate, '
+  + 'call it only for a document that is finished and approved, and say in '
+  + 'your reply that you saved it and where.';
+
+// The Agent engine mounts no save-plan tool: the plan IS the reply, and the
+// app's own Save Plan action writes the reply to llm-doc/plans/. Telling that
+// engine to "call save-plan" sent it looking for a tool it did not have, and
+// the brevity clause below — right for the legacy engine, where the document
+// travels in the tool call — told it to keep the document OUT of the one
+// channel it actually has. Hence a separate clause for that engine.
+const AGENT_ARTIFACT_CLAUSE =
+  '- **The document is your reply.** You have no file-writing tool here — no '
+  + '`save-plan`, no filesystem, no git, no worktrees. Wherever the skill says '
+  + 'to write a file, write the complete document as your reply instead, '
+  + 'starting with its `#` title on the first line and nothing before it: the '
+  + 'app saves that reply to `llm-doc/plans/` under the title, and a reply '
+  + 'that opens with chat prose gets the prose saved into the file. Skip any '
+  + 'instruction to `git commit`, create a branch, or set up a worktree. Keep '
+  + 'conversation and documents in separate turns: a turn that asks or '
+  + 'discusses is chat; a turn that delivers a document is the document, '
+  + 'whole, with no summary of it afterwards. Do not ask which execution mode '
+  + 'to use — the app picks inline vs subagent when the user presses Execute.';
 
 // The full plan reaches the user through the saved-plan card (title, file
 // path, collapsible body, Execute/Edit); a model that ALSO writes the plan
@@ -180,9 +214,14 @@ const QUESTION_CLAUSE =
  * `skillName` is the injected skill's frontmatter name, so the binding can
  * point at it by the same name the skill block is headed with.
  */
-export function buildPlanBinding(mode, { skillName } = {}) {
+export function buildPlanBinding(mode, { skillName, engine = 'legacy' } = {}) {
   const named = skillName ? `the **${skillName}** skill` : 'the skill';
   const modeLabel = mode === 'assist_plan' ? 'ASSIST_PLAN' : 'PLAN';
+  // Which channel carries the document differs per engine (see
+  // AGENT_ARTIFACT_CLAUSE); everything else in the binding is shared.
+  const artifactClauses = engine === 'agent'
+    ? `${ONE_DOCUMENT_CLAUSE}\n${AGENT_ARTIFACT_CLAUSE}\n`
+    : `${ONE_DOCUMENT_CLAUSE}\n${ARTIFACT_CLAUSE}\n${REPLY_BREVITY_CLAUSE}\n`;
   return `You are in ${modeLabel} mode. ${named.charAt(0).toUpperCase()}${named.slice(1)} `
     + 'in the skills block above is your process for this turn — follow it as '
     + 'written. The bindings below are the parts of this environment that skill '
@@ -196,12 +235,11 @@ export function buildPlanBinding(mode, { skillName } = {}) {
     + 'to write the implementation plan. Do not write the plan from memory, and '
     + 'do not load it before there is an approved design to turn into one.\n'
     + `${QUESTION_CLAUSE}\n`
-    + `${ARTIFACT_CLAUSE}\n`
-    + `${REPLY_BREVITY_CLAUSE}\n`
+    + artifactClauses
     + `${FACTS_CLAUSE}\n`
     + '- **No other write tool.** File edits, shell commands, git operations '
-    + 'and issue/PR actions are unavailable in this mode; `save-plan` is the '
-    + 'only action you can take.';
+    + 'and issue/PR actions are unavailable in this mode'
+    + (engine === 'agent' ? '.' : '; `save-plan` is the only action you can take.');
 }
 
 /**

@@ -396,7 +396,9 @@ export function buildEngineOptions(
 
   const persona = planExecute && pipelineSkillNames.length
     ? buildExecuteBinding({ skillName: pipelineSkillNames[0], hasSubagents })
-    : personaForMode(resolvedMode, { skillName: pipelineSkillNames[0] });
+    // `engine: 'agent'` — this engine mounts no save-plan tool; the plan is
+    // the reply and the Mac saves it, so the binding must say so.
+    : personaForMode(resolvedMode, { skillName: pipelineSkillNames[0], engine: 'agent' });
   const { allowedTools, disallowedTools } = v2ToolPolicyForMode(resolvedMode);
 
   // The wire convention is home-relative roots ("~/proj" — what the Mac
