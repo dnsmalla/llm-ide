@@ -64,10 +64,15 @@ struct AgentV2Usage: Sendable, Equatable, Codable {
     let inputTokens: Int
     let outputTokens: Int
     let cacheReadTokens: Int
+    /// Tokens written INTO the prompt cache (billed above the normal rate),
+    /// server API v50. Optional rather than required: the schema has our own
+    /// server always sending it, but an older server sends a usage event
+    /// without it, and a non-optional decode would drop that whole event.
+    let cacheCreationTokens: Int?
     let contextPercent: Double?
 
     enum CodingKeys: String, CodingKey {
-        case inputTokens, outputTokens, cacheReadTokens, contextPercent
+        case inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, contextPercent
     }
 }
 

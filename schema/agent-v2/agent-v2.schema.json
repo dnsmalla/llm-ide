@@ -69,12 +69,25 @@
     {
       "title": "usage",
       "additionalProperties": false,
-      "required": ["type", "inputTokens", "outputTokens", "cacheReadTokens"],
+      "required": ["type", "inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens"],
       "properties": {
         "type": { "const": "usage" },
         "inputTokens": { "type": "integer" },
         "outputTokens": { "type": "integer" },
-        "cacheReadTokens": { "type": "integer" }
+        "cacheReadTokens": { "type": "integer" },
+        "cacheCreationTokens": { "type": "integer" }
+      }
+    },
+    {
+      "title": "memory",
+      "description": "How much of this turn's prompt is the chat's own session memory. Emitted once, before the query starts, so the client's memory footnote is truthful on this engine (server API v50).",
+      "additionalProperties": false,
+      "required": ["type", "sessionFacts", "chars", "approxTokens"],
+      "properties": {
+        "type": { "const": "memory" },
+        "sessionFacts": { "type": "integer" },
+        "chars": { "type": "integer" },
+        "approxTokens": { "type": "integer" }
       }
     },
     {

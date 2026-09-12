@@ -74,6 +74,7 @@ extension AgentV2Event {
             // it — reported only when a fixture actually carries one, so the
             // runner sees the truth rather than the declaration.
             var names = ["inputTokens", "outputTokens", "cacheReadTokens"]
+            if payload.cacheCreationTokens != nil { names.append("cacheCreationTokens") }
             if payload.contextPercent != nil { names.append("contextPercent") }
             return names
 
