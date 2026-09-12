@@ -232,6 +232,28 @@ const RUN_BASH_MCP = `${MCP_PREFIX}run-bash`;
 const NATIVE_GATED_TOOLS = ['Edit', 'Write', 'Bash'];
 const NATIVE_GATED = new Set(NATIVE_GATED_TOOLS);
 
+// SDK built-ins this engine never offers. `canUseTool` ALREADY denies every
+// one of them (it default-denies anything that is not AskUserQuestion, a
+// `kind: 'act'` registry entry, or NATIVE_GATED) — so listing them here
+// removes no capability. What it removes is the ATTEMPT.
+//
+// Left in the model's tool list, they get called and then refused, and a
+// refusal is not something a model reliably reports: asked for a plan in
+// Execute mode, it called `Agent`, was denied, and answered "The agent is
+// analyzing the project structure and will come back with a step-by-step
+// strategy. You'll get a notification when it's ready." Nothing had been
+// started and no notification was coming. The user saw a promise, not an
+// error — and the transcript showed only "Using agent".
+//
+// Note `Agent` is the SDK's CURRENT name for what used to be `Task` (0.3.245
+// ships AgentInput/AgentOutput and no TaskInput). A rename here is a rename
+// in `ClaudeToolPresentation.verb` on the Mac too — see
+// docs/explanation/claude-linker.md.
+const V2_BUILTIN_DENIED_TOOLS = [
+  'Agent', 'TodoWrite', 'NotebookEdit',
+  'SlashCommand', 'ExitPlanMode', 'BashOutput', 'KillShell',
+];
+
 /**
  * The (allowedTools, disallowedTools) pair for `mode`.
  *
@@ -254,7 +276,10 @@ export function v2ToolPolicyForMode(mode) {
   if (!restrictsTools(mode)) {
     // run-bash is v2-retired in every mode: native Bash (canUseTool-gated)
     // replaces it, and offering both would be two shells with one gate.
-    return { allowedTools: [...V2_ALLOWED_TOOLS], disallowedTools: [RUN_BASH_MCP] };
+    return {
+      allowedTools: [...V2_ALLOWED_TOOLS],
+      disallowedTools: [RUN_BASH_MCP, ...V2_BUILTIN_DENIED_TOOLS],
+    };
   }
   const permitted = allowedToolNames(mode);
   const keep = (n) => !n.startsWith(MCP_PREFIX) || permitted.has(n.slice(MCP_PREFIX.length));
@@ -262,6 +287,7 @@ export function v2ToolPolicyForMode(mode) {
     ...V2_ALL_MCP_TOOLS.filter((n) => !keep(n)),
     RUN_BASH_MCP,
     ...NATIVE_GATED_TOOLS,
+    ...V2_BUILTIN_DENIED_TOOLS,
   ]);
   return { allowedTools: V2_ALLOWED_TOOLS.filter(keep), disallowedTools: [...disallowed] };
 }
@@ -610,7 +636,10 @@ export function resolveMaxBudgetUsd(userId, model, { usdCap = usdCapForModel, pr
 
 // Native tools outside the gated roster (and any unknown tool) stay denied —
 // a deny with a reason reads better to the model than a silent hang.
-const DENY_UNKNOWN_TOOL = 'This tool is not enabled in the LLM-IDE chat engine.';
+const DENY_UNKNOWN_TOOL = 'This tool is not enabled in the LLM-IDE chat engine. '
+  + 'Nothing was started and nothing is running in the background, so do not tell the user '
+  + 'that work is under way or that a result will arrive later. Either do the task with the '
+  + 'tools you have, or say plainly that you cannot and why.';
 const DENY_NO_ANSWER = 'The user did not answer the question.';
 
 // Cap for every string carried in approval_request.args — the payload is a

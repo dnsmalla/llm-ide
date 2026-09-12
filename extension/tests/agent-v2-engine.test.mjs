@@ -91,7 +91,19 @@ test('allowlist is read-only + llmide; skills inject via append; cwd + dirs from
     assert.ok(!queryOptions.allowedTools.includes(act), `${act} must NOT be pre-approved — it has to reach canUseTool`);
   }
   // run-bash is hard-disallowed in every mode: native Bash replaces it on v2.
-  assert.deepEqual(queryOptions.disallowedTools, ['mcp__llmide__run-bash']);
+  assert.ok(queryOptions.disallowedTools.includes('mcp__llmide__run-bash'));
+  // SDK built-ins this engine never offers. canUseTool already denies each of
+  // them, so this removes no capability — it removes the ATTEMPT. Left
+  // visible, `Agent` was called in Execute mode, denied, and the model
+  // covered for the refusal with "You'll get a notification when it's ready"
+  // over work that had never started.
+  for (const builtin of ['Agent', 'TodoWrite', 'NotebookEdit',
+                         'SlashCommand', 'ExitPlanMode', 'BashOutput', 'KillShell']) {
+    assert.ok(queryOptions.disallowedTools.includes(builtin),
+      `${builtin} must not be offered to the model — canUseTool denies it anyway`);
+    assert.ok(!queryOptions.allowedTools.includes(builtin),
+      `${builtin} must never be pre-approved`);
+  }
   assert.equal(queryOptions.cwd, WS);
   assert.deepEqual(queryOptions.additionalDirectories, ['/tmp/r']);
   assert.match(queryOptions.systemPrompt.append, /One/);

@@ -55,11 +55,18 @@ enum ClaudeToolPresentation {
         case "grep":          return "Searching"
         case "websearch":     return "Searching the web"
         case "webfetch":      return "Fetching a page"
-        // Real SDK tool names, currently unreachable: neither is in
-        // `V2_BUILTIN_ALLOWED_TOOLS` (engine.mjs), so `canUseTool` denies them.
-        // Kept rather than deleted — allowing either server-side should not
-        // also silently degrade its label to the "Using Task" fallback.
-        case "task":          return "Delegating to a subagent"
+        // Real SDK tool names the engine does not offer: none is in
+        // `V2_BUILTIN_ALLOWED_TOOLS` (engine.mjs), so `canUseTool` denies
+        // them, and `V2_BUILTIN_DENIED_TOOLS` now also keeps them out of the
+        // model's tool list. Kept rather than deleted — allowing one
+        // server-side should not also silently degrade its label to the
+        // "Using agent" fallback.
+        //
+        // `agent` is the SDK's CURRENT name for `task` (0.3.245 ships
+        // AgentInput/AgentOutput and no TaskInput). `task` stays for
+        // transcripts recorded before the rename; dropping it would turn
+        // every old delegation row into a wire name.
+        case "agent", "task": return "Delegating to a subagent"
         case "todowrite":     return "Planning"
         case "bashoutput":    return "Reading command output"
         case "killshell":     return "Stopping a command"
