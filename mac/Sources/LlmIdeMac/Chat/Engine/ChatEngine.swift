@@ -1301,7 +1301,14 @@ final class ChatEngine {
             tracker.phase = .finished
         }
         agent.planExecution = tracker
-        if tracker.phase != .running { onPlanExecutionSettled() }
+        // Release only when the run is genuinely OVER. A task the agent
+        // marked `.failed` settles the tracker even mid-run, and when
+        // `continueNeeded` is true `finishStreamingTurn` is about to send
+        // "Continue working on your pending tasks." — handing the picker back
+        // now would send that continuation as `auto`, to be re-classified,
+        // possibly into a tool-restricted mode that cannot finish the edits
+        // it is in the middle of.
+        if tracker.phase != .running, continueNeeded != true { onPlanExecutionSettled() }
     }
 
 }

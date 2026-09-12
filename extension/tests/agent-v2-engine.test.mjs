@@ -92,15 +92,24 @@ test('allowlist is read-only + llmide; skills inject via append; cwd + dirs from
   }
   // run-bash is hard-disallowed in every mode: native Bash replaces it on v2.
   assert.ok(queryOptions.disallowedTools.includes('mcp__llmide__run-bash'));
-  // SDK built-ins this engine never offers. canUseTool already denies each of
-  // them, so this removes no capability — it removes the ATTEMPT. Left
-  // visible, `Agent` was called in Execute mode, denied, and the model
-  // covered for the refusal with "You'll get a notification when it's ready"
-  // over work that had never started.
-  for (const builtin of ['Agent', 'TodoWrite', 'NotebookEdit',
-                         'SlashCommand', 'ExitPlanMode', 'BashOutput', 'KillShell']) {
-    assert.ok(queryOptions.disallowedTools.includes(builtin),
-      `${builtin} must not be offered to the model — canUseTool denies it anyway`);
+  // `tools` is the ALLOWLIST of built-ins that exist for the turn. canUseTool
+  // already default-denies everything outside it — but a tool the model can
+  // SEE is a tool it will CALL, and it does not reliably report the refusal:
+  // `Agent` was called in Execute mode, denied, and answered "You'll get a
+  // notification when it's ready" over work that had never started.
+  assert.deepEqual(queryOptions.tools,
+    ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Edit', 'Write', 'Bash', 'AskUserQuestion']);
+  // A sample of what 0.3.245 actually ships, none of which this engine
+  // supports. Asserted against `tools` rather than a denylist precisely
+  // because a denylist goes stale: the first version of this named
+  // `SlashCommand`, which does not exist in this SDK, and missed every name
+  // below, which does.
+  for (const builtin of ['Agent', 'Skill', 'TaskCreate', 'TaskUpdate', 'TaskList',
+                         'Monitor', 'Workflow', 'ReportFindings', 'EnterPlanMode',
+                         'ExitPlanMode', 'TodoWrite', 'NotebookEdit', 'Artifact',
+                         'CronCreate', 'TaskOutput', 'TaskStop']) {
+    assert.ok(!queryOptions.tools.includes(builtin),
+      `${builtin} must not exist for the turn — the model must never see it`);
     assert.ok(!queryOptions.allowedTools.includes(builtin),
       `${builtin} must never be pre-approved`);
   }
@@ -124,6 +133,16 @@ test('v2ToolPolicyForMode: restricted modes disallow the native write/shell tool
   for (const t of ['Edit', 'Write', 'Bash']) assert.ok(plan.disallowedTools.includes(t), t);
   const execute = v2ToolPolicyForMode('execute');
   for (const t of ['Edit', 'Write', 'Bash']) assert.ok(!execute.disallowedTools.includes(t), t);
+  // And they do not EXIST for a restricted mode — belt (disallowedTools) plus
+  // braces (tools), so the model is never shown a write tool it would be
+  // refused, and never has to narrate the refusal.
+  for (const t of ['Edit', 'Write', 'Bash']) assert.ok(!plan.tools.includes(t), t);
+  for (const t of ['Edit', 'Write', 'Bash']) assert.ok(execute.tools.includes(t), t);
+  // AskUserQuestion survives every mode: canUseTool is built around it, and
+  // dropping it would silently remove every approval prompt.
+  for (const m of ['plan', 'assist_plan', 'review', 'document', 'execute']) {
+    assert.ok(v2ToolPolicyForMode(m).tools.includes('AskUserQuestion'), m);
+  }
 });
 
 // --- Composition details the brief's tests don't pin -------------------------

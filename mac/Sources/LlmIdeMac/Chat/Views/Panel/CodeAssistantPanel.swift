@@ -514,11 +514,22 @@ struct CodeAssistantPanel: View {
         // Fresh budget of auto-run git ops for this user turn (commit→push→…).
         // Panel-owned because `autoChainPendingAction` — which spends it — is.
         engine.onTurnStart = { autoGitOpsThisTurn = 0 }
-        engine.onPlanReviewReleased = { releasePlanReviewTurn() }
+        // Both hooks below reach into PANEL state (the mode picker, the
+        // attachment bar) from an ENGINE callback, and `adoptEngine` rewires
+        // only the incoming engine — a parked background engine keeps the
+        // closure it was wired with and keeps running its turns. Without this
+        // identity check, chat A's run settling off-screen would flip the
+        // DISPLAYED chat B's mode picker, or strip B's attachments.
+        let wiredID = ObjectIdentifier(engine)
+        engine.onPlanReviewReleased = {
+            guard ObjectIdentifier(engine) == wiredID else { return }
+            releasePlanReviewTurn()
+        }
         // The run is over — hand the picker back so the next message is
         // classified on its own merits. Releases ONLY the modes a run sets;
         // a mode the user picked by hand is untouched (see releaseStickyMode).
         engine.onPlanExecutionSettled = {
+            guard ObjectIdentifier(engine) == wiredID else { return }
             releaseStickyMode(from: [.execute, .plan, .assistPlan])
         }
         engine.onRecordPrompt = { _ = session.record(prompt: $0) }

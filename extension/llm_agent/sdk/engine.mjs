@@ -232,27 +232,37 @@ const RUN_BASH_MCP = `${MCP_PREFIX}run-bash`;
 const NATIVE_GATED_TOOLS = ['Edit', 'Write', 'Bash'];
 const NATIVE_GATED = new Set(NATIVE_GATED_TOOLS);
 
-// SDK built-ins this engine never offers. `canUseTool` ALREADY denies every
-// one of them (it default-denies anything that is not AskUserQuestion, a
-// `kind: 'act'` registry entry, or NATIVE_GATED) — so listing them here
-// removes no capability. What it removes is the ATTEMPT.
+// The base set of SDK built-ins this engine exposes.
 //
-// Left in the model's tool list, they get called and then refused, and a
-// refusal is not something a model reliably reports: asked for a plan in
-// Execute mode, it called `Agent`, was denied, and answered "The agent is
-// analyzing the project structure and will come back with a step-by-step
-// strategy. You'll get a notification when it's ready." Nothing had been
-// started and no notification was coming. The user saw a promise, not an
-// error — and the transcript showed only "Using agent".
+// An ALLOWLIST, via the SDK's own `tools` option — whose sibling `allowedTools`
+// doc says exactly this: "To restrict which tools are available, use the
+// `tools` option instead." `allowedTools` only means "auto-allow without
+// prompting"; it never hid anything.
 //
-// Note `Agent` is the SDK's CURRENT name for what used to be `Task` (0.3.245
-// ships AgentInput/AgentOutput and no TaskInput). A rename here is a rename
-// in `ClaudeToolPresentation.verb` on the Mac too — see
-// docs/explanation/claude-linker.md.
-const V2_BUILTIN_DENIED_TOOLS = [
-  'Agent', 'TodoWrite', 'NotebookEdit',
-  'SlashCommand', 'ExitPlanMode', 'BashOutput', 'KillShell',
-];
+// Why it matters: `canUseTool` default-denies everything outside this set, but
+// a tool the model can SEE is a tool the model will CALL, and a refusal is not
+// something a model reliably reports. Asked for a plan in Execute mode, it
+// called `Agent`, was denied, and answered "The agent is analyzing the project
+// structure and will come back with a step-by-step strategy. You'll get a
+// notification when it's ready." Nothing had started and no notification was
+// coming; the transcript showed only "Using agent".
+//
+// This was first written as a denylist of the built-ins we refuse. That was
+// the same hand-maintained-list mistake the mcp names above were derived to
+// avoid, and it was already wrong when written: it named `SlashCommand`,
+// which 0.3.245 does not ship, and missed the ~35 that it does (Skill,
+// TaskCreate/Get/Update/List, Monitor, Workflow, ReportFindings,
+// EnterPlanMode, Artifact, Cron*, …), every one of which stayed visible and
+// could reproduce the same fabrication. An allowlist cannot go stale: a new
+// SDK built-in is invisible here until someone adds it deliberately.
+//
+// AskUserQuestion is listed because `canUseTool` is built around it (it is the
+// approval round-trip's own transport); dropping it would silently remove
+// every approval prompt.
+const V2_BUILTIN_TOOLS = [...V2_BUILTIN_ALLOWED_TOOLS, ...NATIVE_GATED_TOOLS, 'AskUserQuestion'];
+// A restricted mode (plan/assist_plan/review/document) never gets the native
+// write/shell tools at all — not even to have them denied.
+const V2_BUILTIN_TOOLS_RESTRICTED = [...V2_BUILTIN_ALLOWED_TOOLS, 'AskUserQuestion'];
 
 /**
  * The (allowedTools, disallowedTools) pair for `mode`.
@@ -278,7 +288,8 @@ export function v2ToolPolicyForMode(mode) {
     // replaces it, and offering both would be two shells with one gate.
     return {
       allowedTools: [...V2_ALLOWED_TOOLS],
-      disallowedTools: [RUN_BASH_MCP, ...V2_BUILTIN_DENIED_TOOLS],
+      disallowedTools: [RUN_BASH_MCP],
+      tools: [...V2_BUILTIN_TOOLS],
     };
   }
   const permitted = allowedToolNames(mode);
@@ -287,9 +298,12 @@ export function v2ToolPolicyForMode(mode) {
     ...V2_ALL_MCP_TOOLS.filter((n) => !keep(n)),
     RUN_BASH_MCP,
     ...NATIVE_GATED_TOOLS,
-    ...V2_BUILTIN_DENIED_TOOLS,
   ]);
-  return { allowedTools: V2_ALLOWED_TOOLS.filter(keep), disallowedTools: [...disallowed] };
+  return {
+    allowedTools: V2_ALLOWED_TOOLS.filter(keep),
+    disallowedTools: [...disallowed],
+    tools: [...V2_BUILTIN_TOOLS_RESTRICTED],
+  };
 }
 
 // The in-process llmide server owns this name; a user server answering to it
@@ -427,7 +441,7 @@ export function buildEngineOptions(
     // `engine: 'agent'` — this engine mounts no save-plan tool; the plan is
     // the reply and the Mac saves it, so the binding must say so.
     : personaForMode(resolvedMode, { skillName: pipelineSkillNames[0], engine: 'agent', planWrite });
-  const { allowedTools, disallowedTools } = v2ToolPolicyForMode(resolvedMode);
+  const { allowedTools, disallowedTools, tools } = v2ToolPolicyForMode(resolvedMode);
 
   // The wire convention is home-relative roots ("~/proj" — what the Mac
   // sends); every READ handler expands them (graphkit/memory's expandTilde,
@@ -562,6 +576,9 @@ export function buildEngineOptions(
     // hard-disallowed, matching legacy's dispatch filter for the same mode.
     allowedTools,
     ...(disallowedTools.length ? { disallowedTools } : {}),
+    // The base set of built-ins that EXIST for this turn — see
+    // V2_BUILTIN_TOOLS. Fresh array per call, like allowedTools above.
+    tools,
     systemPrompt: { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n') },
     ...(typeof model === 'string' && model ? { model } : {}),
   };

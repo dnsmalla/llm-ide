@@ -68,8 +68,12 @@ enum ClaudeToolPresentation {
         // every old delegation row into a wire name.
         case "agent", "task": return "Delegating to a subagent"
         case "todowrite":     return "Planning"
-        case "bashoutput":    return "Reading command output"
-        case "killshell":     return "Stopping a command"
+        // Renamed in the SDK like `task`→`agent`: 0.3.245 ships TaskOutput /
+        // TaskStop, not BashOutput / KillShell (which survive only through
+        // the SDK's legacy alias map). Both spellings are kept so a
+        // transcript recorded either side of the rename reads the same.
+        case "taskoutput", "bashoutput":  return "Reading command output"
+        case "taskstop", "killshell":     return "Stopping a command"
         case "slashcommand":  return "Running a command"
         case "exitplanmode":  return "Finishing the plan"
         case .some(let name): return "Using \(name)"
