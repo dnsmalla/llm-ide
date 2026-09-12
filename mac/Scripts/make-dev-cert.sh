@@ -253,7 +253,7 @@ main() {
 
   echo "$IDENTITY_NAME" > "$IDENTITY_FILE"
   echo -e "${GREEN}[make-dev-cert]${NC} done — Scripts/sign.sh will now sign with \"$IDENTITY_NAME\" automatically."
-  echo -e "${GREEN}[make-dev-cert]${NC} rebuild once (Scripts/build_app.sh) and approve the ONE keychain prompt with \"Always Allow\" — it will stick across future rebuilds."
+  echo -e "${GREEN}[make-dev-cert]${NC} rebuild once (Scripts/build.sh, or build_app.sh one level up) and approve the ONE keychain prompt with \"Always Allow\" — it will stick across future rebuilds."
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
