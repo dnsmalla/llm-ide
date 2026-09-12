@@ -210,6 +210,10 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         var planCardAction: PlanCardAction?
         /// Compact label for a plan-execute user turn (hides the long prompt in chat).
         var planExecuteDisplay: String?
+        /// Compact label for a "Write full plan" user turn — and the marker
+        /// `autoChainPendingAction` reads to save that turn's reply back into
+        /// the chat's plan file without a second click.
+        var planWriteDisplay: String?
     }
 
     /// User choice on a saved-plan card — persisted so reloaded sessions
@@ -217,6 +221,10 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     enum PlanCardAction: String, Codable, Equatable, Sendable {
         case execute
         case edit
+        /// "Write full plan": stay in a plan mode and have the agent turn the
+        /// saved design into the detailed implementation plan, which is then
+        /// saved back into the SAME file (see `CodeAssistantPanel.sessionPlanPath`).
+        case write
     }
 
     struct RetryPayload: Codable, Equatable, Sendable {

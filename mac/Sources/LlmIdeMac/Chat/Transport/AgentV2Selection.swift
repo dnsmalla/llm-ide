@@ -156,24 +156,34 @@ public enum AgentV2Selection {
     /// planner's questions — and the turn that finally CONTAINS the plan —
     /// resolve to something else.
     ///
-    /// The SHAPE half is not optional, and that is the correction here. Being
-    /// in plan mode used to be sufficient on its own, so the planner's very
-    /// first move — a clarifying question, which is what both plan skills
-    /// open with — arrived under a "Save Plan" button offering to write that
-    /// question to `llm-doc/plans/`. The order is question → answer → plan →
-    /// save, and the row belongs at the end of it: it appears when there is a
-    /// plan to save (`PlanEditPolicy.looksLikePlan`), not when a plan has
-    /// merely been asked for.
+    /// The SHAPE half is not optional. Being in plan mode used to be
+    /// sufficient on its own, so the planner's very first move — a clarifying
+    /// question, which is what both plan skills open with — arrived under a
+    /// "Save Plan" button offering to write that question to `llm-doc/plans/`.
+    /// The order is question → answer → plan → save, and the row belongs at
+    /// the end of it: it appears when there is a plan to save
+    /// (`PlanEditPolicy.looksLikePlan`), not when a plan has merely been
+    /// asked for.
+    ///
+    /// Outside a plan mode the row is offered only while the chat has NO plan
+    /// file yet (`sessionHasSavedPlan`). That is the flap case it exists for
+    /// — the plan arriving on a turn the server resolved to execute — and it
+    /// ends the moment a plan is saved: work after that is execution, and
+    /// execution narration ("Phase 1 …", numbered deliverables) is exactly
+    /// what a shape check cannot tell from a plan. It once produced a plan
+    /// file titled "📋 Deliverables Created" whose body was the agent
+    /// describing what it had just done.
     /// `public` for the same reason the PlanEditPolicy rules are: this is
     /// asserted by `chat-contract-lab`, a separate target, and this toolchain
     /// has no XCTest (so `@testable import` is not available).
     public static func showsSavePlanAction(mode: String?, v2Selected: Bool, hasPendingTool: Bool,
                                     planSaved: Bool = false,
                                     sessionIsPlanning: Bool = false,
-                                    contentLooksLikePlan: Bool = false) -> Bool {
+                                    contentLooksLikePlan: Bool = false,
+                                    sessionHasSavedPlan: Bool = false) -> Bool {
         guard v2Selected, !hasPendingTool, !planSaved, contentLooksLikePlan else { return false }
         if let mode, planLikeModes.contains(mode) { return true }
-        return sessionIsPlanning
+        return sessionIsPlanning && !sessionHasSavedPlan
     }
 
     /// Whether this transcript has ever run a plan-like turn — the session

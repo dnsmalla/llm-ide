@@ -8,9 +8,76 @@ import Foundation
 /// automatically the moment it's proposed (see `ChatAutoChainPolicy`).
 extension CodeAssistantPanel {
 
-    /// Resolve a `save-plan` proposal against the open project.
+    /// Resolve a `save-plan` proposal against the open project — into the
+    /// chat's existing plan file when it has one.
     func resolvePlan(_ args: PendingTool.SavePlanArgs) -> Result<ProposedPlan, ProposedPlanError> {
-        ProposedPlanResolver.resolve(args: args, projectRoot: activeRepoRoot)
+        ProposedPlanResolver.resolve(args: args, projectRoot: activeRepoRoot, existingPath: sessionPlanPath)
+    }
+
+    /// The file this chat's plan lives in: the newest successful saved-plan
+    /// card's path, or nil before the first save. One chat, one plan file —
+    /// the design, the plan written from it and every revision share it.
+    @MainActor
+    var sessionPlanPath: String? {
+        engine.messages.last(where: {
+            $0.role == .toolResult && $0.toolResult?.kind == .plan && $0.toolResult?.isFailure == false
+        })?.toolResult?.url
+    }
+
+    /// The PlanSavedCard's "Write full plan" action — the step between the
+    /// saved design and Execute that did not exist: Execute jumped straight
+    /// from a design to implementation, and the plan-writing stage the
+    /// bindings describe ("once your human partner has approved the design,
+    /// load writing-plans") never ran, because pressing Execute is what left
+    /// plan mode. Clicking this IS the approval: stay in a plan mode, attach
+    /// the saved design, and fire the write turn. The reply is the full
+    /// document; `autoChainPendingAction` saves it back into the same file.
+    @MainActor
+    func writeFullPlan(_ payload: ChatMessage.ToolResultPayload, messageId: UUID) {
+        markPlanCardAction(.write, for: messageId)
+        guard engine.agent.pendingTool == nil else {
+            clearPlanCardAction(for: messageId)
+            attachNotice = "Resolve the pending action card first, then write the plan."
+            return
+        }
+        if modelState.selectedMode != .plan && modelState.selectedMode != .assistPlan {
+            modelState.selectedMode = .plan
+        }
+        // Work from the document, not from memory of the chat: attach the
+        // saved file, or the card's copy of it when the file is gone.
+        var attached = false
+        if let path = payload.url {
+            switch addFile(url: URL(fileURLWithPath: path)) {
+            case .added, .duplicate: attached = true
+            case .notText, .unreadable: break
+            }
+        }
+        let content = payload.planContent ?? ""
+        if !attached, !content.isEmpty {
+            let label = "plan: \(payload.planTitle ?? "saved plan")"
+            if !attachmentState.attachments.contains(where: { $0.path == label }) {
+                attachmentState.attachments.append(LlmIdeAPIClient.CodeAttachment(path: label, content: content))
+            }
+        }
+        let title = payload.planTitle ?? Self.planTitle(from: content)
+        let outgoing = Self.writePlanMessage(title: title)
+        let userMeta = ChatMessage.Metadata(planWriteDisplay: "Write full plan: \(title)")
+        let attachmentsSnapshot = attachmentState.attachments
+        if engine.busy {
+            engine.enqueue(outgoing, skillIds: [], userMetadata: userMeta, attachments: attachmentsSnapshot)
+        } else {
+            engine.startTurn(outgoing, skillIds: [], userMetadata: userMeta, attachments: attachmentsSnapshot)
+        }
+    }
+
+    /// The canned instruction "Write full plan" sends. Names the title so the
+    /// document keeps it — the title is the file — and says not to implement,
+    /// because the turn runs in a plan mode where that would be refused anyway.
+    static func writePlanMessage(title: String) -> String {
+        "The design \"\(title)\" (attached) is approved. Write the full implementation plan for it now: "
+        + "load the writing-plans skill as your bindings describe and follow it. Deliver the complete "
+        + "document as your reply, under the same title, with the design sections kept and the plan "
+        + "sections added after them, so it is saved back into the same file. Do not start implementing."
     }
 
     /// Save the currently pending plan, with no user interaction. Called from

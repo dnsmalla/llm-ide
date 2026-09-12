@@ -290,6 +290,23 @@ extension CodeAssistantPanel {
         _ pendingTool: PendingTool?,
         usage: LlmIdeAPIClient.CodeAssistResponse.Usage?
     ) async {
+        // Write-phase auto-save. A turn the PlanSavedCard's "Write full plan"
+        // action fired delivers the document as its reply, and clicking that
+        // button WAS the go-ahead to save it — into the chat's existing plan
+        // file (`resolvePlan` → `sessionPlanPath`), which is the whole point
+        // of the step. Gated on shape: a reply that asks a question first is
+        // chat, and is left alone for the normal row to handle once the plan
+        // itself arrives. Only the turn that write message started qualifies;
+        // a message the user typed afterwards resets `lastUser`.
+        if pendingTool == nil,
+           let lastUser = engine.messages.last(where: { $0.role == .user }),
+           lastUser.metadata?.planWriteDisplay != nil,
+           let reply = engine.messages.last(where: { $0.role == .assistant }),
+           reply.status == .done,
+           reply.metadata?.planSaved != true,
+           PlanEditPolicy.looksLikePlan(content: reply.content) {
+            await savePlanFromMessage(reply)
+        }
         // Data-loss guard input: if the server CUT this file to fit the
         // prompt, the agent only saw its head — auto-overwriting with the
         // "full" rewrite would silently drop the tail. matchingAttachment

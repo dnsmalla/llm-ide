@@ -360,6 +360,31 @@ do {
            "already-saved outranks a missing message")
 }
 
+// PlanEditPolicy.reusablePlanPath — one chat, one plan file. Every save
+// after the first goes back into the file the chat's saved-plan card points
+// at, instead of minting `<today>-<slug-of-first-heading>.md` again — which
+// is how a design and the plan written from it ended up as two unrelated
+// files, only one of which Execute attached.
+do {
+    let plans = "/Users/me/Proj/llm-doc/plans"
+    expect(PlanEditPolicy.reusablePlanPath(existing: nil, plansDir: plans) == nil,
+           "no saved plan yet → a fresh dated file")
+    expect(PlanEditPolicy.reusablePlanPath(existing: "\(plans)/2026-09-12-dead-code.md", plansDir: plans)
+               == "\(plans)/2026-09-12-dead-code.md",
+           "the chat's plan file is reused as-is")
+    expect(PlanEditPolicy.reusablePlanPath(existing: "\(plans)/2026-09-12-dead-code.md", plansDir: plans + "/")
+               == "\(plans)/2026-09-12-dead-code.md",
+           "a trailing slash on the folder changes nothing")
+    expect(PlanEditPolicy.reusablePlanPath(existing: "/Users/me/Other/llm-doc/plans/2026-09-12-dead-code.md", plansDir: plans) == nil,
+           "a card from a chat since re-pointed at another project must not write into the old one")
+    expect(PlanEditPolicy.reusablePlanPath(existing: "\(plans)/sub/2026-09-12-dead-code.md", plansDir: plans) == nil,
+           "a subfolder is not a path this app wrote")
+    expect(PlanEditPolicy.reusablePlanPath(existing: "\(plans)/notes.txt", plansDir: plans) == nil,
+           "only a markdown file is a plan file")
+    expect(PlanEditPolicy.reusablePlanPath(existing: "", plansDir: plans) == nil,
+           "an empty path is no path")
+}
+
 // PlanEditPolicy.looksLikePlan — the CONTENT half of the plan row's
 // visibility. This is what fixes the reported "the plan arrived with no Save
 // button": the server-resolved mode is stamped per turn and flaps across a
@@ -542,6 +567,22 @@ do {
         sessionIsPlanning: false,
         contentLooksLikePlan: true) == false,
            "a plan-shaped reply in a chat that never planned is still not offered")
+
+    // After the chat has its plan file, work outside a plan mode is
+    // execution, and its narration is plan-shaped. This is the rule that
+    // stops a second file ("📋 Deliverables Created") being minted from it.
+    expect(AgentV2Selection.showsSavePlanAction(
+        mode: "execute", v2Selected: true, hasPendingTool: false,
+        sessionIsPlanning: true, contentLooksLikePlan: true, sessionHasSavedPlan: true) == false,
+           "execute-mode narration after a saved plan is not offered as a plan")
+    expect(AgentV2Selection.showsSavePlanAction(
+        mode: "execute", v2Selected: true, hasPendingTool: false,
+        sessionIsPlanning: true, contentLooksLikePlan: true, sessionHasSavedPlan: false) == true,
+           "before any save, the plan arriving on an execute-resolved turn is still offered (the flap case)")
+    expect(AgentV2Selection.showsSavePlanAction(
+        mode: "plan", v2Selected: true, hasPendingTool: false,
+        sessionIsPlanning: true, contentLooksLikePlan: true, sessionHasSavedPlan: true) == true,
+           "a plan-mode revision after a save is offered — it goes into the same file")
 
     // Fenced blocks are QUOTED text, not structure. Without this the shell
     // script below supplies both signals — `#` comments and `1)` lines — and

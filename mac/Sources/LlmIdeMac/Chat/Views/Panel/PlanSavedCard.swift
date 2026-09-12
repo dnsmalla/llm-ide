@@ -20,6 +20,10 @@ struct PlanSavedCard: View {
     let onExecute: () -> Void
     /// Wraps `CodeAssistantPanel.editSavedPlanInChat(_:messageId:)`.
     let onEdit: () -> Void
+    /// Wraps `CodeAssistantPanel.writeFullPlan(_:messageId:)` — the step
+    /// between a saved design and Execute: write the detailed plan into
+    /// this same file.
+    let onWrite: () -> Void
 
     @EnvironmentObject var theme: ThemeStore
     @State private var expanded = false
@@ -156,15 +160,30 @@ struct PlanSavedCard: View {
     @ViewBuilder
     private var actions: some View {
         if let action = effectiveAction {
-            Label(
-                action == .execute ? "Executing plan…" : "Editing in chat…",
-                systemImage: action == .execute ? "bolt.fill" : "pencil"
-            )
+            let (text, icon): (String, String) = switch action {
+            case .execute: ("Executing plan…", "bolt.fill")
+            case .edit: ("Editing in chat…", "pencil")
+            case .write: ("Writing the full plan…", "doc.text")
+            }
+            Label(text, systemImage: icon)
             .font(.system(size: 11))
             .foregroundStyle(theme.current.textMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             HStack(spacing: 8) {
+                // Design → write → execute: this is the middle step. Not the
+                // prominent button, because a card can also hold the finished
+                // plan, and there Execute is the next step.
+                Button {
+                    localAction = .write
+                    onWrite()
+                } label: {
+                    Label("Write full plan", systemImage: "doc.text")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Turn this design into the detailed implementation plan, saved into this same file")
                 Button {
                     localAction = .execute
                     onExecute()

@@ -194,6 +194,29 @@ public enum PlanEditPolicy {
         "フェーズ", "ステップ", "ステージ", "段階", "手順",
     ]
 
+    /// The file a plan save should write INTO, or nil to mint a fresh dated
+    /// file. `existing` is the path the chat's newest saved-plan card points
+    /// at — the chat's plan.
+    ///
+    /// One chat, one plan file: the design is saved first, the written-out
+    /// plan and every later revision go back into that same file. Before this
+    /// rule each save minted `<today>-<slug-of-first-heading>.md`, so the
+    /// design and its plan — same work, different headings — landed in two
+    /// unrelated files, and the Execute action only ever attached one.
+    ///
+    /// Reused only while the path still lies directly inside THIS project's
+    /// plans folder. A card from a chat that was since re-pointed at another
+    /// project must not write into the old project, and a path with a
+    /// subfolder or a non-markdown suffix is not one this app wrote.
+    public static func reusablePlanPath(existing: String?, plansDir: String) -> String? {
+        guard let existing, !existing.isEmpty else { return nil }
+        let dir = plansDir.hasSuffix("/") ? plansDir : plansDir + "/"
+        guard existing.hasPrefix(dir) else { return nil }
+        let name = existing.dropFirst(dir.count)
+        guard !name.isEmpty, !name.contains("/"), name.hasSuffix(".md") else { return nil }
+        return existing
+    }
+
     public static func refusal(hasPendingTool: Bool,
                                alreadySaved: Bool,
                                messageInTranscript: Bool) -> WriteRefusal? {

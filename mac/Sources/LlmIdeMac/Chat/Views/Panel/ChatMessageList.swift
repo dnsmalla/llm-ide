@@ -77,6 +77,10 @@ struct ChatMessageList: View {
     /// in chat" action (stay in a plan-like mode, seed the composer with the
     /// card's own plan title).
     let onEditPlan: (UUID, ChatMessage.ToolResultPayload) -> Void
+    /// Wraps `CodeAssistantPanel.writeFullPlan(_:messageId:)` — the card's
+    /// "Write full plan" action (stay in plan mode, write the detailed plan
+    /// into the same file).
+    let onWritePlan: (UUID, ChatMessage.ToolResultPayload) -> Void
 
     @EnvironmentObject var theme: ThemeStore
 
@@ -118,6 +122,12 @@ struct ChatMessageList: View {
             // the list render O(n^2).
             let sessionIsPlanning = AgentV2Selection.sessionIsPlanning(
                 modes: history.map { $0.metadata?.mode })
+            // Does this chat already have its plan file? Once it does, a
+            // plan-shaped reply OUTSIDE a plan mode is execution narration,
+            // not a plan — see showsSavePlanAction.
+            let sessionHasSavedPlan = history.contains {
+                $0.role == .toolResult && $0.toolResult?.kind == .plan && $0.toolResult?.isFailure == false
+            }
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.md) {
@@ -175,7 +185,8 @@ struct ChatMessageList: View {
                                    planSaved: turn.metadata?.planSaved == true,
                                    sessionIsPlanning: sessionIsPlanning,
                                    contentLooksLikePlan: PlanEditPolicy.looksLikePlan(
-                                       content: turn.content)) {
+                                       content: turn.content),
+                                   sessionHasSavedPlan: sessionHasSavedPlan) {
                                 HStack(spacing: 8) {
                                     Button {
                                         onSavePlanFromMessage(turn)
@@ -647,7 +658,8 @@ struct ChatMessageList: View {
                               executingStepCount: planExecution?.planCardMessageId == turn.id
                                   ? planExecution?.steps.count : nil,
                               onExecute: { onExecutePlan(turn.id, payload) },
-                              onEdit: { onEditPlan(turn.id, payload) })
+                              onEdit: { onEditPlan(turn.id, payload) },
+                              onWrite: { onWritePlan(turn.id, payload) })
                     .frame(maxWidth: .infinity, alignment: .center)
             } else {
                 toolNoticeView(payload)
@@ -666,7 +678,7 @@ struct ChatMessageList: View {
                     }
                     if isUser {
                         // Plan-execute turns show a one-line summary, not the full prompt.
-                        Text(turn.metadata?.planExecuteDisplay ?? turn.content)
+                        Text(turn.metadata?.planExecuteDisplay ?? turn.metadata?.planWriteDisplay ?? turn.content)
                             .font(.system(size: 12))
                             .foregroundStyle(theme.current.text)
                             .textSelection(.enabled)

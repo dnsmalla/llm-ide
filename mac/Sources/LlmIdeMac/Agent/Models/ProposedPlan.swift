@@ -42,17 +42,30 @@ enum ProposedPlanResolver {
     /// `llm-doc/plans/`. Unlike `ProposedEditResolver`, this never reads an
     /// existing file — save-plan only ever creates or overwrites-in-place,
     /// it never edits.
+    ///
+    /// `existingPath` is the chat's plan file, when it already has one (the
+    /// newest saved-plan card's path). A save then goes INTO that file — the
+    /// written-out plan replaces the design it grew from, a revision
+    /// replaces the plan — instead of minting another dated file from
+    /// whatever the reply's first heading happened to be. See
+    /// `PlanEditPolicy.reusablePlanPath` for when it is honoured.
     static func resolve(
         args: PendingTool.SavePlanArgs,
-        projectRoot: URL?
+        projectRoot: URL?,
+        existingPath: String? = nil
     ) -> Result<ProposedPlan, ProposedPlanError> {
         guard let projectRoot else { return .failure(.noOpenProject) }
         let content = args.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { return .failure(.emptyContent) }
 
         let plansDir = ProjectLayout(root: projectRoot).plansDir
-        let filename = "\(datePrefix())-\(slugify(args.title)).md"
-        let absolute = plansDir.appendingPathComponent(filename).path
+        let absolute: String
+        if let reuse = PlanEditPolicy.reusablePlanPath(existing: existingPath, plansDir: plansDir.path) {
+            absolute = reuse
+        } else {
+            absolute = plansDir.appendingPathComponent("\(datePrefix())-\(slugify(args.title)).md").path
+        }
+        let filename = (absolute as NSString).lastPathComponent
 
         return .success(ProposedPlan(
             absolutePath: absolute,
