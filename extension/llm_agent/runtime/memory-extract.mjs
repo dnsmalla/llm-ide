@@ -1,7 +1,22 @@
-// Auto project-memory extraction. After a Code Assistant turn, distill 0–N
-// DURABLE, project-specific facts worth recalling in future sessions, deduped
-// against what's already remembered. Persisted by memory-writer.mjs into
-// chat-memory.md and recalled for free by graphkit/memory.mjs next request.
+// Auto memory extraction. After a Code Assistant turn, distill two things
+// from ONE model call:
+//
+//  - PROJECT facts: 0–N DURABLE, project-specific facts worth recalling in
+//    future sessions, deduped against what's already remembered. Persisted
+//    by memory-writer.mjs into chat-memory.md and recalled by
+//    graphkit/memory.mjs (legacy) / the project_memory tool (Agent engine).
+//  - SESSION facts: what THIS conversation has established that its own next
+//    turn needs — the decision the user just made, the option they picked,
+//    the goal and constraints they stated, which phase the work is in, what
+//    is still open. Persisted to kb/session-memory.mjs and injected as "This
+//    session's memory"; deleted with the chat.
+//
+// The two buckets exist because one criterion cannot serve both. The
+// project prompt is (rightly) biased toward returning nothing — "will this
+// still be true next week?" — and for a year session memory was filled only
+// with what passed THAT bar, so the facts a session actually runs on were
+// rejected as transient and the table sat empty (last write 2026-08-30, then
+// two weeks of chats with none).
 //
 // Design constraints:
 //  - Cheap: one short, capped LLM call on a summarize-tier model.
@@ -24,6 +39,9 @@ export const EXTRACT_MODEL = process.env.LLMIDE_SUMMARIZE_MODEL
   || process.env.LLMIDE_MODEL
   || fastModelFor('anthropic');
 const MAX_NEW_FACTS = 5;
+// Session facts per turn. More than project facts: a turn that settles a
+// design can legitimately fix several decisions at once.
+const MAX_SESSION_FACTS = 6;
 const MAX_FACT_CHARS = 280;
 // Keep the inputs bounded so a huge turn can't blow the extractor's budget.
 const MAX_INPUT_CHARS = 6_000;
@@ -135,6 +153,28 @@ export function sanitizeSuperseded(parsed, existingFacts) {
   return out;
 }
 
+// Session facts are plain sentences — no category/key: they are not upserted
+// by subject the way project facts are, they are appended and later deleted
+// wholesale with the chat. Same hygiene as sanitizeFacts (trim, collapse
+// whitespace, cap length, drop junk, dedupe by factIndex, cap the count).
+// Exported for unit testing.
+export function sanitizeSessionFacts(parsed) {
+  if (!Array.isArray(parsed)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of parsed) {
+    if (typeof item !== 'string') continue;
+    const fact = item.trim().replace(/\s+/g, ' ').slice(0, MAX_FACT_CHARS);
+    if (fact.length < 4) continue;
+    const index = factIndex(fact);
+    if (seen.has(index)) continue;
+    if (out.length >= MAX_SESSION_FACTS) break;
+    seen.add(index);
+    out.push(fact);
+  }
+  return out;
+}
+
 // Acknowledgment / pleasantry phrases the user sends to close a turn — these
 // never carry a durable project fact. Ordered longest-first so multi-word
 // phrases match before their single-word prefixes when stripped from the front.
@@ -181,12 +221,25 @@ function buildPrompt({ userMessage, reply, existingFacts }) {
     .map((f) => `- ${f}`)
     .join('\n') || '(none yet)';
   return [
-    'You maintain a long-term memory of DURABLE facts about a software project,',
-    'used to ground a coding assistant in future sessions.',
+    'You maintain two memories for a coding assistant:',
+    '  1. PROJECT memory — DURABLE facts about the software project, recalled',
+    '     in every future session.',
+    '  2. SESSION memory — what THIS conversation has established, recalled',
+    '     only by later turns of this same chat, then forgotten with it.',
     '',
-    'From the exchange below, extract only NEW, durable, project-specific facts',
-    'worth remembering long-term — e.g. conventions, architecture decisions,',
-    'tooling, deploy/test commands, stable user preferences for THIS project.',
+    'From the exchange below, extract into "facts" only NEW, durable,',
+    'project-specific facts worth remembering long-term — e.g. conventions,',
+    'architecture decisions, tooling, deploy/test commands, stable user',
+    'preferences for THIS project.',
+    '',
+    'Extract into "session" what the NEXT turn of this chat needs to continue',
+    'correctly and that is NOT a durable project fact: a decision the user just',
+    'made, an option they chose, a goal or constraint they stated for this',
+    'task, the phase the work is in, what is still open. One sentence each,',
+    'present tense, self-contained ("User chose the phased approach over a',
+    'single sweep", "Plan title is Dead Code Removal; design is saved, plan',
+    `not yet written"). At most ${MAX_SESSION_FACTS}; empty when the turn`,
+    'settled nothing — a question asked and not yet answered settles nothing.',
     '',
     'Rules:',
     '- Exclude anything already in ALREADY KNOWN (do not restate or rephrase it).',
@@ -207,6 +260,7 @@ function buildPrompt({ userMessage, reply, existingFacts }) {
     '  VERBATIM (exactly as written above) in "superseded".',
     '- Output ONLY JSON: {"facts": [{"category": "<category>", "key":',
     '  "<kebab-case-subject>", "fact": "<one concise sentence>"}],',
+    '  "session": ["<one sentence>"],',
     '  "superseded": ["<verbatim known fact>"]}.',
     '  Use empty arrays when nothing qualifies.',
     '',
@@ -219,17 +273,19 @@ function buildPrompt({ userMessage, reply, existingFacts }) {
     'ASSISTANT REPLY:',
     clip(reply, MAX_INPUT_CHARS),
     '',
-    'JSON array of new durable facts:',
+    'JSON:',
   ].join('\n');
 }
 
-// Returns { facts, superseded }: facts are NEW facts (sanitised + capped, NOT
-// yet deduped against disk — appendChatMemory does that); superseded are
-// EXISTING facts the model marked outdated, canonicalised via factKey.
+// Returns { facts, sessionFacts, superseded }: facts are NEW project facts
+// (sanitised + capped, NOT yet deduped against disk — appendChatMemory does
+// that); sessionFacts are this conversation's state sentences
+// (sanitizeSessionFacts); superseded are EXISTING project facts the model
+// marked outdated, canonicalised via factKey.
 // `model` (optional) lets the caller extract on the TURN's own provider
 // fast tier — a codex/OpenAI chat must not force an Anthropic call.
 export async function extractMemories({ userMessage, reply, existingFacts, runClaude, userId, meta, model }) {
-  const empty = { facts: [], superseded: [] };
+  const empty = { facts: [], sessionFacts: [], superseded: [] };
   if (typeof runClaude !== 'function') return empty;
   // Local pre-filter: skip the paid summarize-tier call on turns that can't
   // carry a durable fact (empty reply, pure acknowledgments). This runs on
@@ -250,7 +306,10 @@ export async function extractMemories({ userMessage, reply, existingFacts, runCl
     const raw = await runClaude(prompt, {
       userId,
       model: model || EXTRACT_MODEL,
-      maxTokens: 512,
+      // Two buckets now ride in one response; 512 clipped the JSON when a
+      // design-settling turn filled both, and a clipped response parses as
+      // nothing — every fact of that turn lost, not just the last one.
+      maxTokens: 768,
     });
     // Optional observability sink: rough token cost of THIS extraction call
     // (prompt + response, ~4 chars/token — the same estimate the memory_context
@@ -265,8 +324,11 @@ export async function extractMemories({ userMessage, reply, existingFacts, runCl
       : (parsed && Array.isArray(parsed.facts) ? parsed.facts : []);
     const supersededArr = (!Array.isArray(parsed) && parsed && Array.isArray(parsed.superseded))
       ? parsed.superseded : [];
+    const sessionArr = (!Array.isArray(parsed) && parsed && Array.isArray(parsed.session))
+      ? parsed.session : [];
     return {
       facts: sanitizeFacts(factsArr),
+      sessionFacts: sanitizeSessionFacts(sessionArr),
       superseded: sanitizeSuperseded(supersededArr, shownFacts),
     };
   } catch {

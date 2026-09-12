@@ -21,7 +21,7 @@ import {
   writeChatMemoryFacts,
   factIndex,
 } from '../graphkit/index.mjs';
-import { deleteSessionMemory } from '../kb/session-memory.mjs';
+import { deleteSessionMemory, listSessionMemory } from '../kb/session-memory.mjs';
 import { listAlwaysAllow, clearAlwaysAllow, clearAllAlwaysAllow } from '../kb/tool-approvals.mjs';
 
 // Vision input for /kb/agent/ask. Accepts a data URL string
@@ -477,6 +477,23 @@ export async function handleAgentRoutes(req, res, ctx) {
     const target = factIndex(body.fact);
     const remaining = readChatMemoryFacts(root).filter((f) => factIndex(f) !== target);
     sendJSON(res, 200, { facts: writeChatMemoryFacts(root, remaining) });
+    return true;
+  }
+
+  // GET /kb/agent/session-memory?sessionId=<chat uuid>
+  //   What THIS chat's memory holds — the conversation-state sentences and
+  //   the project facts it taught — for the memory viewer. Until this route
+  //   existed the table was write-and-delete only: the user could not see
+  //   what the assistant was carrying between turns, which read as "session
+  //   memory isn't used". Not repo-scoped (see the DELETE below).
+  //   { facts: string[] }
+  if (req.method === 'GET' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/session-memory') {
+    const sessionId = (new URL(url, 'http://127.0.0.1').searchParams.get('sessionId') || '').trim();
+    if (!sessionId) {
+      sendJSON(res, 400, { error: { code: 'SESSION_ID_REQUIRED', message: 'sessionId is required' } });
+      return true;
+    }
+    sendJSON(res, 200, { facts: listSessionMemory(userId, sessionId) });
     return true;
   }
 

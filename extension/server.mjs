@@ -178,7 +178,13 @@ const HOST = config.host;
 //     "bypass" merely keeps asking, but one ignoring "manual" keeps letting
 //     stored always-allow rows auto-run tools the user asked to be consulted
 //     about. A client that wants "manual" honoured must check this version.
-const SERVER_API_VERSION = 48;
+//   v49 — session memory becomes observable: /agent/v2/stream emits a
+//     `memory` event ({ sessionFacts, chars, approxTokens }) so the client's
+//     memory footnote is truthful on the Agent engine, and GET
+//     /kb/agent/session-memory?sessionId= lists a chat's facts (the table
+//     was write-and-delete only). Both additive; an older client ignores the
+//     event and never calls the route.
+const SERVER_API_VERSION = 49;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

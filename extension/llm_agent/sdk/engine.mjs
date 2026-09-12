@@ -364,8 +364,10 @@ const MAX_PROMPT_CHARS = 120_000;
  *                                     TOOL (project_memory, tools.mjs), not
  *                                     always-on injection; see that module.
  *   prompt                          — the user message, sanitized, 20k cap
- *   meta                            — { mode, model, truncatedPaths } for the
- *                                     runner (session bookkeeping + notices)
+ *   meta                            — { mode, model, truncatedPaths,
+ *                                     sessionMemory: { facts, chars } } for the
+ *                                     runner (session bookkeeping + notices +
+ *                                     the client's memory footnote)
  */
 export function buildEngineOptions(
   { userId, mode, model, language, message, skills, agentContext, attachments, planExecute } = {},
@@ -476,13 +478,21 @@ export function buildEngineOptions(
   // reads identically across engines. redactFence for the same reason
   // legacy applies it: the facts are extracted from prior user/assistant
   // turns, which can carry untrusted text.
+  // Counted for the client's memory footnote (the Mac's brain button): the
+  // legacy route reports memoryChars/approxTokens on its result, and until
+  // this engine did too, every Agent-engine turn read as "0 — no memory
+  // injected" even when this block was in the prompt.
+  let sessionMemoryFacts = 0;
+  let sessionMemoryChars = 0;
   try {
     const chatSessionId = resolveChatSessionId(agentContext);
     if (chatSessionId && userId) {
       const sessionFacts = sessionMemory(userId, chatSessionId);
       if (Array.isArray(sessionFacts) && sessionFacts.length > 0) {
-        const block = `## This session's memory\n${sessionFacts.map((f) => `- ${f}`).join('\n')}`;
-        appendParts.push(redactFence(block));
+        const block = redactFence(`## This session's memory\n${sessionFacts.map((f) => `- ${f}`).join('\n')}`);
+        appendParts.push(block);
+        sessionMemoryFacts = sessionFacts.length;
+        sessionMemoryChars = block.length;
       }
     }
   } catch { /* memory is best-effort — keep the base without it */ }
@@ -540,6 +550,7 @@ export function buildEngineOptions(
       model: typeof model === 'string' && model ? model : null,
       truncatedPaths,
       promptTruncatedChars,
+      sessionMemory: { facts: sessionMemoryFacts, chars: sessionMemoryChars },
     },
   };
 }
@@ -961,6 +972,19 @@ export async function runAgentV2Turn(
   // `meta` was computed and dropped on the floor here, so a truncated prompt
   // left no trace anywhere — not on the wire, not in the log. The model is
   // told in-band (see buildEngineOptions); this is the operator-side record.
+  // The memory footnote, as its own event: how much of the prompt is this
+  // chat's session memory. The Mac folds it into the turn's usage so the
+  // brain button and its tooltip tell the truth on this engine. Emitted
+  // before the query starts; the client stores it and applies it at result.
+  {
+    const chars = meta.sessionMemory?.chars ?? 0;
+    onEvent?.({
+      type: 'memory',
+      sessionFacts: meta.sessionMemory?.facts ?? 0,
+      chars,
+      approxTokens: Math.round(chars / 4),
+    });
+  }
   if (meta.promptTruncatedChars > 0) {
     console.warn(
       `[agent-v2] prompt truncated for user ${userId}: ${meta.promptTruncatedChars} chars dropped `

@@ -1186,3 +1186,118 @@ test('appendChatMemory: an overlong fact is capped on TEXT, never on the stamp',
   assert.equal(text.length, 280 - ` (t:${stamp})`.length,
     'fact TEXT is capped to leave exact room for the stamp, not the other way round');
 });
+
+// ── session memory: its own extraction bucket, its own gate, its own route ──
+//
+// Until this, session memory received ONLY what the project extractor
+// judged durable — and that prompt is (rightly) biased toward returning
+// nothing: "will this still be true next week?". The facts a session runs on
+// (the decision just made, the option chosen, the phase the work is in) fail
+// that bar by definition, so the table sat empty for two weeks of chats.
+
+test('extractMemories returns the session bucket alongside project facts', async () => {
+  const runClaude = async () => JSON.stringify({
+    facts: [{ category: 'tooling', key: 'test-command', fact: 'Tests run via npm test' }],
+    session: ['User chose the phased approach over a single sweep', 'Design is saved; the plan is not yet written'],
+    superseded: [],
+  });
+  const out = await extract.extractMemories({ userMessage: 'q', reply: 'a', existingFacts: [], runClaude, userId: 'u' });
+  assert.deepEqual(out.facts, ['[tooling|test-command] Tests run via npm test']);
+  assert.deepEqual(out.sessionFacts, [
+    'User chose the phased approach over a single sweep',
+    'Design is saved; the plan is not yet written',
+  ]);
+});
+
+test('extractMemories: the legacy bare-array shape still parses, with an empty session bucket', async () => {
+  const out = await extract.extractMemories({ reply: 'a', runClaude: async () => '["Only durable fact"]' });
+  assert.deepEqual(out.facts, ['Only durable fact']);
+  assert.deepEqual(out.sessionFacts, []);
+});
+
+test('sanitizeSessionFacts: trims, collapses whitespace, drops junk, dedupes, caps at six', () => {
+  const out = extract.sanitizeSessionFacts([
+    '  User picked   option B  ', 'User picked option B', 'x', 42, null,
+    // Each ≥ 4 chars so only the CAP removes them, not the junk floor.
+    'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh',
+  ]);
+  assert.equal(out[0], 'User picked option B', 'whitespace collapsed');
+  assert.equal(out.filter((f) => f === 'User picked option B').length, 1, 'deduped');
+  assert.ok(!out.includes('x'), 'junk dropped');
+  assert.equal(out.length, 6, 'capped');
+  assert.deepEqual(extract.sanitizeSessionFacts('not an array'), []);
+});
+
+test('persistTurnMemory writes session memory even when NO project root resolves', async () => {
+  reset();
+  const u = provision();
+  // No indexed repos, no workspace — the case that used to skip everything
+  // before extraction ran. The chat session id alone is enough for the
+  // session store.
+  const runClaude = async () => JSON.stringify({
+    facts: [], session: ['User wants the plan in one file'], superseded: [],
+  });
+  const result = await persist.persistTurnMemory({
+    agentContext: { chatSessionId: 'CHAT-NO-ROOT' },
+    userId: u, userMessage: 'keep it in one file', reply: 'Understood — one file.', runClaude,
+  });
+  assert.equal(result, null, 'nothing was written to project memory (there is no project)');
+  assert.deepEqual(sessionMemory.listSessionMemory(u, 'CHAT-NO-ROOT'), ['User wants the plan in one file']);
+});
+
+test('persistTurnMemory with a root writes project facts to disk and BOTH buckets to the session', async () => {
+  reset();
+  const u = provision();
+  const root = tmpRepo(u, 'both-buckets');
+  const runClaude = async () => JSON.stringify({
+    facts: [{ category: 'convention', key: 'plan-location', fact: 'Plans live in llm-doc/plans' }],
+    session: ['Phase 1 is approved; phase 2 is being planned'],
+    superseded: [],
+  });
+  const result = await persist.persistTurnMemory({
+    agentContext: { indexedRepos: [{ path: root, name: 'r' }], chatSessionId: 'CHAT-ROOT' },
+    userId: u, userMessage: 'q', reply: 'a', runClaude,
+  });
+  assert.deepEqual(result.map(stripFactStamp), ['[convention|plan-location] Plans live in llm-doc/plans']);
+  const session = sessionMemory.listSessionMemory(u, 'CHAT-ROOT');
+  assert.ok(session.some((f) => /Plans live in llm-doc\/plans/.test(f)), 'the project fact this chat taught');
+  assert.ok(session.includes('Phase 1 is approved; phase 2 is being planned'), 'the conversation-state sentence');
+  assert.ok(!writer.readChatMemoryFacts(root).some((f) => /Phase 1 is approved/.test(f)),
+    'a session sentence must NOT leak into durable project memory');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('persistTurnMemory still skips entirely with neither a root nor a chat session', async () => {
+  reset();
+  const u = provision();
+  let called = 0;
+  const runClaude = async () => { called += 1; return '["x"]'; };
+  assert.equal(await persist.persistTurnMemory({ agentContext: {}, userId: u, reply: 'a', runClaude }), null);
+  assert.equal(called, 0, 'no extraction call is spent when there is nowhere to write');
+});
+
+test('GET /kb/agent/session-memory lists a chat\'s facts and requires sessionId', async () => {
+  reset();
+  const u = provision();
+  sessionMemory.appendSessionMemory(u, 'CHAT-GET', ['User chose option B', 'Plan title is Dead Code Removal']);
+  const okUrl = '/kb/agent/session-memory?sessionId=CHAT-GET';
+  let res = mkRes();
+  assert.equal(await handleAgentRoutes(mkReq('GET', okUrl), res, { userId: u, url: okUrl }), true);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { facts: ['User chose option B', 'Plan title is Dead Code Removal'] });
+
+  // Another user's session id yields nothing — rows are per user. Registered
+  // directly: provision() uses one fixed email, so a second call conflicts.
+  const other = users.registerUser(db.getDb(), {
+    email: 'other-session-memory@example.com', password: 'CorrectHorseBattery', displayName: 'o',
+  }).id;
+  res = mkRes();
+  await handleAgentRoutes(mkReq('GET', okUrl), res, { userId: other, url: okUrl });
+  assert.deepEqual(res.body, { facts: [] });
+
+  const badUrl = '/kb/agent/session-memory';
+  res = mkRes();
+  await handleAgentRoutes(mkReq('GET', badUrl), res, { userId: u, url: badUrl });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.error.code, 'SESSION_ID_REQUIRED');
+});

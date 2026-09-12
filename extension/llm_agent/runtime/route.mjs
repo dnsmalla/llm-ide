@@ -303,8 +303,12 @@ export async function handleCodeAssist({
     if (chatSessionId && userId) {
       const sessionFacts = listSessionMemory(userId, chatSessionId);
       if (sessionFacts.length > 0) {
-        const block = `## This session's memory\n${sessionFacts.map((f) => `- ${f}`).join('\n')}`;
-        personaBase += `\n\n${redactFence(block)}`;
+        const block = redactFence(`## This session's memory\n${sessionFacts.map((f) => `- ${f}`).join('\n')}`);
+        personaBase += `\n\n${block}`;
+        // Part of the prompt's memory overhead, so part of the footnote —
+        // it was left out of memoryChars, which undercounted every turn
+        // that carried session facts.
+        memoryChars += block.length;
       }
     }
   } catch { /* memory is best-effort — keep the base without it */ }

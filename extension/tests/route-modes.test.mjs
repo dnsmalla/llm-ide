@@ -196,7 +196,12 @@ test('restricted modes: the prompt carries an accurate tool roster overriding th
     userId: 'u1',
     mode: 'plan',
   });
-  assert.equal(prompts.length, 1);
+  // prompts[0] is the turn. A SECOND call may follow it: persistTurnMemory
+  // now extracts session memory for any turn that has a chat session id,
+  // project or no project (memory-persist.mjs), and it fires after the
+  // reply — so the turn prompt is always first, and its count is no longer
+  // a fixed 1. Pin the order, not the total.
+  assert.ok(prompts.length >= 1);
   // The roster must name what IS available (incl. save-plan for plan mode)…
   assert.match(prompts[0], /Tools available in this mode:.*save-plan/s);
   // …and explicitly disown the base prompt's shell/write-tool guidance, which

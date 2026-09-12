@@ -27,41 +27,55 @@ import { logger } from '../../core/logger.mjs';
 // turn's own provider fast tier (see route.mjs's utilityModel).
 export async function persistTurnMemory({ agentContext, userId, userMessage, reply, runClaude, model }) {
   try {
+    if (!userId) {
+      logger.audit('project_memory', { outcome: 'skipped', reason: 'no user' });
+      return null;
+    }
+    // Session memory is keyed on the CHAT session (a stable per-conversation
+    // UUID owned by the client's session store), not `agentContext.sessionId` —
+    // that one is re-minted on every session switch, so facts captured after a
+    // switch could never be traced back to the chat the user would delete.
+    // Falls back to the agent session id for a client that doesn't send one —
+    // see resolveChatSessionId, shared with the read paths in route.mjs and
+    // sdk/engine.mjs.
+    const sessionId = resolveChatSessionId(agentContext);
+
     const indexed = Array.isArray(agentContext?.indexedRepos) ? agentContext.indexedRepos : [];
     const wsRoot = agentContext?.workspaceRoot;
-    // Candidate write targets: indexed repos first (preserves prior behavior),
-    // then the open workspace folder so an un-indexed open project still
-    // captures memory. Matches what renderGraphifyMemory surfaces.
+    // Candidate write targets for PROJECT memory: indexed repos first
+    // (preserves prior behavior), then the open workspace folder so an
+    // un-indexed open project still captures memory. Matches what
+    // renderGraphifyMemory surfaces. Target the first allow-listed candidate —
+    // the same one the reader surfaces first, so a captured fact is recalled
+    // from the same place.
     const candidatePaths = [...indexed.map((r) => r?.path), wsRoot].filter(Boolean);
-    if (!userId || candidatePaths.length === 0) {
-      logger.audit('project_memory', { outcome: 'skipped', reason: 'no candidate paths', hasUser: !!userId });
-      return null;
-    }
-
-    const allowedRoots = buildAllowedRoots(userId, wsRoot);
-    if (!allowedRoots || allowedRoots.size === 0) {
-      logger.audit('project_memory', { outcome: 'skipped', reason: 'no allowed roots', candidates: candidatePaths.length });
-      return null;
-    }
-
-    // Target the first allow-listed candidate — this matches what the reader
-    // surfaces first, so a captured fact is recalled from the same place.
     let root = null;
-    for (const p of candidatePaths) {
-      root = resolveAllowedRepoRoot(p, allowedRoots);
-      if (root) break;
+    if (candidatePaths.length > 0) {
+      const allowedRoots = buildAllowedRoots(userId, wsRoot);
+      if (allowedRoots && allowedRoots.size > 0) {
+        for (const p of candidatePaths) {
+          root = resolveAllowedRepoRoot(p, allowedRoots);
+          if (root) break;
+        }
+      }
     }
-    if (!root) {
-      logger.audit('project_memory', { outcome: 'skipped', reason: 'no candidate resolved to an allowed root', candidates: candidatePaths.length });
+    // The project root used to gate the WHOLE capture, session memory
+    // included — so a chat with no allow-listed project never wrote a single
+    // session fact, though session memory needs no root at all. Now each
+    // store is written when its own key exists; only having neither skips.
+    if (!root && !sessionId) {
+      logger.audit('project_memory', {
+        outcome: 'skipped', reason: 'no allowed project root and no chat session', candidates: candidatePaths.length,
+      });
       return null;
     }
 
-    const existing = readChatMemoryFacts(root);
+    const existing = root ? readChatMemoryFacts(root) : [];
     // extractMeta.approxTokens is the (estimated) cost of the extraction LLM
     // call — spent whether or not it yields facts, so it's logged on both the
     // no_facts and captured outcomes.
     const extractMeta = {};
-    const { facts, superseded } = await extractMemories({
+    const { facts, sessionFacts, superseded } = await extractMemories({
       userMessage,
       reply,
       existingFacts: existing,
@@ -71,36 +85,36 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
       model,
     });
     const extractTokens = extractMeta.approxTokens ?? 0;
-    if (!facts.length && !superseded.length) {
+    if (!facts.length && !superseded.length && !sessionFacts.length) {
       const reason = extractMeta.skipped
         ? 'gated: contentless turn, extraction skipped (no model call)'
-        : 'extractor found nothing durable';
+        : 'extractor found nothing durable or session-worthy';
       logger.audit('project_memory', {
         outcome: extractMeta.skipped ? 'skipped_extraction' : 'no_facts',
-        reason, extractTokens, root,
+        reason, extractTokens, root, hasSession: Boolean(sessionId),
       });
       return null;
     }
+
     const meta = {};
-    // Session memory is keyed on the CHAT session (a stable per-conversation
-    // UUID owned by the client's session store), not `agentContext.sessionId` —
-    // that one is re-minted on every session switch, so facts captured after a
-    // switch could never be traced back to the chat the user would delete.
-    // Falls back to the agent session id for a client that doesn't send one —
-    // see resolveChatSessionId, shared with the read path in route.mjs.
-    const sessionId = resolveChatSessionId(agentContext);
-    const saved = appendChatMemory({ root, facts, remove: superseded, meta });
-    // Session-scoped copy of the SAME extracted facts, in a real DB table
-    // (kb/session-memory.mjs) — unlike project memory above, this IS deleted
-    // wholesale when the session is cleared/removed (routes/agent.mjs's
-    // DELETE /kb/agent/session-memory). Best-effort: a failure here must
-    // never take down project-memory capture, which already succeeded.
-    if (sessionId) {
+    let saved = null;
+    if (root && (facts.length || superseded.length)) {
+      saved = appendChatMemory({ root, facts, remove: superseded, meta });
+    }
+    // Session-scoped record in a real DB table (kb/session-memory.mjs): the
+    // project facts this chat taught PLUS the conversation-state sentences.
+    // Unlike project memory this IS deleted wholesale when the session is
+    // cleared/removed (routes/agent.mjs's DELETE /kb/agent/session-memory).
+    // Best-effort: a failure here must never take down project-memory
+    // capture, which already succeeded.
+    let sessionWritten = 0;
+    if (sessionId && (facts.length || sessionFacts.length || superseded.length)) {
       try {
-        appendSessionMemory(userId, sessionId, facts, { remove: superseded });
+        sessionWritten = appendSessionMemory(userId, sessionId, [...facts, ...sessionFacts], { remove: superseded });
       } catch { /* best-effort */ }
     }
-    const added = meta.added ?? Math.max(0, (Array.isArray(saved) ? saved.length : 0) - existing.length);
+    const savedCount = Array.isArray(saved) ? saved.length : 0;
+    const added = meta.added ?? Math.max(0, savedCount - existing.length);
     logger.audit('project_memory', {
       outcome: 'captured', extracted: facts.length, added,
       // `updated` = facts whose index (factKey) was already stored and whose
@@ -108,7 +122,8 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
       updated: meta.updated ?? 0,
       removedCount: meta.removed ?? 0, removedFacts: superseded,
       evicted: meta.evicted ?? 0,
-      extractTokens, total: saved.length, root,
+      sessionFacts: sessionFacts.length, sessionWritten,
+      extractTokens, total: savedCount, root,
     });
     return saved;
   } catch (err) {
