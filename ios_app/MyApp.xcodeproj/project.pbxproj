@@ -30,6 +30,7 @@
 		AC1BAD40D67DE71FEE09690F /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A36F27BA352AF7FF9AA51012 /* HelpView.swift */; };
 		B6CF935AF507506E25C1EA4A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 995B956852311CF170F73894 /* ContentView.swift */; };
 		D3D6F9A8DB516321EA005C39 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA5ED588DFDB7A34E47E6C36 /* Assets.xcassets */; };
+		A1C0FF1CE0000000000000P2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1C0FF1CE0000000000000P1 /* PrivacyInfo.xcprivacy */; };
 		FCA16A9A87B1018E6AC5A76C /* MyAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39CD17436AE4D69811BA8EDA /* MyAppApp.swift */; };
 		A1B2C3D4E5F607890A1B2C01 /* ConnectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F607890A1B2C02 /* ConnectionStore.swift */; };
 		C9D0E1F2A3B405060C9D0E01 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D0E1F2A3B405060C9D0E02 /* SpeechRecognizer.swift */; };
@@ -45,6 +46,7 @@
 
 /* Begin PBXFileReference section */
 		0F05147F87FAE3E4689CB880 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		A1C0FF1CE0000000000000P1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		1050205A71E402C9809036C3 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		237B2E48D363E5FB9B47CB07 /* MyApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		39CD17436AE4D69811BA8EDA /* MyAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyAppApp.swift; sourceTree = "<group>"; };
@@ -86,6 +88,7 @@
 			isa = PBXGroup;
 			children = (
 				0F05147F87FAE3E4689CB880 /* Info.plist */,
+				A1C0FF1CE0000000000000P1 /* PrivacyInfo.xcprivacy */,
 			);
 			path = Supporting;
 			sourceTree = "<group>";
@@ -289,6 +292,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D3D6F9A8DB516321EA005C39 /* Assets.xcassets in Resources */,
+				A1C0FF1CE0000000000000P2 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

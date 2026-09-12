@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Apple requires this manifest for App Store submission. It must end up
+       at the ROOT of the built .app — being in Supporting/ next to Info.plist
+       is fine, the Resources build phase flattens it.
+
+       Keep this in sync with the App Store Connect privacy "nutrition
+       labels": the two are checked against each other, and a mismatch is a
+       rejection. -->
+
+  <!-- No tracking: the app has no analytics, no ad SDKs, no IDFA, and no
+       third-party SDKs at all. Its only network peer is the user's own
+       paired Mac. -->
+  <key>NSPrivacyTracking</key>
+  <false/>
+  <key>NSPrivacyTrackingDomains</key>
+  <array/>
+
+  <!-- Nothing is "collected" in Apple's sense (transmitted off device in a
+       way that lets US access it). Chat text, explorer sessions and auto-task
+       state travel only to the Mac the user paired with, over their own LAN
+       or tailnet; no llm-ide-operated server ever sees it. The pairing token
+       and Mac address stay on device (Keychain / UserDefaults respectively).
+
+       If a future build ever adds crash reporting, a hosted relay, or any
+       third-party SDK, this array stops being empty. -->
+  <key>NSPrivacyCollectedDataTypes</key>
+  <array/>
+
+  <!-- Required-reason APIs. UserDefaults is the only one this app touches:
+       ConnectionStore keeps the paired Mac's host/port/deviceId there.
+       CA92.1 = "access info from the app itself, and app group containers
+       the app is a member of" — which is exactly this use.
+
+       Keychain (SecItem), used for the pairing token, is NOT a
+       required-reason API and is deliberately not declared. -->
+  <key>NSPrivacyAccessedAPITypes</key>
+  <array>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>CA92.1</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

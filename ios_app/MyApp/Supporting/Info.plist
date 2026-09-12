@@ -68,5 +68,16 @@
   <array>
     <string>_llmide._tcp</string>
   </array>
+  <!-- Export compliance. The app contains no cryptography of its own: no
+       CryptoKit, no CommonCrypto, no bundled algorithms — the only crypto
+       anywhere near it is the platform's own TLS/Keychain, which is exempt
+       under the "standard encryption built into the OS" carve-out. Declaring
+       this here answers the export-compliance question at build time instead
+       of prompting on every single App Store Connect upload.
+
+       If a future build ever adds its own crypto — e.g. the pinned-SPKI TLS
+       described in the ATS comment above — revisit this before shipping. -->
+  <key>ITSAppUsesNonExemptEncryption</key>
+  <false/>
 </dict>
 </plist>
