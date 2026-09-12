@@ -1,5 +1,45 @@
 import SwiftUI
 
+/// What the finish card may CLAIM, decided from evidence. Kept out of the
+/// View so `chat-contract-lab` can assert it (this toolchain has no XCTest).
+///
+/// The tracker reaches `.finished` when the turn ends with nothing pending
+/// — which is also what happens when the agent does one step, asks "ready
+/// for step 2?" and stops. The card used to render that as "All 7 steps
+/// completed": a claim it had no evidence for, over a reply that said the
+/// opposite. Evidence is the task list (`task-create`/`task-update`); with
+/// none, the honest statement is that the TURN finished and progress was
+/// not tracked, and the reader should trust the agent's own summary.
+public enum PlanExecutionSummaryPolicy {
+    public struct Summary: Equatable {
+        public let title: String
+        public let body: String
+    }
+
+    public static func summary(planTitle: String, total: Int, completed: Int,
+                               hasTaskState: Bool, failed: Bool) -> Summary {
+        if failed {
+            return Summary(title: "Plan execution stopped",
+                           body: "\(completed)/\(total) steps completed before a failure.")
+        }
+        guard hasTaskState else {
+            return Summary(
+                title: "Execution turn finished",
+                body: "The agent did not report step-by-step progress, so the \(total) steps of "
+                    + "\"\(planTitle)\" could not be tracked. Read its summary above — if it stopped "
+                    + "early, reply to continue.")
+        }
+        if completed >= total {
+            return Summary(title: "Execution finished",
+                           body: "All \(total) steps completed for \"\(planTitle)\".")
+        }
+        return Summary(
+            title: "Execution turn finished",
+            body: "\(completed) of \(total) steps completed for \"\(planTitle)\". The agent stopped "
+                + "with work remaining — reply to continue.")
+    }
+}
+
 /// Plan execution UX: total step count, one current step at a time, then a
 /// Review/Commit finish card. Replaces the full task checklist during runs
 /// started from PlanSavedCard.
@@ -128,18 +168,24 @@ struct PlanExecutionCard: View {
     }
 
     private func completeCard(failed: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let summary = PlanExecutionSummaryPolicy.summary(
+            planTitle: tracker.planTitle, total: total, completed: completed,
+            hasTaskState: hasTaskState, failed: failed)
+        // Green only for a claim backed by evidence: every tracked step done.
+        let verified = !failed && hasTaskState && completed >= total
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                Image(systemName: failed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(failed ? theme.current.danger : theme.current.success)
-                Text(failed ? "Plan execution stopped" : "Execution finished")
+                Image(systemName: failed ? "exclamationmark.triangle.fill"
+                      : (verified ? "checkmark.circle.fill" : "flag.checkered"))
+                    .foregroundStyle(failed ? theme.current.danger
+                                     : (verified ? theme.current.success : theme.current.textMuted))
+                Text(summary.title)
                     .font(.system(size: 13, weight: .semibold))
             }
-            Text(failed
-                 ? "\(completed)/\(total) steps completed before a failure."
-                 : "All \(total) steps completed for \"\(tracker.planTitle)\".")
+            Text(summary.body)
                 .font(.system(size: 12))
                 .foregroundStyle(theme.current.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
             if !failed {
                 HStack(spacing: 8) {
                     Button(action: onReview) {

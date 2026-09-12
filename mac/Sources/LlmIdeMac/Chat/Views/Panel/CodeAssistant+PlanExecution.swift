@@ -42,6 +42,19 @@ extension CodeAssistantPanel {
         let svc = SourceControlService()
         svc.config = config
         await svc.refresh(root: root)
+        // A clean tree is a state, not a failure. It is also the COMMON case
+        // after an execution: the agent has Bash and usually commits its own
+        // work — sometimes on another branch, which is worth saying, because
+        // "nothing to commit" over a reply that names a commit hash reads as
+        // "nothing happened". Reported as a notice, and the card is done.
+        if svc.state.files.isEmpty {
+            let branch = svc.state.branch.map { " on \($0)" } ?? ""
+            attachNotice = "Nothing to commit — the working tree\(branch) is clean. If the agent "
+                + "committed its own work, it is already in git (see Source Control); it may "
+                + "have committed on a different branch."
+            dismissPlanExecution()
+            return
+        }
         guard await svc.commit(root: root, message: message) else {
             engine.error = svc.state.opError ?? svc.state.error ?? "Commit failed."
             return

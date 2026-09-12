@@ -360,6 +360,36 @@ do {
            "already-saved outranks a missing message")
 }
 
+// PlanExecutionSummaryPolicy — what the finish card may claim. The tracker
+// finishes when the turn ends with nothing pending, which is ALSO what a
+// one-step-then-"ready for step 2?" turn looks like; the card said "All 7
+// steps completed" over exactly that reply.
+do {
+    let none = PlanExecutionSummaryPolicy.summary(
+        planTitle: "Dead Code Removal", total: 7, completed: 0, hasTaskState: false, failed: false)
+    expect(none.title == "Execution turn finished",
+           "without task evidence the card reports the TURN finishing, not the plan")
+    expect(!none.body.contains("All 7 steps"),
+           "no evidence → no completion claim")
+    expect(none.body.contains("reply to continue"),
+           "the reader is told what to do if the agent stopped early")
+
+    let all = PlanExecutionSummaryPolicy.summary(
+        planTitle: "Dead Code Removal", total: 7, completed: 7, hasTaskState: true, failed: false)
+    expect(all.title == "Execution finished" && all.body.contains("All 7 steps completed"),
+           "every tracked step done → the completion claim is earned")
+
+    let partial = PlanExecutionSummaryPolicy.summary(
+        planTitle: "Dead Code Removal", total: 7, completed: 3, hasTaskState: true, failed: false)
+    expect(partial.title == "Execution turn finished" && partial.body.contains("3 of 7"),
+           "tracked but incomplete → says how far it got")
+
+    let failed = PlanExecutionSummaryPolicy.summary(
+        planTitle: "Dead Code Removal", total: 7, completed: 2, hasTaskState: true, failed: true)
+    expect(failed.title == "Plan execution stopped" && failed.body.contains("2/7"),
+           "a failure keeps its own wording")
+}
+
 // PlanEditPolicy.reusablePlanPath — one chat, one plan file. Every save
 // after the first goes back into the file the chat's saved-plan card points
 // at, instead of minting `<today>-<slug-of-first-heading>.md` again — which
