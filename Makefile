@@ -100,7 +100,7 @@ endif
 # CSV's `status` column is the release checklist.
 # graph-kit-checkout goes FIRST: it is a one-line precondition, and failing it
 # after four Mac builds (many minutes in) is the wrong place to learn about it.
-regression: graph-kit-checkout test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates
+regression: graph-kit-checkout test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates
 
 # The graph verification gates. These are plain executables precisely so they
 # run where `swift test` cannot (a Command-Line-Tools-only toolchain has no
@@ -142,6 +142,12 @@ graph-gates: graph-kit-checkout
 chat-gates:
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run chat-contract-lab
 	node scripts/conformance-agent-v2.mjs
+
+# Doc Gen / Visual: the template-surface marker, which decides which menu a
+# user's template appears in and round-trips through a file on their disk.
+.PHONY: generation-gates
+generation-gates:
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run generation-contract-lab
 
 # Enable the repo's git hooks (.githooks/). The pre-push hook runs the
 # regression gate before any push that touches mac/. Run once per clone.

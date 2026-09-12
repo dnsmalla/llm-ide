@@ -17,6 +17,8 @@ struct DocCommand: Identifiable, Codable, Equatable {
     var folderName: String?
     /// Loaded from or saved to the active project's `commands/` tree.
     var isProjectCommand: Bool
+    /// Which generation menu this command belongs to (`TemplateSurface`).
+    var surface: TemplateSurface
 
     init(
         id: UUID,
@@ -25,7 +27,8 @@ struct DocCommand: Identifiable, Codable, Equatable {
         rawContent: String? = nil,
         isBuiltin: Bool = false,
         folderName: String? = nil,
-        isProjectCommand: Bool = false
+        isProjectCommand: Bool = false,
+        surface: TemplateSurface = .default
     ) {
         self.id = id
         self.name = name
@@ -34,6 +37,7 @@ struct DocCommand: Identifiable, Codable, Equatable {
         self.isBuiltin = isBuiltin
         self.folderName = folderName
         self.isProjectCommand = isProjectCommand
+        self.surface = surface
     }
 
     /// Marker line written into every command file, mirroring
@@ -49,9 +53,10 @@ struct DocCommand: Identifiable, Codable, Equatable {
         let folderName: String
         let name: String
         let instruction: String
+        var surface: TemplateSurface = .default
 
         func markdown() -> String {
-            DocCommand.markdownBody(name: name, instruction: instruction)
+            DocCommand.markdownBody(name: name, instruction: instruction, surface: surface)
         }
     }
 
@@ -71,6 +76,26 @@ struct DocCommand: Identifiable, Codable, Equatable {
             folderName: "release-notes",
             name: "Release Notes",
             instruction: "Write release notes from the selected sources. Group changes under Added, Changed, and Fixed. Write each entry for a user of the product, not for its authors."),
+        // Visual surface — instructions for reading an image, which is what
+        // that menu's sources are.
+        SeedDefinition(
+            id: UUID(uuidString: "B0000010-0000-4000-8000-000000000010")!,
+            folderName: "describe-image",
+            name: "Describe Image",
+            instruction: "Describe what the selected image shows, in the order a reader would notice it. Name concrete elements — labels, values, controls, people, layout — rather than summarising the impression. Say plainly when something is unreadable rather than guessing at it.",
+            surface: .visual),
+        SeedDefinition(
+            id: UUID(uuidString: "B0000011-0000-4000-8000-000000000011")!,
+            folderName: "extract-text",
+            name: "Extract Text",
+            instruction: "Transcribe every piece of text visible in the selected image, preserving its reading order and grouping. Keep labels with their values. Mark anything you cannot read confidently as [unclear] instead of inventing it.",
+            surface: .visual),
+        SeedDefinition(
+            id: UUID(uuidString: "B0000012-0000-4000-8000-000000000012")!,
+            folderName: "read-chart",
+            name: "Read Chart",
+            instruction: "Read the selected chart or diagram. State what is being measured, over what range, and what the data actually says — including the trend and any outlier. Quote axis labels and units verbatim, and say when a value can only be estimated from the image.",
+            surface: .visual),
     ]
 
     /// Shipped skeletons when no project is open (fallback UI).
@@ -80,7 +105,8 @@ struct DocCommand: Identifiable, Codable, Equatable {
             name: $0.name,
             instruction: $0.instruction,
             isBuiltin: true,
-            folderName: $0.folderName)
+            folderName: $0.folderName,
+            surface: $0.surface)
     }
 
     // MARK: - Markdown parsing
@@ -92,7 +118,12 @@ struct DocCommand: Identifiable, Codable, Equatable {
             .filter { line in
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 if trimmed.hasPrefix("# ") { return false }
-                if trimmed == markerComment { return false }
+                // Matches the marker in EITHER form — bare, or carrying
+                // `surface=visual`. An equality check against the bare marker
+                // left the attributed line in the instruction body, so the
+                // model would have been sent "<!-- llmide:doc-command
+                // surface=visual -->" as part of its instruction.
+                if trimmed.hasPrefix("<!--"), trimmed.contains("llmide:doc-command") { return false }
                 return true
             }
             .joined(separator: "\n")
@@ -113,11 +144,12 @@ struct DocCommand: Identifiable, Codable, Equatable {
     }
 
     /// Serialize back to editable `command.md` content.
-    static func markdownBody(name: String, instruction: String) -> String {
+    static func markdownBody(name: String, instruction: String,
+                             surface: TemplateSurface = .default) -> String {
         """
         # \(name)
 
-        \(markerComment)
+        \(TemplateSurfaceMarker.line(base: markerComment, surface: surface))
 
         \(instruction)
         """
@@ -125,7 +157,12 @@ struct DocCommand: Identifiable, Codable, Equatable {
 
     func renderedMarkdown() -> String {
         if let raw = rawContent, !raw.isEmpty { return raw }
-        return Self.markdownBody(name: name, instruction: instruction)
+        return Self.markdownBody(name: name, instruction: instruction, surface: surface)
+    }
+
+    /// The surface declared by a command file's own marker.
+    static func surface(from markdown: String) -> TemplateSurface {
+        TemplateSurfaceMarker.surface(in: markdown, base: markerComment)
     }
 
     // MARK: - Identity

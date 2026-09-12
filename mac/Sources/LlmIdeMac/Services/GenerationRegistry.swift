@@ -36,6 +36,14 @@ final class GenerationRegistry {
     enum Scope: String, CaseIterable, Sendable {
         case docGen
         case visual
+
+        /// The template/command surface this scope's menus show.
+        var surface: TemplateSurface {
+            switch self {
+            case .docGen: return .doc
+            case .visual: return .visual
+            }
+        }
     }
 
     private var models: [Scope: GenerationViewModel] = [:]
@@ -46,7 +54,7 @@ final class GenerationRegistry {
     /// afterwards — including across a view being torn down and rebuilt.
     func model(for scope: Scope) -> GenerationViewModel {
         if let existing = models[scope] { return existing }
-        let created = GenerationViewModel()
+        let created = GenerationViewModel(surface: scope.surface)
         models[scope] = created
         return created
     }

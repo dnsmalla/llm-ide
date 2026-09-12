@@ -232,6 +232,7 @@ let package = Package(
         // `swift test` is skipped there (see the Makefile's HAS_XCTEST guard) —
         // same rationale as graph-kit's graph-layout-lab / graph-engine-lab.
         .executable(name: "chat-contract-lab", targets: ["ChatContractLab"]),
+        .executable(name: "generation-contract-lab", targets: ["GenerationContractLab"]),
     ],
     dependencies: [
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"),
@@ -304,6 +305,14 @@ let package = Package(
             name: "LlmIdeMacMain",
             dependencies: ["LlmIdeMacLib"],
             path: "Sources/LlmIdeMacMain"
+        ),
+        .executableTarget(
+            name: "GenerationContractLab",
+            dependencies: ["LlmIdeMacLib"],
+            path: "Sources/GenerationContractLab",
+            // Same defines as the library, for the same reason ChatContractLab
+            // carries them: Doc Gen and Visual are build-excludable features.
+            swiftSettings: featureDefines
         ),
         .executableTarget(
             name: "ChatContractLab",

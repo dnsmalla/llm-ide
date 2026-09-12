@@ -965,13 +965,21 @@ struct AppShell: View {
 
     private func reloadDocTemplatesForActiveProject() {
         let root = projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
-        templateStore.reloadProjectTemplates(at: root)
         // `root` is optional (nil when no project is open); guard the seeder
         // (which requires a concrete URL) but still pass the optional through
         // to reloadProjectCommands/activate so closing a project clears them.
         if let root {
+            // BOTH seeders, not just commands. `seedIfNeeded` is per-folder
+            // `writeIfAbsent`, so it is how a project picks up seeds added
+            // after it was created — but only the commands seeder ran here,
+            // and the templates seeder ran solely in `ProjectScaffolder` at
+            // New Project time. Every template seed added since a project was
+            // created has therefore never reached it (the Meeting Note and
+            // Email Note ingest seeds, and now the Visual ones).
+            ProjectDocTemplatesSeeder.seedIfNeeded(at: root)
             ProjectDocCommandsSeeder.seedIfNeeded(at: root)
         }
+        templateStore.reloadProjectTemplates(at: root)
         commandStore.reloadProjectCommands(at: root)
         docGenOutputStore.activate(projectRoot: root)
         // Auto Task prompts live in the same project (`templates/auto_task/`)

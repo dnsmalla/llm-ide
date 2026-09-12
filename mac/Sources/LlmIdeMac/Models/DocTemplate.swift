@@ -13,6 +13,15 @@ struct DocTemplate: Identifiable, Codable, Equatable {
     var folderName: String?
     /// Loaded from or saved to the active project's `templates/` tree.
     var isProjectTemplate: Bool
+    /// Which generation menu this template belongs to (`TemplateSurface`).
+    /// Read from the marker line; absent means Doc Gen, as every template
+    /// written before surfaces existed is.
+    var surface: TemplateSurface
+
+    /// Base marker written into every template file. Lets the scanner tell a
+    /// template apart from any other `.md` in the folder, and carries the
+    /// `surface=` attribute.
+    static let markerComment = "<!-- llmide:doc-template -->"
 
     init(
         id: UUID,
@@ -21,7 +30,8 @@ struct DocTemplate: Identifiable, Codable, Equatable {
         rawContent: String? = nil,
         isBuiltin: Bool = false,
         folderName: String? = nil,
-        isProjectTemplate: Bool = false
+        isProjectTemplate: Bool = false,
+        surface: TemplateSurface = .default
     ) {
         self.id = id
         self.name = name
@@ -30,10 +40,11 @@ struct DocTemplate: Identifiable, Codable, Equatable {
         self.isBuiltin = isBuiltin
         self.folderName = folderName
         self.isProjectTemplate = isProjectTemplate
+        self.surface = surface
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, sections, rawContent, isBuiltin, folderName, isProjectTemplate
+        case id, name, sections, rawContent, isBuiltin, folderName, isProjectTemplate, surface
     }
 
     init(from decoder: Decoder) throws {
@@ -45,6 +56,9 @@ struct DocTemplate: Identifiable, Codable, Equatable {
         isBuiltin = try c.decodeIfPresent(Bool.self, forKey: .isBuiltin) ?? false
         folderName = try c.decodeIfPresent(String.self, forKey: .folderName)
         isProjectTemplate = try c.decodeIfPresent(Bool.self, forKey: .isProjectTemplate) ?? false
+        // Optional on decode: app-support templates persisted before surfaces
+        // existed carry no key, and they are Doc Gen templates.
+        surface = try c.decodeIfPresent(TemplateSurface.self, forKey: .surface) ?? .default
     }
 
     func encode(to encoder: Encoder) throws {
@@ -56,6 +70,7 @@ struct DocTemplate: Identifiable, Codable, Equatable {
         try c.encode(isBuiltin, forKey: .isBuiltin)
         try c.encodeIfPresent(folderName, forKey: .folderName)
         try c.encode(isProjectTemplate, forKey: .isProjectTemplate)
+        try c.encode(surface, forKey: .surface)
     }
 
     /// Default templates seeded into every project's `templates/<slug>/template.md`.
@@ -65,12 +80,13 @@ struct DocTemplate: Identifiable, Codable, Equatable {
         let name: String
         let sections: [String]
         var ingestKind: IngestTemplateKind? = nil
+        var surface: TemplateSurface = .default
 
         func markdown() -> String {
             if let kind = ingestKind {
                 return IngestTemplateRenderer.defaultTemplate(kind)
             }
-            return DocTemplate.markdownBody(name: name, sections: sections)
+            return DocTemplate.markdownBody(name: name, sections: sections, surface: surface)
         }
     }
 
@@ -100,6 +116,27 @@ struct DocTemplate: Identifiable, Codable, Equatable {
             folderName: "action-plan",
             name: "Action Plan",
             sections: ["Objective", "Actions", "Owners", "Timeline", "Success Criteria"]),
+        // Visual surface. Its sources are images, so its structures are about
+        // reading an image rather than summarising a meeting — which is the
+        // whole reason the two menus needed separating.
+        SeedDefinition(
+            id: UUID(uuidString: "A0000010-0000-4000-8000-000000000010")!,
+            folderName: "image-analysis",
+            name: "Image Analysis",
+            sections: ["What It Shows", "Details Worth Noting", "Questions It Raises"],
+            surface: .visual),
+        SeedDefinition(
+            id: UUID(uuidString: "A0000011-0000-4000-8000-000000000011")!,
+            folderName: "screenshot-review",
+            name: "Screenshot Review",
+            sections: ["What The Screen Does", "Problems Spotted", "Suggested Changes"],
+            surface: .visual),
+        SeedDefinition(
+            id: UUID(uuidString: "A0000012-0000-4000-8000-000000000012")!,
+            folderName: "design-feedback",
+            name: "Design Feedback",
+            sections: ["First Impression", "Layout & Hierarchy", "Accessibility", "Specific Fixes"],
+            surface: .visual),
         SeedDefinition(
             id: UUID(uuidString: "A0000006-0000-4000-8000-000000000006")!,
             folderName: "meeting-note",
@@ -122,7 +159,8 @@ struct DocTemplate: Identifiable, Codable, Equatable {
             name: $0.name,
             sections: $0.sections,
             isBuiltin: true,
-            folderName: $0.folderName)
+            folderName: $0.folderName,
+            surface: $0.surface)
     }
 
     /// Parse `## ` headings from a Markdown string into section names.
@@ -181,13 +219,13 @@ struct DocTemplate: Identifiable, Codable, Equatable {
     }
 
     /// Serialize sections back to editable `template.md` content.
-    static func markdownBody(name: String, sections: [String]) -> String {
+    static func markdownBody(name: String, sections: [String], surface: TemplateSurface = .default) -> String {
         var lines = [
             "# \(name)",
             "",
-            "<!-- llmide:doc-template -->",
+            TemplateSurfaceMarker.line(base: markerComment, surface: surface),
             "",
-            "Document template for Doc Gen. Edit the `##` sections below to change structure.",
+            "Template for \(surface.label). Edit the `##` sections below to change structure.",
             "",
         ]
         for section in sections where !section.isEmpty {
@@ -199,7 +237,12 @@ struct DocTemplate: Identifiable, Codable, Equatable {
 
     func renderedMarkdown() -> String {
         if let raw = rawContent, !raw.isEmpty { return raw }
-        return Self.markdownBody(name: name, sections: sections)
+        return Self.markdownBody(name: name, sections: sections, surface: surface)
+    }
+
+    /// The surface declared by a template file's own marker.
+    static func surface(from markdown: String) -> TemplateSurface {
+        TemplateSurfaceMarker.surface(in: markdown, base: markerComment)
     }
 
     var isEditable: Bool {

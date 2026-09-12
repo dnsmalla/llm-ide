@@ -16,6 +16,28 @@ struct GenerationTemplateSection: View {
     @State private var showCommandImporter = false
     @State private var showTemplateManager = false
 
+    /// Only this menu's own templates/commands. Both generation sections are
+    /// this same view over the same store, so without the filter Visual
+    /// listed Doc Gen's meeting templates and vice versa.
+    private var visibleTemplates: [DocTemplate] { templateStore.templates(for: vm.surface) }
+    private var visibleCommands: [DocCommand] { commandStore.commands(for: vm.surface) }
+
+    /// Drop a selection that no longer belongs to this menu.
+    ///
+    /// The lists are filtered, so a selection cannot be MADE from the wrong
+    /// surface — but a template's surface lives in its file, and editing that
+    /// file (or the manager moving it) can strip the selection's membership
+    /// underneath a menu that is not on screen. Generating would then run the
+    /// other menu's template without it appearing in the list.
+    private func pruneOffSurfaceSelection() {
+        if let selected = vm.selectedTemplate, selected.surface != vm.surface {
+            vm.selectedTemplate = nil
+        }
+        if let selected = vm.selectedCommand, selected.surface != vm.surface {
+            vm.selectedCommand = nil
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -40,6 +62,9 @@ struct GenerationTemplateSection: View {
                 commandsGroup
             }
         }
+        .onAppear { pruneOffSurfaceSelection() }
+        .onChange(of: templateStore.templates) { _, _ in pruneOffSurfaceSelection() }
+        .onChange(of: commandStore.commands) { _, _ in pruneOffSurfaceSelection() }
         .sheet(isPresented: $showTemplateManager) {
             DocTemplateManagerSheet()
                 .environmentObject(templateStore)
@@ -52,7 +77,7 @@ struct GenerationTemplateSection: View {
             allowsMultipleSelection: false
         ) { result in
             if case .success(let urls) = result, let url = urls.first {
-                if let template = templateStore.importMarkdownFile(at: url) {
+                if let template = templateStore.importMarkdownFile(at: url, surface: vm.surface) {
                     vm.selectedTemplate = template
                 }
             }
@@ -66,7 +91,7 @@ struct GenerationTemplateSection: View {
                 // Commands are project-only: with no project open,
                 // `importMarkdownFile` returns nil and the picker silently
                 // discards the file rather than pretending to select one.
-                if let command = commandStore.importMarkdownFile(at: url) {
+                if let command = commandStore.importMarkdownFile(at: url, surface: vm.surface) {
                     vm.selectedCommand = command
                 }
             }
@@ -92,7 +117,7 @@ struct GenerationTemplateSection: View {
                 .padding(.trailing, 14)
             }
 
-            if templateStore.templates.isEmpty {
+            if visibleTemplates.isEmpty {
                 // Import CTA when no templates yet
                 Button { showTemplateImporter = true } label: {
                     HStack(spacing: 10) {
@@ -140,7 +165,7 @@ struct GenerationTemplateSection: View {
             } else {
                 // Template list
                 VStack(spacing: 3) {
-                    ForEach(templateStore.templates) { template in
+                    ForEach(visibleTemplates) { template in
                         templateRow(template)
                     }
                 }
@@ -202,12 +227,12 @@ struct GenerationTemplateSection: View {
                 .padding(.trailing, 14)
             }
 
-            if commandStore.commands.isEmpty {
+            if visibleCommands.isEmpty {
                 emptyHint("No commands yet — import a .md file")
                     .padding(.bottom, 12)
             } else {
                 VStack(spacing: 3) {
-                    ForEach(commandStore.commands) { command in
+                    ForEach(visibleCommands) { command in
                         commandRow(command)
                     }
                 }

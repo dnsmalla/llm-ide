@@ -14,6 +14,12 @@ final class DocCommandStore: ObservableObject {
         currentProjectRoot != nil ? projectCommands : DocCommand.builtins
     }
 
+    /// Commands belonging to one generation menu — see
+    /// `DocTemplateStore.templates(for:)` for why this filter exists.
+    func commands(for surface: TemplateSurface) -> [DocCommand] {
+        commands.filter { $0.surface == surface }
+    }
+
     private var currentProjectRoot: URL?
     private var hasBootstrapped = false
 
@@ -42,9 +48,13 @@ final class DocCommandStore: ObservableObject {
     /// Import an `.md` file as a command. Requires an open project — commands
     /// live in the project tree, so with no project this is a no-op.
     @discardableResult
-    func importMarkdownFile(at url: URL) -> DocCommand? {
+    func importMarkdownFile(at url: URL, surface: TemplateSurface = .default) -> DocCommand? {
         guard let root = currentProjectRoot,
-              let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+              let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        // See DocTemplateStore.importMarkdownFile — the marker has to be in
+        // the file, or the rescan puts this command back in the other menu.
+        let content = TemplateSurfaceMarker.ensure(
+            in: raw, base: DocCommand.markerComment, surface: surface)
         let name = DocCommand.displayName(
             from: content,
             folderName: url.deletingPathExtension().lastPathComponent)
@@ -56,7 +66,8 @@ final class DocCommandStore: ObservableObject {
                 instruction: DocCommand.instruction(from: content),
                 rawContent: content,
                 folderName: slug,
-                isProjectCommand: true),
+                isProjectCommand: true,
+                surface: surface),
             at: root,
             folderName: slug)
         reloadProjectCommands(at: root)
@@ -100,7 +111,8 @@ final class DocCommandStore: ObservableObject {
                 instruction: DocCommand.instruction(from: content),
                 rawContent: content,
                 folderName: folderName,
-                isProjectCommand: true))
+                isProjectCommand: true,
+                surface: DocCommand.surface(from: content)))
         }
         return commands.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }

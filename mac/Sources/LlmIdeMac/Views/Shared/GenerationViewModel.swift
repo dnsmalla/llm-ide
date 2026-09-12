@@ -3,6 +3,17 @@ import Foundation
 
 @MainActor
 final class GenerationViewModel: ObservableObject {
+    /// Which generation menu this model drives. Doc Gen and Visual share one
+    /// template store over one project folder, so the surface is what tells
+    /// the shared UI which half of it to show. Set once by
+    /// `GenerationRegistry` from the scope it creates the model for; there is
+    /// no case where a model changes surface.
+    let surface: TemplateSurface
+
+    init(surface: TemplateSurface = .default) {
+        self.surface = surface
+    }
+
     @Published var selectedSources: Set<DocGenSource> = []
     /// Lifts `canGenerate`'s template/command + source requirement. Defaults
     /// false (both tabs' behavior with "Use chat" off, unchanged) — set true

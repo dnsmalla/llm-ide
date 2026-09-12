@@ -16,6 +16,17 @@ final class DocTemplateStore: ObservableObject {
 
     var hasProjectTemplates: Bool { currentProjectRoot != nil }
 
+    /// Templates belonging to one generation menu.
+    ///
+    /// Doc Gen and Visual share this store and the project's one `templates/`
+    /// folder, so before surfaces existed each menu listed everything the
+    /// other had — Visual offered "Sprint Review", Doc Gen would have offered
+    /// "Screenshot Review". Filtering happens here rather than in the view so
+    /// both menus and the manager sheet read one rule.
+    func templates(for surface: TemplateSurface) -> [DocTemplate] {
+        templates.filter { $0.surface == surface }
+    }
+
     private var currentProjectRoot: URL?
 
     private var storeURL: URL {
@@ -56,8 +67,14 @@ final class DocTemplateStore: ObservableObject {
     /// Import an `.md` file as a template. Parses `## ` headings as sections.
     /// When a project is open, writes into `templates/<slug>/template.md`.
     @discardableResult
-    func importMarkdownFile(at url: URL) -> DocTemplate? {
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+    func importMarkdownFile(at url: URL, surface: TemplateSurface = .default) -> DocTemplate? {
+        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        // Stamp the surface into the file being imported. The raw content is
+        // what gets written, so without this an import into the Visual menu
+        // would come back as a Doc Gen template on the next rescan and vanish
+        // from the menu it was imported into.
+        let content = TemplateSurfaceMarker.ensure(
+            in: raw, base: DocTemplate.markerComment, surface: surface)
         let name = DocTemplate.displayName(
             from: content,
             folderName: url.deletingPathExtension().lastPathComponent)
@@ -70,7 +87,8 @@ final class DocTemplateStore: ObservableObject {
                     sections: DocTemplate.sections(from: content),
                     rawContent: content,
                     folderName: slug,
-                    isProjectTemplate: true),
+                    isProjectTemplate: true,
+                    surface: surface),
                 at: root,
                 folderName: slug)
             reloadProjectTemplates(at: root)
@@ -81,7 +99,8 @@ final class DocTemplateStore: ObservableObject {
             name: name,
             sections: DocTemplate.sections(from: content),
             rawContent: content,
-            isBuiltin: false)
+            isBuiltin: false,
+            surface: surface)
         add(template)
         return template
     }
@@ -99,7 +118,8 @@ final class DocTemplateStore: ObservableObject {
                     sections: template.sections,
                     rawContent: template.rawContent,
                     folderName: slug,
-                    isProjectTemplate: true),
+                    isProjectTemplate: true,
+                    surface: template.surface),
                 at: root,
                 folderName: slug)
             reloadProjectTemplates(at: root)
@@ -175,7 +195,8 @@ final class DocTemplateStore: ObservableObject {
                 sections: DocTemplate.sections(from: content),
                 rawContent: content,
                 folderName: folderName,
-                isProjectTemplate: true))
+                isProjectTemplate: true,
+                surface: DocTemplate.surface(from: content)))
         }
         return templates.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
