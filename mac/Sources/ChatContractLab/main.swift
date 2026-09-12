@@ -467,9 +467,24 @@ do {
        the original one — is the only one worth acting on afterwards.
     """
     expect(stepsNoHeading.utf8.count > PlanEditPolicy.minimumPlanBytes,
-           "the unsectioned fixture must be long enough to reach the heading check")
-    expect(PlanEditPolicy.looksLikePlan(content: stepsNoHeading) == false,
-           "an unsectioned list is an answer; a plan has sections")
+           "the unsectioned fixture must be long enough to reach the shape check")
+    // Reversed deliberately. This asserted that a plan must have sections,
+    // which was a judgement call and the wrong one: four numbered steps ARE a
+    // plan, heading or not. What the rule actually has to exclude is a reply
+    // that enumerates NO work — see the clarifying-question case below.
+    expect(PlanEditPolicy.looksLikePlan(content: stepsNoHeading) == true,
+           "enumerated work is the signal; a section heading is its usual company, not a requirement")
+
+    let twoStepsNoHeading = """
+    Both of those are fine to change, and neither depends on the other, so you
+    can do them in either order. There is no migration involved and nothing
+    else in the tree reads those two values, which is why this is short.
+
+    1. Rename the field in the config struct.
+    2. Update the one call site that reads it.
+    """
+    expect(PlanEditPolicy.looksLikePlan(content: twoStepsNoHeading) == false,
+           "two numbered lines inside an ordinary answer are a list, not a plan")
 
     let oneStep = """
     # Fix
@@ -487,6 +502,46 @@ do {
            "the single-step fixture must be long enough to reach the step count")
     expect(PlanEditPolicy.looksLikePlan(content: oneStep) == false,
            "one step is a suggestion, not a plan worth writing to llm-doc/plans/")
+
+    // The reported bug: in Plan mode the planner's FIRST move is a clarifying
+    // question (both plan skills open with one), and being in plan mode used
+    // to be enough on its own to show the row — so the question arrived under
+    // a "Save Plan" button offering to write the question itself to
+    // llm-doc/plans/. The order is question → answer → plan → save.
+    let clarifyingQuestion = """
+    I'll help you plan dead code removal. This looks like it needs some
+    exploration first to understand scope and approach.
+
+    Let me start by checking the project structure and whether there are
+    existing tools or processes for identifying dead code. I can see this is a
+    multi-platform project (Mac app, iOS app, browser extension, GraphKit
+    library). Before I can create a proper plan, I need to understand the
+    scope better.
+
+    **First question:** Which parts of the codebase are you looking to clean
+    up? Are we targeting:
+
+    - The entire project (all platforms)?
+    - Specific areas like the Mac app, extension, or library?
+    - Or a particular subsystem you've identified as having dead code?
+    """
+    expect(PlanEditPolicy.looksLikePlan(content: clarifyingQuestion) == false,
+           "a clarifying question enumerates options to choose between, not work to carry out")
+    expect(AgentV2Selection.showsSavePlanAction(
+        mode: "plan", v2Selected: true, hasPendingTool: false,
+        sessionIsPlanning: true,
+        contentLooksLikePlan: PlanEditPolicy.looksLikePlan(content: clarifyingQuestion)) == false,
+           "plan MODE alone must not offer to save a reply that is not a plan")
+    expect(AgentV2Selection.showsSavePlanAction(
+        mode: "plan", v2Selected: true, hasPendingTool: false,
+        sessionIsPlanning: true,
+        contentLooksLikePlan: PlanEditPolicy.looksLikePlan(content: realPlan)) == true,
+           "the row returns once the plan itself arrives")
+    expect(AgentV2Selection.showsSavePlanAction(
+        mode: nil, v2Selected: true, hasPendingTool: false,
+        sessionIsPlanning: false,
+        contentLooksLikePlan: true) == false,
+           "a plan-shaped reply in a chat that never planned is still not offered")
 
     // Fenced blocks are QUOTED text, not structure. Without this the shell
     // script below supplies both signals — `#` comments and `1)` lines — and

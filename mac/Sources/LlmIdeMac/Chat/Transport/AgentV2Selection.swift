@@ -7,7 +7,7 @@ import Foundation
 /// provider the same way the panel resolves it for the wire, AND the chat's
 /// per-session engine marker (the D3 clean cut — legacy chats stay legacy,
 /// v2 chats stay v2, the toggle only decides at creation + kills globally).
-enum AgentV2Selection {
+public enum AgentV2Selection {
 
     /// `@AppStorage`/UserDefaults key for the user's engine toggle. The
     /// Settings row (`ProvidersSettingsSection`) writes through
@@ -145,26 +145,35 @@ enum AgentV2Selection {
     /// not already saved — the saved-plan card is a .toolResult message
     /// that doesn't shift lastAssistantTurnId, so without the flag the
     /// button stayed live and re-saved the same plan on every click — and
-    /// then EITHER of two signals that this reply is a plan.
+    /// then TWO things together: this chat is planning, AND this reply is
+    /// actually a plan.
     ///
-    /// The mode signal is the per-turn mode the SERVER resolved, and on its
-    /// own it is not enough: it flaps across a planning conversation. Asked
-    /// in Auto mode, "can you plan how to remove the dead code" resolves to
-    /// `plan`, but the follow-up turns that answer the planner's questions —
-    /// and the turn that finally CONTAINS the plan — resolve to something
-    /// else, so the finished plan arrived in the transcript with no way to
-    /// save it. The second signal covers that: a chat that HAS planned
-    /// (`sessionIsPlanning`) plus a reply shaped like a plan
-    /// (`PlanEditPolicy.looksLikePlan`). Both halves are required, so an
-    /// ordinary numbered answer in a chat that never planned anything does
-    /// not sprout a Save Plan button.
-    static func showsSavePlanAction(mode: String?, v2Selected: Bool, hasPendingTool: Bool,
+    /// Planning is either signal — the per-turn mode the SERVER resolved, or
+    /// the fact that some earlier turn resolved to a plan mode. Neither is
+    /// enough alone, because the resolved mode flaps across a planning
+    /// conversation: asked in Auto, "can you plan how to remove the dead
+    /// code" resolves to `plan`, but the follow-up turns that answer the
+    /// planner's questions — and the turn that finally CONTAINS the plan —
+    /// resolve to something else.
+    ///
+    /// The SHAPE half is not optional, and that is the correction here. Being
+    /// in plan mode used to be sufficient on its own, so the planner's very
+    /// first move — a clarifying question, which is what both plan skills
+    /// open with — arrived under a "Save Plan" button offering to write that
+    /// question to `llm-doc/plans/`. The order is question → answer → plan →
+    /// save, and the row belongs at the end of it: it appears when there is a
+    /// plan to save (`PlanEditPolicy.looksLikePlan`), not when a plan has
+    /// merely been asked for.
+    /// `public` for the same reason the PlanEditPolicy rules are: this is
+    /// asserted by `chat-contract-lab`, a separate target, and this toolchain
+    /// has no XCTest (so `@testable import` is not available).
+    public static func showsSavePlanAction(mode: String?, v2Selected: Bool, hasPendingTool: Bool,
                                     planSaved: Bool = false,
                                     sessionIsPlanning: Bool = false,
                                     contentLooksLikePlan: Bool = false) -> Bool {
-        guard v2Selected, !hasPendingTool, !planSaved else { return false }
+        guard v2Selected, !hasPendingTool, !planSaved, contentLooksLikePlan else { return false }
         if let mode, planLikeModes.contains(mode) { return true }
-        return sessionIsPlanning && contentLooksLikePlan
+        return sessionIsPlanning
     }
 
     /// Whether this transcript has ever run a plan-like turn — the session

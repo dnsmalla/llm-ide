@@ -91,10 +91,25 @@ public enum PlanEditPolicy {
             // applies, so the two parsers agree about the same document.
             let indent = rawLine.prefix { $0 == " " || $0 == "\t" }.count
             if indent < 2, isStepLine(line) { stepCount += 1 }
-            if hasHeading && stepCount >= minimumPlanSteps { return true }
+            if isPlanShaped(hasHeading: hasHeading, stepCount: stepCount) { return true }
         }
-        return hasHeading && stepCount >= minimumPlanSteps
+        return isPlanShaped(hasHeading: hasHeading, stepCount: stepCount)
     }
+
+    /// Enumerated work is the signal that matters; sections are the usual
+    /// company it keeps, not a requirement. A plan that numbers three or more
+    /// steps is a plan whether or not it bothered with a `##` heading — and a
+    /// clarifying question, which is what this rule most has to exclude,
+    /// enumerates nothing at all (its bullets are options to choose between,
+    /// not steps to carry out, and plain `-` bullets are not counted).
+    private static func isPlanShaped(hasHeading: Bool, stepCount: Int) -> Bool {
+        guard stepCount >= minimumPlanSteps else { return false }
+        return hasHeading || stepCount >= unsectionedPlanSteps
+    }
+
+    /// Steps an UNSECTIONED reply needs before it reads as a plan rather than
+    /// a two-item list inside an ordinary answer.
+    public static let unsectionedPlanSteps = 3
 
     /// Shortest reply that can be a plan. A plan that fits in a tweet is a
     /// suggestion, not something worth writing to `llm-doc/plans/`.
