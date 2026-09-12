@@ -28,7 +28,9 @@ struct ChatMessageList: View {
     /// Active plan execute session, if any (step-by-step progress + finish card).
     let planExecution: CodeAssistantAgentState.PlanExecutionTracker?
     let onReviewPlanExecution: () -> Void
-    let onCommitPlanExecution: () -> Void
+    /// Wraps `CodeAssistantPanel.pushPlanExecutionChanges()` — merge to the
+    /// default branch and push. The card confirms before calling it.
+    let onPushPlanExecution: () -> Void
     let onDismissPlanExecution: () -> Void
     /// Precomputed diff stats for the current `update-file` pendingTool, if
     /// any — see CodeAssistantPanel.pendingUpdateFileDiff.
@@ -128,6 +130,12 @@ struct ChatMessageList: View {
             let sessionHasSavedPlan = history.contains {
                 $0.role == .toolResult && $0.toolResult?.kind == .plan && $0.toolResult?.isFailure == false
             }
+            // Which replies ARE the plan document (collapse them) and which
+            // saved-plan card holds a written plan rather than a design
+            // (drop its "Write full plan" button). One ordered pass, computed
+            // here for the same reason as the two flags above — reading it
+            // per turn inside the ForEach would make the list O(n^2).
+            let planMarks = PlanTranscriptPolicy.mark(history.map(Self.policyTurn))
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.md) {
@@ -136,7 +144,7 @@ struct ChatMessageList: View {
                             if turn.role == .assistant, !turn.toolSteps.isEmpty {
                                 toolActivityView(turn.toolSteps)
                             }
-                            turnView(turn, lastAssistantTurnId: lastAssistantTurnId)
+                            turnView(turn, lastAssistantTurnId: lastAssistantTurnId, marks: planMarks)
                                 .id(turn.id)
                                 .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .bottom)))
                             pendingActionCardIfAny(for: turn, isLastTurn: turn.id == history.last?.id)
@@ -234,7 +242,7 @@ struct ChatMessageList: View {
                                 // to narrate under the finish card.
                                 statusLine: nil,
                                 onReview: onReviewPlanExecution,
-                                onCommit: onCommitPlanExecution,
+                                onPush: onPushPlanExecution,
                                 onDismiss: onDismissPlanExecution
                             )
                             .padding(.top, 4)
@@ -531,7 +539,7 @@ struct ChatMessageList: View {
                 liveTasks: tasks,
                 statusLine: planExecutionStatusLine,
                 onReview: onReviewPlanExecution,
-                onCommit: onCommitPlanExecution,
+                onPush: onPushPlanExecution,
                 onDismiss: onDismissPlanExecution
             )
             .padding(.bottom, 4)
@@ -640,8 +648,25 @@ struct ChatMessageList: View {
         }
     }
 
+    /// `ChatMessage` → the minimal shape `PlanTranscriptPolicy` reads. A
+    /// failed `save-plan` is deliberately `.other`: no card renders for it,
+    /// so it must not consume the write-in-progress marker either.
+    private static func policyTurn(_ m: ChatMessage) -> PlanTranscriptPolicy.Turn {
+        let kind: PlanTranscriptPolicy.Turn.Kind
+        switch m.role {
+        case .user: kind = .user
+        case .assistant: kind = .assistant
+        case .toolResult:
+            kind = (m.toolResult?.kind == .plan && m.toolResult?.isFailure == false)
+                ? .planResult : .other
+        }
+        return .init(id: m.id, kind: kind,
+                     isPlanWriteRequest: m.metadata?.planWriteDisplay != nil)
+    }
+
     @ViewBuilder
-    private func turnView(_ turn: ChatMessage, lastAssistantTurnId: UUID?) -> some View {
+    private func turnView(_ turn: ChatMessage, lastAssistantTurnId: UUID?,
+                          marks: PlanTranscriptPolicy.Marks) -> some View {
         if turn.role == .toolResult, let payload = turn.toolResult {
             // Already typed — `CommandOutputView.init(message:)` reads
             // `turn.toolResult` directly; no string parsing happens at
@@ -654,6 +679,7 @@ struct ChatMessageList: View {
                 // a one-line capsule — the whole point of saving it is acting
                 // on it. Centered like the other tool notices.
                 PlanSavedCard(payload: payload,
+                              stage: marks.writtenPlanCards.contains(turn.id) ? .written : .design,
                               actionTaken: turn.metadata?.planCardAction,
                               executingStepCount: planExecution?.planCardMessageId == turn.id
                                   ? planExecution?.steps.count : nil,
@@ -677,8 +703,13 @@ struct ChatMessageList: View {
                         ModeBadge(mode: mode)
                     }
                     if isUser {
-                        // Plan-execute turns show a one-line summary, not the full prompt.
-                        Text(turn.metadata?.planExecuteDisplay ?? turn.metadata?.planWriteDisplay ?? turn.content)
+                        // Plan-pipeline turns (execute / write / review) show a
+                        // one-line summary, not the canned multi-paragraph
+                        // prompt the button actually sent.
+                        Text(turn.metadata?.planExecuteDisplay
+                             ?? turn.metadata?.planWriteDisplay
+                             ?? turn.metadata?.planReviewDisplay
+                             ?? turn.content)
                             .font(.system(size: 12))
                             .foregroundStyle(theme.current.text)
                             .textSelection(.enabled)
@@ -703,6 +734,33 @@ struct ChatMessageList: View {
                         // per turn. The typing indicator already says what is
                         // happening.
                         EmptyView()
+                    } else if marks.documentReplies.contains(turn.id),
+                              !expandedTurns.contains(turn.id),
+                              // While it streams, trust the position: the turn
+                              // was fired BY "Write full plan", and the heavy
+                              // render is exactly what must not happen per
+                              // chunk. Once it lands, trust the content — an
+                              // agent that answered a write request with a
+                              // clarifying question wrote conversation, not a
+                              // document, and collapsing that would hide the
+                              // question behind "Implementation plan · 3 lines".
+                              // Same `looksLikePlan` gate the auto-save uses,
+                              // so the bubble collapses exactly when a card
+                              // appears below carrying the text.
+                              turn.status == .streaming
+                                  || PlanEditPolicy.looksLikePlan(content: turn.content) {
+                        // The plan document itself. Collapsed to a row: the
+                        // saved-plan card below carries the same text with the
+                        // buttons that act on it, and rendering thousands of
+                        // words of markdown in a web view that re-measures on
+                        // every streamed chunk is what made this turn jerk the
+                        // transcript around. Explicitly expanding still opens
+                        // it — `expandedTurns` is checked BEFORE the usual
+                        // last-turn rule, which would otherwise force it open.
+                        PlanDocumentBubble(
+                            content: turn.content,
+                            isStreaming: turn.status == .streaming,
+                            onExpand: { expandedTurns.insert(turn.id) })
                     } else if isAssistantExpanded(turn, lastAssistantTurnId: lastAssistantTurnId) {
                         // Expanded assistant reply — full markdown render (web view).
                         VStack(alignment: .leading, spacing: 4) {

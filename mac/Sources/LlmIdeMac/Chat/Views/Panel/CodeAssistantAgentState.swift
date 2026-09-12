@@ -43,6 +43,30 @@ final class CodeAssistantAgentState {
         /// Snapshot kept when execution ends (live `agentPendingTasks` clears on the next turn).
         var lastTasks: [AgentTask] = []
 
+        /// Where the post-execution code review has got to. Separate from
+        /// `phase` on purpose: the review is a turn that runs AFTER the
+        /// execution tracker has already settled, and `updatePlanExecution`
+        /// only touches a `.running` tracker — so the finish card stays up,
+        /// unchanged, while its own review streams underneath it.
+        enum ReviewPhase: String, Equatable {
+            case none
+            case running
+            case done
+        }
+
+        var reviewPhase: ReviewPhase = .none
+        /// The review reply, kept so the verdict strip can show the findings
+        /// without hunting the transcript for the message again.
+        var reviewSummary: String = ""
+        /// Parsed from `reviewSummary` by `PlanReviewPolicy.verdict(from:)`.
+        var reviewVerdict: PlanReviewVerdict?
+        /// The branch the review was taken against ("main"), for wording.
+        var reviewBaseBranch: String?
+
+        /// Push is offered once a review has RUN — see
+        /// `PlanReviewPolicy.allowsPush(reviewed:)`.
+        var hasReviewed: Bool { reviewPhase == .done }
+
         var totalSteps: Int { max(steps.count, lastTasks.count) }
     }
     /// Per-request project-memory overhead from the last turn, surfaced on the

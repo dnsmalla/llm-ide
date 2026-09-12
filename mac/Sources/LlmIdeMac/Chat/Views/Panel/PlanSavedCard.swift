@@ -11,7 +11,20 @@ import AppKit
 /// Renders entirely from the persisted payload, so a card reloaded from a
 /// saved session is identical to one that just arrived live.
 struct PlanSavedCard: View {
+    /// Which step of the plan pipeline this card's file is at, decided by
+    /// `PlanTranscriptPolicy` from the turn order — not from the text, which
+    /// cannot tell a design from the plan written out of it.
+    enum Stage {
+        /// A design. The next step is "Write full plan".
+        case design
+        /// The written implementation plan. The next step is Execute, so the
+        /// write button is gone: pressing it again would re-write a plan that
+        /// already exists, back into the same file.
+        case written
+    }
+
     let payload: ChatMessage.ToolResultPayload
+    let stage: Stage
     /// Persisted choice from the owning tool-result message, if any.
     let actionTaken: ChatMessage.PlanCardAction?
     /// When executing, the parsed step count (hides plan preview and file link).
@@ -92,9 +105,20 @@ struct PlanSavedCard: View {
                 .font(.system(size: 12))
                 .foregroundStyle(theme.current.success)
             VStack(alignment: .leading, spacing: 2) {
-                Text(payload.planTitle ?? "Plan saved")
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(payload.planTitle ?? "Plan saved")
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(2)
+                    if stage == .written, !isExecuting {
+                        Text("PLAN WRITTEN")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(theme.current.success)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(theme.current.success.opacity(0.14))
+                            .clipShape(Capsule())
+                    }
+                }
                 if isExecuting, let count = executingStepCount, count > 0 {
                     Text("\(count) steps · executing one at a time")
                         .font(.system(size: 11))
@@ -171,19 +195,22 @@ struct PlanSavedCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             HStack(spacing: 8) {
-                // Design → write → execute: this is the middle step. Not the
-                // prominent button, because a card can also hold the finished
-                // plan, and there Execute is the next step.
-                Button {
-                    localAction = .write
-                    onWrite()
-                } label: {
-                    Label("Write full plan", systemImage: "doc.text")
-                        .font(.system(size: 12))
+                // Design → write → execute: this is the middle step, and it
+                // is offered only while the card still holds a DESIGN. Once
+                // the plan itself has been written into this file, the next
+                // step is Execute and this button would only rewrite it.
+                if stage == .design {
+                    Button {
+                        localAction = .write
+                        onWrite()
+                    } label: {
+                        Label("Write full plan", systemImage: "doc.text")
+                            .font(.system(size: 12))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Turn this design into the detailed implementation plan, saved into this same file")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Turn this design into the detailed implementation plan, saved into this same file")
                 Button {
                     localAction = .execute
                     onExecute()

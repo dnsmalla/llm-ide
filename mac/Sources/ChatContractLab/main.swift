@@ -682,6 +682,112 @@ do {
            "indented sub-steps are details of one step, not steps of their own")
 }
 
+// PlanTranscriptPolicy — which reply is a DOCUMENT and which saved-plan card
+// holds a written plan. Decided by turn order, because content sniffing
+// cannot tell a design from the plan written out of it: both look like plans.
+do {
+    let design = UUID(), writeAsk = UUID(), doc = UUID(), savedPlan = UUID()
+    let marks = PlanTranscriptPolicy.mark([
+        .init(id: design, kind: .planResult),
+        .init(id: writeAsk, kind: .user, isPlanWriteRequest: true),
+        .init(id: doc, kind: .assistant),
+        .init(id: savedPlan, kind: .planResult),
+    ])
+    expect(marks.documentReplies == [doc],
+           "only the reply to the write request is the document")
+    expect(marks.writtenPlanCards == [savedPlan],
+           "the card saved after that reply holds the written plan")
+    expect(!marks.writtenPlanCards.contains(design),
+           "the design card it was written FROM keeps its Write full plan button")
+
+    // A question mid-write is conversation: the user's answer disarms, so
+    // the agent's next reply is not hidden behind a one-line summary.
+    let question = UUID(), answer = UUID(), afterAnswer = UUID()
+    let interrupted = PlanTranscriptPolicy.mark([
+        .init(id: UUID(), kind: .user, isPlanWriteRequest: true),
+        .init(id: question, kind: .assistant),
+        .init(id: answer, kind: .user),
+        .init(id: afterAnswer, kind: .assistant),
+    ])
+    expect(interrupted.documentReplies == [question],
+           "a plain user message disarms the marker")
+    expect(!interrupted.documentReplies.contains(afterAnswer),
+           "the reply after it renders normally")
+
+    let none = PlanTranscriptPolicy.mark([
+        .init(id: UUID(), kind: .user),
+        .init(id: UUID(), kind: .assistant),
+        .init(id: UUID(), kind: .planResult),
+    ])
+    expect(none.documentReplies.isEmpty && none.writtenPlanCards.isEmpty,
+           "an ordinary chat marks nothing")
+}
+
+// PlanReviewPolicy — the verdict gates Push, so it is read off an explicit
+// marker line, not inferred from prose, and a reply that echoes the prompt's
+// own menu of verdicts is unclear rather than a coin flip.
+do {
+    let pass = """
+    No blocking issues found.
+
+    \(PlanReviewPolicy.verdictMarker) PASS
+    """
+    expect(PlanReviewPolicy.verdict(from: pass) == .pass, "an explicit PASS reads as pass")
+
+    let changes = """
+    `foo.swift:12` drops the error.
+
+    **\(PlanReviewPolicy.verdictMarker) CHANGES**
+    """
+    expect(PlanReviewPolicy.verdict(from: changes) == .changesRequested,
+           "markdown emphasis around the marker doesn't hide it")
+
+    let echoed = "\(PlanReviewPolicy.verdictMarker) PASS or \(PlanReviewPolicy.verdictMarker) CHANGES"
+    expect(PlanReviewPolicy.verdict(from: echoed) == .unclear,
+           "the prompt's menu echoed back is not a verdict")
+
+    // Only the first word after the marker is the verdict — a PASS that
+    // explains itself must not be downgraded by a word in its own reasoning,
+    // which is what made the push dialog warn over a clean review.
+    let justified = "\(PlanReviewPolicy.verdictMarker) PASS — no changes required, nothing failed"
+    expect(PlanReviewPolicy.verdict(from: justified) == .pass,
+           "a PASS that explains itself is still a PASS")
+    expect(PlanReviewPolicy.verdict(from: "\(PlanReviewPolicy.verdictMarker) MAYBE") == .unclear,
+           "a marker with an unreadable verdict claims nothing")
+
+    expect(PlanReviewPolicy.verdict(from: "Looks great to me!") == .unclear,
+           "positive prose with no marker claims nothing")
+
+    // Scanned from the end: a reply that restates the instruction first and
+    // concludes afterwards is read off its conclusion.
+    let restated = """
+    I was asked to end with \(PlanReviewPolicy.verdictMarker) PASS or CHANGES.
+
+    Found a null deref.
+
+    \(PlanReviewPolicy.verdictMarker) CHANGES
+    """
+    expect(PlanReviewPolicy.verdict(from: restated) == .changesRequested,
+           "the LAST marker line wins, not the echoed instruction")
+
+    expect(!PlanReviewPolicy.allowsPush(reviewed: false),
+           "Push stays locked until a review has run")
+    expect(PlanReviewPolicy.allowsPush(reviewed: true),
+           "a finished review unlocks it, whatever it concluded")
+    expect(!PlanReviewPolicy.warnsBeforePush(.pass),
+           "a clean review confirms without a warning")
+    expect(PlanReviewPolicy.warnsBeforePush(.changesRequested)
+           && PlanReviewPolicy.warnsBeforePush(.unclear)
+           && PlanReviewPolicy.warnsBeforePush(nil),
+           "anything else warns before merging to the default branch")
+
+    let msg = PlanReviewPolicy.reviewMessage(planTitle: "Dead Code Removal", baseBranch: "main")
+    expect(msg.contains(PlanReviewPolicy.verdictMarker),
+           "the prompt asks for exactly the marker the parser looks for")
+    expect(msg.contains("Do not modify any files"),
+           "a review is not a fix")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

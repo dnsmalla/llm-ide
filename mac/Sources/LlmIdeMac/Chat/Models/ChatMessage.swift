@@ -214,6 +214,10 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         /// `autoChainPendingAction` reads to save that turn's reply back into
         /// the chat's plan file without a second click.
         var planWriteDisplay: String?
+        /// Compact label for the finish card's "Review" user turn — and the
+        /// marker `autoChainPendingAction` reads to land that turn's reply
+        /// on the plan-execution tracker as its verdict.
+        var planReviewDisplay: String?
     }
 
     /// User choice on a saved-plan card — persisted so reloaded sessions

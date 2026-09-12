@@ -41,8 +41,16 @@ public enum PlanExecutionSummaryPolicy {
 }
 
 /// Plan execution UX: total step count, one current step at a time, then a
-/// Review/Commit finish card. Replaces the full task checklist during runs
+/// Review/Push finish card. Replaces the full task checklist during runs
 /// started from PlanSavedCard.
+///
+/// The finish card's three actions are ordered by the workflow they belong
+/// to: **Review** runs the code-review skill over the diff this execution
+/// produced, **Push** merges the branch into the default branch and pushes
+/// it, **Dismiss** drops the card. Push is disabled until a review has run —
+/// merging to main is the one op allowed to reach `origin/<default>`, and
+/// doing it on an unreviewed agent-written change is exactly the mistake this
+/// card exists to prevent.
 struct PlanExecutionCard: View {
     let tracker: CodeAssistantAgentState.PlanExecutionTracker
     let liveTasks: [AgentTask]
@@ -53,10 +61,16 @@ struct PlanExecutionCard: View {
     /// one. Nil when the turn is idle (between auto-continue hops).
     let statusLine: String?
     let onReview: () -> Void
-    let onCommit: () -> Void
+    /// Merge this branch into the default branch and push. Destructive tier —
+    /// the confirmation dialog below is what `RepoManager.runGitOp`'s
+    /// `merge_to_main` contract requires of its caller.
+    let onPush: () -> Void
     let onDismiss: () -> Void
 
     @EnvironmentObject var theme: ThemeStore
+    /// Expands the review findings under the verdict strip.
+    @State private var reviewExpanded = false
+    @State private var confirmingPush = false
 
     private var tasks: [AgentTask] {
         liveTasks.isEmpty ? tracker.lastTasks : liveTasks
@@ -187,25 +201,8 @@ struct PlanExecutionCard: View {
                 .foregroundStyle(theme.current.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
             if !failed {
-                HStack(spacing: 8) {
-                    Button(action: onReview) {
-                        Label("Review changes", systemImage: "arrow.triangle.branch")
-                            .font(.system(size: 12))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    Button(action: onCommit) {
-                        Label("Commit", systemImage: "checkmark.circle")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    Spacer(minLength: 0)
-                    Button("Dismiss", action: onDismiss)
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.current.textMuted)
-                }
+                if tracker.reviewPhase == .done { reviewVerdictStrip }
+                reviewActions
             } else {
                 Button("Dismiss", action: onDismiss)
                     .buttonStyle(.bordered)
@@ -217,5 +214,135 @@ struct PlanExecutionCard: View {
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.current.border, lineWidth: 1))
         .cornerRadius(10)
         .frame(maxWidth: 720, alignment: .leading)
+    }
+
+    /// What the review concluded, with its findings one click away. Shown
+    /// only once a review has actually finished — before that the card makes
+    /// no claim about the change at all.
+    @ViewBuilder
+    private var reviewVerdictStrip: some View {
+        let verdict = tracker.reviewVerdict ?? .unclear
+        let display = PlanReviewPolicy.display(for: verdict)
+        let (icon, tint): (String, Color) = switch verdict {
+        case .pass: ("checkmark.seal.fill", theme.current.success)
+        case .changesRequested: ("exclamationmark.triangle.fill", theme.current.warning)
+        case .unclear: ("questionmark.circle.fill", theme.current.textMuted)
+        }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                    .foregroundStyle(tint)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(display.title)
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(display.detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.current.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            if !tracker.reviewSummary.isEmpty {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { reviewExpanded.toggle() }
+                } label: {
+                    Label(reviewExpanded ? "Hide findings" : "Show findings",
+                          systemImage: reviewExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(theme.current.accent)
+                if reviewExpanded {
+                    // Plain text, not a markdown web view: this sits inside
+                    // the transcript's own lazy stack, and the review reply
+                    // is already rendered in full as its own chat turn just
+                    // above — this is the copy you read without scrolling.
+                    ScrollView {
+                        Text(tracker.reviewSummary)
+                            .font(.system(size: 11))
+                            .foregroundStyle(theme.current.text)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 260)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.08))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tint.opacity(0.3), lineWidth: 1))
+        .cornerRadius(8)
+    }
+
+    private var isReviewing: Bool { tracker.reviewPhase == .running }
+
+    /// Review / Push / Dismiss.
+    private var reviewActions: some View {
+        HStack(spacing: 8) {
+            // Prominent until a review has run (it is the step the card is
+            // asking for), then demoted so Push is the obvious next action.
+            if tracker.hasReviewed {
+                Button(action: onReview) { reviewButtonLabel }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isReviewing)
+                    .help("Run the code-review skill over the changes this execution made")
+            } else {
+                Button(action: onReview) { reviewButtonLabel }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(isReviewing)
+                    .help("Run the code-review skill over the changes this execution made")
+            }
+
+            Button { confirmingPush = true } label: {
+                Label("Push", systemImage: "arrow.up.circle")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(!PlanReviewPolicy.allowsPush(reviewed: tracker.hasReviewed) || isReviewing)
+            .help(tracker.hasReviewed
+                  ? "Commit anything outstanding, merge this branch into the default branch, and push"
+                  : "Run the review first — Push merges straight into the default branch")
+
+            Spacer(minLength: 0)
+            Button("Dismiss", action: onDismiss)
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundStyle(theme.current.textMuted)
+        }
+        .confirmationDialog("Merge into the default branch and push?",
+                            isPresented: $confirmingPush, titleVisibility: .visible) {
+            Button("Merge & Push", role: .destructive, action: onPush)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(pushConfirmationMessage)
+        }
+    }
+
+    @ViewBuilder
+    private var reviewButtonLabel: some View {
+        if isReviewing {
+            HStack(spacing: 5) {
+                ProgressView().controlSize(.small)
+                Text("Reviewing…").font(.system(size: 12))
+            }
+        } else {
+            Label(tracker.hasReviewed ? "Review again" : "Review", systemImage: "checkmark.seal")
+                .font(.system(size: 12))
+        }
+    }
+
+    /// Says what Push is about to do, and warns when the review did not come
+    /// back clean — the point at which overriding it becomes a decision.
+    private var pushConfirmationMessage: String {
+        let base = "Any uncommitted changes are committed, this branch is merged into the "
+            + "default branch (fast-forward only), and that branch is pushed to origin."
+        guard PlanReviewPolicy.warnsBeforePush(tracker.reviewVerdict) else { return base }
+        return "The review did not come back clean. " + base
     }
 }

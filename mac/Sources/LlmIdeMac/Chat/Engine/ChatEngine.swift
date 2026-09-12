@@ -1122,6 +1122,16 @@ final class ChatEngine {
                 tracker.phase = .failed
                 agent.planExecution = tracker
             }
+            // Same reasoning for a post-execution REVIEW turn, which runs
+            // against an already-settled tracker and so is untouched by the
+            // block above. `autoChainPendingAction` is what normally lands
+            // it, and the catch path this runs from never reaches it — so a
+            // stopped or failed review would otherwise leave the finish card
+            // spinning "Reviewing…" forever, with Push locked behind it.
+            if var tracker = agent.planExecution, tracker.reviewPhase == .running {
+                tracker.reviewPhase = .none
+                agent.planExecution = tracker
+            }
             // And drop a parked v2 approval: the server unparks it as
             // `aborted` the moment the stream closes (no tombstone), so the
             // card would otherwise stay interactive under the stopped turn

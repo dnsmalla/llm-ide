@@ -313,6 +313,17 @@ extension CodeAssistantPanel {
            PlanEditPolicy.looksLikePlan(content: reply.content) {
             await savePlanFromMessage(reply)
         }
+        // Review-phase landing. The finish card's Review button fires a Code
+        // Review turn stamped `planReviewDisplay`; its reply is the verdict
+        // the card shows and the thing that unlocks Push. Same gating shape
+        // as the write branch above — only the turn that button started
+        // qualifies, and a message typed afterwards resets `lastUser`.
+        if pendingTool == nil,
+           let lastUser = engine.messages.last(where: { $0.role == .user }),
+           lastUser.metadata?.planReviewDisplay != nil,
+           let reply = engine.messages.last(where: { $0.role == .assistant }) {
+            landPlanReview(reply: reply)
+        }
         // Data-loss guard input: if the server CUT this file to fit the
         // prompt, the agent only saw its head — auto-overwriting with the
         // "full" rewrite would silently drop the tail. matchingAttachment
