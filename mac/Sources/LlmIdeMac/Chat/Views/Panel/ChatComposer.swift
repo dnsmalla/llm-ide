@@ -324,6 +324,7 @@ extension CodeAssistantPanel {
             }
             if showModelPicker { modelPickerChips }
             modePicker
+            activeModeChip
             editModeChip
             memoryButton
             Spacer()
@@ -343,6 +344,7 @@ extension CodeAssistantPanel {
                 }
                 if showModelPicker { modelPickerChips }
                 modePicker
+                activeModeChip
                 editModeChip
                 memoryButton
                 Spacer(minLength: 0)
@@ -616,6 +618,40 @@ extension CodeAssistantPanel {
     /// Code-assist mode selector (Auto / Plan / Assist Plan / Code Review / Document / Execute).
     var modePicker: some View {
         chipMenu($modelState.selectedMode)
+    }
+
+    /// The mode the agent is ACTUALLY working in, shown next to the picker
+    /// whenever it differs from what the picker says.
+    ///
+    /// The picker is a request; in Auto the server answers it per turn, so
+    /// "Auto" on its own left the user unable to tell whether the agent was
+    /// planning, reviewing or editing their files. This is read-only on
+    /// purpose — it reports the server's decision and must never look like a
+    /// second control that could change it. It appears the moment the turn
+    /// reports its mode (`mode_set`, right after the agent starts) and stays
+    /// until the next turn replaces it.
+    @ViewBuilder
+    var activeModeChip: some View {
+        if let raw = engine.activeMode,
+           let resolved = CodeAssistMode(rawValue: raw),
+           resolved != modelState.selectedMode {
+            HStack(spacing: 3) {
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 8, weight: .semibold))
+                Text(resolved.label)
+                    .font(.system(size: 10, weight: .medium))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(theme.current.accent)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(theme.current.accent.opacity(0.12)))
+            .fixedSize()
+            .help(engine.busy
+                  ? "The agent is working in \(resolved.label) mode for this turn"
+                  : "The agent worked in \(resolved.label) mode on the last turn")
+            .accessibilityLabel("Agent mode: \(resolved.label)")
+        }
     }
     func currentModelDisplayName(for cli: AICliTool) -> String {
         let models = modelState.models(for: cli)

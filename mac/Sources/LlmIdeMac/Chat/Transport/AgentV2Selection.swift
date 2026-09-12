@@ -264,6 +264,16 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
         }
     }
 
+    /// Mid-turn resolved-mode echo (`mode_set`). v2 only — the legacy
+    /// endpoint reports its mode once, on the terminal `done` event, which
+    /// `ChatEngine` already applies from the turn result. A legacy turn
+    /// therefore names its mode when it finishes rather than when it starts,
+    /// which is the most that stream can honestly say.
+    var onModeResolved: (@MainActor (String) -> Void)? {
+        get { v2.onModeResolved }
+        set { v2.onModeResolved = newValue }
+    }
+
     init(v2: AgentV2Transport,
          legacy: ChatTransport,
          isV2Enabled: @escaping () -> Bool = { AgentV2Selection.toggleEnabled() },

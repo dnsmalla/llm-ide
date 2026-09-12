@@ -127,6 +127,16 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
     /// only, so it must never drive a chained turn.
     var onLiveTasks: (@MainActor ([AgentTask]) -> Void)?
 
+    /// The mode the SERVER resolved for this turn, reported the moment it is
+    /// known (`mode_set`, right after `init`) rather than only on the result.
+    ///
+    /// This is what lets the chat say which mode the agent is ACTUALLY
+    /// working in: the composer's picker shows what the user asked for, and
+    /// in Auto that is not the answer — the server picks plan / review /
+    /// document / execute per turn, and until this callback existed the only
+    /// way to find out was to read the reply and guess.
+    var onModeResolved: (@MainActor (String) -> Void)?
+
     init(streamer: AgentV2Streaming) {
         self.streamer = streamer
     }
@@ -320,6 +330,7 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 break  // informational: the decision's effect arrives as continued events
             case .modeSet(let mode):
                 resolvedMode = mode
+                self.onModeResolved?(mode)
             case .result:
                 sawTerminal = true
             case .error(let code, let message):
