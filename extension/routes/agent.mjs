@@ -22,6 +22,7 @@ import {
   factIndex,
 } from '../graphkit/index.mjs';
 import { deleteSessionMemory, listSessionMemory } from '../kb/session-memory.mjs';
+import { listGenerationLibrary } from '../llm_agent/skills/generation-library.mjs';
 import { listAlwaysAllow, clearAlwaysAllow, clearAllAlwaysAllow } from '../kb/tool-approvals.mjs';
 
 // Vision input for /kb/agent/ask. Accepts a data URL string
@@ -378,6 +379,21 @@ export async function handleAgentRoutes(req, res, ctx) {
     }
     list.sort((a, b) => a.trigger.localeCompare(b.trigger));
     sendJSON(res, 200, { commands: list });
+    return true;
+  }
+
+  // GET /kb/agent/generation-library
+  //   The kit's `templates/` and `commands/` families, for the Mac app's Doc
+  //   Gen and Visual menus. Each entry carries its `surface` (doc | visual),
+  //   which is what divides the two menus.
+  //
+  //   Exists so those defaults are not Swift constants: adding a template
+  //   used to mean an app change and a release, and now means adding one file
+  //   to the kit. The app seeds these into a project's `templates/` and
+  //   `commands/` folders, where the user can edit their copy.
+  //   { repo, templates: [...], commands: [...] }
+  if (req.method === 'GET' && url.split('?')[0] === '/kb/agent/generation-library') {
+    sendJSON(res, 200, listGenerationLibrary(userId));
     return true;
   }
 

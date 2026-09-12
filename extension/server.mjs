@@ -190,7 +190,12 @@ const HOST = config.host;
 //     no token data). Before this the ledger counted only the input NOT
 //     served from cache, so an Agent-engine turn with a multi-KB system
 //     prompt recorded ~60 tokens. Additive: an older client ignores the key.
-const SERVER_API_VERSION = 50;
+//   v51 — GET /kb/agent/generation-library: the kit's `templates/` and
+//     `commands/` families with each entry's `surface` (doc | visual). The Mac
+//     app's Doc Gen and Visual defaults come from here instead of from Swift
+//     constants, so adding one is a file in the kit rather than an app
+//     release. Additive; an older client never calls it.
+const SERVER_API_VERSION = 51;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -283,6 +288,7 @@ const ENDPOINTS = [
   '/kb/agent/catalog',
   '/kb/agent/commands',
   '/kb/agent/skill-library',
+  '/kb/agent/generation-library',
   '/kb/agent/project-memory',
   '/kb/agent/session-memory',
   '/kb/agent/tool-approvals',
