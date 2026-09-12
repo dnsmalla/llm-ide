@@ -10,6 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
@@ -21,7 +22,7 @@ const tmpDb = path.join(__dirname, '_generation-library-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
-const { parseEntry, normalizeSurface, listGenerationLibrary, DEFAULT_SURFACE } =
+const { parseEntry, normalizeSurface, listGenerationLibrary, readGenerationFamilies, DEFAULT_SURFACE } =
   await import('../llm_agent/skills/generation-library.mjs');
 
 test('surface defaults to doc, and an unrecognised value does not lose the file', () => {
@@ -104,4 +105,67 @@ test('every kit template offers sections and every command offers an instruction
     const withoutTitle = c.body.replace(/^#\s.*$/m, '').trim();
     assert.ok(withoutTitle.length > 0, `command ${c.id} must carry an instruction`);
   }
+});
+
+// --- surface folders -------------------------------------------------------
+// The kit groups both families by surface (`templates/doc/`, `templates/vis/`)
+// and the FOLDER is the surface — the `surface:` frontmatter field is gone.
+// These assert the folder actually decides, because the failure mode is
+// silent: a file read with the wrong surface just shows up in the other menu.
+
+/** Build a throwaway source tree and read its generation families. */
+function readTree(files) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'genlib-'));
+  for (const [rel, body] of Object.entries(files)) {
+    const abs = path.join(root, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, body);
+  }
+  return readGenerationFamilies(root);
+}
+
+const entry = (name, extra = '') =>
+  `---\nname: ${name}\ndescription: d\n${extra}---\n\n# ${name}\n\n## Section\n`;
+
+test('the folder decides the surface, not the frontmatter', () => {
+  const lib = readTree({
+    'templates/doc/plan.md': entry('plan'),
+    // Stale frontmatter left behind by a move: the folder must win, or moving
+    // a file between menus would silently not move it.
+    'templates/vis/shot.md': entry('shot', 'surface: doc\n'),
+    'commands/vis/ocr.md': entry('ocr'),
+  });
+  assert.equal(lib.templates.find((e) => e.id === 'templates/plan').surface, 'doc');
+  assert.equal(lib.templates.find((e) => e.id === 'templates/shot').surface, 'visual',
+    'the vis/ folder must override a stale `surface: doc` frontmatter');
+  assert.equal(lib.commands.find((e) => e.id === 'commands/ocr').surface, 'visual');
+});
+
+test('the id has no surface segment, so seeded project folders keep their names', () => {
+  const lib = readTree({ 'templates/vis/shot.md': entry('shot') });
+  // `<family>/<stem>` — the Mac app derives the project template folder name
+  // and a stable id from this, so a `templates/vis/shot` id would rename every
+  // seeded folder in every existing project.
+  assert.deepEqual(lib.templates.map((e) => e.id), ['templates/shot']);
+});
+
+test('a pre-split source still reads, and `visual/` spells the same surface', () => {
+  const lib = readTree({
+    'templates/old.md': entry('old', 'surface: visual\n'),   // loose, pre-split
+    'templates/visual/new.md': entry('new'),                  // long spelling
+  });
+  assert.equal(lib.templates.find((e) => e.id === 'templates/old').surface, 'visual',
+    'a loose file falls back to its frontmatter so an un-migrated source keeps working');
+  assert.equal(lib.templates.find((e) => e.id === 'templates/new').surface, 'visual');
+});
+
+test('an unrecognised folder is ignored rather than swept into Doc Gen', () => {
+  const lib = readTree({
+    'templates/doc/keep.md': entry('keep'),
+    'templates/README.md': entry('readme-example'),      // documents the family
+    'templates/scratch/draft.md': entry('draft'),        // not a surface folder
+    'templates/doc/nested/deep.md': entry('deep'),       // one level only
+  });
+  assert.deepEqual(lib.templates.map((e) => e.id), ['templates/keep'],
+    'only files directly inside a recognised surface folder are entries');
 });

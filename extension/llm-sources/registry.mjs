@@ -250,18 +250,44 @@ export function countDiscoveryAgents(dir) {
 // for the Library UI; a plugin's OWN commands/ (extension/plugins/loader.mjs's
 // expandSlashCommand) is a separate, unrelated mechanism keyed on that
 // plugin's enabled-command state, not this generic per-source catalog.
+//
+// Scans the family root AND one level of subdirectory. The kit groups both
+// families by surface (`commands/doc/`, `commands/vis/` — see
+// llm_agent/skills/generation-library.mjs, which reads the same layout for
+// the Mac app's menus), so a root-only scan reports zero for a kit that has
+// adopted the split. Loose files at the root still count, for a source that
+// has not.
 function listDiscoveryNamed(dir, family) {
   const d = join(dir, family);
   if (!existsSync(d)) return [];
   let entries;
   try { entries = readdirSync(d, { withFileTypes: true }); } catch { return []; }
   const out = [];
+  const take = (parent, e) => {
+    if (!e.isFile() || !e.name.endsWith('.md')) return;
+    // README.md documents the family for humans. It is skipped by NAME, not
+    // by failing to parse: both family READMEs show a worked example entry in
+    // a fenced block, and the frontmatter reader finds that block's `---`
+    // and reports the README as an extra copy of the example template.
+    if (e.name.toLowerCase() === 'readme.md') return;
+    const fm = readFrontmatterNameDesc(join(parent, e.name));
+    if (!fm) return;
+    out.push({ name: fm.name, description: fm.description, path: join(parent, e.name) });
+  };
   for (const e of entries) {
     if (out.length >= MAX_DISCOVERY_ENTRIES) break;
-    if (!e.isFile() || !e.name.endsWith('.md')) continue;
-    const fm = readFrontmatterNameDesc(join(d, e.name));
-    if (!fm) continue;
-    out.push({ name: fm.name, description: fm.description, path: join(d, e.name) });
+    if (e.isDirectory()) {
+      // One level only — deep-walking an arbitrary source's tree is neither
+      // needed nor safe here.
+      let sub;
+      try { sub = readdirSync(join(d, e.name), { withFileTypes: true }); } catch { continue; }
+      for (const f of sub) {
+        if (out.length >= MAX_DISCOVERY_ENTRIES) break;
+        take(join(d, e.name), f);
+      }
+      continue;
+    }
+    take(d, e);
   }
   return out;
 }
