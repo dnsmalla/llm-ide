@@ -114,6 +114,22 @@ struct ConnectView: View {
                 .cornerRadius(DesignSystem.Layout.cornerRadiusM)
             }
             .padding(.top, DesignSystem.Spacing.xs)
+
+            // Demo entry. Deliberately on the FIRST screen and always visible:
+            // the app is useless without a paired Mac, so anyone who installs
+            // it before setting up their Mac — an App Store reviewer above all
+            // — needs a way in that does not depend on hardware they lack.
+            Button {
+                connection.startDemo()
+            } label: {
+                Text("Explore the demo")
+                    .font(DesignSystem.Typography.bodyFont.weight(.semibold))
+                    .foregroundColor(DesignSystem.Colors.primary)
+            }
+            Text("Browse the app with sample data — no Mac required. Nothing leaves your phone.")
+                .font(DesignSystem.Typography.footnoteFont)
+                .foregroundColor(DesignSystem.Colors.textSecondary)
+                .multilineTextAlignment(.center)
         }
         .padding(.top, DesignSystem.Spacing.lg)
         .sheet(isPresented: $showScanner) {

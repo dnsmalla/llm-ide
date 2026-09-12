@@ -22,6 +22,7 @@
 		86D51A8F64D3F1F7AF72109E /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6619B48C5ED4564AD23384A1 /* DesignSystem.swift */; };
 		A351D57F1B94C3E6FBB89A9B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95A7138E88C6309A4CC79A8F /* SettingsView.swift */; };
 		A7B80010CC00000000000001 /* ConnectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000002 /* ConnectionService.swift */; };
+		A1C0FF1CE0000000000000D2 /* DemoMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0FF1CE0000000000000D1 /* DemoMode.swift */; };
 		A7B80010CC00000000000003 /* LlmIdeChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000004 /* LlmIdeChatStore.swift */; };
 		A7B80010CC00000000000005 /* ExplorerChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000006 /* ExplorerChatStore.swift */; };
 		A7B80010CC00000000000007 /* AutoTaskStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B80010CC00000000000008 /* AutoTaskStore.swift */; };
@@ -63,6 +64,7 @@
 		A9B0C1D2E3F40506A7B8C902 /* AutoTaskSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTaskSetupView.swift; sourceTree = "<group>"; };
 		6619B48C5ED4564AD23384A1 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
 		A7B80010CC00000000000002 /* ConnectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionService.swift; sourceTree = "<group>"; };
+		A1C0FF1CE0000000000000D1 /* DemoMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoMode.swift; sourceTree = "<group>"; };
 		A7B80010CC00000000000004 /* LlmIdeChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlmIdeChatStore.swift; sourceTree = "<group>"; };
 		A7B80010CC00000000000006 /* ExplorerChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorerChatStore.swift; sourceTree = "<group>"; };
 		A7B80010CC00000000000008 /* AutoTaskStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoTaskStore.swift; sourceTree = "<group>"; };
@@ -202,6 +204,7 @@
 				A7B80010CC000000000000B2 /* LoopStore.swift */,
 				A7B80010CC0000000000000A /* MacStatusStore.swift */,
 				F1E2D3C4B5A607890F1E2D02 /* DeviceDiscovery.swift */,
+				A1C0FF1CE0000000000000D1 /* DemoMode.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -307,6 +310,7 @@
 				A1B2C3D4E5F607890A1B2C01 /* ConnectionStore.swift in Sources */,
 				C9D0E1F2A3B405060C9D0E01 /* SpeechRecognizer.swift in Sources */,
 				A7B80010CC00000000000001 /* ConnectionService.swift in Sources */,
+				A1C0FF1CE0000000000000D2 /* DemoMode.swift in Sources */,
 				A7B80010CC00000000000003 /* LlmIdeChatStore.swift in Sources */,
 				A7B80010CC00000000000005 /* ExplorerChatStore.swift in Sources */,
 				A7B80010CC00000000000007 /* AutoTaskStore.swift in Sources */,

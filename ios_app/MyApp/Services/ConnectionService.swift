@@ -128,6 +128,15 @@ final class ConnectionService: ObservableObject {
     /// Set at app launch so `Connected.deviceName` can update persisted pairing info.
     weak var connectionStore: ConnectionStore?
 
+    /// True while the app is running against `DemoResponder` instead of a real
+    /// Mac — see DemoMode.swift for why this exists. Published because
+    /// `ContentView` gates the whole paired UI on it: in demo mode there is no
+    /// saved device, so `connectionStore.hasDevice` is false and would send the
+    /// user straight back to the pairing screen.
+    @Published private(set) var isDemo = false
+    /// Non-nil exactly while `isDemo`. Answers outbound frames locally.
+    private var demoResponder: DemoResponder?
+
     private var webSocketTask: URLSessionWebSocketTask?
     /// ONE session for the app's lifetime. Creating a `URLSession` per connect
     /// attempt leaked it (and its delegate queue) every time, and the reconnect
@@ -262,6 +271,35 @@ final class ConnectionService: ObservableObject {
         macStatusStore?.resetForNewDevice()
     }
 
+    /// Enter demo mode: no socket, no network, no stored credential. Drives
+    /// the REAL handshake — the pairing frame goes to `DemoResponder`, whose
+    /// `connected` reply walks the same `handleMessage` path a Mac's would, so
+    /// the heartbeat, the stores and the status banner all run their normal
+    /// code. Left by `disconnect()` / `closeConnection()` like any connection.
+    func startDemo() {
+        userClosed = false
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        invalidateSocket()
+        // A previous real pairing may have left transcripts and session ids in
+        // the stores; the demo must not appear to inherit that Mac's data.
+        resetStoresForNewDevice()
+        errorMessage = nil
+        directIP = nil
+        directPIN = nil
+        isDemo = true
+        demoResponder = DemoResponder(emit: { [weak self] frame in
+            self?.handleMessage(frame)
+        })
+        connectionStatus = .connecting
+        let pairing = Pairing(pin: "demo", token: nil, deviceId: nil,
+                              deviceName: UIDevice.current.name)
+        if let data = try? JSONEncoder().encode(pairing),
+           let str = String(data: data, encoding: .utf8) {
+            sendTextFrame(str)
+        }
+    }
+
     func disconnect() { disconnect(clearDirect: true) }
 
     /// Close the socket but keep the saved pairing (`directIP`/`directPort`/
@@ -283,6 +321,12 @@ final class ConnectionService: ObservableObject {
     private func disconnect(clearDirect: Bool) {
         reconnectTask?.cancel()
         reconnectTask = nil
+        // Demo mode has no socket to close and nothing to reconnect to, so it
+        // is torn down here rather than in invalidateSocket() — which also runs
+        // on the reconnect path, where dropping the responder would strand the
+        // user on a dead screen.
+        isDemo = false
+        demoResponder = nil
         if clearDirect { directIP = nil; directPIN = nil }
         llmIdeStore?.handleChatError()
         explorerStore?.handleChatError()
@@ -337,7 +381,7 @@ final class ConnectionService: ObservableObject {
         userFacing: Bool = false,
         onSendFailure: ((String) -> Void)? = nil
     ) -> Bool {
-        guard connectionStatus == .connected, webSocketTask != nil else {
+        guard connectionStatus == .connected, webSocketTask != nil || isDemo else {
             if userFacing {
                 errorMessage = connectionStatus == .connecting
                     ? "Still connecting to your Mac — wait for Live status, then try again."
@@ -364,6 +408,13 @@ final class ConnectionService: ObservableObject {
         userFacing: Bool = false,
         onSendFailure: ((String) -> Void)? = nil
     ) {
+        // Demo mode: answer locally instead of writing to a socket. Placed
+        // ahead of the task guard because there IS no task — every send would
+        // otherwise fail with "not connected".
+        if isDemo {
+            demoResponder?.handle(string)
+            return
+        }
         guard let task = webSocketTask else {
             if userFacing {
                 errorMessage = "Not connected to your Mac — reconnect from Settings."
@@ -442,7 +493,9 @@ final class ConnectionService: ObservableObject {
             connectionStatus = .connected
             errorMessage = nil
             reconnectAttempt = 0
-            if let connected = try? JSONDecoder().decode(Connected.self, from: data) {
+            // The demo issues no token and must not write a device name to
+            // UserDefaults — nothing about a fake Mac may outlive the session.
+            if !isDemo, let connected = try? JSONDecoder().decode(Connected.self, from: data) {
                 connectionStore?.updateDeviceName(connected.deviceName)
                 // First pairing: the Mac traded our PIN for a token. Keep it;
                 // the PIN we just used is rotated on the Mac and is now dead.

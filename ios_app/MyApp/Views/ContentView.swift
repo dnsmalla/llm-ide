@@ -7,18 +7,23 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        if connectionStore.hasDevice {
+        // `isDemo` joins `hasDevice` here because demo mode deliberately saves
+        // no device — without it the demo would be bounced straight back to the
+        // pairing screen on the next render.
+        if connectionStore.hasDevice || connection.isDemo {
             // Already have saved connection — go straight to the mobile home
             // (toolbar + Chat/Explore/Auto sheets). Shows a spinner while
             // (re)connecting.
             NavigationStack {
-                MobileHomeView(deviceName: connectionStore.displayName)
+                MobileHomeView(deviceName: connection.isDemo ? DemoResponder.macName
+                                                               : connectionStore.displayName)
                     .onAppear {
                         // Re-establish connection if not already connected —
                         // but not if the user explicitly closed it via
                         // closeConnection() (e.g. popping back from Settings
                         // must not silently undo an intentional close).
-                        if connection.connectionStatus == .disconnected, !connection.userClosed {
+                        if connection.connectionStatus == .disconnected, !connection.userClosed,
+                           !connection.isDemo {
                             connection.connectDirect(
                                 ip: connectionStore.deviceIP,
                                 port: connectionStore.devicePort,
@@ -32,7 +37,8 @@ struct ContentView: View {
                     // receive callback or the next heartbeat tick, with no
                     // resync of the mirrored Mac state.
                     .onChange(of: scenePhase) { phase in
-                        guard phase == .active, connectionStore.hasDevice else { return }
+                        guard phase == .active, !connection.isDemo,
+                              connectionStore.hasDevice else { return }
                         if connection.connectionStatus == .disconnected, !connection.userClosed {
                             connection.connectDirect(
                                 ip: connectionStore.deviceIP,
