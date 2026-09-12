@@ -27,16 +27,28 @@ security find-identity -p codesigning -v
 
 You should see one entry like `Developer ID Application: Your Name (ABCDEFG123)`. Note the cert's full name.
 
-### 2. Update build_app.sh for production
+### 2. Sign with your Developer ID
 
-For local-dev builds the existing ad-hoc signing is fine. For distribution:
+For local-dev builds the existing ad-hoc signing is fine. For distribution,
+point `Scripts/sign.sh` at your Developer ID and let it do the work:
 
 ```bash
-codesign --force --deep --options runtime --timestamp \
-  --entitlements "$PROJ_DIR/LlmIdeMac.entitlements" \
-  --sign "Developer ID Application: Your Name (ABCDEFG123)" \
-  "$APP_DIR"
+LLMIDE_SIGN_IDENTITY="Developer ID Application: Your Name (ABCDEFG123)" \
+  Scripts/sign.sh
 ```
+
+Do **not** hand-roll this with `codesign --deep`. The script signs
+inside-out — Sparkle's XPC services, then `Updater.app`, then `Autoupdate`,
+then the framework, then the app — because `--deep` is deprecated for signing
+AND applies the outer app's `--entitlements` to every nested binary. That is
+how Sparkle's updater previously ended up holding
+`com.apple.security.device.microphone` and
+`com.apple.security.cs.disable-library-validation`. Only the app itself gets
+the entitlements file.
+
+`--timestamp` is applied automatically for a real identity (notarization
+requires a secure timestamp) and skipped for ad-hoc builds, which cannot
+carry one.
 
 ### 3. Notarize
 
