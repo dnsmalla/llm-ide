@@ -234,3 +234,26 @@ test('every pipeline skill id ships in .skills — no fallback copy exists any m
       + '.skills is the only skill source now, so the mode would run with bindings and no process');
   }
 });
+
+// Every id the pipeline can point at must actually resolve.
+//
+// Heavy skills are no longer inlined — the prompt names an id and the model
+// fetches it with `load-skill` (core/prompt-framing.mjs). That makes the id a
+// live contract: a pointer naming something the library cannot resolve would
+// leave the model with a description, no process, and no error anyone sees.
+// Inlining used to fail loudly at build time (no text, no block); a pointer
+// fails silently at run time, so the ids need their own guard.
+test('every pipeline skill id resolves through load-skill', async () => {
+  const { handleLoadSkill } = await import('../llm_agent/runtime/handlers/load-skill.mjs');
+  const ids = [
+    ...Object.values(DISCOVER_SKILL_IDS),
+    WRITE_SKILL_ID,
+    ...Object.values(EXECUTE_SKILL_IDS),
+  ];
+  for (const id of ids) {
+    const res = await handleLoadSkill({ id }, { userId: 'pipeline-ids' });
+    assert.ok(!res.error, `load-skill could not resolve "${id}": ${res.error ?? ''}`);
+    assert.ok((res.content || '').length > 200,
+      `"${id}" resolved but returned almost nothing — the pointer would promise a process that isn't there`);
+  }
+});
