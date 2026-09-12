@@ -446,8 +446,6 @@ export function buildEngineOptions(
   appendParts.push(composeSystemContext(agentContext, userId, message, { memory: false }));
   if (persona) appendParts.push(persona);
   if (resolvedMode === 'execute') appendParts.push(V2_EXECUTE_GUIDANCE);
-  const taskBlock = buildSessionTaskPromptBlock(userId, agentContext, resolvedMode);
-  if (taskBlock) appendParts.push(taskBlock.trimStart());
   // User's own custom persona (kb/personas.mjs) — distinct from the MODE
   // persona above. Mirrors the legacy loop's exact framing/sanitization
   // (llm_agent/runtime/route.mjs) so a persona reads identically across
@@ -482,6 +480,8 @@ export function buildEngineOptions(
   // legacy route reports memoryChars/approxTokens on its result, and until
   // this engine did too, every Agent-engine turn read as "0 — no memory
   // injected" even when this block was in the prompt.
+  // Volatile too (it grows as the chat teaches it things), hence its place
+  // below the skills — see the ordering note further down.
   let sessionMemoryFacts = 0;
   let sessionMemoryChars = 0;
   try {
@@ -496,6 +496,26 @@ export function buildEngineOptions(
       }
     }
   } catch { /* memory is best-effort — keep the base without it */ }
+  // --- Volatile blocks go last -------------------------------------------
+  //
+  // Everything above is stable for the life of a chat in a given mode; from
+  // here down the content changes between turns. The order is not cosmetic:
+  // the system prompt is re-sent every turn and only the identical PREFIX
+  // can be a cache hit, so anything that changes invalidates every byte
+  // after it.
+  //
+  // The task list used to sit immediately BEFORE the pipeline skill, which
+  // is the single largest block in the prompt (up to
+  // MAX_PIPELINE_SKILL_CHARS). Measured on an execute-plan turn: one
+  // `task-update` dropped the identical prefix from 36.1KB to 4.4KB, so
+  // 31.7KB — the whole skill — was re-sent as fresh input on every task
+  // transition. A 7-step plan does that a dozen-plus times per run.
+  // `buildSessionTaskPromptBlock` also embeds a per-task guidance skill
+  // chosen from the ACTIVE task's title, so the block does not merely
+  // change, it swaps a skill in and out as work progresses — all the more
+  // reason for it to sit below anything stable.
+  const taskBlock = buildSessionTaskPromptBlock(userId, agentContext, resolvedMode);
+  if (taskBlock) appendParts.push(taskBlock.trimStart());
   const attachmentsText = buildAttachmentsText(files);
   if (attachmentsText) appendParts.push(attachmentsText);
 
@@ -664,8 +684,8 @@ export function approvalArgsFor(toolName, input) {
  * DB-backed session_memory row set from one extraction pass.
  *
  * Returns `{ result, usageTotals }`: the mapped result event (or null) and
- * summed { inputTokens, outputTokens, cacheReadTokens, costUsd, numTurns,
- * durationMs }.
+ * summed { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens,
+ * costUsd, numTurns, durationMs }.
  */
 export async function runAgentV2Turn(
   {
@@ -1107,7 +1127,10 @@ export async function runAgentV2Turn(
     ...(abortController ? { abortController } : {}),
   });
 
-  const usageTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0, numTurns: 0, durationMs: 0 };
+  const usageTotals = {
+    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+    costUsd: 0, numTurns: 0, durationMs: 0,
+  };
   let result = null;
   let replyText = '';
   try {
@@ -1120,6 +1143,7 @@ export async function runAgentV2Turn(
           usageTotals.inputTokens += ev.inputTokens;
           usageTotals.outputTokens += ev.outputTokens;
           usageTotals.cacheReadTokens += ev.cacheReadTokens;
+          usageTotals.cacheCreationTokens += ev.cacheCreationTokens ?? 0;
         } else if (ev.type === 'result') {
           result = ev;
           usageTotals.costUsd += ev.costUsd ?? 0;

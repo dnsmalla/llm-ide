@@ -782,7 +782,7 @@ test('AskUserQuestion round-trip: request event → answer → allow with update
   withAnthropicKey('sk-ant-v2-test', async () => {
     const script = { messages: [
       { type: 'system', subtype: 'init', session_id: 'sdk-9', tools: [], capabilities: [] },
-      { type: 'assistant', message: { usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 2 } } },
+      { type: 'assistant', message: { usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 2, cache_creation_input_tokens: 7 } } },
       { type: 'result', subtype: 'success', session_id: 'sdk-9', total_cost_usd: 0.25, num_turns: 2, duration_ms: 1200 },
     ] };
     const events = [];
@@ -796,8 +796,13 @@ test('AskUserQuestion round-trip: request event → answer → allow with update
     assert.equal(typeof script.options.canUseTool, 'function');
     assert.equal(script.options.maxTurns, 40);
     assert.equal(result.subtype, 'success');
+    // `cacheCreationTokens` was added when the ledger stopped under-reporting:
+    // these are the tokens written INTO the cache (billed ~1.25x) and nothing
+    // read them off the SDK's usage block before, so a turn's most expensive
+    // input was invisible. Summed here like the rest.
     assert.deepEqual(usageTotals,
-      { inputTokens: 10, outputTokens: 5, cacheReadTokens: 2, costUsd: 0.25, numTurns: 2, durationMs: 1200 });
+      { inputTokens: 10, outputTokens: 5, cacheReadTokens: 2, cacheCreationTokens: 7,
+        costUsd: 0.25, numTurns: 2, durationMs: 1200 });
     // Simulate the SDK asking mid-turn: canUseTool parks a decision under a
     // requestId and only resolves once the registry hears from the client.
     const questions = [{ question: 'Pick one?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }];

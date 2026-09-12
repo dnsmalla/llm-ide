@@ -184,7 +184,13 @@ const HOST = config.host;
 //     /kb/agent/session-memory?sessionId= lists a chat's facts (the table
 //     was write-and-delete only). Both additive; an older client ignores the
 //     event and never calls the route.
-const SERVER_API_VERSION = 49;
+//   v50 — the usage ledger records cache tokens (migration 0032) and
+//     /kb/usage/summary reports a per-model `tokens` breakdown (fresh input,
+//     output, cache read, cache creation, cache-hit %, and how many rows had
+//     no token data). Before this the ledger counted only the input NOT
+//     served from cache, so an Agent-engine turn with a multi-KB system
+//     prompt recorded ~60 tokens. Additive: an older client ignores the key.
+const SERVER_API_VERSION = 50;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

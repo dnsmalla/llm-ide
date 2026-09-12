@@ -147,13 +147,61 @@ function clampStr(s, cap) {
 export function usedForModel(db, userId, provider, model, unit, windowKind, now = new Date()) {
   const startStr = toSqliteLocal(windowStart(windowKind, now));
   const col = unit === 'tokens'
-    ? 'COALESCE(SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)),0)'
+    // Cache CREATION counts: it is fresh input, billed above the normal rate.
+    // Cache READS deliberately do not: they bill at ~0.1x and they are the
+    // outcome a well-ordered prompt is trying to produce, so charging them
+    // against a cap would penalise the very thing that lowers the bill.
+    // `usageSummary` reports all four separately, so the full picture stays
+    // visible even though the cap counts the expensive tokens only.
+    ? 'COALESCE(SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)+COALESCE(cache_creation_tokens,0)),0)'
     : 'COALESCE(SUM(runs),0)';
   const row = db.prepare(
     `SELECT ${col} AS n FROM usage_ledger
       WHERE user_id=? AND provider=? AND model=? AND ts>=?`
   ).get(userId, provider, model, startStr);
   return row ? Number(row.n) : 0;
+}
+
+/**
+ * The four token columns for one model in its window, plus how many rows had
+ * no token data at all.
+ *
+ * Exists because "how many tokens am I burning?" was unanswerable: the ledger
+ * carried one number that excluded cache traffic entirely, so the honest
+ * answer to a turn with a multi-KB system prompt looked like ~60 tokens.
+ * `unknownRows` is not decoration — the CLI dispatch path reports no usage at
+ * all (`claude -p` returns text), so a summary without it would present a
+ * partial total as a complete one.
+ */
+export function tokenBreakdown(db, userId, provider, model, windowKind, now = new Date()) {
+  const startStr = toSqliteLocal(windowStart(windowKind, now));
+  const row = db.prepare(
+    `SELECT COALESCE(SUM(input_tokens),0)          AS input,
+            COALESCE(SUM(output_tokens),0)         AS output,
+            COALESCE(SUM(cache_read_tokens),0)     AS cacheRead,
+            COALESCE(SUM(cache_creation_tokens),0) AS cacheCreation,
+            SUM(CASE WHEN input_tokens IS NULL AND output_tokens IS NULL
+                      AND cache_read_tokens IS NULL AND cache_creation_tokens IS NULL
+                     THEN 1 ELSE 0 END)            AS unknownRows
+       FROM usage_ledger
+      WHERE user_id=? AND provider=? AND model=? AND ts>=?`
+  ).get(userId, provider, model, startStr) || {};
+  const input = Number(row.input || 0);
+  const cacheRead = Number(row.cacheRead || 0);
+  const cacheCreation = Number(row.cacheCreation || 0);
+  const totalInput = input + cacheRead + cacheCreation;
+  return {
+    input,
+    output: Number(row.output || 0),
+    cacheRead,
+    cacheCreation,
+    totalInput,
+    // The number worth acting on: how much of this model's input was served
+    // from cache. A low rate with a big `cacheCreation` means the prompt
+    // prefix is churning between turns.
+    cacheHitPct: totalInput > 0 ? Math.round((cacheRead / totalInput) * 100) : null,
+    unknownRows: Number(row.unknownRows || 0),
+  };
 }
 
 function isQuotaFlagged(db, userId, provider, model, windowKind, now) {
@@ -226,18 +274,24 @@ export function getLimits(db, userId, { provider } = {}) {
 export function recordUsage(db, {
   userId, provider, model, source = 'api', endpoint = null,
   inputTokens = null, outputTokens = null, runs = 1, requestId = null,
+  // Prompt-cache tokens, kept apart from `inputTokens` because they price
+  // differently (~1.25x to write, ~0.1x to read). A caller that knows none
+  // of them leaves them null — "unknown", not zero.
+  cacheReadTokens = null, cacheCreationTokens = null,
 } = {}) {
   if (!userId || !provider || !model) return null;
   try {
     const info = db.prepare(
       `INSERT INTO usage_ledger
-         (user_id, provider, model, source, endpoint, input_tokens, output_tokens, runs, request_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         (user_id, provider, model, source, endpoint, input_tokens, output_tokens,
+          cache_read_tokens, cache_creation_tokens, runs, request_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       userId, String(provider), String(model),
       VALID_SOURCES.has(source) ? source : 'api',
       clampStr(endpoint, 128),
       tokenCountOrNull(inputTokens), tokenCountOrNull(outputTokens),
+      tokenCountOrNull(cacheReadTokens), tokenCountOrNull(cacheCreationTokens),
       Math.max(1, Math.min(1_000_000, intOrNull(runs) || 1)),
       clampStr(requestId, 128),
     );
@@ -435,6 +489,7 @@ export function usageSummary(db, userId, { provider, now = new Date() } = {}) {
         priority: m.priority, unit: m.unit, window_kind: m.window_kind,
         limit, threshold_pct: m.threshold_pct,
         used, pct, state, quota,
+        tokens: tokenBreakdown(db, userId, prov, m.model, m.window_kind, now),
         resetAt: resetAt(m.window_kind, now).toISOString(),
       };
     });

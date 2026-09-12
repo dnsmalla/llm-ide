@@ -157,6 +157,11 @@ struct ModelLimitsPanel: View {
                     Text(resetSubtitle(stat))
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
+                    if let tokens = tokenSubtitle(stat) {
+                        Text(tokens)
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
+                    }
                 }
                 .frame(width: 200, alignment: .leading)
 
@@ -387,6 +392,30 @@ struct ModelLimitsPanel: View {
         let window = stat.windowKind == "monthly" ? "Monthly" : "Daily"
         if let r = stat.resetAt { return "\(window) · resets \(relativeReset(r))" }
         return window
+    }
+
+    /// What this model actually processed, as opposed to what the cap counts.
+    ///
+    /// The cache share is the number worth acting on: a low hit rate next to
+    /// a large cache-creation figure means the prompt prefix is changing
+    /// between turns, and every turn is re-paying for it. `?` marks rows the
+    /// ledger has no token data for at all (the CLI path reports none), so a
+    /// partial total is never shown as a complete one.
+    private func tokenSubtitle(_ stat: LlmIdeAPIClient.UsageModelStat?) -> String? {
+        guard let t = stat?.tokens else { return nil }
+        if t.totalInput == 0 && t.output == 0 {
+            return t.unknownRows > 0 ? "\(t.unknownRows) calls · tokens not reported" : nil
+        }
+        var parts = ["\(compactTokens(t.totalInput)) in", "\(compactTokens(t.output)) out"]
+        if let hit = t.cacheHitPct { parts.append("\(hit)% cached") }
+        if t.unknownRows > 0 { parts.append("+\(t.unknownRows) unmetered") }
+        return parts.joined(separator: " · ")
+    }
+
+    private func compactTokens(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+        if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
+        return "\(n)"
     }
 
     private func usageTrailing(_ stat: LlmIdeAPIClient.UsageModelStat?) -> String {

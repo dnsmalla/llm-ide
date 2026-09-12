@@ -100,8 +100,13 @@ export function mapSdkMessage(msg) {
   if (msg.type === 'assistant') {
     const u = msg?.message?.usage;
     if (u && (u.input_tokens != null || u.output_tokens != null)) {
+      // `cache_creation_input_tokens` is the one that was missing, and it is
+      // the expensive one: tokens written INTO the cache bill at ~1.25x, and
+      // they are created by exactly the prompt-prefix churn this app wants to
+      // see. Without it the ledger reported a turn's fresh input only.
       return [{ type: 'usage', inputTokens: u.input_tokens ?? 0, outputTokens: u.output_tokens ?? 0,
-        cacheReadTokens: u.cache_read_input_tokens ?? 0 }];
+        cacheReadTokens: u.cache_read_input_tokens ?? 0,
+        cacheCreationTokens: u.cache_creation_input_tokens ?? 0 }];
     }
     // A complete assistant message without a usage block adds nothing — its
     // text already streamed as delta events.

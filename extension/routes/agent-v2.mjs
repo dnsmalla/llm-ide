@@ -343,6 +343,10 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       endpoint: '/agent/v2/stream',
       inputTokens: usageTotals?.inputTokens,
       outputTokens: usageTotals?.outputTokens,
+      // Summed all along, dropped here until now — which is why the ledger
+      // read ~60 input tokens for a turn carrying a multi-KB system prompt.
+      cacheReadTokens: usageTotals?.cacheReadTokens,
+      cacheCreationTokens: usageTotals?.cacheCreationTokens,
     });
     // Task parity with legacy /code-assist: emit after the SDK result so the
     // Mac can populate PlanTimelineCard and auto-continue when work remains.

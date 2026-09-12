@@ -336,3 +336,45 @@ test('fastModelFor: the flagged fast entry per provider; null when the chain is 
   assert.equal(fastModelFor('custom:abc-123'), null);
   assert.equal(fastModelFor(undefined), null);
 });
+
+// ── cache tokens on the ledger (migration 0032) ──────────────────────────
+//
+// The ledger recorded input/output only, and on the Agent engine those are
+// the tokens NOT served from cache — a small remainder. Cache creation was
+// never even read off the SDK usage block. Result: /agent/v2/stream rows
+// reporting ~60 input tokens for turns whose system prompt alone is
+// thousands, and a token-unit cap measuring a fraction of the real volume.
+test('recordUsage stores cache tokens, and a token cap counts creation but not reads', async () => {
+  const { db, userId: u } = await setup();
+  const { recordUsage, tokenBreakdown, usedForModel } = await import('../kb/usage.mjs');
+  recordUsage(db, {
+    userId: u, provider: 'anthropic', model: 'claude-opus-5', endpoint: '/agent/v2/stream',
+    inputTokens: 100, outputTokens: 50, cacheReadTokens: 40_000, cacheCreationTokens: 8_000,
+  });
+
+  const b = tokenBreakdown(db, u, 'anthropic', 'claude-opus-5', 'daily');
+  assert.equal(b.input, 100);
+  assert.equal(b.output, 50);
+  assert.equal(b.cacheRead, 40_000);
+  assert.equal(b.cacheCreation, 8_000);
+  assert.equal(b.totalInput, 48_100, 'total input is fresh + cache read + cache creation');
+  assert.equal(b.cacheHitPct, 83, 'the actionable number: how much input came from cache');
+  assert.equal(b.unknownRows, 0);
+
+  // The cap counts fresh input + output + cache CREATION (all billed at >= 1x)
+  // and deliberately omits cache READS (~0.1x) — charging for those would
+  // penalise the prefix stability that lowers the bill.
+  assert.equal(usedForModel(db, u, 'anthropic', 'claude-opus-5', 'tokens', 'daily'), 8_150);
+  assert.equal(usedForModel(db, u, 'anthropic', 'claude-opus-5', 'runs', 'daily'), 1);
+});
+
+test('a row with no token data is reported as unknown, not as zero', async () => {
+  const { db, userId: u } = await setup();
+  const { recordUsage, tokenBreakdown } = await import('../kb/usage.mjs');
+  // The CLI dispatch path: `claude -p` returns text, so nothing is known.
+  recordUsage(db, { userId: u, provider: 'anthropic', model: 'claude-haiku-4-5' });
+  const b = tokenBreakdown(db, u, 'anthropic', 'claude-haiku-4-5', 'daily');
+  assert.equal(b.totalInput, 0);
+  assert.equal(b.unknownRows, 1,
+    'a summary that hid this would present a partial total as a complete one');
+});

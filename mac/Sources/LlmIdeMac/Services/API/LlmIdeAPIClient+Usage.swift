@@ -54,6 +54,24 @@ extension LlmIdeAPIClient {
         var isPaused: Bool { status == "paused" }
     }
 
+    /// The four token columns for one model in its window, plus how many
+    /// ledger rows carried no token data at all (the CLI dispatch path
+    /// reports none — `claude -p` returns text). Server API v50.
+    ///
+    /// Separate from `UsageModelStat.used`, which is what the CAP counts:
+    /// cache reads are excluded there on purpose, so the two numbers answer
+    /// different questions and must not be conflated.
+    struct UsageTokenBreakdown: Codable, Hashable {
+        var input: Int
+        var output: Int
+        var cacheRead: Int
+        var cacheCreation: Int
+        var totalInput: Int
+        /// Share of input served from cache. Nil when nothing is recorded.
+        var cacheHitPct: Int?
+        var unknownRows: Int
+    }
+
     /// One model's live usage for the dashboard.
     struct UsageModelStat: Codable, Identifiable, Hashable {
         var model: String
@@ -70,6 +88,8 @@ extension LlmIdeAPIClient {
         var state: String           // "ok" | "warning" | "exhausted"
         var quota: Bool
         var resetAt: String?
+        /// Optional so an older server (no `tokens` key) still decodes.
+        var tokens: UsageTokenBreakdown?
 
         var id: String { model }
 
@@ -78,7 +98,7 @@ extension LlmIdeAPIClient {
             case windowKind = "window_kind"
             case limit
             case thresholdPct = "threshold_pct"
-            case used, pct, state, quota, resetAt
+            case used, pct, state, quota, resetAt, tokens
         }
     }
 
