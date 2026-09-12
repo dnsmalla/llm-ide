@@ -99,8 +99,19 @@ export function executeSkillId({ hasSubagents } = {}) {
  * client ever sent both, an approved plan waiting to be executed is the
  * more specific signal.
  */
-export function pipelineSkillIdFor({ mode, planExecute, hasSubagents } = {}) {
+export function pipelineSkillIdFor({ mode, planExecute, planWrite, hasSubagents } = {}) {
   if (planExecute) return executeSkillId({ hasSubagents });
+  // Stage 2. Set only when the client fired the saved-plan card's "Write full
+  // plan" action, which is the one signal the server can trust that this turn
+  // turns an approved design into the implementation plan.
+  //
+  // Without it a write turn was still given stage 1's skill: brainstorming
+  // (15KB) — the DISCOVERY process — when the process for this turn is
+  // writing-plans (7KB). The binding told the model to `load-skill` its way
+  // there, so it worked when the model complied and silently did discovery
+  // again when it didn't. The stage is known here; it should not be guessed
+  // from the prompt.
+  if (planWrite) return WRITE_SKILL_ID;
   return discoverSkillIdForMode(mode);
 }
 
@@ -220,6 +231,26 @@ const QUESTION_CLAUSE =
  * moment to start writing. Each mode now gets its own skill's actual finish
  * line.
  */
+/**
+ * The "writing the plan" clause, which differs by STAGE.
+ *
+ * Before the model is there, it is a hand-off: finish stage 1, then load
+ * writing-plans. Once the user has pressed "Write full plan" the model IS
+ * there and the skill is already in the prompt, so telling it to wait for an
+ * approval that already happened — and to fetch a skill it already has — is
+ * an instruction to ignore, and the ones next to it lose force with it.
+ */
+function writingClause(mode, planWrite) {
+  if (planWrite) {
+    return '- **You are writing the plan now.** The approval has happened and the '
+      + 'skill above is the process for this turn — follow it as written. Do not '
+      + 're-open the design, re-ask settled questions, or start implementing.\n';
+  }
+  return `- **Writing the plan.** ${handoffTrigger(mode)} call \`load-skill\` with `
+    + `\`${WRITE_SKILL_ID}\` and follow what it returns to write the implementation `
+    + 'plan. Do not write it from memory, and do not load it earlier.\n';
+}
+
 function handoffTrigger(mode) {
   return mode === 'assist_plan'
     ? 'Once the question frontier is empty and your partner has confirmed you '
@@ -236,7 +267,7 @@ function handoffTrigger(mode) {
  * `skillName` is the injected skill's frontmatter name, so the binding can
  * point at it by the same name the skill block is headed with.
  */
-export function buildPlanBinding(mode, { skillName, engine = 'legacy' } = {}) {
+export function buildPlanBinding(mode, { skillName, engine = 'legacy', planWrite = false } = {}) {
   const named = skillName ? `the **${skillName}** skill` : 'the skill';
   const modeLabel = mode === 'assist_plan' ? 'ASSIST_PLAN' : 'PLAN';
   // Which channel carries the document differs per engine (see
@@ -252,9 +283,7 @@ export function buildPlanBinding(mode, { skillName, engine = 'legacy' } = {}) {
     + 're-read the conversation to work out which step you are on, and pick up '
     + 'from there. A fresh request starts at that skill\'s beginning; do not '
     + 'skip ahead to a finished plan because the request sounds simple.\n'
-    + `- **Writing the plan.** ${handoffTrigger(mode)} call \`load-skill\` with `
-    + `\`${WRITE_SKILL_ID}\` and follow what it returns to write the implementation `
-    + 'plan. Do not write it from memory, and do not load it earlier.\n'
+    + writingClause(mode, planWrite)
     + `${QUESTION_CLAUSE}\n`
     + artifactClauses
     + `${FACTS_CLAUSE}\n`

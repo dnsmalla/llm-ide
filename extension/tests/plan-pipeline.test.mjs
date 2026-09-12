@@ -105,6 +105,35 @@ test('plan binding routes the skills\' questions through AskUserQuestion', () =>
   }
 });
 
+test('a write turn gets the plan-WRITING skill, not stage 1 again', () => {
+  // Stage 2 had no signal, so `pipelineSkillIdFor` fell through to the mode
+  // and a "Write full plan" turn was handed brainstorming (15KB) — the
+  // DISCOVERY process — for a stage whose process is writing-plans (7KB).
+  // The binding told the model to load-skill its way across, so it worked
+  // when the model complied and silently re-did discovery when it did not.
+  assert.equal(pipelineSkillIdFor({ mode: 'plan' }), DISCOVER_SKILL_IDS.plan);
+  assert.equal(pipelineSkillIdFor({ mode: 'plan', planWrite: true }), WRITE_SKILL_ID);
+  assert.equal(pipelineSkillIdFor({ mode: 'assist_plan', planWrite: true }), WRITE_SKILL_ID,
+    'both plan modes converge on the same writing stage');
+  // Execute is the later stage and wins if a client ever sent both.
+  assert.equal(
+    pipelineSkillIdFor({ mode: 'plan', planWrite: true, planExecute: true, hasSubagents: false }),
+    EXECUTE_SKILL_IDS.inline);
+});
+
+test('the binding stops telling a write turn to wait for an approval it already has', () => {
+  const before = buildPlanBinding('plan', { skillName: 'brainstorming' });
+  assert.match(before, /Once your human partner has approved the design/);
+
+  const during = buildPlanBinding('plan', { skillName: 'writing-plans', planWrite: true });
+  assert.match(during, /You are writing the plan now/);
+  assert.doesNotMatch(during, /Once your human partner has approved the design/,
+    'the approval already happened — repeating the wait is an instruction to ignore');
+  assert.doesNotMatch(during, /call `load-skill` with `skills\/writing-plans`/,
+    'and the skill is already in the prompt, so fetching it is too');
+  assert.match(during, /Do not re-open the design/);
+});
+
 test('each plan mode hands off to writing-plans at its own skill\'s finish line', () => {
   // The two stage-1 skills end differently: brainstorming produces a design
   // and says "invoke writing-plans"; grilling produces settled decisions and

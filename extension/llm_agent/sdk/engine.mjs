@@ -370,7 +370,7 @@ const MAX_PROMPT_CHARS = 120_000;
  *                                     the client's memory footnote)
  */
 export function buildEngineOptions(
-  { userId, mode, model, language, message, skills, agentContext, attachments, planExecute } = {},
+  { userId, mode, model, language, message, skills, agentContext, attachments, planExecute, planWrite } = {},
   {
     readSkill = readSkillInstructions,
     roots = buildReadableRoots,
@@ -391,7 +391,7 @@ export function buildEngineOptions(
   let hasSubagents = false;
   try { hasSubagents = (getSubagents(userId)?.size ?? 0) > 0; }
   catch { /* no plugin view (tests, fresh install) — inline execution */ }
-  const pipelineSkillId = pipelineSkillIdFor({ mode: resolvedMode, planExecute, hasSubagents });
+  const pipelineSkillId = pipelineSkillIdFor({ mode: resolvedMode, planExecute, planWrite, hasSubagents });
   const { text: pipelineSkillsText, names: pipelineSkillNames } = pipelineSkillId
     ? buildModeSkillsText([pipelineSkillId], userId, readSkill)
     : { text: '', names: [] };
@@ -400,7 +400,7 @@ export function buildEngineOptions(
     ? buildExecuteBinding({ skillName: pipelineSkillNames[0], hasSubagents })
     // `engine: 'agent'` — this engine mounts no save-plan tool; the plan is
     // the reply and the Mac saves it, so the binding must say so.
-    : personaForMode(resolvedMode, { skillName: pipelineSkillNames[0], engine: 'agent' });
+    : personaForMode(resolvedMode, { skillName: pipelineSkillNames[0], engine: 'agent', planWrite });
   const { allowedTools, disallowedTools } = v2ToolPolicyForMode(resolvedMode);
 
   // The wire convention is home-relative roots ("~/proj" — what the Mac
@@ -691,6 +691,9 @@ export async function runAgentV2Turn(
   {
     message, userId, mode, model, language, skills, agentContext, attachments,
     planExecute,
+    // Stage-2 marker — the saved-plan card's "Write full plan" action. See
+    // runtime/plan-pipeline.mjs's pipelineSkillIdFor.
+    planWrite,
     // Provider id the client resolved for this turn: absent/`anthropic` for
     // first-party Claude, or an Anthropic-compatible `custom:<uuid>`. Anything
     // else is refused by resolveAgentEngineAuth before the SDK spawns.
@@ -986,7 +989,7 @@ export async function runAgentV2Turn(
   };
 
   const { queryOptions, prompt, meta } = buildEngineOptions(
-    { userId, mode, model, language, message, skills, agentContext, attachments, planExecute },
+    { userId, mode, model, language, message, skills, agentContext, attachments, planExecute, planWrite },
     { readSkill, roots, sessionMemory },
   );
   // `meta` was computed and dropped on the floor here, so a truncated prompt

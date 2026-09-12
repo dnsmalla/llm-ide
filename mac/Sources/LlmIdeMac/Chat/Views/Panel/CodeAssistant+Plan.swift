@@ -63,10 +63,16 @@ extension CodeAssistantPanel {
         let outgoing = Self.writePlanMessage(title: title)
         let userMeta = ChatMessage.Metadata(planWriteDisplay: "Write full plan: \(title)")
         let attachmentsSnapshot = attachmentState.attachments
+        // `planWrite` is what tells the server this is stage 2: it injects the
+        // plan-WRITING skill instead of stage 1's discovery skill. Without it
+        // a write turn carried brainstorming — the process for the stage
+        // already finished.
         if engine.busy {
-            engine.enqueue(outgoing, skillIds: [], userMetadata: userMeta, attachments: attachmentsSnapshot)
+            engine.enqueue(outgoing, skillIds: [], userMetadata: userMeta,
+                           planWrite: true, attachments: attachmentsSnapshot)
         } else {
-            engine.startTurn(outgoing, skillIds: [], userMetadata: userMeta, attachments: attachmentsSnapshot)
+            engine.startTurn(outgoing, skillIds: [], userMetadata: userMeta,
+                             planWrite: true, attachments: attachmentsSnapshot)
         }
     }
 

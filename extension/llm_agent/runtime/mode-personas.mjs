@@ -83,8 +83,8 @@ const MODE_CONFIG = {
  * don't inject a skill still get a coherent, if less specific, binding —
  * the mode's tool contract and save/facts rules hold either way.
  */
-export function personaForMode(mode, { skillName, engine } = {}) {
-  if (PLAN_LIKE_MODES.has(mode)) return buildPlanBinding(mode, { skillName, engine });
+export function personaForMode(mode, { skillName, engine, planWrite } = {}) {
+  if (PLAN_LIKE_MODES.has(mode)) return buildPlanBinding(mode, { skillName, engine, planWrite });
   return MODE_CONFIG[mode]?.persona ?? '';
 }
 

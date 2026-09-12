@@ -114,6 +114,7 @@ export async function handleCodeAssist({
   provider,                 // explicit provider id from the client, if any
   mode: requestedMode,      // NEW — "auto" | "plan" | "assist_plan" | "review" | "document" | "execute" | undefined
   planExecute,              // client fired the saved-plan card's "Execute plan" — inject the execution skill
+  planWrite,                // client fired "Write full plan" — inject the plan-WRITING skill, not stage 1's
   // Test seam only — defaults to the real classifier. ESM named exports
   // can't be redefined by node:test's mock.method (module namespace
   // properties are non-configurable), and mock.module() needs
@@ -197,7 +198,7 @@ export async function handleCodeAssist({
   // the server knows. Injected as its own block rather than merged into
   // `skillsText` so the framing stays honest about who chose it.
   const hasSubagents = (userSubagents?.size ?? 0) > 0;
-  const pipelineSkillId = pipelineSkillIdFor({ mode: resolvedMode, planExecute, hasSubagents });
+  const pipelineSkillId = pipelineSkillIdFor({ mode: resolvedMode, planExecute, planWrite, hasSubagents });
   const { text: pipelineSkillsText, names: pipelineSkillNames } = pipelineSkillId
     ? buildModeSkillsText([pipelineSkillId], userId, readSkillInstructions)
     : { text: '', names: [] };
@@ -326,7 +327,7 @@ export async function handleCodeAssist({
   // couldn't be read (no skills repo on disk, source disabled).
   const modePersona = planExecute && pipelineSkillNames.length
     ? buildExecuteBinding({ skillName: pipelineSkillNames[0], hasSubagents })
-    : personaForMode(resolvedMode, { skillName: pipelineSkillNames[0] });
+    : personaForMode(resolvedMode, { skillName: pipelineSkillNames[0], planWrite });
   if (modePersona) personaBase += `\n\n${modePersona}`;
 
   // Restricted modes: append the accurate tool roster. The composed base

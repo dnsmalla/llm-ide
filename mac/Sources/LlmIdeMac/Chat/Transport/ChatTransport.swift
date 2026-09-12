@@ -66,6 +66,14 @@ struct ChatTransportInput: Sendable {
     /// existing call site, which passes nothing.
     var planExecute: Bool = false
 
+    /// True only for the turn the saved-plan card's "Write full plan" action
+    /// fires — stage 2 of the plan pipeline. The server swaps stage 1's
+    /// discovery skill (brainstorming, 15KB) for the plan-WRITING skill
+    /// (writing-plans, 7KB): the right process for this turn, and smaller.
+    /// Same shape and reasoning as `planExecute`; `var` with a default so
+    /// existing call sites are unchanged.
+    var planWrite: Bool = false
+
     /// The chat's permission chip for this turn: `"bypass"` (allow all) or
     /// `"manual"` (ask every time), from `EditAcceptanceMode`.
     ///

@@ -48,6 +48,7 @@ final class ChatEngine {
         /// other messages ahead of it. A flag on the engine would be spent
         /// by whichever turn drained first.
         var planExecute: Bool = false
+        var planWrite: Bool = false
         /// Snapshot of the composer's attachments AT ENQUEUE TIME, when the
         /// caller has one to give (nil for callers — like "Execute plan" —
         /// that never passed one and mean "read whatever the live composer
@@ -483,7 +484,8 @@ final class ChatEngine {
 
     /// Launch a turn as an unstructured Task whose handle Stop can cancel.
     func startTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil,
-                   planExecute: Bool = false, attachments: [LlmIdeAPIClient.CodeAttachment]? = nil) {
+                   planExecute: Bool = false, planWrite: Bool = false,
+                   attachments: [LlmIdeAPIClient.CodeAttachment]? = nil) {
         // Mark the slot taken SYNCHRONOUSLY. `runTurn` doesn't set `busy`
         // until the Task below is scheduled, so a caller that reached here
         // after an `await` (the quick chat's send-path version probe) could
@@ -501,7 +503,8 @@ final class ChatEngine {
         // immediately before calling (see both quick-chat composers).
         busy = true
         runTask = Task { await runTurn(message, skillIds: skillIds, userMetadata: userMetadata,
-                                       planExecute: planExecute, attachments: attachments) }
+                                       planExecute: planExecute, planWrite: planWrite,
+                                       attachments: attachments) }
     }
 
     /// Cancel the in-flight turn — panel-driven (`runTask`) or phone-driven
@@ -537,16 +540,18 @@ final class ChatEngine {
     /// Queue a message the user sent while a turn was running. Drained FIFO,
     /// one per turn, by `runTurn`'s tail.
     func enqueue(_ text: String, skillIds: [String], userMetadata: ChatMessage.Metadata? = nil,
-                 planExecute: Bool = false, attachments: [LlmIdeAPIClient.CodeAttachment]? = nil) {
+                 planExecute: Bool = false, planWrite: Bool = false,
+                 attachments: [LlmIdeAPIClient.CodeAttachment]? = nil) {
         queued.append(.init(text: text, skillIds: skillIds, userMetadata: userMetadata,
-                            planExecute: planExecute, attachments: attachments))
+                            planExecute: planExecute, planWrite: planWrite, attachments: attachments))
     }
 
     /// Run one user turn end-to-end. On completion it drains `queued` (if any)
     /// as a FRESH task — an unstructured `Task {}` does NOT inherit the current
     /// task's cancellation, so a stopped turn still lets the queued message run.
     func runTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil,
-                 planExecute: Bool = false, attachments: [LlmIdeAPIClient.CodeAttachment]? = nil) async {
+                 planExecute: Bool = false, planWrite: Bool = false,
+                 attachments: [LlmIdeAPIClient.CodeAttachment]? = nil) async {
         onTurnStart()
         onRecordPrompt(message)
         onNudge(message)
@@ -619,6 +624,7 @@ final class ChatEngine {
             // turn (panel, menu bar, phone), and this flag belongs to one
             // caller — the saved-plan card's Execute action.
             input.planExecute = planExecute
+            input.planWrite = planWrite
             // Stream so the user sees live progress ("Searching the web…",
             // "Writing the answer…") instead of a frozen spinner for the
             // 60–90s an agent turn can take. Falls back to buffered on a
@@ -694,7 +700,8 @@ final class ChatEngine {
         if !queued.isEmpty {
             let next = queued.removeFirst()
             startTurn(next.text, skillIds: next.skillIds, userMetadata: next.userMetadata,
-                      planExecute: next.planExecute, attachments: next.attachments)
+                      planExecute: next.planExecute, planWrite: next.planWrite,
+                      attachments: next.attachments)
         } else {
             busy = false
             runTask = nil

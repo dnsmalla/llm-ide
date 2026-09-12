@@ -302,6 +302,11 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       // already-approved plan, so the pipeline injects the execution
       // skill (llm_agent/runtime/plan-pipeline.mjs).
       planExecute: body.planExecute === true,
+      // Stage 2 of the plan pipeline: the saved-plan card's "Write full plan"
+      // action. Like planExecute, it is a client signal the server cannot
+      // derive from the message, and it selects writing-plans over stage 1's
+      // discovery skill.
+      planWrite: body.planWrite === true,
       // The chat's own permission chip (Manual / Bypass), forwarded per turn
       // so the agent follows the setting the user is looking at. Anything
       // else — including absent, which is what an older client sends — means
