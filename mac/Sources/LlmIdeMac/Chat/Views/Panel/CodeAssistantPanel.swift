@@ -384,7 +384,7 @@ struct CodeAssistantPanel: View {
                 onSavePlanFromMessage: { message in
                     Task { await savePlanFromMessage(message) }
                 },
-                onEditPlanFromMessage: { message in beginPlanEdit(from: message) },
+                onPreviewPlanFromMessage: { message in beginPlanEdit(from: message) },
                 onRefinePlanFromMessage: { message in refinePlanInChat(from: message) },
                 onExecutePlan: { messageId, payload in executeSavedPlan(payload, messageId: messageId) },
                 onEditPlan: { messageId, payload in editSavedPlanInChat(payload, messageId: messageId) }

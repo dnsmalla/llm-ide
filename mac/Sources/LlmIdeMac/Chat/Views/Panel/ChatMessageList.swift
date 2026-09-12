@@ -64,8 +64,9 @@ struct ChatMessageList: View {
     /// that reply rather than a tool proposal the loop confirms).
     let onSavePlanFromMessage: (ChatMessage) -> Void
     /// Wraps `CodeAssistantPanel.beginPlanEdit(from:)` — opens the plan in the
-    /// hand-edit sheet instead of saving the agent's text as-is.
-    let onEditPlanFromMessage: (ChatMessage) -> Void
+    /// preview sheet (rendered, with a Markdown toggle for hand-editing)
+    /// instead of saving the agent's text unread.
+    let onPreviewPlanFromMessage: (ChatMessage) -> Void
     /// Wraps `CodeAssistantPanel.refinePlanInChat(from:)` — stays in a
     /// plan-like mode and seeds the composer with a revision instruction.
     let onRefinePlanFromMessage: (ChatMessage) -> Void
@@ -109,6 +110,14 @@ struct ChatMessageList: View {
             // call the equivalent computed property independently, making the whole
             // list render O(n^2) instead of O(n).
             let lastAssistantTurnId = history.last(where: { $0.role == .assistant })?.id
+            // Has this chat ever run a plan-like turn? The session half of
+            // the plan-row visibility rule — see
+            // `AgentV2Selection.showsSavePlanAction`. Computed once per render
+            // alongside `lastAssistantTurnId` for the same reason: it is an
+            // O(n) scan, and reading it inside the per-turn ForEach would make
+            // the list render O(n^2).
+            let sessionIsPlanning = AgentV2Selection.sessionIsPlanning(
+                modes: history.map { $0.metadata?.mode })
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Spacing.md) {
@@ -163,7 +172,10 @@ struct ChatMessageList: View {
                                    mode: turn.metadata?.mode,
                                    v2Selected: engine.usesAgentV2Engine,
                                    hasPendingTool: pendingTool != nil,
-                                   planSaved: turn.metadata?.planSaved == true) {
+                                   planSaved: turn.metadata?.planSaved == true,
+                                   sessionIsPlanning: sessionIsPlanning,
+                                   contentLooksLikePlan: PlanEditPolicy.looksLikePlan(
+                                       content: turn.content)) {
                                 HStack(spacing: 8) {
                                     Button {
                                         onSavePlanFromMessage(turn)
@@ -174,21 +186,22 @@ struct ChatMessageList: View {
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
                                     .help("Save this plan to llm-doc/plans/ in the open project")
-                                    // Edit = fix the plan BY HAND before it is
-                                    // written; Refine = ask the agent for
-                                    // another revision. Both were previously
-                                    // reachable only AFTER saving (the
-                                    // PlanSavedCard), which forced a wrong
-                                    // plan onto disk first.
+                                    // Preview = read the plan as a rendered
+                                    // document (and fix it by hand there, via
+                                    // the sheet's Markdown toggle); Refine =
+                                    // ask the agent for another revision. Both
+                                    // were previously reachable only AFTER
+                                    // saving (the PlanSavedCard), which forced
+                                    // a wrong plan onto disk first.
                                     Button {
-                                        onEditPlanFromMessage(turn)
+                                        onPreviewPlanFromMessage(turn)
                                     } label: {
-                                        Label("Edit", systemImage: "pencil")
+                                        Label("Preview", systemImage: "doc.richtext")
                                             .font(Typography.caption)
                                     }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
-                                    .help("Edit this plan yourself, then save it")
+                                    .help("Read this plan as a document, edit it, then save it")
                                     Button {
                                         onRefinePlanFromMessage(turn)
                                     } label: {

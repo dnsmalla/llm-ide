@@ -296,9 +296,10 @@ extension CodeAssistantPanel {
         }
     }
 
-    /// The "Edit" action on a v2 plan-like RESULT turn: open the reply in an
-    /// editable sheet so the user can fix the plan BY HAND before it is
-    /// written. Nothing is saved until the sheet's own Save.
+    /// The "Preview" action on a v2 plan-like RESULT turn: open the reply in
+    /// the plan sheet — rendered as a document, with a Markdown toggle so the
+    /// user can also fix it BY HAND — before it is written. Nothing is saved
+    /// until the sheet's own Save.
     @MainActor
     func beginPlanEdit(from message: ChatMessage) {
         // The same guards the write itself applies, checked up front so the

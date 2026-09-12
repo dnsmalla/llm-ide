@@ -360,6 +360,173 @@ do {
            "already-saved outranks a missing message")
 }
 
+// PlanEditPolicy.looksLikePlan — the CONTENT half of the plan row's
+// visibility. This is what fixes the reported "the plan arrived with no Save
+// button": the server-resolved mode is stamped per turn and flaps across a
+// planning conversation (the question turn resolves to `plan`, the turn that
+// finally CONTAINS the plan does not), so the row also follows the shape of
+// the reply. Conservative on purpose — a false positive puts a Save Plan
+// button under an ordinary answer.
+do {
+    let realPlan = """
+    Here is the plan, scoped to what actually survived verification.
+
+    ## Scope, restated honestly
+
+    Of the four items I proposed, three were mine, not yours. The duplicate
+    tree exists only in the index, the ignore file is merely untidy, and the
+    audit is three weeks old. What remains is worth doing, in order, with a
+    revert point between each phase so the diff stays reviewable.
+
+    ## Steps
+
+    1. Rebuild the code index so it stops reporting files that do not exist.
+    2. Collapse the duplicated .gitignore blocks into their unique lines.
+    3. Re-run the dead-code audit against the rebuilt index.
+    """
+    expect(PlanEditPolicy.looksLikePlan(content: realPlan) == true,
+           "a sectioned, enumerated plan is recognised even when the turn was not stamped plan")
+
+    let phasePlan = """
+    I will sequence this so each stage is independently revertable, and I will
+    stop between them so you can read the diff before the next one starts.
+    Nothing here touches the build configuration, which is the part that would
+    be expensive to get wrong, and every stage leaves the tree green.
+
+    ## Phase 1 — tag the current tree
+    Cut a tag so the whole campaign can be reverted in one move.
+
+    ## Phase 2 — delete the stale copies
+    Remove the files the rebuilt index proves are unreferenced.
+    """
+    expect(PlanEditPolicy.looksLikePlan(content: phasePlan) == true,
+           "phase headings count as steps — a plan need not use numbered lines")
+
+    let checklistPlan = """
+    # Cleanup plan
+
+    The list below is ordered by risk: the reversible edits come first, and
+    the one irreversible deletion is last so everything before it can be
+    verified in place. Each item is small enough to review on its own, which
+    is the point of splitting them rather than landing one large commit.
+
+    - [ ] Rebuild the code index
+    - [ ] Collapse the duplicate ignore blocks
+    - [ ] Delete the verified-stale tree
+    """
+    expect(PlanEditPolicy.looksLikePlan(content: checklistPlan) == true,
+           "a checklist plan counts")
+
+    // Japanese is this app's primary UI language, so a JA plan has to score
+    // exactly like its English twin — otherwise the row this whole rule
+    // restores goes missing again for the users most likely to see it.
+    let japanesePlan = """
+    検証で残った作業だけに絞って、以下の計画を提案します。各段階は独立して
+    元に戻せるので、差分はレビュー可能なまま保てます。ビルド設定には触れま
+    せん。そこは間違えたときの手戻りが最も大きいためです。
+
+    ## フェーズ1 — コードインデックスの再生成
+    存在しないファイルを報告しなくなるまで作り直します。
+
+    ## フェーズ2 — 重複した .gitignore の整理
+    重複行をユニークな行にまとめます。
+    """
+    expect(PlanEditPolicy.looksLikePlan(content: japanesePlan) == true,
+           "a Japanese plan with フェーズ headings counts — JA is the primary UI language")
+
+    let japaneseNumbered = """
+    確認できた事実だけで手順を書きます。順番は依存関係のとおりで、前の手順が
+    終わるまで次には進みません。途中で止めても壊れない並びにしてあります。
+    ビルド設定には触れません。そこは間違えたときの手戻りが最も大きいためです。
+
+    # 不要コード削除の計画
+
+    １．コードインデックスを再生成する
+    ２．重複した .gitignore の行をまとめる
+    """
+    expect(PlanEditPolicy.looksLikePlan(content: japaneseNumbered) == true,
+           "full-width numbering (１．) enumerates steps too")
+
+    // Negatives — each drops exactly one of the three required signals, and
+    // each is comfortably OVER minimumPlanBytes so it fails for the stated
+    // reason rather than on length.
+    expect(PlanEditPolicy.looksLikePlan(content: "Sure — 1. do it\n2. done") == false,
+           "a two-line answer is too short to be a plan, numbered or not")
+
+    let proseOnly = String(repeating: "This is a long prose answer with no enumerated work in it. ", count: 12)
+    expect(PlanEditPolicy.looksLikePlan(content: "# Summary\n\n" + proseOnly) == false,
+           "a long sectioned answer with nothing enumerated is not a plan")
+
+    let stepsNoHeading = """
+    1. Rebuild the code index so it stops reporting files that do not exist.
+    2. Collapse the duplicated .gitignore blocks into their unique lines.
+    3. Re-run the dead-code audit against the rebuilt index and compare it
+       against the list produced before the rebuild, which is describing a
+       tree that no longer matches what is actually on disk today.
+    4. Write down whatever survived that comparison, because that list — not
+       the original one — is the only one worth acting on afterwards.
+    """
+    expect(stepsNoHeading.utf8.count > PlanEditPolicy.minimumPlanBytes,
+           "the unsectioned fixture must be long enough to reach the heading check")
+    expect(PlanEditPolicy.looksLikePlan(content: stepsNoHeading) == false,
+           "an unsectioned list is an answer; a plan has sections")
+
+    let oneStep = """
+    # Fix
+
+    The index is stale, which is why the earlier search reported files that
+    are not on disk. Rebuilding it is a single command and changes nothing
+    else in the tree, so it can be done before deciding anything larger, and
+    it costs nothing to redo if the result turns out to be uninteresting.
+    Everything else on the original list depends on the rebuilt index, so
+    there is nothing further worth deciding until this one command has run.
+
+    1. Rebuild the code index.
+    """
+    expect(oneStep.utf8.count > PlanEditPolicy.minimumPlanBytes,
+           "the single-step fixture must be long enough to reach the step count")
+    expect(PlanEditPolicy.looksLikePlan(content: oneStep) == false,
+           "one step is a suggestion, not a plan worth writing to llm-doc/plans/")
+
+    // Fenced blocks are QUOTED text, not structure. Without this the shell
+    // script below supplies both signals — `#` comments and `1)` lines — and
+    // an ordinary explanation sprouts a Save Plan button.
+    let explanationWithScript = """
+    The failure comes from the script itself, not from your configuration.
+    Here is the part that matters, with the two lines that decide the exit
+    code; everything above it is setup and can be ignored for now.
+
+    ```bash
+    # Phase 1 of the rebuild
+    1) echo "collecting"
+    2) echo "comparing"
+    # Phase 2 of the rebuild
+    ```
+
+    Run it again once the index is rebuilt and the exit code should change.
+    """
+    expect(PlanEditPolicy.looksLikePlan(content: explanationWithScript) == false,
+           "a fenced script is quoted text — its comments and lists are not plan structure")
+
+    // Sub-bullets are details OF a step, which is the rule the execute-path
+    // parser (`stepLines(in:patterns:)`) already applies. The two parsers
+    // must agree about the same document.
+    let nestedDetails = """
+    # Rebuild
+
+    Only one thing actually needs doing here, but it has several moving parts
+    worth listing so nothing is missed while it runs. None of them is a
+    separate decision — they all belong to the single step below.
+
+    1. Rebuild the code index.
+        1. Drop the stale database.
+        2. Re-scan the working tree.
+        3. Verify the file count matches what is on disk.
+    """
+    expect(PlanEditPolicy.looksLikePlan(content: nestedDetails) == false,
+           "indented sub-steps are details of one step, not steps of their own")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

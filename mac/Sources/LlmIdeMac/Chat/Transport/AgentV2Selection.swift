@@ -138,17 +138,43 @@ enum AgentV2Selection {
         CodeAssistMode.assistPlan.rawValue,
     ]
 
-    /// Visibility rule for the "Save Plan" action on a v2 assistant message:
-    /// plan-like mode, v2 selected, no pending tool (a pending
+    /// Visibility rule for the plan actions (Save / Preview / Refine) on a v2
+    /// assistant message: v2 selected, no pending tool (a pending
     /// `save-plan`/`update-file` card means the legacy proposal flow owns
     /// the turn, and the action would be a second way to do the same save),
-    /// and not already saved — the saved-plan card is a .toolResult message
+    /// not already saved — the saved-plan card is a .toolResult message
     /// that doesn't shift lastAssistantTurnId, so without the flag the
-    /// button stayed live and re-saved the same plan on every click.
+    /// button stayed live and re-saved the same plan on every click — and
+    /// then EITHER of two signals that this reply is a plan.
+    ///
+    /// The mode signal is the per-turn mode the SERVER resolved, and on its
+    /// own it is not enough: it flaps across a planning conversation. Asked
+    /// in Auto mode, "can you plan how to remove the dead code" resolves to
+    /// `plan`, but the follow-up turns that answer the planner's questions —
+    /// and the turn that finally CONTAINS the plan — resolve to something
+    /// else, so the finished plan arrived in the transcript with no way to
+    /// save it. The second signal covers that: a chat that HAS planned
+    /// (`sessionIsPlanning`) plus a reply shaped like a plan
+    /// (`PlanEditPolicy.looksLikePlan`). Both halves are required, so an
+    /// ordinary numbered answer in a chat that never planned anything does
+    /// not sprout a Save Plan button.
     static func showsSavePlanAction(mode: String?, v2Selected: Bool, hasPendingTool: Bool,
-                                    planSaved: Bool = false) -> Bool {
-        guard v2Selected, !hasPendingTool, !planSaved, let mode else { return false }
-        return planLikeModes.contains(mode)
+                                    planSaved: Bool = false,
+                                    sessionIsPlanning: Bool = false,
+                                    contentLooksLikePlan: Bool = false) -> Bool {
+        guard v2Selected, !hasPendingTool, !planSaved else { return false }
+        if let mode, planLikeModes.contains(mode) { return true }
+        return sessionIsPlanning && contentLooksLikePlan
+    }
+
+    /// Whether this transcript has ever run a plan-like turn — the session
+    /// half of the content signal above. Cheap enough to compute once per
+    /// render of the list (one pass over the messages' metadata).
+    static func sessionIsPlanning(modes: [String?]) -> Bool {
+        modes.contains { mode in
+            guard let mode else { return false }
+            return planLikeModes.contains(mode)
+        }
     }
 }
 
