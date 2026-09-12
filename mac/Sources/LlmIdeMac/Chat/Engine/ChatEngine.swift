@@ -307,6 +307,19 @@ final class ChatEngine {
         ChatTransportInput.makeProvider(selectedProvider: AppConfig.shared.activeCLI)
     }
 
+    /// Called when a post-execution REVIEW turn ends without landing a
+    /// verdict — stopped, cancelled, or failed.
+    ///
+    /// The normal landing runs from `autoChainPendingAction`, which the
+    /// error/stop path never reaches: `runTurn`'s `catch` finalizes the turn
+    /// and returns without calling `autoChain`. Everything the panel owns
+    /// for a review (the attached diff, the sticky Code Review mode) would
+    /// therefore be left behind — a ~130 KB patch re-sent with every later
+    /// message, and a picker stuck in a mode the user never chose. The
+    /// engine cannot clear either of those itself (both live on the panel),
+    /// so it announces the release and the panel does the clearing.
+    var onPlanReviewReleased: () -> Void = {}
+
     /// Called at the very top of every user turn, before any state changes.
     /// Exists so the panel can reset per-turn budgets it still owns (today:
     /// `autoGitOpsThisTurn`, which `autoChainPendingAction` reads and which is
@@ -1131,6 +1144,7 @@ final class ChatEngine {
             if var tracker = agent.planExecution, tracker.reviewPhase == .running {
                 tracker.reviewPhase = .none
                 agent.planExecution = tracker
+                onPlanReviewReleased()
             }
             // And drop a parked v2 approval: the server unparks it as
             // `aborted` the moment the stream closes (no tombstone), so the

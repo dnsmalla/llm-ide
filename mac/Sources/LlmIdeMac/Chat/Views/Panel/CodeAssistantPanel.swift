@@ -497,6 +497,7 @@ struct CodeAssistantPanel: View {
         // Fresh budget of auto-run git ops for this user turn (commit→push→…).
         // Panel-owned because `autoChainPendingAction` — which spends it — is.
         engine.onTurnStart = { autoGitOpsThisTurn = 0 }
+        engine.onPlanReviewReleased = { releasePlanReviewTurn() }
         engine.onRecordPrompt = { _ = session.record(prompt: $0) }
         engine.onNudge = { prompt in
             if session.shouldNudge(for: prompt) { engine.agent.nudgePrompt = prompt }

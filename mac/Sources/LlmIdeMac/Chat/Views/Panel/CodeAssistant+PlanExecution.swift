@@ -69,8 +69,10 @@ extension CodeAssistantPanel {
         guard !diff.patch.isEmpty else {
             tracker.reviewPhase = .none
             engine.agent.planExecution = tracker
-            attachNotice = "Nothing to review — no changes against \(diff.baseBranch ?? "HEAD"). "
-                + "If the agent committed on a different branch, switch to it first."
+            attachNotice = diff.baseBranch.map {
+                "Nothing to review — no changes against \($0)."
+            } ?? "Nothing to review — the working tree is clean and this branch has no upstream "
+                + "to compare against. If the agent committed on a different branch, switch to it first."
             return
         }
         tracker.reviewSummary = ""
@@ -121,16 +123,23 @@ extension CodeAssistantPanel {
     /// `autoChainPendingAction` for the turn `reviewPlanExecutionChanges`
     /// started; a turn that failed or was stopped releases the phase instead
     /// of leaving the button spinning forever.
+    /// Everything a review turn leaves on the PANEL, undone. The engine owns
+    /// `reviewPhase` and clears that itself; the attached patch and the
+    /// sticky Code Review mode live here, so they are cleared here — from
+    /// both endings, the normal one below and `onPlanReviewReleased` (stop /
+    /// cancel / failure), which is the path that never reaches
+    /// `autoChainPendingAction` at all.
+    @MainActor
+    func releasePlanReviewTurn() {
+        attachmentState.attachments.removeAll { $0.path == Self.reviewDiffLabel }
+        releaseStickyMode(from: [.review])
+    }
+
     @MainActor
     func landPlanReview(reply: ChatMessage) {
-        // Unconditional, and BEFORE the guard: `ChatEngine`'s stop/failure
-        // path releases `reviewPhase` on its own, so a review that ended that
-        // way reaches here already `.none` — and the guard below would return
-        // leaving 120k characters of patch attached to the composer, re-sent
-        // with every later message in this chat.
-        attachmentState.attachments.removeAll { $0.path == Self.reviewDiffLabel }
         guard var tracker = engine.agent.planExecution,
               tracker.reviewPhase == .running else { return }
+        releasePlanReviewTurn()
         guard reply.status == .done, !reply.content.isEmpty else {
             tracker.reviewPhase = .none
             engine.agent.planExecution = tracker
@@ -140,9 +149,6 @@ extension CodeAssistantPanel {
         tracker.reviewSummary = reply.content
         tracker.reviewVerdict = PlanReviewPolicy.verdict(from: reply.content)
         engine.agent.planExecution = tracker
-        // The review is over; the picker goes back to Auto so the next thing
-        // typed isn't silently a Code Review turn.
-        releaseStickyMode(from: [.review])
     }
 
     /// The change this execution produced, as one patch.
@@ -167,9 +173,15 @@ extension CodeAssistantPanel {
         // `RepoManager.resolveDefaultBranch` uses — NOT "whichever of main/
         // master isn't the current branch", which on `main` in a repo with a
         // stale local `master` would diff against unrelated history.
-        // Standing ON the default branch there is no `<base>...HEAD` to take.
+        // Standing ON the default branch there is no `<base>...HEAD` to take —
+        // but the unpushed commits are still a real, reviewable change, so the
+        // base becomes the upstream (`origin/main`) instead. Without this the
+        // common "agent committed straight to main" case had no diff at all.
         var base = await defaultBranch(at: root)
-        if base == branch { base = nil }
+        if base == branch {
+            let upstream = await git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+            base = upstream.isEmpty ? nil : upstream
+        }
 
         // Budgeted per section rather than by truncating the joined string:
         // the committed diff is usually the biggest by far, and a single
@@ -197,15 +209,11 @@ extension CodeAssistantPanel {
         if !untracked.isEmpty {
             sections.append(newFileSection(untracked, root: root))
         }
-        // On the default branch with a clean tree the working diff is the
-        // whole story — and if that is empty too, say so with the recent
-        // commits rather than sending an empty review.
-        if sections.isEmpty, base == nil {
-            let log = await git(["log", "--oneline", "-20"])
-            if !log.isEmpty {
-                sections.append("# Recent commits on `\(branch)` (working tree clean)\n\n\(log)")
-            }
-        }
+        // No fallback to `git log`. A list of twenty commit SUBJECTS is not a
+        // diff, and Code Review mode has no tools to go fetch the real one —
+        // so a review of it would be a review of nothing, and its PASS would
+        // unlock a push of code no one read. An empty patch is the honest
+        // answer; the caller turns it into "nothing to review".
         return (sections.joined(separator: "\n\n"), base)
     }
 

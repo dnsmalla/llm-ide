@@ -755,6 +755,24 @@ do {
     expect(PlanReviewPolicy.verdict(from: "\(PlanReviewPolicy.verdictMarker) MAYBE") == .unclear,
            "a marker with an unreadable verdict claims nothing")
 
+    // The prompt offers the two verdicts as adjacent lines. A reply that
+    // quotes that menu back ends on CHANGES, which read as a requested
+    // change over a review that had in fact passed.
+    let quotedMenu = """
+    You asked me to end with one of:
+
+    \(PlanReviewPolicy.verdictMarker) PASS        — if nothing found would block merging to main
+    \(PlanReviewPolicy.verdictMarker) CHANGES     — if anything found should be fixed first
+
+    Nothing blocking. \(PlanReviewPolicy.verdictMarker) PASS
+    """
+    expect(PlanReviewPolicy.verdict(from: quotedMenu) == .pass,
+           "the prompt's two-line menu quoted back is skipped for the real verdict")
+
+    let menuOnly = PlanReviewPolicy.reviewMessage(planTitle: "X", baseBranch: "main")
+    expect(PlanReviewPolicy.verdict(from: menuOnly) == .unclear,
+           "the prompt itself states no verdict — the menu is not a conclusion")
+
     expect(PlanReviewPolicy.verdict(from: "Looks great to me!") == .unclear,
            "positive prose with no marker claims nothing")
 

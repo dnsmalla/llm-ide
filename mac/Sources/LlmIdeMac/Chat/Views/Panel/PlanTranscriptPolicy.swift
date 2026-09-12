@@ -149,31 +149,66 @@ public enum PlanReviewPolicy {
     /// read off its own echo of the prompt rather than off its conclusion.
     /// Only the FIRST WORD after the marker is read, so a verdict that
     /// explains itself ("PASS — no changes required") isn't downgraded by a
-    /// word in its own justification. A line carrying the marker twice is
-    /// the prompt's own menu echoed back, and decides nothing.
+    /// word in its own justification.
+    ///
+    /// The prompt offers the two verdicts as a MENU of adjacent lines, and a
+    /// reply that quotes that menu back carries both — with CHANGES last,
+    /// which read as a requested change over a review that passed. So
+    /// adjacent marker lines that disagree are treated as the menu and
+    /// skipped, and the scan continues past them to the reply's own verdict.
     public static func verdict(from reply: String) -> PlanReviewVerdict {
-        let lines = reply.split(separator: "\n", omittingEmptySubsequences: true)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-        for line in lines.reversed() {
-            // Strip markdown emphasis/bullets the model may wrap it in
-            // (`**REVIEW-VERDICT: PASS**`, `- REVIEW-VERDICT: PASS`).
-            let bare = line
-                .replacingOccurrences(of: "*", with: "")
-                .replacingOccurrences(of: "`", with: "")
-                .trimmingCharacters(in: CharacterSet(charactersIn: "-• \t"))
-            guard let range = bare.range(of: verdictMarker) else { continue }
-            // The menu ("… PASS or … CHANGES") names both and means neither.
-            if bare[range.upperBound...].contains(verdictMarker) { return .unclear }
-            let word = bare[range.upperBound...]
-                .split(whereSeparator: { $0 == " " || $0 == "\t" })
-                .first
-                .map { String($0).uppercased() } ?? ""
-            if word.hasPrefix("PASS") { return .pass }
-            if word.hasPrefix("CHANGE") || word.hasPrefix("FAIL") { return .changesRequested }
-            // A marker with an unreadable verdict after it claims nothing —
-            // and keeps looking no further: this WAS the conclusion line.
-            return .unclear
+        let marked = reply
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .enumerated()
+            .compactMap { index, raw -> (line: Int, verdict: PlanReviewVerdict)? in
+                guard let v = markerVerdict(on: String(raw)) else { return nil }
+                return (index, v)
+            }
+        // Drop menu pairs: neighbouring marker lines (allowing one blank
+        // between) that name different verdicts state options, not findings.
+        //
+        // Consumed strictly two at a time. Testing every adjacent pair
+        // independently would chain — in "PASS / CHANGES / <the real> PASS"
+        // the menu's second line also pairs with the verdict below it, and
+        // the reply's own conclusion got swallowed as part of the menu.
+        var isMenu = Array(repeating: false, count: marked.count)
+        var i = 0
+        while i + 1 < marked.count {
+            let a = marked[i], b = marked[i + 1]
+            if b.line - a.line <= 2, a.verdict != b.verdict {
+                isMenu[i] = true
+                isMenu[i + 1] = true
+                i += 2
+            } else {
+                i += 1
+            }
         }
+        for i in marked.indices.reversed() where !isMenu[i] {
+            return marked[i].verdict
+        }
+        return .unclear
+    }
+
+    /// The verdict a single line states, or nil if it carries no marker.
+    /// A line naming the marker twice is a one-line menu and states nothing.
+    private static func markerVerdict(on line: String) -> PlanReviewVerdict? {
+        // Strip markdown emphasis/bullets the model may wrap it in
+        // (`**REVIEW-VERDICT: PASS**`, `- REVIEW-VERDICT: PASS`).
+        let bare = line
+            .trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "*", with: "")
+            .replacingOccurrences(of: "`", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-• \t"))
+        guard let range = bare.range(of: verdictMarker) else { return nil }
+        if bare[range.upperBound...].contains(verdictMarker) { return .unclear }
+        let word = bare[range.upperBound...]
+            .split(whereSeparator: { $0 == " " || $0 == "\t" })
+            .first
+            .map { String($0).uppercased() } ?? ""
+        if word.hasPrefix("PASS") { return .pass }
+        if word.hasPrefix("CHANGE") || word.hasPrefix("FAIL") { return .changesRequested }
+        // A marker with an unreadable verdict after it claims nothing — but
+        // it IS a conclusion line, so it still ends the scan.
         return .unclear
     }
 
