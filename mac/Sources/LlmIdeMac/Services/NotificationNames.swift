@@ -105,6 +105,19 @@ extension Notification.Name {
     /// graph rebuilds, etc.
     static let activeProjectChanged = Notification.Name("activeProjectChanged")
 
+    /// Posted by `GenerationLibraryStore` when a refresh brings the kit's
+    /// templates/commands in. AppShell re-seeds and re-scans the open project
+    /// on it.
+    ///
+    /// Needed because the seed and the fetch race. Project activation seeds
+    /// `templates/`/`commands/` from whatever the store holds at that instant,
+    /// and the fetch is fire-and-forget; on a first launch (empty disk cache)
+    /// the store is still empty when the project activates, so nothing is
+    /// seeded and both menus come up empty until the user switches projects.
+    /// Seeding is `writeIfAbsent`, so re-running it is a top-up, never a
+    /// fight with the user's edits.
+    static let generationLibraryChanged = Notification.Name("generationLibraryChanged")
+
     // MARK: - Chat approvals
 
     /// Posted by AppShell's pending-approval toolbar button (see

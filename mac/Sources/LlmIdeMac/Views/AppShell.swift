@@ -455,6 +455,22 @@ struct AppShell: View {
             GenerationRegistry.shared.reset()
             reloadDocTemplatesForActiveProject()
         }
+        // The kit arriving after the project did. Seeding above ran against
+        // whatever GenerationLibraryStore held at activation, which on a first
+        // launch (empty disk cache) was nothing — leaving Doc Gen and Visual
+        // with no templates or commands until the next project switch. Re-seed
+        // on arrival; every write is `writeIfAbsent`, so this tops the project
+        // up and never touches a file the user has edited.
+        //
+        // Deliberately NARROW: only the template/command seed + rescan, not
+        // the whole project-activation path. Nothing about the project
+        // changed, so `GenerationRegistry.reset()` (would discard an
+        // in-flight run's edited document), the Doc Gen output-store rebind
+        // and the Auto Task rebind (a forced reload of the project's auto-task
+        // templates) all stay out of it.
+        .onReceive(NotificationCenter.default.publisher(for: .generationLibraryChanged)) { _ in
+            seedAndReloadGenerationFiles()
+        }
         // Ingest the open project's code into the KB so the agent can SEARCH it
         // (search-kb / findContext), not just read files. Keyed on the active
         // project's path so it fires on BOTH launch-restore (which sets
@@ -963,11 +979,16 @@ struct AppShell: View {
         itemStore.setExternalCodeFolders(config.localCodeFolders)
     }
 
-    private func reloadDocTemplatesForActiveProject() {
+    /// Seed the open project's `templates/`/`commands/` from the kit and
+    /// republish both stores. Split out of
+    /// `reloadDocTemplatesForActiveProject()` so the kit arriving late can
+    /// re-run JUST this, without the project-activation side effects around
+    /// it — see the `.generationLibraryChanged` observer.
+    private func seedAndReloadGenerationFiles() {
         let root = projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
         // `root` is optional (nil when no project is open); guard the seeder
         // (which requires a concrete URL) but still pass the optional through
-        // to reloadProjectCommands/activate so closing a project clears them.
+        // to reloadProjectCommands so closing a project clears them.
         if let root {
             // BOTH seeders, not just commands. `seedIfNeeded` is per-folder
             // `writeIfAbsent`, so it is how a project picks up seeds added
@@ -982,6 +1003,11 @@ struct AppShell: View {
         }
         templateStore.reloadProjectTemplates(at: root)
         commandStore.reloadProjectCommands(at: root)
+    }
+
+    private func reloadDocTemplatesForActiveProject() {
+        let root = projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
+        seedAndReloadGenerationFiles()
         docGenOutputStore.activate(projectRoot: root)
         // Auto Task prompts live in the same project (`templates/auto_task/`)
         // and follow the same open/close/switch moments, so they rebind here

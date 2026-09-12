@@ -51,6 +51,11 @@ final class GenerationLibraryStore: ObservableObject {
             templates = lib.templates
             commands = lib.commands
             writeCache(lib)
+            // Tell the open project to top itself up. Its `templates/` and
+            // `commands/` were seeded from whatever this store held when the
+            // project activated, which on a first launch (no disk cache) was
+            // nothing — see `.generationLibraryChanged`.
+            NotificationCenter.default.post(name: .generationLibraryChanged, object: nil)
         } catch {
             Self.log.error("generation library fetch failed: \(error.localizedDescription, privacy: .public)")
         }
