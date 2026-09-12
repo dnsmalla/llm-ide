@@ -8,10 +8,35 @@ final class DocTemplateStore: ObservableObject {
     @Published private(set) var customTemplates: [DocTemplate] = []
     @Published private(set) var projectTemplates: [DocTemplate] = []
 
-    /// Project `templates/` when a project is open; otherwise built-ins + app-support customs.
+    /// Project `templates/` when a project is open; otherwise the kit's
+    /// defaults + app-support customs.
+    ///
+    /// With no project there is no `templates/` folder to scan, so the
+    /// fallback comes straight from `GenerationLibraryStore` — the same kit
+    /// entries a project would have been seeded with, served from its disk
+    /// cache when the backend is not up. `DocTemplate.builtins` used to fill
+    /// this and is now empty: keeping an app-local copy of the kit's defaults
+    /// is the duplication that moving them to the kit removes.
     var templates: [DocTemplate] {
         if currentProjectRoot != nil { return projectTemplates }
-        return DocTemplate.builtins + customTemplates
+        return kitTemplates + customTemplates
+    }
+
+    /// The kit's templates as `DocTemplate`s, for the no-project surface.
+    private var kitTemplates: [DocTemplate] {
+        GenerationLibraryStore.shared.templates.compactMap { entry in
+            let folder = entry.folderName
+            guard !folder.isEmpty else { return nil }
+            let markdown = ProjectDocTemplatesSeeder.projectMarkdown(for: entry)
+            return DocTemplate(
+                id: DocTemplate.stableID(forFolder: folder),
+                name: DocTemplate.displayName(from: markdown, folderName: folder),
+                sections: DocTemplate.sections(from: markdown),
+                rawContent: markdown,
+                isBuiltin: true,
+                folderName: folder,
+                surface: entry.templateSurface)
+        }
     }
 
     var hasProjectTemplates: Bool { currentProjectRoot != nil }

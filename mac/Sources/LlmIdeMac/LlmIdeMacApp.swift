@@ -293,6 +293,11 @@ public struct LlmIdeMacApp: App {
                     templateStore.bootstrap()
                     commandStore.bootstrap()
                     docGenOutputStore.bootstrap()
+                    // The kit's default templates/commands. Fire-and-forget:
+                    // the store already serves its disk cache, so a failed or
+                    // slow fetch costs freshness, never the defaults — and
+                    // this must not gate the backend start below.
+                    Task { await GenerationLibraryStore.shared.refresh(api: api) }
                     // Start the backend FIRST. Session restore below calls
                     // the backend (api.refresh), so it must already be coming
                     // up — and, more importantly, a slow or blocked restore

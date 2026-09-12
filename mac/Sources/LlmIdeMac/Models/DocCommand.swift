@@ -60,54 +60,17 @@ struct DocCommand: Identifiable, Codable, Equatable {
         }
     }
 
-    static let seedDefinitions: [SeedDefinition] = [
-        SeedDefinition(
-            id: UUID(uuidString: "B0000001-0000-4000-8000-000000000001")!,
-            folderName: "summarize",
-            name: "Summarize",
-            instruction: "Summarize the selected sources. Lead with the single most important point, then give the supporting detail as short bullets. Omit anything the sources do not state."),
-        SeedDefinition(
-            id: UUID(uuidString: "B0000002-0000-4000-8000-000000000002")!,
-            folderName: "explain-code",
-            name: "Explain Code",
-            instruction: "Explain the selected code for an engineer who is new to this codebase. Cover what it does, how it is used, and what it depends on. Reference concrete file and symbol names."),
-        SeedDefinition(
-            id: UUID(uuidString: "B0000003-0000-4000-8000-000000000003")!,
-            folderName: "release-notes",
-            name: "Release Notes",
-            instruction: "Write release notes from the selected sources. Group changes under Added, Changed, and Fixed. Write each entry for a user of the product, not for its authors."),
-        // Visual surface — instructions for reading an image, which is what
-        // that menu's sources are.
-        SeedDefinition(
-            id: UUID(uuidString: "B0000010-0000-4000-8000-000000000010")!,
-            folderName: "describe-image",
-            name: "Describe Image",
-            instruction: "Describe what the selected image shows, in the order a reader would notice it. Name concrete elements — labels, values, controls, people, layout — rather than summarising the impression. Say plainly when something is unreadable rather than guessing at it.",
-            surface: .visual),
-        SeedDefinition(
-            id: UUID(uuidString: "B0000011-0000-4000-8000-000000000011")!,
-            folderName: "extract-text",
-            name: "Extract Text",
-            instruction: "Transcribe every piece of text visible in the selected image, preserving its reading order and grouping. Keep labels with their values. Mark anything you cannot read confidently as [unclear] instead of inventing it.",
-            surface: .visual),
-        SeedDefinition(
-            id: UUID(uuidString: "B0000012-0000-4000-8000-000000000012")!,
-            folderName: "read-chart",
-            name: "Read Chart",
-            instruction: "Read the selected chart or diagram. State what is being measured, over what range, and what the data actually says — including the trend and any outlier. Quote axis labels and units verbatim, and say when a value can only be estimated from the image.",
-            surface: .visual),
-    ]
+    /// Empty: every seeded command now comes from `dnsmalla/agent-kit`'s
+    /// `commands/` family, so adding one is a file in the kit rather than an
+    /// app release. Unlike templates there is no app-owned remainder — there
+    /// is no command equivalent of the ingest layouts. Kept as a type so the
+    /// seeder's shape and `SeedDefinition` stay available to any caller that
+    /// still writes a command programmatically.
+    static let seedDefinitions: [SeedDefinition] = []
 
-    /// Shipped skeletons when no project is open (fallback UI).
-    static let builtins: [DocCommand] = seedDefinitions.map {
-        DocCommand(
-            id: $0.id,
-            name: $0.name,
-            instruction: $0.instruction,
-            isBuiltin: true,
-            folderName: $0.folderName,
-            surface: $0.surface)
-    }
+    /// Shipped skeletons when no project is open (fallback UI). Empty for the
+    /// same reason `DocTemplate.builtins` is — see there.
+    static let builtins: [DocCommand] = []
 
     // MARK: - Markdown parsing
 

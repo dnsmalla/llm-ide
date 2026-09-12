@@ -73,7 +73,16 @@ struct DocTemplate: Identifiable, Codable, Equatable {
         try c.encode(surface, forKey: .surface)
     }
 
-    /// Default templates seeded into every project's `templates/<slug>/template.md`.
+    /// App-owned templates seeded into every project's
+    /// `templates/<slug>/template.md`.
+    ///
+    /// Only the INGEST layouts remain here. The Doc Gen and Visual templates a
+    /// user picks from a menu moved to `dnsmalla/agent-kit`'s `templates/`
+    /// family, so adding one is a file in the kit rather than an app release
+    /// — see `GenerationLibraryStore`. These two cannot follow: they are
+    /// `{{placeholder}}` layouts rendered by `IngestTemplateRenderer` for
+    /// auto-generated notes, and they are deliberately excluded from the
+    /// picker below.
     struct SeedDefinition {
         let id: UUID
         let folderName: String
@@ -92,52 +101,6 @@ struct DocTemplate: Identifiable, Codable, Equatable {
 
     static let seedDefinitions: [SeedDefinition] = [
         SeedDefinition(
-            id: UUID(uuidString: "A0000001-0000-4000-8000-000000000001")!,
-            folderName: "meeting-summary",
-            name: "Meeting Summary",
-            sections: ["Key Decisions", "Action Items", "Blockers", "Next Steps"]),
-        SeedDefinition(
-            id: UUID(uuidString: "A0000002-0000-4000-8000-000000000002")!,
-            folderName: "sprint-review",
-            name: "Sprint Review",
-            sections: ["Sprint Goal", "Completed Items", "Carry-overs", "Blockers & Risks", "Next Sprint Goals"]),
-        SeedDefinition(
-            id: UUID(uuidString: "A0000003-0000-4000-8000-000000000003")!,
-            folderName: "decision-log",
-            name: "Decision Log",
-            sections: ["Context", "Decision", "Rationale", "Alternatives Considered", "Follow-ups"]),
-        SeedDefinition(
-            id: UUID(uuidString: "A0000004-0000-4000-8000-000000000004")!,
-            folderName: "status-update",
-            name: "Status Update",
-            sections: ["Summary", "Completed This Period", "In Progress", "Risks", "Next Period"]),
-        SeedDefinition(
-            id: UUID(uuidString: "A0000005-0000-4000-8000-000000000005")!,
-            folderName: "action-plan",
-            name: "Action Plan",
-            sections: ["Objective", "Actions", "Owners", "Timeline", "Success Criteria"]),
-        // Visual surface. Its sources are images, so its structures are about
-        // reading an image rather than summarising a meeting — which is the
-        // whole reason the two menus needed separating.
-        SeedDefinition(
-            id: UUID(uuidString: "A0000010-0000-4000-8000-000000000010")!,
-            folderName: "image-analysis",
-            name: "Image Analysis",
-            sections: ["What It Shows", "Details Worth Noting", "Questions It Raises"],
-            surface: .visual),
-        SeedDefinition(
-            id: UUID(uuidString: "A0000011-0000-4000-8000-000000000011")!,
-            folderName: "screenshot-review",
-            name: "Screenshot Review",
-            sections: ["What The Screen Does", "Problems Spotted", "Suggested Changes"],
-            surface: .visual),
-        SeedDefinition(
-            id: UUID(uuidString: "A0000012-0000-4000-8000-000000000012")!,
-            folderName: "design-feedback",
-            name: "Design Feedback",
-            sections: ["First Impression", "Layout & Hierarchy", "Accessibility", "Specific Fixes"],
-            surface: .visual),
-        SeedDefinition(
             id: UUID(uuidString: "A0000006-0000-4000-8000-000000000006")!,
             folderName: "meeting-note",
             name: "Meeting Note (auto)",
@@ -152,16 +115,14 @@ struct DocTemplate: Identifiable, Codable, Equatable {
     ]
 
     /// Shipped skeletons when no project is open (fallback UI).
-    /// Ingest seeds are excluded — they are auto-note layouts, not Doc Gen templates.
-    static let builtins: [DocTemplate] = seedDefinitions.filter { $0.ingestKind == nil }.map {
-        DocTemplate(
-            id: $0.id,
-            name: $0.name,
-            sections: $0.sections,
-            isBuiltin: true,
-            folderName: $0.folderName,
-            surface: $0.surface)
-    }
+    ///
+    /// Empty now that the menu templates come from the kit: with no project
+    /// there is no `templates/` folder to read, and inventing a second,
+    /// app-local copy of the kit's defaults is exactly the duplication this
+    /// change removes. `DocTemplateStore` fills this surface from
+    /// `GenerationLibraryStore` instead, which is cached and therefore
+    /// available offline.
+    static let builtins: [DocTemplate] = []
 
     /// Parse `## ` headings from a Markdown string into section names.
     static func sections(from markdown: String) -> [String] {

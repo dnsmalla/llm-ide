@@ -10,8 +10,28 @@ final class DocCommandStore: ObservableObject {
     @Published private(set) var projectCommands: [DocCommand] = []
 
     /// Project `commands/` when a project is open; otherwise the built-ins.
+    /// Project `commands/` when a project is open; otherwise the kit's
+    /// defaults — see `DocTemplateStore.templates` for why these are not
+    /// app-local constants any more.
     var commands: [DocCommand] {
-        currentProjectRoot != nil ? projectCommands : DocCommand.builtins
+        currentProjectRoot != nil ? projectCommands : kitCommands
+    }
+
+    private var kitCommands: [DocCommand] {
+        GenerationLibraryStore.shared.commands.compactMap { entry in
+            let folder = entry.folderName
+            guard !folder.isEmpty else { return nil }
+            let markdown = TemplateSurfaceMarker.ensure(
+                in: entry.body, base: DocCommand.markerComment, surface: entry.templateSurface)
+            return DocCommand(
+                id: DocCommand.stableID(forFolder: folder),
+                name: DocCommand.displayName(from: markdown, folderName: folder),
+                instruction: DocCommand.instruction(from: markdown),
+                rawContent: markdown,
+                isBuiltin: true,
+                folderName: folder,
+                surface: entry.templateSurface)
+        }
     }
 
     /// Commands belonging to one generation menu — see

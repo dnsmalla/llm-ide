@@ -976,8 +976,9 @@ struct AppShell: View {
             // New Project time. Every template seed added since a project was
             // created has therefore never reached it (the Meeting Note and
             // Email Note ingest seeds, and now the Visual ones).
-            ProjectDocTemplatesSeeder.seedIfNeeded(at: root)
-            ProjectDocCommandsSeeder.seedIfNeeded(at: root)
+            let kit = GenerationLibraryStore.shared
+            ProjectDocTemplatesSeeder.seedIfNeeded(at: root, kit: kit.templates)
+            ProjectDocCommandsSeeder.seedIfNeeded(at: root, kit: kit.commands)
         }
         templateStore.reloadProjectTemplates(at: root)
         commandStore.reloadProjectCommands(at: root)

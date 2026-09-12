@@ -95,6 +95,29 @@ do {
            "a file with no `# Title` still gets its marker")
 }
 
+// Seeding a kit entry into a project: the file the app writes must read back
+// as the surface the kit declared, or the template lands in the wrong menu.
+do {
+    // `ensure` is what the seeder uses to stamp a kit body (which carries no
+    // marker of its own) on the way into the project.
+    let kitBody = "# Image Analysis\n\n## What It Shows\n\n## Details Worth Noting\n"
+    let seeded = TemplateSurfaceMarker.ensure(
+        in: kitBody, base: templateMarker, surface: .visual)
+    expect(TemplateSurfaceMarker.surface(in: seeded, base: templateMarker) == .visual,
+           "a kit template seeded as visual reads back as visual from the project file")
+    expect(seeded.contains("## What It Shows") && seeded.contains("## Details Worth Noting"),
+           "and the kit's sections survive the stamping verbatim")
+    expect(seeded.hasPrefix("# Image Analysis"),
+           "the title stays first — the project scanner reads the display name from it")
+
+    let docBody = "# Meeting Summary\n\n## Key Decisions\n"
+    let seededDoc = TemplateSurfaceMarker.ensure(in: docBody, base: templateMarker, surface: .doc)
+    expect(TemplateSurfaceMarker.surface(in: seededDoc, base: templateMarker) == .doc,
+           "a kit template with no surface seeds as Doc Gen")
+    expect(seededDoc.contains(templateMarker),
+           "and still carries the bare marker, so the scanner recognises it as a template at all")
+}
+
 if failures.isEmpty {
     print("generation-contract-lab: all assertions passed")
 } else {

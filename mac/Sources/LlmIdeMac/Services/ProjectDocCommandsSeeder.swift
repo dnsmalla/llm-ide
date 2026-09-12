@@ -11,7 +11,13 @@ enum ProjectDocCommandsSeeder {
         category: "ProjectDocCommandsSeeder")
 
     /// Create `commands/` and seed default command folders + README.
-    static func seedIfNeeded(at projectRoot: URL) {
+    /// `kit` is the default set from `dnsmalla/agent-kit` — see
+    /// `ProjectDocTemplatesSeeder.seedIfNeeded(at:kit:)` for why these are no
+    /// longer Swift constants. Unlike templates there is no app-owned
+    /// remainder: every seeded command comes from the kit, so an empty `kit`
+    /// seeds only the README and the next open tops the project up.
+    static func seedIfNeeded(at projectRoot: URL,
+                             kit: [LlmIdeAPIClient.GenerationLibraryEntry] = []) {
         let layout = ProjectLayout(root: projectRoot)
         let fm = FileManager.default
 
@@ -26,15 +32,19 @@ enum ProjectDocCommandsSeeder {
             at: layout.commandsDir.appendingPathComponent("README.md"),
             content: commandsReadme)
 
-        for def in DocCommand.seedDefinitions {
-            let dir = layout.commandDir(named: def.folderName)
+        for entry in kit where !entry.folderName.isEmpty {
+            let dir = layout.commandDir(named: entry.folderName)
             do {
                 try fm.createDirectory(at: dir, withIntermediateDirectories: true)
             } catch {
-                log.error("command dir \(def.folderName, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+                log.error("command dir \(entry.folderName, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
                 continue
             }
-            writeIfAbsent(at: dir.appendingPathComponent("command.md"), content: def.markdown())
+            // The surface marker is what the project scanner reads to decide
+            // which menu this belongs in.
+            let content = TemplateSurfaceMarker.ensure(
+                in: entry.body, base: DocCommand.markerComment, surface: entry.templateSurface)
+            writeIfAbsent(at: dir.appendingPathComponent("command.md"), content: content)
         }
     }
 

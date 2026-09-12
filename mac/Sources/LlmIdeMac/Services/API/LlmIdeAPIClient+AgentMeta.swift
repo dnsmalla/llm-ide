@@ -66,6 +66,48 @@ extension LlmIdeAPIClient {
         return resp.skills
     }
 
+    // MARK: Generation library (kit templates + commands)
+
+    /// One `templates/` or `commands/` entry from the kit.
+    ///
+    /// `body` is the file below its frontmatter — the `##` sections of a
+    /// template, or the instruction text of a command — and is written into
+    /// the project verbatim, so it must not be reformatted on the way through.
+    struct GenerationLibraryEntry: Decodable, Identifiable, Hashable {
+        let id: String            // "<family>/<stem>"
+        let name: String
+        let description: String
+        /// "doc" | "visual". Absent on an older server → doc, which is what
+        /// every entry written before surfaces existed means.
+        let surface: String
+        let body: String
+
+        enum CodingKeys: String, CodingKey { case id, name, description, surface, body }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            name = try c.decode(String.self, forKey: .name)
+            description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+            surface = try c.decodeIfPresent(String.self, forKey: .surface) ?? "doc"
+            body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
+        }
+    }
+
+    struct GenerationLibrary: Decodable {
+        let templates: [GenerationLibraryEntry]
+        let commands: [GenerationLibraryEntry]
+    }
+
+    /// The kit's default templates and commands (server API v51).
+    ///
+    /// These used to be Swift constants, so adding one meant an app release.
+    /// They come from `dnsmalla/agent-kit` now; the app seeds them into a
+    /// project where the user can edit their own copy.
+    func generationLibrary() async throws -> GenerationLibrary {
+        try await get("/kb/agent/generation-library", authenticated: true)
+    }
+
     // MARK: Project memory (auto-captured chat facts)
 
     private struct ProjectMemoryResponse: Decodable { let facts: [String]; let repo: String? }

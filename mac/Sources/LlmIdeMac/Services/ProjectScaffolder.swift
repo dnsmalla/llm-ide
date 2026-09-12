@@ -75,6 +75,12 @@ enum ProjectScaffolder {
     ///   (e.g. read-only volume, permissions issue). `.gitignore` / `.gitkeep`
     ///   / README write failures are logged but do not propagate — they are
     ///   non-critical and will succeed on the next open.
+    /// `@MainActor` because seeding now reads `GenerationLibraryStore`, which
+    /// is main-actor state. Every caller is already on it (`ProjectStore` is
+    /// `@MainActor`), so this constrains nothing today — and it makes a future
+    /// off-main caller a compile error instead of the runtime trap an
+    /// `assumeIsolated` here would have been.
+    @MainActor
     static func scaffold(at folderURL: URL, project: Project) throws {
         let fm = FileManager.default
 
@@ -122,10 +128,15 @@ enum ProjectScaffolder {
         //    filled later by ProjectSkillsInstaller; these point agents there.
         ensureAgentEntryFiles(at: folderURL, project: project)
 
-        // 7. Doc Gen templates — default subfolders under templates/
-        ProjectDocTemplatesSeeder.seedIfNeeded(at: folderURL)
-        // 7b. Doc Gen commands — default subfolders under commands/
-        ProjectDocCommandsSeeder.seedIfNeeded(at: folderURL)
+        // 7. Templates + commands. The defaults come from the kit
+        //    (`GenerationLibraryStore`, cached on disk) rather than from
+        //    app constants, so adding one never needs an app release. A
+        //    scaffold that runs before the first successful fetch seeds only
+        //    the app-owned ingest layouts; opening the project tops it up,
+        //    because every seed write is `writeIfAbsent`.
+        let kit = GenerationLibraryStore.shared
+        ProjectDocTemplatesSeeder.seedIfNeeded(at: folderURL, kit: kit.templates)
+        ProjectDocCommandsSeeder.seedIfNeeded(at: folderURL, kit: kit.commands)
 
         log.info("scaffold complete: \(folderURL.lastPathComponent, privacy: .public)")
     }
