@@ -23,7 +23,8 @@ extension CodeAssistantPanel {
     private static let noIssueTrackerHint = "Add or activate a project in Settings → GitLab or GitHub."
 
     var showProjectMemorySheet: some View {
-        ProjectMemoryView(api: api, repos: activeMemoryRepos, workspaceRoot: activeMemoryWorkspaceRoot)
+        ProjectMemoryView(api: api, repos: activeMemoryRepos, workspaceRoot: activeMemoryWorkspaceRoot,
+                          sessionId: engine.currentSessionIDString.isEmpty ? nil : engine.currentSessionIDString)
             .environmentObject(theme)
     }
 

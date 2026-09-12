@@ -1,8 +1,14 @@
 import SwiftUI
 
-/// Viewer for the auto-captured project memory (chat-memory.md). Because
-/// capture is automatic, the user needs to see and prune what's been learned.
-/// Read + delete only — facts are written by the agent, not added by hand.
+/// Viewer for the auto-captured memory: the project's (chat-memory.md) and,
+/// when opened from a chat, that chat's own session memory (kb/session-
+/// memory.mjs). Because capture is automatic, the user needs to see and
+/// prune what's been learned. Read + delete only — facts are written by the
+/// agent, not added by hand.
+///
+/// The session section is what makes session memory VISIBLE at all: it was
+/// injected into prompts and deleted with the chat, but never shown, which
+/// read as "session memory isn't used".
 struct ProjectMemoryView: View {
     let api: LlmIdeAPIClient
     /// Candidate repo paths (the client's indexedRepos, "~/…"). The server
@@ -12,11 +18,18 @@ struct ProjectMemoryView: View {
     /// The open Explorer folder ("~/…"), if any. Lets memory resolve to the
     /// open project even when it isn't a formally-indexed repo.
     var workspaceRoot: String? = nil
+    /// The chat this viewer was opened from (its stable session-store UUID),
+    /// if any — the key session memory is stored under. Nil from surfaces
+    /// with no chat.
+    var sessionId: String? = nil
 
     @EnvironmentObject var theme: ThemeStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var facts: [String] = []
+    /// This chat's session memory; empty when there is no chat or nothing
+    /// captured yet.
+    @State private var sessionFacts: [String] = []
     @State private var resolvedRepo: String?
     @State private var loading = true
     @State private var error: String?
@@ -38,10 +51,10 @@ struct ProjectMemoryView: View {
             Image(systemName: "brain")
                 .foregroundStyle(theme.current.accent)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Project memory")
+                Text("Memory")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(theme.current.text)
-                Text("What the assistant has learned about this project")
+                Text("What the assistant has learned about this project — and in this chat")
                     .font(.system(size: 11))
                     .foregroundStyle(theme.current.textMuted)
             }
@@ -73,21 +86,84 @@ struct ProjectMemoryView: View {
                     .foregroundStyle(theme.current.textMuted)
                     .multilineTextAlignment(.center)
             }
-        } else if resolvedRepo == nil {
+        } else if resolvedRepo == nil && sessionFacts.isEmpty {
             centered { emptyState("Open a project folder (or index a repo) to capture memory.") }
-        } else if facts.isEmpty {
+        } else if facts.isEmpty && sessionFacts.isEmpty {
             centered { emptyState("Nothing remembered yet. The assistant will capture durable facts as you chat about this project.") }
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(facts, id: \.self) { fact in
-                        factRow(fact)
-                        Divider().background(theme.current.border.opacity(0.5))
+                    if !sessionFacts.isEmpty {
+                        sectionHeader(
+                            "This chat",
+                            subtitle: "Decisions and state from this conversation — forgotten with the chat",
+                            trailing: {
+                                Button(role: .destructive) { Task { await forgetSession() } } label: {
+                                    Text("Forget").font(.system(size: 11))
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(busy)
+                                .help("Forget everything this chat's memory holds")
+                            })
+                        ForEach(sessionFacts, id: \.self) { fact in
+                            sessionRow(fact)
+                            Divider().background(theme.current.border.opacity(0.5))
+                        }
+                    }
+                    if !facts.isEmpty {
+                        if !sessionFacts.isEmpty {
+                            sectionHeader("This project",
+                                          subtitle: "Durable facts, recalled in every chat about this project",
+                                          trailing: { EmptyView() })
+                        }
+                        ForEach(facts, id: \.self) { fact in
+                            factRow(fact)
+                            Divider().background(theme.current.border.opacity(0.5))
+                        }
                     }
                 }
                 .padding(.vertical, 4)
             }
         }
+    }
+
+    private func sectionHeader<T: View>(_ title: String, subtitle: String,
+                                        @ViewBuilder trailing: () -> T) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title.uppercased())
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.current.textMuted)
+                Text(subtitle)
+                    .font(.system(size: 10))
+                    .foregroundStyle(theme.current.textMuted)
+            }
+            Spacer(minLength: 4)
+            trailing()
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    /// A session fact: plain sentence, no per-row delete — session memory is
+    /// forgotten together (there is no per-fact edit on the server), and the
+    /// section header carries that action.
+    private func sessionRow(_ fact: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 4))
+                .foregroundStyle(theme.current.accent)
+                .padding(.top, 7)
+            Text(fact)
+                .font(.system(size: 12))
+                .foregroundStyle(theme.current.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
     }
 
     private func factRow(_ fact: String) -> some View {
@@ -141,8 +217,14 @@ struct ProjectMemoryView: View {
     // MARK: Data
 
     private func load() async {
-        guard !repos.isEmpty || (workspaceRoot?.isEmpty == false) else { loading = false; return }
         loading = true; error = nil
+        // Session memory first, and on its own: it needs no project, and a
+        // project-memory failure must not hide what this chat remembers (or
+        // the reverse). Best-effort — an empty list is the honest fallback.
+        if let sessionId, !sessionId.isEmpty {
+            sessionFacts = (try? await api.sessionMemory(sessionId: sessionId)) ?? []
+        }
+        guard !repos.isEmpty || (workspaceRoot?.isEmpty == false) else { loading = false; return }
         do {
             let r = try await api.projectMemory(repos: repos, workspaceRoot: workspaceRoot)
             facts = r.facts
@@ -172,6 +254,15 @@ struct ProjectMemoryView: View {
         busy = true; defer { busy = false }
         do { facts = try await api.deleteProjectMemoryFact(repo: repo, fact: fact, workspaceRoot: workspaceRoot) }
         catch { self.error = "Couldn't update project memory." }
+    }
+
+    private func forgetSession() async {
+        guard let sessionId, !sessionId.isEmpty else { return }
+        busy = true; defer { busy = false }
+        do {
+            _ = try await api.forgetSessionMemory(sessionId: sessionId)
+            sessionFacts = []
+        } catch { self.error = "Couldn't forget this chat's memory." }
     }
 
     private func clearAll() async {

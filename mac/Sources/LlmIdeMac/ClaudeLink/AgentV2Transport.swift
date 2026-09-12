@@ -86,12 +86,14 @@ private final class TurnFailureCapture {
 ///   `onApproval`. The transport never answers them: the stream stays open
 ///   while the engine parks, and the panel/engine (Tasks 11–12) posts the
 ///   decision separately.
-/// - **Usage** — the legacy `Usage` block is attachment/memory accounting;
-///   the v2 server reports neither (its `usage` events carry token counts,
-///   which no legacy field fits). The attachment figures are computed
-///   client-side from the request — the same arithmetic the legacy server
-///   applies (`files.length`, summed chars, `files.map(f => f.path)`) — so
-///   the panel's usage footnote keeps working; token counts are dropped.
+/// - **Usage** — the legacy `Usage` block is attachment/memory accounting.
+///   The attachment figures are computed client-side from the request — the
+///   same arithmetic the legacy server applies (`files.length`, summed
+///   chars, `files.map(f => f.path)`). The memory figures come from the
+///   server's `memory` event (API v49): on this engine the injected block is
+///   the chat's session memory, and before that event every turn read as
+///   "0 — no memory injected". The `usage` events' token counts still have
+///   no legacy field and are dropped.
 /// - **Errors** — `error` events can't throw through the non-throwing
 ///   `onEvent` callback, so the failure is captured and thrown once the
 ///   stream ends. The 3-callback entry point reuses that same deferral
@@ -240,6 +242,9 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
 
         var reply = ""
         var resolvedMode: String?
+        // The session-memory footnote (`memory`, v49). Arrives before the
+        // query starts; applied to the result's usage below.
+        var memoryInfo: AgentV2Memory?
         var sawTerminal = false
         var resolvedTasks: [AgentTask]?
         var resolvedContinueNeeded = false
@@ -336,6 +341,8 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
             case .modeSet(let mode):
                 resolvedMode = mode
                 self.onModeResolved?(mode)
+            case .memory(let info):
+                memoryInfo = info
             case .result:
                 sawTerminal = true
             case .error(let code, let message):
@@ -365,9 +372,14 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 attachmentChars: input.attachments.reduce(0) { $0 + $1.content.count },
                 paths: input.attachments.map(\.path),
                 truncatedPaths: nil,
-                memoryApproxTokens: nil,
-                memoryChars: nil,
-                memoryHasChatMemory: nil
+                // From the `memory` event (v49). On this engine the injected
+                // memory IS the chat's session memory — project memory is a
+                // tool, not always-on injection — so "has chat memory" means
+                // "session facts were injected". An older server sends no
+                // event and these stay nil, as they always were.
+                memoryApproxTokens: memoryInfo?.approxTokens,
+                memoryChars: memoryInfo?.chars,
+                memoryHasChatMemory: memoryInfo.map { $0.sessionFacts > 0 }
             ),
             // The route echoes the resolved mode right after `init`
             // (`mode_set`) — the v2 analog of the legacy `done.mode`. Fall

@@ -118,6 +118,9 @@ extension AgentV2Event {
         case .modeSet:
             return ["mode"]
 
+        case .memory:
+            return ["sessionFacts", "chars", "approxTokens"]
+
         case .tasks:
             return ["tasks", "tasks.id", "tasks.title", "tasks.status", "continueNeeded"]
 

@@ -390,8 +390,13 @@ extension CodeAssistantPanel {
         if t == 0 {
             return "Project memory — no memory injected last turn (0 tokens). None generated for this project yet."
         }
-        let chat = engine.agent.lastMemoryHasChat ? " (incl. chat-captured facts)" : " (graph-derived only)"
-        return "Project memory — added ~\(t) tokens to the last request\(chat). Click to view/prune."
+        // On the Agent engine the injected block IS this chat's session memory
+        // (project memory is a tool there); on the legacy engine "chat" means
+        // chat-captured project facts rode along with the graph-derived ones.
+        let chat = engine.agent.lastMemoryHasChat
+            ? (engine.usesAgentV2Engine ? " (this chat's session memory)" : " (incl. chat-captured facts)")
+            : " (graph-derived only)"
+        return "Memory — added ~\(t) tokens to the last request\(chat). Click to view/prune."
     }
 
     /// "1.2k" / "850" style compact token count.

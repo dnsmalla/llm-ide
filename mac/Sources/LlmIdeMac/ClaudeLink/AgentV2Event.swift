@@ -71,6 +71,20 @@ struct AgentV2Usage: Sendable, Equatable, Codable {
     }
 }
 
+/// `{"type":"memory", …}` — how much of this turn's prompt is the chat's
+/// own session memory (server API v49). `sessionFacts` is the number of
+/// "This session's memory" lines injected, `chars`/`approxTokens` their
+/// size. The Mac folds it into the turn's usage so the memory footnote is
+/// truthful on this engine — before it, every Agent-engine turn reported
+/// "0 — no memory injected" whether or not the block was in the prompt.
+struct AgentV2Memory: Sendable, Equatable, Codable {
+    let sessionFacts: Int
+    let chars: Int
+    let approxTokens: Int
+
+    enum CodingKeys: String, CodingKey { case sessionFacts, chars, approxTokens }
+}
+
 /// One selectable answer of a parked `AskUserQuestion`.
 struct AgentV2ApprovalOption: Sendable, Equatable, Codable {
     let label: String
@@ -191,6 +205,9 @@ enum AgentV2Event: Sendable, Equatable {
     case toolResult(AgentV2ToolResult)
     /// `{"type":"usage", …}` — per-assistant-message token usage.
     case usage(AgentV2Usage)
+    /// `{"type":"memory", …}` — the session-memory share of the prompt,
+    /// emitted once before the query starts (server API v49).
+    case memory(AgentV2Memory)
     /// `{"type":"approval_request", …}` — engine parked on AskUserQuestion.
     case approvalRequest(AgentV2Approval)
     /// `{"type":"approval_resolved","requestId":…,"outcome":…}` — the parked
@@ -238,6 +255,8 @@ enum AgentV2Event: Sendable, Equatable {
             return Self.payload(AgentV2ToolResult.self, data).map { .toolResult($0) }
         case "usage":
             return Self.payload(AgentV2Usage.self, data).map { .usage($0) }
+        case "memory":
+            return Self.payload(AgentV2Memory.self, data).map { .memory($0) }
         case "approval_request":
             return Self.payload(AgentV2Approval.self, data).map { .approvalRequest($0) }
         case "approval_resolved":

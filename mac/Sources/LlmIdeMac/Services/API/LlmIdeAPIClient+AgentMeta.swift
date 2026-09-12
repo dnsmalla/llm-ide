@@ -156,6 +156,19 @@ extension LlmIdeAPIClient {
     private struct ForgetSessionMemoryResponse: Decodable {
         let removed: Int
     }
+    private struct SessionMemoryResponse: Decodable {
+        let facts: [String]
+    }
+
+    /// What one chat's session memory holds (kb/session-memory.mjs): the
+    /// conversation-state sentences captured after each turn plus the project
+    /// facts that chat taught. Read-only — session facts are not edited one
+    /// by one; they are forgotten together via `forgetSessionMemory`.
+    func sessionMemory(sessionId: String) async throws -> [String] {
+        let resp: SessionMemoryResponse = try await get(
+            "/kb/agent/session-memory?sessionId=\(encodeRepo(sessionId))", authenticated: true)
+        return resp.facts
+    }
 
     /// Delete everything session memory captured for one chat session — a
     /// real DB delete (kb/session-memory.mjs), called when that chat is
