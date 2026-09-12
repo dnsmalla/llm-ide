@@ -479,6 +479,20 @@ struct CodeAssistantPanel: View {
                 // agent has to follow the one on screen when they send.
                 permissionMode: editMode.agentPermissionMode)
         }
+        // The mode the server resolved becomes the picker's selection, so the
+        // chip names what the agent is actually doing. Only `.auto` is ever
+        // re-decided server-side, and moving OFF auto is the point: the user
+        // asked for the picker to follow the agent, which necessarily means
+        // the next message is sent in the resolved mode rather than being
+        // re-classified. Changing the picker back to Auto restores per-turn
+        // classification.
+        engine.onResolvedMode = { raw in
+            guard modelState.selectedMode == .auto,
+                  let resolved = CodeAssistMode(rawValue: raw),
+                  resolved != .auto
+            else { return }
+            modelState.selectedMode = resolved
+        }
         // Fresh budget of auto-run git ops for this user turn (commit→push→…).
         // Panel-owned because `autoChainPendingAction` — which spends it — is.
         engine.onTurnStart = { autoGitOpsThisTurn = 0 }

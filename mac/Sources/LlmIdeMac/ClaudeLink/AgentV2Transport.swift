@@ -130,11 +130,12 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
     /// The mode the SERVER resolved for this turn, reported the moment it is
     /// known (`mode_set`, right after `init`) rather than only on the result.
     ///
-    /// This is what lets the chat say which mode the agent is ACTUALLY
-    /// working in: the composer's picker shows what the user asked for, and
-    /// in Auto that is not the answer — the server picks plan / review /
-    /// document / execute per turn, and until this callback existed the only
-    /// way to find out was to read the reply and guess.
+    /// This is what MOVES the composer's picker onto the mode the agent is
+    /// actually working in. On Auto the picker used to keep saying "Auto"
+    /// while the server had already picked plan / review / document /
+    /// execute for the turn, so the only way to find out was to read the
+    /// reply and guess. Firing here rather than on the result means the
+    /// picker updates as the agent starts, not after it finishes.
     var onModeResolved: (@MainActor (String) -> Void)?
 
     init(streamer: AgentV2Streaming) {
