@@ -105,6 +105,27 @@ test('plan binding routes the skills\' questions through AskUserQuestion', () =>
   }
 });
 
+test('each plan mode hands off to writing-plans at its own skill\'s finish line', () => {
+  // The two stage-1 skills end differently: brainstorming produces a design
+  // and says "invoke writing-plans"; grilling produces settled decisions and
+  // stops at "shared understanding", never writing a design at all.
+  //
+  // One phrasing for both — "once your human partner has approved the design"
+  // — left Assist Plan pointing at something its stage never produces, so
+  // there was no defined moment for it to start writing the plan.
+  const plan = buildPlanBinding('plan', { skillName: 'brainstorming' });
+  assert.match(plan, /Once your human partner has approved the design/);
+  assert.ok(plan.includes(WRITE_SKILL_ID), 'and names the id load-skill accepts');
+
+  const assist = buildPlanBinding('assist_plan', { skillName: 'grilling' });
+  assert.match(assist, /question frontier is empty/,
+    'assist_plan hands off at grilling\'s own finish line, not at a design it never writes');
+  assert.match(assist, /share an understanding/);
+  assert.doesNotMatch(assist, /approved the design/,
+    'and must not wait on a design that stage does not produce');
+  assert.ok(assist.includes(WRITE_SKILL_ID));
+});
+
 test('plan binding asks for ONE document per piece of work, on both engines', () => {
   // The upstream skills write a design doc and then a plan that cites it; an
   // earlier binding preserved that with "Design"/"Plan" title suffixes, which

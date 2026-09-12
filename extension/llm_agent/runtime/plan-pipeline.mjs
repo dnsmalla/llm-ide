@@ -206,6 +206,28 @@ const QUESTION_CLAUSE =
   + 'recommendation first; set `multiSelect` when answers are not exclusive.';
 
 /**
+ * When stage 1 is finished and the model should move on to writing the plan.
+ *
+ * Mode-specific because the two stage-1 skills END DIFFERENTLY, and a single
+ * phrasing broke one of them. brainstorming produces a design and closes with
+ * "Invoke the writing-plans skill"; grilling produces settled decisions and
+ * closes at "do not act until the user confirms you have reached a shared
+ * understanding" — it never writes a design at all.
+ *
+ * The binding used to say "once your human partner has approved the design"
+ * for both, so in Assist Plan the hand-off named a thing that stage never
+ * produces: the model had no approved design to point at and no defined
+ * moment to start writing. Each mode now gets its own skill's actual finish
+ * line.
+ */
+function handoffTrigger(mode) {
+  return mode === 'assist_plan'
+    ? 'Once the question frontier is empty and your partner has confirmed you '
+      + 'share an understanding,'
+    : 'Once your human partner has approved the design,';
+}
+
+/**
  * The mode persona for a plan-like mode: a short binding block that frames
  * the injected stage-1 skill and names the stage transitions. Kept free of
  * any restatement of the skill's own process — that is the drift this
@@ -230,10 +252,9 @@ export function buildPlanBinding(mode, { skillName, engine = 'legacy' } = {}) {
     + 're-read the conversation to work out which step you are on, and pick up '
     + 'from there. A fresh request starts at that skill\'s beginning; do not '
     + 'skip ahead to a finished plan because the request sounds simple.\n'
-    + `- **Writing the plan.** Once your human partner has approved the design, `
-    + `call \`load-skill\` with \`${WRITE_SKILL_ID}\` and follow what it returns `
-    + 'to write the implementation plan. Do not write the plan from memory, and '
-    + 'do not load it before there is an approved design to turn into one.\n'
+    + `- **Writing the plan.** ${handoffTrigger(mode)} call \`load-skill\` with `
+    + `\`${WRITE_SKILL_ID}\` and follow what it returns to write the implementation `
+    + 'plan. Do not write it from memory, and do not load it earlier.\n'
     + `${QUESTION_CLAUSE}\n`
     + artifactClauses
     + `${FACTS_CLAUSE}\n`
