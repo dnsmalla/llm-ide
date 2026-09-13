@@ -246,7 +246,7 @@ struct ChatEngineMessageTests {
             role: .assistant, content: "answer", status: .stopped, createdAt: Date(),
             toolSteps: [.init(label: "Reading Foo.swift", tool: "read-file")],
             metadata: .init(mode: CodeAssistMode.plan.rawValue, usage: nil, skills: nil,
-                            failedError: nil, retryPayload: nil))
+                            failedError: nil))
         let session = ChatSession(scope: .explorer, messages: [message])
         let data = try AppJSON.encoder.encode(session)
         let reloaded = try AppJSON.decoder.decode(ChatSession.self, from: data)

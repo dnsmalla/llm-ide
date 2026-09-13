@@ -395,17 +395,6 @@ struct MenuBarChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func statusDot(_ label: String, up: Bool) -> some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(up ? Color.green : Color.red)
-                .frame(width: 7, height: 7)
-            Text(label)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(theme.current.textMuted)
-        }
-    }
-
     private func voiceErrorBanner(_ error: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")

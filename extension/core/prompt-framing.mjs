@@ -13,7 +13,7 @@ const HOME_PREFIX_RE = /^\/Users\/[^/]+\//;
 /// one. The client encodes any of these as `[binary:<mime>]\n<base64>` in an
 /// attachment's `content` (CodeAssistant+Attachments.swift), which is the only
 /// shape this module recognises.
-export const IMAGE_MEDIA_TYPES = new Set([
+const IMAGE_MEDIA_TYPES = new Set([
   'image/png', 'image/jpeg', 'image/gif', 'image/webp',
 ]);
 

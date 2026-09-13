@@ -201,7 +201,6 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         var usage: LlmIdeAPIClient.CodeAssistResponse.Usage?
         var skills: [String]?
         var failedError: String?
-        var retryPayload: RetryPayload?
         /// v2 plan messages: this message's plan was saved (retires the
         /// "Save Plan" affordance). Optional so pre-existing persisted
         /// sessions decode unchanged.
@@ -234,11 +233,6 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         /// saved design into the detailed implementation plan, which is then
         /// saved back into the SAME file (see `CodeAssistantPanel.sessionPlanPath`).
         case write
-    }
-
-    struct RetryPayload: Codable, Equatable, Sendable {
-        let message: String
-        let skillIds: [String]
     }
 
     let id: UUID
