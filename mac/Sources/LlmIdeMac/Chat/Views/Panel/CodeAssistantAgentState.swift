@@ -63,6 +63,16 @@ final class CodeAssistantAgentState {
         /// The branch the review was taken against ("main"), for wording.
         var reviewBaseBranch: String?
 
+        /// What a Push would commit, resolved when the button is tapped and
+        /// shown in the confirmation. Push commits the WHOLE working tree
+        /// (`SourceControlService.commit` runs `git add -A` when nothing is
+        /// staged) and the status it reads includes untracked files — so
+        /// anything sitting in the repo that the plan never touched goes
+        /// along, under the plan's name, into the default branch, to origin.
+        /// "Any uncommitted changes are committed" was true and still did not
+        /// tell anyone that. Naming the files is what makes it a decision.
+        var pendingCommitFiles: [String] = []
+
         /// Push is offered once a review has RUN — see
         /// `PlanReviewPolicy.allowsPush(reviewed:)`.
         var hasReviewed: Bool { reviewPhase == .done }

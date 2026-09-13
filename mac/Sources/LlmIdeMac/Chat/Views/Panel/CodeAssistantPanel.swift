@@ -390,6 +390,7 @@ struct CodeAssistantPanel: View {
                 planExecution: engine.agent.planExecution,
                 onReviewPlanExecution: { Task { await reviewPlanExecutionChanges() } },
                 onPushPlanExecution: { Task { await pushPlanExecutionChanges() } },
+                onPreparePlanPush: { await preparePlanPushPreview() },
                 onDismissPlanExecution: { dismissPlanExecution() },
                 diffPreview: pendingUpdateFileDiff,
                 draft: $draft,

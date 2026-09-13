@@ -31,6 +31,9 @@ struct ChatMessageList: View {
     /// Wraps `CodeAssistantPanel.pushPlanExecutionChanges()` — merge to the
     /// default branch and push. The card confirms before calling it.
     let onPushPlanExecution: () -> Void
+    /// Wraps `CodeAssistantPanel.preparePlanPushPreview()` — resolves what a
+    /// Push would commit so the confirmation can name it.
+    let onPreparePlanPush: () async -> Void
     let onDismissPlanExecution: () -> Void
     /// Precomputed diff stats for the current `update-file` pendingTool, if
     /// any — see CodeAssistantPanel.pendingUpdateFileDiff.
@@ -230,20 +233,7 @@ struct ChatMessageList: View {
                                 .padding(.top, 4)
                             }
                         }
-                        if let pe = planExecution, pe.phase == .finished || pe.phase == .failed {
-                            PlanExecutionCard(
-                                tracker: pe,
-                                liveTasks: tasks,
-                                // The run is over; there is no live activity
-                                // to narrate under the finish card.
-                                statusLine: nil,
-                                onReview: onReviewPlanExecution,
-                                onPush: onPushPlanExecution,
-                                onDismiss: onDismissPlanExecution
-                            )
-                            .padding(.top, 4)
-                            .transition(.opacity)
-                        }
+                        planFinishCard
                         if engine.busy {
                             HStack(spacing: 6) {
                                 ProgressView().controlSize(.small)
@@ -335,6 +325,29 @@ struct ChatMessageList: View {
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Chat transcript")
+        }
+    }
+
+    /// The finish card for a settled plan run — Review / Push / Dismiss.
+    /// A computed property rather than an inline literal so `body` stays
+    /// inside the type-checker's budget; it reads the same state it did
+    /// there.
+    @ViewBuilder
+    private var planFinishCard: some View {
+        if let pe = planExecution, pe.phase == .finished || pe.phase == .failed {
+            PlanExecutionCard(
+                tracker: pe,
+                liveTasks: tasks,
+                // The run is over; there is no live activity to narrate
+                // under the finish card.
+                statusLine: nil,
+                onReview: onReviewPlanExecution,
+                onPush: onPushPlanExecution,
+                onPreparePush: onPreparePlanPush,
+                onDismiss: onDismissPlanExecution
+            )
+            .padding(.top, 4)
+            .transition(.opacity)
         }
     }
 
@@ -536,6 +549,7 @@ struct ChatMessageList: View {
                 statusLine: planExecutionStatusLine,
                 onReview: onReviewPlanExecution,
                 onPush: onPushPlanExecution,
+                onPreparePush: onPreparePlanPush,
                 onDismiss: onDismissPlanExecution
             )
             .padding(.bottom, 4)

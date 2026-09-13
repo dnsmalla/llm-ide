@@ -65,6 +65,12 @@ struct PlanExecutionCard: View {
     /// the confirmation dialog below is what `RepoManager.runGitOp`'s
     /// `merge_to_main` contract requires of its caller.
     let onPush: () -> Void
+    /// Resolve what a Push would commit, into `tracker.pendingCommitFiles`,
+    /// before the confirmation is shown. Separate from `onPush` because the
+    /// dialog has to be able to LIST the files: the user is agreeing to a
+    /// commit of the working tree, and a tree they cannot see is not
+    /// something anyone can agree to.
+    let onPreparePush: () async -> Void
     let onDismiss: () -> Void
 
     @EnvironmentObject var theme: ThemeStore
@@ -298,7 +304,12 @@ struct PlanExecutionCard: View {
                     .help("Run the code-review skill over the changes this execution made")
             }
 
-            Button { confirmingPush = true } label: {
+            Button {
+                Task {
+                    await onPreparePush()
+                    confirmingPush = true
+                }
+            } label: {
                 Label("Push", systemImage: "arrow.up.circle")
                     .font(.system(size: 12, weight: .medium))
             }
@@ -340,9 +351,28 @@ struct PlanExecutionCard: View {
     /// Says what Push is about to do, and warns when the review did not come
     /// back clean — the point at which overriding it becomes a decision.
     private var pushConfirmationMessage: String {
-        let base = "Any uncommitted changes are committed, this branch is merged into the "
-            + "default branch (fast-forward only), and that branch is pushed to origin."
-        guard PlanReviewPolicy.warnsBeforePush(tracker.reviewVerdict) else { return base }
-        return "The review did not come back clean. " + base
+        let base = "This branch is merged into the default branch (fast-forward only) "
+            + "and pushed to origin."
+        var parts: [String] = []
+        if PlanReviewPolicy.warnsBeforePush(tracker.reviewVerdict) {
+            parts.append("The review did not come back clean.")
+        }
+        parts.append(commitPreview)
+        parts.append(base)
+        return parts.joined(separator: " ")
+    }
+
+    /// The files a Push would commit first, named. Everything in the working
+    /// tree is committed under the plan's title — including files the plan
+    /// never touched and files git has never seen — so the list is the whole
+    /// point of the sentence.
+    private var commitPreview: String {
+        let files = tracker.pendingCommitFiles
+        guard !files.isEmpty else { return "Nothing is uncommitted." }
+        let shown = files.prefix(8).joined(separator: ", ")
+        let rest = files.count - min(files.count, 8)
+        let tail = rest > 0 ? " and \(rest) more" : ""
+        return "\(files.count) uncommitted \(files.count == 1 ? "file" : "files") "
+            + "will be committed as “\(tracker.planTitle)” first: \(shown)\(tail)."
     }
 }

@@ -317,6 +317,26 @@ extension CodeAssistantPanel {
     /// local merge has already moved the default branch. `SourceControlService`
     /// resolves the backend with the token (`resolveCredentials`), and
     /// respects the repo's operation allow-list.
+    /// Fill `tracker.pendingCommitFiles` with what a Push would commit, so
+    /// the confirmation can name them. Read-only: one `git status` through
+    /// the same service the push itself uses, so the list and the commit can
+    /// not disagree about what "uncommitted" means (it includes untracked
+    /// files — `--untracked-files=all`).
+    @MainActor
+    func preparePlanPushPreview() async {
+        guard var tracker = engine.agent.planExecution else { return }
+        guard let root = config.activeRepoLocalURL, WorkspaceRoot.isGitRepo(root) else {
+            tracker.pendingCommitFiles = []
+            engine.agent.planExecution = tracker
+            return
+        }
+        let svc = SourceControlService()
+        svc.config = config
+        await svc.refresh(root: root)
+        tracker.pendingCommitFiles = svc.state.files.map(\.path)
+        engine.agent.planExecution = tracker
+    }
+
     @MainActor
     func pushPlanExecutionChanges() async {
         guard let root = config.activeRepoLocalURL, WorkspaceRoot.isGitRepo(root) else {
