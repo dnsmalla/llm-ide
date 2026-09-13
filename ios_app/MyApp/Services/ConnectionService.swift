@@ -600,9 +600,14 @@ final class ConnectionService: ObservableObject {
             loopStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "mac_status":
             macStatusStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
-        case "llmide_chat_history_reply", "llmide_chat_history_clear_ack",
-             "approval_request", "approval_cleared":
+        case "llmide_chat_history_reply", "llmide_chat_history_clear_ack":
             llmIdeStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
+        case "approval_request", "approval_cleared":
+            // Both surfaces can be parked on a question; each store checks the
+            // frame's commandId against its own, exactly as with `output`.
+            let type = json["type"] as? String ?? ""
+            llmIdeStore?.handleInbound(type: type, data: data)
+            explorerStore?.handleInbound(type: type, data: data)
         case "output":
             let commandId = json["commandId"] as? String
             if let payload = json["payload"] as? [String: Any] {

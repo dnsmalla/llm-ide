@@ -205,6 +205,7 @@ struct ExplorerChatView: View {
                                        isStreaming: explorerStore.isStreaming && msg.id == current.history.last?.id)
                                 .id(msg.id)
                         }
+                        approvalSlot
                     } else if explorerStore.isPreparingSession {
                         VStack(spacing: DesignSystem.Spacing.sm) {
                             ProgressView()
@@ -261,6 +262,26 @@ struct ExplorerChatView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
     }
+
+    /// The agent's own question, answerable by tapping — see
+    /// `ApprovalQuestionCard`. Its own property so the transcript body stays
+    /// inside the type-checker's budget.
+    @ViewBuilder
+    private var approvalSlot: some View {
+        if let request = explorerStore.pendingApproval {
+            ApprovalQuestionCard(request: request) { selection in
+                explorerStore.submitApproval(selection: selection)
+            }
+            .id(request.requestId)
+            .transition(.opacity)
+        } else if let notice = explorerStore.approvalNotice, !notice.isEmpty {
+            Text(notice)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
 
     // MARK: — Input bar
 

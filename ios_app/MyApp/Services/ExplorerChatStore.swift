@@ -15,6 +15,13 @@ final class ExplorerChatStore: ObservableObject {
     /// True while a streamed reply for THIS surface is in flight. Replaces the
     /// pre-refactor shared `llmStreaming` flag.
     @Published var isStreaming: Bool = false
+    /// The question the agent is parked on — same channel as the llm-ide
+    /// chat's (`LlmIdeChatStore.pendingApproval`). This surface is the one
+    /// bound to a project, so it is where planning happens and where the
+    /// agent asks most.
+    @Published var pendingApproval: ApprovalRequest?
+    /// Why the last question went away without this phone answering it.
+    @Published var approvalNotice: String?
     /// True while waiting for Mac to return a session id / history (auto-provision).
     @Published var isPreparingSession: Bool = false
     /// Mac workspace filename search (for @file / @folder picker).
@@ -184,9 +191,38 @@ final class ExplorerChatStore: ObservableObject {
 
     // MARK: — Inbound (called by ConnectionService.receiveMessage dispatch)
 
+    /// Answer the parked question. See `LlmIdeChatStore.submitApproval` — the
+    /// mapping itself lives on `ApprovalRequest` so both surfaces build the
+    /// same wire shape.
+    func submitApproval(selection: [Int: Set<String>]) {
+        guard let request = pendingApproval else { return }
+        let answers = request.answers(from: selection)
+        guard !answers.isEmpty else { return }
+        connection?.sendEncodable(ApprovalAnswer(
+            commandId: request.commandId, requestId: request.requestId, answers: answers))
+        pendingApproval = nil
+        approvalNotice = nil
+    }
+
     /// Handle `explore_session_*` frames that refresh sessions / load history.
     func handleInbound(type: String, data: Data) {
         switch type {
+        case MobileProtocol.Tag.approvalRequest:
+            // Only this surface's own turn: both stores see every approval
+            // frame (the receive loop fans them out the way it does `output`),
+            // and a question belonging to the llm-ide chat must not appear
+            // under the explorer transcript.
+            if let request = try? JSONDecoder().decode(ApprovalRequest.self, from: data),
+               !request.questions.isEmpty, ownsCommand(request.commandId) {
+                approvalNotice = nil
+                pendingApproval = request
+            }
+        case MobileProtocol.Tag.approvalCleared:
+            if let cleared = try? JSONDecoder().decode(ApprovalCleared.self, from: data),
+               pendingApproval?.requestId == cleared.requestId {
+                pendingApproval = nil
+                approvalNotice = cleared.reason
+            }
         case "explore_session_list":
             if let list = try? JSONDecoder().decode(ExploreSessionList.self, from: data) {
                 exploreSessions = list.sessions
@@ -291,6 +327,8 @@ final class ExplorerChatStore: ObservableObject {
                 exploreCommandIds.remove(id)
                 approvalPausedCommandIds.remove(id)
                 if currentCommandId == id { currentCommandId = nil }
+                // The turn is over, so its question can no longer be answered.
+                if pendingApproval?.commandId == id { pendingApproval = nil }
             }
         }
     }

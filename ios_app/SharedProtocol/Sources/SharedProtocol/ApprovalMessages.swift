@@ -49,6 +49,24 @@ public struct ApprovalRequest: Codable, Equatable {
         self.commandId = commandId; self.requestId = requestId; self.questions = questions
     }
     private enum CodingKeys: String, CodingKey { case type, commandId, requestId, questions }
+
+    /// Chosen labels per question index → the `answers` dictionary.
+    ///
+    /// Lives on the wire type so every surface that can answer builds the
+    /// same shape: keyed by the QUESTION TEXT, multi-select sorted and
+    /// comma-joined. The Mac's own card does this (`ApprovalQuestionCard
+    /// .answers`) and the server passes the result through verbatim to the
+    /// SDK — a second copy on each phone screen is how one of them ends up
+    /// keying by header or index and answering the wrong question with a
+    /// perfectly successful POST.
+    public func answers(from selection: [Int: Set<String>]) -> [String: String] {
+        var answers: [String: String] = [:]
+        for (index, question) in questions.enumerated() {
+            guard let labels = selection[index], !labels.isEmpty else { continue }
+            answers[question.question] = labels.sorted().joined(separator: ",")
+        }
+        return answers
+    }
 }
 
 /// Phone → Mac: the user's answers, keyed by the QUESTION TEXT — the same

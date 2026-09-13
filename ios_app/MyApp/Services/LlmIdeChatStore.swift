@@ -122,11 +122,7 @@ final class LlmIdeChatStore: ObservableObject {
     /// answer was sent invites a second answer to a question that is gone.
     func submitApproval(selection: [Int: Set<String>]) {
         guard let request = pendingApproval else { return }
-        var answers: [String: String] = [:]
-        for (index, question) in request.questions.enumerated() {
-            guard let labels = selection[index], !labels.isEmpty else { continue }
-            answers[question.question] = labels.sorted().joined(separator: ",")
-        }
+        let answers = request.answers(from: selection)
         guard !answers.isEmpty else { return }
         connection?.sendEncodable(ApprovalAnswer(
             commandId: request.commandId, requestId: request.requestId, answers: answers))
@@ -150,20 +146,21 @@ final class LlmIdeChatStore: ObservableObject {
                 llmIdeMessages = Self.preservingAttachments(from: llmIdeMessages, into: restored)
             }
         case MobileProtocol.Tag.approvalRequest:
+            // Only this surface's own turn — both stores see every approval
+            // frame, the way they both see `output`.
             if let request = try? JSONDecoder().decode(ApprovalRequest.self, from: data),
-               !request.questions.isEmpty {
+               !request.questions.isEmpty, ownsCommand(request.commandId) {
                 approvalNotice = nil
                 pendingApproval = request
             }
         case MobileProtocol.Tag.approvalCleared:
-            if let cleared = try? JSONDecoder().decode(ApprovalCleared.self, from: data) {
-                // Only for the card actually on screen: a late clear for an
-                // older question must not take down a NEWER one the agent has
-                // since asked.
-                if pendingApproval?.requestId == cleared.requestId {
-                    pendingApproval = nil
-                    approvalNotice = cleared.reason
-                }
+            // Only for the card actually on screen: a late clear for an older
+            // question must not take down a NEWER one the agent has since
+            // asked — nor one belonging to the other surface.
+            if let cleared = try? JSONDecoder().decode(ApprovalCleared.self, from: data),
+               pendingApproval?.requestId == cleared.requestId {
+                pendingApproval = nil
+                approvalNotice = cleared.reason
             }
         case "llmide_chat_history_clear_ack":
             if (try? JSONDecoder().decode(LlmIdeChatHistoryClearAck.self, from: data))?.ok == true {
@@ -230,8 +227,10 @@ final class LlmIdeChatStore: ObservableObject {
             isStreaming = false
             // The turn is over, so its question (if any) can no longer be
             // answered — the requestId is dead server-side. The Mac sends an
-            // explicit clear too; this covers the frame arriving first.
-            pendingApproval = nil
+            // explicit clear too; this covers the frame arriving first. Scoped
+            // to THIS turn so a `done` for one command can't take down a
+            // question the other surface is showing.
+            if let id = commandId, pendingApproval?.commandId == id { pendingApproval = nil }
             if let id = commandId {
                 llmIdeCommandIds.remove(id)
                 approvalPausedCommandIds.remove(id)

@@ -104,9 +104,15 @@ final class MobileControlManager {
     /// looks unheld and the Mac opens a second engine on the same file.
     private let explorerMobileEngineResolver = ExplorerMobileEngineResolver()
 
-    /// The question each in-flight phone turn is parked on, so the turn's end
-    /// can take the phone's card down (see `handleLlmIdeChat`'s defer).
-    private var lastApprovalRequestIds: [String: String] = [:]
+    /// The question each in-flight phone turn is parked on, with the engine
+    /// holding it — so the answer goes back to THAT engine, and the turn's end
+    /// can take the phone's card down.
+    ///
+    /// Keyed by commandId and carrying the engine because the two phone arms
+    /// run on different ones: `llmide_chat` on the quick-chat engine,
+    /// `explore_chat` on whichever the resolver picked (shared or off-screen).
+    /// Looking the engine up again at answer time would find the wrong one.
+    private var pendingPhoneApprovals: [String: (engine: ChatEngine, requestId: String)] = [:]
 
     private var server: MobileWebSocketServer?
     private var advertiser: MobileBonjourAdvertiser?
@@ -771,11 +777,12 @@ final class MobileControlManager {
             // longer be answered is worse than no card.
             engine.onExternalApproval = { [weak self] approval in
                 guard let self else { return }
-                Task { await self.sendApprovalToPhone(approval, commandId: commandId) }
+                Task { await self.sendApprovalToPhone(approval, commandId: commandId, engine: engine) }
             }
             defer {
                 engine.onExternalApproval = nil
-                if let requestId = lastApprovalRequestIds.removeValue(forKey: commandId) {
+                if let entry = pendingPhoneApprovals.removeValue(forKey: commandId) {
+                    let requestId = entry.requestId
                     Task { [weak self] in
                         await self?.server?.send(ApprovalCleared(
                             commandId: commandId, requestId: requestId,
@@ -914,6 +921,25 @@ final class MobileControlManager {
         }
         do {
             let commandId = chat.commandId
+            // Same question channel as the llm-ide arm: a parked question goes
+            // to the phone to be tapped, not left to whoever reaches the Mac.
+            // This arm needs it MORE — it is the one bound to a project, so
+            // it is where planning happens.
+            engine.onExternalApproval = { [weak self] approval in
+                guard let self else { return }
+                Task { await self.sendApprovalToPhone(approval, commandId: commandId, engine: engine) }
+            }
+            defer {
+                engine.onExternalApproval = nil
+                if let entry = pendingPhoneApprovals.removeValue(forKey: commandId) {
+                    let requestId = entry.requestId
+                    Task { [weak self] in
+                        await self?.server?.send(ApprovalCleared(
+                            commandId: commandId, requestId: requestId,
+                            reason: "This turn has finished."))
+                    }
+                }
+            }
             let reply = try await engine.runExternalTurn(
                 message: skillMessage,
                 skillIds: skillIds,
@@ -1103,13 +1129,14 @@ final class MobileControlManager {
     // MARK: - Mid-turn questions
 
     /// Mac → phone: a question the turn is parked on.
-    private func sendApprovalToPhone(_ approval: AgentV2Approval, commandId: String) async {
+    private func sendApprovalToPhone(_ approval: AgentV2Approval, commandId: String,
+                                     engine: ChatEngine) async {
         // ToolApproval (allow/deny a write) is deliberately NOT forwarded: the
         // phone runs read-only modes, so one should never park — and if one
         // ever did, an allow button on a surface with no diff view is not a
         // decision anyone should be asked to make from a phone.
         guard approval.kind == "AskUserQuestion", !approval.questions.isEmpty else { return }
-        lastApprovalRequestIds[commandId] = approval.requestId
+        pendingPhoneApprovals[commandId] = (engine, approval.requestId)
         await server?.send(ApprovalRequest(
             commandId: commandId,
             requestId: approval.requestId,
@@ -1128,10 +1155,9 @@ final class MobileControlManager {
     /// one: by the time an answer arrives the turn may have moved on, and
     /// `submitApproval` no-ops when the requestId it holds is not this one.
     private func handleApprovalAnswer(_ answer: ApprovalAnswer) async {
-        guard let api, let config, let projectStore,
-              let ctx = QuickChatContext.resolve(config: config, projectStore: projectStore) else { return }
-        let engine = quickChatEngine(for: ctx, api: api)
-        guard let pending = engine.pendingApproval,
+        guard let entry = pendingPhoneApprovals[answer.commandId],
+              entry.requestId == answer.requestId,
+              let pending = entry.engine.pendingApproval,
               pending.approval.requestId == answer.requestId else {
             // Already answered, expired, or belongs to another turn. Tell the
             // phone rather than leaving its card up waiting for a reply that
@@ -1141,8 +1167,8 @@ final class MobileControlManager {
                 reason: "That question is no longer open."))
             return
         }
-        await engine.submitApproval(answers: answer.answers)
-        lastApprovalRequestIds.removeValue(forKey: answer.commandId)
+        await entry.engine.submitApproval(answers: answer.answers)
+        pendingPhoneApprovals.removeValue(forKey: answer.commandId)
         // Either it landed (the card should go) or it failed and the state
         // kept its error for the Mac to show; the phone's copy is done either
         // way — a retry belongs to the surface that can see the error.
