@@ -124,7 +124,7 @@ test('a write turn gets the plan-WRITING skill, not stage 1 again', () => {
 
 test('the binding stops telling a write turn to wait for an approval it already has', () => {
   const before = buildPlanBinding('plan', { skillName: 'brainstorming' });
-  assert.match(before, /Once your human partner has approved the design/);
+  assert.match(before, /Once the design is settled/);
 
   const during = buildPlanBinding('plan', { skillName: 'writing-plans', planWrite: true });
   assert.match(during, /You are writing the plan now/);
@@ -135,25 +135,36 @@ test('the binding stops telling a write turn to wait for an approval it already 
   assert.match(during, /Do not re-open the design/);
 });
 
-test('each plan mode hands off to writing-plans at its own skill\'s finish line', () => {
+test('each plan mode continues into writing-plans at its own skill\'s finish line', () => {
   // The two stage-1 skills end differently: brainstorming produces a design
   // and says "invoke writing-plans"; grilling produces settled decisions and
-  // stops at "shared understanding", never writing a design at all.
+  // stops at "shared understanding", never writing a design at all. One
+  // phrasing for both left Assist Plan pointing at something its stage never
+  // produces, so there was no defined moment for it to start writing.
   //
-  // One phrasing for both — "once your human partner has approved the design"
-  // — left Assist Plan pointing at something its stage never produces, so
-  // there was no defined moment for it to start writing the plan.
+  // Neither finish line is an APPROVAL any more. Waiting for one is what
+  // ended the turn at the design, which then had to be saved to
+  // `llm-doc/plans/` to have something for a second turn to attach — so a
+  // chat that stopped there left a design in the plans folder as if it were
+  // a plan. The user approves what comes out the far end, not the design on
+  // the way.
   const plan = buildPlanBinding('plan', { skillName: 'brainstorming' });
-  assert.match(plan, /Once your human partner has approved the design/);
+  assert.match(plan, /Once the design is settled/);
   assert.ok(plan.includes(WRITE_SKILL_ID), 'and names the id load-skill accepts');
 
   const assist = buildPlanBinding('assist_plan', { skillName: 'grilling' });
   assert.match(assist, /question frontier is empty/,
-    'assist_plan hands off at grilling\'s own finish line, not at a design it never writes');
-  assert.match(assist, /share an understanding/);
-  assert.doesNotMatch(assist, /approved the design/,
-    'and must not wait on a design that stage does not produce');
+    'assist_plan continues at grilling\'s own finish line, not at a design it never writes');
   assert.ok(assist.includes(WRITE_SKILL_ID));
+
+  for (const [name, binding] of [['plan', plan], ['assist_plan', assist]]) {
+    // The whole point: one turn, design through plan, with no stop in between
+    // for a button that no longer exists.
+    assert.match(binding, /in this SAME turn/, `${name} must not end the turn at the design`);
+    assert.match(binding, /do not ask whether to continue/, name);
+    assert.doesNotMatch(binding, /approved the design/,
+      `${name} must not wait on an approval to keep going`);
+  }
 });
 
 test('no binding names AskUserQuestion on the engine that lacks it', () => {

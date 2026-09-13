@@ -14,12 +14,15 @@ struct PlanSavedCard: View {
     /// Which step of the plan pipeline this card's file is at, decided by
     /// `PlanTranscriptPolicy` from the turn order — not from the text, which
     /// cannot tell a design from the plan written out of it.
+    ///
+    /// Only the badge reads this now that the write button is gone. It stays
+    /// because sessions saved under the two-stage flow still carry the turn
+    /// order it is derived from, and their cards should keep reading the way
+    /// they did when they were written.
     enum Stage {
-        /// A design. The next step is "Write full plan".
+        /// A design saved by the old two-stage flow.
         case design
-        /// The written implementation plan. The next step is Execute, so the
-        /// write button is gone: pressing it again would re-write a plan that
-        /// already exists, back into the same file.
+        /// The written implementation plan.
         case written
     }
 
@@ -33,10 +36,6 @@ struct PlanSavedCard: View {
     let onExecute: () -> Void
     /// Wraps `CodeAssistantPanel.editSavedPlanInChat(_:messageId:)`.
     let onEdit: () -> Void
-    /// Wraps `CodeAssistantPanel.writeFullPlan(_:messageId:)` — the step
-    /// between a saved design and Execute: write the detailed plan into
-    /// this same file.
-    let onWrite: () -> Void
 
     @EnvironmentObject var theme: ThemeStore
     @State private var expanded = false
@@ -195,22 +194,10 @@ struct PlanSavedCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             HStack(spacing: 8) {
-                // Design → write → execute: this is the middle step, and it
-                // is offered only while the card still holds a DESIGN. Once
-                // the plan itself has been written into this file, the next
-                // step is Execute and this button would only rewrite it.
-                if stage == .design {
-                    Button {
-                        localAction = .write
-                        onWrite()
-                    } label: {
-                        Label("Write full plan", systemImage: "doc.text")
-                            .font(.system(size: 12))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help("Turn this design into the detailed implementation plan, saved into this same file")
-                }
+                // No write step here any more: the plan is written in the
+                // same turn as the design (see plan-pipeline.mjs's
+                // `writingClause`), so a card only ever holds a finished
+                // plan and the next thing to do with it is run it.
                 Button {
                     localAction = .execute
                     onExecute()

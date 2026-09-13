@@ -331,23 +331,13 @@ extension CodeAssistantPanel {
         _ pendingTool: PendingTool?,
         usage: LlmIdeAPIClient.CodeAssistResponse.Usage?
     ) async {
-        // Write-phase auto-save. A turn the PlanSavedCard's "Write full plan"
-        // action fired delivers the document as its reply, and clicking that
-        // button WAS the go-ahead to save it — into the chat's existing plan
-        // file (`resolvePlan` → `sessionPlanPath`), which is the whole point
-        // of the step. Gated on shape: a reply that asks a question first is
-        // chat, and is left alone for the normal row to handle once the plan
-        // itself arrives. Only the turn that write message started qualifies;
-        // a message the user typed afterwards resets `lastUser`.
-        if pendingTool == nil,
-           let lastUser = engine.messages.last(where: { $0.role == .user }),
-           lastUser.metadata?.planWriteDisplay != nil,
-           let reply = engine.messages.last(where: { $0.role == .assistant }),
-           reply.status == .done,
-           reply.metadata?.planSaved != true,
-           PlanEditPolicy.looksLikePlan(content: reply.content) {
-            await savePlanFromMessage(reply)
-        }
+        // No write-phase auto-save any more. It existed because the
+        // PlanSavedCard's "Write full plan" button fired a turn whose reply
+        // WAS the document, and pressing the button was the go-ahead to save
+        // it. Nothing fires such a turn now — the plan is written in the same
+        // turn as the design — and nothing else in this method may save a
+        // plan on the model's say-so: the plan reaches disk when the user
+        // presses Save on it, and only then.
         // Review-phase landing. The finish card's Review button fires a Code
         // Review turn stamped `planReviewDisplay`; its reply is the verdict
         // the card shows and the thing that unlocks Push. Same gating shape

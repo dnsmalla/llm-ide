@@ -18,6 +18,11 @@ extension CodeAssistantPanel {
         )
     }
 
+    /// Drop the finish card. The card, and ONLY the card: dismissing a plan
+    /// run never touches the working tree — no revert, no checkout, no stash.
+    /// Whatever the execution (and any review fix after it) wrote is still
+    /// there afterwards, to keep or to undo through Source Control like any
+    /// other change.
     @MainActor
     func dismissPlanExecution() {
         engine.agent.planExecution = nil

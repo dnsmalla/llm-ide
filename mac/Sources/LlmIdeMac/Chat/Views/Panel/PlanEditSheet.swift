@@ -98,10 +98,10 @@ public enum PlanEditPolicy {
 
     /// Enumerated work is the signal that matters; sections are the usual
     /// company it keeps, not a requirement. A plan that numbers three or more
-    /// steps is a plan whether or not it bothered with a `##` heading — and a
-    /// clarifying question, which is what this rule most has to exclude,
-    /// enumerates nothing at all (its bullets are options to choose between,
-    /// not steps to carry out, and plain `-` bullets are not counted).
+    /// steps is a plan whether or not it bothered with a `##` heading.
+    /// What the rule has to exclude is a clarifying question: its bullets are
+    /// options to choose between, not steps to carry out, and plain `-`
+    /// bullets are not counted.
     private static func isPlanShaped(hasHeading: Bool, stepCount: Int) -> Bool {
         guard stepCount >= minimumPlanSteps else { return false }
         return hasHeading || stepCount >= unsectionedPlanSteps

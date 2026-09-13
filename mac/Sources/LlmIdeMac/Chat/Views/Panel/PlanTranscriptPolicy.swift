@@ -36,12 +36,20 @@ public enum PlanTranscriptPolicy {
         public let id: UUID
         public let kind: Kind
         /// `user` turns only: this message was sent by "Write full plan".
+        /// Nothing stamps this any more — the plan is written in the same
+        /// turn as the design — but sessions saved under the two-stage flow
+        /// still carry it, and they must keep rendering the way they did.
         public let isPlanWriteRequest: Bool
+        /// `assistant` turns only: this reply's text has been saved as the
+        /// chat's plan, so the card below it now holds the same document.
+        public let isSavedPlanSource: Bool
 
-        public init(id: UUID, kind: Kind, isPlanWriteRequest: Bool = false) {
+        public init(id: UUID, kind: Kind, isPlanWriteRequest: Bool = false,
+                    isSavedPlanSource: Bool = false) {
             self.id = id
             self.kind = kind
             self.isPlanWriteRequest = isPlanWriteRequest
+            self.isSavedPlanSource = isSavedPlanSource
         }
     }
 
@@ -76,6 +84,13 @@ public enum PlanTranscriptPolicy {
             case .user:
                 state = turn.isPlanWriteRequest ? .awaitingReply : nil
             case .assistant:
+                // A reply whose text has been SAVED is a document, whatever
+                // order it arrived in: the PlanSavedCard below it renders the
+                // same markdown with the buttons that act on it, so leaving
+                // the bubble expanded puts the whole plan on screen twice.
+                // This is the rule that carries the one-turn flow, where no
+                // write request precedes the document.
+                if turn.isSavedPlanSource { documents.insert(turn.id) }
                 if state == .awaitingReply {
                     documents.insert(turn.id)
                     state = .awaitingSave

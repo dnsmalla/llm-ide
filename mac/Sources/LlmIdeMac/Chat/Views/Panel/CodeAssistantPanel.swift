@@ -407,8 +407,7 @@ struct CodeAssistantPanel: View {
                 onPreviewPlanFromMessage: { message in beginPlanEdit(from: message) },
                 onRefinePlanFromMessage: { message in refinePlanInChat(from: message) },
                 onExecutePlan: { messageId, payload in executeSavedPlan(payload, messageId: messageId) },
-                onEditPlan: { messageId, payload in editSavedPlanInChat(payload, messageId: messageId) },
-                onWritePlan: { messageId, payload in writeFullPlan(payload, messageId: messageId) }
+                onEditPlan: { messageId, payload in editSavedPlanInChat(payload, messageId: messageId) }
             )
             Divider().background(theme.current.border)
             if !attachmentState.selectedSkills.isEmpty { skillBar }

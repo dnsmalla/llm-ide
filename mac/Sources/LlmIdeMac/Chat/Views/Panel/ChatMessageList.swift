@@ -79,10 +79,6 @@ struct ChatMessageList: View {
     /// in chat" action (stay in a plan-like mode, seed the composer with the
     /// card's own plan title).
     let onEditPlan: (UUID, ChatMessage.ToolResultPayload) -> Void
-    /// Wraps `CodeAssistantPanel.writeFullPlan(_:messageId:)` — the card's
-    /// "Write full plan" action (stay in plan mode, write the detailed plan
-    /// into the same file).
-    let onWritePlan: (UUID, ChatMessage.ToolResultPayload) -> Void
 
     @EnvironmentObject var theme: ThemeStore
 
@@ -224,12 +220,12 @@ struct ChatMessageList: View {
                                     Button {
                                         onRefinePlanFromMessage(turn)
                                     } label: {
-                                        Label("Refine", systemImage: "arrow.triangle.2.circlepath")
+                                        Label("Edit in chat", systemImage: "pencil")
                                             .font(Typography.caption)
                                     }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
-                                    .help("Ask the agent to revise this plan in chat")
+                                    .help("Keep refining this plan in this chat")
                                 }
                                 .padding(.top, 4)
                             }
@@ -648,6 +644,22 @@ struct ChatMessageList: View {
         }
     }
 
+    /// What a USER turn shows in the transcript: a plan-pipeline turn's
+    /// one-line summary if it has one, otherwise the message itself. The
+    /// canned prompts those turns carry run to several paragraphs and are
+    /// written for the model, not for the person reading the chat.
+    ///
+    /// Hoisted out of the view body deliberately: inline, the `??` chain put
+    /// that expression past the type-checker's budget ("unable to type-check
+    /// in reasonable time"), and every label added would push it further.
+    private static func userTurnLabel(_ turn: ChatMessage) -> String {
+        guard let meta = turn.metadata else { return turn.content }
+        return meta.planExecuteDisplay
+            ?? meta.planWriteDisplay
+            ?? meta.planReviewDisplay
+            ?? turn.content
+    }
+
     /// `ChatMessage` → the minimal shape `PlanTranscriptPolicy` reads. A
     /// failed `save-plan` is deliberately `.other`: no card renders for it,
     /// so it must not consume the write-in-progress marker either.
@@ -661,7 +673,8 @@ struct ChatMessageList: View {
                 ? .planResult : .other
         }
         return .init(id: m.id, kind: kind,
-                     isPlanWriteRequest: m.metadata?.planWriteDisplay != nil)
+                     isPlanWriteRequest: m.metadata?.planWriteDisplay != nil,
+                     isSavedPlanSource: m.metadata?.planSaved == true)
     }
 
     @ViewBuilder
@@ -684,8 +697,7 @@ struct ChatMessageList: View {
                               executingStepCount: planExecution?.planCardMessageId == turn.id
                                   ? planExecution?.steps.count : nil,
                               onExecute: { onExecutePlan(turn.id, payload) },
-                              onEdit: { onEditPlan(turn.id, payload) },
-                              onWrite: { onWritePlan(turn.id, payload) })
+                              onEdit: { onEditPlan(turn.id, payload) })
                     .frame(maxWidth: .infinity, alignment: .center)
             } else {
                 toolNoticeView(payload)
@@ -706,10 +718,7 @@ struct ChatMessageList: View {
                         // Plan-pipeline turns (execute / write / review) show a
                         // one-line summary, not the canned multi-paragraph
                         // prompt the button actually sent.
-                        Text(turn.metadata?.planExecuteDisplay
-                             ?? turn.metadata?.planWriteDisplay
-                             ?? turn.metadata?.planReviewDisplay
-                             ?? turn.content)
+                        Text(Self.userTurnLabel(turn))
                             .font(.system(size: 12))
                             .foregroundStyle(theme.current.text)
                             .textSelection(.enabled)

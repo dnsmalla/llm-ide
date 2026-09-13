@@ -248,11 +248,21 @@ const QUESTION_CLAUSE_LEGACY =
 /**
  * The "writing the plan" clause, which differs by STAGE.
  *
- * Before the model is there, it is a hand-off: finish stage 1, then load
- * writing-plans. Once the user has pressed "Write full plan" the model IS
- * there and the skill is already in the prompt, so telling it to wait for an
- * approval that already happened — and to fetch a skill it already has — is
- * an instruction to ignore, and the ones next to it lose force with it.
+ * The default is a CONTINUATION, not a hand-off: the model finishes stage 1
+ * and then, in the same turn, loads writing-plans and writes the document.
+ *
+ * It used to stop at the design and wait for the app to fire a second turn
+ * (the saved card's "Write full plan" button). That made the design a
+ * deliverable in its own right — it was saved to `llm-doc/plans/` to have
+ * something to attach to the write turn — so a chat that never pressed the
+ * button left a design sitting in the plans folder as if it were a plan. The
+ * design is now an intermediate step the model passes through, and the only
+ * document that reaches disk is the plan itself.
+ *
+ * `planWrite` remains for a client that still asks for the write stage on its
+ * own: the skill is already in the prompt then, so telling the model to fetch
+ * it — or to wait for an approval that already happened — is an instruction
+ * to ignore, and the ones next to it lose force with it.
  */
 function writingClause(mode, planWrite) {
   if (planWrite) {
@@ -260,16 +270,19 @@ function writingClause(mode, planWrite) {
       + 'skill above is the process for this turn — follow it as written. Do not '
       + 're-open the design, re-ask settled questions, or start implementing.\n';
   }
-  return `- **Writing the plan.** ${handoffTrigger(mode)} call \`load-skill\` with `
+  return `- **Keep going into the plan.** ${handoffTrigger(mode)} do not stop there `
+    + `and do not ask whether to continue: in this SAME turn, call \`load-skill\` with `
     + `\`${WRITE_SKILL_ID}\` and follow what it returns to write the implementation `
     + 'plan. Do not write it from memory, and do not load it earlier.\n';
 }
 
 function handoffTrigger(mode) {
+  // The trigger is the stage's own FINISH LINE, not an approval. Waiting for
+  // one was what stopped the turn at the design; the user approves the plan
+  // that comes out the far end (Save / Execute), not the design on the way.
   return mode === 'assist_plan'
-    ? 'Once the question frontier is empty and your partner has confirmed you '
-      + 'share an understanding,'
-    : 'Once your human partner has approved the design,';
+    ? 'Once the question frontier is empty and the decisions are settled,'
+    : 'Once the design is settled — the options explored and one chosen —';
 }
 
 /**

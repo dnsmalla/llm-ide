@@ -698,7 +698,7 @@ do {
     expect(marks.writtenPlanCards == [savedPlan],
            "the card saved after that reply holds the written plan")
     expect(!marks.writtenPlanCards.contains(design),
-           "the design card it was written FROM keeps its Write full plan button")
+           "the design card it was written FROM is not the written plan")
 
     // A question mid-write is conversation: the user's answer disarms, so
     // the agent's next reply is not hidden behind a one-line summary.
@@ -721,6 +721,29 @@ do {
     ])
     expect(none.documentReplies.isEmpty && none.writtenPlanCards.isEmpty,
            "an ordinary chat marks nothing")
+
+    // The one-turn flow: the request, the reply that carries design AND plan,
+    // then the card once the user presses Save. No write request precedes the
+    // document, so the ORDER rule above marks nothing — the reply is a
+    // document because its text is what the card below now holds.
+    let ask = UUID(), oneTurnDoc = UUID(), card = UUID()
+    let oneTurn = PlanTranscriptPolicy.mark([
+        .init(id: ask, kind: .user),
+        .init(id: oneTurnDoc, kind: .assistant, isSavedPlanSource: true),
+        .init(id: card, kind: .planResult),
+    ])
+    expect(oneTurn.documentReplies == [oneTurnDoc],
+           "a saved reply collapses — the card renders the same markdown below it")
+
+    // Before Save there is no card, so the reply is the only copy of the plan
+    // and must stay readable.
+    let unsaved = UUID()
+    let beforeSave = PlanTranscriptPolicy.mark([
+        .init(id: UUID(), kind: .user),
+        .init(id: unsaved, kind: .assistant),
+    ])
+    expect(beforeSave.documentReplies.isEmpty,
+           "an unsaved plan reply is not collapsed — nothing else is showing it")
 }
 
 // PlanReviewPolicy — the verdict gates Push, so it is read off an explicit
