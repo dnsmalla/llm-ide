@@ -9,6 +9,70 @@ import { sanitizeForPrompt, sanitizeLine } from './utils.mjs';
 
 const HOME_PREFIX_RE = /^\/Users\/[^/]+\//;
 
+/// Media types the client may attach as an image, and the model can read as
+/// one. The client encodes any of these as `[binary:<mime>]\n<base64>` in an
+/// attachment's `content` (CodeAssistant+Attachments.swift), which is the only
+/// shape this module recognises.
+export const IMAGE_MEDIA_TYPES = new Set([
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+]);
+
+/// Anthropic accepts an image up to 5 MB of source data; base64 inflates by
+/// ~4/3, so this caps the ENCODED string with headroom under that. A bigger
+/// paste is dropped whole rather than truncated: half a base64 string is not
+/// a smaller image, it is a corrupt one.
+const MAX_IMAGE_BASE64_CHARS = 6_000_000;
+/// Total across one turn, so a drag of twenty screenshots can't build a
+/// request the API will reject outright.
+const MAX_IMAGES_TOTAL_BASE64_CHARS = 14_000_000;
+/// How many images one turn may carry.
+const MAX_IMAGES = 8;
+
+/// Split attachments into IMAGES (to be sent as image content blocks) and
+/// everything else (to be framed as text by `selectAttachments`).
+///
+/// This must run BEFORE `selectAttachments`: that function clamps each
+/// attachment to `maxPerFileChars` (80k), and clamping a base64 payload
+/// produces a blob that is no longer an image — which is exactly what a
+/// pasted screenshot used to become on its way to the model, on top of
+/// costing a five-figure token count to say nothing.
+///
+/// Returns `{ images, rest, dropped }`: `images` as `{ path, mediaType, data }`
+/// ready for an Anthropic image block, `rest` unchanged for the text path,
+/// and `dropped` naming any image refused by a cap so the caller can tell the
+/// user (and the model) instead of silently omitting it.
+export function splitImageAttachments(rawFiles) {
+  const list = Array.isArray(rawFiles) ? rawFiles : [];
+  const images = [];
+  const rest = [];
+  const dropped = [];
+  let totalChars = 0;
+  for (const f of list) {
+    if (!f || typeof f.path !== 'string' || typeof f.content !== 'string') continue;
+    const match = /^\[binary:([^\]\s]+)\]\n/.exec(f.content);
+    const mediaType = match?.[1];
+    if (!mediaType || !IMAGE_MEDIA_TYPES.has(mediaType)) {
+      // Not an image — a PDF or any other binary keeps today's behaviour
+      // (framed as text), which is the caller's problem to improve, not this
+      // function's to change silently.
+      rest.push(f);
+      continue;
+    }
+    const path = sanitizeLine(f.path, 200).replace(HOME_PREFIX_RE, '~/');
+    const data = f.content.slice(match[0].length).trim();
+    if (!data) continue;
+    if (images.length >= MAX_IMAGES
+      || data.length > MAX_IMAGE_BASE64_CHARS
+      || totalChars + data.length > MAX_IMAGES_TOTAL_BASE64_CHARS) {
+      dropped.push(path || 'image');
+      continue;
+    }
+    totalChars += data.length;
+    images.push({ path: path || 'image', mediaType, data });
+  }
+  return { images, rest, dropped };
+}
+
 /// Select + clamp code-assist attachments under the prompt-size caps,
 /// reporting which files were CUT. Pure (no I/O) so it's unit-testable.
 ///

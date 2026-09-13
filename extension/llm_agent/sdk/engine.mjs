@@ -51,7 +51,7 @@ import { redactFence } from '../runtime/redaction.mjs';
 import { persistTurnMemory } from '../runtime/memory-persist.mjs';
 import { config } from '../../core/config.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';
-import { selectAttachments, buildSkillsText, buildModeSkillsText } from '../../core/prompt-framing.mjs';
+import { selectAttachments, splitImageAttachments, buildSkillsText, buildModeSkillsText } from '../../core/prompt-framing.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { usdCapForModel } from '../../kb/usage.mjs';
 import { nativePluginsEnabled } from '../../kb/user.mjs';
@@ -178,6 +178,25 @@ const capAttachments = selectAttachments;
 // `<<<E<<<X>>>ND>>>` in an attached file became a real `<<<END>>>`, closing
 // this fence inside the SYSTEM prompt and letting the rest of the file read
 // as trusted framing. See core/utils.mjs neutralizePromptFences.
+// The images ride as content blocks; this is the text that tells the model
+// what they are, in the order the blocks appear.
+function buildImagesText(images, dropped) {
+  if (!images.length && !dropped.length) return '';
+  let text = '';
+  if (images.length) {
+    text += `# Attached images (${images.length})\n`;
+    text += 'They are in this turn as image blocks, in this order:\n';
+    images.forEach((img, i) => { text += `${i + 1}. ${img.path}\n`; });
+  }
+  if (dropped.length) {
+    // Said out loud rather than silently omitted: the user attached these and
+    // can see them in the chat, so a model that never mentions them reads as
+    // having looked and found nothing.
+    text += `\nNOT sent (too large, or past this turn's image limit): ${dropped.join(', ')}\n`;
+  }
+  return `${text}\n`;
+}
+
 function buildAttachmentsText(files) {
   if (!files.length) return '';
   let text = `# Attached files (${files.length})\n`;
@@ -470,7 +489,15 @@ export function buildEngineOptions(
   const safeMessage = neutralizePromptFences(message);
   const promptTruncatedChars = Math.max(0, safeMessage.length - MAX_PROMPT_CHARS);
   const promptChars = Math.min(safeMessage.length, MAX_PROMPT_CHARS);
-  const { files, truncatedPaths } = capAttachments(attachments, {
+  // Images leave the text path entirely — they ride as image content blocks
+  // (see the runner), which is the only way the model can actually SEE a
+  // pasted screenshot. Split FIRST: `capAttachments` clamps each attachment
+  // to 80k chars, and a clamped base64 payload is not a smaller image, it is
+  // a corrupt one — which is what an attached screenshot became on its way
+  // to the model before this, at a five-figure token cost for nothing.
+  const { images, rest: textAttachments, dropped: droppedImages } =
+    splitImageAttachments(attachments);
+  const { files, truncatedPaths } = capAttachments(textAttachments, {
     maxTotalChars: Math.max(0, V2_TURN_INPUT_CHAR_BUDGET - promptChars),
   });
 
@@ -558,6 +585,11 @@ export function buildEngineOptions(
   if (taskBlock) appendParts.push(taskBlock.trimStart());
   const attachmentsText = buildAttachmentsText(files);
   if (attachmentsText) appendParts.push(attachmentsText);
+  // Name the images. The blocks themselves carry no filename, so without this
+  // the model can describe what it sees but cannot say WHICH attachment it is
+  // — and a turn with two screenshots becomes unanswerable ("the first one").
+  const imagesText = buildImagesText(images, droppedImages);
+  if (imagesText) appendParts.push(imagesText);
 
   const queryOptions = {
     // Live token + tool-args deltas — the stream a chat UI needs.
@@ -608,14 +640,50 @@ export function buildEngineOptions(
         + `${MAX_PROMPT_CHARS} kept, ${promptTruncatedChars} missing from the end. `
         + `Tell the user this happened if the missing part could change your answer.\n<<<LLMIDE_NOTICE_END>>>`
       : safeMessage,
+    // The images this turn carries, for the runner to send as content blocks.
+    // Deliberately NOT folded into `prompt`: an image is a block, and the only
+    // way to get one to the model is the structured message shape.
+    images,
     meta: {
       mode: resolvedMode,
       model: typeof model === 'string' && model ? model : null,
       truncatedPaths,
       promptTruncatedChars,
+      images: images.length,
+      droppedImages,
       sessionMemory: { facts: sessionMemoryFacts, chars: sessionMemoryChars },
     },
   };
+}
+
+/// The `prompt` argument for `query()`.
+///
+/// A plain string when the turn is text — the shape this engine has always
+/// used. With images it becomes the SDK's other accepted form
+/// (`AsyncIterable<SDKUserMessage>`, sdk.d.ts): one user message whose
+/// `content` is an array of blocks — every image first, then the text. That
+/// ordering is what the Messages API documents for vision: the model reads
+/// the images, then the instruction about them.
+///
+/// One message, then the iterable ends — the turn is a single user prompt,
+/// and leaving the iterator open would leave the SDK waiting for more input
+/// instead of answering.
+export function buildPromptInput(text, images) {
+  if (!images?.length) return text;
+  const content = [
+    ...images.map((img) => ({
+      type: 'image',
+      source: { type: 'base64', media_type: img.mediaType, data: img.data },
+    })),
+    { type: 'text', text },
+  ];
+  return (async function* promptWithImages() {
+    yield {
+      type: 'user',
+      message: { role: 'user', content },
+      parent_tool_use_id: null,
+    };
+  })();
 }
 
 // --- The turn runner ----------------------------------------------------------
@@ -1034,7 +1102,7 @@ export async function runAgentV2Turn(
     }
   };
 
-  const { queryOptions, prompt, meta } = buildEngineOptions(
+  const { queryOptions, prompt, images, meta } = buildEngineOptions(
     { userId, mode, model, language, message, skills, agentContext, attachments, planExecute, planWrite },
     { readSkill, roots, sessionMemory },
   );
@@ -1102,7 +1170,7 @@ export async function runAgentV2Turn(
     cwd: queryOptions.cwd,
     onNote: (note) => console.warn(note),
   });
-  const q = queryFactory(prompt, {
+  const q = queryFactory(buildPromptInput(prompt, images), {
     ...queryOptions,
     ...(userMcp.allowedTools.length
       ? { allowedTools: [...(queryOptions.allowedTools || []), ...userMcp.allowedTools] }

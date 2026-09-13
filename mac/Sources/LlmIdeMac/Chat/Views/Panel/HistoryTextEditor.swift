@@ -36,6 +36,11 @@ struct HistoryTextEditor: NSViewRepresentable {
     var onReturn: (() -> Bool)? = nil
     var onTab: (() -> Bool)? = nil
     var onEscape: (() -> Bool)? = nil
+    /// A ⌘V carrying an image (a screenshot, a copied picture) rather than
+    /// text. Return `true` to consume the paste — the caller attached it — or
+    /// `false` to let the text view paste whatever else is on the pasteboard.
+    /// nil = not wired, and every paste behaves exactly as it did before.
+    var onPasteImage: ((Data, String) -> Bool)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = ArrowInterceptingTextView()
@@ -56,6 +61,7 @@ struct HistoryTextEditor: NSViewRepresentable {
         textView.onReturn = onReturn
         textView.onTab = onTab
         textView.onEscape = onEscape
+        textView.onPasteImage = onPasteImage
         textView.ghostText = ghostText
         textView.ghostColor = ghostColor
 
@@ -89,6 +95,7 @@ struct HistoryTextEditor: NSViewRepresentable {
         textView.onReturn = onReturn
         textView.onTab = onTab
         textView.onEscape = onEscape
+        textView.onPasteImage = onPasteImage
         textView.ghostText = ghostText
         textView.ghostColor = ghostColor
         textView.font = font
@@ -126,6 +133,7 @@ final class ArrowInterceptingTextView: NSTextView {
     var onReturn: (() -> Bool)?
     var onTab: (() -> Bool)?
     var onEscape: (() -> Bool)?
+    var onPasteImage: ((Data, String) -> Bool)?
     /// Suffix of the predicted prompt, painted after the typed text by
     /// `draw(_:)` below. Kept OUT of the text storage on purpose.
     var ghostText: String? {
@@ -133,6 +141,58 @@ final class ArrowInterceptingTextView: NSTextView {
     }
     var ghostColor: NSColor = .placeholderTextColor {
         didSet { if ghostColor != oldValue { needsDisplay = true } }
+    }
+
+    /// ⌘V of an image — a screenshot, or a picture copied from anywhere.
+    ///
+    /// Read off the pasteboard here rather than in the SwiftUI layer because
+    /// this is where a paste actually arrives: `NSTextView` consumes the key
+    /// and would insert the pasteboard's text representation (for a
+    /// screenshot, nothing at all), so an image paste silently did nothing.
+    ///
+    /// TEXT ALWAYS WINS. A pasteboard that carries a string is pasted as a
+    /// string, even when it also carries a picture — copying a cell from a
+    /// spreadsheet, or a selection from a browser, puts BOTH there, and
+    /// hijacking those into an attachment would break ordinary pasting to
+    /// serve a rarer case. Only a pasteboard with no text at all — which is
+    /// what a screenshot is — reaches the image branches.
+    ///
+    /// Then PNG (what a macOS screenshot puts there), then TIFF re-encoded to
+    /// PNG (what several apps put there instead), then a copied image FILE,
+    /// offered as a `file-url` and read from disk. None of those, or a handler
+    /// that declines, falls through to the normal paste.
+    override func paste(_ sender: Any?) {
+        guard let onPasteImage else { return super.paste(sender) }
+        let board = NSPasteboard.general
+        let text = board.string(forType: .string)
+        guard text?.isEmpty != false else { return super.paste(sender) }
+        if let png = board.data(forType: .png), onPasteImage(png, "image/png") { return }
+        if let tiff = board.data(forType: .tiff),
+           let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]),
+           onPasteImage(png, "image/png") { return }
+        if let urls = board.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+            for url in urls {
+                guard let mediaType = Self.imageMediaType(forExtension: url.pathExtension),
+                      let data = try? Data(contentsOf: url) else { continue }
+                if onPasteImage(data, mediaType) { return }
+            }
+        }
+        super.paste(sender)
+    }
+
+    /// The media type for an image file extension, or nil for anything that
+    /// isn't an image this app sends. Matches the set the server accepts as an
+    /// image block (`IMAGE_MEDIA_TYPES` in core/prompt-framing.mjs) — a type
+    /// outside it would be attached as base64 TEXT, which costs a fortune and
+    /// tells the model nothing.
+    static func imageMediaType(forExtension ext: String) -> String? {
+        switch ext.lowercased() {
+        case "png": return "image/png"
+        case "jpg", "jpeg": return "image/jpeg"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        default: return nil
+        }
     }
 
     /// Paint the ghost suggestion after the last typed character. Using the

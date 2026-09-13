@@ -277,6 +277,12 @@ extension CodeAssistantPanel {
                         if completion.isOpen { completion.close(); return true }
                         if promptSuggestion != nil { ghostDismissed = true; return true }
                         return false
+                    },
+                    // ⌘V of a screenshot: stage it as an attachment instead of
+                    // pasting the pasteboard's text (for a screenshot there is
+                    // none, so the keystroke used to do nothing at all).
+                    onPasteImage: { data, mediaType in
+                        attachPastedImage(data, mediaType: mediaType)
                     }
                 )
                 .frame(height: composerHeight)

@@ -53,6 +53,44 @@ extension CodeAssistantPanel {
         }
     }
 
+    /// Attach an image pasted into the composer (⌘V of a screenshot, or of a
+    /// picture copied from anywhere else).
+    ///
+    /// Same `[binary:<mime>]` encoding `addFile` gives an image on disk, so it
+    /// travels the one attachment path — but with no file behind it, so the
+    /// name is synthesized and numbered per chat: the chip needs a label, the
+    /// server names the image to the model by this path, and two screenshots
+    /// in one turn have to be distinguishable ("the first one").
+    ///
+    /// Returns false when the bytes aren't usable, so the caller can fall back
+    /// to a normal paste rather than swallowing the keystroke.
+    @discardableResult
+    func attachPastedImage(_ data: Data, mediaType: String) -> Bool {
+        guard !data.isEmpty else { return false }
+        let ext: String
+        switch mediaType {
+        case "image/png": ext = "png"
+        case "image/jpeg": ext = "jpg"
+        case "image/gif": ext = "gif"
+        case "image/webp": ext = "webp"
+        default: return false
+        }
+        // Numbered against what is already staged, so the first paste of a
+        // message is always 1 — chips are one-shot (cleared on send), and a
+        // counter that kept climbing across a conversation would label a lone
+        // screenshot "Pasted image 7".
+        let taken = attachmentState.attachments.filter { $0.path.hasPrefix(Self.pastedImagePrefix) }.count
+        let path = "\(Self.pastedImagePrefix)\(taken + 1).\(ext)"
+        attachmentState.attachments.append(LlmIdeAPIClient.CodeAttachment(
+            path: path,
+            content: "[binary:\(mediaType)]\n" + data.base64EncodedString()))
+        return true
+    }
+
+    /// Label prefix for a pasted image. Also how `attachPastedImage` counts
+    /// the ones already staged, so it stays a single definition.
+    static var pastedImagePrefix: String { "Pasted image " }
+
     /// Replace the home prefix with `~/` for the chip label / prompt.
     /// Prevents the user's username leaking unnecessarily into LLM
     /// logs upstream.

@@ -1,6 +1,6 @@
 import { runClaude, runClaudeStream, streamModelReply, resolveLanguage } from '../providers/runtime.mjs';
 import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
-import { selectAttachments, buildSkillsText } from '../core/prompt-framing.mjs';
+import { selectAttachments, splitImageAttachments, buildSkillsText } from '../core/prompt-framing.mjs';
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
 import { makeTaskProgressEmitter } from '../llm_agent/runtime/task-session-context.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
@@ -330,7 +330,23 @@ export async function handleAIRoutes(req, res) {
       ? `Always respond in ${lang.name}, even if the user writes in a different language.`
       : 'Answer in the same language the user asks in.';
 
-    const { files, totalChars, truncatedPaths } = selectAttachments(body.attachments, {
+    // This engine has no image channel — its prompt is one text string, and
+    // the CLI/gateway paths behind it take nothing else. An image attachment
+    // reaching `selectAttachments` would be framed as 80k characters of
+    // clamped base64: a corrupt image, an enormous bill, and a model that
+    // cannot see it either way. Replace each with a one-line note instead, so
+    // the model can SAY what happened rather than ignore an attachment the
+    // user can plainly see in the chat. (The Agent engine sends real image
+    // blocks — see llm_agent/sdk/engine.mjs's buildPromptInput.)
+    const { images, rest: textAttachments } = splitImageAttachments(body.attachments);
+    const attachmentsForPrompt = images.length
+      ? [...textAttachments, ...images.map((img) => ({
+        path: img.path,
+        content: `(An image the user attached. This engine cannot see images — `
+          + `say so, and tell them the Agent engine can.)`,
+      }))]
+      : textAttachments;
+    const { files, totalChars, truncatedPaths } = selectAttachments(attachmentsForPrompt, {
       maxFiles: 30,
       maxPerFileChars: 80_000,
       maxTotalChars: 200_000,

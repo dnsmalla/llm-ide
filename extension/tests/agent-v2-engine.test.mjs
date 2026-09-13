@@ -42,7 +42,7 @@ try { fs.rmSync(agentSdkRoot, { recursive: true, force: true }); } catch { /* ok
 
 const {
   buildEngineOptions, resolveAnthropicKey, resolveAgentEngineAuth, runAgentV2Turn, agentSdkHomeFor, resolveMaxBudgetUsd,
-  approvalArgsFor, v2ToolPolicyForMode,
+  approvalArgsFor, v2ToolPolicyForMode, buildPromptInput,
 } = await import('../llm_agent/sdk/engine.mjs');
 const { answerDecision, abortDecisionsForSession } = await import('../llm_agent/sdk/decisions.mjs');
 const { registerUser } = await import('../server/users.mjs');
@@ -52,6 +52,77 @@ const { listSessionMemory } = await import('../kb/session-memory.mjs');
 const { hasAlwaysAllow, setAlwaysAllow } = await import('../kb/tool-approvals.mjs');
 const { syncCustomProviders } = await import('../server/custom-providers.mjs');
 const { setSecret } = await import('../server/vault.mjs');
+
+// --- Images ------------------------------------------------------------------
+
+const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUg==';
+
+test('an attached image leaves the text path and is returned as an image', () => {
+  const { queryOptions, images, meta } = buildEngineOptions(
+    {
+      userId: 'u',
+      message: 'what is wrong with this screen?',
+      agentContext: { workspaceRoot: WS },
+      attachments: [
+        { path: 'Pasted image 1.png', content: `[binary:image/png]\n${PNG_B64}` },
+        { path: '~/notes.md', content: 'plain text' },
+      ],
+    },
+    { readSkill: () => null, roots: () => [WS] },
+  );
+  const append = queryOptions.systemPrompt.append;
+  // The base64 must not reach the text block: capAttachments clamps each
+  // attachment to 80k chars, so a real screenshot arrived there CORRUPT — and
+  // cost five figures in tokens to say nothing.
+  assert.ok(!append.includes(PNG_B64), 'image bytes must not be framed as text');
+  assert.ok(append.includes('plain text'), 'the text attachment still is');
+  // But the model has to know which image is which, since blocks carry no name.
+  assert.match(append, /# Attached images \(1\)/);
+  assert.match(append, /Pasted image 1\.png/);
+  assert.equal(images.length, 1);
+  assert.equal(images[0].mediaType, 'image/png');
+  assert.equal(images[0].data, PNG_B64);
+  assert.equal(meta.images, 1);
+});
+
+test('an image too large to send is named, not silently dropped', () => {
+  const { queryOptions, images, meta } = buildEngineOptions(
+    {
+      userId: 'u',
+      message: 'look',
+      agentContext: { workspaceRoot: WS },
+      attachments: [{ path: 'huge.png', content: `[binary:image/png]\n${'A'.repeat(6_000_001)}` }],
+    },
+    { readSkill: () => null, roots: () => [WS] },
+  );
+  assert.equal(images.length, 0);
+  assert.deepEqual(meta.droppedImages, ['huge.png']);
+  // The user can see the chip in the chat, so a model that never mentions it
+  // reads as having looked and found nothing.
+  assert.match(queryOptions.systemPrompt.append, /NOT sent \(too large/);
+});
+
+test('buildPromptInput: text stays a string, images become one user message', async () => {
+  assert.equal(buildPromptInput('hi', []), 'hi');
+  assert.equal(buildPromptInput('hi', undefined), 'hi');
+
+  const iterable = buildPromptInput('what is this?', [
+    { path: 'a.png', mediaType: 'image/png', data: PNG_B64 },
+  ]);
+  assert.equal(typeof iterable, 'object');
+  const messages = [];
+  for await (const m of iterable) messages.push(m);
+  assert.equal(messages.length, 1, 'one user prompt, then the iterator ends');
+  const [only] = messages;
+  assert.equal(only.type, 'user');
+  assert.equal(only.parent_tool_use_id, null);
+  // Images FIRST, then the text about them — the order the Messages API
+  // documents for vision.
+  assert.deepEqual(only.message.content.map((b) => b.type), ['image', 'text']);
+  assert.deepEqual(only.message.content[0].source,
+    { type: 'base64', media_type: 'image/png', data: PNG_B64 });
+  assert.equal(only.message.content[1].text, 'what is this?');
+});
 
 // --- The brief's binding contract -------------------------------------------
 
