@@ -277,11 +277,23 @@ struct ChatMessageList: View {
                     .animation(.easeOut(duration: 0.18), value: engine.busy)
                     .animation(.easeOut(duration: 0.2), value: engine.error)
                 }
-                // A new message is an explicit act (the user sent something,
-                // or a reply landed), so it always re-pins and scrolls —
-                // matching the behaviour this view has always had.
+                // A turn the USER just sent re-pins: they acted, and the
+                // answer belongs on screen. Anything else only scrolls if the
+                // transcript is already following.
+                //
+                // This used to re-pin on EVERY new message, on the reasoning
+                // that a new message is an explicit act. That holds for a
+                // plain exchange and not for the cases this app is built on:
+                // an autonomous chain appends a tool-result ack per step, a
+                // phone-driven turn appends on the shared engine, and a plan
+                // update appends its own turns. Scroll up to read during any
+                // of those and the view threw you back to the bottom every
+                // few seconds. `isPinnedToBottom` already exists for exactly
+                // this — the streaming follow respects it; only this handler
+                // overrode it — and "Jump to latest" is the way back.
                 .onChange(of: engine.messages.count) { _, _ in
-                    isPinnedToBottom = true
+                    if engine.messages.last?.role == .user { isPinnedToBottom = true }
+                    guard isPinnedToBottom else { return }
                     withAnimation { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
                 }
                 // Follow the reply as it streams. Without this the transcript
