@@ -257,6 +257,16 @@ extension ChatEngine {
             // best-effort tradeoff matching `sessionMoved`'s entry-race one,
             // not something this call can safely repair from here.
             guard currentSessionIDString == expectedSessionID.uuidString else {
+                // Release the slot this call claimed. Every other exit does
+                // (both entry guards, the success tail, the catch tail), and
+                // this one was only safe by accident: the paths that move the
+                // session all run `resetActiveTurnState()`, which clears
+                // `busy` as a side effect in another file. A session change
+                // that doesn't reset would leave this engine wedged — `busy`
+                // stuck true, every later phone turn answered `.busy`, the
+                // composer stuck on Stop. The queue is empty on those paths
+                // (the reset clears it), so this only unlatches the slot.
+                drainQueueOrRelease()
                 return resp.reply
             }
             // Same as runTurn's: the final reply supersedes anything still
@@ -287,6 +297,8 @@ extension ChatEngine {
             // (error banner, `.failed` status, persist) may land on whatever
             // session is now loaded if it isn't the one this call started on.
             guard currentSessionIDString == expectedSessionID.uuidString else {
+                // Same slot release as the success path's session guard above.
+                drainQueueOrRelease()
                 throw error
             }
             let isCancellation = Self.isCancellation(error)

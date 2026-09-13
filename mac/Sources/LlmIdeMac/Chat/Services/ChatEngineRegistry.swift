@@ -264,7 +264,18 @@ final class ChatEngineRegistry {
 
     /// Move a mid-turn engine off-screen, still running.
     private func park(_ engine: ChatEngine) {
-        guard let id = UUID(uuidString: engine.currentSessionIDString) else { return }
+        guard let id = UUID(uuidString: engine.currentSessionIDString) else {
+            // Nothing to key the lot by, so this engine cannot be parked —
+            // and the caller is about to replace `displayed[scope]` with a
+            // fresh one regardless. Returning quietly left a RUNNING engine
+            // with no owner: its turn ran to completion, `persistsUnobserved`
+            // was never set, so the reply was written nowhere and lost.
+            // Reachable for `.quick` after `switchQuickChatProject(to: nil)`
+            // clears the id mid-turn. Stop it instead — a cancelled turn
+            // keeps its partial text where the user can still see it.
+            engine.stop()
+            return
+        }
         // Land any debounced write from the observed period before the
         // panel's `.onChange` stops firing for this instance.
         engine.flushPendingPersist()
