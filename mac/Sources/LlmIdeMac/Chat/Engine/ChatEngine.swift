@@ -550,6 +550,16 @@ final class ChatEngine {
         // start "Continue working…" right after the user asked it to stop.
         // `runTurn` resets the flag — a new user message is fresh consent.
         agent.agentStopRequested = true
+        // Queued messages go with it. `drainQueueOrRelease` is the shared tail
+        // of every turn INCLUDING a cancelled one (deliberately — a fresh
+        // un-cancelled task is how the queue keeps moving), so without this
+        // Stop cancelled the turn in flight and immediately started the next
+        // queued message, with `runTurn` resetting `agentStopRequested` as
+        // "fresh consent" on the way in. Stopping a run of five queued
+        // messages meant pressing Stop five times. A queued message is work
+        // the user asked for and has now asked to stop; it has not been sent,
+        // so dropping it costs nothing but the typing.
+        queued.removeAll()
         runTask?.cancel()
         externalRunTask?.cancel()
     }
