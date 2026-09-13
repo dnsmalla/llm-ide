@@ -150,34 +150,70 @@ final class ArrowInterceptingTextView: NSTextView {
     /// and would insert the pasteboard's text representation (for a
     /// screenshot, nothing at all), so an image paste silently did nothing.
     ///
-    /// TEXT ALWAYS WINS. A pasteboard that carries a string is pasted as a
-    /// string, even when it also carries a picture — copying a cell from a
-    /// spreadsheet, or a selection from a browser, puts BOTH there, and
-    /// hijacking those into an attachment would break ordinary pasting to
-    /// serve a rarer case. Only a pasteboard with no text at all — which is
-    /// what a screenshot is — reaches the image branches.
+    override func paste(_ sender: Any?) {
+        guard let onPasteImage, let image = Self.pasteboardImage() else {
+            return super.paste(sender)
+        }
+        if onPasteImage(image.data, image.mediaType) { return }
+        super.paste(sender)
+    }
+
+    /// Cmd-V has to REACH `paste(_:)` for any of this to happen, and for a
+    /// screenshot it did not.
+    ///
+    /// AppKit disables the Paste command when the clipboard holds nothing the
+    /// first responder can read, and a plain-text `NSTextView`
+    /// (`isRichText = false`) advertises only text/URL/colour/font types —
+    /// measured, not assumed: for a screenshot clipboard,
+    /// `canReadItem(withDataConformingToTypes: readablePasteboardTypes)` is
+    /// FALSE. So the menu item was disabled, the key equivalent never fired,
+    /// and the override below was dead code for exactly the case it was
+    /// written for.
+    ///
+    /// Enabling it here rather than by widening `readablePasteboardTypes` is
+    /// deliberate: that property also feeds `acceptableDragTypes`, so widening
+    /// it would let this text view start accepting image DROPS too — swallowing
+    /// them from the composer's own drop handling, which already attaches a
+    /// dragged file properly. Menu validation is the narrow door.
+    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(NSText.paste(_:)),
+           onPasteImage != nil, Self.pasteboardImage() != nil {
+            return true
+        }
+        return super.validateMenuItem(menuItem)
+    }
+
+    /// The image on the clipboard this editor would attach, or nil.
+    ///
+    /// TEXT ALWAYS WINS: a pasteboard carrying a string is pasted as a string,
+    /// even when it also carries a picture — copying a cell from a spreadsheet,
+    /// or a selection from a browser, puts BOTH there, and hijacking those into
+    /// an attachment would break ordinary pasting to serve a rarer case.
     ///
     /// Then PNG (what a macOS screenshot puts there), then TIFF re-encoded to
     /// PNG (what several apps put there instead), then a copied image FILE,
-    /// offered as a `file-url` and read from disk. None of those, or a handler
-    /// that declines, falls through to the normal paste.
-    override func paste(_ sender: Any?) {
-        guard let onPasteImage else { return super.paste(sender) }
+    /// offered as a `file-url` and read from disk.
+    ///
+    /// One definition so the menu validation above and the paste below can
+    /// never disagree — an enabled Paste that then declines would eat the
+    /// keystroke and do nothing.
+    static func pasteboardImage() -> (data: Data, mediaType: String)? {
         let board = NSPasteboard.general
         let text = board.string(forType: .string)
-        guard text?.isEmpty != false else { return super.paste(sender) }
-        if let png = board.data(forType: .png), onPasteImage(png, "image/png") { return }
+        guard text?.isEmpty != false else { return nil }
+        if let png = board.data(forType: .png) { return (png, "image/png") }
         if let tiff = board.data(forType: .tiff),
-           let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]),
-           onPasteImage(png, "image/png") { return }
+           let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            return (png, "image/png")
+        }
         if let urls = board.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
             for url in urls {
-                guard let mediaType = Self.imageMediaType(forExtension: url.pathExtension),
+                guard let mediaType = imageMediaType(forExtension: url.pathExtension),
                       let data = try? Data(contentsOf: url) else { continue }
-                if onPasteImage(data, mediaType) { return }
+                return (data, mediaType)
             }
         }
-        super.paste(sender)
+        return nil
     }
 
     /// The media type for an image file extension, or nil for anything that
