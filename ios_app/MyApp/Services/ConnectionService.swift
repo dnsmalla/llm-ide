@@ -600,7 +600,8 @@ final class ConnectionService: ObservableObject {
             loopStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "mac_status":
             macStatusStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
-        case "llmide_chat_history_reply", "llmide_chat_history_clear_ack":
+        case "llmide_chat_history_reply", "llmide_chat_history_clear_ack",
+             "approval_request", "approval_cleared":
             llmIdeStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "output":
             let commandId = json["commandId"] as? String

@@ -149,8 +149,13 @@ struct LlmIdeControlView: View {
                                        isStreaming: llmIdeStore.isStreaming && msg.id == llmIdeStore.llmIdeMessages.last?.id)
                                 .id(msg.id)
                     }
+                    approvalSlot
                 }
                 .padding(DesignSystem.Spacing.md)
+            }
+            .onChange(of: llmIdeStore.pendingApproval?.requestId) { id in
+                guard let id else { return }
+                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .bottom) }
             }
             .onChange(of: llmIdeStore.llmIdeMessages.last?.text) { _ in
                 if let last = llmIdeStore.llmIdeMessages.last {
@@ -170,6 +175,28 @@ struct LlmIdeControlView: View {
             } message: {
                 Text("This deletes the shared llm-ide transcript on your Mac too. It can't be undone.")
             }
+        }
+    }
+
+    /// The agent's own question, answerable by tapping — under the transcript
+    /// because that is where it was asked, and the turn is parked until it is
+    /// answered. Hoisted out of `chatTranscript` because inline it put that
+    /// body past the type-checker's budget ("unable to type-check this
+    /// expression in reasonable time").
+    @ViewBuilder
+    private var approvalSlot: some View {
+        if let request = llmIdeStore.pendingApproval {
+            ApprovalQuestionCard(request: request) { selection in
+                llmIdeStore.submitApproval(selection: selection)
+                haptic(.light)
+            }
+            .id(request.requestId)
+            .transition(.opacity)
+        } else if let notice = llmIdeStore.approvalNotice, !notice.isEmpty {
+            Text(notice)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

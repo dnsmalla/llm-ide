@@ -183,6 +183,12 @@ final class ChatEngine {
     /// streaming placeholder append so an empty turn isn't read aloud.
     /// Publicly settable: the panel's session load/switch paths set it too.
     var suppressHistoryAnnounce = false
+    /// Called when a question parks during an EXTERNAL (phone-driven) turn,
+    /// with the approval itself — set by whoever is driving that turn so the
+    /// question can reach the client that asked for it. Nil for a turn the
+    /// Mac drives: the panel renders `pendingApproval` directly.
+    var onExternalApproval: ((AgentV2Approval) -> Void)?
+
     /// The parked AskUserQuestion the v2 engine is blocking on, if any. Set
     /// by the transport's `onApproval` callback (`handleApprovalArrival`),
     /// dropped by submit/dismiss and at turn start. Nil on legacy engines,

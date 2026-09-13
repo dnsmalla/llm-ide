@@ -160,6 +160,11 @@ extension ChatEngine {
         recordProgress(LlmIdeAPIClient.AgentProgress(
             label: Self.externalApprovalNote, phase: "tool", tool: nil, detail: nil
         ))
+        // Hand it to whoever is driving this turn from off-machine. The note
+        // above tells the phone a question EXISTS; this is what lets it show
+        // the question and send back an answer, instead of the turn sitting
+        // parked until someone reaches the Mac.
+        onExternalApproval?(approval)
     }
 
     /// Posts the user's answers for the parked approval via

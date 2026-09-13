@@ -34,6 +34,11 @@ public enum MobileProtocol {
         public static let output = "output"
         public static let error = "error"
 
+        // Mid-turn questions (AskUserQuestion) — see ApprovalMessages.swift.
+        public static let approvalRequest = "approval_request"
+        public static let approvalAnswer = "approval_answer"
+        public static let approvalCleared = "approval_cleared"
+
         // MARK: Explorer-chat sessions
         public static let exploreListSessions = "explore_list_sessions"
         public static let exploreSessionList = "explore_session_list"

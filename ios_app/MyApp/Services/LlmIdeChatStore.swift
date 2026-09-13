@@ -14,6 +14,14 @@ final class LlmIdeChatStore: ObservableObject {
     /// True while a streamed reply for THIS surface is in flight. Replaces the
     /// pre-refactor shared `llmStreaming` flag.
     @Published var isStreaming: Bool = false
+    /// The question the agent is parked on, when it has asked one mid-turn.
+    /// Rendered as tappable options under the transcript: answering is the
+    /// fast path, and typing is for when none of them is what you mean.
+    /// Nil whenever nothing is waiting on an answer.
+    @Published var pendingApproval: ApprovalRequest?
+    /// Why the last question went away without this phone answering it
+    /// ("Answered on the Mac", "no longer open"). Shown once, then cleared.
+    @Published var approvalNotice: String?
 
     /// Command ids whose streamed reply belongs to this transcript.
     private var llmIdeCommandIds: Set<String> = []
@@ -103,6 +111,29 @@ final class LlmIdeChatStore: ObservableObject {
 
     // MARK: — Inbound (called by ConnectionService.receiveMessage dispatch)
 
+    /// Answer the parked question. `selection` is the chosen labels per
+    /// question index; a multi-select answer is sorted and comma-joined, which
+    /// is the wire form the Mac's own card produces and the server passes
+    /// through verbatim.
+    ///
+    /// The card comes down immediately. The turn resumes on the Mac, and a
+    /// failure there is the Mac's to show — this surface cannot render a
+    /// decision error usefully, and leaving a tappable question up after the
+    /// answer was sent invites a second answer to a question that is gone.
+    func submitApproval(selection: [Int: Set<String>]) {
+        guard let request = pendingApproval else { return }
+        var answers: [String: String] = [:]
+        for (index, question) in request.questions.enumerated() {
+            guard let labels = selection[index], !labels.isEmpty else { continue }
+            answers[question.question] = labels.sorted().joined(separator: ",")
+        }
+        guard !answers.isEmpty else { return }
+        connection?.sendEncodable(ApprovalAnswer(
+            commandId: request.commandId, requestId: request.requestId, answers: answers))
+        pendingApproval = nil
+        approvalNotice = nil
+    }
+
     func handleInbound(type: String, data: Data) {
         switch type {
         case "llmide_chat_history_reply":
@@ -117,6 +148,22 @@ final class LlmIdeChatStore: ObservableObject {
                 // transcript has no images, so a just-sent thumbnail used to
                 // vanish from its bubble the moment the reply completed.
                 llmIdeMessages = Self.preservingAttachments(from: llmIdeMessages, into: restored)
+            }
+        case MobileProtocol.Tag.approvalRequest:
+            if let request = try? JSONDecoder().decode(ApprovalRequest.self, from: data),
+               !request.questions.isEmpty {
+                approvalNotice = nil
+                pendingApproval = request
+            }
+        case MobileProtocol.Tag.approvalCleared:
+            if let cleared = try? JSONDecoder().decode(ApprovalCleared.self, from: data) {
+                // Only for the card actually on screen: a late clear for an
+                // older question must not take down a NEWER one the agent has
+                // since asked.
+                if pendingApproval?.requestId == cleared.requestId {
+                    pendingApproval = nil
+                    approvalNotice = cleared.reason
+                }
             }
         case "llmide_chat_history_clear_ack":
             if (try? JSONDecoder().decode(LlmIdeChatHistoryClearAck.self, from: data))?.ok == true {
@@ -181,6 +228,10 @@ final class LlmIdeChatStore: ObservableObject {
         if done {
             streamTimeoutTask?.cancel()
             isStreaming = false
+            // The turn is over, so its question (if any) can no longer be
+            // answered — the requestId is dead server-side. The Mac sends an
+            // explicit clear too; this covers the frame arriving first.
+            pendingApproval = nil
             if let id = commandId {
                 llmIdeCommandIds.remove(id)
                 approvalPausedCommandIds.remove(id)

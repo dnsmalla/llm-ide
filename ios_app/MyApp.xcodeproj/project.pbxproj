@@ -38,6 +38,7 @@
 		F1E2D3C4B5A607890F1E2D01 /* DeviceDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1E2D3C4B5A607890F1E2D02 /* DeviceDiscovery.swift */; };
 		BA4E414CCA79B719381FF75E /* SharedProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = D93CD22A115FBBAB8240DF00 /* XCSwiftPackageProductDependency */; };
 		F0A1B2C3D4E5F607180A0002 /* ChatBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F607180A0001 /* ChatBubble.swift */; };
+		F0A1B2C3D4E5F607180A00A2 /* ApprovalQuestionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F607180A00A1 /* ApprovalQuestionCard.swift */; };
 		F0A1B2C3D4E5F607180A000C /* ChatMarkdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F607180A000B /* ChatMarkdown.swift */; };
 		F0A1B2C3D4E5F607180A0004 /* ChatInputBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F607180A0003 /* ChatInputBar.swift */; };
 		F0A1B2C3D4E5F607180A0006 /* StatusBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F607180A0005 /* StatusBanner.swift */; };
@@ -78,6 +79,7 @@
 		C9D0E1F2A3B405060C9D0E02 /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		F1E2D3C4B5A607890F1E2D02 /* DeviceDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceDiscovery.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F607180A0001 /* ChatBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatBubble.swift; sourceTree = "<group>"; };
+		F0A1B2C3D4E5F607180A00A1 /* ApprovalQuestionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalQuestionCard.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F607180A000B /* ChatMarkdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMarkdown.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F607180A0003 /* ChatInputBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatInputBar.swift; sourceTree = "<group>"; };
 		F0A1B2C3D4E5F607180A0005 /* StatusBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBanner.swift; sourceTree = "<group>"; };
@@ -176,6 +178,7 @@
 			isa = PBXGroup;
 			children = (
 				F0A1B2C3D4E5F607180A0001 /* ChatBubble.swift */,
+				F0A1B2C3D4E5F607180A00A1 /* ApprovalQuestionCard.swift */,
 				F0A1B2C3D4E5F607180A000B /* ChatMarkdown.swift */,
 				F0A1B2C3D4E5F607180A0003 /* ChatInputBar.swift */,
 				F0A1B2C3D4E5F607180A0005 /* StatusBanner.swift */,
@@ -334,6 +337,7 @@
 				A9B0C1D2E3F40506A7B8C901 /* AutoTaskSetupView.swift in Sources */,
 				A351D57F1B94C3E6FBB89A9B /* SettingsView.swift in Sources */,
 				F0A1B2C3D4E5F607180A0002 /* ChatBubble.swift in Sources */,
+				F0A1B2C3D4E5F607180A00A2 /* ApprovalQuestionCard.swift in Sources */,
 				F0A1B2C3D4E5F607180A000C /* ChatMarkdown.swift in Sources */,
 				F0A1B2C3D4E5F607180A0004 /* ChatInputBar.swift in Sources */,
 				F0A1B2C3D4E5F607180A0006 /* StatusBanner.swift in Sources */,
