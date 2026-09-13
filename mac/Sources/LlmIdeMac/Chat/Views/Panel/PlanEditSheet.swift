@@ -73,6 +73,7 @@ public enum PlanEditPolicy {
         guard trimmed.utf8.count >= minimumPlanBytes else { return false }
         var hasHeading = false
         var stepCount = 0
+        var lastContentLine = ""
         // Fenced blocks are QUOTED text, not document structure: a shell
         // script's `# comment` lines and a diff's `1)` lines would otherwise
         // supply both signals, and an ordinary explanation containing one
@@ -90,18 +91,28 @@ public enum PlanEditPolicy {
             // the same rule `CodeAssistantPanel.stepLines(in:patterns:)`
             // applies, so the two parsers agree about the same document.
             let indent = rawLine.prefix { $0 == " " || $0 == "\t" }.count
-            if indent < 2, isStepLine(line) { stepCount += 1 }
-            if isPlanShaped(hasHeading: hasHeading, stepCount: stepCount) { return true }
+            if indent < 2, isStepLine(line), !asksSomething(line) { stepCount += 1 }
+            lastContentLine = line
         }
+        // A reply that ENDS by asking the reader something is a proposal
+        // waiting on an answer, not a plan to carry out — "Does this approach
+        // make sense for what you're trying to achieve?" was saved as one,
+        // executed, and reviewed, with nothing to implement at any step.
+        if asksSomething(lastContentLine) { return false }
         return isPlanShaped(hasHeading: hasHeading, stepCount: stepCount)
     }
 
     /// Enumerated work is the signal that matters; sections are the usual
     /// company it keeps, not a requirement. A plan that numbers three or more
     /// steps is a plan whether or not it bothered with a `##` heading.
-    /// What the rule has to exclude is a clarifying question: its bullets are
-    /// options to choose between, not steps to carry out, and plain `-`
-    /// bullets are not counted.
+    ///
+    /// The rule this most has to exclude is the clarifying question both plan
+    /// skills open with. It was once assumed such a reply "enumerates nothing
+    /// at all" — but a planner numbers its questions exactly the way it would
+    /// number steps ("1. **Should we first run the analysis** …?"), and three
+    /// of those scored as a plan, were saved, executed against, and reviewed.
+    /// So a numbered line that ASKS something is not counted as work, and a
+    /// document that ends by asking is not a plan at all — see `looksLikePlan`.
     private static func isPlanShaped(hasHeading: Bool, stepCount: Int) -> Bool {
         guard stepCount >= minimumPlanSteps else { return false }
         return hasHeading || stepCount >= unsectionedPlanSteps
@@ -153,6 +164,20 @@ public enum PlanEditPolicy {
         // one needs its space, or "1.5x faster" would read as a step.
         let after = rest.dropFirst().first
         return marker == "." || marker == ")" ? after == " " : true
+    }
+
+    /// Whether a line asks the reader something rather than stating work.
+    ///
+    /// Judged on the last character, ignoring the markdown a model wraps a
+    /// line in (`**… strategy?**`), and full-width `？` because this app's
+    /// primary UI language writes it that way.
+    private static func asksSomething(_ line: String) -> Bool {
+        var s = Substring(line.trimmingCharacters(in: .whitespaces))
+        while let last = s.last, last == "*" || last == "`" || last == "_" || last == " " {
+            s = s.dropLast()
+        }
+        guard let last = s.last else { return false }
+        return last == "?" || last == "？"
     }
 
     /// Markers that can follow a step's number.

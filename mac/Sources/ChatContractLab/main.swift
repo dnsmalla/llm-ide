@@ -559,6 +559,56 @@ do {
     expect(PlanEditPolicy.looksLikePlan(content: stepsNoHeading) == true,
            "enumerated work is the signal; a section heading is its usual company, not a requirement")
 
+    // Both of these were SAVED as plans, executed against, and reviewed. They
+    // are quoted from the files that resulted, because the failure is not
+    // hypothetical: a planner numbers its questions exactly the way it would
+    // number steps, and the flow downstream cannot tell the difference — the
+    // execute prompt read the first one back as "Steps: 1. … 2. … 3. …".
+    let numberedQuestions = """
+    I can see the project has dead code analysis tooling set up (scripts and a
+    removal-candidates file), but there are currently no findings identified yet.
+    Before I create a plan, I need to clarify what you're looking for:
+
+    **Spike classification**: This looks like a feasibility question — we need to
+    understand the scope of dead code in the project first, then decide how to
+    tackle it.
+
+    A few quick questions:
+
+    1. **Should we first run the dead code analysis** to identify candidates (Swift
+    and TypeScript/JavaScript files), or do you already have a list of specific
+    dead code you want removed?
+
+    2. **Scope** — are we analyzing the entire codebase, or specific areas?
+
+    3. **After we identify dead code, what's the removal strategy?**
+
+    Once I understand your intent, I can propose an analysis + removal process.
+    """
+    expect(PlanEditPolicy.looksLikePlan(content: numberedQuestions) == false,
+           "numbered QUESTIONS are not enumerated work, however many there are")
+
+    let endsByAsking = """
+    ## Design: Clear Session Lifecycle
+
+    **Core idea:** Create an explicit `ChatSessionManager` that owns all session
+    state transitions and lifecycle operations, making the flow easy to trace.
+
+    **Changes:**
+
+    1. **Add `ChatSessionManager`** — a new service that becomes the single
+    interface for all session operations.
+    2. **Move persistence behind it** so views never touch the store directly.
+    3. **Route ChatEngine through it** instead of direct store calls.
+
+    **Files touched:** Create `Services/ChatSessionManager.swift`, update Views
+    and ChatEngine to use it instead of direct store calls.
+
+    Does this approach make sense for what you're trying to achieve?
+    """
+    expect(PlanEditPolicy.looksLikePlan(content: endsByAsking) == false,
+           "a proposal that ends by asking is waiting on an answer, not ready to run")
+
     let twoStepsNoHeading = """
     Both of those are fine to change, and neither depends on the other, so you
     can do them in either order. There is no migration involved and nothing
