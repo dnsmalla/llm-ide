@@ -160,7 +160,8 @@ extension ChatEngine {
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, var session = ChatSessionStore.load(id: id) else { return }
         session.title = String(trimmed.prefix(60))
-        ChatSessionStore.save(session)
+        // Not a use of the chat — see `save(_:touch:)`.
+        ChatSessionStore.save(session, touch: false)
         refreshSessions()
     }
 

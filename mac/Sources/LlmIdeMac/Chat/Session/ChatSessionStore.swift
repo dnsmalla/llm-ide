@@ -83,10 +83,16 @@ enum ChatSessionStore {
         }
     }
 
-    static func save(_ session: ChatSession) {
+    /// Write `session`, stamping `lastUsedAt` with now.
+    ///
+    /// `touch: false` keeps the existing timestamp, for a write that is not
+    /// USE: renaming a chat went through the bump and re-sorted it to the top
+    /// of a list ordered newest-first, so giving a chat a better name moved it
+    /// somewhere the user wasn't looking for it.
+    static func save(_ session: ChatSession, touch: Bool = true) {
         guard session.scope != nil, let url = fileURL(for: session.id) else { return }
         var bumped = session
-        bumped.lastUsedAt = Date()
+        if touch { bumped.lastUsedAt = Date() }
         do {
             let data = try AppJSON.encoder.encode(bumped)
             try data.write(to: url, options: .atomic)
