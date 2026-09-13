@@ -76,7 +76,11 @@ enum MobileExploreBridge {
 
         return AgentContext(
             activeProject: activeProject,
-            indexedRepos: [],
+            // Not `[]`: that renders as "(none indexed)" — a false statement
+            // — and, worse, makes `memory-persist.mjs` write this turn's
+            // captured project memory to a different root than a Mac turn
+            // would (it takes the first indexed repo, else the workspace).
+            indexedRepos: IndexedReposResolver.externalRepos(config: config),
             recentIssues: recentIssues.isEmpty ? nil : recentIssues,
             workspaceRoot: workspaceRoot,
             sessionId: sessionId,

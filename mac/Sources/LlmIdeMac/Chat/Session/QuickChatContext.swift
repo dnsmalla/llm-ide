@@ -357,9 +357,13 @@ struct QuickChatContext {
             // Same shape the Code Assistant panel and MobileExploreBridge send
             // (see CodeAssistantPanel+Agent.swift / MobileExploreBridge.swift):
             // the server scopes its read-only file tools to this root, so
-            // "where is auth handled" can resolve a real file. `indexedRepos`
-            // is left empty — it's an enhancement for the full panel, not a
-            // requirement for a quick chat turn.
+            // "where is auth handled" can resolve a real file.
+            //
+            // `indexedRepos` carries the Library's external code folders. An
+            // empty list is not a smaller prompt: it renders as "(none
+            // indexed)", and `memory-persist.mjs` picks the first indexed repo
+            // as the root for captured project memory — so a surface sending
+            // none writes its memory somewhere else than the panel does.
             //
             // `activeProject` IS carried: it is what the server's
             // render-active-project context renders, and a turn without it
@@ -371,7 +375,7 @@ struct QuickChatContext {
             agentContext: AgentContext(
                 activeProject: CodeAssistantPanel.deriveActiveProject(from: projectStore.activeProject)
                     ?? CodeAssistantPanel.deriveActiveProject(fromConfig: config),
-                indexedRepos: [],
+                indexedRepos: IndexedReposResolver.externalRepos(config: config),
                 workspaceRoot: PathUtils.homeRelative(root.path)))
     }
 }
