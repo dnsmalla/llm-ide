@@ -140,13 +140,27 @@ final class ExplorerMobileEngineResolver: ExternalEngineHolder {
             touch(sessionID)
             return cached
         }
-        // Deliberately the LEGACY transport, not the v2 factory: a v2 turn
-        // can park on an AskUserQuestion approval, and an OFF-SCREEN engine
-        // has no panel to render the card or post the decision — the turn
-        // would hang until the server's park timeout denies it. Off-screen
-        // phone turns stay on /code-assist; the shared (visible) engine is
-        // where the Agent engine beta applies.
-        let engine = ChatEngine(scope: .explorer, transport: CodeAssistTransport(api: api))
+        // The SAME transport policy the registry applies to a displayed
+        // engine (`ChatTransportFactory` + the beta toggle).
+        //
+        // This used to be pinned to the legacy transport, because a v2 turn
+        // can park on an AskUserQuestion and an off-screen engine had no panel
+        // to render the card. The phone renders it now, so the reason is gone
+        // — and the pin had consequences of its own: the legacy engine has no
+        // AskUserQuestion at all (so a planner simply asked in prose), and its
+        // write proposals are auto-chained CLIENT-side by the panel, which an
+        // off-screen engine does not have — so an execute turn against a
+        // session the Mac was not displaying could not apply anything. Same
+        // question, same answer, whichever engine the phone lands on.
+        //
+        // A ToolApproval can still park here on Manual, exactly as it can on
+        // the displayed engine; the phone shows "Question pending on Mac" and
+        // it is answered there. On Bypass — what a phone turn inherits from
+        // the Mac's chip — nothing parks at all.
+        let engine = ChatEngine(
+            scope: .explorer,
+            transport: ChatTransportFactory.makeTransport(
+                api: api, useV2: AgentV2Selection.toggleEnabled()))
         guard engine.loadSessionForBackgroundUse(id: sessionID) else { return nil }
         offScreen[sessionID] = engine
         touch(sessionID)

@@ -29,6 +29,27 @@ enum MobileExploreBridge {
     /// stable id explicitly keeps memory keying on the preferred field
     /// instead of the server's sessionId fallback, which only lined up
     /// because this caller happened to pass the chat UUID.
+    /// The permission setting a phone-driven turn runs under: whatever the
+    /// Mac's Code Assistant chip is set to, read from the same
+    /// `codeAssist.editMode` preference the panel binds
+    /// (`EditAcceptanceMode.agentPermissionMode`).
+    ///
+    /// Inherited rather than invented so there is ONE place to change it and
+    /// one answer to "what will a message from my phone be allowed to do" —
+    /// the chip you can see on the Mac. Without it a phone turn sent no
+    /// permission at all, the server asked for every write, and the phone has
+    /// no way to answer a ToolApproval: the turn hung until the 15-minute
+    /// park expired, which is what "execution doesn't work from the phone"
+    /// looked like.
+    ///
+    /// Note what it does NOT lift: the server's hard rails stand either way —
+    /// a blocklisted command and a write outside the workspace are refused on
+    /// bypass exactly as on manual.
+    static func permissionMode() -> String {
+        let raw = UserDefaults.standard.string(forKey: "codeAssist.editMode") ?? ""
+        return (EditAcceptanceMode(rawValue: raw) ?? .review).agentPermissionMode
+    }
+
     static func buildAgentContext(config: AppConfig, projectStore: ProjectStore,
                                   sessionId: String?) async -> AgentContext {
         let activeProject = deriveActiveProject(from: projectStore.activeProject)

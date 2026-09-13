@@ -81,6 +81,13 @@ extension ChatEngine {
     /// Mac panel renders the confirmation card — today the one surface that
     /// can act on it. A phone-side confirmation channel is the future work
     /// that would lift this.
+    /// - Parameter permissionMode: Forwarded to
+    ///   `ChatTransportInput.permissionMode` — `"bypass"` (apply edits and run
+    ///   commands without a card) or `"manual"`. Nil leaves the server's
+    ///   default, which asks: every write then parks on a ToolApproval card,
+    ///   and a client with no way to answer one (the phone) simply hangs until
+    ///   the 15-minute expiry. That is what "execution doesn't work from the
+    ///   phone" was.
     /// - Parameter mode: Forwarded verbatim to `ChatTransportInput.mode`.
     ///   Defaults to `nil` (full agentic run) for `explore_chat`'s existing
     ///   behavior; the phone's `llmide_chat` arm (Task 8) passes `"ask"` —
@@ -95,6 +102,7 @@ extension ChatEngine {
         model: String?,
         provider: String?,
         mode: String? = nil,
+        permissionMode: String? = nil,
         expectedSessionID: UUID,
         onProgress: @escaping (String) -> Void
     ) async throws -> String {
@@ -129,6 +137,7 @@ extension ChatEngine {
             try await performExternalTurn(
                 message: message, skillIds: skillIds, attachments: attachments,
                 agentContext: agentContext, model: model, provider: provider, mode: mode,
+                permissionMode: permissionMode,
                 expectedSessionID: expectedSessionID, onProgress: onProgress)
         }
         externalRunTask = task
@@ -164,6 +173,7 @@ extension ChatEngine {
         model: String?,
         provider: String?,
         mode: String? = nil,
+        permissionMode: String? = nil,
         expectedSessionID: UUID,
         onProgress: @escaping (String) -> Void
     ) async throws -> String {
@@ -215,7 +225,8 @@ extension ChatEngine {
                 language: nil,
                 model: model,
                 provider: provider,
-                mode: mode
+                mode: mode,
+                permissionMode: permissionMode
             )
             // Same identity stamp as runTurn/sendFollowup — here the bridge
             // already targets this engine's session (the resolver guarantees

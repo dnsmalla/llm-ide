@@ -918,6 +918,15 @@ final class MobileControlManager {
                 agentContext: agentContext,
                 model: model,
                 provider: provider,
+                // Parity with the Mac's own Explorer panel, which sends its
+                // picker's mode — usually Auto, which the server classifies.
+                // This arm sent nothing, so every turn ran as the server's
+                // default (execute): "make me a plan" never reached plan mode,
+                // because only `auto` is ever classified.
+                mode: "auto",
+                // And the Mac's permission chip, so a classified execute turn
+                // can actually finish. See MobileExploreBridge.permissionMode.
+                permissionMode: MobileExploreBridge.permissionMode(),
                 expectedSessionID: sid,
                 onProgress: { [weak self] label in
                     guard let self, !self.isMobileCommandCancelled(commandId) else { return }
