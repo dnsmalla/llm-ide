@@ -21,7 +21,14 @@ enum RecentIssuesResolver {
     /// Cached result, so a phone turn moments after a Mac refresh costs no
     /// network. Short by design: issues change, and a stale list read as
     /// current is worse than a slow one.
-    private static var cache: (issues: [AgentContext.RecentIssue], at: Date)?
+    ///
+    /// Keyed by the PROJECT it was fetched for, so switching projects misses
+    /// by construction. A time-only cache would have served the previous
+    /// project's issues for up to `freshness` after a switch — the same
+    /// "another project's list" failure `load` refuses to produce directly,
+    /// arriving by the back door — and would have depended on every future
+    /// switch path remembering to call an invalidator.
+    private static var cache: (key: String, issues: [AgentContext.RecentIssue], at: Date)?
     static let freshness: TimeInterval = 120
 
     /// The issues to ground a turn in, fetching only when the cache is cold or
@@ -29,7 +36,10 @@ enum RecentIssuesResolver {
     static func contextIssues(config: AppConfig, projectStore: ProjectStore) async
         -> [AgentContext.RecentIssue]
     {
-        if let cache, Date().timeIntervalSince(cache.at) < freshness { return cache.issues }
+        let key = projectKey(config: config, projectStore: projectStore)
+        if let cache, cache.key == key, Date().timeIntervalSince(cache.at) < freshness {
+            return cache.issues
+        }
         return await fetch(config: config, projectStore: projectStore)
     }
 
@@ -40,14 +50,20 @@ enum RecentIssuesResolver {
     static func fetch(config: AppConfig, projectStore: ProjectStore) async
         -> [AgentContext.RecentIssue]
     {
+        let key = projectKey(config: config, projectStore: projectStore)
         let issues = await load(config: config, projectStore: projectStore)
-        cache = (issues, Date())
+        cache = (key, issues, Date())
         return issues
     }
 
-    /// Drop the cache — a project switch makes the list belong to a repo the
-    /// user is no longer looking at.
-    static func invalidate() { cache = nil }
+    /// What the cached list belongs to. Both halves, because `load` consults
+    /// both and refuses when they disagree — a key built from either one alone
+    /// would call two different situations the same.
+    private static func projectKey(config: AppConfig, projectStore: ProjectStore) -> String {
+        let workspace = CodeAssistantPanel.deriveActiveProject(from: projectStore.activeProject)?.url
+        let settings = CodeAssistantPanel.deriveActiveProject(fromConfig: config)?.url
+        return "\(workspace ?? "-")|\(settings ?? "-")"
+    }
 
     // MARK: - The fetch itself
 

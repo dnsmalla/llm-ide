@@ -75,12 +75,23 @@ extension CodeAssistantPanel {
         case "image/webp": ext = "webp"
         default: return false
         }
-        // Numbered against what is already staged, so the first paste of a
-        // message is always 1 — chips are one-shot (cleared on send), and a
-        // counter that kept climbing across a conversation would label a lone
-        // screenshot "Pasted image 7".
-        let taken = attachmentState.attachments.filter { $0.path.hasPrefix(Self.pastedImagePrefix) }.count
-        let path = "\(Self.pastedImagePrefix)\(taken + 1).\(ext)"
+        // Numbered from 1 for each message — chips are one-shot (cleared on
+        // send), and a counter that kept climbing across a conversation would
+        // label a lone screenshot "Pasted image 7".
+        //
+        // Taken by SEARCHING for a free name rather than counting what is
+        // staged: with a count, pasting two, deleting the first and pasting
+        // again re-issues "Pasted image 2". Attachments are keyed by path
+        // everywhere downstream — `addFile`'s duplicate check, the server's
+        // own `selectAttachments` (which skips a path it has already seen) —
+        // so that duplicate would not be a clash the user could see, it would
+        // be the second screenshot silently never reaching the model.
+        var n = 1
+        var path = "\(Self.pastedImagePrefix)\(n).\(ext)"
+        while attachmentState.attachments.contains(where: { $0.path == path }) {
+            n += 1
+            path = "\(Self.pastedImagePrefix)\(n).\(ext)"
+        }
         attachmentState.attachments.append(LlmIdeAPIClient.CodeAttachment(
             path: path,
             content: "[binary:\(mediaType)]\n" + data.base64EncodedString()))

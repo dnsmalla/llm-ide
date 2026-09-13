@@ -178,6 +178,15 @@ const capAttachments = selectAttachments;
 // `<<<E<<<X>>>ND>>>` in an attached file became a real `<<<END>>>`, closing
 // this fence inside the SYSTEM prompt and letting the rest of the file read
 // as trusted framing. See core/utils.mjs neutralizePromptFences.
+function buildAttachmentsText(files) {
+  if (!files.length) return '';
+  let text = `# Attached files (${files.length})\n`;
+  for (const f of files) {
+    text += `\n## ${f.path}\n<<<BEGIN>>>\n${f.content}\n<<<END>>>\n`;
+  }
+  return `${text}\n`;
+}
+
 // The images ride as content blocks; this is the text that tells the model
 // what they are, in the order the blocks appear.
 function buildImagesText(images, dropped) {
@@ -193,15 +202,6 @@ function buildImagesText(images, dropped) {
     // can see them in the chat, so a model that never mentions them reads as
     // having looked and found nothing.
     text += `\nNOT sent (too large, or past this turn's image limit): ${dropped.join(', ')}\n`;
-  }
-  return `${text}\n`;
-}
-
-function buildAttachmentsText(files) {
-  if (!files.length) return '';
-  let text = `# Attached files (${files.length})\n`;
-  for (const f of files) {
-    text += `\n## ${f.path}\n<<<BEGIN>>>\n${f.content}\n<<<END>>>\n`;
   }
   return `${text}\n`;
 }
@@ -656,18 +656,20 @@ export function buildEngineOptions(
   };
 }
 
-/// The `prompt` argument for `query()`.
-///
-/// A plain string when the turn is text — the shape this engine has always
-/// used. With images it becomes the SDK's other accepted form
-/// (`AsyncIterable<SDKUserMessage>`, sdk.d.ts): one user message whose
-/// `content` is an array of blocks — every image first, then the text. That
-/// ordering is what the Messages API documents for vision: the model reads
-/// the images, then the instruction about them.
-///
-/// One message, then the iterable ends — the turn is a single user prompt,
-/// and leaving the iterator open would leave the SDK waiting for more input
-/// instead of answering.
+/**
+ * The `prompt` argument for `query()`.
+ *
+ * A plain string when the turn is text — the shape this engine has always
+ * used. With images it becomes the SDK's other accepted form
+ * (`AsyncIterable<SDKUserMessage>`, sdk.d.ts): one user message whose
+ * `content` is an array of blocks — every image first, then the text. That
+ * ordering is what the Messages API documents for vision: the model reads the
+ * images, then the instruction about them.
+ *
+ * One message, then the iterable ends — the turn is a single user prompt, and
+ * leaving the iterator open would leave the SDK waiting for more input
+ * instead of answering.
+ */
 export function buildPromptInput(text, images) {
   if (!images?.length) return text;
   const content = [
