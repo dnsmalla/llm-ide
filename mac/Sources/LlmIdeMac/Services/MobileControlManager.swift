@@ -97,6 +97,11 @@ final class MobileControlManager {
     /// turn on — the shared, Mac-panel-visible one when safe, or a private
     /// off-screen engine when the Mac is already showing a different session
     /// (see that type's doc comment for why this exists).
+    /// The phone bridge's off-screen `.explorer` engines. Registered with
+    /// `ChatEngineRegistry` as its external holder (see `ExternalEngineHolder`)
+    /// so the registry can see these engines when it resolves which engine
+    /// owns a session — without that, a session the phone is running here
+    /// looks unheld and the Mac opens a second engine on the same file.
     private let explorerMobileEngineResolver = ExplorerMobileEngineResolver()
 
     private var server: MobileWebSocketServer?
@@ -134,6 +139,12 @@ final class MobileControlManager {
 
     init() {
         pairedDevices = pairedDeviceStore.all
+        // The registry must be able to see this pool — see
+        // `explorerMobileEngineResolver` and `ExternalEngineHolder`. Set here
+        // rather than at first use: `switchDisplayedSession` consults the
+        // holder on the MAC user's action, which can happen before the phone
+        // has ever driven a turn.
+        ChatEngineRegistry.shared.externalHolder = explorerMobileEngineResolver
         // Best-effort teardown of the native server on force-quit / Cmd-Q /
         // logout so the listener + Bonjour service don't briefly outlive the
         // app. `stop()` is idempotent and main-isolated like this hook.

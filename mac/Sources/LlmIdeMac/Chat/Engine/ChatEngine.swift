@@ -211,6 +211,9 @@ final class ChatEngine {
     /// Agent-turn metadata. The engine owns it; the panel reads the same
     /// object (it is a reference type, so both see one state).
     let agent = CodeAssistantAgentState()
+    /// A transport swap requested while a turn was in flight, applied at the
+    /// next idle. See `setTransport`.
+    var pendingTransport: ChatTransport?
     /// The turn transport. A `var` (not `let`) since Task 12's agent-engine
     /// toggle: the panel swaps it via `setTransport(_:)` when the user flips
     /// the beta setting, engine identity unchanged. Still engine-owned by
@@ -469,14 +472,35 @@ final class ChatEngine {
         connectTransportObservers()
     }
 
-    /// Swap the turn transport (the agent-engine beta toggle's onChange).
-    /// Refused mid-turn: the in-flight round-trip holds the old transport,
-    /// and swapping under it would split one visible turn across two engines
-    /// (and strand any v2 approvals parked against the old one). A flip
-    /// during a turn simply applies on the next flip or the next engine.
+    /// Swap the turn transport (the agent-engine beta toggle's onChange, and
+    /// the registry re-pointing an engine it has just adopted).
+    ///
+    /// Never applied mid-turn: the in-flight round-trip holds the old
+    /// transport, and swapping under it would split one visible turn across
+    /// two engines (and strand any v2 approvals parked against the old one).
+    /// It is DEFERRED rather than dropped — `drainQueueOrRelease`'s idle
+    /// branch applies it the moment the turn ends. Dropping it meant a flip
+    /// during a turn silently did nothing until the user flipped again, and
+    /// it is the reason an engine adopted mid-turn (see the registry) would
+    /// otherwise keep the transport it was built with for the rest of its
+    /// life — a chat stamped for the Agent engine quietly answering every
+    /// later turn on the legacy one.
     func setTransport(_ newTransport: ChatTransport) {
-        guard !busy else { return }
+        guard !busy else {
+            pendingTransport = newTransport
+            return
+        }
+        pendingTransport = nil
         transport = newTransport
+        connectTransportObservers()
+    }
+
+    /// Apply a transport swap that arrived mid-turn. Called from the idle
+    /// branch of `drainQueueOrRelease`, which is every turn's shared tail.
+    func applyPendingTransportIfAny() {
+        guard let next = pendingTransport else { return }
+        pendingTransport = nil
+        transport = next
         connectTransportObservers()
     }
 
@@ -770,6 +794,10 @@ final class ChatEngine {
             // a no-op, so a stale handle was never dangerous; this keeps
             // the field tidy for stop()/tests.
             externalRunTask = nil
+            // A transport swap that arrived mid-turn (toggle flip, or the
+            // registry adopting this engine) lands here, where there is no
+            // round-trip holding the old one.
+            applyPendingTransportIfAny()
         }
     }
 

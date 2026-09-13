@@ -41,7 +41,7 @@ import Foundation
 /// lookup before handing it back, rather than trusting the cache
 /// unconditionally.
 @MainActor
-final class ExplorerMobileEngineResolver {
+final class ExplorerMobileEngineResolver: ExternalEngineHolder {
     /// Upper bound on cached off-screen engines. Phone usage flips between
     /// a handful of sessions, and each cached engine pins that session's
     /// transcript in memory for the process lifetime — unbounded growth
@@ -113,9 +113,16 @@ final class ExplorerMobileEngineResolver {
         // persisted last would erase the other's turns. The registry's live
         // engine wins over anything this resolver could build or has cached.
         if let live = ChatEngineRegistry.shared.liveEngine(for: sessionID) {
-            // Drop our own copy if we had one: from here on that session has
-            // exactly one writer again, and it is not this cache.
-            forget(sessionID: sessionID)
+            // The registry can now see THIS pool too (`ExternalEngineHolder`),
+            // so `live` may be the very engine cached here. Forgetting it in
+            // that case would hand back an engine nothing tracks any more —
+            // untracked means un-evictable and, once the registry drops its
+            // own reference, invisible to the next lookup. Only drop the cache
+            // entry when the winner is someone else's engine, which is what
+            // this branch was always for.
+            if live !== offScreen[sessionID] {
+                forget(sessionID: sessionID)
+            }
             return live
         }
         if let cached = offScreen[sessionID] {
@@ -164,5 +171,19 @@ final class ExplorerMobileEngineResolver {
     func forget(sessionID: UUID) {
         offScreen.removeValue(forKey: sessionID)
         offScreenOrder.removeAll { $0 == sessionID }
+    }
+
+    // MARK: - ExternalEngineHolder
+
+    /// What the registry sees of this pool. Same lookup `cachedEngine` does —
+    /// side-effect free, no creation, no refresh — under the name the
+    /// registry's one-live-engine-per-session rule speaks.
+    func heldEngine(for sessionID: UUID) -> ChatEngine? {
+        offScreen[sessionID]
+    }
+
+    /// The registry has taken this engine on screen; it owns it from here.
+    func releaseHeldEngine(for sessionID: UUID) {
+        forget(sessionID: sessionID)
     }
 }

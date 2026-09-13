@@ -1,5 +1,25 @@
 import Foundation
 
+/// Another owner of live engines, which the registry must be able to see to
+/// keep the one-live-engine-per-session rule.
+///
+/// Today there is exactly one: `ExplorerMobileEngineResolver`, the phone
+/// bridge's pool of off-screen `.explorer` engines. It already asks the
+/// registry before building anything (`liveEngine(for:)`), but the registry
+/// could not ask back — so a session the phone was running off-screen looked
+/// unheld, and `switchDisplayedSession` loaded it from disk into a SECOND
+/// engine. Two writers, one file: the phone's reply landed at its turn end
+/// and the Mac's next turn overwrote the file from an array that never had
+/// it. Silent, and only in the window where the two surfaces are actually
+/// collaborating — the case this whole design exists to support.
+@MainActor
+protocol ExternalEngineHolder: AnyObject {
+    /// The live engine this holder keeps for `sessionID`, if any.
+    func heldEngine(for sessionID: UUID) -> ChatEngine?
+    /// Stop tracking `sessionID` — the registry has taken the engine over.
+    func releaseHeldEngine(for sessionID: UUID)
+}
+
 /// Per-`ChatScope` shared `ChatEngine` instances, plus the background lot of
 /// engines whose session is still working after the user switched away.
 ///
@@ -40,6 +60,11 @@ import Foundation
 @Observable
 final class ChatEngineRegistry {
     static let shared = ChatEngineRegistry()
+
+    /// Set once at startup by whoever owns the off-screen pool
+    /// (`MobileControlManager`). Weak: the holder owns its engines and its
+    /// own lifetime; the registry only needs to be able to ask.
+    weak var externalHolder: ExternalEngineHolder?
 
     /// The engine each scope's panel currently renders.
     private var displayed: [ChatScope: ChatEngine] = [:]
@@ -116,7 +141,12 @@ final class ChatEngineRegistry {
     /// next `persistCurrentChat`.
     func liveEngine(for sessionID: UUID) -> ChatEngine? {
         if let parked = background[sessionID] { return parked }
-        return displayed.values.first { $0.currentSessionIDString == sessionID.uuidString }
+        if let shown = displayed.values.first(where: { $0.currentSessionIDString == sessionID.uuidString }) {
+            return shown
+        }
+        // Last, so a registry-owned engine always wins: the holder's engine
+        // is the answer only when nothing here has the session.
+        return externalHolder?.heldEngine(for: sessionID)
     }
 
     /// Whether `sessionID` has a turn in flight right now, on any engine.
@@ -188,9 +218,25 @@ final class ChatEngineRegistry {
         if let parked = background.removeValue(forKey: sessionID) {
             backgroundOrder.removeAll { $0 == sessionID }
             retire(current)
-            adopt(parked, scope: scope)
+            adopt(parked, scope: scope, api: api)
             sweepBackground()
             return parked
+        }
+
+        // 1b. An external holder is RUNNING this session off-screen (a phone
+        // turn on a chat the Mac wasn't showing). Take the engine over rather
+        // than loading the session from disk: the disk copy is missing the
+        // reply still streaming into that engine, and the displayed engine's
+        // next persist would overwrite the file with the stale array once the
+        // phone's turn landed. An IDLE held engine needs no takeover — it has
+        // already persisted, so disk is current, and the holder drops its own
+        // copy the next time it asks `liveEngine`.
+        if let held = externalHolder?.heldEngine(for: sessionID), held.busy {
+            externalHolder?.releaseHeldEngine(for: sessionID)
+            retire(current)
+            adopt(held, scope: scope, api: api)
+            sweepBackground()
+            return held
         }
 
         guard current.busy else {
@@ -286,8 +332,16 @@ final class ChatEngineRegistry {
     }
 
     /// Bring a parked engine back on screen.
-    private func adopt(_ engine: ChatEngine, scope: ChatScope) {
+    private func adopt(_ engine: ChatEngine, scope: ChatScope, api: LlmIdeAPIClient) {
         engine.persistsUnobserved = false
+        // An adopted engine may have been built elsewhere, for off-screen use:
+        // the phone bridge deliberately gives its own engines the LEGACY
+        // transport (an off-screen engine has no panel to render an approval
+        // card). On screen that is no longer true, and keeping it would mean a
+        // chat stamped for the Agent engine quietly answering on the legacy
+        // one. `setTransport` defers to the next idle if a turn is in flight.
+        engine.setTransport(ChatTransportFactory.makeTransport(
+            api: api, useV2: AgentV2Selection.toggleEnabled()))
         displayed[scope] = engine
         // The pointer is what a relaunch restores, and this chat is now the
         // scope's visible one — `switchSession` would have done this, but
