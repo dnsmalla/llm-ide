@@ -50,6 +50,15 @@ enum EditAcceptanceMode: String, CaseIterable, Identifiable, ChipMenuOption {
     /// a write outside the workspace are still refused. `manual` asks every
     /// time, including for tools previously marked "always allow".
     var agentPermissionMode: String { self == .auto ? "bypass" : "manual" }
+
+    /// The preference the chip is stored in. A constant because it has two
+    /// readers now — the panel's own `@AppStorage` and the phone bridge,
+    /// which inherits this setting for a phone-driven turn. As two string
+    /// literals, renaming the key on one side would leave the other reading a
+    /// key that does not exist: the bridge would silently fall back to
+    /// `manual` and execution from the phone would stop working, with nothing
+    /// to see but turns that park.
+    static let defaultsKey = "codeAssist.editMode"
 }
 
 struct CodeAssistantPanel: View {
@@ -164,7 +173,7 @@ struct CodeAssistantPanel: View {
     /// `.review` (default) shows the confirmation card + popup; `.auto`
     /// applies `update-file` edits immediately (to attached files only —
     /// the GitLab actions always confirm regardless).
-    @AppStorage("codeAssist.editMode") var editModeRaw = EditAcceptanceMode.review.rawValue
+    @AppStorage(EditAcceptanceMode.defaultsKey) var editModeRaw = EditAcceptanceMode.review.rawValue
     var editMode: EditAcceptanceMode { EditAcceptanceMode(rawValue: editModeRaw) ?? .review }
     /// Agent engine — on by default. When on (AND the turn's
     /// provider is Anthropic), the engine's transport answers turns on the

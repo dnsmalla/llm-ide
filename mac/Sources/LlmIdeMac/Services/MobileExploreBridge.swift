@@ -30,9 +30,9 @@ enum MobileExploreBridge {
     /// instead of the server's sessionId fallback, which only lined up
     /// because this caller happened to pass the chat UUID.
     /// The permission setting a phone-driven turn runs under: whatever the
-    /// Mac's Code Assistant chip is set to, read from the same
-    /// `codeAssist.editMode` preference the panel binds
-    /// (`EditAcceptanceMode.agentPermissionMode`).
+    /// Mac's Code Assistant chip is set to, read through
+    /// `EditAcceptanceMode.defaultsKey` — the same constant the panel's own
+    /// `@AppStorage` binds — and mapped by `agentPermissionMode`.
     ///
     /// Inherited rather than invented so there is ONE place to change it and
     /// one answer to "what will a message from my phone be allowed to do" —
@@ -46,7 +46,7 @@ enum MobileExploreBridge {
     /// a blocklisted command and a write outside the workspace are refused on
     /// bypass exactly as on manual.
     static func permissionMode() -> String {
-        let raw = UserDefaults.standard.string(forKey: "codeAssist.editMode") ?? ""
+        let raw = UserDefaults.standard.string(forKey: EditAcceptanceMode.defaultsKey) ?? ""
         return (EditAcceptanceMode(rawValue: raw) ?? .review).agentPermissionMode
     }
 
