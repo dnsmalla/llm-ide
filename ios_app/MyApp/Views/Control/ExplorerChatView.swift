@@ -282,7 +282,6 @@ struct ExplorerChatView: View {
         }
     }
 
-
     // MARK: — Input bar
 
     private var inputBar: some View {

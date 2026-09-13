@@ -770,26 +770,11 @@ final class MobileControlManager {
         let (model, provider) = MobileExploreBridge.modelAndProvider(config: config)
         do {
             let commandId = chat.commandId
-            // A question that parks mid-turn goes to the phone, so it can be
-            // answered by tapping there instead of waiting for someone to
-            // reach the Mac. Cleared in the `defer` below: once the turn is
-            // over the requestId is dead server-side, and a card that can no
-            // longer be answered is worse than no card.
-            engine.onExternalApproval = { [weak self] approval in
-                guard let self else { return }
-                Task { await self.sendApprovalToPhone(approval, commandId: commandId, engine: engine) }
-            }
-            defer {
-                engine.onExternalApproval = nil
-                if let entry = pendingPhoneApprovals.removeValue(forKey: commandId) {
-                    let requestId = entry.requestId
-                    Task { [weak self] in
-                        await self?.server?.send(ApprovalCleared(
-                            commandId: commandId, requestId: requestId,
-                            reason: "This turn has finished."))
-                    }
-                }
-            }
+            // A parked question goes to the phone to be tapped, not left to
+            // whoever reaches the Mac. Both arms open and close it the same
+            // way — see `beginPhoneApprovals`.
+            beginPhoneApprovals(engine: engine, commandId: commandId)
+            defer { endPhoneApprovals(engine: engine, commandId: commandId) }
             let reply = try await engine.runExternalTurn(
                 message: message,
                 skillIds: [],
@@ -921,25 +906,11 @@ final class MobileControlManager {
         }
         do {
             let commandId = chat.commandId
-            // Same question channel as the llm-ide arm: a parked question goes
-            // to the phone to be tapped, not left to whoever reaches the Mac.
-            // This arm needs it MORE — it is the one bound to a project, so
-            // it is where planning happens.
-            engine.onExternalApproval = { [weak self] approval in
-                guard let self else { return }
-                Task { await self.sendApprovalToPhone(approval, commandId: commandId, engine: engine) }
-            }
-            defer {
-                engine.onExternalApproval = nil
-                if let entry = pendingPhoneApprovals.removeValue(forKey: commandId) {
-                    let requestId = entry.requestId
-                    Task { [weak self] in
-                        await self?.server?.send(ApprovalCleared(
-                            commandId: commandId, requestId: requestId,
-                            reason: "This turn has finished."))
-                    }
-                }
-            }
+            // A parked question goes to the phone to be tapped, not left to
+            // whoever reaches the Mac. Both arms open and close it the same
+            // way — see `beginPhoneApprovals`.
+            beginPhoneApprovals(engine: engine, commandId: commandId)
+            defer { endPhoneApprovals(engine: engine, commandId: commandId) }
             let reply = try await engine.runExternalTurn(
                 message: skillMessage,
                 skillIds: skillIds,
@@ -1127,6 +1098,34 @@ final class MobileControlManager {
     }
 
     // MARK: - Mid-turn questions
+
+    /// Start forwarding this turn's parked questions to the phone.
+    ///
+    /// Paired with `endPhoneApprovals` in a `defer`, by both phone arms. It is
+    /// one definition rather than two hand-copied blocks because the two arms
+    /// already diverged once on exactly this kind of wiring: the first version
+    /// of this channel was added to `llmide_chat` only, so the Explorer chat —
+    /// the arm actually bound to a project, where the planning questions come
+    /// from — still showed nothing but "Question pending on Mac".
+    private func beginPhoneApprovals(engine: ChatEngine, commandId: String) {
+        engine.onExternalApproval = { [weak self] approval in
+            guard let self else { return }
+            Task { await self.sendApprovalToPhone(approval, commandId: commandId, engine: engine) }
+        }
+    }
+
+    /// Stop forwarding, and take down any card still on the phone: once the
+    /// turn is over the requestId is dead server-side, and a question that
+    /// can no longer be answered is worse than no question.
+    private func endPhoneApprovals(engine: ChatEngine, commandId: String) {
+        engine.onExternalApproval = nil
+        guard let entry = pendingPhoneApprovals.removeValue(forKey: commandId) else { return }
+        Task { [weak self] in
+            await self?.server?.send(ApprovalCleared(
+                commandId: commandId, requestId: entry.requestId,
+                reason: "This turn has finished."))
+        }
+    }
 
     /// Mac → phone: a question the turn is parked on.
     private func sendApprovalToPhone(_ approval: AgentV2Approval, commandId: String,
