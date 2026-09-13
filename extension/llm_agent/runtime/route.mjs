@@ -25,7 +25,7 @@ import { buildDispatch } from '../tools/registry.mjs';
 import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved, providerHasCli, DEFAULT_DEEPSEEK_BASE, DEFAULT_GEMINI_OPENAI_BASE } from '../../providers/providers.mjs';
 import { skillsToOpenAITools } from './openai-tools.mjs';
 import { fastModelFor } from '../../kb/usage.mjs';
-import { classifyCodeAssistMode, MODES } from './mode-classify.mjs';
+import { classifyCodeAssistMode, MODES, AUTO_READ_ONLY, clampToReadOnly } from './mode-classify.mjs';
 import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES } from './mode-personas.mjs';
 import { pipelineSkillIdFor, buildExecuteBinding } from './plan-pipeline.mjs';
 import { buildSessionTaskPromptBlock, taskTurnResponse } from './task-session-context.mjs';
@@ -151,9 +151,19 @@ export async function handleCodeAssist({
   const utilityModel = fastModelFor(effProvider)
     || (effProvider.startsWith('custom') ? null : model);
 
-  const resolvedMode = requestedMode === 'auto'
-    ? (await _classifyMode(message, { userId, model: utilityModel })).mode
-    : (requestedMode && MODES.has(requestedMode) ? requestedMode : 'execute');
+  // `auto_read_only` — classify like `auto`, then refuse any mode that could
+  // write (see AUTO_READ_ONLY). Same handling as the v2 route, because the
+  // client that needs it (the phone) reaches whichever engine its chat was
+  // stamped with; a clamp on one engine only would make the same request
+  // behave differently depending on which chat it landed in.
+  const readOnlyAuto = requestedMode === AUTO_READ_ONLY;
+  let resolvedMode;
+  if (requestedMode === 'auto' || readOnlyAuto) {
+    const classified = (await _classifyMode(message, { userId, model: utilityModel })).mode;
+    resolvedMode = readOnlyAuto ? clampToReadOnly(classified) : classified;
+  } else {
+    resolvedMode = requestedMode && MODES.has(requestedMode) ? requestedMode : 'execute';
+  }
 
   // MCP plugins (Claude CLI path only). Restricted modes get none; execute
   // modes get the user's enabled+consented servers as --mcp-config. Subagents

@@ -9,6 +9,7 @@
 import { runClaude as defaultRunClaude, tryParseJSON } from '../../providers/runtime.mjs';
 import { fastModelFor } from '../../kb/usage.mjs';
 import { logger } from '../../core/logger.mjs';
+import { restrictsTools } from './mode-personas.mjs';
 
 const log = logger.child({ component: 'mode-classify' });
 
@@ -38,6 +39,31 @@ export const MODES = new Set(['plan', 'assist_plan', 'review', 'document', 'ask'
 // classifier's answer. Used at the `MODES.has(parsed.mode)` check below in
 // place of MODES for that reason.
 export const CLASSIFIABLE_MODES = new Set(['plan', 'assist_plan', 'review', 'document', 'execute']);
+
+/// A requested mode meaning "classify this like `auto`, but never land on a
+/// mode that can write".
+///
+/// Exists for a client with no way to answer a confirmation. The phone is the
+/// one today: it has no approval UI and no mode picker, so every turn was
+/// pinned to `ask` — which the server takes at face value (only `auto` is
+/// ever classified), so a plan request from the phone never reached `plan` at
+/// all. It got the ASK persona, whose closing line is "tell them to ask in
+/// the Code Assistant panel".
+///
+/// Pinning to `ask` was the right instinct for `execute` and wrong for the
+/// rest: plan/assist_plan/review/document are ALL tool-restricted, and on the
+/// Agent engine a plan turn cannot even save — the plan is just the reply. So
+/// they need no confirmation channel, and this lets them through while
+/// `execute` still falls back to `ask`.
+export const AUTO_READ_ONLY = 'auto_read_only';
+
+/// The classified mode, or `ask` when it is one that could write.
+/// `restrictsTools` is the same predicate the engines use to decide whether a
+/// mode's tool roster is narrowed, so "safe without a confirmation channel"
+/// has one definition rather than a second list to keep in sync.
+export function clampToReadOnly(mode) {
+  return restrictsTools(mode) ? mode : 'ask';
+}
 
 // Fast tier by default: a 5-way mode classification in ≤128 tokens is well
 // within the chain's smallest model, and this call runs SERIALLY before

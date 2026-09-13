@@ -105,3 +105,33 @@ test('classify model: chain-derived default; opts.model overrides per turn', asy
   });
   assert.equal(seen[1], MODEL, 'without an override the chain-derived default rides');
 });
+
+// --- auto_read_only ----------------------------------------------------------
+//
+// A client with no confirmation UI (the phone) needs "classify like auto, but
+// never land somewhere that can write". Before this it sent a flat `ask`,
+// which the server takes at face value — only `auto` is ever classified — so a
+// plan request from the phone never reached plan mode at all.
+test('clampToReadOnly lets every tool-restricted mode through and refuses execute', async () => {
+  const { clampToReadOnly, AUTO_READ_ONLY } = await import('../llm_agent/runtime/mode-classify.mjs');
+  const { restrictsTools } = await import('../llm_agent/runtime/mode-personas.mjs');
+
+  // The whole point: a plan request from a phone must still plan.
+  for (const mode of ['plan', 'assist_plan', 'review', 'document', 'ask']) {
+    assert.equal(clampToReadOnly(mode), mode, `${mode} is read-only and must pass through`);
+    assert.ok(restrictsTools(mode), `${mode} must be tool-restricted for that to be safe`);
+  }
+  // And the one the pin existed for still cannot run.
+  assert.equal(clampToReadOnly('execute'), 'ask');
+  assert.ok(!restrictsTools('execute'));
+  // Anything unrecognised is refused too, rather than falling through to the
+  // full agentic default the way a plain `auto` does.
+  assert.equal(clampToReadOnly('nonsense'), 'ask');
+
+  assert.equal(AUTO_READ_ONLY, 'auto_read_only');
+  // It must NOT be a real mode: it is a REQUEST, resolved before anything
+  // downstream sees a mode, and a persona/tool-roster lookup for it would
+  // find nothing.
+  const { MODES } = await import('../llm_agent/runtime/mode-classify.mjs');
+  assert.ok(!MODES.has(AUTO_READ_ONLY), 'auto_read_only is a request, never a resolved mode');
+});

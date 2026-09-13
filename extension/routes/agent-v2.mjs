@@ -20,7 +20,7 @@ import { runAgentV2Turn, AGENT_SDK_PROVIDER } from '../llm_agent/sdk/engine.mjs'
 import { deleteSdkTranscripts } from '../llm_agent/sdk/transcripts.mjs';
 import { taskTurnResponse, makeTaskProgressEmitter } from '../llm_agent/runtime/task-session-context.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
-import { classifyCodeAssistMode, MODES } from '../llm_agent/runtime/mode-classify.mjs';
+import { classifyCodeAssistMode, MODES, AUTO_READ_ONLY, clampToReadOnly } from '../llm_agent/runtime/mode-classify.mjs';
 import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
 import { expandSlashCommand } from '../plugins/loader.mjs';
 import { getDb } from '../kb/db.mjs';
@@ -161,13 +161,22 @@ async function handleV2Stream(req, res, userId, deps) {
   // call; the classifier's own failure fallback (execute) is defended here
   // too so a classify infrastructure error can never fail the turn.
   const requestedMode = typeof body.mode === 'string' && body.mode ? body.mode : '';
+  // `auto_read_only` classifies exactly like `auto` and then refuses any mode
+  // that could write — for a client with no way to answer a confirmation (the
+  // phone). See AUTO_READ_ONLY. Its fallbacks are `ask`, not execute: a client
+  // that asked for read-only must not get the full agentic mode because the
+  // classifier had a bad day.
+  const readOnly = requestedMode === AUTO_READ_ONLY;
   let mode;
-  if (requestedMode === 'auto') {
+  if (requestedMode === 'auto' || readOnly) {
     try {
       const classified = (await deps.classifyMode(message, { userId }))?.mode;
-      mode = typeof classified === 'string' && MODES.has(classified) ? classified : DEFAULT_MODE;
+      const resolved = typeof classified === 'string' && MODES.has(classified)
+        ? classified
+        : (readOnly ? 'ask' : DEFAULT_MODE);
+      mode = readOnly ? clampToReadOnly(resolved) : resolved;
     } catch {
-      mode = DEFAULT_MODE;
+      mode = readOnly ? 'ask' : DEFAULT_MODE;
     }
   } else {
     mode = requestedMode && MODES.has(requestedMode) ? requestedMode : DEFAULT_MODE;

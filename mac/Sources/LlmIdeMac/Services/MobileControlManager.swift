@@ -766,11 +766,24 @@ final class MobileControlManager {
                 agentContext: await ctx.withRecentIssues(config: config, projectStore: projectStore),
                 model: model,
                 provider: provider,
-                // Read-only: the phone has no confirmation channel for a
-                // parked approval card, the same reasoning the menu bar and
-                // LLM Chat sheet's own `mode: "ask"` wiring uses — enforced
-                // server-side.
-                mode: "ask",
+                // Classified like the Mac's Auto, then clamped server-side to
+                // a mode that cannot write (`auto_read_only` — see
+                // llm_agent/runtime/mode-classify.mjs).
+                //
+                // It used to send a flat `"ask"`, for a real reason: the phone
+                // has no approval UI, so a write-capable mode would park a
+                // card nobody could answer. But the server only classifies
+                // `auto` — an explicit mode is taken at face value — so "make
+                // me a plan" from the phone never reached plan mode at all. It
+                // got the ASK persona, which ends by telling the user to go
+                // ask in the Code Assistant panel.
+                //
+                // The pin was right for `execute` and wrong for the rest:
+                // plan/assist_plan/review/document are all tool-restricted,
+                // and on the Agent engine a plan turn has no save-plan tool —
+                // the plan is simply the reply. So they need no confirmation
+                // channel, and `execute` still lands on `ask`.
+                mode: "auto_read_only",
                 expectedSessionID: sid,
                 onProgress: { [weak self] label in
                     guard let self, !self.isMobileCommandCancelled(commandId) else { return }
