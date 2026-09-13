@@ -43,7 +43,8 @@ enum ChatAutoChainPolicy {
         truncatedPaths: Set<String>,
         isWholeFileRewrite: Bool,
         matchPath: String?,
-        shouldAutoRunGitOp: (GitOpArgs) -> Bool
+        shouldAutoRunGitOp: (GitOpArgs) -> Bool,
+        savePlanLooksLikePlan: Bool = true
     ) -> [ChatAutoChainDecision] {
         var decisions: [ChatAutoChainDecision] = []
 
@@ -75,14 +76,22 @@ enum ChatAutoChainPolicy {
             decisions.append(.autoRunBash)
         }
 
-        // Branch 4: save-plan. Unlike the branches above, this is NOT gated
-        // by editMode or the per-turn budget — it can never touch an
-        // arbitrary file (fixed destination under llm-doc/plans/, always
-        // creates/overwrites only its own plan file), so it always saves
-        // automatically the instant it's proposed. See save-plan.md and
-        // mode-personas.mjs (PLAN_LIKE_MODES) for why it's the one write
-        // tool the plan-like modes (plan, assist_plan) get.
-        if pendingTool?.savePlanArgs != nil {
+        // Branch 4: save-plan. Not gated by editMode or the per-turn budget —
+        // it can never touch an arbitrary file (fixed destination under
+        // llm-doc/plans/, always creates/overwrites only its own plan file).
+        // See save-plan.md and mode-personas.mjs (PLAN_LIKE_MODES) for why
+        // it's the one write tool the plan-like modes get.
+        //
+        // It IS gated on the proposal being plan-SHAPED. The Agent engine's
+        // side of this now requires a human Save, because a planner's opening
+        // questions and a design ending in "does this approach make sense?"
+        // were being saved as plans, executed against, and reviewed. The same
+        // text can arrive here as a `save-plan` proposal, and "the model
+        // asked for it" is not evidence that the content is a plan. A refused
+        // auto-save is not a lost plan: `pendingTool` stays, so the proposal
+        // renders as a PendingActionCard with its title and preview and the
+        // user decides — the same card every other proposal gets.
+        if pendingTool?.savePlanArgs != nil, savePlanLooksLikePlan {
             decisions.append(.autoSavePlan)
         }
 

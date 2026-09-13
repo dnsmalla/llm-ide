@@ -419,7 +419,11 @@ extension CodeAssistantPanel {
             truncatedPaths: Set(usage?.truncatedPaths ?? []),
             isWholeFileRewrite: updateArgs?.content != nil,
             matchPath: matchPath,
-            shouldAutoRunGitOp: shouldAutoRunGitOp
+            shouldAutoRunGitOp: shouldAutoRunGitOp,
+            // The same shape test the v2 Save affordance applies — one rule
+            // for "is this a plan", whichever engine proposed it.
+            savePlanLooksLikePlan: PlanEditPolicy.looksLikePlan(
+                content: pendingTool?.savePlanArgs?.content ?? "")
         )
 
         for decision in decisions {
