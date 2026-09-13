@@ -319,6 +319,26 @@ struct QuickChatContext {
         attach(engine, toProject: resolve(config: config, projectStore: projectStore)?.projectId)
     }
 
+    /// This context plus the project's open issues.
+    ///
+    /// Separate from `resolve` because `resolve` is synchronous — its callers
+    /// build a turn inline — while fetching issues is a network round trip.
+    /// A caller that can await (the phone's chat handler) uses this; the
+    /// others get whatever the shared cache already holds.
+    ///
+    /// Why it matters: `## Recent open issues` is rendered ONLY from this
+    /// field and no tool can fetch issues, so a turn without it cannot answer
+    /// "list the issues" at all. The Code Assistant panel has always passed
+    /// them; a quick chat never did, which is why the same prompt worked on
+    /// the Mac panel and came back empty from the phone.
+    @MainActor
+    func withRecentIssues(config: AppConfig, projectStore: ProjectStore) async -> AgentContext {
+        var context = agentContext
+        let issues = await RecentIssuesResolver.contextIssues(config: config, projectStore: projectStore)
+        if !issues.isEmpty { context.recentIssues = issues }
+        return context
+    }
+
     /// `WorkspaceRoot.resolve` and `ProjectStore.activeProject` are both
     /// `@MainActor`-isolated (see `WorkspaceRoot.swift` / `ProjectStore.swift`),
     /// so this has to be too.
@@ -340,6 +360,18 @@ struct QuickChatContext {
             // "where is auth handled" can resolve a real file. `indexedRepos`
             // is left empty — it's an enhancement for the full panel, not a
             // requirement for a quick chat turn.
-            agentContext: AgentContext(indexedRepos: [], workspaceRoot: PathUtils.homeRelative(root.path)))
+            //
+            // `activeProject` IS carried: it is what the server's
+            // render-active-project context renders, and a turn without it
+            // answers "which project is this?" with nothing — while the same
+            // question in the Code Assistant panel answers fine. Cheap and
+            // synchronous (it reads settings already in memory), unlike the
+            // issue list, which a caller that can await attaches itself (see
+            // `withRecentIssues`).
+            agentContext: AgentContext(
+                activeProject: CodeAssistantPanel.deriveActiveProject(from: projectStore.activeProject)
+                    ?? CodeAssistantPanel.deriveActiveProject(fromConfig: config),
+                indexedRepos: [],
+                workspaceRoot: PathUtils.homeRelative(root.path)))
     }
 }

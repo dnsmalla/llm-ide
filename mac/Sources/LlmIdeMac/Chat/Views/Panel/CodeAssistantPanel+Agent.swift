@@ -237,80 +237,12 @@ extension CodeAssistantPanel {
     }
 
     func refreshRecentIssuesOnce() async {
-        // Determine the active project and its provider
-        let workspaceProject = Self.deriveActiveProject(from: projectStore.activeProject)
-        let configProject = Self.deriveActiveProject(fromConfig: config)
-        guard let activeProject = workspaceProject ?? configProject,
-              let provider = activeProject.provider else {
-            engine.agent.recentIssues = []
-            return
-        }
-        // If the workspace's linkedRepo is the active project and it isn't the
-        // same as the legacy Settings-active project, the config-based fetch
-        // below would hand the agent a DIFFERENT project's issues (mismatched
-        // context). Clear rather than serve wrong data; resolving the workspace
-        // GitLab URL→id for a proper fetch is the remaining Phase 2 work.
-        if let workspaceProject, let configProject,
-           workspaceProject.url != configProject.url {
-            engine.agent.recentIssues = []
-            return
-        }
-
-        // Create the appropriate RepoBackend based on provider
-        let backend: RepoBackend
-        let projectId: String
-
-        if provider == "GitLab" {
-            guard let project = config.gitLabSavedProjects.first(where: { $0.isActive }),
-                  let pid = project.resolvedId else {
-                engine.agent.recentIssues = []
-                return
-            }
-            backend = RepoBackendFactory.backend(for: .gitlab, config: config)
-            projectId = String(pid)
-        } else if provider == "GitHub" {
-            guard let repo = config.gitHubSavedRepos.first(where: { $0.isActive }),
-                  let (owner, name) = GitHubClient.ownerAndName(from: repo.url) else {
-                engine.agent.recentIssues = []
-                return
-            }
-            backend = RepoBackendFactory.backend(for: .github, config: config)
-            projectId = "\(owner)/\(name)"
-        } else {
-            engine.agent.recentIssues = []
-            return
-        }
-
-        do {
-            // Open issues only: that's what the user actively references.
-            // Closed issues clutter the prompt without much upside.
-            let filter = RepoIssueFilter(state: .opened, search: "", labelName: "")
-            let issues = try await backend.listIssues(projectId: projectId, filter: filter, page: 1)
-
-            // Cap at 15 so the prompt context doesn't blow up; pick the
-            // most recently updated. Sort by updatedAt (descending).
-            let capped = Array(
-                issues
-                    .sorted { $0.updatedAt > $1.updatedAt }
-                    .prefix(15)
-            )
-
-            engine.agent.recentIssues = capped.map { issue in
-                let desc = issue.body ?? ""
-                let snippet = desc.isEmpty ? nil : String(desc.prefix(160))
-                return AgentContext.RecentIssue(
-                    iid: issue.number,  // Use `number` (GitLab iid, GitHub number)
-                    title: issue.title,
-                    state: issue.state,   // "opened" / "closed"
-                    labels: issue.labels,
-                    snippet: snippet,
-                    updatedAt: issue.updatedAt
-                )
-            }
-        } catch {
-            // Don't surface — agent just sees an empty list this turn.
-            engine.agent.recentIssues = []
-        }
+        // The fetch itself lives in `RecentIssuesResolver` so the phone's
+        // bridge grounds its turns in the same issues this does. It used to
+        // live here, which is why the phone had none: the same prompt listed
+        // issues on the Mac and listed nothing from the phone.
+        engine.agent.recentIssues = await RecentIssuesResolver.fetch(
+            config: config, projectStore: projectStore)
     }
 
     func commonAncestor(_ paths: [String]) -> String {

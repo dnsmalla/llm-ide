@@ -758,7 +758,12 @@ final class MobileControlManager {
                 message: message,
                 skillIds: [],
                 attachments: [],
-                agentContext: ctx.agentContext,
+                // Topped up with the project's open issues — this handler can
+                // await, and `## Recent open issues` is the only way an agent
+                // learns about them (no tool fetches issues). Without it the
+                // phone answered "list the issues" with nothing while the Mac
+                // panel, which has always passed them, listed them fine.
+                agentContext: await ctx.withRecentIssues(config: config, projectStore: projectStore),
                 model: model,
                 provider: provider,
                 // Read-only: the phone has no confirmation channel for a

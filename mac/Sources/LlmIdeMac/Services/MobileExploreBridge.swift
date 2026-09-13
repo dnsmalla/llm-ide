@@ -66,10 +66,18 @@ enum MobileExploreBridge {
             }
         }
 
+        // The SAME issues the Mac panel passes. There is no issue-reading
+        // tool in the registry — `## Recent open issues` is rendered purely
+        // from this field — so a nil here meant a phone turn could not answer
+        // "list the issues" at all, while the same prompt on the Mac could.
+        // Cache-first: a phone turn moments after a Mac refresh costs nothing.
+        let recentIssues = await RecentIssuesResolver.contextIssues(
+            config: config, projectStore: projectStore)
+
         return AgentContext(
             activeProject: activeProject,
             indexedRepos: [],
-            recentIssues: nil,
+            recentIssues: recentIssues.isEmpty ? nil : recentIssues,
             workspaceRoot: workspaceRoot,
             sessionId: sessionId,
             chatSessionId: sessionId,
