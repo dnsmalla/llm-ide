@@ -113,20 +113,34 @@ extension CodeAssistantPanel {
         }
     }
 
-    /// Walk the history in reverse, find the most recent assistant
-    /// turn that follows a user turn whose content matches `prompt`.
-    /// Falls back to the latest assistant turn if no exact match.
+    /// Walk the history in reverse, find the most recent assistant turn that
+    /// follows a user turn asking the same question as `prompt`.
+    ///
+    /// "The same question" is the nudge's OWN definition — `hashForPrompt`,
+    /// which lowercases, collapses whitespace and trims trailing punctuation.
+    /// Matching on exact string equality here while the counter matched on
+    /// the normalised hash meant the two could disagree about the very
+    /// question being saved: "How does auth work?" and "how does auth work"
+    /// count as one question (so the nudge fires) but only one of them is the
+    /// literal `prompt` handed to this method.
+    ///
+    /// And a miss returns nil rather than "the last assistant turn in the
+    /// chat". That fallback wrote whatever the agent happened to say last
+    /// into project memory as the answer to this question — a durable,
+    /// silent, wrong pairing. `saveLatestAnswer` already reports an empty
+    /// answer as "No agent answer found yet", which is the honest outcome.
     func mostRecentAnswer(forPrompt prompt: String) -> String? {
         let history = engine.messages
-        for i in stride(from: history.count - 1, through: 0, by: -1) {
-            let t = history[i]
-            if t.role == .assistant {
-                if i > 0 && history[i - 1].role == .user && history[i - 1].content == prompt {
-                    return t.content
-                }
-            }
+        let wanted = session.hashForPrompt(prompt)
+        guard !wanted.isEmpty else { return nil }
+        for i in stride(from: history.count - 1, through: 1, by: -1) {
+            let turn = history[i]
+            guard turn.role == .assistant, !turn.content.isEmpty else { continue }
+            let asked = history[i - 1]
+            guard asked.role == .user, session.hashForPrompt(asked.content) == wanted else { continue }
+            return turn.content
         }
-        return history.last(where: { $0.role == .assistant })?.content
+        return nil
     }
 
     /// Creates the issue via the resolved backend (GitLab or GitHub) with
