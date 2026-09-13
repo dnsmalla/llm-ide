@@ -156,6 +156,40 @@ extension CodeAssistantPanel {
         engine.agent.planExecution = tracker
     }
 
+    /// Bring the chat's saved plan level with the code after a review fix.
+    ///
+    /// Fired by `autoChainPendingAction`, not by a button: the fix is whatever
+    /// the user typed after reading the findings, so the trigger is the edit
+    /// itself (`PlanReviewPolicy.updatesPlanAfterFix`). The reply is the
+    /// rewritten document and is saved back into the SAME file — the one path
+    /// that writes a plan to disk without being asked, which is why the policy
+    /// that gates it is pure and pinned by the lab.
+    @MainActor
+    func updatePlanAfterReviewFix() {
+        // A parked proposal is a write the agent is waiting on; firing now
+        // would abandon it unanswered. The next fix turn re-triggers this.
+        guard engine.agent.pendingTool == nil else { return }
+        guard let path = sessionPlanPath else { return }
+        let url = URL(fileURLWithPath: path)
+        // Work from the document on disk, exactly as the execute turn does.
+        switch addFile(url: url) {
+        case .added, .duplicate: break
+        case .notText, .unreadable: return   // nothing to rewrite from
+        }
+        let title = engine.agent.planExecution?.planTitle
+            ?? url.deletingPathExtension().lastPathComponent
+        let outgoing = PlanReviewPolicy.planUpdateMessage(planTitle: title)
+        let meta = ChatMessage.Metadata(planUpdateDisplay: "Update plan after review fixes")
+        let attachmentsSnapshot = attachmentState.attachments
+        if engine.busy {
+            engine.enqueue(outgoing, skillIds: [], userMetadata: meta,
+                           attachments: attachmentsSnapshot)
+        } else {
+            engine.startTurn(outgoing, skillIds: [], userMetadata: meta,
+                             attachments: attachmentsSnapshot)
+        }
+    }
+
     /// The change this execution produced, as one patch.
     ///
     /// NOT just `git diff HEAD`: a plan execution usually ends with the agent

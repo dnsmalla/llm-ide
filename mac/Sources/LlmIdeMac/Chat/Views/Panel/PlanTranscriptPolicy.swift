@@ -227,6 +227,72 @@ public enum PlanReviewPolicy {
         return .unclear
     }
 
+    /// The canned instruction the automatic plan update sends.
+    ///
+    /// A rewrite, not an append: the plan's job is to describe the work, and
+    /// once review has changed the work the document describes something that
+    /// is no longer true. The turn must not touch code — the fixing already
+    /// happened; this one only brings the document level with it.
+    public static func planUpdateMessage(planTitle: String) -> String {
+        """
+        The review of "\(planTitle)" found problems and the code has since been changed to \
+        answer them, so the attached plan no longer describes the work that exists.
+
+        Rewrite it to match the FINAL state: keep the title, fold the fixes into the tasks \
+        they belong to, and drop or correct anything the fixes made untrue. Someone reading \
+        it should see what was built, not what was first intended.
+
+        Deliver the complete document as your reply — it is saved back into the same file. \
+        Do not modify any files in this turn, and do not start new work.
+        """
+    }
+
+    /// File-writing tools, across both engines and both naming schemes: the
+    /// SDK's native `Edit`/`Write`/`MultiEdit`/`NotebookEdit` and llm-ide's
+    /// own `update-file`. Compared lowercased and with the `mcp__llmide__`
+    /// prefix stripped, which is how a step's tool name arrives on the wire.
+    public static let codeChangingTools: Set<String> = [
+        "edit", "write", "multiedit", "notebookedit", "update-file",
+    ]
+
+    /// Whether `toolName` (as recorded on a `ToolStep`) wrote to a file.
+    public static func isCodeChangingTool(_ toolName: String) -> Bool {
+        var name = toolName.lowercased()
+        if let range = name.range(of: "mcp__", options: .backwards) {
+            // `mcp__llmide__update-file` → `update-file`; the server namespaces
+            // every llmide tool this way and the step records the wire name.
+            name = String(name[range.upperBound...])
+            if let sep = name.range(of: "__") { name = String(name[sep.upperBound...]) }
+        }
+        return codeChangingTools.contains(name)
+    }
+
+    /// Whether a finished turn should trigger an automatic rewrite of the
+    /// chat's plan file.
+    ///
+    /// The trigger is the WORK changing under a plan that has already been
+    /// executed and reviewed: once review asks for changes, every turn that
+    /// edits a file leaves the saved plan describing something that is no
+    /// longer what the code does. There is no Fix button to key on — a fix is
+    /// whatever the user typed — so the signal is the edit itself.
+    ///
+    /// Deliberately narrow, because this is the ONE path that writes a plan to
+    /// disk without the user asking:
+    /// - only after a review that asked for changes (`.pass` and `.unclear`
+    ///   are not open findings, and a plan nobody reviewed is not this flow),
+    /// - only when the turn actually wrote a file,
+    /// - never for the update turn itself, or the rewrite would edit nothing,
+    ///   be saved, and qualify again,
+    /// - and only when the chat already HAS a plan file: this updates a
+    ///   document the user saved, it never creates one.
+    public static func updatesPlanAfterFix(verdict: PlanReviewVerdict?,
+                                           turnChangedCode: Bool,
+                                           isPlanUpdateTurn: Bool,
+                                           hasPlanFile: Bool) -> Bool {
+        guard verdict == .changesRequested else { return false }
+        return turnChangedCode && !isPlanUpdateTurn && hasPlanFile
+    }
+
     /// Headline + explanation for the verdict strip on the finish card.
     public struct Display: Equatable, Sendable {
         public let title: String

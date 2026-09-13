@@ -657,6 +657,7 @@ struct ChatMessageList: View {
         return meta.planExecuteDisplay
             ?? meta.planWriteDisplay
             ?? meta.planReviewDisplay
+            ?? meta.planUpdateDisplay
             ?? turn.content
     }
 

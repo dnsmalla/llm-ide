@@ -331,13 +331,42 @@ extension CodeAssistantPanel {
         _ pendingTool: PendingTool?,
         usage: LlmIdeAPIClient.CodeAssistResponse.Usage?
     ) async {
-        // No write-phase auto-save any more. It existed because the
-        // PlanSavedCard's "Write full plan" button fired a turn whose reply
-        // WAS the document, and pressing the button was the go-ahead to save
-        // it. Nothing fires such a turn now — the plan is written in the same
-        // turn as the design — and nothing else in this method may save a
-        // plan on the model's say-so: the plan reaches disk when the user
-        // presses Save on it, and only then.
+        // A NEW plan reaches disk only when the user presses Save. The
+        // write-phase auto-save that used to sit here belonged to the "Write
+        // full plan" button, which no longer exists — the plan is written in
+        // the same turn as the design now. The one exception is below: an
+        // EXISTING plan file, already saved and already executed, being
+        // brought level with code that review changed.
+        //
+        // Landing: the reply to the update turn IS the rewritten document, so
+        // it goes straight back into the same file. Gated on shape, so a turn
+        // that answered with a question instead leaves the old plan alone.
+        if pendingTool == nil,
+           let lastUser = engine.messages.last(where: { $0.role == .user }),
+           lastUser.metadata?.planUpdateDisplay != nil,
+           let reply = engine.messages.last(where: { $0.role == .assistant }),
+           reply.status == .done,
+           reply.metadata?.planSaved != true,
+           PlanEditPolicy.looksLikePlan(content: reply.content) {
+            await savePlanFromMessage(reply)
+        }
+        // Firing: review asked for changes, and this turn edited a file. The
+        // saved plan now describes work that no longer matches the code, so
+        // rewrite it. `planUpdateDisplay` on the turn above is what keeps the
+        // rewrite from qualifying as its own trigger.
+        if pendingTool == nil,
+           let reply = engine.messages.last(where: { $0.role == .assistant }),
+           reply.status == .done,
+           PlanReviewPolicy.updatesPlanAfterFix(
+               verdict: engine.agent.planExecution?.reviewVerdict,
+               turnChangedCode: reply.toolSteps.contains {
+                   PlanReviewPolicy.isCodeChangingTool($0.tool ?? "")
+               },
+               isPlanUpdateTurn: engine.messages.last(where: { $0.role == .user })?
+                   .metadata?.planUpdateDisplay != nil,
+               hasPlanFile: sessionPlanPath != nil) {
+            updatePlanAfterReviewFix()
+        }
         // Review-phase landing. The finish card's Review button fires a Code
         // Review turn stamped `planReviewDisplay`; its reply is the verdict
         // the card shows and the thing that unlocks Push. Same gating shape

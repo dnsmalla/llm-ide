@@ -218,6 +218,11 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         /// marker `autoChainPendingAction` reads to land that turn's reply
         /// on the plan-execution tracker as its verdict.
         var planReviewDisplay: String?
+        /// Compact label for the plan-update turn the app fires itself after
+        /// a review fix — and the marker `autoChainPendingAction` reads to
+        /// save that turn's reply back into the chat's plan file. Also what
+        /// stops the update from triggering another update.
+        var planUpdateDisplay: String?
     }
 
     /// User choice on a saved-plan card — persisted so reloaded sessions

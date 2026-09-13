@@ -746,6 +746,56 @@ do {
            "an unsaved plan reply is not collapsed — nothing else is showing it")
 }
 
+// PlanReviewPolicy.updatesPlanAfterFix — the ONE path that writes a plan to
+// disk without the user asking for it, so every leg of the gate is pinned.
+do {
+    expect(PlanReviewPolicy.updatesPlanAfterFix(
+        verdict: .changesRequested, turnChangedCode: true,
+        isPlanUpdateTurn: false, hasPlanFile: true),
+           "review asked for changes and this turn edited a file — the plan is now stale")
+
+    expect(!PlanReviewPolicy.updatesPlanAfterFix(
+        verdict: .pass, turnChangedCode: true,
+        isPlanUpdateTurn: false, hasPlanFile: true),
+           "a passing review leaves no findings to fix, so an edit is ordinary work")
+    expect(!PlanReviewPolicy.updatesPlanAfterFix(
+        verdict: .unclear, turnChangedCode: true,
+        isPlanUpdateTurn: false, hasPlanFile: true),
+           "nor does a review that claimed nothing")
+    expect(!PlanReviewPolicy.updatesPlanAfterFix(
+        verdict: nil, turnChangedCode: true,
+        isPlanUpdateTurn: false, hasPlanFile: true),
+           "and a plan nobody reviewed is not this flow at all")
+
+    expect(!PlanReviewPolicy.updatesPlanAfterFix(
+        verdict: .changesRequested, turnChangedCode: false,
+        isPlanUpdateTurn: false, hasPlanFile: true),
+           "a turn that only talked about the findings changed nothing to describe")
+    expect(!PlanReviewPolicy.updatesPlanAfterFix(
+        verdict: .changesRequested, turnChangedCode: true,
+        isPlanUpdateTurn: true, hasPlanFile: true),
+           "the update turn must not trigger another update — that is the loop")
+    expect(!PlanReviewPolicy.updatesPlanAfterFix(
+        verdict: .changesRequested, turnChangedCode: true,
+        isPlanUpdateTurn: false, hasPlanFile: false),
+           "with no saved plan there is nothing to update — this never CREATES one")
+
+    // Tool names arrive on a ToolStep in either engine's spelling.
+    for name in ["Edit", "Write", "MultiEdit", "NotebookEdit",
+                 "mcp__llmide__update-file", "update-file"] {
+        expect(PlanReviewPolicy.isCodeChangingTool(name), "\(name) writes to a file")
+    }
+    for name in ["Read", "Grep", "mcp__llmide__read-file", "mcp__llmide__find-code",
+                 "AskUserQuestion", ""] {
+        expect(!PlanReviewPolicy.isCodeChangingTool(name), "\(name) does not")
+    }
+
+    let msg = PlanReviewPolicy.planUpdateMessage(planTitle: "Clear Session Lifecycle")
+    expect(msg.contains("Clear Session Lifecycle"), "the update names the plan it rewrites")
+    expect(msg.contains("Do not modify any files in this turn"),
+           "the fixing already happened — this turn only moves the document")
+}
+
 // PlanReviewPolicy — the verdict gates Push, so it is read off an explicit
 // marker line, not inferred from prose, and a reply that echoes the prompt's
 // own menu of verdicts is unclear rather than a coin flip.
