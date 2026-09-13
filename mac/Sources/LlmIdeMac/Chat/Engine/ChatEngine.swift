@@ -911,15 +911,31 @@ final class ChatEngine {
     /// recorded on the message, so there is nothing to recover them from. The
     /// composer's current selection is what a re-send would pick up anyway if
     /// the user re-typed the prompt, and that's the honest equivalent here.
+    ///
+    /// It DOES carry the plan-pipeline flags and the files the failed turn
+    /// was sent with. Without them a retried Execute turn re-sent the canned
+    /// prompt with `planExecute` false and no attachment — so the server
+    /// injected no execution skill and the agent never saw the plan document
+    /// — while the transcript still showed "Execute plan: … (N steps)" from
+    /// the metadata, which DOES survive. A retry that silently does something
+    /// else than the turn it replaces is worse than no retry button.
+    /// `currentTurnAttachments` is the right source: it holds what the turn
+    /// in flight was actually sent (the composer cleared its chips on send),
+    /// and only a NEW user turn overwrites it.
     func retryFailedTurn(_ id: UUID) {
         guard !busy, canRetryFailedTurn(id),
               let idx = messages.firstIndex(where: { $0.id == id }) else { return }
         let userTurn = messages[idx - 1]
+        let meta = userTurn.metadata
+        let files = currentTurnAttachments
         messages.removeSubrange((idx - 1)...idx)
         // The banner described the failure being retried; a retry that fails
         // again raises its own.
         error = nil
-        startTurn(userTurn.content, userMetadata: userTurn.metadata)
+        startTurn(userTurn.content, userMetadata: meta,
+                  planExecute: meta?.planExecuteDisplay != nil,
+                  planWrite: meta?.planWriteDisplay != nil,
+                  attachments: files.isEmpty ? nil : files)
     }
 
     /// Tag the placeholder message for a failed round-trip: `.failed` status
