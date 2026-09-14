@@ -5,8 +5,18 @@ import Foundation
 /// `resolvedMode`) — raw values are wire contracts, not renameable.
 enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption {
     case auto
-    /// Read-only question answering — the cheapest mode, and the only one the
-    /// picker offers that cannot change anything.
+    /// Read-only question answering — the only mode the picker offers that
+    /// cannot change anything, and the smallest prompt.
+    ///
+    /// MEASURED on this install: the Ask prefix is 30,920 tokens against
+    /// Execute's 52,102 (41% smaller), which is ~3.1K vs ~5.2K per turn once
+    /// the cache is warm. But switching INTO it cost 38,676 — a mode change
+    /// alters the `tools` array, and tools render before `system` in the
+    /// cache key, so the whole prefix (the SDK's own ~48.8K preset included)
+    /// is rewritten. Break-even against simply staying in Execute is ~17
+    /// turns. Cheaper for a run of questions; more expensive for one. The
+    /// help text says so, because "read-only so it must be cheaper" is the
+    /// obvious wrong conclusion.
     ///
     /// The server has always supported it (`mode-personas.mjs`'s `ask`), and
     /// the menu bar, the quick-chat sheet and the phone have always sent it;
@@ -61,7 +71,7 @@ enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption
     var help: String {
         switch self {
         case .auto: return "Auto — Claude classifies your request and picks a mode itself"
-        case .ask: return "Ask — answer a question about this project, read-only; the cheapest mode (no edit/command tools are loaded at all)"
+        case .ask: return "Ask — answer a question about this project, read-only (no edit/command tools are loaded). Cheapest per turn, but SWITCHING mode rebuilds the prompt cache, so it pays off over a run of questions, not a single one"
         case .plan: return "Plan — work up a design together (questions, approaches, your approval), then write and save the plan; no file edits or commands except saving it"
         case .assistPlan: return "Assist Plan — same pipeline, but it grills your stated plan in rounds of numbered questions instead of exploring approaches; no file edits or commands except saving the finished plan"
         case .review: return "Review — give code-review feedback; no file edits or commands"
