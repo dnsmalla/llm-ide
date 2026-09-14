@@ -366,27 +366,31 @@ do {
 // message as a planner. The lifecycle releases it back to Auto, the only
 // setting that re-decides the next turn.
 do {
-    let planStages: Set<String> = ["plan", "assist_plan"]
-    expect(AgentV2Selection.releasesStickyMode(current: "plan", releasing: planStages),
+    let planStages = ModePolicy.planStages
+    expect(ModePolicy.releasesStickyMode(current: "plan", releasing: planStages),
            "a saved plan hands Plan back to Auto")
-    expect(AgentV2Selection.releasesStickyMode(current: "assist_plan", releasing: planStages),
+    expect(ModePolicy.releasesStickyMode(current: "assist_plan", releasing: planStages),
            "and Assist Plan too")
-    expect(!AgentV2Selection.releasesStickyMode(current: "auto", releasing: planStages),
+    expect(!ModePolicy.releasesStickyMode(current: "auto", releasing: planStages),
            "Auto is already released; releasing it again would be a change that changes nothing")
     // The guard that matters: a mode the user picked by hand is not the
     // flow's to undo. Saving a plan while in Execute leaves Execute alone.
-    expect(!AgentV2Selection.releasesStickyMode(current: "execute", releasing: planStages),
+    expect(!ModePolicy.releasesStickyMode(current: "execute", releasing: planStages),
            "a save never overrules a deliberately-picked Execute")
-    expect(!AgentV2Selection.releasesStickyMode(current: "review", releasing: planStages),
+    expect(!ModePolicy.releasesStickyMode(current: "review", releasing: planStages),
            "nor any other mode outside the stage being released")
     // The end of a RUN releases the mode that run set, and nothing else.
-    let runStages: Set<String> = ["execute", "plan", "assist_plan"]
-    expect(AgentV2Selection.releasesStickyMode(current: "execute", releasing: runStages),
+    let runStages = ModePolicy.runStages
+    expect(ModePolicy.releasesStickyMode(current: "execute", releasing: runStages),
            "a finished run hands Execute back")
-    expect(!AgentV2Selection.releasesStickyMode(current: "review", releasing: runStages),
+    expect(!ModePolicy.releasesStickyMode(current: "review", releasing: runStages),
            "but still not a mode the run never set")
-    expect(AgentV2Selection.autoMode == "auto",
+    expect(ModePolicy.autoMode == "auto",
            "the release target is the wire value the server classifies on")
+    expect(ModePolicy.runAndReviewStages == ModePolicy.runStages.union(ModePolicy.reviewStage),
+           "dismissing a finished run releases the run's modes AND Code Review — one set, built from the others")
+    expect(ModePolicy.reviewStage == ["review"],
+           "releasing a review takes back Code Review only")
 }
 
 // PlanExecutionSummaryPolicy — what the finish card may claim. The tracker
@@ -915,12 +919,12 @@ do {
     // `dismissPlanExecution` on its common "nothing to commit" path and
     // release the picker as a side effect; with Commit gone, the RUN's end
     // has to do it or the chat answers "I want a plan to…" as an Execute turn.
-    let runStagesNow: Set<String> = ["execute", "plan", "assist_plan"]
-    expect(AgentV2Selection.releasesStickyMode(current: "execute", releasing: runStagesNow),
+    let runStagesNow = ModePolicy.runStages
+    expect(ModePolicy.releasesStickyMode(current: "execute", releasing: runStagesNow),
            "a settled run hands Execute back to Auto without waiting for Dismiss")
-    expect(!AgentV2Selection.releasesStickyMode(current: "auto", releasing: runStagesNow),
+    expect(!ModePolicy.releasesStickyMode(current: "auto", releasing: runStagesNow),
            "releasing Auto changes nothing")
-    expect(!AgentV2Selection.releasesStickyMode(current: "review", releasing: runStagesNow),
+    expect(!ModePolicy.releasesStickyMode(current: "review", releasing: runStagesNow),
            "a run never set Code Review, so settling must not take it away")
 
     expect(!PlanReviewPolicy.allowsPush(reviewed: false),

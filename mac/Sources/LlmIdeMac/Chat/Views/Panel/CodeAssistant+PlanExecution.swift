@@ -33,7 +33,7 @@ extension CodeAssistantPanel {
         // next message is classified on its own merits instead of staying an
         // Execute turn forever. See `releaseStickyMode`. `.review` is in the
         // set because the finish card's Review button puts the picker there.
-        releaseStickyMode(from: [.execute, .plan, .assistPlan, .review])
+        releaseStickyMode(from: ModePolicy.runAndReviewStages)
     }
 
     // MARK: - Review
@@ -137,7 +137,7 @@ extension CodeAssistantPanel {
     @MainActor
     func releasePlanReviewTurn() {
         attachmentState.attachments.removeAll { $0.path == Self.reviewDiffLabel }
-        releaseStickyMode(from: [.review])
+        releaseStickyMode(from: ModePolicy.reviewStage)
     }
 
     @MainActor

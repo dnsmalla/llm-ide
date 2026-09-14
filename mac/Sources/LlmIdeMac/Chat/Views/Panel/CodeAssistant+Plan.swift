@@ -419,10 +419,10 @@ extension CodeAssistantPanel {
     /// Execute (or anything outside `modes`) keeps it — this exists to undo
     /// stickiness, never to overrule a choice.
     @MainActor
-    func releaseStickyMode(from modes: Set<CodeAssistMode> = [.plan, .assistPlan]) {
-        guard AgentV2Selection.releasesStickyMode(
+    func releaseStickyMode(from stages: Set<String> = ModePolicy.planStages) {
+        guard ModePolicy.releasesStickyMode(
             current: modelState.selectedMode.rawValue,
-            releasing: Set(modes.map(\.rawValue)))
+            releasing: stages)
         else { return }
         modelState.selectedMode = .auto
     }

@@ -537,7 +537,7 @@ struct CodeAssistantPanel: View {
         // a mode the user picked by hand is untouched (see releaseStickyMode).
         engine.onPlanExecutionSettled = {
             guard ObjectIdentifier(engine) == wiredID else { return }
-            releaseStickyMode(from: [.execute, .plan, .assistPlan])
+            releaseStickyMode(from: ModePolicy.runStages)
         }
         engine.onRecordPrompt = { _ = session.record(prompt: $0) }
         engine.onNudge = { prompt in

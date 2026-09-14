@@ -61,7 +61,7 @@ public enum PlanRequestPolicy {
     /// plan-like mode: already there. That leaves exactly the modes that will
     /// answer a planning request as something else.
     public static func offersPlanSwitch(draft: String, currentMode: String) -> Bool {
-        guard currentMode != AgentV2Selection.autoMode else { return false }
+        guard currentMode != ModePolicy.autoMode else { return false }
         guard !AgentV2Selection.planLikeModes.contains(currentMode) else { return false }
         return looksLikePlanRequest(draft)
     }
