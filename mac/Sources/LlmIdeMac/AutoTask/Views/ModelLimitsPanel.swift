@@ -29,6 +29,19 @@ struct ModelLimitsPanel: View {
     @State private var expanded: Set<String> = []
     @State private var lastUpdated: Date?
     @State private var didInitProvider = false
+    @State private var subscriptionUsage: ClaudeSubscriptionUsageClient.Usage?
+    @State private var subscriptionUsageError: String?
+    @State private var loadingSubscriptionUsage = false
+    /// Bumped on every `loadSubscriptionUsage()` call and compared on
+    /// return so a superseded call (provider switched mid-flight, or a
+    /// later poll tick landed first) can never clobber a fresher result —
+    /// see the doc comment on `loadSubscriptionUsage()`.
+    @State private var subscriptionUsageGeneration = 0
+    /// Set on a terminal, credential-shaped failure (no credentials found /
+    /// keychain denied / session expired) so the 30s poll stops retrying a
+    /// keychain prompt or file read that cannot succeed until the user acts
+    /// (signs in, switches provider). Cleared on every provider switch.
+    @State private var subscriptionUsageSuppressed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -43,6 +56,7 @@ struct ModelLimitsPanel: View {
                         autoSwitchBanner
                         usageSection
                         rateLimitSection
+                        subscriptionUsageSection
                         footerNote
                     }
                     .padding(.horizontal, 28)
@@ -68,7 +82,12 @@ struct ModelLimitsPanel: View {
                 try? await Task.sleep(for: .seconds(30))
                 if Task.isCancelled { break }
                 if !dirty && !saving { await load() }
+                await loadSubscriptionUsage()
             }
+        }
+        .task(id: providerKey) {
+            subscriptionUsageSuppressed = false
+            await loadSubscriptionUsage()
         }
     }
 
@@ -352,6 +371,91 @@ struct ModelLimitsPanel: View {
         }
     }
 
+    // MARK: - Claude subscription usage (real OAuth quota, Claude provider only)
+
+    @ViewBuilder
+    private var subscriptionUsageSection: some View {
+        if providerKey == ClaudeCLI.provider {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(spacing: Spacing.sm) {
+                    Text("Claude subscription usage").font(Typography.title).foregroundStyle(theme.current.text)
+                    Text("auto-refreshes").font(Typography.captionStrong).foregroundStyle(theme.current.textMuted)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(theme.current.surface).clipShape(Capsule())
+                    Spacer()
+                }
+                if let usage = subscriptionUsage {
+                    VStack(spacing: Spacing.sm) {
+                        if usage.fiveHour.pct != nil || usage.sevenDay.pct != nil {
+                            subscriptionRow("Session (5h)", pct: usage.fiveHour.pct, resetsAt: usage.fiveHour.resetsAt)
+                            subscriptionRow("Weekly (7d)", pct: usage.sevenDay.pct, resetsAt: usage.sevenDay.resetsAt)
+                        }
+                        if let extra = usage.extra {
+                            subscriptionRow("Overage credits", pct: extra.pct, resetsAt: nil,
+                                            detail: extraUsageDetail(extra))
+                        }
+                        if usage.mode == "unknown" {
+                            Text("Anthropic didn't return a recognizable usage shape for this account.")
+                                .font(Typography.caption).foregroundStyle(theme.current.textMuted)
+                        }
+                    }
+                    .padding(Spacing.md)
+                    .background(theme.current.surface)
+                    .overlay(RoundedRectangle(cornerRadius: Radius.sm).strokeBorder(theme.current.border, lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
+                } else if loadingSubscriptionUsage {
+                    ProgressView().controlSize(.small).padding(.vertical, 8)
+                }
+                // A subordinate note, not a replacement: a transient failure
+                // (e.g. a network blip on a poll tick) keeps whatever usage
+                // is already on screen above instead of blanking it.
+                if let err = subscriptionUsageError {
+                    Text(err)
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func subscriptionRow(_ label: String, pct: Double?, resetsAt: Date?, detail: String? = nil) -> some View {
+        let frac = max(0, min(1, (pct ?? 0) / 100))
+        let color: Color = frac > 0.8 ? theme.current.danger : (frac > 0.5 ? theme.current.accent4 : theme.current.accent3)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label).font(Typography.caption).foregroundStyle(theme.current.text)
+                Spacer()
+                Text(pct != nil ? "\(Int((frac * 100).rounded()))% used" : "—")
+                    .font(Typography.caption).foregroundStyle(theme.current.textMuted)
+                if let detail {
+                    Text("· \(detail)").font(Typography.caption).foregroundStyle(theme.current.textMuted)
+                }
+                if let resetsAt {
+                    Text("· resets \(relative(resetsAt))").font(Typography.caption).foregroundStyle(theme.current.textMuted)
+                }
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(theme.current.border.opacity(0.5))
+                    Capsule().fill(color).frame(width: geo.size.width * CGFloat(pct != nil ? frac : 0))
+                }
+            }
+            .frame(height: 6)
+        }
+    }
+
+    /// "$4.50 / $50.00" when both amounts are known — `used_credits`/
+    /// `monthly_limit` from the API are already cents, same as the ledger's
+    /// own `format_cents_usd` in statusline.sh.
+    private func extraUsageDetail(_ extra: ClaudeSubscriptionUsageClient.ExtraUsage) -> String? {
+        guard let used = extra.usedCents else { return nil }
+        let usedFmt = String(format: "$%.2f", Double(used) / 100)
+        guard let limit = extra.limitCents, limit > 0 else { return usedFmt }
+        return "\(usedFmt) / \(String(format: "$%.2f", Double(limit) / 100))"
+    }
+
     // MARK: - Footer + bottom bar
 
     private var footerNote: some View {
@@ -506,6 +610,59 @@ struct ModelLimitsPanel: View {
             status = nil
         } catch {
             status = (false, "Couldn't load usage: \(error.localizedDescription)")
+        }
+    }
+
+    /// Called both from `.task(id: providerKey)` (fires on every provider
+    /// switch, cancelling any in-flight fetch) and from the 30s polling loop
+    /// above. `key`/`providerKey == key` guards every write against a
+    /// cancelled call losing the race and overwriting a newer result —
+    /// `URLSession` still resumes a cancelled request's continuation with
+    /// `URLError.cancelled`, with no ordering guarantee against the task
+    /// that superseded it.
+    /// Called both from `.task(id: providerKey)` (fires on every provider
+    /// switch, cancelling any in-flight fetch) and from the 30s polling loop
+    /// above. Every write is guarded by comparing a generation number
+    /// captured at call start against the current one: a superseded call
+    /// (provider switched mid-flight, or a poll tick that landed after a
+    /// newer one started) always loses, regardless of whether it fails,
+    /// succeeds, or is cancelled — a plain `Task.isCancelled` check isn't
+    /// enough since a cancelled `URLSession` request still resumes its
+    /// continuation, racing the call that superseded it.
+    private func loadSubscriptionUsage() async {
+        guard api != nil, providerKey == ClaudeCLI.provider else {
+            if providerKey != ClaudeCLI.provider { subscriptionUsage = nil; subscriptionUsageError = nil }
+            return
+        }
+        guard !subscriptionUsageSuppressed else { return }
+
+        subscriptionUsageGeneration += 1
+        let generation = subscriptionUsageGeneration
+        loadingSubscriptionUsage = true
+        do {
+            let usage = try await ClaudeSubscriptionUsageClient.fetchUsage()
+            guard generation == subscriptionUsageGeneration else { return }
+            loadingSubscriptionUsage = false
+            subscriptionUsage = usage
+            subscriptionUsageError = nil
+        } catch {
+            guard generation == subscriptionUsageGeneration else { return }
+            loadingSubscriptionUsage = false
+            subscriptionUsageError = error.localizedDescription
+            // Keep whatever usage is already on screen for a transient
+            // failure (network blip). Only a terminal, credential-shaped
+            // failure — one no retry can fix without the user acting —
+            // clears it and stops the 30s poll from repeating a keychain
+            // prompt or file read that cannot succeed.
+            if let usageError = error as? ClaudeSubscriptionUsageClient.UsageError {
+                switch usageError {
+                case .noCredentials, .keychainDenied, .sessionExpired:
+                    subscriptionUsageSuppressed = true
+                    subscriptionUsage = nil
+                case .httpError, .invalidResponse:
+                    break
+                }
+            }
         }
     }
 
