@@ -231,18 +231,15 @@ final class ChatEngine {
     /// completed it instead). Cleared at the start of the next turn; the
     /// transcript renders it dismissibly next to the error bubble.
     var agentV2Notice: String?
-    /// Fired with the mode the SERVER resolved for a turn — live from the
-    /// Agent engine's `mode_set` event (right after the agent starts), and
-    /// from the turn result on every engine, which is the earliest the
-    /// legacy stream can say.
-    ///
-    /// The panel answers it by moving the composer's mode picker onto that
-    /// mode, so the picker names what the agent is ACTUALLY doing rather
-    /// than only what was asked for. Only "auto" is ever re-decided by the
-    /// server (routes/agent-v2.mjs classifies exactly that one), so for an
-    /// explicitly picked mode this resolves to the same value and changes
-    /// nothing.
-    var onResolvedMode: (String) -> Void = { _ in }
+    /// The mode the SERVER resolved for the current/last turn — live from the
+    /// Agent engine's `mode_set` event (right after the agent starts) and
+    /// again from every engine's turn result (the earliest the legacy stream
+    /// can say). ONE state for both sources; the panel observes it and applies
+    /// `ModePolicy.pickerMode`. Replaces the `onResolvedMode` hook, which
+    /// carried the same value by a second route and had to be identity-guarded
+    /// against a parked background engine flipping the displayed chat's picker
+    /// — observing THIS engine's state has no such problem.
+    var resolvedMode: String?
     /// Sidebar section this engine's chats belong to. Fixed for the engine's
     /// lifetime: it scopes the session files (`ChatSession.scope`), the
     /// `"chat.current.<scope>"` relaunch pointer, and `switchSession`'s
@@ -545,7 +542,7 @@ final class ChatEngine {
             self?.applyLiveTasks(tasks)
         }
         engineTransport.onModeResolved = { [weak self] mode in
-            self?.onResolvedMode(mode)
+            self?.resolvedMode = mode
         }
         // D3 clean cut: selection is per-chat, so the composite must see the
         // CURRENT session's engine marker — only this engine knows which
@@ -1209,7 +1206,7 @@ final class ChatEngine {
                 // Legacy engines report their mode only here, on the terminal
                 // event — the Agent engine has already fired this live from
                 // `mode_set`, where a repeat is a no-op.
-                onResolvedMode(resolved.rawValue)
+                resolvedMode = resolved.rawValue
             }
             metadata.usage = usage
             // Unconditional, matching `usage` above: every abbreviated

@@ -981,6 +981,20 @@ do {
            "ordinary work in Execute is exactly right — say nothing")
 }
 
+// ModePolicy.pickerMode — the picker follows the mode the server resolved,
+// but ONLY while it sits on Auto. A mode the user picked by hand is theirs;
+// and Auto resolving to Auto is not a move.
+do {
+    expect(ModePolicy.pickerMode(current: "auto", resolved: "plan") == "plan",
+           "on Auto, the picker follows the resolved mode")
+    expect(ModePolicy.pickerMode(current: "auto", resolved: "auto") == nil,
+           "Auto resolving to Auto is not a move")
+    expect(ModePolicy.pickerMode(current: "execute", resolved: "plan") == nil,
+           "a hand-picked mode is never overruled by the server")
+    expect(ModePolicy.pickerMode(current: "auto", resolved: "not-a-mode") == nil,
+           "an unknown wire value moves nothing")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {
