@@ -16,7 +16,7 @@ struct ChatEngineTurnTests {
         // Scope is irrelevant to the turn lifecycle — these tests never touch
         // session files; ChatEngineSessionTests covers the scoped paths.
         let engine = ChatEngine(scope: .explorer, transport: t)
-        engine.resolveTransportInput = { msg, history, _, skills in
+        engine.hooks.resolveTransportInput = { msg, history, _, skills in
             ChatTransportInput(message: msg, history: history, attachments: [],
                                skills: skills, agentContext: nil, language: "en",
                                model: nil, provider: nil, mode: "auto")
@@ -373,7 +373,7 @@ struct ChatEngineTurnTests {
         let (engine, t) = makeEngine()
         let ownChatID = UUID().uuidString
         engine.currentSessionIDString = ownChatID
-        engine.resolveTransportInput = { msg, history, _, skills in
+        engine.hooks.resolveTransportInput = { msg, history, _, skills in
             ChatTransportInput(message: msg, history: history, attachments: [],
                                skills: skills,
                                // What the displayed chat's panel would supply.
@@ -403,12 +403,12 @@ struct ChatEngineTurnTests {
         let (engine, t) = makeEngine()
         // makeEngine's input builder hardcodes attachments: [] — this test
         // needs one that passes the engine-supplied list through.
-        engine.resolveTransportInput = { msg, history, attachments, skills in
+        engine.hooks.resolveTransportInput = { msg, history, attachments, skills in
             ChatTransportInput(message: msg, history: history, attachments: attachments,
                                skills: skills, agentContext: nil, language: "en",
                                model: nil, provider: nil, mode: "auto")
         }
-        engine.attachmentsForTurn = {
+        engine.hooks.attachmentsForTurn = {
             [LlmIdeAPIClient.CodeAttachment(path: "displayed-chat.swift", content: "let x = 1")]
         }
         engine.persistsUnobserved = true

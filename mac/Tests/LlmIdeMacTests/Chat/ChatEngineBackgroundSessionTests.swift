@@ -74,7 +74,7 @@ struct ChatEngineBackgroundSessionTests {
     func makeFixture(transport: ChatTransport) -> (ChatEngineRegistry, UUID, UUID) {
         let registry = ChatEngineRegistry(engineFactory: { scope in
             let engine = ChatEngine(scope: scope, transport: transport)
-            engine.resolveTransportInput = { msg, history, _, skills in
+            engine.hooks.resolveTransportInput = { msg, history, _, skills in
                 ChatTransportInput(message: msg, history: history, attachments: [],
                                    skills: skills, agentContext: nil, language: "en",
                                    model: nil, provider: nil, mode: "auto")

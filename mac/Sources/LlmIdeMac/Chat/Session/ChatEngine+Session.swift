@@ -260,14 +260,14 @@ extension ChatEngine {
            scope != .quick || session.projectId == quickChatProjectId {
             resetTransientSessionState()
             messages = session.messages
-            onHistoryReplaced(session.messages)
+            hooks.onHistoryReplaced(session.messages)
         } else {
             switch fallbackSessionAfterLoss() {
             case .adopt(let newest):
                 currentSessionIDString = newest.id.uuidString
                 resetTransientSessionState()
                 messages = newest.messages
-                onHistoryReplaced(newest.messages)
+                hooks.onHistoryReplaced(newest.messages)
                 rememberCurrentPointer()
             case .mintFresh:
                 // No usable pointer and no safe saved chat to fall back to —
@@ -294,7 +294,7 @@ extension ChatEngine {
         externalRunTask = nil
         busy = false
         queued.removeAll()
-        onResetActiveTurnExtra()
+        hooks.onResetActiveTurnExtra()
         // runTask?.cancel() above is fire-and-forget — the actual
         // CancellationError cleanup inside runTurn's/sendFollowup's catch
         // block runs asynchronously and is NOT guaranteed to complete before
@@ -359,7 +359,7 @@ extension ChatEngine {
         // Composer/attachment state the panel still owns (Task 14 moves it).
         // Order against the engine-owned resets above is immaterial — the two
         // sets of fields are disjoint.
-        onResetTransientStateExtra()
+        hooks.onResetTransientStateExtra()
     }
 
     /// Save a fresh session as the new current one, point all the bookkeeping
@@ -453,7 +453,7 @@ extension ChatEngine {
         resetTransientSessionState()
         suppressHistoryAnnounce = true
         messages = session.messages
-        onHistoryReplaced(session.messages)
+        hooks.onHistoryReplaced(session.messages)
         DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
         ChatSessionStore.save(session)
         refreshSessions()
@@ -592,7 +592,7 @@ extension ChatEngine {
                 resetTransientSessionState()
                 suppressHistoryAnnounce = true
                 messages = next.messages
-                onHistoryReplaced(next.messages)
+                hooks.onHistoryReplaced(next.messages)
                 DispatchQueue.main.async { [self] in suppressHistoryAnnounce = false }
             case .mintFresh:
                 // No safe session to fall back to for this scope — mint a

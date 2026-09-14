@@ -402,7 +402,7 @@ struct AgentV2ApprovalTests {
         // closure's context. The invariant pinned below is unchanged: the
         // approval posts back exactly the session id the turn carried.
         engine.agent.agentSessionId = "legacy-sess-1"
-        engine.resolveTransportInput = { message, history, attachments, skills in
+        engine.hooks.resolveTransportInput = { message, history, attachments, skills in
             ChatTransportInput(message: message, history: history, attachments: attachments,
                               skills: skills,
                               agentContext: AgentContext(indexedRepos: [], sessionId: "ignored-by-stamp"),
@@ -469,7 +469,7 @@ struct AgentV2ApprovalTests {
         // engine's own on every turn (the 409 cross-chat fix) — the id under
         // test lives on the engine now.
         engine.agent.agentSessionId = "legacy-sess-mixed"
-        engine.resolveTransportInput = { message, history, attachments, skills in
+        engine.hooks.resolveTransportInput = { message, history, attachments, skills in
             ChatTransportInput(message: message, history: history, attachments: attachments,
                                skills: skills,
                                agentContext: AgentContext(indexedRepos: [], sessionId: "ignored-by-stamp"),

@@ -195,9 +195,9 @@ extension ChatEngine {
             drainQueueOrRelease()
             throw ExternalTurnError.sessionMoved
         }
-        onTurnStart()
-        onRecordPrompt(message)
-        onNudge(message)
+        hooks.onTurnStart()
+        hooks.onRecordPrompt(message)
+        hooks.onNudge(message)
         messages.append(ChatMessage(role: .user, content: message, status: .done, createdAt: Date()))
         busy = true
         statusText = ""
@@ -218,7 +218,7 @@ extension ChatEngine {
         persistCurrentChat()
         let streamingID = beginStreamingTurn()
         do {
-            let recent = packHistory(messages)
+            let recent = hooks.packHistory(messages)
             var input = ChatTransportInput(
                 message: message,
                 history: Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it

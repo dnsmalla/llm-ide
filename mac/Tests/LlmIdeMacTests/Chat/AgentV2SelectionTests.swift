@@ -407,7 +407,7 @@ struct AgentV2SelectionTests {
             scope: .explorer,
             transport: AgentV2EngineTransport(v2: AgentV2Transport(streamer: stream),
                                                legacy: legacy, isV2Enabled: { true }))
-        engine.resolveTransportInput = { message, history, attachments, skills in
+        engine.hooks.resolveTransportInput = { message, history, attachments, skills in
             ChatTransportInput(message: message, history: history, attachments: attachments,
                                skills: skills, agentContext: nil, language: nil,
                                model: nil, provider: "anthropic", mode: "plan")
@@ -467,7 +467,7 @@ struct AgentV2SelectionTests {
                 scope: .explorer,
                 transport: AgentV2EngineTransport(v2: AgentV2Transport(streamer: stream),
                                                    legacy: legacy, isV2Enabled: { true }))
-            engine.resolveTransportInput = { message, history, attachments, skills in
+            engine.hooks.resolveTransportInput = { message, history, attachments, skills in
                 ChatTransportInput(message: message, history: history, attachments: attachments,
                                    skills: skills, agentContext: nil, language: nil,
                                    model: nil, provider: "anthropic", mode: "plan")

@@ -29,7 +29,7 @@ struct ChatEngineSessionTests {
     func makeEngine() -> (ChatEngine, ScriptedChatTransport) {
         let t = ScriptedChatTransport()
         let engine = ChatEngine(scope: Self.scope, transport: t)
-        engine.resolveTransportInput = { msg, history, _, skills in
+        engine.hooks.resolveTransportInput = { msg, history, _, skills in
             ChatTransportInput(message: msg, history: history, attachments: [],
                                skills: skills, agentContext: nil, language: "en",
                                model: nil, provider: nil, mode: "auto")
@@ -127,7 +127,7 @@ struct ChatEngineSessionTests {
         await withTempStore {
             let (engine, _) = makeEngine()
             var replaced: [[String]] = []
-            engine.onHistoryReplaced = { replaced.append($0.map(\.content)) }
+            engine.hooks.onHistoryReplaced = { replaced.append($0.map(\.content)) }
 
             let keep = ChatSession(scope: Self.scope, title: "Keep",
                                    messages: [ChatMessage(wireTurn: .init(role: .user, content: "kept"), sessionDate: Date())])
@@ -171,7 +171,7 @@ struct ChatEngineSessionTests {
         // No store needed: this path is pure in-memory turn state.
         let (engine, _) = makeEngine()
         var extraResets = 0
-        engine.onResetActiveTurnExtra = { extraResets += 1 }
+        engine.hooks.onResetActiveTurnExtra = { extraResets += 1 }
 
         let streamingID = engine.beginStreamingTurn()
         engine.appendStreamedChunk(streamingID, "half an answer")

@@ -24,7 +24,7 @@ struct ChatAcknowledgeTests {
         let t = ScriptedChatTransport()
         // Scope is irrelevant here — these tests never touch session files.
         let engine = ChatEngine(scope: .explorer, transport: t)
-        engine.resolveTransportInput = { msg, history, _, skills in
+        engine.hooks.resolveTransportInput = { msg, history, _, skills in
             ChatTransportInput(message: msg, history: history, attachments: [],
                                skills: skills, agentContext: nil, language: "en",
                                model: nil, provider: nil, mode: "auto")

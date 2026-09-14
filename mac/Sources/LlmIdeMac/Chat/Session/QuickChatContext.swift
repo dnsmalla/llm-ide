@@ -193,7 +193,7 @@ struct QuickChatContext {
         // directly — no `MainActor.run` hop. Two hops here would also be two
         // suspension points, letting a project switch land BETWEEN the model
         // read and the context read.
-        engine.resolveTransportInput = { [weak engine] message, history, attachments, skills in
+        engine.hooks.resolveTransportInput = { [weak engine] message, history, attachments, skills in
             let tool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
             let model = effectiveModelId(explicit: engine?.quickChatModelId,
                                          defaultModelId: config.defaultModelId,

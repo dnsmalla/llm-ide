@@ -19,7 +19,7 @@ struct ChatEngineMessageTests {
     func makeEngine() -> (ChatEngine, ScriptedChatTransport) {
         let t = ScriptedChatTransport()
         let engine = ChatEngine(scope: .explorer, transport: t)
-        engine.resolveTransportInput = { msg, history, _, skills in
+        engine.hooks.resolveTransportInput = { msg, history, _, skills in
             ChatTransportInput(message: msg, history: history, attachments: [],
                                skills: skills, agentContext: nil, language: "en",
                                model: nil, provider: nil, mode: "auto")

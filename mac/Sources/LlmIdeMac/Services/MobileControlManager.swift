@@ -1117,7 +1117,7 @@ final class MobileControlManager {
     /// the arm actually bound to a project, where the planning questions come
     /// from — still showed nothing but "Question pending on Mac".
     private func beginPhoneApprovals(engine: ChatEngine, commandId: String) {
-        engine.onExternalApproval = { [weak self] approval in
+        engine.hooks.onExternalApproval = { [weak self] approval in
             guard let self else { return }
             Task { await self.sendApprovalToPhone(approval, commandId: commandId, engine: engine) }
         }
@@ -1127,7 +1127,7 @@ final class MobileControlManager {
     /// turn is over the requestId is dead server-side, and a question that
     /// can no longer be answered is worse than no question.
     private func endPhoneApprovals(engine: ChatEngine, commandId: String) {
-        engine.onExternalApproval = nil
+        engine.hooks.onExternalApproval = nil
         guard let entry = pendingPhoneApprovals.removeValue(forKey: commandId) else { return }
         Task { [weak self] in
             await self?.server?.send(ApprovalCleared(

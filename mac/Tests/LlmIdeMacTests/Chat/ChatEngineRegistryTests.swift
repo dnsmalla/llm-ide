@@ -257,7 +257,7 @@ struct ChatEngineRunExternalTurnTests {
         let big = String(repeating: "a", count: ChatEngine.maxHistoryTurnChars + 500)
         let oversized = ChatMessage(wireTurn: .init(role: .user, content: big), sessionDate: Date())
 
-        let packed = engine.packHistory([oversized])
+        let packed = engine.hooks.packHistory([oversized])
         #expect(packed.first?.content.hasSuffix("…(turn clipped)") == true)
         #expect(packed.first?.content.count == ChatEngine.maxHistoryTurnChars + "\n…(turn clipped)".count)
         // Exactly matches calling the budgeted packer directly — proving the
@@ -313,7 +313,7 @@ struct ChatEngineRunExternalTurnTests {
             // Wired so the test can prove the panel's Bypass/Auto chaining
             // would NOT fire for this phone-driven turn.
             var autoChainCalls = 0
-            engine.autoChain = { _, _ in autoChainCalls += 1 }
+            engine.hooks.autoChain = { _, _ in autoChainCalls += 1 }
 
             _ = try await engine.runExternalTurn(
                 message: "run ls", skillIds: [], attachments: [],
@@ -479,7 +479,7 @@ struct ChatEngineRunExternalTurnTests {
 
             // Wired so the test can prove it does NOT fire against B.
             var autoChainCalls = 0
-            engine.autoChain = { _, _ in autoChainCalls += 1 }
+            engine.hooks.autoChain = { _, _ in autoChainCalls += 1 }
 
             // 1. The phone's turn starts on A — passes the entry guard,
             // appends+persists the user turn, busy = true — then suspends

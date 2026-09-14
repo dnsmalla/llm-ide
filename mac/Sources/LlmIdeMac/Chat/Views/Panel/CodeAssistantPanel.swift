@@ -498,7 +498,7 @@ struct CodeAssistantPanel: View {
                 ]
             )
         }
-        engine.resolveTransportInput = { message, history, attachments, skills in
+        engine.hooks.resolveTransportInput = { message, history, attachments, skills in
             ChatTransportInput(
                 message: message,
                 history: history,
@@ -520,7 +520,7 @@ struct CodeAssistantPanel: View {
         }
         // Fresh budget of auto-run git ops for this user turn (commit→push→…).
         // Panel-owned because `autoChainPendingAction` — which spends it — is.
-        engine.onTurnStart = { autoGitOpsThisTurn = 0 }
+        engine.hooks.onTurnStart = { autoGitOpsThisTurn = 0 }
         // Both hooks below reach into PANEL state (the mode picker, the
         // attachment bar) from an ENGINE callback, and `adoptEngine` rewires
         // only the incoming engine — a parked background engine keeps the
@@ -528,29 +528,29 @@ struct CodeAssistantPanel: View {
         // identity check, chat A's run settling off-screen would flip the
         // DISPLAYED chat B's mode picker, or strip B's attachments.
         let wiredID = ObjectIdentifier(engine)
-        engine.onPlanReviewReleased = {
+        engine.hooks.onPlanReviewReleased = {
             guard ObjectIdentifier(engine) == wiredID else { return }
             releasePlanReviewTurn()
         }
         // The run is over — hand the picker back so the next message is
         // classified on its own merits. Releases ONLY the modes a run sets;
         // a mode the user picked by hand is untouched (see releaseStickyMode).
-        engine.onPlanExecutionSettled = {
+        engine.hooks.onPlanExecutionSettled = {
             guard ObjectIdentifier(engine) == wiredID else { return }
             releaseStickyMode(from: ModePolicy.runStages)
         }
-        engine.onRecordPrompt = { _ = session.record(prompt: $0) }
-        engine.onNudge = { prompt in
+        engine.hooks.onRecordPrompt = { _ = session.record(prompt: $0) }
+        engine.hooks.onNudge = { prompt in
             if session.shouldNudge(for: prompt) { engine.agent.nudgePrompt = prompt }
         }
-        engine.attachmentsForTurn = { attachmentState.attachments }
+        engine.hooks.attachmentsForTurn = { attachmentState.attachments }
         // `packHistory` defaults to `engine.historyForRequest` in
         // `ChatEngine.init` itself now (code review, Task 12) — no explicit
         // wiring needed here.
-        engine.autoChain = { pendingTool, usage in
+        engine.hooks.autoChain = { pendingTool, usage in
             await autoChainPendingAction(pendingTool, usage: usage)
         }
-        engine.onHistoryReplaced = { history in
+        engine.hooks.onHistoryReplaced = { history in
             rebuildSentPrompts(from: history)
             // An open plan-edit draft names a message in the transcript that
             // was just replaced — its Save would land in the NEW chat. This
@@ -559,8 +559,8 @@ struct CodeAssistantPanel: View {
             // idle ones that never reach `adoptEngine`.
             sheets.planEditTarget = nil
         }
-        engine.onResetActiveTurnExtra = { expandedTurns.removeAll() }
-        engine.onResetTransientStateExtra = {
+        engine.hooks.onResetActiveTurnExtra = { expandedTurns.removeAll() }
+        engine.hooks.onResetTransientStateExtra = {
             sentPrompts = []; historyIndex = nil; draftStash = ""
             draft = ""
             attachmentState.attachments.removeAll()
