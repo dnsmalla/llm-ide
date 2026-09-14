@@ -232,6 +232,8 @@ const NON_WIRE_TYPE_LITERALS = new Set([
   'web_fetch_result',
   'web_search_tool_result',   // runtime/handlers/web-search.mjs — Anthropic content block
   'web_search_result',
+  'image',                    // sdk/engine.mjs buildPromptInput — Anthropic image block
+  'user',                     // sdk/engine.mjs buildPromptInput — SDKUserMessage envelope
   // JSON-Schema fragments inside tool definitions.
   'text', 'object', 'string', 'boolean', 'number', 'integer', 'array',
 ]);
