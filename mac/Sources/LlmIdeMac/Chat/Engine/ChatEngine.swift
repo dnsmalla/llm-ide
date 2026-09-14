@@ -1139,8 +1139,7 @@ final class ChatEngine {
             // `phase != .running`, and the plan card stuck on "Executing plan…".
             // `.failed` is the honest phase: its card reads "Plan execution
             // stopped" and carries the Dismiss the running card doesn't have.
-            if var tracker = agent.planExecution, tracker.phase == .running {
-                tracker.phase = .failed
+            if var tracker = agent.planExecution, tracker.settleInterrupted() {
                 agent.planExecution = tracker
                 hooks.onPlanExecutionSettled()
             }
@@ -1150,8 +1149,7 @@ final class ChatEngine {
             // it, and the catch path this runs from never reaches it — so a
             // stopped or failed review would otherwise leave the finish card
             // spinning "Reviewing…" forever, with Push locked behind it.
-            if var tracker = agent.planExecution, tracker.reviewPhase == .running {
-                tracker.reviewPhase = .none
+            if var tracker = agent.planExecution, tracker.releaseInterruptedReview() {
                 agent.planExecution = tracker
                 hooks.onPlanReviewReleased()
             }
@@ -1198,8 +1196,7 @@ final class ChatEngine {
             // reaching idle through THIS door would otherwise leave the plan
             // card on "Executing plan…" with no Dismiss and the picker pinned
             // to Execute. `.failed` is the phase whose card carries Dismiss.
-            if var tracker = agent.planExecution, tracker.phase == .running {
-                tracker.phase = .failed
+            if var tracker = agent.planExecution, tracker.settleInterrupted() {
                 agent.planExecution = tracker
                 hooks.onPlanExecutionSettled()
             }
@@ -1283,44 +1280,18 @@ final class ChatEngine {
     func applyLiveTasks(_ tasks: [AgentTask]) {
         guard !tasks.isEmpty else { return }
         agent.agentPendingTasks = tasks
-        guard var tracker = agent.planExecution, tracker.phase == .running else { return }
-        tracker.lastTasks = tasks
+        guard var tracker = agent.planExecution else { return }
+        tracker.noteLiveTasks(tasks)
         agent.planExecution = tracker
     }
 
     /// Advance the plan-execute tracker when server tasks complete or fail.
     private func updatePlanExecution(with tasks: [AgentTask], continueNeeded: Bool?) {
-        guard var tracker = agent.planExecution, tracker.phase == .running else { return }
-        if !tasks.isEmpty { tracker.lastTasks = tasks }
-        if tasks.contains(where: { $0.status == .failed }) {
-            tracker.phase = .failed
-        } else if !tasks.contains(where: { $0.status == .pending || $0.status == .inProgress }),
-                  continueNeeded != true,
-                  // A plan executed via direct tool calls (bash/file edits)
-                  // without ever touching the session task-list leaves
-                  // `tasks` empty for the whole run — an empty list must be
-                  // able to finish here too, or the tracker never leaves
-                  // `.running` and the card spins forever under the turn's
-                  // own already-delivered final answer. But an empty list
-                  // carries no evidence of its own, so it settles the
-                  // tracker only when the turn itself ended the chain:
-                  // `continueNeeded` came back an explicit false (an
-                  // external turn's hard-coded nil means "don't chain", not
-                  // "the chain ended") and no proposal is parked waiting
-                  // for an answer (a legacy update-file/bash card mid-plan
-                  // also arrives with an empty list).
-                  !tasks.isEmpty || (continueNeeded == false && agent.pendingTool == nil) {
-            tracker.phase = .finished
-        }
+        guard var tracker = agent.planExecution else { return }
+        let release = tracker.apply(tasks: tasks, continueNeeded: continueNeeded,
+                                    pendingToolParked: agent.pendingTool != nil)
         agent.planExecution = tracker
-        // Release only when the run is genuinely OVER. A task the agent
-        // marked `.failed` settles the tracker even mid-run, and when
-        // `continueNeeded` is true `finishStreamingTurn` is about to send
-        // "Continue working on your pending tasks." — handing the picker back
-        // now would send that continuation as `auto`, to be re-classified,
-        // possibly into a tool-restricted mode that cannot finish the edits
-        // it is in the middle of.
-        if tracker.phase != .running, continueNeeded != true { hooks.onPlanExecutionSettled() }
+        if release { hooks.onPlanExecutionSettled() }
     }
 
 }

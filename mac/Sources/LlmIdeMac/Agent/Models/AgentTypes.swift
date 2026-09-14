@@ -74,7 +74,7 @@ struct AgentContext: Codable, Equatable {
 /// `extension/llm_agent/runtime/handlers/session-tasks.mjs`'s
 /// `taskStatusIcon` and `task-update.md`'s schema enum) — the raw values
 /// below are NOT freely renameable, they must match the wire strings.
-enum AgentTaskStatus: String, Codable, Equatable {
+public enum AgentTaskStatus: String, Codable, Equatable {
     case pending
     case inProgress = "in_progress"
     case completed
@@ -87,16 +87,25 @@ enum AgentTaskStatus: String, Codable, Equatable {
     /// via the `try?` decode in `LlmIdeAPIClient+CodeAssist.swift` — losing
     /// the reply text, pendingTool, and usage along with it, not just the
     /// task list.
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = AgentTaskStatus(rawValue: raw) ?? .pending
     }
 }
 
-struct AgentTask: Codable, Identifiable, Equatable {
-    let id: String
-    let title: String
-    let status: AgentTaskStatus
+/// `public` so `ChatContractLab` (a separate target) can construct fixtures
+/// for `PlanExecutionTracker`'s transition-rule assertions — see the header
+/// comment in `ChatContractLab/main.swift` for the convention.
+public struct AgentTask: Codable, Identifiable, Equatable {
+    public let id: String
+    public let title: String
+    public let status: AgentTaskStatus
+
+    public init(id: String, title: String, status: AgentTaskStatus) {
+        self.id = id
+        self.title = title
+        self.status = status
+    }
 }
 
 /// Canonical identity for a pending tool call — the one place that maps

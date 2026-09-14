@@ -26,7 +26,7 @@ struct ChatMessageList: View {
     /// Current multi-step task list — `CodeAssistantAgentState.agentPendingTasks`.
     let tasks: [AgentTask]
     /// Active plan execute session, if any (step-by-step progress + finish card).
-    let planExecution: CodeAssistantAgentState.PlanExecutionTracker?
+    let planExecution: PlanExecutionTracker?
     let onReviewPlanExecution: () -> Void
     /// Wraps `CodeAssistantPanel.pushPlanExecutionChanges()` — merge to the
     /// default branch and push. The card confirms before calling it.

@@ -11,7 +11,7 @@ extension CodeAssistantPanel {
     func beginPlanExecution(messageId: UUID, payload: ChatMessage.ToolResultPayload, planContent content: String) {
         let steps = Self.parsePlanSteps(from: content)
         let title = payload.planTitle ?? Self.planTitle(from: content)
-        engine.agent.planExecution = CodeAssistantAgentState.PlanExecutionTracker(
+        engine.agent.planExecution = PlanExecutionTracker(
             planTitle: title,
             steps: steps,
             planCardMessageId: messageId

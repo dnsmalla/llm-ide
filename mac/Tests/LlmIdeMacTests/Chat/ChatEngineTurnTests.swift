@@ -227,8 +227,8 @@ struct ChatEngineTurnTests {
 
     // MARK: - Plan execution tracker
 
-    private func runningTracker() -> CodeAssistantAgentState.PlanExecutionTracker {
-        CodeAssistantAgentState.PlanExecutionTracker(
+    private func runningTracker() -> PlanExecutionTracker {
+        PlanExecutionTracker(
             planTitle: "Add dark mode",
             steps: ["Add tokens", "Wire the toggle"],
             planCardMessageId: UUID())

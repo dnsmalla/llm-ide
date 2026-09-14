@@ -27,58 +27,6 @@ final class CodeAssistantAgentState {
     /// Active plan execute session — drives step-by-step progress UI and the
     /// completion Review/Commit card. Cleared when the user dismisses or commits.
     var planExecution: PlanExecutionTracker?
-
-    /// Tracks one saved-plan execute run in the chat UI.
-    struct PlanExecutionTracker: Equatable {
-        enum Phase: String, Equatable {
-            case running
-            case finished
-            case failed
-        }
-
-        var planTitle: String
-        var steps: [String]
-        var planCardMessageId: UUID
-        var phase: Phase = .running
-        /// Snapshot kept when execution ends (live `agentPendingTasks` clears on the next turn).
-        var lastTasks: [AgentTask] = []
-
-        /// Where the post-execution code review has got to. Separate from
-        /// `phase` on purpose: the review is a turn that runs AFTER the
-        /// execution tracker has already settled, and `updatePlanExecution`
-        /// only touches a `.running` tracker — so the finish card stays up,
-        /// unchanged, while its own review streams underneath it.
-        enum ReviewPhase: String, Equatable {
-            case none
-            case running
-            case done
-        }
-
-        var reviewPhase: ReviewPhase = .none
-        /// The review reply, kept so the verdict strip can show the findings
-        /// without hunting the transcript for the message again.
-        var reviewSummary: String = ""
-        /// Parsed from `reviewSummary` by `PlanReviewPolicy.verdict(from:)`.
-        var reviewVerdict: PlanReviewVerdict?
-        /// The branch the review was taken against ("main"), for wording.
-        var reviewBaseBranch: String?
-
-        /// What a Push would commit, resolved when the button is tapped and
-        /// shown in the confirmation. Push commits the WHOLE working tree
-        /// (`SourceControlService.commit` runs `git add -A` when nothing is
-        /// staged) and the status it reads includes untracked files — so
-        /// anything sitting in the repo that the plan never touched goes
-        /// along, under the plan's name, into the default branch, to origin.
-        /// "Any uncommitted changes are committed" was true and still did not
-        /// tell anyone that. Naming the files is what makes it a decision.
-        var pendingCommitFiles: [String] = []
-
-        /// Push is offered once a review has RUN — see
-        /// `PlanReviewPolicy.allowsPush(reviewed:)`.
-        var hasReviewed: Bool { reviewPhase == .done }
-
-        var totalSteps: Int { max(steps.count, lastTasks.count) }
-    }
     /// Per-request project-memory overhead from the last turn, surfaced on the
     /// 🧠 button so the always-on memory block's token cost is visible.
     var lastMemoryTokens: Int?

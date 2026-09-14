@@ -1030,6 +1030,47 @@ do {
            "a parked proposal defers every landing to the answer")
 }
 
+// PlanExecutionTracker — the plan-run state machine the engine drives. Its two
+// transition rules used to be inline `if`s in ChatEngine.finishStreamingTurn.
+do {
+    func tracker() -> PlanExecutionTracker {
+        PlanExecutionTracker(planTitle: "t", steps: ["a", "b"], planCardMessageId: UUID())
+    }
+    func task(_ status: AgentTaskStatus) -> AgentTask {
+        AgentTask(id: UUID().uuidString, title: "x", status: status)
+    }
+    var t = tracker()
+    expect(t.settleInterrupted() && t.phase == .failed,
+           "a Stop mid-run lands on .failed — the phase whose card carries Dismiss")
+    expect(!t.settleInterrupted(),
+           "settling an already-settled tracker is a no-op")
+
+    t = tracker()
+    expect(!t.apply(tasks: [task(.pending)], continueNeeded: true, pendingToolParked: false) && t.phase == .running,
+           "pending tasks with the chain continuing keep the run open")
+    expect(t.apply(tasks: [task(.completed)], continueNeeded: false, pendingToolParked: false) && t.phase == .finished,
+           "all tasks completed and the chain ended: finished, release the picker")
+
+    t = tracker()
+    expect(t.apply(tasks: [task(.failed)], continueNeeded: true, pendingToolParked: false) == false && t.phase == .failed,
+           "a failed task settles the tracker even mid-chain, but does NOT release while the chain continues")
+
+    t = tracker()
+    expect(!t.apply(tasks: [], continueNeeded: nil, pendingToolParked: false) && t.phase == .running,
+           "an empty list with an external turn's nil carries no evidence — stay running")
+    expect(!t.apply(tasks: [], continueNeeded: false, pendingToolParked: true) && t.phase == .running,
+           "an empty list with a parked proposal is a card mid-plan, not the end")
+    expect(t.apply(tasks: [], continueNeeded: false, pendingToolParked: false) && t.phase == .finished,
+           "an empty list finishes only when the turn itself ended the chain")
+
+    t = tracker()
+    t.reviewPhase = .running
+    expect(t.releaseInterruptedReview() && t.reviewPhase == .none,
+           "a stopped review releases the finish card")
+    expect(!t.releaseInterruptedReview(),
+           "and nothing happens when no review was running")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

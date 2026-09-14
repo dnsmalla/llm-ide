@@ -52,7 +52,7 @@ public enum PlanExecutionSummaryPolicy {
 /// doing it on an unreviewed agent-written change is exactly the mistake this
 /// card exists to prevent.
 struct PlanExecutionCard: View {
-    let tracker: CodeAssistantAgentState.PlanExecutionTracker
+    let tracker: PlanExecutionTracker
     let liveTasks: [AgentTask]
     /// The engine's live status line ("Running xcodebuild…"), shown under the
     /// current step while the turn is working. The step title says WHICH step
