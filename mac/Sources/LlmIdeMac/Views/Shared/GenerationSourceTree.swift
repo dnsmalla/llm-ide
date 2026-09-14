@@ -3,6 +3,15 @@ import SwiftUI
 /// Step 2 of Doc Gen: tick source files or whole folders, across three Library
 /// categories. Trees are built with the same helpers the Library tab uses, so
 /// the hierarchy shown here cannot drift from the hierarchy shown there.
+///
+/// There is deliberately NO selection-count warning here. The server used to
+/// take only the first 20 sources, so this tree warned past 20; it now sends
+/// every source and fits them to a total CHARACTER budget instead
+/// (`export-routes.mjs#packSources`, server API v52). A file count says
+/// nothing about that budget, and this tree cannot predict the
+/// post-sanitization length the server measures — so truncation is reported
+/// AFTER a run, from the server's own `truncated` list, by
+/// `GenerationEditorPanel`'s done view.
 struct GenerationSourceTree: View {
     @ObservedObject var vm: GenerationViewModel
     @Binding var isExpanded: Bool
@@ -26,7 +35,6 @@ struct GenerationSourceTree: View {
     let selectedURL: Binding<URL?>?
 
     @Environment(LibraryItemStore.self) private var itemStore
-    @EnvironmentObject private var theme: ThemeStore
 
     /// `@AppStorage` key for the selected tab, caller-supplied so each host
     /// keeps its own persisted choice — Doc Gen keeps `"docgen.sourceTab"`
@@ -50,11 +58,6 @@ struct GenerationSourceTree: View {
         LibraryItem.Category(rawValue: selectedTabRaw) ?? (categories.first ?? .code)
     }
 
-    /// The server accepts at most 20 sources. Selection is never blocked at
-    /// this limit — the user is only told, rather than having extras
-    /// silently dropped on generate.
-    private static let sourceLimit = 20
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             GenerationSectionHeader(
@@ -65,9 +68,6 @@ struct GenerationSourceTree: View {
 
             if isExpanded {
                 tabPicker
-                if vm.selectedSources.count > Self.sourceLimit {
-                    overflowWarning
-                }
                 treeBody
             }
         }
@@ -83,20 +83,6 @@ struct GenerationSourceTree: View {
         .labelsHidden()
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
-    }
-
-    private var overflowWarning: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.caption2)
-                .foregroundStyle(theme.current.warning)
-            Text("\(vm.selectedSources.count) selected — only \(Self.sourceLimit) can be sent")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 6)
     }
 
     @ViewBuilder

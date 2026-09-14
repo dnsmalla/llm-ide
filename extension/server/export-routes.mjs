@@ -66,6 +66,132 @@ function safeStr(v, fallback = '') {
   return fallback;
 }
 
+/// Per-source ceiling. One file can never occupy more than this much of the
+/// prompt, however large it is on disk.
+export const MAX_SOURCE_CONTENT = 50_000;
+
+/// The smallest slice of a source worth sending. A source that cannot be
+/// given at least this much is omitted entirely and NAMED in `omitted`,
+/// rather than sent as a useless 3-character stub.
+export const MIN_SOURCE_CONTENT = 200;
+
+/// Total budget for the RENDERED source block of one /generate-doc prompt —
+/// headings and separators included, not just source content.
+///
+/// This — NOT a file count — is what keeps the prompt inside runClaude's
+/// 500 000-char cap (`providers/runtime.mjs` MAX_PROMPT_CHARS, which THROWS
+/// rather than truncating). The old guard was `sources.slice(0, 20)`, which
+/// both dropped the 21st file silently AND failed at its stated job: 20 files
+/// x MAX_SOURCE_CONTENT is 1 000 000 chars, twice the cap. 400 000 leaves
+/// ~100 k of headroom for the template shape, command and user prompt.
+///
+/// Budgeting the RENDERED text rather than the content alone matters now that
+/// the file count is unbounded: each source also costs `### <name>\n` plus a
+/// blank-line separator (up to ~127 chars), so tens of thousands of tiny
+/// sources could clear a content-only budget and still blow the prompt cap.
+export const MAX_TOTAL_SOURCE_CHARS = 400_000;
+
+const SOURCE_SEPARATOR = '\n\n';
+
+/// How many source NAMES the response carries back per list. The counts
+/// alongside them are exact; this only bounds the response size.
+export const MAX_REPORTED_NAMES = 50;
+
+/// Render every source into the prompt's source block, fitting the rendered
+/// result into MAX_TOTAL_SOURCE_CHARS by equal-share water-filling.
+///
+/// Water-filling (settle the smallest first, hand its unused share back to
+/// the rest) rather than a flat per-source cap or first-N: a pile of small
+/// files always survives whole, and one huge file can never starve them.
+///
+/// Nothing is ever dropped SILENTLY. A source that had to be shortened is
+/// named in `truncated`; one that could not be given even MIN_SOURCE_CONTENT
+/// is named in `omitted`. Both reach the user.
+///
+/// Pure, and exported so the budget arithmetic is unit-testable without
+/// spawning a model. `budget` is injectable for the same reason.
+export function packSources(rawSources, { budget = MAX_TOTAL_SOURCE_CHARS } = {}) {
+  const items = (Array.isArray(rawSources) ? rawSources : []).map((s, index) => {
+    // Sanitize BEFORE measuring: sanitizeForPrompt can change length (it can
+    // also LENGTHEN, inserting separators into fence-like runs), and the
+    // budget must be measured on the text actually sent.
+    const clean = sanitizeForPrompt(String(s?.content || ''));
+    const name = sanitizeLine(String(s?.name || 'Source'));
+    return {
+      index,
+      name,
+      content: safeTruncate(clean, MAX_SOURCE_CONTENT),
+      // Per-item, not per-name: two different files can share a display name,
+      // and reporting must not collapse or double-count them.
+      isTruncated: clean.length > MAX_SOURCE_CONTENT,
+      // What this source costs the budget beyond its content.
+      overhead: `### ${name}\n`.length + (index > 0 ? SOURCE_SEPARATOR.length : 0),
+    };
+  });
+
+  // How many leading sources fit, in ONE forward pass.
+  //
+  // Keeping a prefix of k sources needs
+  //   sum(heading_i + min(MIN_SOURCE_CONTENT, len_i)) + SEPARATOR x (k - 1)
+  // which is non-decreasing in k, so the first k that overshoots is the
+  // answer. Deliberately NOT a drop-one-and-re-measure loop: that is O(n^2),
+  // and this runs on the single Node event loop that also serves chat, the
+  // KB and the Mobile Control proxy — at the 8 MB body limit a 100 000-source
+  // request blocked it for over a minute. A source shorter than
+  // MIN_SOURCE_CONTENT is charged only its own length; charging it the full
+  // minimum would drop sources that fit comfortably.
+  let keptCount = 0;
+  let need = 0;
+  for (const it of items) {
+    const step = `### ${it.name}\n`.length
+      + Math.min(MIN_SOURCE_CONTENT, it.content.length)
+      + (keptCount > 0 ? SOURCE_SEPARATOR.length : 0);
+    if (need + step > budget) break;
+    need += step;
+    keptCount += 1;
+  }
+  // Whatever did not fit is dropped from the END, so selection order decides
+  // what survives (the client sorts before sending; see
+  // GenerationViewModel.generate()).
+  const kept = items.slice(0, keptCount);
+  const omitted = items.slice(keptCount).map((it) => it.name);
+  // The first kept item pays no separator; re-derive now that the set is final.
+  kept.forEach((it, i) => { it.overhead = `### ${it.name}\n`.length + (i > 0 ? SOURCE_SEPARATOR.length : 0); });
+
+  const contentBudget = budget - kept.reduce((n, it) => n + it.overhead, 0);
+  const total = kept.reduce((n, it) => n + it.content.length, 0);
+  if (total > contentBudget) {
+    let remaining = contentBudget;
+    let pending = kept.length;
+    // Ascending, so each already-small source releases what it does not use.
+    for (const it of [...kept].sort((a, b) => a.content.length - b.content.length)) {
+      const share = Math.floor(remaining / pending);
+      pending -= 1;
+      if (it.content.length <= share) {
+        remaining -= it.content.length;
+        continue;
+      }
+      it.content = safeTruncate(it.content, share);
+      remaining -= it.content.length;
+      it.isTruncated = true;
+    }
+  }
+
+  const truncated = kept.filter((it) => it.isTruncated).map((it) => it.name);
+  return {
+    text: kept.map((it) => `### ${it.name}\n${it.content}`).join(SOURCE_SEPARATOR),
+    // Names are capped; the COUNTS are not. A request at the 8 MB body limit
+    // can omit tens of thousands of sources, and shipping every name back
+    // would make the response itself multi-megabyte and the client's
+    // single-line notice unreadable. The client says "and N more" from the
+    // counts.
+    truncated: truncated.slice(0, MAX_REPORTED_NAMES),
+    truncatedCount: truncated.length,
+    omitted: omitted.slice(0, MAX_REPORTED_NAMES),
+    omittedCount: omitted.length,
+  };
+}
+
 /// Assemble the /generate-doc prompt. Exported so the prompt shape can be
 /// unit-tested without spawning a model. `command` and `prompt` are already
 /// sanitized and truncated by the caller.
@@ -292,15 +418,11 @@ export async function handleExportRoutes(req, res) {
       ? sanitizeForPrompt(body.prompt.slice(0, MAX_PROMPT)).trim()
       : '';
 
-    // Cap sources array length and per-item content size before building
-    // the in-memory prompt string — an unbounded array of large items
-    // could allocate GBs before runtime.mjs's 500 k char cap fires.
-    const MAX_SOURCE_CONTENT = 50_000;
-    const sourceParts = body.sources.slice(0, 20)
-      .map(s => `### ${sanitizeLine(String(s.name || 'Source'))}\n${sanitizeForPrompt(String(s.content || '').slice(0, MAX_SOURCE_CONTENT))}`)
-      .join('\n\n');
+    // Every selected source is sent; the TOTAL character budget (not a file
+    // count) is what keeps the prompt inside runClaude's cap. See packSources.
+    const packed = packSources(body.sources);
 
-    const prompt = buildDocPrompt({ templateName, sections, command, prompt: userPrompt, sourceParts });
+    const prompt = buildDocPrompt({ templateName, sections, command, prompt: userPrompt, sourceParts: packed.text });
 
     const content = await runClaude(prompt, { userId: req.user?.id, maxTokens: 2048 });
     const trimmed = content.trim();
@@ -318,7 +440,18 @@ export async function handleExportRoutes(req, res) {
       body: trimmed,
       meta: { generator: 'generate-doc', template: templateName || null, sections, command: command || null, sources: sourceNames },
     });
-    sendJSON(res, 200, { content: trimmed });
+    // `truncated` / `omitted` name what the budget could not fit (capped at
+    // MAX_REPORTED_NAMES each), and the `*Count` pair gives the exact totals
+    // the names may not cover. Between them the client can say what the model
+    // saw only part of, or not at all — the old 20-file cap dropped the rest
+    // silently.
+    sendJSON(res, 200, {
+      content: trimmed,
+      truncated: packed.truncated,
+      truncatedCount: packed.truncatedCount,
+      omitted: packed.omitted,
+      omittedCount: packed.omittedCount,
+    });
     return true;
   }
 

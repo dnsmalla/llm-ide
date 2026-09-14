@@ -219,6 +219,16 @@ struct GenerationEditorPanel<ToolbarAccessory: View>: View {
                         .foregroundStyle(theme.current.warning)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                // Same reasoning for what the prompt budget could not fit:
+                // the saved document was built from less than the whole
+                // selection, and after the reset this is the only place left
+                // that says so.
+                if let notice = vm.lastSavedSourceFitNotice {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundStyle(theme.current.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 8)
             Button("Open") { NSWorkspace.shared.open(url) }
@@ -269,7 +279,15 @@ struct GenerationEditorPanel<ToolbarAccessory: View>: View {
                 .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(vm.selectedSources.enumerated()), id: \.element) { idx, source in
+                    // Sorted on the SAME key `generate()` sends by
+                    // (`DocGenSource.sendOrderKey`): the server drops from the
+                    // end of that order when the selection overruns its
+                    // budget, so this list has to show the order that decides
+                    // it. Raw `Set` order would also reshuffle rows between
+                    // redraws.
+                    ForEach(Array(vm.selectedSources
+                        .sorted(by: { $0.sendOrderKey < $1.sendOrderKey })
+                        .enumerated()), id: \.element) { idx, source in
                         HStack(spacing: 10) {
                             Image(systemName: sourceIcon(source))
                                 .font(.system(size: 11))
@@ -456,6 +474,29 @@ struct GenerationEditorPanel<ToolbarAccessory: View>: View {
                         .font(.caption2)
                         .foregroundStyle(theme.current.warning)
                     Text("\(skipped.count) source\(skipped.count == 1 ? "" : "s") could not be read and were skipped: \(skipped.joined(separator: ", "))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(theme.current.warning.opacity(0.08))
+            }
+
+            // Distinct from `skipped` above: those sources never reached the
+            // model at all, these reached it partially or not at all. The
+            // server names them (`truncated` / `omitted`, API v52) because
+            // only it knows the post-sanitization lengths it budgets on — the
+            // source tree cannot predict them, which is why this replaced the
+            // old "only 20 can be sent" warning there. Also carries the
+            // out-of-date-server warning, for a server that silently keeps
+            // only the first 20 and reports nothing.
+            if let notice = vm.sourceFitNotice {
+                HStack(spacing: 6) {
+                    Image(systemName: "scissors")
+                        .font(.caption2)
+                        .foregroundStyle(theme.current.warning)
+                    Text(notice)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()

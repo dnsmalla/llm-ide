@@ -69,6 +69,38 @@ extension LlmIdeAPIClient {
 
     private struct GenerateDocResponse: Decodable {
         let content: String
+        /// Sources the server's total-character budget forced short, and
+        /// sources it could not fit at all
+        /// (`export-routes.mjs#packSources`, server API v52). BOTH optional
+        /// so a pre-v52 server still decodes — that server silently dropped
+        /// everything past the 20th source instead, which is exactly why
+        /// their ABSENCE has to stay distinguishable from an empty list.
+        let truncated: [String]?
+        let truncatedCount: Int?
+        let omitted: [String]?
+        let omittedCount: Int?
+    }
+
+    /// What one `/generate-doc` run produced: the document, plus what the
+    /// server had to leave out. Returned as a struct rather than a bare
+    /// String so the shortfall reaches the UI instead of being dropped at the
+    /// client boundary.
+    struct GeneratedDoc {
+        let content: String
+        /// Names of sources sent only in part — capped by the server at
+        /// MAX_REPORTED_NAMES, so this can be SHORTER than `truncatedTotal`.
+        let truncatedSources: [String]
+        /// Exact number of sources sent only in part, never capped.
+        let truncatedTotal: Int
+        /// Names of sources not sent at all; capped the same way.
+        let omittedSources: [String]
+        /// Exact number of sources not sent at all, never capped.
+        let omittedTotal: Int
+        /// False when the server did not report on source fitting AT ALL
+        /// (pre-v52). Such a server applied its own silent `slice(0, 20)`, so
+        /// the caller must warn on its own rather than read the empty
+        /// `truncatedSources` as "everything was sent".
+        let serverReportsFit: Bool
     }
 
     func generateDoc(
@@ -77,7 +109,7 @@ extension LlmIdeAPIClient {
         command: String?,
         prompt: String?,
         sources: [(name: String, content: String)]
-    ) async throws -> String {
+    ) async throws -> GeneratedDoc {
         guard let url = URL(string: baseURL + "/generate-doc") else { throw APIError.invalidURL }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -112,7 +144,17 @@ extension LlmIdeAPIClient {
                 details: nil)
         }
         let resp = try AppJSON.decoder.decode(GenerateDocResponse.self, from: data)
-        return resp.content
+        let truncated = resp.truncated ?? []
+        let omitted = resp.omitted ?? []
+        return GeneratedDoc(
+            content: resp.content,
+            truncatedSources: truncated,
+            // Fall back to the name count for a server that sends names but
+            // no count — never below what we can actually see.
+            truncatedTotal: max(resp.truncatedCount ?? 0, truncated.count),
+            omittedSources: omitted,
+            omittedTotal: max(resp.omittedCount ?? 0, omitted.count),
+            serverReportsFit: resp.truncated != nil)
     }
 
     /// Write `content` as Markdown. `directory` wins when supplied (Doc Gen's

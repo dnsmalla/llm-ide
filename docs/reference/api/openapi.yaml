@@ -1147,7 +1147,7 @@ paths:
                       name:    { type: string }
                       content: { type: string }
                   minItems: 1
-                  description: 'Source material (max 20 items, 50 000 chars each); non-empty is required, not just present'
+                  description: 'Source material; non-empty is required, not just present. No item-count limit — sources are capped at 50 000 chars each and the RENDERED source block (headings included) is fitted to a 400 000-char total budget by equal-share water-filling; anything shortened is named in the response''s truncated array, and anything that could not be given at least 200 chars is named in omitted'
       responses:
         '200':
           description: Generated markdown document
@@ -1157,6 +1157,20 @@ paths:
                 type: object
                 properties:
                   content: { type: string, description: 'Full markdown document' }
+                  truncated:
+                    type: array
+                    items: { type: string }
+                    description: 'Names of the sources the total-character budget forced short, capped at 50 entries (server API v52; absent on older servers, which silently kept only the first 20 sources)'
+                  truncatedCount:
+                    type: integer
+                    description: 'Exact number of shortened sources; never capped, so it can exceed truncated.length'
+                  omitted:
+                    type: array
+                    items: { type: string }
+                    description: 'Names of the sources that did not fit the budget at all and were not sent, capped at 50 entries (server API v52). Dropped from the end of the request array, so the client decides what survives by the order it sends'
+                  omittedCount:
+                    type: integer
+                    description: 'Exact number of omitted sources; never capped, so it can exceed omitted.length'
         '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /chat:

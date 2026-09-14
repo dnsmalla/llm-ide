@@ -222,6 +222,22 @@ enum DocGenSource: Hashable {
         }
     }
 
+    /// Total order for sending a SELECTION to the server.
+    ///
+    /// `GenerationViewModel.selectedSources` is a `Set`, whose iteration order
+    /// is hash order — it varies between runs of the SAME selection. The
+    /// server fits sources to a character budget and drops from the end, so
+    /// unordered input makes "which file got dropped" non-deterministic from
+    /// the user's point of view. Sorting on this before sending gives that
+    /// decision a stable, explainable basis. Files sort by path (meetings
+    /// first, by id) so the order matches how the Library lists them.
+    var sendOrderKey: String {
+        switch self {
+        case .meeting(let id, _): return "0\(id)"
+        case .file(let url, _): return "1\(url.path)"
+        }
+    }
+
     func hash(into hasher: inout Hasher) {
         switch self {
         case .meeting(let id, _): hasher.combine(0); hasher.combine(id)

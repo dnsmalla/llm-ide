@@ -195,7 +195,17 @@ const HOST = config.host;
 //     app's Doc Gen and Visual defaults come from here instead of from Swift
 //     constants, so adding one is a file in the kit rather than an app
 //     release. Additive; an older client never calls it.
-const SERVER_API_VERSION = 51;
+//   v52 — POST /generate-doc: the 20-source cap is gone. Every selected
+//     source is now sent, fitted into a TOTAL character budget by
+//     equal-share water-filling over the RENDERED block, headings included
+//     (export-routes.mjs#packSources). The response gained `truncated:
+//     string[]` (sources sent only in part) and `omitted: string[]` (sources
+//     that did not fit at all, dropped from the end). Additive: an older
+//     client ignores both keys, and one that used to send at most 20 sources
+//     still behaves identically. The Mac client treats the ABSENCE of
+//     `truncated` as "this server is pre-v52" and warns when it sent more
+//     than 20 sources, since such a server drops the rest silently.
+const SERVER_API_VERSION = 52;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

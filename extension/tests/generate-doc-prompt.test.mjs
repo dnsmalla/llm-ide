@@ -20,7 +20,9 @@ const tmpDb = path.join(__dirname, '_generate-doc-prompt-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
-const { buildDocPrompt, handleExportRoutes, validateDocRequest, buildDocRef } = await import('../server/export-routes.mjs');
+const { buildDocPrompt, handleExportRoutes, validateDocRequest, buildDocRef,
+        packSources, MAX_SOURCE_CONTENT, MAX_TOTAL_SOURCE_CHARS,
+        MIN_SOURCE_CONTENT, MAX_REPORTED_NAMES } = await import('../server/export-routes.mjs');
 
 function makeReq({ method, url, body, userId = 'u1' }) {
   const chunks = body == null ? [] : [Buffer.from(JSON.stringify(body))];
@@ -190,4 +192,126 @@ test('buildDocRef: template + same command, same sources, run twice — refs mat
   const refA = buildDocRef({ docTitle: 'Sprint Review', command: 'Be terse.', sourceNames: 'a|b' });
   const refB = buildDocRef({ docTitle: 'Sprint Review', command: 'Be terse.', sourceNames: 'a|b' });
   assert.equal(refA, refB);
+});
+
+// --- packSources: the total-character budget that replaced the 20-file cap ---
+
+test('packSources sends every source when the total fits the budget', () => {
+  const sources = Array.from({ length: 50 }, (_, i) => ({ name: `f${i}.md`, content: 'x'.repeat(100) }));
+  const packed = packSources(sources);
+  assert.equal(packed.truncated.length, 0);
+  for (let i = 0; i < 50; i += 1) {
+    assert.ok(packed.text.includes(`### f${i}.md`), `f${i}.md must be in the prompt`);
+  }
+  assert.equal((packed.text.match(/x/g) || []).length, 50 * 100);
+});
+
+test('packSources no longer drops sources past the old 20-file cap', () => {
+  const sources = Array.from({ length: 42 }, (_, i) => ({ name: `f${i}.md`, content: `body-${i}` }));
+  const packed = packSources(sources);
+  assert.ok(packed.text.includes('### f41.md'), '42nd source must survive');
+  assert.ok(packed.text.includes('body-41'));
+});
+
+test('packSources caps any single source at MAX_SOURCE_CONTENT', () => {
+  const packed = packSources([{ name: 'big.md', content: 'y'.repeat(MAX_SOURCE_CONTENT + 5_000) }]);
+  assert.equal((packed.text.match(/y/g) || []).length, MAX_SOURCE_CONTENT);
+  assert.deepEqual(packed.truncated, ['big.md']);
+});
+
+test('packSources keeps the RENDERED block inside the total budget', () => {
+  // 40 × 60 000 = 2 400 000 chars of input, far past runClaude's 500 000 cap.
+  const sources = Array.from({ length: 40 }, (_, i) => ({ name: `f${i}.md`, content: 'z'.repeat(60_000) }));
+  const packed = packSources(sources);
+  // The whole emitted string — headings and separators included, not just content.
+  assert.ok(packed.text.length <= MAX_TOTAL_SOURCE_CHARS,
+            `rendered block must fit the budget, got ${packed.text.length}`);
+  assert.equal(packed.truncated.length, 40, 'every oversized source is reported as truncated');
+});
+
+test('packSources: many tiny sources cannot blow the budget via heading overhead', () => {
+  // Content total is trivial (200 000 chars) but 20 000 headings are not:
+  // a content-only budget let this render ~880 000 chars and throw in runClaude.
+  const sources = Array.from({ length: 20_000 }, (_, i) => ({
+    name: `some/rather/long/path/file-${i}.md`,
+    content: 'q'.repeat(10),
+  }));
+  const packed = packSources(sources);
+  assert.ok(packed.text.length <= MAX_TOTAL_SOURCE_CHARS,
+            `rendered block must fit the budget, got ${packed.text.length}`);
+  assert.ok(packed.omittedCount > 0, 'sources that could not fit are counted, not dropped silently');
+  assert.equal(packed.omittedCount + (packed.text.match(/^### /gm) || []).length, 20_000,
+               'every source is either rendered or counted in omittedCount');
+});
+
+test('packSources omits from the END, so selection order is preserved', () => {
+  const sources = Array.from({ length: 5_000 }, (_, i) => ({ name: `f${i}`, content: 'w'.repeat(500) }));
+  const packed = packSources(sources);
+  assert.ok(packed.text.includes('### f0\n'), 'the first source is always kept');
+  assert.equal(packed.omitted[0], `f${5_000 - packed.omittedCount}`,
+               'omission starts right after the last kept source — it drops from the end');
+});
+
+test('packSources never renders a source below MIN_SOURCE_CONTENT', () => {
+  const sources = Array.from({ length: 5_000 }, (_, i) => ({ name: `f${i}`, content: 'w'.repeat(5_000) }));
+  const packed = packSources(sources);
+  for (const block of packed.text.split('\n\n')) {
+    const body = block.slice(block.indexOf('\n') + 1);
+    assert.ok(body.length >= MIN_SOURCE_CONTENT, `a rendered source was only ${body.length} chars`);
+  }
+});
+
+test('packSources reports two same-named sources separately, not deduped', () => {
+  const sources = [
+    { name: 'README.md', content: 'p'.repeat(MAX_SOURCE_CONTENT + 1) },
+    { name: 'README.md', content: 'r'.repeat(MAX_SOURCE_CONTENT + 1) },
+  ];
+  const packed = packSources(sources);
+  assert.deepEqual(packed.truncated, ['README.md', 'README.md'],
+                   'display names collide across folders; per-item reporting must not collapse them');
+});
+
+test('packSources water-fills: small sources stay whole, only the big one is cut', () => {
+  const sources = [
+    { name: 'one', content: 'x'.repeat(1_000) },
+    { name: 'two', content: 'y'.repeat(1_000) },
+    { name: 'huge', content: 'z'.repeat(MAX_SOURCE_CONTENT) },
+  ];
+  // Budget deliberately smaller than the natural total so water-filling engages.
+  const packed = packSources(sources, { budget: 20_000 });
+  assert.equal((packed.text.match(/x/g) || []).length, 1_000, 'first small source survives whole');
+  assert.equal((packed.text.match(/y/g) || []).length, 1_000, 'second small source survives whole');
+  assert.deepEqual(packed.truncated, ['huge'], 'only the oversized source is reported');
+  assert.deepEqual(packed.omitted, [], 'nothing is dropped when everything fits');
+  assert.equal(packed.omittedCount, 0);
+  assert.ok((packed.text.match(/z/g) || []).length >= 17_000,
+            'the big source gets the budget the small ones did not use');
+});
+
+test('packSources handles an empty/absent source list without throwing', () => {
+  assert.equal(packSources([]).text, '');
+  assert.deepEqual(packSources([]).omitted, []);
+  assert.equal(packSources([]).omittedCount, 0);
+  assert.equal(packSources(undefined).text, '');
+});
+
+test('packSources caps the reported NAME lists but not the counts', () => {
+  const sources = Array.from({ length: 60_000 }, (_, i) => ({ name: `f${i}`, content: 'w'.repeat(5) }));
+  const packed = packSources(sources);
+  assert.ok(packed.omittedCount > MAX_REPORTED_NAMES, 'this case must actually overflow the cap');
+  assert.equal(packed.omitted.length, MAX_REPORTED_NAMES, 'names are capped');
+  assert.equal(packed.omittedCount + (packed.text.match(/^### /gm) || []).length, 60_000,
+               'the count still accounts for every source');
+});
+
+test('packSources stays fast on a request at the body limit (single pass, not O(n^2))', () => {
+  // 100 000 sources is what fits in the 8 MB body cap. The drop-one-and-
+  // re-measure loop this replaced blocked the event loop for ~67 s here,
+  // stalling chat, the KB and the Mobile Control proxy along with it.
+  const sources = Array.from({ length: 100_000 }, (_, i) => ({ name: `f${i}`, content: 'w'.repeat(5) }));
+  const started = Date.now();
+  const packed = packSources(sources);
+  const elapsed = Date.now() - started;
+  assert.ok(packed.text.length <= MAX_TOTAL_SOURCE_CHARS);
+  assert.ok(elapsed < 2_000, `packSources took ${elapsed} ms — the quadratic drop loop is back`);
 });

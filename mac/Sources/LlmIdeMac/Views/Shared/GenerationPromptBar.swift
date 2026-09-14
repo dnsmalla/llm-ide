@@ -185,18 +185,25 @@ struct GenerationPromptBar: View {
             .opacity(vm.isSaved ? 0.5 : 1)
 
             Button {
-                // A saved document is finished work: the panel returns to the
-                // setup view so the next generation can start, instead of
-                // leaving a read-only copy on screen that can no longer be
-                // edited or saved. The file itself is reported by the setup
-                // view's "Saved to …" row (`vm.lastSavedDocument`), which
-                // survives this reset. Only on success — a failed write still
-                // has unsaved work to keep on screen.
+                // A saved document is finished work: the panel returns to a
+                // CLEAN setup view so the next generation starts from
+                // defaults, instead of leaving a read-only copy on screen
+                // alongside the previous run's ticked sources, template and
+                // prompt (which the next run then silently inherited). The
+                // file itself is reported by the setup view's "Saved to …"
+                // row (`vm.lastSavedDocument`), which survives this reset.
+                // Only on success — a failed write still has unsaved work to
+                // keep on screen.
                 if vm.save(content: vm.editedContent,
                            api: api,
                            config: outputStore.config,
                            projectRoot: projectRoot) {
-                    vm.resetToIdle()
+                    vm.resetInputsToDefaults()
+                    // Setup's destination goes back to default too, so "clean
+                    // setup" means the whole left panel and not just the parts
+                    // the view model owns. Done AFTER the save above, which
+                    // still writes to the folder the user had configured.
+                    outputStore.update(DocGenOutputConfig())
                 }
             } label: {
                 HStack(spacing: 5) {

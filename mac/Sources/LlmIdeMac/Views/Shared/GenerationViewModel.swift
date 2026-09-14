@@ -50,6 +50,22 @@ final class GenerationViewModel: ObservableObject {
     @Published private(set) var generationState: GenerationState = .idle
     /// Source display names that could not be read before the last generate attempt.
     @Published private(set) var unreadableSourceNames: Set<String> = []
+    /// What the SERVER could not fit into the last run's prompt, already
+    /// phrased for display, or nil when everything was sent whole.
+    ///
+    /// Distinct from `unreadableSourceNames`: those never reached the model at
+    /// all, these reached it partially or not at all. Reported rather than
+    /// prevented — the client cannot predict the post-sanitization length the
+    /// server budgets on, so the server is the only honest source of this.
+    /// Also covers the pre-v52 server that says nothing and silently keeps
+    /// only the first 20 sources (see `GeneratedDoc.serverReportsFit`).
+    @Published private(set) var sourceFitNotice: String?
+    /// `sourceFitNotice` as it stood for the document `lastSavedDocument`
+    /// names. Snapshotted at save for the same reason
+    /// `lastSavedSkippedSources` is: the reset after a save clears the live
+    /// value, and the saved notice is then the only thing left that can say
+    /// the saved document was built from less than the whole selection.
+    @Published private(set) var lastSavedSourceFitNotice: String?
     /// True once the current document has been written to disk by `save`;
     /// false whenever a new document lands (a fresh generation or an applied
     /// edit). Drives disabling Edit/Save after a successful save (pressing
@@ -84,6 +100,7 @@ final class GenerationViewModel: ObservableObject {
     func clearSavedDocumentNotice() {
         lastSavedDocument = nil
         lastSavedSkippedSources = []
+        lastSavedSourceFitNotice = nil
         lastSavedProjectRoot = nil
     }
     /// The chat reply text last written by `saveChatOutput`, or nil before
@@ -126,6 +143,15 @@ final class GenerationViewModel: ObservableObject {
     /// front with a clear message, instead of silently revising a
     /// truncated copy and overwriting the original with the (now
     /// tail-shorter) result.
+    ///
+    /// MEASURED IN UTF-16 CODE UNITS, not `String.count`. The server counts
+    /// JavaScript string length, which is UTF-16 code units; Swift's `count`
+    /// is grapheme clusters, so an emoji-heavy 49 000-grapheme document is
+    /// 60 000+ there and used to pass this guard and be truncated anyway.
+    /// The residual gap — `sanitizeForPrompt` can LENGTHEN text — is caught
+    /// after the fact by the server's own `truncated`/`omitted` report in
+    /// `applyEdit`, which refuses to apply the result. That backstop needs a
+    /// v52+ server; against an older one this guard is all there is.
     private static let maxRevisionSourceChars = 50_000
 
     var canGenerate: Bool {
@@ -170,12 +196,17 @@ final class GenerationViewModel: ObservableObject {
         clearSavedDocumentNotice()
         generationState = .generating
         unreadableSourceNames = []
+        sourceFitNotice = nil
 
         generationTask = Task {
             do {
                 var sources: [(name: String, content: String)] = []
                 var skippedSources: [String] = []
-                for source in selectedSources {
+                // Sorted, NOT raw Set order: the server drops from the end of
+                // this list when the selection overruns its character budget,
+                // so an unordered send would make the dropped file vary
+                // between identical runs. See `DocGenSource.sendOrderKey`.
+                for source in selectedSources.sorted(by: { $0.sendOrderKey < $1.sendOrderKey }) {
                     guard !Task.isCancelled else { return }
                     switch source {
                     case .meeting(let id, let title):
@@ -214,9 +245,10 @@ final class GenerationViewModel: ObservableObject {
                     command: command?.instruction,
                     prompt: userPrompt.isEmpty ? nil : userPrompt,
                     sources: sources)
-                editedContent = result
+                editedContent = result.content
+                sourceFitNotice = Self.sourceFitNotice(for: result, sentCount: sources.count)
                 isSaved = false
-                generationState = .done(result, skipped: skippedSources)
+                generationState = .done(result.content, skipped: skippedSources)
             } catch {
                 if !Task.isCancelled {
                     generationState = .error(error.localizedDescription)
@@ -254,8 +286,9 @@ final class GenerationViewModel: ObservableObject {
         // before building the prompt, so a document past that would come
         // back revised-from-a-truncated-copy and overwrite the original
         // with the (silently shorter) result.
-        guard currentDocument.count <= Self.maxRevisionSourceChars else {
-            editError = "This document is \(currentDocument.count) characters, over the " +
+        let documentLength = currentDocument.utf16.count
+        guard documentLength <= Self.maxRevisionSourceChars else {
+            editError = "This document is \(documentLength) characters, over the " +
                 "\(Self.maxRevisionSourceChars)-character limit for a single revision. " +
                 "Save it and start a new document for further changes."
             return
@@ -292,11 +325,34 @@ final class GenerationViewModel: ObservableObject {
                     command: command?.instruction,
                     prompt: revisionPrompt,
                     sources: [(name: sourceName, content: currentDocument)])
-                editedContent = result
+                // The up-front `maxRevisionSourceChars` guard is NOT
+                // sufficient on its own, so the server's own report is what
+                // decides here. Two ways a document that passed the guard is
+                // still truncated server-side: Swift's `count` is grapheme
+                // clusters while the server measures UTF-16 code units (an
+                // emoji-heavy document is far longer there), and
+                // `sanitizeForPrompt` can LENGTHEN text. Either way the
+                // revision was made from a truncated copy, so applying it
+                // would overwrite the original with a shorter one — exactly
+                // the loss the guard exists to prevent. Refuse, keep the
+                // pre-edit document, and say why.
+                guard result.truncatedTotal == 0 && result.omittedTotal == 0 else {
+                    editError = "The server could only read part of this document " +
+                        "(\(documentLength) characters), so the revision would have " +
+                        "replaced it with a shortened copy. The document is unchanged. " +
+                        "Save it and start a new document for further changes."
+                    generationState = .done(currentDocument, skipped: [])
+                    preRevisionDocument = nil
+                    return
+                }
+                editedContent = result.content
+                // A revision replaces the document the original run's notice
+                // described, so that notice no longer applies.
+                sourceFitNotice = nil
                 editPrompt = ""
                 isSaved = false
                 preRevisionDocument = nil
-                generationState = .done(result, skipped: [])
+                generationState = .done(result.content, skipped: [])
             } catch {
                 // Task.isCancelled here means cancelGeneration() already
                 // restored generationState synchronously — don't clobber it.
@@ -329,11 +385,98 @@ final class GenerationViewModel: ObservableObject {
     func resetToIdle() {
         generationState = .idle
         unreadableSourceNames = []
+        sourceFitNotice = nil
         editPrompt = ""
         editError = nil
         editedContent = ""
         isSaved = false
         preRevisionDocument = nil
+    }
+
+    /// `resetToIdle()` plus every RUN INPUT the user picked: sources,
+    /// template, command, prompt, and the "Use chat" toggle.
+    ///
+    /// Called after a successful save, where the run is finished work: the
+    /// panel used to return to setup still carrying the previous document's
+    /// 42 ticked files and its template, so the next run silently inherited
+    /// them. `resetToIdle()` stays as it was for the paths where the inputs
+    /// SHOULD survive — "Try Again" after an error, and "Start another",
+    /// where the user is re-running over the same selection.
+    ///
+    /// `lastSavedDocument` deliberately survives, exactly as it does through
+    /// `resetToIdle()`: it is the setup view's "Saved to …" row, the only
+    /// thing left telling the user where the document went.
+    ///
+    /// The "Use chat" toggle lives in `@AppStorage` on the panel views rather
+    /// than here, so it is reset through `UserDefaults` on this surface's own
+    /// key — writing the key republishes to every `@AppStorage` bound to it.
+    func resetInputsToDefaults() {
+        resetToIdle()
+        selectedSources = []
+        selectedTemplate = nil
+        selectedCommand = nil
+        prompt = ""
+        relaxRequirements = false
+        UserDefaults.standard.set(false, forKey: Self.useChatDefaultsKey(for: surface))
+    }
+
+    /// Phrase what the server could not fit, for `sourceFitNotice`.
+    ///
+    /// `sentCount` is how many sources the client actually put on the wire,
+    /// needed only for the stale-server case: a pre-v52 server reports
+    /// nothing and silently keeps just the first 20, so past 20 sent sources
+    /// the shortfall is real and must be named even though the server said
+    /// nothing about it. Static and pure so the wording is testable.
+    static func sourceFitNotice(for result: LlmIdeAPIClient.GeneratedDoc,
+                                sentCount: Int) -> String? {
+        guard result.serverReportsFit else {
+            guard sentCount > Self.legacyServerSourceCap else { return nil }
+            let dropped = sentCount - Self.legacyServerSourceCap
+            return "This server is out of date: it sent only the first " +
+                "\(Self.legacyServerSourceCap) of \(sentCount) sources and ignored the " +
+                "other \(dropped). Restart the local server to send them all."
+        }
+        var parts: [String] = []
+        if result.omittedTotal > 0 {
+            parts.append("\(result.omittedTotal) source\(result.omittedTotal == 1 ? "" : "s") " +
+                "did not fit and \(result.omittedTotal == 1 ? "was" : "were") not sent: " +
+                nameList(result.omittedSources, total: result.omittedTotal))
+        }
+        if result.truncatedTotal > 0 {
+            parts.append("\(result.truncatedTotal) source\(result.truncatedTotal == 1 ? "" : "s") " +
+                "\(result.truncatedTotal == 1 ? "was" : "were") too long to send in full and " +
+                "\(result.truncatedTotal == 1 ? "was" : "were") shortened: " +
+                nameList(result.truncatedSources, total: result.truncatedTotal))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
+
+    /// Render a name list that the server may have capped. Joining tens of
+    /// thousands of names into one `Text` is unreadable (and was what the
+    /// uncapped version did), so anything past what the server sent is
+    /// summarised as a count.
+    private static func nameList(_ names: [String], total: Int) -> String {
+        let shown = names.joined(separator: ", ")
+        guard total > names.count else { return shown }
+        let rest = total - names.count
+        return shown.isEmpty
+            ? "\(rest) source\(rest == 1 ? "" : "s")"
+            : "\(shown) and \(rest) more"
+    }
+
+    /// The source cap a pre-v52 server applies silently
+    /// (`export-routes.mjs`'s old `body.sources.slice(0, 20)`).
+    private static let legacyServerSourceCap = 20
+
+    /// The `@AppStorage` key backing this surface's "Use chat" toggle. Doc Gen
+    /// and Visual each own theirs (`DocGenSourcePanel` / `VisualSourcePanel`
+    /// and their prompt bars all declare the same two literals) — keep these
+    /// in sync with those declarations.
+    static func useChatDefaultsKey(for surface: TemplateSurface) -> String {
+        switch surface {
+        case .doc:    return "DOCGEN_USE_CHAT"
+        case .visual: return "VISUAL_USE_CHAT"
+        }
     }
 
     /// Write the generated markdown to the configured output folder. Unlike the
@@ -363,6 +506,7 @@ final class GenerationViewModel: ObservableObject {
             isSaved = true
             lastSavedDocument = url
             lastSavedSkippedSources = unreadableSourceNames.sorted()
+            lastSavedSourceFitNotice = sourceFitNotice
             lastSavedProjectRoot = projectRoot
             if revealInFinder {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
