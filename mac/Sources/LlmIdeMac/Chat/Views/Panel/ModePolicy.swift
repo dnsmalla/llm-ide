@@ -13,9 +13,13 @@ public enum ModePolicy {
 
     /// Wire values `CodeAssistMode` knows. Mirrors its `rawValue`s; an
     /// unknown server value must never move the picker.
-    static let knownModes: Set<String> = [
-        "auto", "plan", "assist_plan", "review", "document", "execute",
-    ]
+    /// DERIVED from `CodeAssistMode`, not hand-listed, so the two cannot
+    /// drift — and drift here is silent: a mode the picker can hold but this
+    /// set omits simply never follows the server, with no error anywhere.
+    /// (Adding `ask` to the enum hit exactly that, which is why it is
+    /// computed now.) Public for `chat-contract-lab`; `CodeAssistMode` stays
+    /// internal, which is the whole reason this type keys on raw strings.
+    public static let knownModes: Set<String> = Set(CodeAssistMode.allCases.map(\.rawValue))
 
     /// Where the picker should move when the server resolves `resolved`
     /// for a turn, or nil to leave it. Only Auto ever follows: moving OFF

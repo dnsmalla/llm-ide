@@ -61,14 +61,19 @@ const MODE_CONFIG = {
   // Read-only is therefore not a preference here, it is what makes the
   // surface safe. See mode-classify.mjs's MODES for the other half.
   ask: {
+    // Deliberately says nothing about WHICH surface sent the turn. It used to
+    // say "from a quick-chat window" and end by telling the user to ask in the
+    // Code Assistant panel — true while the menu bar, sheet and phone were the
+    // only senders, and wrong the moment the panel's own mode picker offered
+    // Ask: it told a panel user to go where they already were.
     persona: 'You are in ASK mode — the user is asking a question about this '
-           + 'project from a quick-chat window, not starting a work session. '
+           + 'project, not starting a work session. '
            + 'Answer directly and concisely, using the read-only tools to ground '
            + 'the answer in the actual code and in this project\'s memory rather '
            + 'than guessing. You cannot modify anything in this mode: no file '
            + 'edits, no shell commands, no git/issue/PR actions. If the user '
-           + 'wants a change made, say so and tell them to ask in the '
-           + 'Code Assistant panel.',
+           + 'wants a change made, say so and tell them to switch the mode '
+           + 'picker to Execute (or Plan, if the change needs designing first).',
   },
 };
 

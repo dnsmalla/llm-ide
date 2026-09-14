@@ -1114,6 +1114,38 @@ do {
            "caching is a pre-payment: writes cost MORE than fresh input, reads much less")
 }
 
+// Ask mode — read-only, the cheapest mode, and now pickable in the panel
+// rather than only sendable by the quick chat / menu bar / phone.
+do {
+    // `knownModes` gates whether a server-resolved mode may move the picker,
+    // and a mode the picker can hold but this set omits fails SILENTLY — no
+    // error, the picker just never follows. Adding Ask hit exactly that, so
+    // the set is now derived from the enum rather than hand-listed; these
+    // two assertions pin the property that derivation buys.
+    expect(ModePolicy.knownModes.contains("ask"),
+           "Ask is resolvable — the quick chat has always sent it, the panel can now pick it")
+    expect(ModePolicy.knownModes.count >= 7,
+           "every picker mode is present, not a hand-copied subset that silently lost one")
+    expect(ModePolicy.pickerMode(current: "auto", resolved: "ask") == "ask",
+           "so a turn the server resolved to Ask moves the picker there, like any other mode")
+
+    // A hand-picked Ask is the user's choice, so no lifecycle release takes it
+    // back — `releasesStickyMode` only ever undoes a mode the FLOW set.
+    for stages in [ModePolicy.planStages, ModePolicy.runStages,
+                   ModePolicy.runAndReviewStages, ModePolicy.reviewStage] {
+        expect(!ModePolicy.releasesStickyMode(current: "ask", releasing: stages),
+               "a run ending never drags the user out of Ask — they chose it")
+    }
+
+    // Ask is not a planning mode, so asking for a plan from it still offers
+    // the switch rather than answering the request read-only and silently
+    // producing nothing.
+    expect(PlanRequestPolicy.offersPlanSwitch(draft: "i want a plan to remove the dead code", currentMode: "ask"),
+           "a plan request typed in Ask is offered the switch, like one typed in Execute")
+    expect(!PlanRequestPolicy.offersPlanSwitch(draft: "what does this function do?", currentMode: "ask"),
+           "but an ordinary question in Ask is exactly right — say nothing")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

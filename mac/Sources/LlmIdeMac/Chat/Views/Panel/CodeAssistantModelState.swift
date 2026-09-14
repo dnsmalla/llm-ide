@@ -4,7 +4,21 @@ import Foundation
 /// extension/llm_agent/runtime/mode-personas.mjs / route.mjs's
 /// `resolvedMode`) — raw values are wire contracts, not renameable.
 enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption {
-    case auto, plan
+    case auto
+    /// Read-only question answering — the cheapest mode, and the only one the
+    /// picker offers that cannot change anything.
+    ///
+    /// The server has always supported it (`mode-personas.mjs`'s `ask`), and
+    /// the menu bar, the quick-chat sheet and the phone have always sent it;
+    /// the panel simply had no way to pick it, so a question typed here ran
+    /// with Execute's full write surface — Edit/Write/Bash plus the task
+    /// tools — loaded into the prompt for a turn that was never going to use
+    /// them. It is NOT reachable by classification: `mode-classify.mjs`
+    /// deliberately keeps `ask` out of `CLASSIFIABLE_MODES`, because a
+    /// classifier that wrongly picks read-only makes real work silently do
+    /// nothing. Choosing it by hand carries no such risk.
+    case ask
+    case plan
     /// The grilling-first counterpart to `.plan`. Both modes run the same
     /// pipeline (question → write plan → save → execute); they differ only in
     /// the questioning stage: `.plan` runs superpowers' `brainstorming`
@@ -20,6 +34,7 @@ enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption
     var label: String {
         switch self {
         case .auto: return "Auto"
+        case .ask: return "Ask"
         case .plan: return "Plan"
         case .assistPlan: return "Assist Plan"
         // "Code Review", not "Review" — the adjacent editModeChip already
@@ -34,6 +49,7 @@ enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption
     var icon: String {
         switch self {
         case .auto: return "sparkles"
+        case .ask: return "bubble.left"
         case .plan: return "list.bullet.clipboard"
         case .assistPlan: return "questionmark.bubble.fill"
         case .review: return "checkmark.seal"
@@ -45,6 +61,7 @@ enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption
     var help: String {
         switch self {
         case .auto: return "Auto — Claude classifies your request and picks a mode itself"
+        case .ask: return "Ask — answer a question about this project, read-only; the cheapest mode (no edit/command tools are loaded at all)"
         case .plan: return "Plan — work up a design together (questions, approaches, your approval), then write and save the plan; no file edits or commands except saving it"
         case .assistPlan: return "Assist Plan — same pipeline, but it grills your stated plan in rounds of numbered questions instead of exploring approaches; no file edits or commands except saving the finished plan"
         case .review: return "Review — give code-review feedback; no file edits or commands"
