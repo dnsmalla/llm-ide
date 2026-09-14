@@ -523,14 +523,14 @@ struct MenuBarChatView: View {
                         .background(Self.greetingBlue.opacity(0.12))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 } else {
-                    SelfSizingMarkdownView(
+                    ChatMarkdownBubble(
                         markdown: displayedContent(for: msg),
-                        isDark: theme.current.isDark
-                    ) { h in
-                        if engine.bubbleHeights[msg.id] != h { engine.bubbleHeights[msg.id] = h }
-                    }
+                        isDark: theme.current.isDark,
+                        isStreaming: msg.status == .streaming,
+                        contentHeight: Binding(
+                            get: { engine.bubbleHeights[msg.id] ?? 24 },
+                            set: { engine.bubbleHeights[msg.id] = $0 }))
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(height: max(engine.bubbleHeights[msg.id] ?? 24, 24))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(Color(nsColor: .controlBackgroundColor))

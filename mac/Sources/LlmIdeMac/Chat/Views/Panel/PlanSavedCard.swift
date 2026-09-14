@@ -151,11 +151,10 @@ struct PlanSavedCard: View {
         if expanded {
             // Full plan, rendered as real markdown — the same web renderer
             // the assistant bubble uses.
-            SelfSizingMarkdownView(markdown: content, isDark: theme.current.isDark) { h in
-                if markdownHeight != h { markdownHeight = h }
-            }
-            .frame(height: max(markdownHeight, 24))
-            .frame(maxWidth: .infinity, alignment: .leading)
+            ChatMarkdownBubble(markdown: content,
+                               isDark: theme.current.isDark,
+                               contentHeight: $markdownHeight)
+                .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             // Collapsed: the first lines as plain text — cheap, and enough to
             // recognise the plan without a web view per card in the list.

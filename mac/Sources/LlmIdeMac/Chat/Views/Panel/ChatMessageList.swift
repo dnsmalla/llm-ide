@@ -800,14 +800,14 @@ struct ChatMessageList: View {
                     } else if isAssistantExpanded(turn, lastAssistantTurnId: lastAssistantTurnId) {
                         // Expanded assistant reply — full markdown render (web view).
                         VStack(alignment: .leading, spacing: 4) {
-                            SelfSizingMarkdownView(
+                            ChatMarkdownBubble(
                                 markdown: displayedContent(for: turn),
-                                isDark: theme.current.isDark
-                            ) { h in
-                                if engine.bubbleHeights[turn.id] != h { engine.bubbleHeights[turn.id] = h }
-                            }
+                                isDark: theme.current.isDark,
+                                isStreaming: turn.status == .streaming,
+                                contentHeight: Binding(
+                                    get: { engine.bubbleHeights[turn.id] ?? 24 },
+                                    set: { engine.bubbleHeights[turn.id] = $0 }))
                             .frame(maxWidth: 720, alignment: .leading)
-                            .frame(height: max(engine.bubbleHeights[turn.id] ?? 24, 24))
                             // Older expanded replies can be collapsed again; the
                             // latest stays open and shows no collapse control.
                             if turn.id != lastAssistantTurnId {

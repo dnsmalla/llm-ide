@@ -350,7 +350,9 @@ struct LlmChatSheet: View {
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     } else if isExpanded {
-                        AssistantBubbleContent(markdown: msg.content, isDark: theme.current.isDark)
+                        AssistantBubbleContent(markdown: msg.content,
+                                               isDark: theme.current.isDark,
+                                               isStreaming: msg.status == .streaming)
                     } else {
                         collapsedAssistantContent(msg)
                     }
@@ -496,13 +498,14 @@ struct LlmChatSheet: View {
 private struct AssistantBubbleContent: View {
     let markdown: String
     let isDark: Bool
+    var isStreaming: Bool = false
     @State private var height: CGFloat = 24
 
     var body: some View {
-        SelfSizingMarkdownView(markdown: markdown, isDark: isDark) { h in
-            if height != h { height = h }
-        }
-        .frame(maxWidth: 640, alignment: .leading)
-        .frame(height: max(height, 24))
+        ChatMarkdownBubble(markdown: markdown,
+                           isDark: isDark,
+                           isStreaming: isStreaming,
+                           contentHeight: $height)
+            .frame(maxWidth: 640, alignment: .leading)
     }
 }
