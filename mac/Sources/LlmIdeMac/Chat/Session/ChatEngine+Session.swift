@@ -344,6 +344,11 @@ extension ChatEngine {
         agent.planExecution = nil
         agent.agentIsAutonomous = false
         agent.agentStopRequested = false
+        // The auto-continue budget is per chain, and the chain belongs to the
+        // chat being left — carrying 5 spent rounds into the next chat would
+        // give its first plan 3 rounds instead of 8.
+        autoContinueRounds = 0
+        nextTurnIsAutoContinue = false
         // The files the last turn carried belong to the chat being left.
         currentTurnAttachments = []
         sessionEpoch += 1

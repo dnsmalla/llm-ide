@@ -278,6 +278,20 @@ final class ChatEngine {
     /// A knob only so tests don't wait 0.8 real seconds; production never
     /// changes it.
     var continueDelayNanos: UInt64 = 800_000_000
+    /// Ceiling on back-to-back "Continue working on your pending tasks."
+    /// turns fired without the user typing anything. The server keeps
+    /// answering `continueNeeded: true` for as long as a task is pending, and
+    /// every such turn re-sends the plan attachments plus the execute-stage
+    /// skill (2–32 KB) — with no ceiling, a plan the agent cannot finish
+    /// burned tokens until Stop. `maxAutoGitOpsPerTurn` (panel) bounds
+    /// edits/git ops WITHIN a turn; this bounds the turns themselves.
+    static let maxAutoContinueRounds = 8
+    var autoContinueRounds = 0
+    /// Set right before the auto-continue `startTurn` so `runTurn` can tell
+    /// it from a user turn — both go through the same entry point, and only
+    /// a user turn resets the round count (fresh consent, same as
+    /// `agentStopRequested`).
+    var nextTurnIsAutoContinue = false
 
     // MARK: - Injected collaborators (the panel wires these in Task 7)
 
@@ -643,9 +657,17 @@ final class ChatEngine {
         // the first `continueNeeded` turn after either stop silently skipped
         // its continuation and left the plan card on "Executing plan…".
         agent.agentStopRequested = false
-        // Transient v2 banner (stale-server notice): it described the
-        // PREVIOUS turn's fallback — a new turn starting means it has served
-        // its purpose.
+        // Same consent logic for the auto-continue ceiling: a turn the USER
+        // sent starts the count over; the chain's own continue turns (flagged
+        // just before their `startTurn`) must not, or the cap would never bite.
+        if nextTurnIsAutoContinue {
+            nextTurnIsAutoContinue = false
+        } else {
+            autoContinueRounds = 0
+        }
+        // Transient banner (stale-server notice, auto-continue ceiling): it
+        // described the PREVIOUS turn — a new turn starting means it has
+        // served its purpose.
         agentV2Notice = nil
         // Clear any stale pending-tool card from a prior turn the user ignored —
         // otherwise it stays interactive against the old args while a new turn runs.
@@ -1263,8 +1285,29 @@ final class ChatEngine {
         } else if continueNeeded == false, !modeRestrictsTools {
             updatePlanExecution(with: agent.agentPendingTasks, continueNeeded: continueNeeded)
         }
-        if continueNeeded == true && !agent.agentStopRequested {
+        if continueNeeded == true && !agent.agentStopRequested
+            && autoContinueRounds >= Self.maxAutoContinueRounds {
+            // The chain has run its allotted rounds without finishing. Stop
+            // driving it, but keep the tasks pending so the user can resume
+            // with one word — a dismissible notice, not an error: nothing
+            // failed, the ceiling did its job.
+            agent.agentIsAutonomous = false
+            autoContinueRounds = 0
+            agentV2Notice = "Paused after \(Self.maxAutoContinueRounds) automatic rounds with tasks still pending. Send a message (e.g. “continue”) to keep going."
+            // Same as the `stopped` branch above: `updatePlanExecution`
+            // deliberately leaves a `.running` tracker alone while
+            // `continueNeeded` is true (the chain was about to continue), so
+            // reaching idle through THIS door would otherwise leave the plan
+            // card on "Executing plan…" with no Dismiss and the picker pinned
+            // to Execute. `.failed` is the phase whose card carries Dismiss.
+            if var tracker = agent.planExecution, tracker.phase == .running {
+                tracker.phase = .failed
+                agent.planExecution = tracker
+                onPlanExecutionSettled()
+            }
+        } else if continueNeeded == true && !agent.agentStopRequested {
             agent.agentIsAutonomous = true
+            autoContinueRounds += 1
             let scheduledEpoch = sessionEpoch
             DispatchQueue.main.asyncAfter(deadline: .now() + .nanoseconds(Int(continueDelayNanos))) {
                 MainActor.assumeIsolated {
@@ -1288,6 +1331,7 @@ final class ChatEngine {
                     // replayed through `packHistory`, and the composer that
                     // supplied them cleared its chips when the first message
                     // was sent, so a live read here would find nothing.
+                    self.nextTurnIsAutoContinue = true
                     self.startTurn("Continue working on your pending tasks.",
                                    attachments: self.currentTurnAttachments)
                 }
@@ -1295,6 +1339,7 @@ final class ChatEngine {
         } else {
             agent.agentIsAutonomous = false
             agent.agentStopRequested = false
+            autoContinueRounds = 0
         }
         if let u = usage {
             agent.lastMemoryTokens = u.memoryApproxTokens
