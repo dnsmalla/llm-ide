@@ -30,9 +30,13 @@ struct HistoryTextEditor: NSViewRepresentable {
     /// the text view move the caret normally.
     var onArrowUp: () -> Bool
     var onArrowDown: () -> Bool
-    /// Autocomplete-menu keys. Each returns `true` to consume the key (menu
-    /// open) or `false` to fall through to the text view's default (newline /
-    /// tab insertion / nothing). nil = no menu wired (default behaviour).
+    /// Autocomplete-menu keys, plus `onReturn` doubling as submit. Each
+    /// returns `true` to consume the key or `false` to fall through to the
+    /// text view's default (tab insertion / nothing) — except `onReturn`,
+    /// whose caller (`ChatComposer`) always returns `true` (accept the
+    /// completion, or submit the draft): bare Return never falls through to
+    /// newline insertion, only ⇧/⌘/⌥/⌃+Return do, via `keyDown`'s `bare`
+    /// gate below. nil = no menu wired (default behaviour).
     var onReturn: (() -> Bool)? = nil
     var onTab: (() -> Bool)? = nil
     var onEscape: (() -> Bool)? = nil
@@ -342,10 +346,15 @@ final class ArrowInterceptingTextView: NSTextView {
         // (⌘⌥⌃⇧) should disqualify a "bare" arrow.
         let chordMods: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
         let bare = event.modifierFlags.intersection(chordMods).isEmpty
-        // Menu keys take priority while the autocomplete menu is open (the
-        // handler returns false when it's closed, so normal editing — newline
-        // on Return, tab insertion — is untouched). Return stays bare-only so
-        // ⌘↵ keeps submitting via the SwiftUI button.
+        // Menu keys take priority while the autocomplete menu is open. Tab
+        // falls through to normal tab insertion when its handler declines;
+        // Return does NOT fall through — its handler (ChatComposer's
+        // onReturn) always accepts the completion or submits the draft, so
+        // bare Return never inserts a newline. `bare` excludes ⇧/⌘/⌥/⌃, so
+        // ⇧↵ (newline) and ⌘↵ (the SwiftUI Send button's own shortcut) both
+        // skip this branch entirely and are unaffected. This ordering also
+        // relies on the `hasMarkedText()` bail-out above running FIRST: an
+        // IME's own Return (candidate confirmation) never reaches here.
         if bare, event.keyCode == 36 /* return */, onReturn?() == true { return }
         if bare, event.keyCode == 48 /* tab */, onTab?() == true { return }
         if event.keyCode == 53 /* esc */, onEscape?() == true { return }

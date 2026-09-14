@@ -255,7 +255,23 @@ extension CodeAssistantPanel {
                     ghostColor: NSColor(theme.current.textMuted.opacity(0.6)),
                     onArrowUp: { arrowUpAction() },
                     onArrowDown: { arrowDownAction() },
-                    onReturn: { if completion.isOpen { acceptCompletion(); return true }; return false },
+                    // Enter submits, Claude-style; Shift+Enter still inserts
+                    // a newline. This closure only ever sees BARE Return —
+                    // `ArrowInterceptingTextView.keyDown`'s `bare` gate
+                    // already excludes ⇧ (and ⌘⌥⌃) before calling `onReturn`,
+                    // so Shift+Return falls straight through to the text
+                    // view's default newline insertion without reaching
+                    // here at all. That same `keyDown` also bails out to the
+                    // default handler FIRST whenever `hasMarkedText()` is
+                    // true, so a Return that confirms an IME candidate
+                    // (Japanese/Chinese/Korean input) never reaches this
+                    // closure either — only a genuinely bare, non-IME Return
+                    // does.
+                    onReturn: {
+                        if completion.isOpen { acceptCompletion(); return true }
+                        submit()
+                        return true
+                    },
                     // Tab: completion menu keeps priority; otherwise accept the
                     // ghost prediction. Assigning the full stored prompt (not
                     // draft + suffix) keeps the accepted text byte-identical to
@@ -411,10 +427,11 @@ extension CodeAssistantPanel {
     }
 
     var keyHint: some View {
-        Text("⌘↵")
+        Text("↵")
             .font(.system(size: 10, design: .monospaced))
             .foregroundStyle(theme.current.textMuted.opacity(0.6))
             .fixedSize()
+            .help("↵ sends · ⇧↵ for a new line")
     }
 
     var sendButton: some View {
@@ -455,8 +472,13 @@ extension CodeAssistantPanel {
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            // Enter (in the text view itself, via HistoryTextEditor's
+            // onReturn above) is the primary send key now, Claude-style.
+            // ⌘↵ stays wired as a secondary shortcut — it still works from
+            // anywhere the button has focus, and costs nothing to keep for
+            // anyone's existing muscle memory.
             .keyboardShortcut(.return, modifiers: .command)
-            .help(engine.busy ? "Queue this message — sends when the current response finishes (⌘↵)" : "Send (⌘↵)")
+            .help(engine.busy ? "Queue this message — sends when the current response finishes (↵)" : "Send (↵ · ⇧↵ for a new line)")
             .accessibilityLabel(engine.busy ? "Queue message" : "Send message")
         }
     }
