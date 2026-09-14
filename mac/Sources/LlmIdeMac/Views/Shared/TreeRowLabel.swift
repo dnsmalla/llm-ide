@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// Presentation-only row used by all file-tree views (Library FSNodeRow,
-/// Explorer). Takes scalars so it works with any
-/// node model (eager FSNode or lazy FileSystemTree.Node). Each tree keeps its
-/// own recursion + selection/tap model; this only renders the label.
+/// Presentation-only row used by every file-tree view (the Explorer tree, the
+/// Library sidebar and its `LibraryFileRow`, `FileTreePanel`'s FSNodeRow).
+/// Takes scalars so it works with any node model (eager FSNode, lazy
+/// FileSystemTree.Node, the Library's CodeEntry). Each tree keeps its own
+/// recursion + selection/tap model; this only renders the label.
 struct TreeRowLabel: View {
     let name: String
     let isFolder: Bool
@@ -15,6 +16,16 @@ struct TreeRowLabel: View {
     // and an extra `@Observable` dependency edge, on EVERY row of EVERY
     // render to feed a parameter the body never read.
     var folderTint: Color? = nil   // nil → default folder color
+    /// Overrides the folder glyph. The Library's SOURCES sub-groups are folder
+    /// rows that must keep their input source's own symbol (a waveform for
+    /// Meetings, an envelope for Mail) — `nil` keeps the standard
+    /// folder / folder.fill pair every real directory uses.
+    var folderIcon: String? = nil
+    /// Small count shown right after the name (the Library's SOURCES
+    /// sub-groups show how many files they hold). Deliberately NOT at the
+    /// trailing edge where `gitStatus`'s letter goes — it reads as part of
+    /// the name, which is where the previous DisclosureGroup label put it.
+    var badge: String? = nil
     // file extension for FileIconKit (files only)
     var fileExtension: String = ""
     /// Git status decoration (nil → undecorated / clean). VS Code-style.
@@ -23,8 +34,9 @@ struct TreeRowLabel: View {
     /// becomes its own button, so expanding a folder does NOT go through the
     /// row's click. That separation is what makes ⌘/⇧ multi-select work on
     /// folders — clicking a folder's body selects it like any other row
-    /// instead of also toggling it. `nil` (Library's `FileTreePanel`) keeps
-    /// the previous static chevron and needs no change.
+    /// instead of also toggling it. `nil` (the Library sidebar,
+    /// `FileTreePanel`) keeps a static chevron, for trees whose whole ROW
+    /// toggles: a button there would race the row's own tap handler.
     var onToggleChevron: (() -> Void)? = nil
 
     @EnvironmentObject private var theme: ThemeStore
@@ -49,7 +61,7 @@ struct TreeRowLabel: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 10)
                 }
-                Image(systemName: isExpanded ? "folder.fill" : "folder")
+                Image(systemName: folderIcon ?? (isExpanded ? "folder.fill" : "folder"))
                     .font(Typography.filename)
                     .foregroundStyle(gitColor ?? folderTint ?? FileIconKit.folderColor)
                     .frame(width: 16)
@@ -58,6 +70,11 @@ struct TreeRowLabel: View {
                     .foregroundStyle(gitColor ?? .primary)
                     .strikethrough(gitStatus == .deleted)
                     .lineLimit(1)
+                if let badge {
+                    Text(badge)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
             } else {
                 indentGuides(depth)
                 Spacer().frame(width: 10)   // aligns the file icon under sibling folder icons

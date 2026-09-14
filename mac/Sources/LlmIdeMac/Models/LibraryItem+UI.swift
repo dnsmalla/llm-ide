@@ -24,11 +24,3 @@ extension LibraryItem.Category {
         }
     }
 }
-
-extension LibraryItem {
-    /// SF Symbol name — delegates to the shared FileIconKit.
-    var fileIcon: String { FileIconKit.icon(for: ext) }
-
-    /// Per-extension colour — delegates to the shared FileIconKit.
-    var fileIconColor: Color { FileIconKit.color(for: ext) }
-}

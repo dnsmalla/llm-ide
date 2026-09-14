@@ -91,4 +91,33 @@ struct CodeEntry: Identifiable {
                 CodeEntry(id: "file:" + item.path, name: item.name, item: item, children: nil)
             })
     }
+
+    /// One VISIBLE row of a flattened forest, carrying the `depth` that
+    /// `TreeRowLabel` turns into indent guides.
+    struct Row: Identifiable {
+        let entry: CodeEntry
+        let depth: Int
+        var id: String { entry.id }
+    }
+
+    /// Flatten the forest to the rows currently on screen, mirroring the
+    /// Explorer's `ExplorerTreeStore.flatten`.
+    ///
+    /// The Library used to hand this forest straight to `OutlineGroup`, which
+    /// owns both the indentation and the disclosure triangle — so its rows
+    /// could not carry the Explorer's indent guides, its own chevron, or a
+    /// depth at all. Flattening here moves that decision back into the row,
+    /// which is what makes the two trees look like one control.
+    ///
+    /// A folder's children are emitted only while its `id` is in `expanded`,
+    /// so collapsed subtrees cost nothing to render.
+    static func flatten(_ forest: [CodeEntry],
+                        expanded: Set<String>,
+                        depth: Int = 0) -> [Row] {
+        forest.flatMap { entry -> [Row] in
+            let row = Row(entry: entry, depth: depth)
+            guard let children = entry.children, expanded.contains(entry.id) else { return [row] }
+            return [row] + flatten(children, expanded: expanded, depth: depth + 1)
+        }
+    }
 }

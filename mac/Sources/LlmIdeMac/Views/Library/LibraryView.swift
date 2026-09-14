@@ -1,6 +1,12 @@
 import SwiftUI
 
 struct LibraryView: View {
+    /// Leading inset shared by EVERY file/folder row in the sidebar, so the
+    /// hierarchy (section HEADER → folder → files) still reads once the rows
+    /// draw their own chevron. Deeper levels indent from here, via
+    /// `TreeRowLabel`'s indent guides.
+    private static let treeRowInset: CGFloat = 16
+
     let api: LlmIdeAPIClient
     @Environment(ShellState.self) private var shell
     @Environment(AppEnvironment.self) private var env
@@ -341,11 +347,15 @@ struct LibraryView: View {
     // MARK: - Nested tree sections (Code, LLM Doc)
 
     /// Renders a tree category's items as a recursive directory tree (the
-    /// store's memoized `treeEntries(for:)` forest) via `OutlineGroup`, which
-    /// handles expand/collapse and nesting for us. Each root shows its true
-    /// subfolder hierarchy; files reuse the standard row + selection tag —
-    /// including the context-menu Remove, which is the delete affordance
-    /// here (OutlineGroup isn't a ForEach, so there's no swipe-to-delete).
+    /// store's memoized `treeEntries(for:)` forest), flattened to the rows
+    /// currently on screen. Each root shows its true subfolder hierarchy;
+    /// files reuse the standard row + selection tag — including the
+    /// context-menu Remove, which stays the delete affordance here because a
+    /// tree's rows are not one flat level for `.onDelete` to index into.
+    ///
+    /// `CodeEntry.flatten` rather than `OutlineGroup`: the outline group owns
+    /// both the indentation and the disclosure triangle, so its rows could
+    /// never carry the Explorer's indent guides or chevron — see that method.
     @ViewBuilder
     private func treeSection(_ category: LibraryItem.Category) -> some View {
         let items = itemStore.items(for: category)
@@ -354,8 +364,15 @@ struct LibraryView: View {
                 if items.isEmpty {
                     emptyRow("No \(category.sectionTitle.lowercased()) files yet")
                 } else {
-                    OutlineGroup(itemStore.treeEntries(for: category), children: \.children) { entry in
-                        treeEntryRow(entry, tint: theme.current.tint(for: category))
+                    // Read the persisted set ONCE per section: its getter
+                    // re-splits the whole AppStorage string, and a row-by-row
+                    // read would put that on the render path per visible row.
+                    let expanded = expandedFolders
+                    let rows = CodeEntry.flatten(itemStore.treeEntries(for: category),
+                                                 expanded: expanded)
+                    ForEach(rows) { row in
+                        treeEntryRow(row, tint: theme.current.tint(for: category),
+                                     expanded: expanded)
                     }
                 }
             }
@@ -364,23 +381,60 @@ struct LibraryView: View {
         }
     }
 
+    /// One flattened tree row — the Explorer's `TreeRowLabel` for both a
+    /// folder and a file, so the two trees read as one control.
     @ViewBuilder
-    private func treeEntryRow(_ entry: CodeEntry, tint: Color) -> some View {
-        if let item = entry.item {
-            LibraryFileRow(item: item)
+    private func treeEntryRow(_ row: CodeEntry.Row, tint: Color,
+                              expanded: Set<String>) -> some View {
+        if let item = row.entry.item {
+            LibraryFileRow(item: item, depth: row.depth)
                 .tag(ShellState.LibrarySelection.file(item.url))
+                .padding(.leading, Self.treeRowInset)
         } else {
-            HStack(spacing: 5) {
-                Image(systemName: "folder.fill")
-                    .font(Typography.filename)
-                    .foregroundStyle(tint)
-                Text(entry.name)
-                    .font(Typography.filename)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-            }
-            .help(entry.name)
+            folderRow(name: row.entry.name, key: row.entry.id, depth: row.depth,
+                      tint: tint, isExpanded: expanded.contains(row.entry.id))
         }
+    }
+
+    /// A folder row: the Explorer's label, toggled by a tap anywhere on it.
+    ///
+    /// The whole row toggles, not just the chevron — the Library has no
+    /// multi-select for a body click to protect (the reason the Explorer
+    /// separates the two), and its folders carry no selection tag, so this is
+    /// what the `DisclosureGroup` label did before. `onToggleChevron` is left
+    /// nil for exactly that reason: a chevron BUTTON on a row that already
+    /// toggles would race this tap handler, and two toggles cancel out.
+    private func folderRow(name: String, key: String, depth: Int, tint: Color,
+                           isExpanded: Bool, icon: String? = nil,
+                           badge: String? = nil) -> some View {
+        TreeRowLabel(name: name,
+                     isFolder: true,
+                     isExpanded: isExpanded,
+                     depth: depth,
+                     folderTint: tint,
+                     folderIcon: icon,
+                     badge: badge)
+            .help(name)
+            // Padding BEFORE the hit shape, so the row's leading inset is part
+            // of the tappable area rather than a dead strip.
+            .padding(.leading, Self.treeRowInset)
+            .contentShape(Rectangle())
+            .onTapGesture { toggleFolder(key) }
+            // A tap gesture is invisible to VoiceOver and to the keyboard, and
+            // with no chevron button left on the row there is nothing else to
+            // focus — the DisclosureGroup this replaced was operable by both.
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityAction { toggleFolder(key) }
+    }
+
+    /// Expand/collapse a folder. Animated to match the section headers, which
+    /// the `DisclosureGroup` this replaced got for free.
+    private func toggleFolder(_ key: String) {
+        var set = expandedFolders
+        if set.contains(key) { set.remove(key) } else { set.insert(key) }
+        withAnimation(.easeInOut(duration: 0.18)) { expandedFolders = set }
     }
 
     /// Standard single-list file-tree section. After the tree routing above,
@@ -405,49 +459,35 @@ struct LibraryView: View {
                 ForEach(looseFiles) { item in
                     LibraryFileRow(item: item)
                         .tag(ShellState.LibrarySelection.file(item.url))
+                        .padding(.leading, Self.treeRowInset)
                 }
                 .onDelete { offsets in
                     let toDelete = offsets.map { looseFiles[$0] }
                     toDelete.forEach { itemStore.remove(id: $0.id) }
                 }
 
-                // Folder groups (imported via "Add Folder")
+                // Folder groups (imported via "Add Folder"). A folder row plus
+                // its children as SIBLING rows rather than a DisclosureGroup:
+                // that control draws its own triangle and indentation, which
+                // is what kept these rows from matching the Explorer tree.
+                let expanded = expandedFolders
                 ForEach(sortedFolders, id: \.self) { folderName in
                     let folderItems = folderGroups[folderName] ?? []
                     let key = "\(category.rawValue):\(folderName)"
-                    let isExpanded = Binding(
-                        get: { expandedFolders.contains(key) },
-                        set: { open in
-                            if open { expandedFolders.insert(key) }
-                            else     { expandedFolders.remove(key) }
-                        }
-                    )
-                    DisclosureGroup(isExpanded: isExpanded) {
+                    folderRow(name: folderName, key: key, depth: 0,
+                              tint: theme.current.tint(for: category),
+                              isExpanded: expanded.contains(key))
+                    if expanded.contains(key) {
                         ForEach(folderItems) { item in
-                            LibraryFileRow(item: item)
+                            LibraryFileRow(item: item, depth: 1)
                                 .tag(ShellState.LibrarySelection.file(item.url))
-                                .padding(.leading, 6)
+                                .padding(.leading, Self.treeRowInset)
                         }
                         .onDelete { offsets in
                             let toDelete = offsets.map { folderItems[$0] }
                             toDelete.forEach { itemStore.remove(id: $0.id) }
                         }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "folder.fill")
-                                .font(Typography.filename)
-                                .foregroundStyle(theme.current.tint(for: category))
-                            Text(folderName)
-                                .font(Typography.filename)
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                        }
-                        .help(folderName)
                     }
-                    // Indent the whole disclosure row — including the ">" chevron —
-                    // two spaces in from the section header so the tree hierarchy
-                    // (HEADER → ">" folder → files) reads clearly.
-                    .padding(.leading, 16)
                 }
             }
           }
@@ -480,52 +520,63 @@ struct LibraryView: View {
         }
     }
 
-    /// One collapsible SOURCES sub-group. Mirrors the folder-group
-    /// DisclosureGroup styling used elsewhere in the file tree; defaults to
-    /// collapsed and shows a muted empty state when it has no files.
+    /// One collapsible SOURCES sub-group, rendered as a folder row in the same
+    /// tree as every other section — but keeping the source's own symbol
+    /// (`folderIcon`), because Meetings and Mail are not directories and
+    /// reading as one would lose what they are. Defaults to collapsed and
+    /// shows a muted empty state when it has no files.
     ///
     /// Files render as the source's real on-disk tree
     /// (`source/<source dir>/<YYYY>/<MM>/…`, sub-group-relative so the tree
-    /// starts at the year) — the same shared forest Code and LLM Doc use.
-    /// Delete is via the row context menu (OutlineGroup isn't a ForEach, so
-    /// no swipe-to-delete).
+    /// starts at the year) — the same shared forest Code and LLM Doc use, one
+    /// level deeper so it nests under this row. Delete is via the row context
+    /// menu (this isn't a ForEach over one level, so no swipe-to-delete).
     @ViewBuilder
     private func sourceSubGroup(source: InputSource, items: [LibraryItem],
                                 tint: Color) -> some View {
         let stateKey = "sources:\(source.id)"
-        let isExpanded = Binding(
-            get: { expandedSourceGroups.contains(stateKey) },
-            set: { open in
-                if open { expandedSourceGroups.insert(stateKey) }
-                else     { expandedSourceGroups.remove(stateKey) }
-            }
-        )
-        DisclosureGroup(isExpanded: isExpanded) {
+        let isExpanded = expandedSourceGroups.contains(stateKey)
+        // A folder row like every other, but toggled through its OWN
+        // persisted set (`expandedSourceGroups`) — see that property.
+        TreeRowLabel(name: source.displayName,
+                     isFolder: true,
+                     isExpanded: isExpanded,
+                     depth: 0,
+                     folderTint: tint,
+                     folderIcon: source.icon,
+                     badge: items.isEmpty ? nil : "\(items.count)")
+            .help(source.displayName)
+            .padding(.leading, Self.treeRowInset)
+            .contentShape(Rectangle())
+            .onTapGesture { toggleSourceGroup(stateKey) }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityAction { toggleSourceGroup(stateKey) }
+
+        if isExpanded {
             if items.isEmpty {
-                emptyRow(source.emptyText, icon: source.icon, leading: 6)
+                // Lines this row's icon up with the depth-1 file icons it
+                // stands in for: one 14pt indent guide, the 10pt chevron
+                // stand-in, and the 4pt gap before each (see TreeRowLabel).
+                emptyRow(source.emptyText, icon: source.icon,
+                         leading: Self.treeRowInset + 32)
             } else {
-                OutlineGroup(itemStore.sourceTreeEntries(forSourceId: source.id),
-                             children: \.children) { entry in
-                    treeEntryRow(entry, tint: tint)
-                        .padding(.leading, 6)
-                }
-            }
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: source.icon)
-                    .font(Typography.filename)
-                    .foregroundStyle(tint)
-                Text(source.displayName)
-                    .font(Typography.filename)
-                    .foregroundStyle(.primary)
-                if !items.isEmpty {
-                    Text("\(items.count)")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                let expanded = expandedFolders
+                let rows = CodeEntry.flatten(itemStore.sourceTreeEntries(forSourceId: source.id),
+                                             expanded: expanded,
+                                             depth: 1)
+                ForEach(rows) { row in
+                    treeEntryRow(row, tint: tint, expanded: expanded)
                 }
             }
         }
-        .padding(.leading, 16)
+    }
+
+    private func toggleSourceGroup(_ key: String) {
+        var set = expandedSourceGroups
+        if set.contains(key) { set.remove(key) } else { set.insert(key) }
+        withAnimation(.easeInOut(duration: 0.18)) { expandedSourceGroups = set }
     }
 
     // MARK: - Unified section header
@@ -677,12 +728,6 @@ struct LibraryView: View {
         panel.prompt = "Add Folder"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         itemStore.addFolder(url: url, category: category)
-        // Auto-expand the new group — only meaningful for the flat
-        // (plainFileTreeSection) categories; the nested trees keep their own
-        // ephemeral OutlineGroup state and never read these keys.
-        if !category.rendersNestedTree {
-            expandedFolders.insert("\(category.rawValue):\(url.lastPathComponent)")
-        }
     }
 
     // MARK: - Empty / error states

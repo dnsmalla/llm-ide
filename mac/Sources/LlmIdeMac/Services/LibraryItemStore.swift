@@ -244,7 +244,7 @@ final class LibraryItemStore {
             let rootComps = folderURL.standardizedFileURL.pathComponents
             guard let enumerator = fm.enumerator(
                 at: folderURL,
-                includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .fileSizeKey],
+                includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
                 options: [.skipsHiddenFiles]
             ) else { continue }
             for case let fileURL as URL in enumerator {
@@ -254,7 +254,7 @@ final class LibraryItemStore {
                     enumerator.skipDescendants()
                     continue
                 }
-                guard let rv = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                guard let rv = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]),
                       rv.isRegularFile == true
                 else { continue }
                 if category == .code, !isCodeRelevant(url: fileURL) { continue }
@@ -270,7 +270,6 @@ final class LibraryItemStore {
                    name.caseInsensitiveCompare(NoteService.indexFileName) == .orderedSame,
                    parentName == subfolder { continue }
                 var item = LibraryItem(name: name, path: fileURL.path, category: category)
-                item.sizeBytes = rv.fileSize
                 // Tree categories (Code, LLM Doc) record the directory path
                 // relative to the canonical subfolder (files at its top level
                 // get an empty path). For llm-doc that is <source>/<YYYY>/<MM>
@@ -339,7 +338,7 @@ final class LibraryItemStore {
             guard fm.fileExists(atPath: path),
                   let enumerator = fm.enumerator(
                     at: folderURL,
-                    includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .fileSizeKey],
+                    includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
                     options: [.skipsHiddenFiles]
                   ) else { continue }
             for case let fileURL as URL in enumerator {
@@ -349,12 +348,11 @@ final class LibraryItemStore {
                     enumerator.skipDescendants()
                     continue
                 }
-                guard let rv = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                guard let rv = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]),
                       rv.isRegularFile == true
                 else { continue }
                 if !isCodeRelevant(url: fileURL) { continue }
                 var item = LibraryItem(name: name, path: fileURL.path, category: .code)
-                item.sizeBytes = rv.fileSize
                 item.folderOrigin = folderName
                 // Nest the whole repo under a single node named after the
                 // folder, then its real subdirectory structure beneath that.

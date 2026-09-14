@@ -1,35 +1,27 @@
 import SwiftUI
 
+/// A file leaf in the Library sidebar, rendered with the SAME `TreeRowLabel`
+/// the Explorer tree uses — one compact line with indent guides, the
+/// extension's icon and color, and the name.
+///
+/// It used to be a two-line row of its own (name over "EXT · size") with no
+/// depth at all, which is what made the Library's tree read as a different
+/// control from the Explorer's. The size now lives in the detail pane only.
 struct LibraryFileRow: View {
     let item: LibraryItem
+    /// Nesting level inside the section, for the indent guides. Folder groups
+    /// and tree sections pass the row's real depth; flat lists leave it at 0.
+    var depth: Int = 0
     @Environment(LibraryItemStore.self) private var store
     @State private var showRemoveConfirmation = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: item.fileIcon)
-                .font(Typography.filename)
-                .foregroundStyle(item.fileIconColor)
-                .frame(width: 18, alignment: .center)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(item.name)
-                    .font(Typography.filename)
-                    .lineLimit(1)
-                HStack(spacing: 5) {
-                    Text(item.ext.isEmpty ? "file" : item.ext.uppercased())
-                        .font(Typography.fileMeta)
-                        .foregroundStyle(.secondary)
-                    if let size = fileSize {
-                        Text("·").font(Typography.fileMeta).foregroundStyle(.tertiary)
-                        Text(size).font(Typography.fileMeta).foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 2)
+        TreeRowLabel(name: item.name,
+                     isFolder: false,
+                     isExpanded: false,
+                     depth: depth,
+                     fileExtension: item.ext)
+        .help(item.name)
         .contextMenu {
             Button("Reveal in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([item.url])
@@ -50,13 +42,5 @@ struct LibraryFileRow: View {
             // rescan); external referenced files are never touched.
             Text("The file will be deleted from the project folder. Files in external referenced folders are never deleted.")
         }
-    }
-
-    // Size is captured during the (off-main) library scan and read straight off
-    // the model — no synchronous `stat()` per row in `body`, which previously
-    // ran hundreds of blocking filesystem calls per layout pass on big folders.
-    private var fileSize: String? {
-        guard let bytes = item.sizeBytes else { return nil }
-        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 }
