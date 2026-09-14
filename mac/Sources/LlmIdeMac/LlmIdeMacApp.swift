@@ -482,6 +482,12 @@ public struct LlmIdeMacApp: App {
                 // resolving `BackendManager.self` (no value in the
                 // environment) rather than ever seeing the real version.
                 .environment(backend)
+                // Without this, every raw system color in MenuBarChatView
+                // (control/window/text background) tracks the real macOS
+                // appearance while text colors track `theme.current.isDark` —
+                // when the two disagree, text renders unreadable. ContentView
+                // already applies the same fix for the main window scene.
+                .preferredColorScheme(theme.current.isDark ? .dark : .light)
         } label: {
             Image(systemName: "bubble.left.and.text.bubble.right")
                 .symbolRenderingMode(.hierarchical)

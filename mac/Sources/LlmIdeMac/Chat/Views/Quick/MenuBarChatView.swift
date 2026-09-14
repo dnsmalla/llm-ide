@@ -100,7 +100,7 @@ struct MenuBarChatView: View {
             }
         }
         .frame(width: 380, height: 520)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(theme.current.body)
         .background(MenuBarChatWindowAccessor(window: $popoverWindow))
         .onExitCommand { closePopover() }
         // Re-probe once per appearance, whichever way the gate currently
@@ -431,7 +431,7 @@ struct MenuBarChatView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
-                .background(Color(nsColor: .controlBackgroundColor))
+                .background(theme.current.surface2)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
@@ -533,7 +533,7 @@ struct MenuBarChatView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Color(nsColor: .controlBackgroundColor))
+                    .background(theme.current.surface)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
 
@@ -580,6 +580,7 @@ struct MenuBarChatView: View {
             VStack(alignment: .leading, spacing: 10) {
                 TextField("Type / to use skills", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
+                    .foregroundStyle(theme.current.text)
                     .lineLimit(1...5)
                     .focused($inputFocused)
                     .onSubmit { sendDraft() }
@@ -611,7 +612,7 @@ struct MenuBarChatView: View {
             .background(
                 RoundedRectangle(cornerRadius: 18)
                     .strokeBorder(theme.current.border.opacity(0.8), lineWidth: 1)
-                    .background(RoundedRectangle(cornerRadius: 18).fill(Color(nsColor: .textBackgroundColor)))
+                    .background(RoundedRectangle(cornerRadius: 18).fill(theme.current.surface))
             )
             .padding(.horizontal, 14)
             .padding(.bottom, 14)
@@ -643,7 +644,7 @@ struct MenuBarChatView: View {
         } label: {
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(canSend || engine.busy ? Self.greetingBlue : Color(nsColor: .controlBackgroundColor))
+                    .fill(canSend || engine.busy ? Self.greetingBlue : theme.current.surface2)
                     .frame(width: 36, height: 36)
                 if engine.busy {
                     Image(systemName: "stop.fill")
@@ -667,7 +668,7 @@ struct MenuBarChatView: View {
         } label: {
             ZStack(alignment: .topTrailing) {
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(voiceState.isRecording ? theme.current.danger : Color(nsColor: .controlBackgroundColor))
+                    .fill(voiceState.isRecording ? theme.current.danger : theme.current.surface2)
                     .frame(width: 36, height: 36)
                 
                 Image(systemName: voiceState.isRecording ? "waveform" : "mic.fill")
