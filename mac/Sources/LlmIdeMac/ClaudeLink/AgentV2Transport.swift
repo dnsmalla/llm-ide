@@ -246,6 +246,12 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         // The session-memory footnote (`memory`, v49). Arrives before the
         // query starts; applied to the result's usage below.
         var memoryInfo: AgentV2Memory?
+        // One `usage` event per assistant message (a turn with tool calls
+        // has several); summed across the turn to match the server's own
+        // `usageTotals` accumulation in engine.mjs, not overwritten like
+        // `memoryInfo` above.
+        var tokenTotals = (input: 0, output: 0, cacheRead: 0, cacheCreation: 0)
+        var sawUsage = false
         var sawTerminal = false
         var resolvedTasks: [AgentTask]?
         var resolvedContinueNeeded = false
@@ -326,15 +332,12 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                     truncated: payload.truncated,
                     onProgress: onProgress
                 )
-            case .usage:
-                // Still dropped, but now for a real reason rather than for lack
-                // of a field: token counts are PER TURN, and `AgentProgress` is
-                // a per-tool-step event. They belong on the turn's
-                // `ChatMessage.Metadata` alongside cost — see
-                // docs/superpowers/plans/2026-09-11-linker-contract-and-v2-data.md
-                // Task 10 Step 4, which leaves that placement open rather than
-                // inventing a UI for it here.
-                break
+            case .usage(let u):
+                sawUsage = true
+                tokenTotals.input += u.inputTokens
+                tokenTotals.output += u.outputTokens
+                tokenTotals.cacheRead += u.cacheReadTokens
+                tokenTotals.cacheCreation += u.cacheCreationTokens ?? 0
             case .approvalRequest(let approval):
                 onApproval(approval)
             case .approvalResolved:
@@ -385,7 +388,16 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
             // The route echoes the resolved mode right after `init`
             // (`mode_set`) — the v2 analog of the legacy `done.mode`. Fall
             // back to the requested mode when the echo never arrived.
-            mode: resolvedMode ?? input.mode
+            mode: resolvedMode ?? input.mode,
+            tokenUsage: sawUsage
+                ? AgentV2Usage(
+                    inputTokens: tokenTotals.input,
+                    outputTokens: tokenTotals.output,
+                    cacheReadTokens: tokenTotals.cacheRead,
+                    cacheCreationTokens: tokenTotals.cacheCreation,
+                    contextPercent: nil
+                )
+                : nil
         )
     }
 

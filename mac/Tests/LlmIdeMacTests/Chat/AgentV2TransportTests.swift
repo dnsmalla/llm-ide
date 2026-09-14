@@ -30,7 +30,7 @@ final class ScriptedAgentV2Stream: AgentV2Streaming, @unchecked Sendable {
 /// `onApproval`.
 private struct LegacyOnlyTransport: ChatTransport {
     var result = ChatTransportResult(reply: "legacy", pendingTool: nil, tasks: nil,
-                                     continueNeeded: nil, usage: nil, mode: "plan")
+                                     continueNeeded: nil, usage: nil, mode: "plan", tokenUsage: nil)
     private(set) var sawProgress = false
     private(set) var sawChunk = false
 

@@ -105,7 +105,7 @@ struct ChatEngineRunExternalTurnTests {
             t.scripted = [.progress("Reading Foo.swift", "read-file"),
                           .progress("Writing the answer", nil)]
             t.result = .init(reply: "the answer", pendingTool: nil, tasks: nil,
-                             continueNeeded: nil, usage: nil, mode: nil)
+                             continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
 
             var progressLabels: [String] = []
             let reply = try await engine.runExternalTurn(
@@ -308,7 +308,7 @@ struct ChatEngineRunExternalTurnTests {
             // The agent proposes a bash command with this turn.
             t.result = .init(reply: "proposing a command",
                              pendingTool: PendingTool(name: "bash", arguments: .init(raw: Data(#"{"command":"ls"}"#.utf8))),
-                             tasks: nil, continueNeeded: nil, usage: nil, mode: nil)
+                             tasks: nil, continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
 
             // Wired so the test can prove the panel's Bypass/Auto chaining
             // would NOT fire for this phone-driven turn.
@@ -595,7 +595,7 @@ struct ChatEngineRunExternalTurnTests {
 @MainActor
 final class SuspendableChatTransport: ChatTransport, @unchecked Sendable {
     var result = ChatTransportResult(reply: "the answer", pendingTool: nil, tasks: nil,
-                                     continueNeeded: nil, usage: nil, mode: nil)
+                                     continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
     var thrownError: Error?
     private var continuation: CheckedContinuation<Void, Never>?
 

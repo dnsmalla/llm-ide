@@ -736,7 +736,8 @@ final class ChatEngine {
                 continueNeeded: resp.continueNeeded,
                 usage: resp.usage,
                 mode: resp.mode,
-                stopped: false
+                stopped: false,
+                tokenUsage: resp.tokenUsage
             )
             // Only the primary turn's chain check runs here — the follow-up
             // turn's own chain check (inside sendFollowup) covers every step
@@ -894,7 +895,8 @@ final class ChatEngine {
                 continueNeeded: resp.continueNeeded,
                 usage: resp.usage,
                 mode: resp.mode,
-                stopped: false
+                stopped: false,
+                tokenUsage: resp.tokenUsage
             )
             // Chain the NEXT step hands-free when allowed — this is what lets a
             // multi-step plan (e.g. "update A, then update B" or "commit and
@@ -1156,7 +1158,8 @@ final class ChatEngine {
         continueNeeded: Bool?,
         usage: LlmIdeAPIClient.CodeAssistResponse.Usage?,
         mode: String?,
-        stopped: Bool
+        stopped: Bool,
+        tokenUsage: AgentV2Usage? = nil
     ) {
         // Land any coalesced text before finalizing. This is what preserves
         // the partial reply on the paths that DON'T overwrite from
@@ -1187,6 +1190,12 @@ final class ChatEngine {
                 onResolvedMode(resolved.rawValue)
             }
             metadata.usage = usage
+            // Unconditional, matching `usage` above: every abbreviated
+            // "stopped:true" call site (Stop, session-switch, a mid-stream
+            // failure) passes tokenUsage: nil via the default, same as it
+            // passes usage: nil — a stopped/failed turn simply has none to
+            // report, not a value this must avoid clobbering.
+            metadata.tokenUsage = tokenUsage
             messages[idx].metadata = metadata
             let text = String(messages[idx].content.prefix(200))
             if !text.isEmpty {

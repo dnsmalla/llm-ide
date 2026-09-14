@@ -14,7 +14,7 @@ final class ScriptedChatTransport: ChatTransport, @unchecked Sendable {
     enum Step: Sendable { case progress(String, String?); case chunk(String) }  // (label, tool)
     var scripted: [Step] = []
     var result = ChatTransportResult(reply: "", pendingTool: nil, tasks: nil,
-                                     continueNeeded: nil, usage: nil, mode: nil)
+                                     continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
     var thrownError: Error?
     private(set) var receivedInputs: [ChatTransportInput] = []
     private(set) var progressCountWithSideEffects = 0

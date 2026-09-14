@@ -33,7 +33,7 @@ final class QueuedAgentV2Stream: AgentV2Streaming, @unchecked Sendable {
 @MainActor
 final class ScriptedLegacyTransport: ChatTransport, @unchecked Sendable {
     var result = ChatTransportResult(reply: "legacy reply", pendingTool: nil, tasks: nil,
-                                     continueNeeded: nil, usage: nil, mode: "plan")
+                                     continueNeeded: nil, usage: nil, mode: "plan", tokenUsage: nil)
     private(set) var inputs: [ChatTransportInput] = []
     /// Scripted approval to fire via the 4-callback `roundTrip` below — nil
     /// (the default) means this double never parks anything, matching every

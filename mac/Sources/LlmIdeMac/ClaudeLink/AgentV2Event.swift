@@ -57,9 +57,13 @@ struct AgentV2ToolResult: Sendable, Equatable, Codable {
     }
 }
 
-/// Token usage for one assistant message. `contextPercent` is reserved by
-/// the spec table (§4) but events.mjs does not emit it yet, so it decodes
-/// as nil on today's stream — optional by design, not oversight.
+/// Token usage for one assistant message off the wire — AND, when
+/// `AgentV2Transport` sums every such event seen during one turn (a turn
+/// with tool calls gets several), a synthesized per-turn total in the same
+/// shape. `contextPercent` is reserved by the spec table (§4) but
+/// events.mjs does not emit it yet, so it decodes as nil on today's stream
+/// — optional by design, not oversight; a synthesized total also leaves it
+/// nil, since "percent of context" doesn't sum across messages meaningfully.
 struct AgentV2Usage: Sendable, Equatable, Codable {
     let inputTokens: Int
     let outputTokens: Int
@@ -74,6 +78,13 @@ struct AgentV2Usage: Sendable, Equatable, Codable {
     enum CodingKeys: String, CodingKey {
         case inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, contextPercent
     }
+
+    /// Everything genuinely consumed and billed for this message/turn —
+    /// cache read/write included, not just the fresh input+output. With
+    /// prompt caching on (the normal case) `inputTokens` alone is only the
+    /// small uncached delta, so a headline number built from it alone reads
+    /// as near-zero on a turn that actually carried a large cached prefix.
+    var totalTokens: Int { inputTokens + outputTokens + cacheReadTokens + (cacheCreationTokens ?? 0) }
 }
 
 /// `{"type":"memory", …}` — how much of this turn's prompt is the chat's

@@ -199,6 +199,12 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     struct Metadata: Codable, Equatable, Sendable {
         var mode: String?
         var usage: LlmIdeAPIClient.CodeAssistResponse.Usage?
+        /// Real per-turn LLM token counts (agent-v2 engine only — see
+        /// `AgentV2Transport`'s `.usage` handling). Distinct from `usage`
+        /// above, which is prompt-COMPOSITION accounting (attachment byte
+        /// counts), not token counts. Nil for the legacy `/code-assist`
+        /// transport, which has no token data to report.
+        var tokenUsage: AgentV2Usage?
         var skills: [String]?
         var failedError: String?
         /// v2 plan messages: this message's plan was saved (retires the

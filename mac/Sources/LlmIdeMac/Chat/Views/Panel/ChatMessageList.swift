@@ -687,6 +687,19 @@ struct ChatMessageList: View {
             ?? turn.content
     }
 
+    private static func compactTokenCount(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+        if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
+        return "\(n)"
+    }
+
+    private static func tokenUsageTooltip(_ usage: AgentV2Usage) -> String {
+        var parts = ["\(usage.inputTokens) in", "\(usage.outputTokens) out"]
+        if usage.cacheReadTokens > 0 { parts.append("\(usage.cacheReadTokens) cache read") }
+        if let created = usage.cacheCreationTokens, created > 0 { parts.append("\(created) cache write") }
+        return parts.joined(separator: " · ")
+    }
+
     /// `ChatMessage` → the minimal shape `PlanTranscriptPolicy` reads. A
     /// failed `save-plan` is deliberately `.other`: no card renders for it,
     /// so it must not consume the write-in-progress marker either.
@@ -740,6 +753,22 @@ struct ChatMessageList: View {
                     if !isUser, let raw = turn.metadata?.mode,
                        let mode = CodeAssistMode(rawValue: raw) {
                         ModeBadge(mode: mode)
+                    }
+                    if !isUser, let usage = turn.metadata?.tokenUsage {
+                        // Real per-turn LLM tokens (agent-v2 only — see
+                        // ChatMessage.Metadata.tokenUsage). Includes cache
+                        // read/write, not just input+output: with prompt
+                        // caching on (the normal case), `inputTokens` alone
+                        // is only the small UNCACHED delta — a turn carrying
+                        // a multi-KB system prompt can read ~60 fresh input
+                        // tokens against a 200K-token cached prefix, and
+                        // that prefix is both billed and genuinely consumed
+                        // context, not an implementation detail to hide.
+                        // The breakdown (in/out/cache) stays in the tooltip.
+                        Text("\(Self.compactTokenCount(usage.totalTokens)) tokens")
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
+                            .help(Self.tokenUsageTooltip(usage))
                     }
                     if isUser {
                         // Plan-pipeline turns (execute / write / review) show a

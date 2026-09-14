@@ -22,7 +22,7 @@ final class BlockingChatTransport: ChatTransport, @unchecked Sendable {
         }
         try Task.checkCancellation()
         return ChatTransportResult(reply: reply, pendingTool: nil, tasks: nil,
-                                   continueNeeded: nil, usage: nil, mode: nil)
+                                   continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
     }
 
     /// Let the parked turn finish.

@@ -293,7 +293,8 @@ extension ChatEngine {
                 continueNeeded: nil,  // see doc comment: external turns never auto-continue
                 usage: resp.usage,
                 mode: resp.mode,
-                stopped: false
+                stopped: false,
+                tokenUsage: resp.tokenUsage
             )
             // No autoChain here either — see doc comment: a phone-driven
             // turn never auto-executes a proposed tool. The card lands on

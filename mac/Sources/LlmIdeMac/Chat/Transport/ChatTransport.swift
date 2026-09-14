@@ -109,6 +109,18 @@ struct ChatTransportResult: Sendable {
     let continueNeeded: Bool?
     let usage: LlmIdeAPIClient.CodeAssistResponse.Usage?
     let mode: String?
+    /// Real per-turn LLM token counts. Only `AgentV2Transport` populates
+    /// this (summed across the turn's `usage` events, matching the
+    /// server's own `usageTotals` accumulation in engine.mjs); the legacy
+    /// `CodeAssistTransport` has no token data, so `init(_ response:)`
+    /// below always passes nil for it.
+    ///
+    /// Deliberately required rather than `= nil`: a `let` stored property's
+    /// default value is NOT exposed as a memberwise-init parameter at all
+    /// (Swift silently drops it — `S(a:, b:)` fails to compile even with
+    /// `let b: Int? = nil` on `S`), so every construction site would have
+    /// silently kept nil forever, including `AgentV2Transport`'s.
+    let tokenUsage: AgentV2Usage?
 }
 
 extension ChatTransportResult: Equatable {
@@ -124,6 +136,7 @@ extension ChatTransportResult: Equatable {
               lhs.pendingTool == rhs.pendingTool,
               lhs.continueNeeded == rhs.continueNeeded,
               lhs.mode == rhs.mode,
+              lhs.tokenUsage == rhs.tokenUsage,
               usageEqual(lhs.usage, rhs.usage)
         else { return false }
         return tasksEqual(lhs.tasks, rhs.tasks)
@@ -168,7 +181,8 @@ extension ChatTransportResult {
             tasks: response.tasks,
             continueNeeded: response.continueNeeded,
             usage: response.usage,
-            mode: response.mode
+            mode: response.mode,
+            tokenUsage: nil
         )
     }
 }
