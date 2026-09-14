@@ -355,42 +355,27 @@ extension CodeAssistantPanel {
         // Landing: the reply to the update turn IS the rewritten document, so
         // it goes straight back into the same file. Gated on shape, so a turn
         // that answered with a question instead leaves the old plan alone.
-        if pendingTool == nil,
-           let lastUser = engine.messages.last(where: { $0.role == .user }),
-           lastUser.metadata?.planUpdateDisplay != nil,
-           let reply = engine.messages.last(where: { $0.role == .assistant }),
-           reply.status == .done,
-           reply.metadata?.planSaved != true,
-           PlanEditPolicy.looksLikePlan(content: reply.content) {
-            await savePlanFromMessage(reply)
-        }
-        // Firing: review asked for changes, and this turn edited a file. The
-        // saved plan now describes work that no longer matches the code, so
-        // rewrite it. `planUpdateDisplay` on the turn above is what keeps the
-        // rewrite from qualifying as its own trigger.
-        if pendingTool == nil,
-           let reply = engine.messages.last(where: { $0.role == .assistant }),
-           reply.status == .done,
-           PlanReviewPolicy.updatesPlanAfterFix(
-               verdict: engine.agent.planExecution?.reviewVerdict,
-               turnChangedCode: reply.toolSteps.contains {
-                   PlanReviewPolicy.isCodeChangingTool($0.tool ?? "")
-               },
-               isPlanUpdateTurn: engine.messages.last(where: { $0.role == .user })?
-                   .metadata?.planUpdateDisplay != nil,
-               hasPlanFile: sessionPlanPath != nil) {
-            updatePlanAfterReviewFix()
-        }
-        // Review-phase landing. The finish card's Review button fires a Code
-        // Review turn stamped `planReviewDisplay`; its reply is the verdict
-        // the card shows and the thing that unlocks Push. Same gating shape
-        // as the write branch above — only the turn that button started
-        // qualifies, and a message typed afterwards resets `lastUser`.
-        if pendingTool == nil,
-           let lastUser = engine.messages.last(where: { $0.role == .user }),
-           lastUser.metadata?.planReviewDisplay != nil,
-           let reply = engine.messages.last(where: { $0.role == .assistant }) {
-            landPlanReview(reply: reply)
+        let lastUser = engine.messages.last(where: { $0.role == .user })
+        let reply = engine.messages.last(where: { $0.role == .assistant })
+        let landing = PlanTurnLanding.Turn(
+            pendingToolParked: pendingTool != nil,
+            lastUserIsPlanUpdate: lastUser?.metadata?.planUpdateDisplay != nil,
+            lastUserIsPlanReview: lastUser?.metadata?.planReviewDisplay != nil,
+            replyDone: reply?.status == .done,
+            replyAlreadySaved: reply?.metadata?.planSaved == true,
+            replyLooksLikePlan: reply.map { PlanEditPolicy.looksLikePlan(content: $0.content) } ?? false,
+            turnChangedCode: reply?.toolSteps.contains { PlanReviewPolicy.isCodeChangingTool($0.tool ?? "") } ?? false,
+            reviewVerdict: engine.agent.planExecution?.reviewVerdict,
+            hasPlanFile: sessionPlanPath != nil)
+        for action in PlanTurnLanding.actions(for: landing) {
+            switch action {
+            case .savePlanReply:
+                if let reply { await savePlanFromMessage(reply) }
+            case .updatePlanAfterFix:
+                updatePlanAfterReviewFix()
+            case .landReview:
+                if let reply { landPlanReview(reply: reply) }
+            }
         }
         // Data-loss guard input: if the server CUT this file to fit the
         // prompt, the agent only saw its head — auto-overwriting with the

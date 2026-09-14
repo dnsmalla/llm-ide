@@ -999,6 +999,37 @@ do {
            "an unknown wire value moves nothing")
 }
 
+// PlanTurnLanding — what a finished turn does to the chat's plan file, decided
+// in one place from the last two messages. Order matters: a review landing
+// never also rewrites the plan.
+do {
+    func turn(parked: Bool = false, update: Bool = false, review: Bool = false, done: Bool = true,
+              saved: Bool = false, looksLikePlan: Bool = true, changedCode: Bool = false,
+              verdict: PlanReviewVerdict? = nil, hasPlan: Bool = true) -> PlanTurnLanding.Turn {
+        .init(pendingToolParked: parked, lastUserIsPlanUpdate: update, lastUserIsPlanReview: review,
+              replyDone: done, replyAlreadySaved: saved, replyLooksLikePlan: looksLikePlan,
+              turnChangedCode: changedCode, reviewVerdict: verdict, hasPlanFile: hasPlan)
+    }
+    expect(PlanTurnLanding.actions(for: turn(update: true)) == [.savePlanReply],
+           "the reply to an update turn IS the rewritten plan — save it")
+    expect(PlanTurnLanding.actions(for: turn(update: true, looksLikePlan: false)) == [],
+           "an update turn that answered with a question leaves the old plan alone")
+    expect(PlanTurnLanding.actions(for: turn(update: true, saved: true)) == [],
+           "an already-saved reply is not saved twice")
+    expect(PlanTurnLanding.actions(for: turn(changedCode: true, verdict: .changesRequested)) == [.updatePlanAfterFix],
+           "review asked for changes and this turn edited a file — rewrite the plan")
+    expect(PlanTurnLanding.actions(for: turn(update: true, changedCode: true, verdict: .changesRequested)) == [.savePlanReply],
+           "the update turn itself never triggers another update — that is the loop")
+    expect(PlanTurnLanding.actions(for: turn(changedCode: true, verdict: .changesRequested, hasPlan: false)) == [],
+           "with no plan file there is nothing to update — this never CREATES one")
+    expect(PlanTurnLanding.actions(for: turn(review: true)) == [.landReview],
+           "the Review button's turn lands its verdict")
+    expect(PlanTurnLanding.actions(for: turn(review: true, done: false)) == [.landReview],
+           "a review lands even when the reply is not marked done (stopped review still releases the card)")
+    expect(PlanTurnLanding.actions(for: turn(parked: true, update: true)) == [],
+           "a parked proposal defers every landing to the answer")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {
