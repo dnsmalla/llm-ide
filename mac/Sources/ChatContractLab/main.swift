@@ -816,10 +816,16 @@ do {
         verdict: .unclear, turnChangedCode: true,
         isPlanUpdateTurn: false, hasPlanFile: true),
            "nor does a review that claimed nothing")
+    // Two meanings, one gate: a plan nobody reviewed is not this flow — AND a
+    // review whose rewrite has already LANDED is done with it. The panel
+    // clears `reviewVerdict` when a plan-update reply lands
+    // (CodeAssistantPanel+Session), so the second and third fix turns of one
+    // review round stop spawning a full plan-regeneration turn each. A new
+    // review re-arms exactly one more.
     expect(!PlanReviewPolicy.updatesPlanAfterFix(
         verdict: nil, turnChangedCode: true,
         isPlanUpdateTurn: false, hasPlanFile: true),
-           "and a plan nobody reviewed is not this flow at all")
+           "no verdict, no rewrite — unreviewed, or already brought level by the last update")
 
     expect(!PlanReviewPolicy.updatesPlanAfterFix(
         verdict: .changesRequested, turnChangedCode: false,

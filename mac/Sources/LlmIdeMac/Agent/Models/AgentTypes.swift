@@ -74,7 +74,7 @@ struct AgentContext: Codable, Equatable {
 /// `extension/llm_agent/runtime/handlers/session-tasks.mjs`'s
 /// `taskStatusIcon` and `task-update.md`'s schema enum) — the raw values
 /// below are NOT freely renameable, they must match the wire strings.
-public enum AgentTaskStatus: String, Codable, Equatable {
+public enum AgentTaskStatus: String, Codable, Equatable, Sendable {
     case pending
     case inProgress = "in_progress"
     case completed
@@ -96,7 +96,7 @@ public enum AgentTaskStatus: String, Codable, Equatable {
 /// `public` so `ChatContractLab` (a separate target) can construct fixtures
 /// for `PlanExecutionTracker`'s transition-rule assertions — see the header
 /// comment in `ChatContractLab/main.swift` for the convention.
-public struct AgentTask: Codable, Identifiable, Equatable {
+public struct AgentTask: Codable, Identifiable, Equatable, Sendable {
     public let id: String
     public let title: String
     public let status: AgentTaskStatus

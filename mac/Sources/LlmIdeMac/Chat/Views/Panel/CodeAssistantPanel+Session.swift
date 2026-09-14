@@ -371,6 +371,20 @@ extension CodeAssistantPanel {
             switch action {
             case .savePlanReply:
                 if let reply { await savePlanFromMessage(reply) }
+                // The plan is back in sync with the code, so disarm the
+                // rewrite until a NEW review re-arms it. `.savePlanReply`
+                // only ever fires for a plan-UPDATE turn (PlanTurnLanding
+                // requires `lastUserIsPlanUpdate`), and the verdict is what
+                // `updatesPlanAfterFix` gates on — without clearing it here,
+                // EVERY later code-changing turn of the same review round
+                // spawned another full plan-regeneration turn, each one
+                // re-attaching the plan document and rewriting it whole.
+                // `reviewPlanExecution` clears it when a review starts and
+                // `landPlanReview` sets it when one lands, so a second review
+                // round arms exactly one more rewrite — which is the point:
+                // the plan tracks the code at review boundaries, not at every
+                // keystroke of a fix.
+                engine.agent.planExecution?.reviewVerdict = nil
             case .updatePlanAfterFix:
                 updatePlanAfterReviewFix()
             case .landReview:
