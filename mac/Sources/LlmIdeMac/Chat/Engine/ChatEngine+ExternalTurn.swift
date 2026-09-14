@@ -203,6 +203,9 @@ extension ChatEngine {
         statusText = ""
         error = nil
         agentV2Notice = nil
+        // Same turn-start rule as runTurn: a leftover resolution from the
+        // previous turn must not survive into this one.
+        resolvedMode = nil
         agent.pendingTool = nil
         agent.agentPendingTasks = []
         // Stale v2 approval card — same turn-start rule as runTurn.

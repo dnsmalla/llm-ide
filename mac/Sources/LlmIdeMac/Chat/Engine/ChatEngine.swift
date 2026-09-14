@@ -236,9 +236,11 @@ final class ChatEngine {
     /// again from every engine's turn result (the earliest the legacy stream
     /// can say). ONE state for both sources; the panel observes it and applies
     /// `ModePolicy.pickerMode`. Replaces the `onResolvedMode` hook, which
-    /// carried the same value by a second route and had to be identity-guarded
-    /// against a parked background engine flipping the displayed chat's picker
-    /// — observing THIS engine's state has no such problem.
+    /// carried the same value by a second route. The neighbouring
+    /// `onPlanReviewReleased`/`onPlanExecutionSettled` hooks must be
+    /// identity-guarded against a parked background engine acting on the
+    /// displayed chat's state; observing THIS engine's own property makes
+    /// that hazard impossible here, so no such guard is needed.
     var resolvedMode: String?
     /// Sidebar section this engine's chats belong to. Fixed for the engine's
     /// lifetime: it scopes the session files (`ChatSession.scope`), the
@@ -666,6 +668,11 @@ final class ChatEngine {
         // described the PREVIOUS turn — a new turn starting means it has
         // served its purpose.
         agentV2Notice = nil
+        // Same reasoning: a leftover resolution from the PREVIOUS turn must
+        // not survive into this one, or a repeat value (e.g. "execute" again
+        // after Auto released back) assigns unchanged and `.onChange` never
+        // fires — nil first makes every resolution a nil→value transition.
+        resolvedMode = nil
         // Clear any stale pending-tool card from a prior turn the user ignored —
         // otherwise it stays interactive against the old args while a new turn runs.
         agent.pendingTool = nil

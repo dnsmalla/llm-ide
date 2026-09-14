@@ -338,6 +338,10 @@ extension ChatEngine {
         pendingApproval = nil
         agentV2Transport?.resetSdkSessionId()
         error = nil
+        // A resolution left over from the OUTGOING chat's last turn must not
+        // move the incoming chat's picker — same staleness class as the
+        // approval card and SDK session id above.
+        resolvedMode = nil
         agent.nudgePrompt = nil
         agent.agentSessionId = UUID().uuidString
         agent.agentPendingTasks = []
