@@ -335,6 +335,9 @@ struct CodeAssistantPanel: View {
             // to "picker is on Auto" — moving OFF auto is the point (the next
             // message sends in the resolved mode instead of being re-classified);
             // changing the picker back to Auto restores per-turn classification.
+            // A release (`releaseStickyMode`) retracts `resolvedMode` in the same
+            // frame it fires, so this handler only ever sees resolutions the
+            // lifecycle has NOT already taken back.
             .onChange(of: engine.resolvedMode) { _, raw in
                 guard let raw,
                       let next = ModePolicy.pickerMode(current: modelState.selectedMode.rawValue, resolved: raw),

@@ -425,6 +425,15 @@ extension CodeAssistantPanel {
             releasing: stages)
         else { return }
         modelState.selectedMode = .auto
+        // The lifecycle has just taken the picker back. The turn that ended in
+        // THIS same frame also recorded its resolved mode, and the panel's
+        // `.onChange(of: engine.resolvedMode)` is delivered on the next view
+        // update — by which point the picker reads `.auto`, so the
+        // "follow only while on Auto" gate that correctly refused the
+        // resolution a moment ago would now pass and undo this release.
+        // Retracting the resolution here collapses the frame's net change to
+        // nothing, so `.onChange` never fires for a turn already released.
+        engine.resolvedMode = nil
     }
 
     /// User-facing wording for a refused plan write. One table so the button,

@@ -4,6 +4,12 @@ import Foundation
 /// value. A new plan-side hook is a new field here, not an edit to
 /// `ChatEngine.swift` — see that file's `hooks` property and Task 4's brief
 /// (`.superpowers/sdd/2026-09-14-chat-feature-isolation/task-4-brief.md`).
+///
+/// Mutate individual members (`engine.hooks.onX = …`), never assign the
+/// whole value — several independent owners (the panel, `MobileControlManager`,
+/// `QuickChatContext`, tests) each set different members, and `packHistory` is
+/// wired in `ChatEngine.init`, so a whole-struct assignment silently reverts
+/// history packing to the bare default.
 @MainActor
 struct ChatEngineHooks {
     /// Called when a question parks during an EXTERNAL (phone-driven) turn,

@@ -55,10 +55,11 @@ public enum PlanTurnLanding {
             out.append(.savePlanReply)
         }
         if turn.replyDone,
-           PlanReviewPolicy.updatesPlanAfterFix(verdict: turn.reviewVerdict,
-                                               turnChangedCode: turn.turnChangedCode,
-                                               isPlanUpdateTurn: turn.lastUserIsPlanUpdate,
-                                               hasPlanFile: turn.hasPlanFile) {
+           PlanReviewPolicy.updatesPlanAfterFix(
+               verdict: turn.reviewVerdict,
+               turnChangedCode: turn.turnChangedCode,
+               isPlanUpdateTurn: turn.lastUserIsPlanUpdate,
+               hasPlanFile: turn.hasPlanFile) {
             out.append(.updatePlanAfterFix)
         }
         if turn.lastUserIsPlanReview {
