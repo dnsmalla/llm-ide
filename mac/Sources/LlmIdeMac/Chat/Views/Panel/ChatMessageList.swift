@@ -693,10 +693,15 @@ struct ChatMessageList: View {
         return "\(n)"
     }
 
+    /// The breakdown behind the headline, naming each part's billing rate —
+    /// the rates are the whole reason the headline is not a flat sum (see
+    /// `AgentV2Usage.billableTokens`), so hiding them would leave the
+    /// weighted number unexplainable.
     private static func tokenUsageTooltip(_ usage: AgentV2Usage) -> String {
         var parts = ["\(usage.inputTokens) in", "\(usage.outputTokens) out"]
-        if usage.cacheReadTokens > 0 { parts.append("\(usage.cacheReadTokens) cache read") }
-        if let created = usage.cacheCreationTokens, created > 0 { parts.append("\(created) cache write") }
+        if usage.cacheReadTokens > 0 { parts.append("\(usage.cacheReadTokens) cache read (×0.1)") }
+        if let created = usage.cacheCreationTokens, created > 0 { parts.append("\(created) cache write (×1.25)") }
+        parts.append("\(usage.processedTokens) processed in total")
         return parts.joined(separator: " · ")
     }
 
@@ -756,16 +761,18 @@ struct ChatMessageList: View {
                     }
                     if !isUser, let usage = turn.metadata?.tokenUsage {
                         // Real per-turn LLM tokens (agent-v2 only — see
-                        // ChatMessage.Metadata.tokenUsage). Includes cache
-                        // read/write, not just input+output: with prompt
-                        // caching on (the normal case), `inputTokens` alone
-                        // is only the small UNCACHED delta — a turn carrying
-                        // a multi-KB system prompt can read ~60 fresh input
-                        // tokens against a 200K-token cached prefix, and
-                        // that prefix is both billed and genuinely consumed
-                        // context, not an implementation detail to hide.
-                        // The breakdown (in/out/cache) stays in the tooltip.
-                        Text("\(Self.compactTokenCount(usage.totalTokens)) tokens")
+                        // ChatMessage.Metadata.tokenUsage), weighted by how
+                        // each kind actually bills rather than summed flat.
+                        // Cache read/write MUST be counted — with caching on
+                        // (the normal case) `inputTokens` alone is only the
+                        // small uncached delta against a huge cached prefix
+                        // — but counting them at face value is just as wrong
+                        // in the other direction: a write bills 1.25× and a
+                        // read 0.1×, so a flat sum made a warm turn look as
+                        // expensive as a cold one when it costs a tenth.
+                        // See `AgentV2Usage.billableTokens`; the raw
+                        // breakdown and the rates stay in the tooltip.
+                        Text("\(Self.compactTokenCount(usage.billableTokens)) tokens")
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                             .help(Self.tokenUsageTooltip(usage))

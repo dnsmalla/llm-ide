@@ -1077,6 +1077,43 @@ do {
            "and nothing happens when no review was running")
 }
 
+// AgentV2Usage.billableTokens — the chat bubble's headline. Prompt caching is
+// a pre-payment, not a discount (write 1.25×, read 0.1×), so a flat sum makes
+// a cold turn and a warm turn look identical when they differ ~10× in cost.
+// The two fixtures below are REAL turns from this install's usage ledger.
+do {
+    func billable(input: Int, output: Int, read: Int, write: Int?) -> Int {
+        TokenCostPolicy.billableTokens(input: input, output: output, cacheRead: read, cacheWrite: write)
+    }
+    // Ledger id=497: a one-word "hello" on a cold cache. Everything was
+    // WRITTEN, which bills ABOVE face value — the flat sum understated it.
+    let coldProcessed = 20 + 6 + 0 + 52_102
+    let cold = billable(input: 20, output: 6, read: 0, write: 52_102)
+    expect(cold == 20 + 6 + Int((52_102.0 * 1.25).rounded()),
+           "a cold turn bills ABOVE its raw count — every token was a 1.25× write")
+    expect(cold > coldProcessed,
+           "so the weighted headline must exceed the flat sum here, not undercut it")
+
+    // Ledger id=487: a warm follow-up in the same chat. Nearly all of it was
+    // READ at 0.1×, so the flat sum overstated the cost by roughly 10×.
+    let warmProcessed = 20 + 6 + 52_592 + 228
+    let warm = billable(input: 20, output: 6, read: 52_592, write: 228)
+    expect(warm < warmProcessed / 8,
+           "a warm turn bills under an eighth of its raw count")
+    expect(cold > warm * 8,
+           "cold vs warm is the ~10× gap the flat sum hid — the whole point of weighting")
+
+    // A turn from a server too old to send cacheCreationTokens must not be
+    // read as "zero writes billed at 1.25" — nil is unknown, and unknown
+    // contributes nothing rather than silently inventing a cost.
+    expect(billable(input: 100, output: 50, read: 1_000, write: nil) == 100 + 50 + 100,
+           "an absent cache-write count contributes nothing, it is not a zero-cost claim")
+    expect(billable(input: 0, output: 0, read: 0, write: 0) == 0,
+           "an empty turn is zero, not a rounding artefact")
+    expect(TokenCostPolicy.cacheWriteMultiplier > 1 && TokenCostPolicy.cacheReadMultiplier < 1,
+           "caching is a pre-payment: writes cost MORE than fresh input, reads much less")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

@@ -79,12 +79,19 @@ struct AgentV2Usage: Sendable, Equatable, Codable {
         case inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, contextPercent
     }
 
-    /// Everything genuinely consumed and billed for this message/turn —
-    /// cache read/write included, not just the fresh input+output. With
-    /// prompt caching on (the normal case) `inputTokens` alone is only the
-    /// small uncached delta, so a headline number built from it alone reads
-    /// as near-zero on a turn that actually carried a large cached prefix.
-    var totalTokens: Int { inputTokens + outputTokens + cacheReadTokens + (cacheCreationTokens ?? 0) }
+    /// Raw count of everything this message/turn processed. Honest about
+    /// VOLUME, misleading about cost — the three input kinds bill at very
+    /// different rates (see `billableTokens`). Kept for the tooltip's
+    /// breakdown; do not use it as a headline.
+    var processedTokens: Int { inputTokens + outputTokens + cacheReadTokens + (cacheCreationTokens ?? 0) }
+
+    /// The same turn as fresh-input-equivalent tokens, so two turns showing
+    /// the same number really did cost about the same. The rules (and why a
+    /// flat sum is wrong in BOTH directions) live in `TokenCostPolicy`.
+    var billableTokens: Int {
+        TokenCostPolicy.billableTokens(input: inputTokens, output: outputTokens,
+                                       cacheRead: cacheReadTokens, cacheWrite: cacheCreationTokens)
+    }
 }
 
 /// `{"type":"memory", …}` — how much of this turn's prompt is the chat's
