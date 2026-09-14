@@ -17,7 +17,7 @@ import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { expandTilde } from '../../graphkit/memory.mjs';
 import { persistTurnMemory } from './memory-persist.mjs';
-import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
+import { listSessionMemory, resolveChatSessionId, capSessionMemory } from '../../kb/session-memory.mjs';
 import { buildReadableRoots } from './handlers/repo-files.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
@@ -312,7 +312,9 @@ export async function handleCodeAssist({
   try {
     const chatSessionId = resolveChatSessionId(agentContext);
     if (chatSessionId && userId) {
-      const sessionFacts = listSessionMemory(userId, chatSessionId);
+      // Capped the same way sdk/engine.mjs caps it, so the two engines inject
+      // identical memory for the same chat (engine-prompt-parity).
+      const sessionFacts = capSessionMemory(listSessionMemory(userId, chatSessionId));
       if (sessionFacts.length > 0) {
         const block = redactFence(`## This session's memory\n${sessionFacts.map((f) => `- ${f}`).join('\n')}`);
         personaBase += `\n\n${block}`;

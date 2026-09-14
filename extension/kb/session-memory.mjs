@@ -30,6 +30,41 @@ export function resolveChatSessionId(agentContext) {
 const FACT_MAX = 500;
 const MAX_FACTS_PER_SESSION = 200; // matches config.memory-ish order of magnitude; a disk/prompt-size guard, not a product limit
 
+// What rides the PROMPT is a separate, tighter ceiling from what is stored.
+// The "This session's memory" block is re-sent on EVERY turn of a chat, and
+// the extractor adds up to 6 facts per turn (llm_agent/runtime/memory-
+// extract.mjs), so the full stored list (200 × 500 chars above) grows into a
+// ~100k-char fixed cost per turn on a long chat — for the one-word follow-ups
+// as much as for the real work. Both engines (sdk/engine.mjs and
+// runtime/route.mjs) build the block from `capSessionMemory`, so they inject
+// the same memory for the same chat.
+const PROMPT_MAX_FACTS = 40;
+const PROMPT_MAX_CHARS = 8_000;
+
+/**
+ * Trim an oldest-first fact list to the NEWEST facts that fit under both a
+ * count and a char ceiling, returned oldest-first. A single oversized fact is
+ * still kept (bounded by FACT_MAX) rather than returning nothing.
+ */
+export function capSessionMemory(
+  facts,
+  { maxFacts = PROMPT_MAX_FACTS, maxChars = PROMPT_MAX_CHARS } = {},
+) {
+  if (!Array.isArray(facts) || facts.length === 0) return [];
+  const kept = [];
+  let chars = 0;
+  for (let i = facts.length - 1; i >= 0 && kept.length < maxFacts; i -= 1) {
+    const fact = facts[i];
+    if (typeof fact !== 'string' || fact.length === 0) continue;
+    // "- " prefix + newline, as rendered in the block.
+    const cost = fact.length + 3;
+    if (chars + cost > maxChars && kept.length > 0) break;
+    kept.push(fact);
+    chars += cost;
+  }
+  return kept.reverse();
+}
+
 function nowSec() {
   return Date.now() / 1000;
 }

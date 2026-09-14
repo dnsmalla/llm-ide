@@ -55,7 +55,7 @@ import { selectAttachments, splitImageAttachments, buildSkillsText, buildModeSki
 import { getDb } from '../../kb/db.mjs';
 import { usdCapForModel } from '../../kb/usage.mjs';
 import { nativePluginsEnabled } from '../../kb/user.mjs';
-import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
+import { listSessionMemory, resolveChatSessionId, capSessionMemory } from '../../kb/session-memory.mjs';
 import { getAgentPersona } from '../../kb/personas.mjs';
 import { getSecret, makeSecretReader } from '../../server/vault.mjs';
 import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
@@ -554,8 +554,9 @@ export function buildEngineOptions(
   try {
     const chatSessionId = resolveChatSessionId(agentContext);
     if (chatSessionId && userId) {
-      const sessionFacts = sessionMemory(userId, chatSessionId);
-      if (Array.isArray(sessionFacts) && sessionFacts.length > 0) {
+      const allFacts = sessionMemory(userId, chatSessionId);
+      const sessionFacts = capSessionMemory(allFacts);
+      if (sessionFacts.length > 0) {
         const block = redactFence(`## This session's memory\n${sessionFacts.map((f) => `- ${f}`).join('\n')}`);
         appendParts.push(block);
         sessionMemoryFacts = sessionFacts.length;

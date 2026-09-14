@@ -84,3 +84,31 @@ test('a turn with no session facts still emits the event, at zero — the client
     assert.equal(mem.length, 1);
     assert.deepEqual(mem[0], { type: 'memory', sessionFacts: 0, chars: 0, approxTokens: 0 });
   }));
+
+// The block is re-sent on every turn, so it is capped to the NEWEST facts —
+// the on-disk list (up to 200 × 500 chars) stays complete, only the prompt
+// copy is trimmed. The memory event must count what was actually injected,
+// not what is stored, or the brain button would overstate the cost.
+test('a long session injects only the newest facts, under both the count and the char ceiling',
+  withAnthropicKey('sk-ant-mem-3', async () => {
+    const facts = Array.from({ length: 200 }, (_, i) => `fact ${String(i).padStart(3, '0')} ${'x'.repeat(180)}`);
+    const { events, capture } = await turnWith({ sessionFacts: facts, tag: 'long' });
+    const mem = events.filter((e) => e.type === 'memory');
+    assert.equal(mem.length, 1);
+    assert.ok(mem[0].sessionFacts < 200, 'not every stored fact rides the prompt');
+    assert.ok(mem[0].sessionFacts <= 40);
+    assert.ok(mem[0].chars <= 8_000 + '## This session\'s memory\n'.length);
+    const appended = capture.options.systemPrompt?.append ?? JSON.stringify(capture.options);
+    assert.match(appended, /fact 199 /, 'the newest fact is kept');
+    assert.doesNotMatch(appended, /fact 000 /, 'the oldest fact is dropped');
+    assert.equal(mem[0].approxTokens, Math.round(mem[0].chars / 4));
+  }));
+
+test('capSessionMemory keeps order (oldest-first) and never returns an empty list for one oversized fact', async () => {
+  const { capSessionMemory } = await import('../kb/session-memory.mjs');
+  assert.deepEqual(capSessionMemory(['a', 'b', 'c'], { maxFacts: 2 }), ['b', 'c']);
+  assert.deepEqual(capSessionMemory(['a'.repeat(50), 'b'.repeat(50)], { maxChars: 60 }), ['b'.repeat(50)]);
+  assert.deepEqual(capSessionMemory(['z'.repeat(500)], { maxChars: 10 }), ['z'.repeat(500)]);
+  assert.deepEqual(capSessionMemory([], {}), []);
+  assert.deepEqual(capSessionMemory(null, {}), []);
+});
