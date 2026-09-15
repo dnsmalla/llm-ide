@@ -20,3 +20,4 @@ LoopEngine/     Feature:Loop
 Graph/          Feature:CodeGraph
 Features/Search/    Feature:Search
 Features/Gantt/    Feature:Gantt
+Features/ReviewConflicts/    Feature:ReviewConflicts

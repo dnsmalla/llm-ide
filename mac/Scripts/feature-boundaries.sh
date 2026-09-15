@@ -231,6 +231,37 @@ fi
 #     referenced TerminalPanelState unconditionally after it moved into a
 #     now-excludable Features/Terminal folder, and the boundary check above
 #     never saw it because Shell consumers are always allowed through it.
+# 3a. `strip_feature_guard_for_flag` only understands `#if`/`#else`/`#endif`.
+#     An `#elseif` branch inherits its enclosing `#if` frame's hidden/visible
+#     state as written today, which is backwards for the branch that runs
+#     when the target flag is FALSE — a genuine false negative, not a
+#     hypothetical one (reviewer-reproduced: `#if FEATURE_TERMINAL / x /
+#     #elseif DEBUG / <ref> / #endif` silently passed). Full `#elseif`
+#     support is deliberately out of scope; refuse it outright instead of
+#     guessing, so the first `#elseif` under Shell/Core forces a person to
+#     either restructure it (nested #if/#else) or extend the parser on
+#     purpose.
+: > "$WORK/elseif-hits.txt"
+find "$SRC" -name '*.swift' | sort | while read -r f; do
+  rel="${f#"$SRC"/}"
+  consumer="$(layer_of "$rel")"
+  [[ "$consumer" == "Shell" || "$consumer" == "Core" ]] || continue
+  grep -n '^[[:space:]]*#elseif\b' "$f" | while IFS=: read -r lineno _; do
+    echo "$rel:$lineno" >> "$WORK/elseif-hits.txt"
+  done
+done
+
+echo "=== #elseif under Shell/Core (unsupported by the guard parser) ==="
+if [ -s "$WORK/elseif-hits.txt" ]; then
+  sort "$WORK/elseif-hits.txt" | while read -r loc; do
+    echo "  ERROR  $loc  — strip_feature_guard_for_flag has no #elseif support; restructure as nested #if/#else or extend the parser deliberately"
+  done
+  echo "FAIL: #elseif found under Shell/Core; the build-exclusion guard parser cannot reason about it safely" >&2
+  status=1
+else
+  echo "  none"
+fi
+
 : > "$WORK/exc-layers.txt"
 : > "$WORK/layer-flag.txt"
 while read -r p; do

@@ -145,12 +145,14 @@ struct ReviewView: View {
                    idealWidth: hasFile ? 460 : 180,
                    maxWidth: .infinity)
 
-            if chatVisible {
-                CodeAssistantPanel(api: api,
-                                   scope: .conflicts,
-                                   initialURL: activeTabURL,
-                                   showFileAttachButtons: true,
-                                   showModelPicker: true)
+            if chatVisible,
+               let codeAssistantPanel = FeatureCatalog.codeAssistantPanel(
+                   api: api,
+                   scope: .conflicts,
+                   initialURL: activeTabURL,
+                   showFileAttachButtons: true,
+                   showModelPicker: true) {
+                codeAssistantPanel
                     .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
                     .transition(.move(edge: .trailing))
             }

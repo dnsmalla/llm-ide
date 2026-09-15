@@ -194,6 +194,27 @@ enum FeatureCatalog {
         #endif
     }
 
+    // MARK: - Chat panel
+
+    /// The Code Assistant panel, embedded by Review Conflicts and Visual.
+    /// Those features reach it through this factory rather than naming
+    /// `CodeAssistantPanel`, so Chat's internals can change without touching
+    /// them. Parameters mirror the existing call sites exactly (`ReviewView`
+    /// and `VisualView` both pass `showFileAttachButtons: true,
+    /// showModelPicker: true`; the defaults here match `CodeAssistantPanel`'s
+    /// own so a future caller with fewer arguments still behaves the same).
+    static func codeAssistantPanel(api: LlmIdeAPIClient,
+                                   scope: ChatScope,
+                                   initialURL: URL? = nil,
+                                   showFileAttachButtons: Bool = true,
+                                   showModelPicker: Bool = false) -> AnyView? {
+        AnyView(CodeAssistantPanel(api: api,
+                                   scope: scope,
+                                   initialURL: initialURL,
+                                   showFileAttachButtons: showFileAttachButtons,
+                                   showModelPicker: showModelPicker))
+    }
+
     // MARK: - Terminal
 
     #if FEATURE_TERMINAL
