@@ -162,6 +162,23 @@ enum FeatureCatalog {
         #endif
     }
 
+    /// Project memory viewer, shown as a sheet from Chat's Code Assistant
+    /// panel. Chat is never build-excluded, so this seam is what keeps
+    /// `CodeAssistant+Sheets.swift` from naming an Explorer-owned type
+    /// directly when Explorer is compiled out.
+    static func explorerProjectMemorySection(
+        api: LlmIdeAPIClient,
+        repos: [String],
+        workspaceRoot: String?,
+        sessionId: String?
+    ) -> AnyView? {
+        #if FEATURE_EXPLORER
+        return AnyView(ProjectMemoryView(api: api, repos: repos, workspaceRoot: workspaceRoot, sessionId: sessionId))
+        #else
+        return nil
+        #endif
+    }
+
     // MARK: - Gantt / Issues
 
     static func issuesPane(api: LlmIdeAPIClient) -> AnyView {
