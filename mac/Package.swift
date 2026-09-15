@@ -80,7 +80,7 @@ if docGenIncluded {
 if terminalIncluded {
     featureDefines.append(.define("FEATURE_TERMINAL"))
 } else {
-    libExcludes.append("Views/Terminal")
+    libExcludes.append("Features/Terminal")
 }
 if autoTasksIncluded {
     featureDefines.append(.define("FEATURE_AUTOTASK"))
