@@ -487,7 +487,21 @@ EOF
 
 ## Tasks 3–8: the zero-edge leaves
 
-These six features have no cross-feature references. They are sealed immediately on arrival, which is what makes them the right place to prove the ratchet works on real moves before touching anything entangled.
+**REVISED DURING EXECUTION.** These six were believed to have no cross-feature
+references. Executing them disproved it — the original measurement only covered
+folders that were already classified, and all six lived in the exempt bucket.
+Review Conflicts and Visual embed `CodeAssistantPanel`; Gantt and Issues are
+coupled both ways; `Shell/AppShell.swift` uses `TerminalPanelState` unguarded.
+
+Two policy changes follow, and they apply to **every** feature task from here on:
+
+- **Features are classified on arrival, never sealed on arrival.** Sealing is
+  unsound while collaborators are still invisible to the gate — Gantt "passed"
+  sealing only because Issues had not moved. All sealing happens once, in Task 22.
+- **`pending` lines are expected and do not fail the build.** After the gate
+  hardening, a reference from a classified feature into unclassified code prints
+  `pending`. Roughly 70 appear today and shrink as migration proceeds. Do not
+  treat them as failures.
 
 Every one of these tasks follows the same shape, and each states its own commands in full so it can be executed without reading its neighbours.
 
@@ -501,7 +515,7 @@ Every one of these tasks follows the same shape, and each states its own command
 
 **Interfaces:**
 - Consumes: `Core/`, `Shell/` from Tasks 1–2.
-- Produces: `Features/Search/` — sealed. No symbol under it may be referenced by another feature.
+- Produces: `Features/Search/` — classified (sealed in Task 22). No symbol under it may be referenced by another feature.
 
 - [ ] **Step 1: Move the files**
 
@@ -520,12 +534,12 @@ Search is excluded together with Explorer (it is reached through the Explorer pa
 libExcludes.append(contentsOf: ["Views/Explorer", "Features/Search", "Views/SourceControl"])
 ```
 
-- [ ] **Step 3: Seal it in the feature map**
+- [ ] **Step 3: Classify it in the feature map** (no `sealed` flag — see Task 22)
 
 Add to `mac/Scripts/feature-map.txt`:
 
 ```
-Features/Search/    Feature:Search    sealed
+Features/Search/    Feature:Search
 ```
 
 - [ ] **Step 4: Verify the gate — Search must show zero**
@@ -567,17 +581,49 @@ EOF
 
 ### Task 4: Review Conflicts
 
-The smallest feature in the app — one view. Worth its own task because sealing it costs nothing and the folder is where conflict-review code goes next time.
+**REWRITTEN AFTER EXECUTION.** `ReviewView.swift` embeds `CodeAssistantPanel`, which
+Chat owns. This is a real cross-feature edge, not the zero-edge move first assumed.
 
 **Files:**
 - Move: `Views/ReviewView.swift`
-- Modify: `mac/Scripts/feature-map.txt`
+- Modify: `Shell/FeatureCatalog.swift`, `mac/Scripts/feature-map.txt`
 
 **Interfaces:**
 - Consumes: `Core/`, `Shell/`.
-- Produces: `Features/ReviewConflicts/` — sealed.
+- Produces: `Features/ReviewConflicts/` — classified, not sealed. Adds
+  `FeatureCatalog.codeAssistantPanel(...) -> AnyView?`, the shared seam for every
+  feature that embeds the chat panel (Visual in Task 5 uses the same one).
 
-- [ ] **Step 1: Move the file**
+- [ ] **Step 1: Read the real call site before designing the factory**
+
+```bash
+cd mac/Sources/LlmIdeMac
+grep -n "CodeAssistantPanel" Views/ReviewView.swift Views/Visual/*.swift
+grep -rn "struct CodeAssistantPanel" Chat/
+```
+
+Write the factory signature from what those call sites actually pass. Do not
+invent parameters and then change the call sites to match — that would be a
+behavior change, which is out of scope.
+
+- [ ] **Step 2: Add the factory to `Shell/FeatureCatalog.swift`**
+
+In a new `// MARK: - Chat panel` section. Chat is not build-excludable, so there
+is no `#if`; the factory exists so features stop naming a Chat type directly:
+
+```swift
+// MARK: - Chat panel
+
+/// The Code Assistant panel, embedded by Review Conflicts and Visual.
+/// Those features reach it through this factory rather than naming
+/// `CodeAssistantPanel`, so Chat's internals can change without touching them.
+/// Parameters mirror the existing call sites exactly — see Task 4 Step 1.
+static func codeAssistantPanel(/* copy the real parameter list from Step 1 */) -> AnyView? {
+    AnyView(CodeAssistantPanel(/* forward them unchanged */))
+}
+```
+
+- [ ] **Step 3: Move the view and retarget its call site**
 
 ```bash
 cd mac/Sources/LlmIdeMac
@@ -585,40 +631,48 @@ mkdir -p Features/ReviewConflicts/Views
 git mv Views/ReviewView.swift Features/ReviewConflicts/Views/
 ```
 
-- [ ] **Step 2: Seal it**
+Then replace the direct `CodeAssistantPanel(...)` construction in
+`Features/ReviewConflicts/Views/ReviewView.swift` with
+`FeatureCatalog.codeAssistantPanel(...)`, forwarding the same arguments.
 
-`Package.swift` needs no change — Review Conflicts is not build-excludable. Add to `mac/Scripts/feature-map.txt`:
+- [ ] **Step 4: Classify it** (no `sealed` flag — see Task 22)
+
+`Package.swift` needs no change — Review Conflicts is not build-excludable.
 
 ```
-Features/ReviewConflicts/    Feature:ReviewConflicts    sealed
+Features/ReviewConflicts/    Feature:ReviewConflicts
 ```
 
-- [ ] **Step 3: Verify the gate**
+- [ ] **Step 5: Verify the gate**
 
 ```bash
-cd mac && ./Scripts/feature-boundaries.sh | tail -5
+cd mac && ./Scripts/feature-boundaries.sh > /tmp/gate-t4.txt 2>&1; echo "exit=$?"
+grep -E "ReviewConflicts" /tmp/gate-t4.txt
 ```
 
-Expected: `total: 4  sealed violations: 0`.
+Expected: `exit=0`, and **no** `ReviewConflicts -> Chat` line. If one appears, the
+call site still names a Chat type directly and the factory is not doing its job.
 
-- [ ] **Step 4: Build**
+- [ ] **Step 6: Build**
 
 ```bash
-cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build 2>&1 | tail -5
+cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build > /tmp/b4.log 2>&1; echo "exit=$?"; tail -5 /tmp/b4.log
 ```
 
 Expected: `Build complete`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add -A mac
 git commit -m "$(cat <<'EOF'
-refactor(mac): Review Conflicts を Features/ReviewConflicts に分離し封印する
+refactor(mac): Review Conflicts を分離し Chat 参照をシーム経由にする
 
-ビュー 1 枚のみだが、次に競合レビュー用コードを追加する際の
-置き場所を確定させる意味でフォルダを与える。
-ビルド除外対象ではないため Package.swift の変更はない。
+ReviewView は CodeAssistantPanel を直接埋め込んでいた。当初「クロス機能
+参照ゼロ」と見なしていたのは計測範囲の誤りで、実際には Chat への依存である。
+
+FeatureCatalog.codeAssistantPanel() を追加し、パネルを埋め込む機能が
+Chat の型を直接名指ししないようにする。Visual も同じシームを使う。
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
@@ -629,13 +683,17 @@ EOF
 
 ### Task 5: Visual
 
+**REWRITTEN AFTER EXECUTION.** Visual also embeds `CodeAssistantPanel`. It reuses
+the factory Task 4 added — do not add a second one.
+
 **Files:**
 - Move: `Views/Visual/` (4 files)
-- Modify: `mac/Package.swift:78`, `mac/Scripts/feature-map.txt`
+- Modify: `mac/Package.swift` (the `docGenIncluded` else-branch), `mac/Scripts/feature-map.txt`
 
 **Interfaces:**
-- Consumes: `Core/`, `Shell/`.
-- Produces: `Features/Visual/` — sealed. Note Visual rides on the `docGen` build flag, not one of its own.
+- Consumes: `FeatureCatalog.codeAssistantPanel(...)` from Task 4.
+- Produces: `Features/Visual/` — classified, not sealed. Visual rides the `docGen`
+  build flag, not one of its own.
 
 - [ ] **Step 1: Move the files**
 
@@ -645,7 +703,14 @@ mkdir -p Features/Visual/Views
 git mv Views/Visual/* Features/Visual/Views/ && rmdir Views/Visual
 ```
 
-- [ ] **Step 2: Update `Package.swift`**
+- [ ] **Step 2: Retarget the chat-panel call site**
+
+Replace the direct `CodeAssistantPanel(...)` construction in the moved files with
+`FeatureCatalog.codeAssistantPanel(...)`, forwarding the same arguments. If Visual
+passes different arguments than Review Conflicts did, extend the factory's
+parameter list with defaults rather than adding a second factory.
+
+- [ ] **Step 3: Update `Package.swift`**
 
 In the `if docGenIncluded { … } else { … }` branch, replace `"Views/Visual"`:
 
@@ -653,39 +718,41 @@ In the `if docGenIncluded { … } else { … }` branch, replace `"Views/Visual"`
 libExcludes.append(contentsOf: ["Views/DocGen", "Features/Visual"])
 ```
 
-- [ ] **Step 3: Seal it**
+- [ ] **Step 4: Classify it** (no `sealed` flag — see Task 22)
 
 ```
-Features/Visual/    Feature:Visual    sealed
+Features/Visual/    Feature:Visual
 ```
 
-- [ ] **Step 4: Verify the gate**
+- [ ] **Step 5: Verify the gate**
 
 ```bash
-cd mac && ./Scripts/feature-boundaries.sh | tail -5
+cd mac && ./Scripts/feature-boundaries.sh > /tmp/gate-t5.txt 2>&1; echo "exit=$?"
+grep -E "Visual" /tmp/gate-t5.txt
 ```
 
-Expected: `total: 4  sealed violations: 0`, `all exclude paths exist`.
+Expected: `exit=0`, `all exclude paths exist`, and no `Visual -> Chat` line.
 
-- [ ] **Step 5: Build lite (where docGen is excluded)**
+- [ ] **Step 6: Build lite, where docGen is excluded**
 
 ```bash
 cd mac
-GIT_CONFIG_GLOBAL=/dev/null make build-mac-lite > /tmp/lite.log 2>&1; echo "exit=$?"
-grep -c "Invalid Exclude" /tmp/lite.log    # expected: 0
+GIT_CONFIG_GLOBAL=/dev/null make build-mac-lite > /tmp/lite5.log 2>&1; echo "exit=$?"
+grep -c "Invalid Exclude" /tmp/lite5.log    # expected: 0
 ```
 
-Expected: `exit=0`.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add -A mac
 git commit -m "$(cat <<'EOF'
-refactor(mac): Visual を Features/Visual に分離し封印する
+refactor(mac): Visual を分離し Chat 参照をシーム経由にする
 
-Visual は独自フラグを持たず doc_gen フラグに相乗りしているため、
-Package.swift の除外も docGenIncluded 側の 1 行変更に留まる。
+Visual も CodeAssistantPanel を直接埋め込んでいたため、Task 4 で追加した
+FeatureCatalog.codeAssistantPanel() を再利用する。2 つ目のファクトリは作らない。
+
+Visual は独自フラグを持たず doc_gen に相乗りしているため、
+Package.swift の変更は docGenIncluded 側の 1 行に留まる。
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
@@ -702,7 +769,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `Core/`, `Shell/`.
-- Produces: `Features/Gantt/` — sealed. Gantt and Issues share the `gantt` build flag but become separate folders; the shared flag stays, the shared folder does not.
+- Produces: `Features/Gantt/` — classified (sealed in Task 22). Gantt and Issues share the `gantt` build flag but become separate folders; the shared flag stays, the shared folder does not.
 
 - [ ] **Step 1: Move the files**
 
@@ -720,10 +787,10 @@ In the `if ganttIncluded { … } else { … }` branch:
 libExcludes.append(contentsOf: ["Features/Gantt", "Views/Issues"])
 ```
 
-- [ ] **Step 3: Seal it**
+- [ ] **Step 3: Classify it** (no `sealed` flag — see Task 22)
 
 ```
-Features/Gantt/    Feature:Gantt    sealed
+Features/Gantt/    Feature:Gantt
 ```
 
 - [ ] **Step 4: Verify the gate**
@@ -761,15 +828,61 @@ EOF
 
 ### Task 7: Issues
 
+**REWRITTEN AFTER EXECUTION.** Gantt and Issues are coupled in **both** directions
+(shared sheet types and cross-referenced view models), and Issues reaches Chat
+through `RecentIssuesResolver`. This is the hardest untangle in the batch and the
+first task where moving files is not enough.
+
 **Files:**
 - Move: `Views/Issues/` (4 files), `Views/ExistingIssuePicker.swift`, `Services/RecentIssuesResolver.swift`
-- Modify: `mac/Package.swift:66`, `mac/Scripts/feature-map.txt`
+- Possibly move to Core: shared Gantt/Issues types identified in Step 1
+- Modify: `mac/Package.swift` (the `ganttIncluded` else-branch), `mac/Scripts/feature-map.txt`
 
 **Interfaces:**
-- Consumes: `Core/`, `Shell/`.
-- Produces: `Features/Issues/` — sealed.
+- Consumes: `Core/`, `Shell/`, `FeatureCatalog.codeAssistantPanel(...)` if the Chat
+  edge turns out to be a panel embed.
+- Produces: `Features/Issues/` — classified, not sealed.
 
-- [ ] **Step 1: Move the files**
+- [ ] **Step 1: Map the coupling before moving anything**
+
+This is the step that decides the rest of the task. Produce an explicit list:
+
+```bash
+cd mac/Sources/LlmIdeMac
+# What Gantt uses from Issues
+grep -rnoE '[A-Z][A-Za-z0-9_]{3,}' Features/Gantt --include=*.swift | sort -u > /tmp/gantt-refs.txt
+# Types Issues declares
+grep -rhoE '^(public |final |@MainActor )*(class|struct|enum|protocol) [A-Z][A-Za-z0-9_]*' \
+     Views/Issues Views/ExistingIssuePicker.swift | awk '{print $NF}' | sort -u > /tmp/issues-types.txt
+grep -Ff /tmp/issues-types.txt /tmp/gantt-refs.txt | sort -u
+# And the reverse: what Issues uses from Gantt
+grep -rhoE '^(public |final |@MainActor )*(class|struct|enum|protocol) [A-Z][A-Za-z0-9_]*' \
+     Features/Gantt | awk '{print $NF}' | sort -u > /tmp/gantt-types.txt
+grep -rnwFf /tmp/gantt-types.txt Views/Issues Views/ExistingIssuePicker.swift
+# And the Chat edge
+grep -n "CodeAssistantPanel\|ChatEngine\|ChatSession" Services/RecentIssuesResolver.swift Views/Issues/*.swift
+```
+
+Write the resulting edge list into your report. Each edge gets one of three
+dispositions, and you state which and why:
+
+- **Shared data type** (a model both features render) → move it to `Core/`.
+- **Chat panel embed** → route through `FeatureCatalog.codeAssistantPanel(...)`.
+- **One feature driving the other's behaviour** → leave it, record it as a
+  `pending`/cross-feature edge, and note it for Task 22. Do NOT invent a protocol
+  here; Task 22 decides whether Gantt and Issues stay separate or merge.
+
+- [ ] **Step 2: Move the shared types to Core first**
+
+Move only what Step 1 classified as shared data types. Use `git mv`. Build after
+this step alone, before moving Issues itself — if it breaks, the cause is
+unambiguous.
+
+```bash
+cd mac && GIT_CONFIG_GLOBAL=/dev/null swift build > /tmp/b7a.log 2>&1; echo "exit=$?"; tail -5 /tmp/b7a.log
+```
+
+- [ ] **Step 3: Move Issues**
 
 ```bash
 cd mac/Sources/LlmIdeMac
@@ -779,45 +892,48 @@ git mv Views/ExistingIssuePicker.swift Features/Issues/Views/
 git mv Services/RecentIssuesResolver.swift Features/Issues/Services/
 ```
 
-- [ ] **Step 2: Update `Package.swift`**
-
-The `ganttIncluded` else-branch now excludes two feature folders:
+- [ ] **Step 4: Update `Package.swift` and classify**
 
 ```swift
 libExcludes.append(contentsOf: ["Features/Gantt", "Features/Issues"])
 ```
 
-- [ ] **Step 3: Seal it**
-
 ```
-Features/Issues/    Feature:Issues    sealed
+Features/Issues/    Feature:Issues
 ```
 
-- [ ] **Step 4: Verify the gate**
+- [ ] **Step 5: Verify the gate and RECORD the surviving edges**
 
 ```bash
-cd mac && ./Scripts/feature-boundaries.sh
+cd mac && ./Scripts/feature-boundaries.sh > /tmp/gate-t7.txt 2>&1; echo "exit=$?"
+grep -E "Gantt|Issues" /tmp/gate-t7.txt
 ```
 
-Expected: `total: 4  sealed violations: 0`. Both Gantt and Issues are now sealed, so any reference between them fails the build here.
+Expected: `exit=0` (neither feature is sealed yet, so cross-feature references are
+warnings). Copy every surviving `Gantt <-> Issues` line into your report verbatim —
+Task 22 needs exactly that list to decide whether they merge.
 
-- [ ] **Step 5: Build lite**
+- [ ] **Step 6: Build lite and min**
 
 ```bash
 cd mac
-GIT_CONFIG_GLOBAL=/dev/null make build-mac-lite > /tmp/lite.log 2>&1; echo "exit=$?"
-grep -c "Invalid Exclude" /tmp/lite.log    # expected: 0
+GIT_CONFIG_GLOBAL=/dev/null make build-mac-lite > /tmp/lite7.log 2>&1; echo "exit=$?"
+GIT_CONFIG_GLOBAL=/dev/null make build-mac-min  > /tmp/min7.log  2>&1; echo "exit=$?"
+grep -c "Invalid Exclude" /tmp/lite7.log /tmp/min7.log   # expected: 0 for both
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add -A mac
 git commit -m "$(cat <<'EOF'
-refactor(mac): Issues を Features/Issues に分離し封印する
+refactor(mac): Issues を Features/Issues に分離する
 
-Gantt と Issues が双方とも封印されたため、両者間の参照は
-以降ビルドを落とす。ganttIncluded の除外は 2 フォルダ指定になる。
+Gantt と Issues は双方向に結合しており、Issues は RecentIssuesResolver
+経由で Chat も参照する。当初の「参照ゼロ」という想定は計測範囲の誤りだった。
+
+共有データ型のみ Core へ移し、残る相互参照は封印せず記録に留める。
+両者を 1 機能に統合するか分離を維持するかは Task 22 で判断する。
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
@@ -828,21 +944,31 @@ EOF
 
 ### Task 8: Terminal
 
+**REWRITTEN AFTER EXECUTION.** The original version moved `TerminalPanelState.swift`
+into `Features/Terminal/` and broke `build-mac-lite` and `build-mac-min`:
+`Shell/AppShell.swift` declares `@State private var terminalPanelState:
+TerminalPanelState` with **no** `#if FEATURE_TERMINAL` guard, so excluding the
+folder removes a type Shell compiles against unconditionally.
+
+Per Ruling 4, `TerminalPanelState` **stays in `Shell/Chrome/`**. Guarding AppShell's
+state is a structural change to Shell that this migration does not need, and the
+spec puts behavior changes out of scope.
+
 **Files:**
-- Move: `Views/Terminal/` (6 files), `Views/Shell/TerminalPanelState.swift` (now at `Shell/Chrome/TerminalPanelState.swift` after Task 2)
-- Modify: `mac/Package.swift:83`, `mac/Scripts/feature-map.txt`
+- Move: `Views/Terminal/` (6 files) only
+- Do NOT move: `Shell/Chrome/TerminalPanelState.swift`
+- Modify: `mac/Package.swift` (the `terminalIncluded` else-branch), `mac/Scripts/feature-map.txt`
 
 **Interfaces:**
-- Consumes: `Core/`, `Shell/`.
-- Produces: `Features/Terminal/` — sealed.
+- Consumes: `Core/`, `Shell/` (including `TerminalPanelState`, which remains Shell's).
+- Produces: `Features/Terminal/` — classified, not sealed.
 
-- [ ] **Step 1: Move the files**
+- [ ] **Step 1: Move the views only**
 
 ```bash
 cd mac/Sources/LlmIdeMac
-mkdir -p Features/Terminal/Models Features/Terminal/Views
+mkdir -p Features/Terminal/Views
 git mv Views/Terminal/* Features/Terminal/Views/ && rmdir Views/Terminal
-git mv Shell/Chrome/TerminalPanelState.swift Features/Terminal/Models/
 ```
 
 - [ ] **Step 2: Update `Package.swift`**
@@ -851,40 +977,50 @@ git mv Shell/Chrome/TerminalPanelState.swift Features/Terminal/Models/
 libExcludes.append("Features/Terminal")
 ```
 
-- [ ] **Step 3: Seal it**
+- [ ] **Step 3: Classify it** (no `sealed` flag — see Task 22)
 
 ```
-Features/Terminal/    Feature:Terminal    sealed
+Features/Terminal/    Feature:Terminal
 ```
 
-- [ ] **Step 4: Verify the gate**
+- [ ] **Step 4: Verify the gate — including the check that exists because of this task**
 
 ```bash
-cd mac && ./Scripts/feature-boundaries.sh | tail -5
+cd mac && ./Scripts/feature-boundaries.sh > /tmp/gate-t8.txt 2>&1; echo "exit=$?"
+grep -A3 "Shell/Core references into build-excludable" /tmp/gate-t8.txt
 ```
 
-Expected: `total: 4  sealed violations: 0`.
+Expected: `exit=0` and `none` under the Shell/Core section. That section was added
+precisely because of this task's first attempt: if it reports
+`Shell/AppShell.swift -> Terminal (build-excludable)`, a Terminal-owned type has
+moved into the excludable folder again and lite/min will not compile.
 
-Note `TerminalPanelState` moved *out* of Shell into a sealed feature. If Shell chrome referenced it, that is still legal (Shell may reference any feature) — but if another feature did, this seals against it now.
-
-- [ ] **Step 5: Build lite and min**
+- [ ] **Step 5: Build lite and min — the configurations that broke last time**
 
 ```bash
 cd mac
-GIT_CONFIG_GLOBAL=/dev/null make build-mac-lite > /tmp/lite.log 2>&1; echo "exit=$?"
-GIT_CONFIG_GLOBAL=/dev/null make build-mac-min  > /tmp/min.log  2>&1; echo "exit=$?"
-grep -c "Invalid Exclude" /tmp/lite.log /tmp/min.log   # expected: 0 for both
+GIT_CONFIG_GLOBAL=/dev/null make build-mac-lite > /tmp/lite8.log 2>&1; echo "exit=$?"
+GIT_CONFIG_GLOBAL=/dev/null make build-mac-min  > /tmp/min8.log  2>&1; echo "exit=$?"
+grep -c "Invalid Exclude" /tmp/lite8.log /tmp/min8.log   # expected: 0 for both
+grep -c "cannot find type" /tmp/lite8.log /tmp/min8.log  # expected: 0 for both
 ```
+
+Both must be `exit=0`. The `cannot find type` grep is the specific signature of the
+first attempt's failure.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add -A mac
 git commit -m "$(cat <<'EOF'
-refactor(mac): Terminal を Features/Terminal に分離し封印する
+refactor(mac): Terminal のビュー群を Features/Terminal に分離する
 
-TerminalPanelState を Shell のクロームから機能側へ移す。
-Shell から機能を参照するのは合法であり、逆方向のみを封印する。
+TerminalPanelState は Shell/Chrome に残す。Shell/AppShell.swift が
+同型を #if FEATURE_TERMINAL なしで参照しているため、除外可能フォルダへ
+移すと lite / min ビルドが "cannot find type" で壊れる。
+
+Shell が免除されるのは境界規則であって除外規則ではない。この区別を
+突いた失敗であり、ゲートに専用チェックを追加済みである。
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 EOF
@@ -907,7 +1043,7 @@ Larger moves with real internal structure. From here on, a feature that owns a S
 
 **Interfaces:**
 - Consumes: `Core/`, `Shell/`.
-- Produces: `Features/Live/` — sealed. Adds `FeatureCatalog.liveCaptureSettingsSection() -> AnyView?` returning `MeetingCaptureMatrixView`.
+- Produces: `Features/Live/` — classified (sealed in Task 22). Adds `FeatureCatalog.liveCaptureSettingsSection() -> AnyView?` returning `MeetingCaptureMatrixView`.
 
 - [ ] **Step 1: Move the files**
 
@@ -939,10 +1075,10 @@ static func liveCaptureSettingsSection() -> AnyView? {
 
 Then in `Views/SettingsView.swift`, replace the direct `MeetingCaptureMatrixView()` construction with `FeatureCatalog.liveCaptureSettingsSection()`.
 
-- [ ] **Step 3: Seal it**
+- [ ] **Step 3: Classify it** (no `sealed` flag — see Task 22)
 
 ```
-Features/Live/    Feature:Live    sealed
+Features/Live/    Feature:Live
 ```
 
 - [ ] **Step 4: Verify the gate**
@@ -990,7 +1126,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `Core/` (notably `Core/Editor/` for Monaco), `Shell/`.
-- Produces: `Features/Explorer/` — sealed.
+- Produces: `Features/Explorer/` — classified (sealed in Task 22).
 
 - [ ] **Step 1: Move the files**
 
@@ -1015,10 +1151,10 @@ git mv Views/Shared/FileTreePanel.swift Views/Shared/EditorTabBar.swift \
 libExcludes.append(contentsOf: ["Features/Explorer", "Features/Search", "Views/SourceControl"])
 ```
 
-- [ ] **Step 3: Seal it**
+- [ ] **Step 3: Classify it** (no `sealed` flag — see Task 22)
 
 ```
-Features/Explorer/    Feature:Explorer    sealed
+Features/Explorer/    Feature:Explorer
 ```
 
 - [ ] **Step 4: Verify the gate**
@@ -1068,7 +1204,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `Core/`, `Shell/`.
-- Produces: `Features/SourceControl/` — sealed. Adds `FeatureCatalog.sourceControlSettingsSections() -> [AnyView]` returning the GitHub, GitLab and Repo panels.
+- Produces: `Features/SourceControl/` — classified (sealed in Task 22). Adds `FeatureCatalog.sourceControlSettingsSections() -> [AnyView]` returning the GitHub, GitLab and Repo panels.
 
 - [ ] **Step 1: Move services and models**
 
@@ -1119,14 +1255,14 @@ static func sourceControlSettingsSections() -> [AnyView] {
 
 Replace the three direct constructions in `Views/SettingsView.swift` with a loop over `FeatureCatalog.sourceControlSettingsSections()`.
 
-- [ ] **Step 4: Update `Package.swift` and seal**
+- [ ] **Step 4: Update `Package.swift` and classify** (no `sealed` flag — see Task 22)
 
 ```swift
 libExcludes.append(contentsOf: ["Features/Explorer", "Features/Search", "Features/SourceControl"])
 ```
 
 ```
-Features/SourceControl/    Feature:SourceControl    sealed
+Features/SourceControl/    Feature:SourceControl
 ```
 
 - [ ] **Step 5: Verify the gate**
@@ -1340,7 +1476,7 @@ The largest non-Chat feature, and the hub the product is built around.
 
 **Interfaces:**
 - Consumes: `Core/`, `Shell/`.
-- Produces: `Features/Library/` — sealed. `MarkdownRenderer` and `SelfSizingMarkdownView` land in `Core/DesignSystem/` because Chat renders markdown too.
+- Produces: `Features/Library/` — classified (sealed in Task 22). `MarkdownRenderer` and `SelfSizingMarkdownView` land in `Core/DesignSystem/` because Chat renders markdown too.
 
 - [ ] **Step 1: Move the two markdown views to Core before anything else**
 
@@ -1373,10 +1509,10 @@ git mv Models/LibraryItem.swift Models/LibraryItem+UI.swift \
        Models/ProjectExportBundle.swift Features/Library/Models/
 ```
 
-- [ ] **Step 3: Seal it**
+- [ ] **Step 3: Classify it** (no `sealed` flag — see Task 22)
 
 ```
-Features/Library/    Feature:Library    sealed
+Features/Library/    Feature:Library
 ```
 
 - [ ] **Step 4: Verify the gate**
@@ -1863,7 +1999,7 @@ These already have folders. Each task is a rename plus a `Package.swift` line �
 
 **Interfaces:**
 - Consumes: `Core/`, `Shell/`.
-- Produces: `Features/CodeGraph/` — sealed.
+- Produces: `Features/CodeGraph/` — classified (sealed in Task 22).
 
 - [ ] **Step 1: Move**
 
@@ -1888,10 +2024,10 @@ cd mac && grep -rln "import GraphCore\|import GraphKit" Sources/LlmIdeMac
 
 Expected: every hit under `Features/CodeGraph/`.
 
-- [ ] **Step 3: Seal and verify**
+- [ ] **Step 3: Classify and verify** (no `sealed` flag — see Task 22)
 
 ```
-Features/CodeGraph/    Feature:CodeGraph    sealed
+Features/CodeGraph/    Feature:CodeGraph
 ```
 
 ```bash
@@ -1940,7 +2076,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `Core/` (including `Core/DesignSystem/SelfSizingMarkdownView.swift` relocated in Task 14, and `ClaudeLink/`, which the map declares Core), `Shell/`.
-- Produces: `Features/Chat/` — sealed.
+- Produces: `Features/Chat/` — classified (sealed in Task 22).
 
 - [ ] **Step 1: Move**
 
@@ -1958,7 +2094,7 @@ git mv Views/Shared/FirstLaunchChat.swift Views/Shared/CliProgressView.swift \
 - [ ] **Step 2: Seal and verify**
 
 ```
-Features/Chat/    Feature:Chat    sealed
+Features/Chat/    Feature:Chat
 ```
 
 ```bash
@@ -2010,7 +2146,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `Core/Contracts/LoopRunning.swift` from Task 16.
-- Produces: `Features/AutoTask/` — sealed.
+- Produces: `Features/AutoTask/` — classified (sealed in Task 22).
 
 - [ ] **Step 1: Move**
 
@@ -2028,10 +2164,10 @@ libExcludes.append(contentsOf: ["Features/AutoTask", "LoopEngine"])
 
 (Loop's path changes in Task 21.)
 
-- [ ] **Step 3: Seal and verify**
+- [ ] **Step 3: Classify and verify** (no `sealed` flag — see Task 22)
 
 ```
-Features/AutoTask/    Feature:AutoTask    sealed
+Features/AutoTask/    Feature:AutoTask
 ```
 
 ```bash
@@ -2075,7 +2211,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `Core/Contracts/TaskLogWriting.swift` from Task 17.
-- Produces: `Features/Loop/` — sealed.
+- Produces: `Features/Loop/` — classified (sealed in Task 22).
 
 - [ ] **Step 1: Check `Services/Memory/` ownership before moving it**
 
@@ -2103,10 +2239,10 @@ git mv Services/Memory Features/Loop/Services/Memory   # or Core/Platform/Memory
 libExcludes.append(contentsOf: ["Features/AutoTask", "Features/Loop"])
 ```
 
-- [ ] **Step 4: Seal and verify — this should be the last violation removed**
+- [ ] **Step 4: Classify and verify — this should be the last violation removed**
 
 ```
-Features/Loop/    Feature:Loop    sealed
+Features/Loop/    Feature:Loop
 ```
 
 ```bash
