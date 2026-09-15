@@ -102,6 +102,15 @@ endif
 # after four Mac builds (many minutes in) is the wrong place to learn about it.
 regression: graph-kit-checkout feature-gates test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates
 
+.PHONY: feature-gates
+# Enforces the layering rule: Shell -> Features -> Core. Swift has no
+# intra-target boundary enforcement, so this is a textual check over the
+# symbol declarations/references in mac/Sources/LlmIdeMac. Runs first in
+# `regression` (~16s) because failing fast beats failing after four Swift
+# builds.
+feature-gates:
+	cd mac && ./Scripts/feature-boundaries.sh
+
 # The graph verification gates. These are plain executables precisely so they
 # run where `swift test` cannot (a Command-Line-Tools-only toolchain has no
 # XCTest): graph-layout-lab asserts the layout engine against exact N² ground
@@ -120,15 +129,6 @@ regression: graph-kit-checkout feature-gates test-mac build-mac-lite build-mac-m
 # submodule dir `swift run` walks up to mac/Package.swift and still runs the
 # labs, but conformance-memory.mjs exists only in the submodule's scripts/ —
 # the failure was a bare Node MODULE_NOT_FOUND stack trace naming no cause.
-.PHONY: feature-gates
-# Enforces the layering rule: Shell -> Features -> Core. Swift has no
-# intra-target boundary enforcement, so this is a textual check over the
-# symbol declarations/references in mac/Sources/LlmIdeMac. Runs first in
-# `regression` (~16s) because failing fast beats failing after four Swift
-# builds.
-feature-gates:
-	cd mac && ./Scripts/feature-boundaries.sh
-
 .PHONY: graph-kit-checkout
 graph-kit-checkout:
 	@test -f mac/LocalPackages/graph-kit/Package.swift || { \

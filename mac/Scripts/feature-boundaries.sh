@@ -127,4 +127,29 @@ else
   echo "  all exclude paths exist"
 fi
 
+# testExcludes entries are bare filenames checked against the test target's
+# OWN root (Tests/LlmIdeMacTests per Package.swift's .testTarget `path:`),
+# never $SRC — a different directory than the lib target this script otherwise
+# only knows about. Same hazard as libExcludes: SwiftPM only WARNS on an
+# invalid exclude and exits 0, so a renamed/moved test file leaves a stale
+# entry that silently stops excluding anything and the test target's shape
+# drifts without anyone noticing.
+TESTROOT="$ROOT/Tests/LlmIdeMacTests"
+perl -0777 -ne '
+  while (/var\s+testExcludes:\s*\[String\]\s*=\s*\[(.*?)\]/gs) { print "$1\n"; }
+  while (/testExcludes\.append\(contentsOf:\s*\[(.*?)\]\)/gs) { print "$1\n"; }
+  while (/testExcludes\.append\((\"[^\"]*\")\)/gs) { print "$1\n"; }
+  while (/mobileTestExcludes:\s*Set<String>\s*=\s*\[(.*?)\]/gs) { print "$1\n"; }
+' "$ROOT/Package.swift" \
+  | grep -oE '"[^"]+"' | tr -d '"' | sort -u | while read -r p; do
+      [ -e "$TESTROOT/$p" ] || { echo "  MISSING: $p"; }
+    done > "$WORK/missing-test.txt"
+if [ -s "$WORK/missing-test.txt" ]; then
+  cat "$WORK/missing-test.txt"
+  echo "FAIL: Package.swift names testExcludes paths that do not exist under Tests/LlmIdeMacTests" >&2
+  status=1
+else
+  echo "  all testExcludes paths exist"
+fi
+
 exit $status
