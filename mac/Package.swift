@@ -58,7 +58,7 @@ if explorerIncluded {
     // Search and Source Control are also gated on `file_explorer` (controller
     // ruling: option b) — they're navigated to via the Explorer's panel-header
     // switcher (PanelSectionTabs) and make little sense without a file tree.
-    libExcludes.append(contentsOf: ["Views/Explorer", "Views/Search", "Views/SourceControl"])
+    libExcludes.append(contentsOf: ["Views/Explorer", "Features/Search", "Views/SourceControl"])
 }
 if ganttIncluded {
     featureDefines.append(.define("FEATURE_GANTT"))

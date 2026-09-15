@@ -13,3 +13,4 @@ Chat/           Feature:Chat
 AutoTask/       Feature:AutoTask
 LoopEngine/     Feature:Loop
 Graph/          Feature:CodeGraph
+Features/Search/    Feature:Search    sealed
