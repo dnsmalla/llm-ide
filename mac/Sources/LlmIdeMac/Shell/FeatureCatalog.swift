@@ -171,6 +171,60 @@ enum FeatureCatalog {
         #endif
     }
 
+    /// The "run against an existing issue" picker, embedded by
+    /// `CodeWorkflowSheet` / `QuickFixSheet` — Issues-owned, so it rides on
+    /// the same `FEATURE_GANTT` flag as `issuesPane`/`ganttPane` (see
+    /// Package.swift's `libExcludes`: `Features/Gantt` and `Features/Issues`
+    /// are excluded together).
+    static func existingIssuePicker(
+        backend: RepoBackend,
+        projectId: String,
+        displayName: String,
+        isResolved: Bool,
+        onSelect: @escaping (RepoIssue) -> Void,
+        onCancel: @escaping () -> Void
+    ) -> AnyView {
+        #if FEATURE_GANTT
+        return AnyView(ExistingIssuePicker(
+            backend: backend,
+            projectId: projectId,
+            displayName: displayName,
+            isResolved: isResolved,
+            onSelect: onSelect,
+            onCancel: onCancel
+        ))
+        #else
+        return AnyView(EmptyView())
+        #endif
+    }
+
+    /// The open issues an agent turn is grounded in — Issues-owned data, read
+    /// by `MobileExploreBridge` for phone turns. Excluded builds answer with
+    /// no issues rather than failing to compile against Issues-only types.
+    static func recentIssuesContext(config: AppConfig, projectStore: ProjectStore) async
+        -> [AgentContext.RecentIssue]
+    {
+        #if FEATURE_GANTT
+        return await RecentIssuesResolver.contextIssues(config: config, projectStore: projectStore)
+        #else
+        return []
+        #endif
+    }
+
+    /// Force-refresh variant of `recentIssuesContext`, ignoring the resolver's
+    /// cache — the Mac panel's own refresh trigger (on appear, after creating
+    /// an issue).
+    @discardableResult
+    static func refreshRecentIssues(config: AppConfig, projectStore: ProjectStore) async
+        -> [AgentContext.RecentIssue]
+    {
+        #if FEATURE_GANTT
+        return await RecentIssuesResolver.fetch(config: config, projectStore: projectStore)
+        #else
+        return []
+        #endif
+    }
+
     // MARK: - Doc Gen
 
     static func docGenPane(api: LlmIdeAPIClient) -> AnyView {

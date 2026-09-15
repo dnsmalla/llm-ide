@@ -241,7 +241,7 @@ extension CodeAssistantPanel {
         // bridge grounds its turns in the same issues this does. It used to
         // live here, which is why the phone had none: the same prompt listed
         // issues on the Mac and listed nothing from the phone.
-        engine.agent.recentIssues = await RecentIssuesResolver.fetch(
+        engine.agent.recentIssues = await FeatureCatalog.refreshRecentIssues(
             config: config, projectStore: projectStore)
     }
 

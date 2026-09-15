@@ -66,7 +66,7 @@ struct QuickFixSheet: View {
             }
         }
         .sheet(isPresented: $showIssuePicker) {
-            ExistingIssuePicker(
+            FeatureCatalog.existingIssuePicker(
                 backend: target.backend,
                 projectId: target.projectId,
                 displayName: target.displayName,

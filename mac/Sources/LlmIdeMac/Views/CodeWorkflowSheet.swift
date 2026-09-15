@@ -77,7 +77,7 @@ struct CodeWorkflowSheet: View {
             }
         }
         .sheet(isPresented: $showExistingPicker) {
-            ExistingIssuePicker(
+            FeatureCatalog.existingIssuePicker(
                 backend: target.backend,
                 projectId: target.projectId,
                 displayName: target.displayName,

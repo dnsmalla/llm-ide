@@ -4,7 +4,7 @@ import Foundation
 /// carried as a plain `String`.
 ///
 /// `String` rather than `URL` or a custom `UTType`: it is the drag idiom this
-/// codebase already uses (`Views/Issues/RepoKanbanPanel.swift`), it needs no
+/// codebase already uses (`Features/Issues/Views/RepoKanbanPanel.swift`), it needs no
 /// `Transferable` conformance of our own, and it lets ONE drag carry a whole
 /// multi-selection — which `.draggable` cannot express any other way, since it
 /// hands over one item per dragged row.
