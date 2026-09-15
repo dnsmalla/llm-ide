@@ -23,6 +23,38 @@ perl -0777 -ne '
 ' "$ROOT/Package.swift" \
   | grep -oE '"[^"]+"' | tr -d '"' | sort -u > "$WORK/libexcludes.txt"
 
+# Folder -> FEATURE_* flag correspondence, DERIVED (not hardcoded) from each
+# `if <cond> { featureDefines.append(.define("FEATURE_X")) } else { ... }`
+# block in Package.swift: the quoted strings at the TOP LEVEL of that
+# else-block (i.e. not inside a further-nested `if`, like the `auto_tasks`
+# sub-block under `mobileIncluded`'s else) are the paths FEATURE_X's
+# exclusion controls. This can't be a naming-convention lookup — `file_explorer`
+# guards `Features/Search` as `FEATURE_EXPLORER`, not `FEATURE_SEARCH` — so it
+# has to be parsed. Brace-depth tracked by hand because these else-blocks are
+# not flat (see the nested `if autoTasksIncluded` case above).
+perl -e '
+  local $/; my $text = <STDIN>;
+  while ($text =~ /if\s+\w+\s*\{\s*featureDefines\.append\(\.define\("([^"]+)"\)\)\s*\}\s*else\s*\{/gs) {
+    my $flag = $1;
+    my $start = pos($text);
+    my $depth = 1; my $i = $start; my $len = length($text);
+    while ($i < $len && $depth > 0) {
+      my $c = substr($text, $i, 1);
+      $depth++ if $c eq "{";
+      $depth-- if $c eq "}";
+      $i++;
+    }
+    my $body = substr($text, $start, $i - $start - 1);
+    my $d = 0; my $flat = "";
+    for my $c (split //, $body) {
+      if ($c eq "{") { $d++; $flat .= " "; next; }
+      if ($c eq "}") { $d--; $flat .= " "; next; }
+      $flat .= ($d == 0 ? $c : " ");
+    }
+    while ($flat =~ /"([^"]+)"/g) { print "$flag\t$1\n"; }
+  }
+' < "$ROOT/Package.swift" | sort -u > "$WORK/flagmap.txt"
+
 layer_of() {
   local rel="$1" prefix lay sealed
   while read -r prefix lay sealed; do
@@ -52,20 +84,57 @@ strip() {
     s{//[^\n]*}{}g;' "$1"
 }
 
-# For the Shell/Core build-exclusion check only: drop the body of any
-# `#if FEATURE_x` (non-negated) branch. That code is compiled out together
-# with the excluded feature it's guarding, so a reference inside it is not
-# the Terminal-style bug (an UNCONDITIONAL reference) this check targets —
-# see Shell/FeatureCatalog.swift, whose whole job is exactly this pattern.
-# The `#else`/un-guarded-off branch is left in place and still scanned. No
-# nesting of `#if FEATURE_*` exists in this codebase, so one flag suffices.
-strip_feature_guards() {
-  perl -ne '
-    if (/^\s*#if\s+(?!!)FEATURE_/) { $skip = 1; next }
-    if (/^\s*#else\b/)            { $skip = 0; next }
-    if (/^\s*#endif\b/)           { $skip = 0; next }
-    print unless $skip;
-  '
+# For the Shell/Core build-exclusion check only: given the ONE flag that
+# actually controls a specific owner's exclusion (looked up in flagmap.txt,
+# never guessed), drop the body of whichever branch does not compile when
+# that flag is false — i.e. the branch that is guaranteed absent in the
+# build the owner's folder is excluded from. Any OTHER `#if FEATURE_*` guard
+# (a different feature entirely) is left untouched and still scanned: a
+# guard naming the wrong flag must not hide the reference, or this reopens
+# the exact hole the check exists to close (see task-8a-report.md round 1 —
+# a reviewer-reproduced `#if FEATURE_AUTOTASK` wrapped around the Terminal
+# reference in AppShell.swift made the ERROR vanish under the old blanket
+# "any FEATURE_*" stripper).
+#
+# Stack-based (not a single flag) so nested guards resolve correctly, and
+# negation-aware so `#if !FLAG / <unsafe> / #else / <safe> / #endif` hides
+# the right branch instead of the literal-opposite one. Conservative on `||`:
+# `#if FLAG || OTHER` can still compile even when FLAG is false, so it is
+# never treated as safe cover regardless of branch.
+strip_feature_guard_for_flag() {
+  local flag="$1"
+  perl -e '
+    my $flag = shift @ARGV;
+    my @stack;
+    while (my $line = <STDIN>) {
+      if ($line =~ /^\s*#if\s+(.*)$/) {
+        my $cond = $1;
+        my $relevant = 0;
+        my $negated = 0;
+        if ($cond !~ /\|\|/ && $cond =~ /\b\Q$flag\E\b/) {
+          $relevant = 1;
+          $negated = ($cond =~ /!\s*\Q$flag\E\b/) ? 1 : 0;
+        }
+        push @stack, { relevant => $relevant, negated => $negated, inElse => 0 };
+        next;
+      }
+      if ($line =~ /^\s*#else\b/) {
+        $stack[-1]{inElse} = 1 if @stack;
+        next;
+      }
+      if ($line =~ /^\s*#endif\b/) {
+        pop @stack if @stack;
+        next;
+      }
+      my $hidden = 0;
+      for my $fr (@stack) {
+        next unless $fr->{relevant};
+        my $h = (!$fr->{negated} && !$fr->{inElse}) || ($fr->{negated} && $fr->{inElse});
+        if ($h) { $hidden = 1; last; }
+      }
+      print $line unless $hidden;
+    }
+  ' "$flag"
 }
 
 # 1. Declaration map: symbol -> layer.
@@ -163,11 +232,16 @@ fi
 #     now-excludable Features/Terminal folder, and the boundary check above
 #     never saw it because Shell consumers are always allowed through it.
 : > "$WORK/exc-layers.txt"
+: > "$WORK/layer-flag.txt"
 while read -r p; do
   [[ "$p" == Features/* ]] || continue
-  layer_of "$p/" >> "$WORK/exc-layers.txt"
+  lay="$(layer_of "$p/")"
+  echo "$lay" >> "$WORK/exc-layers.txt"
+  flag="$(awk -F'\t' -v path="$p" '$2==path{print $1; exit}' "$WORK/flagmap.txt")"
+  [ -n "$flag" ] && printf '%s\t%s\n' "$lay" "$flag" >> "$WORK/layer-flag.txt"
 done < "$WORK/libexcludes.txt"
 sort -u -o "$WORK/exc-layers.txt" "$WORK/exc-layers.txt"
+sort -u -o "$WORK/layer-flag.txt" "$WORK/layer-flag.txt"
 
 : > "$WORK/shell-violations.txt"
 if [ -s "$WORK/exc-layers.txt" ]; then
@@ -175,11 +249,19 @@ if [ -s "$WORK/exc-layers.txt" ]; then
     rel="${f#"$SRC"/}"
     consumer="$(layer_of "$rel")"
     [[ "$consumer" == "Shell" || "$consumer" == "Core" ]] || continue
-    body="$(strip "$f" | strip_feature_guards)"
+    raw_body="$(strip "$f")"
     while read -r owner; do
       [[ -z "$owner" ]] && continue
       syms="$(awk -v o="$owner" '$2==o{print $1}' "$WORK/owned.txt" | paste -sd'|' -)"
       [[ -z "$syms" ]] && continue
+      # Fail closed: no derivable flag for this owner means no guard can be
+      # trusted to hide it, so scan the RAW (unstripped-of-guards) body.
+      flag="$(awk -F'\t' -v o="$owner" '$1==o{print $2; exit}' "$WORK/layer-flag.txt")"
+      if [ -n "$flag" ]; then
+        body="$(printf '%s' "$raw_body" | strip_feature_guard_for_flag "$flag")"
+      else
+        body="$raw_body"
+      fi
       hits="$(printf '%s' "$body" | grep -owE "$syms" | sort -u | paste -sd, -)"
       [[ -n "$hits" ]] && \
         echo "$consumer|$rel  ->  ${owner#Feature:} (build-excludable)  [$hits]" >> "$WORK/shell-violations.txt"
