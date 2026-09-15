@@ -63,7 +63,7 @@ if explorerIncluded {
 if ganttIncluded {
     featureDefines.append(.define("FEATURE_GANTT"))
 } else {
-    libExcludes.append(contentsOf: ["Views/Gantt", "Views/Issues"])
+    libExcludes.append(contentsOf: ["Features/Gantt", "Views/Issues"])
     testExcludes.append("GanttViewModelProviderParityTests.swift")
 }
 if docGenIncluded {
