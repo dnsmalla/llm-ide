@@ -28,3 +28,4 @@ Features/Live/    Feature:Live
 Features/Explorer/    Feature:Explorer
 Features/SourceControl/    Feature:SourceControl
 Features/DocGen/    Feature:DocGen
+Features/Generation/    Feature:Generation

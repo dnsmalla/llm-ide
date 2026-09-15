@@ -75,7 +75,7 @@ if docGenIncluded {
     // there is no longer a doc_gen-specific test file to exclude here.
     // Views/Visual mirrors Doc Gen's generation flow and rides on the same
     // flag (see ShellState.Section.backingFeature) — exclude it here too.
-    libExcludes.append(contentsOf: ["Features/DocGen", "Features/Visual"])
+    libExcludes.append(contentsOf: ["Features/DocGen", "Features/Visual", "Features/Generation"])
 }
 if terminalIncluded {
     featureDefines.append(.define("FEATURE_TERMINAL"))
