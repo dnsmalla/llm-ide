@@ -69,7 +69,7 @@ never imports Shell.
 | `RegressionRunner` (no single feature owns it — 4 consumers + `FeatureCatalog`) | `Services/` |
 | `DesignSystem/` — the 9 files of `Views/Components/` | `Views/Components/` |
 | `Editor/` — `Monaco*` (6), `Hljs`, `HtmlPreviewWebView`, `Mermaid`, `GitGutter` | `Views/Shared/`, `Services/` |
-| `Contracts/` — the three new cross-feature protocols | new |
+| `Contracts/` — the two new cross-feature protocols (`LoopRunning`, `TaskLogWriting`) | new |
 | `ClaudeLink/` (6, unmoved in place) | already a slice; the SDK layer, not a feature |
 
 ### Shell
@@ -126,54 +126,115 @@ Upgrading GitLab must not require touching a Settings folder.
 
 ## Cross-feature seams
 
-After the moves, this is the complete set of genuine edges.
+The seam set below was **measured by the gate script**, not inferred. Running it
+against today's tree with comments and string literals stripped reports exactly
+**four** cross-feature references, in four files:
 
-| Edge | Reality | Seam |
+```
+AutoTask/Services/AutoCodeUpdateService+PipelineTasks.swift -> Loop
+    [AgentLoopSkillExecutor, AgentLoopStageRepairer, LoopDefinition,
+     LoopEngineConfigStore, LoopEngineRunner, LoopRunNotifier,
+     LoopRunTrigger, LoopStage, RegressionRunnerSweepAdapter]
+AutoTask/Services/AutoCodeUpdateService.swift               -> Loop  [LoopRunTrigger]
+LoopEngine/Services/LoopRunService.swift                    -> AutoTask [AutoTask, TaskLogStore]
+LoopEngine/Services/MobileLoopBridge.swift                  -> AutoTask [AutoCodeUpdateService, AutoTask]
+```
+
+Every other edge this design previously listed — AutoTask→Graph
+(`GraphAutoUpdater`), AutoTask/Loop→Chat (`CodeAssistantPanel`), Chat→Loop
+(`LoopEngineConfig`), Chat→Graph (`GraphSettingsSection`), Graph→Chat
+(`ChatEngine`) — is **comments only** and was verified as such file by file. They
+are not edges and need no seam.
+
+Consequently the seam work is much smaller than first drafted:
+
+| Edge | Files | Seam |
 |---|---|---|
-| AutoTask → Loop | 1 file (`AutoCodeUpdateService+PipelineTasks.swift`) constructs `LoopEngineRunner` | `protocol LoopRunning` in Core; Loop conforms |
-| Loop → AutoTask | 1 weak `TaskLogStore` reference in `LoopRunService` | `protocol TaskLogWriting` in Core; AutoTask conforms |
-| Loop/AutoTask/Graph/Chat → `RegressionRunner` | 4 consumers + `FeatureCatalog` | No protocol needed — no single feature owns it, so it **moves to Core** and every feature may import it directly |
-| AutoTask → Graph | `GraphAutoUpdater`, 2 files | `protocol GraphRefreshing` in Core |
-| Mobile → AutoTask, Loop, Chat | already mediated for two of three | **extend the existing `MobileFeatureBridge`** to cover Chat; invent nothing |
-| AutoTask → Chat, Loop → Chat | `CodeAssistantPanel`, 1 file each | `FeatureCatalog` factory returning `AnyView`, exactly like `graphMainPane()` |
-| Chat → Loop (`LoopEngineConfig`), Chat → Graph (`GraphSettingsSection`) | 1 file each, config/settings reads | resolved by the Settings-contribution pattern; no new protocol |
-| Chat → ClaudeLink, 11 files | **not an edge** | ClaudeLink is Core |
-| `MobileLoopBridge` in `LoopEngine/` | Mobile's file parked in Loop's folder | deleted as an edge by moving the file to `Features/MobileControl/` |
+| AutoTask → Loop | 2 | `protocol LoopRunning` in `Core/Contracts/`; Loop conforms |
+| Loop → AutoTask | 1 (`LoopRunService.logStore`) | `protocol TaskLogWriting` in `Core/Contracts/`; AutoTask conforms |
+| `MobileLoopBridge` → AutoTask | 1 | **No protocol.** It is Mobile's file parked in `LoopEngine/`; moving it to `Features/MobileControl/` deletes the edge |
+| `RegressionRunner` (4 consumers + `FeatureCatalog`) | — | **No protocol.** No feature owns it, so it moves to Core and every feature may import it directly |
 
-Total: **three new protocols** (`LoopRunning`, `TaskLogWriting`, `GraphRefreshing`),
-one extension to an existing bridge, two
-`FeatureCatalog` view factories following a pattern already in the file.
-Everything else dissolves when files land in the right folder.
+Total: **two new protocols**. No `GraphRefreshing`, no `FeatureCatalog` view
+factories, no extension to `MobileFeatureBridge` — all three were prescribed
+against edges that do not exist.
 
 Protocols live in `Core/Contracts/`. The conforming feature registers itself
 through `FeatureRegistry` at boot, so a compiled-out feature leaves the consumer
 holding `nil` and degrading — which is how `MobileFeatureBridge` already behaves.
 
+### Why the first draft was wrong, and what it implies
+
+The first pass counted raw symbol names and reported seven Loop→AutoTask files
+and a dozen edges across the app. Stripping comments reduced that to one real
+file and two real edges. Prose in doc comments — "mirroring `AutoCodeView`'s
+split", "same idiom as `CustomAutoTask`" — accounted for nearly all of it.
+
+This is the strongest argument for the gate existing at all: the codebase's
+cross-feature coupling was widely over-estimated, including by this design a
+draft ago. A measured number, enforced, replaces a guess.
+
 ## The gate
 
 Swift enforces no boundaries inside a single target, so the rule is checked
 textually by `mac/Scripts/feature-boundaries.sh`, wired into `make regression`.
+The script exists in prototype and its output is quoted above; the plan
+productionises it.
 
-1. Build a declaration map: symbol → owning folder. Keep only symbols declared
-   exactly once module-wide; ambiguous names are skipped rather than guessed.
-2. Classify each file by path: `Core` / `Features/<Name>` / `Shell`.
-3. Flag references where the consumer is a Feature and the owner is a *different*
-   Feature. Core and Shell owners are always allowed; Shell consumers are always
-   allowed.
-4. Compare the violation count to `feature-boundaries-baseline.txt`. Fail if it
-   rose. Each migration commit lowers it. Target: zero.
+1. **Strip comments and string literals** from every file before any matching.
+2. Build a declaration map: symbol → owning layer. Only **top-level**
+   declarations count (column 0) and only symbols declared once module-wide.
+3. Classify each file by path via `mac/Scripts/feature-map.txt`
+   (`path-prefix  layer  [sealed]`). Unclassified paths default to `Shell`,
+   which is exempt — so the map shrinks the exempt bucket as migration proceeds.
+4. Flag references where the consumer is a Feature and the owner is a
+   *different* Feature. Core and Shell owners are always allowed; Shell
+   consumers are always allowed.
+5. Enforce (see ratchet below).
 
-Two requirements the measurement proved are not optional:
+### Two requirements the measurement proved are not optional
 
-- **Strip comments and string literals before matching.** Five of seven apparent
-  Loop→AutoTask edges were doc-comment prose. A gate that counts those fails
-  honest commits and trains people to ignore it.
-- **Verify every `Package.swift` exclude path exists.** SwiftPM only warns on an
-  invalid exclude and exits 0. This restructure moves ~250 files past exactly
-  that hazard. Three lines, same script.
+- **Strip comments and string literals.** Without this the script reported 13
+  violations, 9 of them prose. A gate that counts doc comments fails honest
+  commits and trains people to ignore it.
+- **Count top-level declarations only.** A *nested* `enum Error` inside a Loop
+  type otherwise claims ownership of every stdlib `Error` in the module — that
+  single bug produced 8 of the 13 false positives. Nested declarations are
+  indented; column-0 matching removes them precisely.
 
-The baseline is committed at whatever count the tree actually produces when
-measured — not a predicted number.
+Both fixes were validated against known-good and known-bad cases: stripping must
+remove `LoopEngineStatus.swift`'s comment reference to `AutoCodeUpdateService`
+while preserving `LoopRunService.swift:32`'s real `TaskLogStore` reference.
+
+### The ratchet, and why it must be per-feature
+
+A naive "total must never rise" ratchet **would block this migration**. Moving
+Explorer into `Features/Explorer/` makes previously-invisible Explorer↔Source
+Control references countable for the first time, so the total goes *up* — the
+migration's own progress would fail the gate.
+
+So enforcement is per-feature, via a third column in `feature-map.txt`:
+
+- A feature marked **`sealed`** must have **zero** cross-feature references.
+  The build fails otherwise. Sealing is permanent — a sealed feature can never
+  regain an edge.
+- An unsealed feature is **reported but not enforced**, so discovery is free.
+
+Migration is therefore "seal features one at a time," and the exit condition is
+every feature sealed. This is strictly stronger than a total-count ratchet: it
+cannot be satisfied by trading one feature's violations for another's.
+
+### Also checked by the same script
+
+**Every `Package.swift` exclude path must exist.** SwiftPM only warns on an
+invalid exclude and exits 0, so a file moved out from under an exclude silently
+rejoins the lite build. This restructure moves ~250 files past exactly that
+hazard. Three lines, same script.
+
+### Cost
+
+The prototype runs the full 511-file scan in ~16 s on this machine. That is
+acceptable inside `make regression`, which already runs four Swift builds.
 
 ### What this buys `Package.swift`
 
@@ -184,7 +245,7 @@ That is the isolation goal made mechanical.
 
 ## Migration sequence
 
-Leaves first, entangled last. Roughly 23 commits, each independently shippable
+Leaves first, entangled last. Roughly 22 commits, each independently shippable
 and each lowering the ratchet.
 
 | Step | Commits | Content |
@@ -194,7 +255,7 @@ and each lowering the ratchet.
 | 2 | 6 | Zero-edge leaves: Search, Conflicts, Visual, Gantt, Issues, Terminal. Cheap, and they validate the ratchet on real moves. |
 | 3 | 6 | Medium: Live, Explorer, Source Control, Doc Gen, Settings, Library. |
 | 4 | 1 | Mobile Control — frees `MobileLoopBridge`, collapses the 16-entry exclude list. |
-| 5 | 3 | The three Core protocols, one commit each. |
+| 5 | 2 | The two Core protocols, one commit each. |
 | 6 | 4 | Chat, Graph, AutoTask, Loop move under `Features/` — edge-removal and `Package.swift` commits, not bulk moves. |
 
 ## Verification
@@ -210,7 +271,7 @@ graph and chat contract labs.
 - **Step 5 is not covered.** Replacing a direct call with a protocol seam changes
   runtime wiring, and nothing automated catches a seam that compiles but is never
   registered — the consumer silently sees `nil` and degrades, indistinguishable
-  from correct compiled-out behavior. Each of the three commits carries a named
+  from correct compiled-out behavior. Each of the two commits carries a named
   manual GUI check, e.g. for `LoopRunning`: the Loop Engineering auto task
   actually starts a run rather than a no-op.
 
@@ -222,15 +283,18 @@ Operational notes for whoever runs this:
   gate die with SIGPIPE, reporting PASS while pushing nothing.
 - `git push` must be foreground with a long timeout.
 
+## Decisions
+
+- **Branch:** all ~22 commits land on `refactor/mac-feature-slices`, merged to
+  `main` once the ratchet reaches zero.
+
 ## Open decisions
 
-- **Branch vs `main`.** Whether these ~23 commits land directly on `main` or on
-  `refactor/mac-feature-slices`. Not yet decided.
-- **The three manual checks in step 5** require the user at the GUI; they cannot be
+- **The two manual checks in step 5** require the user at the GUI; they cannot be
   automated on this toolchain.
 
 ## Out of scope
 
-Behavior changes of any kind. This restructure moves files, introduces three
-protocols to replace three direct calls, and adds one gate script. Any feature
+Behavior changes of any kind. This restructure moves files, introduces two
+protocols to replace two direct calls, and adds one gate script. Any feature
 improvement discovered along the way is recorded, not implemented.
