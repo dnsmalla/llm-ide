@@ -163,6 +163,41 @@ Protocols live in `Core/Contracts/`. The conforming feature registers itself
 through `FeatureRegistry` at boot, so a compiled-out feature leaves the consumer
 holding `nil` and degrading — which is how `MobileFeatureBridge` already behaves.
 
+### CORRECTION (2026-09-15, during execution): the measurement's scope
+
+The four-reference figure above is accurate **only for the five folders that were
+already classified** — `Chat/`, `AutoTask/`, `LoopEngine/`, `Graph/`,
+`ClaudeLink/`. Every other feature still lived in `Services/` and `Views/`, which
+the gate treats as exempt, so its references were never counted. The claim that
+the six "leaf" features had zero cross-feature edges was an assertion, not a
+measurement.
+
+Executing Tasks 3–8 disproved it:
+
+- **Review Conflicts** and **Visual** both embed `CodeAssistantPanel` — a real
+  dependency on Chat. The `FeatureCatalog` view-factory seam this design deleted
+  as unnecessary is in fact required, and is reinstated.
+- **Gantt ↔ Issues** are coupled in both directions, and **Issues → Chat** through
+  `RecentIssuesResolver`.
+- **`Shell/AppShell.swift` uses `TerminalPanelState` unguarded.** Moving that type
+  into a build-excludable folder breaks `build-mac-lite` and `build-mac-min`.
+
+Two design changes follow, both of which make the gate stronger rather than
+weaker:
+
+1. **Seal at the end, not on arrival.** A feature cannot be soundly sealed while
+   its collaborators are still invisible to the gate. Gantt "passed" sealing only
+   because Issues had not moved yet. Features are classified on arrival and sealed
+   in one final step.
+2. **Unclassified is its own layer.** Unlisted paths no longer default to `Shell`.
+   A classified feature referencing unclassified code emits a `pending` line, so
+   an edge that will matter later is visible now instead of ambushing whichever
+   task moves the other half.
+3. **Shell's exemption is from the boundary rule, not the exclusion rule.** A file
+   under `Shell/` or `Core/` referencing a symbol owned by a build-excludable
+   `Features/` folder is an error. Nothing caught this before; it is the exact
+   shape of the Terminal failure.
+
 ### Why the first draft was wrong, and what it implies
 
 The first pass counted raw symbol names and reported seven Loop→AutoTask files
