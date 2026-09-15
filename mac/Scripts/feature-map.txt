@@ -26,3 +26,4 @@ Features/Visual/    Feature:Visual
 Features/Terminal/    Feature:Terminal
 Features/Live/    Feature:Live
 Features/Explorer/    Feature:Explorer
+Features/SourceControl/    Feature:SourceControl

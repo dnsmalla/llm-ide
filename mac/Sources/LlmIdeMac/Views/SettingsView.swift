@@ -55,7 +55,9 @@ struct SettingsView: View {
                                     .font(Typography.title)
                                     .foregroundStyle(theme.current.textMuted)
                                 PathsSettingsSection()
-                                RepoSettingsSection(api: api)
+                                ForEach(Array(FeatureCatalog.sourceControlSettingsSections(api: api).enumerated()), id: \.offset) { _, section in
+                                    section
+                                }
                                 // Memory listing stays here (not on a feature
                                 // page) because it has no other home. The
                                 // graph-specific card (auto-update cadence,

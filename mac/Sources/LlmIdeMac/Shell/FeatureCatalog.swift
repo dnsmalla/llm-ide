@@ -162,6 +162,18 @@ enum FeatureCatalog {
         #endif
     }
 
+    /// Source Control's settings panel(s). Gated on the Explorer flag, which
+    /// is what excludes Source Control from lite/min builds. `RepoSettingsSection`
+    /// is the only top-level call site Settings needs — it embeds the GitHub
+    /// and GitLab sections itself, so there is nothing else to return here.
+    static func sourceControlSettingsSections(api: LlmIdeAPIClient) -> [AnyView] {
+        #if FEATURE_EXPLORER
+        return [AnyView(RepoSettingsSection(api: api))]
+        #else
+        return []
+        #endif
+    }
+
     /// Project memory viewer, shown as a sheet from Chat's Code Assistant
     /// panel. Chat is never build-excluded, so this seam is what keeps
     /// `CodeAssistant+Sheets.swift` from naming an Explorer-owned type
