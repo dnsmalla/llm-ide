@@ -612,7 +612,13 @@ export function buildEngineOptions(
     // The base set of built-ins that EXIST for this turn — see
     // V2_BUILTIN_TOOLS. Fresh array per call, like allowedTools above.
     tools,
-    systemPrompt: { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n') },
+    // `snapshot: false` — the SDK's default flipped to `snapshot: true` (record
+    // the append on the session's first request, reuse it verbatim on every
+    // later turn until compaction) in 0.3.267+. The "Volatile blocks" comment
+    // above exists precisely because this append is meant to change every
+    // turn within one resumed session (task list, attachments, memory facts);
+    // recording it would silently freeze all of that at turn one.
+    systemPrompt: { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n'), snapshot: false },
     ...(typeof model === 'string' && model ? { model } : {}),
   };
 
