@@ -3,8 +3,13 @@
 # Layer is: Core | Shell | Feature:<Name>
 # A third column of `sealed` means the feature is enforced at ZERO
 # cross-feature references. Unsealed features are reported only.
-# Unlisted paths default to Shell, which is exempt — migration shrinks
-# that bucket one feature at a time.
+# Unlisted paths default to Unclassified, a real (non-exempt-from-reporting)
+# layer: a classified Feature referencing Unclassified code produces a
+# non-failing `pending` line instead of vanishing silently. Shell/Core stay
+# exempt from the cross-feature BOUNDARY rule (they may reference anything)
+# but are NOT exempt from the build-exclusion rule (see feature-boundaries.sh).
+# Seal a feature only once its collaborators are classified too — sealing
+# early hides real edges to still-unclassified code (see Gantt history).
 
 Shell/          Shell
 Core/           Core
@@ -13,5 +18,5 @@ Chat/           Feature:Chat
 AutoTask/       Feature:AutoTask
 LoopEngine/     Feature:Loop
 Graph/          Feature:CodeGraph
-Features/Search/    Feature:Search    sealed
-Features/Gantt/    Feature:Gantt    sealed
+Features/Search/    Feature:Search
+Features/Gantt/    Feature:Gantt

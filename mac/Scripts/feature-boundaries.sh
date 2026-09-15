@@ -12,13 +12,24 @@ MAP="$(dirname "$0")/feature-map.txt"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/fb.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
+# libExcludes paths, extracted once and reused by both the exclude-path
+# existence check (below) and the Shell/Core build-exclusion check: a
+# `Features/X` entry here names a feature the lite/min builds can drop
+# entirely, so Shell/Core code may never depend on its symbols unguarded.
+perl -0777 -ne '
+  while (/var\s+libExcludes:\s*\[String\]\s*=\s*\[(.*?)\]/gs) { print "$1\n"; }
+  while (/libExcludes\.append\(contentsOf:\s*\[(.*?)\]\)/gs) { print "$1\n"; }
+  while (/libExcludes\.append\((\"[^\"]*\")\)/gs) { print "$1\n"; }
+' "$ROOT/Package.swift" \
+  | grep -oE '"[^"]+"' | tr -d '"' | sort -u > "$WORK/libexcludes.txt"
+
 layer_of() {
   local rel="$1" prefix lay sealed
   while read -r prefix lay sealed; do
     [[ -z "$prefix" || "$prefix" == \#* ]] && continue
     [[ "$rel" == $prefix* ]] && { echo "$lay"; return; }
   done < "$MAP"
-  echo "Shell"
+  echo "Unclassified"
 }
 
 is_sealed() {
@@ -39,6 +50,22 @@ strip() {
     s{"""[^"]*(?:"(?!"")[^"]*)*"""}{""}gs;
     s{"(?:\\.|[^"\\\n])*"}{""}g;
     s{//[^\n]*}{}g;' "$1"
+}
+
+# For the Shell/Core build-exclusion check only: drop the body of any
+# `#if FEATURE_x` (non-negated) branch. That code is compiled out together
+# with the excluded feature it's guarding, so a reference inside it is not
+# the Terminal-style bug (an UNCONDITIONAL reference) this check targets —
+# see Shell/FeatureCatalog.swift, whose whole job is exactly this pattern.
+# The `#else`/un-guarded-off branch is left in place and still scanned. No
+# nesting of `#if FEATURE_*` exists in this codebase, so one flag suffices.
+strip_feature_guards() {
+  perl -ne '
+    if (/^\s*#if\s+(?!!)FEATURE_/) { $skip = 1; next }
+    if (/^\s*#else\b/)            { $skip = 0; next }
+    if (/^\s*#endif\b/)           { $skip = 0; next }
+    print unless $skip;
+  '
 }
 
 # 1. Declaration map: symbol -> layer.
@@ -80,6 +107,23 @@ find "$SRC" -name '*.swift' | sort | while read -r f; do
   done < "$WORK/features.txt"
 done
 
+# 2b. Report (never fail on) Feature -> Unclassified references. An edge that
+#     will matter once the other side is classified should be visible now
+#     rather than ambushing whichever later task moves that code.
+: > "$WORK/pending.txt"
+uc_syms="$(awk '$2=="Unclassified"{print $1}' "$WORK/owned.txt" | paste -sd'|' -)"
+if [ -n "$uc_syms" ]; then
+  find "$SRC" -name '*.swift' | sort | while read -r f; do
+    rel="${f#"$SRC"/}"
+    consumer="$(layer_of "$rel")"
+    [[ "$consumer" != Feature:* ]] && continue
+    body="$(strip "$f")"
+    hits="$(printf '%s' "$body" | grep -owE "$uc_syms" | sort -u | paste -sd, -)"
+    [[ -n "$hits" ]] && \
+      echo "${consumer#Feature:}|$rel  ->  Unclassified  [$hits]" >> "$WORK/pending.txt"
+  done
+fi
+
 # 3. Report everything; fail only on SEALED features.
 #    A total-count ratchet would block this migration: classifying Explorer
 #    makes previously-invisible Explorer<->SourceControl references countable
@@ -100,6 +144,60 @@ done < "$WORK/violations.txt"
 echo "total: $(wc -l < "$WORK/violations.txt" | tr -d ' ')  sealed violations: $sealed_hits"
 [ "$sealed_hits" -gt 0 ] && { echo "FAIL: a sealed feature references another feature" >&2; status=1; }
 
+echo "=== pending (feature -> unclassified) — informational, never fails ==="
+if [ -s "$WORK/pending.txt" ]; then
+  sort "$WORK/pending.txt" | while IFS='|' read -r feat line; do
+    echo "  pending  [$feat] $line"
+  done
+else
+  echo "  none"
+fi
+
+# 3b. Shell/Core is exempt from the cross-feature BOUNDARY rule above (it may
+#     reference any feature's symbols), but it is NOT exempt from build
+#     exclusion: a Feature folder named in Package.swift's libExcludes can be
+#     compiled out entirely (lite/min builds), so an unguarded Shell/Core
+#     reference into it is a real compile-time break, not a style nit. This
+#     is the exact shape of the Task 8 Terminal failure: Shell/AppShell.swift
+#     referenced TerminalPanelState unconditionally after it moved into a
+#     now-excludable Features/Terminal folder, and the boundary check above
+#     never saw it because Shell consumers are always allowed through it.
+: > "$WORK/exc-layers.txt"
+while read -r p; do
+  [[ "$p" == Features/* ]] || continue
+  layer_of "$p/" >> "$WORK/exc-layers.txt"
+done < "$WORK/libexcludes.txt"
+sort -u -o "$WORK/exc-layers.txt" "$WORK/exc-layers.txt"
+
+: > "$WORK/shell-violations.txt"
+if [ -s "$WORK/exc-layers.txt" ]; then
+  find "$SRC" -name '*.swift' | sort | while read -r f; do
+    rel="${f#"$SRC"/}"
+    consumer="$(layer_of "$rel")"
+    [[ "$consumer" == "Shell" || "$consumer" == "Core" ]] || continue
+    body="$(strip "$f" | strip_feature_guards)"
+    while read -r owner; do
+      [[ -z "$owner" ]] && continue
+      syms="$(awk -v o="$owner" '$2==o{print $1}' "$WORK/owned.txt" | paste -sd'|' -)"
+      [[ -z "$syms" ]] && continue
+      hits="$(printf '%s' "$body" | grep -owE "$syms" | sort -u | paste -sd, -)"
+      [[ -n "$hits" ]] && \
+        echo "$consumer|$rel  ->  ${owner#Feature:} (build-excludable)  [$hits]" >> "$WORK/shell-violations.txt"
+    done < "$WORK/exc-layers.txt"
+  done
+fi
+
+echo "=== Shell/Core references into build-excludable features ==="
+if [ -s "$WORK/shell-violations.txt" ]; then
+  sort "$WORK/shell-violations.txt" | while IFS='|' read -r layer line; do
+    echo "  ERROR  [$layer] $line"
+  done
+  echo "FAIL: Shell/Core references a symbol owned by a build-excludable feature" >&2
+  status=1
+else
+  echo "  none"
+fi
+
 # 4. Every Package.swift exclude path must exist. SwiftPM only WARNS on an
 #    invalid exclude and exits 0, so a file moved out from under one silently
 #    rejoins the lite build. This migration moves ~250 files past that hazard.
@@ -111,14 +209,9 @@ echo "total: $(wc -l < "$WORK/violations.txt" | tr -d ' ')  sealed violations: $
 #    both would report false MISSING paths that no build ever excluded.
 echo "=== Package.swift exclude paths ==="
 missing=0
-perl -0777 -ne '
-  while (/var\s+libExcludes:\s*\[String\]\s*=\s*\[(.*?)\]/gs) { print "$1\n"; }
-  while (/libExcludes\.append\(contentsOf:\s*\[(.*?)\]\)/gs) { print "$1\n"; }
-  while (/libExcludes\.append\((\"[^\"]*\")\)/gs) { print "$1\n"; }
-' "$ROOT/Package.swift" \
-  | grep -oE '"[^"]+"' | tr -d '"' | sort -u | while read -r p; do
-      [ -e "$SRC/$p" ] || { echo "  MISSING: $p"; }
-    done > "$WORK/missing.txt"
+while read -r p; do
+  [ -e "$SRC/$p" ] || { echo "  MISSING: $p"; }
+done < "$WORK/libexcludes.txt" > "$WORK/missing.txt"
 if [ -s "$WORK/missing.txt" ]; then
   cat "$WORK/missing.txt"
   echo "FAIL: Package.swift names exclude paths that do not exist" >&2
