@@ -6,6 +6,7 @@
 # Unlisted paths default to Shell, which is exempt — migration shrinks
 # that bucket one feature at a time.
 
+Shell/          Shell
 Core/           Core
 ClaudeLink/     Core
 Chat/           Feature:Chat
