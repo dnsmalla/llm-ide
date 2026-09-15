@@ -671,3 +671,39 @@ final class LibraryItemStore {
         }
     }
 }
+
+// MARK: - ProjectNotesProviding (AutoTask seam)
+
+/// Conformance lives here, not in AutoTask/, so AutoTask depends only on the
+/// small protocol (`ProjectNotesProviding`) and never reaches into
+/// LibraryItemStore's scan internals directly.
+extension LibraryItemStore: ProjectNotesProviding {
+    func projectNotes() -> [ProjectNoteRef] {
+        items(for: .notes).compactMap { item in
+            let mtime = { (try? item.url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate }
+            guard let date = Self.generatedAt(fromFilename: item.name) ?? mtime() else { return nil }
+            return ProjectNoteRef(id: item.id, title: item.name, fileURL: item.url, modifiedAt: date)
+        }
+    }
+
+    /// Parses the `yyyy-MM-dd-HHmmss-<slug>.md` prefix every generated note
+    /// filename carries (`EmailNoteWriter.filename`, `SourceConnectorNoteWriter
+    /// .filename`) — free (no I/O) and immune to the note file's on-disk mtime
+    /// being rewritten by a clone/checkout/copy long after it was actually
+    /// generated. `mtime` stays the fallback for anything that doesn't match
+    /// (a hand-added file, a future writer with a different naming scheme).
+    private static let filenameStampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd-HHmmss"
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    static func generatedAt(fromFilename name: String) -> Date? {
+        let prefix = name.prefix(17)  // "yyyy-MM-dd-HHmmss" is exactly 17 chars
+        guard prefix.count == 17 else { return nil }
+        return filenameStampFormatter.date(from: String(prefix))
+    }
+}

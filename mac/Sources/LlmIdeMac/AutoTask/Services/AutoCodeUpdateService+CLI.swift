@@ -121,11 +121,7 @@ extension AutoCodeUpdateService {
     /// `runCLI(issue:)`): lowercased, split on non-alphanumerics, first 5 words,
     /// dash-joined. Used to make `.implement` branch names human-readable.
     nonisolated static func customTaskSlug(from value: String) -> String {
-        value.lowercased()
-            .components(separatedBy: .alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-            .prefix(5)
-            .joined(separator: "-")
+        issueBranchSlug(from: value)
     }
 
     /// Short disambiguator for `.implement` branch names: the first hex segment
@@ -271,6 +267,20 @@ extension AutoCodeUpdateService {
         }
     }
 
+    /// Slug used for an issue's fix branch name (`fix/<number>-<slug>`):
+    /// lowercased title, split on non-alphanumerics, first 5 words,
+    /// dash-joined. Shared by `runCLI(issue:)` (which creates the branch)
+    /// and `runImplementIssues`' start-of-work comment (which announces the
+    /// branch name before the CLI runs) — factored out so the two can never
+    /// drift and quote a different branch name than the one actually created.
+    nonisolated static func issueBranchSlug(from title: String) -> String {
+        title.lowercased()
+            .components(separatedBy: .alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .prefix(5)
+            .joined(separator: "-")
+    }
+
     func runCLI(issue: RepoIssue, localPath: String, logDir: URL) async -> Bool {
         let cliTool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
         let cliCommand = cliTool.cliExecutable   // e.g. "claude" or "gh copilot"
@@ -303,12 +313,7 @@ extension AutoCodeUpdateService {
             resolvedModel = model
         }
 
-        let slug = issue.title
-            .lowercased()
-            .components(separatedBy: .alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-            .prefix(5)
-            .joined(separator: "-")
+        let slug = Self.issueBranchSlug(from: issue.title)
 
         // The issue title/body are UNTRUSTED — they come from whoever
         // filed the ticket. Fence them with a random nonce so embedded

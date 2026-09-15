@@ -104,4 +104,55 @@ extension SourceConnectorEngineTests {
         let r2 = await connector.fetchAndIngest(ctx)
         if case .none = r2 { /* ok */ } else { XCTFail("expected .none on rerun, got \(r2)") }
     }
+
+    /// Regression test for the "notes nested one level too deep" bug: when
+    /// `sourceConnectorRoot` (the project's `source/` folder, where raw
+    /// fetched content lives) differs from the project root that
+    /// `notesOutputFolder` is derived from — the real-world shape, `root`
+    /// and `notesOutputFolder`'s previous test above happened to coincide
+    /// and would pass even with the bug — the generated note must land at
+    /// the canonical `<projectRoot>/llm-doc/<type>/`, never nested inside
+    /// `sourceConnectorRoot` as `<projectRoot>/source/llm-doc/<type>/`. See
+    /// SourceNestedLlmDocMigration's doc comment for the same bug, already
+    /// fixed once for EmailSource and reproduced here for SourceConnector
+    /// until this fix.
+    func testFetchAndIngestWritesNoteUnderProjectRootNotSourceConnectorRoot() async throws {
+        let projectRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sc-nested-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: projectRoot) }
+        let sourceRoot = projectRoot.appendingPathComponent("source", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+
+        let connector = SourceConnector(manifest: makeManifest(), adapterFactory: { FakeAdapter() })
+        try connector.ensureSetup(at: sourceRoot)
+
+        let config = AppConfig(userDefaults: UserDefaults(suiteName: "sc-nested-\(UUID().uuidString)")!)
+        let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+        let ctx = SourceContext(
+            api: api, config: config, root: sourceRoot,
+            notesOutputFolder: projectRoot.appendingPathComponent("llm-doc"),
+            sourceConnectorRoot: sourceRoot,
+            classify: { _, _ in
+                SourceConnectorClassification(
+                    category: "work", noteWorthy: true, summary: "s",
+                    todos: [SourceConnectorClassification.Todo(title: "t", detail: "d", due: nil, priority: "med")])
+            })
+
+        let result = await connector.fetchAndIngest(ctx)
+        if case .imported(let n, _, _) = result {
+            XCTAssertEqual(n, 1)
+        } else {
+            XCTFail("expected .imported(1), got \(result)")
+        }
+
+        let canonicalNotesDir = projectRoot.appendingPathComponent("llm-doc").appendingPathComponent("slack")
+        let misplacedNotesDir = sourceRoot.appendingPathComponent("llm-doc").appendingPathComponent("slack")
+        XCTAssertTrue(
+            try FileManager.default.contentsOfDirectory(atPath: canonicalNotesDir.path).contains { $0.hasSuffix(".md") },
+            "note should be written under <projectRoot>/llm-doc/slack/, not nested inside source/")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: misplacedNotesDir.path)
+                && ((try? FileManager.default.contentsOfDirectory(atPath: misplacedNotesDir.path))?.isEmpty == false),
+            "note must NOT land at <projectRoot>/source/llm-doc/slack/")
+    }
 }

@@ -8,14 +8,33 @@ struct NoteAction: Identifiable, Equatable, Hashable, Sendable {
     let meetingTitle: String
 }
 
+/// One note file to scan for action items — an absolute path plus enough
+/// identity to attribute the extracted `NoteAction`s. Deliberately doesn't
+/// name `MeetingIndex.Row` or `ProjectNoteRef`: both a real meeting transcript
+/// (global meetings folder, via `MeetingIndex`) and a source-connector note
+/// (`<project>/llm-doc/…`, via `ProjectNotesProviding`) convert into this
+/// same shape so `NoteActionExtractor` doesn't care which store a row came
+/// from.
+struct ActionSourceRow: Equatable {
+    let id: String
+    let title: String
+    let fileURL: URL
+}
+
 enum NoteActionExtractor {
-    /// Reads each meeting's .md file from `notesRoot` and returns all
-    /// `## Actions` bullet items across all provided rows.
-    static func extract(from rows: [MeetingIndex.Row], notesRoot: URL) -> [NoteAction] {
+    /// Headings that mark the action-item list across the note templates in
+    /// use: raw meeting transcripts write `## Actions` (`MeetingFileStore`),
+    /// the generic ingest template writes `## Action items`, and the email
+    /// template writes `## To-dos` (`IngestTemplateRenderer`). Checked in
+    /// order; the first one present in the file wins.
+    private static let actionHeadings = ["## Actions", "## Action items", "## To-dos"]
+
+    /// Reads each row's .md file and returns all action-list bullet items
+    /// across all provided rows.
+    static func extract(from rows: [ActionSourceRow]) -> [NoteAction] {
         var result: [NoteAction] = []
         for row in rows {
-            let fileURL = notesRoot.appendingPathComponent(row.path)
-            guard let contents = try? String(contentsOf: fileURL, encoding: .utf8),
+            guard let contents = try? String(contentsOf: row.fileURL, encoding: .utf8),
                   let split = FrontmatterCoder.split(file: contents),
                   split.bodyStart <= contents.endIndex else { continue }
             let body = String(contents[split.bodyStart...])
@@ -26,7 +45,7 @@ enum NoteActionExtractor {
                 let id = sha256(normalized)
                 result.append(NoteAction(id: id, text: text,
                                          meetingId: row.id,
-                                         meetingTitle: row.title ?? ""))
+                                         meetingTitle: row.title))
             }
         }
         return result
@@ -39,7 +58,8 @@ enum NoteActionExtractor {
     }
 
     private static func actionsSection(in body: String) -> [String] {
-        guard let range = body.range(of: "## Actions") else { return [] }
+        guard let heading = actionHeadings.first(where: { body.range(of: $0) != nil }),
+              let range = body.range(of: heading) else { return [] }
         let after = String(body[range.upperBound...])
         let nextHeading = after.range(of: "\n## ")?.lowerBound ?? after.endIndex
         let section = after[..<nextHeading]

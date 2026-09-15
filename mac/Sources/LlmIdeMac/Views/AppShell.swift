@@ -785,6 +785,7 @@ struct AppShell: View {
                 .map { URL(fileURLWithPath: $0.localPath) }
             self.appEnv = try AppEnvironment(indexRootURL: indexRoot)
             FeatureCatalog.setAutoCodeEnvironment(self.appEnv)
+            FeatureCatalog.setAutoCodeProjectNotes(itemStore)
             // Populate the NOTES and MEETINGS sections from the bound project's
             // source/ and llm-doc/ folders. Run OFF the main thread
             // (rescanAsync) so a large project's directory walk doesn't freeze
@@ -802,6 +803,7 @@ struct AppShell: View {
         // new path on init.
         appEnv?.indexer.stopWatching()
         FeatureCatalog.setAutoCodeEnvironment(nil)
+        FeatureCatalog.setAutoCodeProjectNotes(nil)
         appEnv = nil
         envInitError = nil
         initEnv()

@@ -93,6 +93,12 @@ final class AutoCodeUpdateService: ObservableObject {
     /// `AppShell` when `AppEnvironment` is created for the active project.
     weak var environment: AppEnvironment?
 
+    /// Project-rooted notes (`<project>/llm-doc/…`) for `runSourcesToIssue`.
+    /// Wired from `AppShell` alongside `environment` — see
+    /// `ProjectNotesProviding`'s doc comment for why this is a protocol
+    /// rather than a direct `LibraryItemStore` reference.
+    weak var projectNotes: ProjectNotesProviding?
+
     let repoManager = RepoManager()
 
     private var timer: Timer?

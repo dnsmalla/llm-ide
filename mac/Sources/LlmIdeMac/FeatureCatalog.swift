@@ -404,6 +404,18 @@ enum FeatureCatalog {
         #endif
     }
 
+    /// Point `runSourcesToIssue` at the active project's notes
+    /// (`<project>/llm-doc/…`, via `LibraryItemStore`'s `ProjectNotesProviding`
+    /// conformance) so source-connector notes (email, Slack, …) aren't
+    /// invisible to it — they live outside the meetings folder `environment`
+    /// covers. Called from AppShell's initEnv()/rebuildEnv() alongside
+    /// `setAutoCodeEnvironment`. No-op when compiled out.
+    static func setAutoCodeProjectNotes(_ provider: ProjectNotesProviding?) {
+        #if FEATURE_AUTOTASK
+        autoCodeService?.projectNotes = provider
+        #endif
+    }
+
     // MARK: - Mobile
 
     #if FEATURE_MOBILE

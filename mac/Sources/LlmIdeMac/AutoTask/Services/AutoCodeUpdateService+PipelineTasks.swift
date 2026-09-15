@@ -38,6 +38,83 @@ extension AutoCodeUpdateService {
         failedCount > 0 ? "\(failedCount) issue(s) failed — see log" : nil
     }
 
+    // MARK: - User-facing text (issue bodies / comments)
+    //
+    // Every one of these is read by a human on GitLab/GitHub, not just an
+    // internal log line — a bare "Action item from meeting: X" reads as spam
+    // and was going unactioned. Pure + static so the exact wording is
+    // unit-testable without a fake RepoBackend.
+
+    /// Body for an issue filed from a meeting/source action item
+    /// (`runSourcesToIssue`). `meetingTitle` is blank for a source-connector
+    /// note that carries no title (see `ProjectNoteRef`) — falls back to a
+    /// generic phrase rather than an empty, quote-dangling sentence.
+    static func sourceIssueBody(actionText: String, meetingTitle: String) -> String {
+        let origin = meetingTitle.isEmpty ? "a recent note" : "**\"\(meetingTitle)\"**"
+        return """
+        Hello,
+
+        The following action item was captured automatically from \(origin) and looks ready to act on:
+
+        > \(actionText)
+
+        Could someone take a look and confirm the next step? Happy to add more context if it would help.
+
+        —
+        _Filed automatically by LLM-IDE Auto Tasks (Source → Issue)._
+        """
+    }
+
+    /// Comment posted to an issue right before Auto Tasks starts working it,
+    /// so a human sees intent + a short plan instead of the branch/commit
+    /// appearing with no warning. `branch` should be the exact name
+    /// `runCLI(issue:)` is about to create (`Self.issueBranchSlug`), so the
+    /// plan names the real branch, not a guess.
+    static func implementationStartComment(issueNumber: Int, branch: String) -> String {
+        """
+        Hi there,
+
+        Auto Tasks is starting work on issue #\(issueNumber) now. Here's the short plan:
+
+        1. Create a local branch `\(branch)` off the current base branch.
+        2. Implement the change described above.
+        3. Commit the fix locally and leave it ready for review — nothing is pushed automatically.
+
+        I'll follow up here once the change is ready for you to look at.
+        """
+    }
+
+    /// Comment posted after a successful local commit — names the branch
+    /// (the prior wording didn't) so the reviewer knows exactly what to check
+    /// out. `branch` is nil only when the actual branch genuinely couldn't be
+    /// determined (`git rev-parse` failed) — hedge rather than assert a name
+    /// nobody confirmed.
+    static func implementationDoneComment(branch: String?) -> String {
+        let location = branch.map { "on branch `\($0)`" } ?? "on a local fix branch"
+        return """
+        Good news — a fix for this issue has been committed locally \(location) \
+        and is ready for your review. Nothing has been pushed; please review the changes \
+        and push when you're happy with them.
+        """
+    }
+
+    /// Description for the MR/PR `runReviewMerge` opens for a pushed fix branch.
+    static func reviewMergeDescription(branch: String) -> String {
+        """
+        Hi there,
+
+        Auto Tasks pushed the `\(branch)` branch and opened this merge request for review. \
+        Nothing is merged automatically — please review the diff and merge manually when you're ready.
+
+        Thanks!
+        """
+    }
+
+    /// Issue comment `runReviewMerge` posts once its MR/PR is open.
+    static func reviewMergeComment(branch: String, mrURL: String) -> String {
+        "Heads up — branch `\(branch)` has been pushed and merge request \(mrURL) is open for your review."
+    }
+
     /// Pure summary of a regression sweep's verdict list, factored out of
     /// `runRegressionSweep` so the fail-closed verdict accounting is
     /// unit-testable without spinning up the full `RegressionRunner`.
@@ -180,22 +257,49 @@ extension AutoCodeUpdateService {
             return
         }
 
-        let rows: [MeetingIndex.Row]
+        let meetingRows: [MeetingIndex.Row]
         do {
-            rows = try index.list()
+            meetingRows = try index.list()
         } catch {
             taskErrors[key] = "Meeting index read failed: \(error.localizedDescription)"
             logStore.append(.sourcesToIssue, taskErrors[key]!, level: .error)
             return
         }
 
-        let sortedRows = rows.sorted { $0.startedAt > $1.startedAt }
-        let recentRows: [MeetingIndex.Row]
+        // Real meeting transcripts live under the global meetings folder and
+        // are covered by `MeetingIndex`; generated source-connector notes
+        // (email, Slack, …) land under `<project>/llm-doc/…` instead — a
+        // completely different tree that `MeetingIndex` never scans (see
+        // `ProjectNotesProviding`). Timestamp both before applying the
+        // lookback window.
+        let timestampedMeetings: [(ms: Int64, row: ActionSourceRow)] = meetingRows.map {
+            (ms: $0.startedAt, row: ActionSourceRow(
+                id: $0.id, title: $0.title ?? "", fileURL: notesFolderURL.appendingPathComponent($0.path)))
+        }
+        let timestampedNotes: [(ms: Int64, row: ActionSourceRow)] = (projectNotes?.projectNotes() ?? []).map {
+            (ms: Int64($0.modifiedAt.timeIntervalSince1970 * 1000),
+             row: ActionSourceRow(id: $0.id, title: $0.title, fileURL: $0.fileURL))
+        }
+
+        let recentRows: [ActionSourceRow]
         if autoTaskSettings.lookbackByDays {
             let cutoffMs = Self.lookbackCutoffMs(now: Date(), days: autoTaskSettings.lookbackDays)
-            recentRows = sortedRows.filter { $0.startedAt >= cutoffMs }
+            // Days-based lookback has no shared budget to fight over — union
+            // then filter.
+            recentRows = (timestampedMeetings + timestampedNotes)
+                .filter { $0.ms >= cutoffMs }
+                .sorted { $0.ms > $1.ms }
+                .map(\.row)
         } else {
-            recentRows = Array(sortedRows.prefix(autoTaskSettings.lookbackMeetingCount))
+            // Count-based lookback applies `lookbackMeetingCount` PER ORIGIN,
+            // not to the merged pool: a project with hundreds of email/Slack
+            // notes would otherwise fill every slot with connector notes and
+            // starve real meetings out entirely (or vice versa) — the exact
+            // failure this dual-origin combine exists to avoid.
+            let n = autoTaskSettings.lookbackMeetingCount
+            let topMeetings = timestampedMeetings.sorted { $0.ms > $1.ms }.prefix(n)
+            let topNotes = timestampedNotes.sorted { $0.ms > $1.ms }.prefix(n)
+            recentRows = (topMeetings + topNotes).sorted { $0.ms > $1.ms }.map(\.row)
         }
 
         if recentRows.isEmpty {
@@ -207,8 +311,17 @@ extension AutoCodeUpdateService {
             return
         }
 
-        let actions = NoteActionExtractor.extract(from: recentRows, notesRoot: notesFolderURL)
-        let newActions = actions.filter { !registry.isKnown(id: $0.id) }
+        let actions = NoteActionExtractor.extract(from: recentRows)
+        // Dedupe by id BEFORE the registry filter: the same action text can
+        // now legitimately appear twice in `recentRows` (a meeting transcript
+        // under `## Actions` and its generated note under `## Action items`
+        // describe the same item), and `NoteAction.id` is a hash of the
+        // normalized text, so two rows yielding an identical action collapse
+        // to one — without this each surviving duplicate calls createIssue
+        // separately below.
+        var seenActionIds = Set<String>()
+        let dedupedActions = actions.filter { seenActionIds.insert($0.id).inserted }
+        let newActions = dedupedActions.filter { !registry.isKnown(id: $0.id) }
         if newActions.isEmpty {
             logStore.append(.sourcesToIssue, "No new action items to file as issues.")
             taskErrors.removeValue(forKey: key)
@@ -224,7 +337,11 @@ extension AutoCodeUpdateService {
             return
         }
 
-        let normalizedExistingTitles = Set(existingIssues.map { NoteActionExtractor.normalize($0.title) })
+        // `var` — every issue this run creates is added below so two actions
+        // in the same `newActions` batch that normalize to the same title
+        // (distinct ids, e.g. slightly different punctuation) don't each
+        // file their own issue against an empty snapshot of "existing" titles.
+        var normalizedExistingTitles = Set(existingIssues.map { NoteActionExtractor.normalize($0.title) })
         var failures: [String] = []
         for action in newActions {
             if Task.isCancelled { break }
@@ -237,9 +354,10 @@ extension AutoCodeUpdateService {
             do {
                 let payload = RepoIssuePayload(
                     title: action.text,
-                    body: "Action item from meeting: \(action.meetingTitle)"
+                    body: Self.sourceIssueBody(actionText: action.text, meetingTitle: action.meetingTitle)
                 )
                 let created = try await client.createIssue(projectId: resolved.projectId, payload: payload)
+                normalizedExistingTitles.insert(normalized)
                 registry.register(action: action, issueIid: created.number)
                 createdCount += 1
                 logStore.append(.sourcesToIssue, "Created issue #\(created.number): \(created.title)")
@@ -332,6 +450,30 @@ extension AutoCodeUpdateService {
                     continue
                 }
             }
+
+            // Branch `runCLI(issue:)` is about to instruct the CLI to create
+            // (see its prompt's STEPS). Announced now — AFTER the base-branch
+            // checkout above succeeded, so a failed checkout never leaves a
+            // "starting work" comment with no follow-up — so a human sees
+            // intent + a short plan before any commit lands. Posted only on
+            // the FIRST attempt (`entry.retryCount == 0`): `pendingEntries()`
+            // retries a `.failed` entry up to 3 times, and re-announcing the
+            // same plan on every retry (with no "it failed" comment in
+            // between) reads as the task being stuck in a loop.
+            let plannedBranch = "fix/\(number)-\(Self.issueBranchSlug(from: issue.title))"
+            if entry.retryCount == 0, config.isAllowed(.commentIssue, provider: client.kind) {
+                do {
+                    _ = try await client.createNote(
+                        projectId: resolved.projectId,
+                        number: number,
+                        body: Self.implementationStartComment(issueNumber: number, branch: plannedBranch)
+                    )
+                } catch {
+                    // Best-effort, like the completion note below — a comment
+                    // failure must not block the actual implementation work.
+                    log.error("Failed to add start-of-work note to issue \(number): \(error)")
+                }
+            }
             let baseSha = await Task.detached { Self.headSha(at: capturedGitRoot) }.value
 
             let succeeded = await runCLI(issue: issue, localPath: capturedGitRoot, logDir: logDir)
@@ -339,22 +481,44 @@ extension AutoCodeUpdateService {
             let committed = succeeded && headAfter != nil && headAfter != baseSha
 
             if committed {
-                let branchAfter = await Task.detached { Self.currentBranch(at: capturedGitRoot) }.value
+                var branchAfter = await Task.detached { Self.currentBranch(at: capturedGitRoot) }.value
                 if let base = baseBranch, let baseSha, branchAfter == base {
                     let rescue = "fix/\(number)-auto"
-                    _ = await Task.detached {
+                    let rescued = await Task.detached {
                         Self.rescueCommitToBranch(rescue, base: base, baseSha: baseSha, at: capturedGitRoot)
                     }.value
+                    // `rescueCommitToBranch` can fail on its LAST step (the
+                    // checkout) after already succeeding at `git branch` +
+                    // `git reset --hard` — the commit is safely captured on
+                    // `rescue` in that case too, just not the checked-out
+                    // branch. Check the ref directly rather than trusting the
+                    // combined Bool, so a failed final checkout doesn't make
+                    // this report "committed on \(base)" — a shared branch —
+                    // when the commit actually landed on `rescue`. (Written
+                    // as an explicit `if`, not `rescued || await …` — `||`'s
+                    // autoclosure doesn't support `await`.)
+                    var rescueBranchExists = rescued
+                    if !rescueBranchExists {
+                        rescueBranchExists = await Task.detached {
+                            Self.localBranches(prefix: "fix/", at: capturedGitRoot).contains(rescue)
+                        }.value
+                    }
+                    if rescueBranchExists { branchAfter = rescue }
                 }
                 registry.markDone(id: entry.actionId)
                 implementedCount += 1
-                logStore.append(.implementIssues, "Issue #\(number): fix committed locally on fix branch.")
+                // `branchAfter` is nil only when `git rev-parse` itself failed
+                // (detached HEAD, git error) — genuinely unknown, so the
+                // human-facing comment hedges rather than naming the
+                // uncommitted-to `plannedBranch` as if it were fact. The log
+                // line is internal and can still take the best-effort guess.
+                logStore.append(.implementIssues, "Issue #\(number): fix committed locally on \(branchAfter ?? plannedBranch).")
                 if config.isAllowed(.commentIssue, provider: client.kind) {
                     do {
                         _ = try await client.createNote(
                             projectId: resolved.projectId,
                             number: number,
-                            body: "A fix branch was prepared locally by Auto Tasks and is awaiting human review before push."
+                            body: Self.implementationDoneComment(branch: branchAfter)
                         )
                     } catch {
                         log.error("Failed to add review note to issue \(number): \(error)")
@@ -457,7 +621,7 @@ extension AutoCodeUpdateService {
             do {
                 let payload = RepoMergeRequestPayload(
                     title: title,
-                    description: "Auto Tasks pushed branch `\(branch)` for review. Merge manually when ready.",
+                    description: Self.reviewMergeDescription(branch: branch),
                     sourceBranch: branch,
                     targetBranch: defaultBranch
                 )
@@ -467,7 +631,7 @@ extension AutoCodeUpdateService {
 
                 if let num = Self.issueNumber(fromFixBranch: branch),
                    config.isAllowed(.commentIssue, provider: client.kind) {
-                    let comment = "Branch `\(branch)` pushed. Merge request: \(mr.webUrl)"
+                    let comment = Self.reviewMergeComment(branch: branch, mrURL: mr.webUrl)
                     _ = try? await client.createNote(projectId: resolved.projectId, number: num, body: comment)
                 }
             } catch {

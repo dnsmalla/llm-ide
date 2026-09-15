@@ -63,6 +63,20 @@ final class SourceConnector: InputSource {
         do {
             batch = try await adapter.fetch(ctx)
         } catch {
+            // The server reports "not connected yet" / "no fetch mapping for
+            // this connector" as a 400 (`MCP_UNAUTHORIZED` /
+            // `MCP_NOT_FETCHABLE` — router.mjs's mcp-connector block: "both
+            // client-actionable, so 400"), same shape as EmailSource's local
+            // `guard ... else { return .noSource }` for an unconfigured
+            // email source. Surfacing it as `.failure` flipped the Sources
+            // card red for a connector nobody has connected yet — mirror
+            // EmailSource and treat "not configured" as informational, not
+            // an error. Any other code (network blip, 5xx, …) is a real
+            // failure and still surfaces as one.
+            if let apiError = error as? APIError,
+               apiError.code == "MCP_UNAUTHORIZED" || apiError.code == "MCP_NOT_FETCHABLE" {
+                return .noSource
+            }
             return .failure(error.localizedDescription, imported: 0)
         }
 
@@ -83,9 +97,19 @@ final class SourceConnector: InputSource {
             markSeenFailures.append("markSeen: \(error.localizedDescription)")
         }
 
-        // Notes land at `<sourceConnectorRoot>/llm-doc/<noteType>/` — the
-        // same folder `ensureSetup` pre-created.
-        let writer = SourceConnectorNoteWriter(repoRoot: ctx.sourceConnectorRoot,
+        // Notes land at the canonical `<projectRoot>/llm-doc/<noteType>/` —
+        // the same convention EmailSource uses (fixed there in 51f7bcfb after
+        // notes were found nested one level too deep at `source/llm-doc/`,
+        // see SourceNestedLlmDocMigration's doc comment). This call site
+        // still used `ctx.sourceConnectorRoot` (= `ctx.root`, the project's
+        // `source/` folder, unless overridden), reproducing the same bug for
+        // every Source Connector added after that fix (Slack, Miro, …): the
+        // generated note was invisible to LibraryItemStore's llm-doc scan
+        // and to `runSourcesToIssue`'s action-item extraction until the next
+        // app launch ran the migration. `ctx.sourceConnectorRoot` stays the
+        // root for the RAW inbox below — only the generated note's root
+        // changes.
+        let writer = SourceConnectorNoteWriter(repoRoot: ctx.notesOutputFolder.deletingLastPathComponent(),
                                                noteType: NoteType(manifest.noteType), platform: manifest.id)
         let knownHashes = (try? await writer.existingSourceHashes()) ?? []
         let (processed, failures) = await InboxGenerationPipeline.run(
