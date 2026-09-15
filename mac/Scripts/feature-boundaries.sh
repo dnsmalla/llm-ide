@@ -222,15 +222,6 @@ else
   echo "  none"
 fi
 
-# 3b. Shell/Core is exempt from the cross-feature BOUNDARY rule above (it may
-#     reference any feature's symbols), but it is NOT exempt from build
-#     exclusion: a Feature folder named in Package.swift's libExcludes can be
-#     compiled out entirely (lite/min builds), so an unguarded Shell/Core
-#     reference into it is a real compile-time break, not a style nit. This
-#     is the exact shape of the Task 8 Terminal failure: Shell/AppShell.swift
-#     referenced TerminalPanelState unconditionally after it moved into a
-#     now-excludable Features/Terminal folder, and the boundary check above
-#     never saw it because Shell consumers are always allowed through it.
 # 3a. `strip_feature_guard_for_flag` only understands `#if`/`#else`/`#endif`.
 #     An `#elseif` branch inherits its enclosing `#if` frame's hidden/visible
 #     state as written today, which is backwards for the branch that runs
@@ -262,6 +253,15 @@ else
   echo "  none"
 fi
 
+# 3b. Shell/Core is exempt from the cross-feature BOUNDARY rule above (it may
+#     reference any feature's symbols), but it is NOT exempt from build
+#     exclusion: a Feature folder named in Package.swift's libExcludes can be
+#     compiled out entirely (lite/min builds), so an unguarded Shell/Core
+#     reference into it is a real compile-time break, not a style nit. This
+#     is the exact shape of the Task 8 Terminal failure: Shell/AppShell.swift
+#     referenced TerminalPanelState unconditionally after it moved into a
+#     now-excludable Features/Terminal folder, and the boundary check above
+#     never saw it because Shell consumers are always allowed through it.
 : > "$WORK/exc-layers.txt"
 : > "$WORK/layer-flag.txt"
 while read -r p; do
@@ -356,6 +356,64 @@ if [ -s "$WORK/missing-test.txt" ]; then
   status=1
 else
   echo "  all testExcludes paths exist"
+fi
+
+# 5. Non-Swift files naming a stale mac/Sources/LlmIdeMac path. Swift is one
+#    module, so moving a file inside it never breaks a Swift build — every
+#    check above only ever catches that class. It silently breaks anything
+#    OUTSIDE Swift that names a path by hand: a script, a Makefile target, a
+#    CI step. This is exactly how conformance-agent-v2.mjs kept hardcoding
+#    Views/DocGen/DocGenView.swift and Views/Visual/VisualView.swift after
+#    the Features/ migration moved both, undetected through three reviews
+#    because every one of them only re-ran Swift builds and the boundary
+#    gate above.
+#
+#    Scope is deliberately narrow: scripts/, mac/Scripts/, and Makefile —
+#    not a repo-wide scan. A repo-wide grep for "Sources/LlmIdeMac" also
+#    matches explanatory comments naming a file for context
+#    (extension/kb/chat-sessions.mjs, extension/llm_agent/runtime/loop.mjs)
+#    and test/schema fixture payloads that deliberately reference paths as
+#    sample data, not real files (extension/tests/fence-output-hygiene.test.mjs,
+#    schema/agent-v2/fixtures/approval_request_tool.json). None of those live
+#    under scripts/, mac/Scripts/, or Makefile, so narrowing the search root
+#    already clears every false positive found surveying this repo — no
+#    ignore list needed. A gate that cries wolf gets ignored, and eight more
+#    feature-move tasks depend on this one being trusted.
+#
+#    Matching is further restricted to literals ending in `.swift`: the
+#    hazard this closes is a stale SOURCE FILE reference, not a stale
+#    directory (e.g. `Sources/LlmIdeMac/Resources`, mentioned in
+#    mac/Scripts/build.sh and mac/Scripts/build-monaco-bundle.mjs, is a real,
+#    unmoved directory, not a file this check can usefully validate). The
+#    `.swift` restriction also happens to skip every comment found in-scope
+#    (mac/Scripts/feature-boundaries.sh's own prose, Makefile's), since none
+#    of them names a specific .swift file — verified by survey, not assumed.
+echo "=== non-Swift files naming a stale mac/Sources/LlmIdeMac/*.swift path ==="
+REPO_ROOT="$(cd "$ROOT/.." && pwd)"
+: > "$WORK/stale-path-hits.txt"
+{
+  find "$REPO_ROOT/scripts" "$ROOT/Scripts" -type f \
+    \( -name '*.mjs' -o -name '*.js' -o -name '*.sh' -o -name '*.yml' -o -name '*.yaml' -o -name '*.json' \) \
+    2>/dev/null
+  [ -f "$REPO_ROOT/Makefile" ] && echo "$REPO_ROOT/Makefile"
+} | grep -vE '/(node_modules|\.build|\.superpowers)/' | sort -u | while read -r f; do
+  grep -noE '(mac/)?Sources/LlmIdeMac/[A-Za-zA-Z0-9_./-]+\.swift' "$f" | while IFS=: read -r lineno lit; do
+    if [[ "$lit" == mac/Sources/LlmIdeMac/* ]]; then
+      target="$REPO_ROOT/$lit"
+    else
+      target="$ROOT/$lit"
+    fi
+    [ -e "$target" ] || echo "${f#"$REPO_ROOT"/}:$lineno  names \"$lit\" which does not exist" >> "$WORK/stale-path-hits.txt"
+  done
+done
+if [ -s "$WORK/stale-path-hits.txt" ]; then
+  sort -u "$WORK/stale-path-hits.txt" | while read -r line; do
+    echo "  ERROR  $line"
+  done
+  echo "FAIL: a non-Swift file names a mac/Sources/LlmIdeMac/*.swift path that does not exist" >&2
+  status=1
+else
+  echo "  none"
 fi
 
 exit $status
