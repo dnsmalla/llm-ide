@@ -210,8 +210,10 @@ struct ConnectionsSettingsSection: View {
                 }
             }
 
-            MeetingCaptureMatrixView()
-                .environmentObject(theme)
+            if let liveCaptureSettings = FeatureCatalog.liveCaptureSettingsSection() {
+                liveCaptureSettings
+                    .environmentObject(theme)
+            }
 
             DisclosureGroup(isExpanded: $showMeetingAdvanced) {
                 HStack {

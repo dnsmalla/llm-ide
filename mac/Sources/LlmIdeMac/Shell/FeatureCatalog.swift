@@ -121,6 +121,15 @@ enum FeatureCatalog {
         #endif
     }
 
+    // MARK: - Live
+
+    /// Live capture's own settings panel. Settings composes contributed
+    /// sections rather than owning each feature's panel — same seam as
+    /// `graphSettingsSection()`.
+    static func liveCaptureSettingsSection() -> AnyView? {
+        AnyView(MeetingCaptureMatrixView())
+    }
+
     // MARK: - Explorer
 
     /// Project file browser. No module-owned services — construction happens

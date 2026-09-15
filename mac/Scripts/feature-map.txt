@@ -24,3 +24,4 @@ Features/Issues/    Feature:Issues
 Features/ReviewConflicts/    Feature:ReviewConflicts
 Features/Visual/    Feature:Visual
 Features/Terminal/    Feature:Terminal
+Features/Live/    Feature:Live
