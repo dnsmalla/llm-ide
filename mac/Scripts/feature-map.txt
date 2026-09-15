@@ -1,0 +1,13 @@
+# path-prefix   layer            sealed?
+# First matching prefix wins, so list most-specific prefixes first.
+# Layer is: Core | Shell | Feature:<Name>
+# A third column of `sealed` means the feature is enforced at ZERO
+# cross-feature references. Unsealed features are reported only.
+# Unlisted paths default to Shell, which is exempt — migration shrinks
+# that bucket one feature at a time.
+
+ClaudeLink/     Core
+Chat/           Feature:Chat
+AutoTask/       Feature:AutoTask
+LoopEngine/     Feature:Loop
+Graph/          Feature:CodeGraph
