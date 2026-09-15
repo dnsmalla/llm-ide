@@ -15,7 +15,7 @@ buckets: `Services/` (147) and `Views/` (146).
 The isolation *machinery* already exists and works: `AppFeature`,
 `FeatureCatalog` as the single `#if FEATURE_*` seam, `AppModule`/`FeatureRegistry`
 for start/stop, and `Package.swift` folder excludes. The gap is that only five of
-sixteen features own a folder for that machinery to point at.
+seventeen features own a folder for that machinery to point at.
 
 The cost is concrete and already being paid:
 
@@ -49,7 +49,7 @@ on the gate (see below).
 ```
 Sources/LlmIdeMac/
 ├── Core/            leaf infrastructure — knows nothing about any feature
-├── Features/        the 16 features, one folder each
+├── Features/        the 17 features, one folder each
 └── Shell/           composition root — the ONLY layer that may name every feature
 ```
 
@@ -107,8 +107,8 @@ and `LoopEngine/` already use.
 | Terminal | `Views/Terminal/`(6), `TerminalPanelState` | 7 |
 
 Mobile Control and Terminal are not menu sections but are build-excludable and
-currently scattered. They get folders for the same reason as the rest: sixteen
-folders, not fourteen.
+currently scattered, as is Chat. They get folders for the same reason as the
+rest: seventeen folders, not fourteen — the fourteen menu sections plus Chat, Mobile Control and Terminal.
 
 ### Two structural decisions
 
@@ -245,7 +245,7 @@ That is the isolation goal made mechanical.
 
 ## Migration sequence
 
-Leaves first, entangled last. Roughly 22 commits, each independently shippable
+Leaves first, entangled last. Roughly 23 commits (Tasks 0–22), each independently shippable
 and each lowering the ratchet.
 
 | Step | Commits | Content |
@@ -285,7 +285,7 @@ Operational notes for whoever runs this:
 
 ## Decisions
 
-- **Branch:** all ~22 commits land on `refactor/mac-feature-slices`, merged to
+- **Branch:** all ~23 commits land on `refactor/mac-feature-slices`, merged to
   `main` once the ratchet reaches zero.
 
 ## Open decisions
