@@ -14,7 +14,7 @@ import Foundation
 /// first-class answer, not a failure: the runner falls back to hash comparison,
 /// which is exactly today's behaviour, so an unrecognised runner is never made
 /// worse by this existing.
-enum StageOutputParser {
+public enum StageOutputParser {
     /// One recognised runner: the regex, and which capture group holds the
     /// failure count.
     private struct Pattern {
@@ -79,5 +79,35 @@ enum StageOutputParser {
     private static func matchCount(_ regex: String, in text: String) -> Int {
         guard let re = try? NSRegularExpression(pattern: regex) else { return 0 }
         return re.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
+    }
+
+    private static func firstStringCapture(_ regex: String, group: Int, in text: String) -> String? {
+        guard let re = try? NSRegularExpression(pattern: regex),
+              let match = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              match.numberOfRanges > group,
+              let range = Range(match.range(at: group), in: text)
+        else { return nil }
+        return String(text[range])
+    }
+
+    /// The binary name a shell reported as missing, when `output` looks like an
+    /// exit-127 "command not found" line. Handles both the bash/dash/sh phrasing
+    /// ("/bin/sh: pytest: command not found", with or without a "line N:"
+    /// segment in between) and zsh's reversed phrasing
+    /// ("zsh: command not found: pytest"). Returns `nil` when neither shape is
+    /// recognised, so the caller can fall back to naming the whole configured
+    /// command instead of guessing.
+    public static func missingCommandName(in output: String) -> String? {
+        let patterns = [
+            #": ([^:\n]+): command not found"#,
+            #"command not found: (\S+)"#,
+        ]
+        for pattern in patterns {
+            if let name = firstStringCapture(pattern, group: 1, in: output) {
+                let trimmed = name.trimmingCharacters(in: .whitespaces)
+                if !trimmed.isEmpty { return trimmed }
+            }
+        }
+        return nil
     }
 }

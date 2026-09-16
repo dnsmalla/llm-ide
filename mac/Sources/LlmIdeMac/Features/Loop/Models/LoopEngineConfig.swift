@@ -5,10 +5,10 @@ import Foundation
 /// project id — same idiom as `CustomAutoTask`/`CustomProvider`, and
 /// local-only (never synced), matching how Repo/Issues/Gantt config
 /// already works.
-struct LoopEngineConfig: Codable, Equatable {
-    var stages: [LoopStage]
-    var maxIterations: Int = 10
-    var consecutiveFailureStop: Int = 2
+public struct LoopEngineConfig: Codable, Equatable {
+    public var stages: [LoopStage]
+    public var maxIterations: Int = 10
+    public var consecutiveFailureStop: Int = 2
 
     /// Optional wall-clock ceiling for a run, in seconds. `nil` ⇒ unlimited,
     /// which is now the DEFAULT.
@@ -25,34 +25,34 @@ struct LoopEngineConfig: Codable, Equatable {
     /// Still honoured when the user sets it deliberately in Settings → Loop, and
     /// still checked only between stages: "stop starting new work after this",
     /// never a hard kill of a stage already running.
-    var wallClockBudgetSeconds: Double?
+    public var wallClockBudgetSeconds: Double?
 
     /// Maximum repair attempts per stage per run. `maxIterations` bounds how many
     /// times the loop goes round, but a single stubborn stage can consume every
     /// one of them; this bounds the spend on one stage independently of the
     /// iteration count, which is what actually costs LLM calls.
-    var maxRepairsPerStage: Int = 3
+    public var maxRepairsPerStage: Int = 3
 
     /// What to do when a repair edits a protected path. See `RepairScopeGuard`.
-    var protectedPathPolicy: ProtectedPathPolicy = .revert
+    public var protectedPathPolicy: ProtectedPathPolicy = .revert
 
     /// Write a human-readable run summary into the Library
     /// (`llm-doc/loop/<yyyy>/<MM>/`) at the end of every run. Off by default —
     /// the journal already records every run, and a note per run is only wanted
     /// when a person, not a tool, is the audience. See `LoopRunSummaryWriter`.
-    var writeSummaryNote: Bool = false
+    public var writeSummaryNote: Bool = false
 
     /// Project-specific additions to `GitRepairScopeGuard.defaultProtectedGlobs`.
     /// Additive by design — a project can widen the protected set but not narrow
     /// the built-in one, because the built-ins are what stop the loop certifying
     /// a deleted test as a fix.
-    var extraProtectedGlobs: [String] = []
+    public var extraProtectedGlobs: [String] = []
 
     /// When another run already holds the main git root, provision an isolated
     /// worktree instead of waiting in `LoopRunQueue`. Off by default — queueing
     /// is safer when disk or git state is tight. Stage approvals still key off
     /// the main repo path, and worktrees with changes are retained for review.
-    var useWorktreesForConcurrentRuns: Bool = false
+    public var useWorktreesForConcurrentRuns: Bool = false
 
     /// The full protected set this config enforces.
     var protectedGlobs: [String] {
@@ -71,7 +71,7 @@ struct LoopEngineConfig: Codable, Equatable {
         case writeSummaryNote, useWorktreesForConcurrentRuns
     }
 
-    init(stages: [LoopStage], maxIterations: Int = 10, consecutiveFailureStop: Int = 2,
+    public init(stages: [LoopStage], maxIterations: Int = 10, consecutiveFailureStop: Int = 2,
          wallClockBudgetSeconds: Double? = nil, maxRepairsPerStage: Int = 3,
          protectedPathPolicy: ProtectedPathPolicy = .revert, extraProtectedGlobs: [String] = [],
          writeSummaryNote: Bool = false, useWorktreesForConcurrentRuns: Bool = false) {
@@ -90,7 +90,7 @@ struct LoopEngineConfig: Codable, Equatable {
     /// shipped version is `decodeIfPresent` with a default, or a saved config
     /// from an older build fails to decode and the user silently loses their
     /// stage list (`load` returns nil ⇒ callers re-detect defaults).
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         stages = try container.decode([LoopStage].self, forKey: .stages)
         maxIterations = try container.decodeIfPresent(Int.self, forKey: .maxIterations) ?? 10
@@ -117,7 +117,7 @@ struct LoopEngineConfig: Codable, Equatable {
     /// limit" — so this is no longer load-bearing for correctness; it stays
     /// because writing the key makes the stored config self-describing, and a
     /// future default other than nil would need the distinction back.
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(stages, forKey: .stages)
         try container.encode(maxIterations, forKey: .maxIterations)

@@ -18,7 +18,7 @@ import Foundation
 /// System Check markers match, so that loop is never created, and a repo with
 /// no detectable test tooling gets Regression alone — exactly what such a repo
 /// got before the split.
-enum LoopStageDetector {
+public enum LoopStageDetector {
     /// The PRE-SPLIT flat catalogue of default stages, each marked
     /// `isDefault = true`. It is deliberately still the legacy nine and does
     /// NOT include the Regression loop's own `regression-test` verify stage
@@ -696,6 +696,15 @@ enum LoopStageDetector {
         // 4. Re-pin each default loop's own stages.
         loops = loops.map { ensureDefaultStages(in: $0, gitRoot: gitRoot) }
 
+        // 4.5 Re-validate default test-role stage commands against detection
+        // right now (see `revalidatingTestStages`). Step 4's `pinning` helper
+        // deliberately never touches an existing match's command — it exists
+        // to ADD a missing default and preserve a stage's edits otherwise — so
+        // a Test/Regression stage whose command was auto-detected once against
+        // a nested subproject (or a project that has since dropped its test
+        // tooling) would otherwise carry that command forever.
+        loops = revalidatingTestStages(in: loops, gitRoot: gitRoot)
+
         // 5. Keep one editable loop. A first-time project gets one; an
         //    existing project keeps whatever it has (including a loop this
         //    call emptied), so a deletion is never undone.
@@ -729,6 +738,85 @@ enum LoopStageDetector {
             }
         }
         return LoopEngineProjectStore(loops: loops)
+    }
+
+    /// Re-validate every DEFAULT test-role stage — `isDefault == true`,
+    /// `kind == .shellCommand`, `defaultKey` one of `"test"` /
+    /// `"regression-test"` — against what `detectTestCommand` finds RIGHT NOW,
+    /// and reconcile:
+    /// - a stage whose command no longer matches detection is UPDATED to the
+    ///   freshly detected command;
+    /// - a stage whose tooling detection no longer finds ANYTHING is REMOVED;
+    ///   if that empties a default loop (`defaultKey != nil`) whose only
+    ///   content was that stage, the loop is removed too — an empty default
+    ///   loop can never succeed, it can only ever be re-created empty on the
+    ///   next load.
+    ///
+    /// Scoped deliberately narrow so a hand-written or hand-edited stage is
+    /// never at risk: a stage the user added themselves (`defaultKey == nil`)
+    /// is invisible to this pass no matter what its command says, and every
+    /// OTHER default (the Regression sweep, the System Check commands, the
+    /// Plan skill stages) is left alone — those commands are markers of what
+    /// exists in the tree, not "which tool is currently installed" guesses,
+    /// so they do not go stale the same way a test command can.
+    ///
+    /// Requires a resolvable `gitRoot`; with none, nothing changes — acting on
+    /// a temporarily unresolvable working tree is exactly the failure mode
+    /// every other detector path already refuses (see `ensureDefaultLoops`
+    /// step 1's own git-root guard).
+    ///
+    /// **On telling a stale auto-detected command apart from a deliberate user
+    /// edit:** `LoopStage` records no "last auto-detected value", so there is
+    /// no way to reconstruct, from the saved command alone, whether it was
+    /// auto-detected and has since gone stale, or the user changed it on
+    /// purpose while it still carried `isDefault == true` (the general
+    /// `pinning` helper preserves a matched stage's command exactly for that
+    /// reason — editing a pinned default does not clear its `isDefault` flag).
+    /// This function still updates in that ambiguous case, for two reasons:
+    /// (1) the concrete bug this fixes — a `pytest` command auto-detected once
+    /// against a nested subproject, persisting forever on a machine where
+    /// `pytest` was never installed — is far more likely than a user
+    /// hand-typing the exact command a fresh detection would also produce for
+    /// the wrong reason; (2) `isDefault == true` is already the only signal
+    /// every other rule in this file treats as "this slot is auto-managed",
+    /// so treating it any differently here would be a special case, not a
+    /// safer default. A user who wants a default's command to diverge from
+    /// detection permanently has no way to pin that today (there is no
+    /// "detach from default" action) — that gap is worth a follow-up, not a
+    /// reason to leave a genuinely stale, unrunnable command in place.
+    public static func revalidatingTestStages(in loops: [LoopDefinition], gitRoot: URL?) -> [LoopDefinition] {
+        guard let gitRoot else { return loops }
+        let detected = detectTestCommand(gitRoot: gitRoot)
+        func isTestRoleStage(_ stage: LoopStage) -> Bool {
+            guard stage.isDefault, stage.kind == .shellCommand, let key = stage.defaultKey else { return false }
+            return key == "test" || key == "regression-test"
+        }
+        return loops.compactMap { loop -> LoopDefinition? in
+            var stages = loop.config.stages
+            var changed = false
+            if detected == nil {
+                let before = stages.count
+                stages.removeAll(where: isTestRoleStage)
+                changed = stages.count != before
+            } else {
+                for index in stages.indices where isTestRoleStage(stages[index]) && stages[index].command != detected {
+                    stages[index].command = detected
+                    changed = true
+                }
+            }
+            guard changed else { return loop }
+            var updated = loop
+            updated.config.stages = LoopStage.renumbered(stages)
+            // An empty default loop can never succeed — nothing left to run
+            // means nothing left to gate on — so drop it rather than keep a
+            // dead loop around; `ensureDefaultLoops` recreates it from
+            // `defaultLoops` the moment detection finds something again. A
+            // user loop (`defaultKey == nil`) is never dropped this way, even
+            // if it happens to end up empty — deleting a user's loop is their
+            // call alone.
+            if updated.isDefault, updated.config.stages.isEmpty { return nil }
+            return updated
+        }
     }
 
 }

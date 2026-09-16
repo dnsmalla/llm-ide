@@ -779,7 +779,18 @@ final class LoopEngineRunner: ObservableObject {
         // "is the output byte-identical", which cannot see thrashing at all.
         // Said once per stage per run, not every iteration.
         let scoreNote: String
-        if let score {
+        if outcome.exitCode == 127 {
+            // Exit 127 is the shell's own convention for "command not found" —
+            // not a test failure at all. Reporting that plainly, ahead of the
+            // failure-count logic below, is what turns a confusing "failure
+            // count not recognised" (true, but useless — of course pytest's
+            // "command not found" line has no failure count) into an
+            // actionable "pytest isn't installed". This does not suppress the
+            // underlying failure: the stage still fails and still repairs/gives
+            // up exactly as any other failure would.
+            let missing = StageOutputParser.missingCommandName(in: outcome.output) ?? command
+            scoreNote = " · command not found: \"\(missing)\" is not installed or not on PATH"
+        } else if let score {
             scoreNote = " · \(score) failing"
         } else if didTimeOut {
             // The parser was handed "stage timed out after Ns", not the

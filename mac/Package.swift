@@ -227,6 +227,7 @@ let package = Package(
         // same rationale as graph-kit's graph-layout-lab / graph-engine-lab.
         .executable(name: "chat-contract-lab", targets: ["ChatContractLab"]),
         .executable(name: "generation-contract-lab", targets: ["GenerationContractLab"]),
+        .executable(name: "loop-contract-lab", targets: ["LoopContractLab"]),
     ],
     dependencies: [
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"),
@@ -318,6 +319,11 @@ let package = Package(
             // assert nothing about Graph at all — naming a Graph type would
             // break build-mac-lite/min, where `Graph/` is excluded.
             swiftSettings: featureDefines
+        ),
+        .executableTarget(
+            name: "LoopContractLab",
+            dependencies: ["LlmIdeMacLib"],
+            path: "Sources/LoopContractLab"
         ),
         .testTarget(
             name: "LlmIdeMacTests",
