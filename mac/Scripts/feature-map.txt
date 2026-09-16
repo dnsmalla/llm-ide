@@ -14,7 +14,7 @@
 Shell/          Shell
 Core/           Core
 ClaudeLink/     Core
-Chat/           Feature:Chat
+Features/Chat/          Feature:Chat
 AutoTask/       Feature:AutoTask
 LoopEngine/     Feature:Loop
 Features/CodeGraph/    Feature:CodeGraph
