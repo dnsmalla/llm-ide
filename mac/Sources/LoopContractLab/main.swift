@@ -28,6 +28,14 @@ func expect(_ condition: Bool, _ label: String) {
 
 print("loop-contract-lab")
 
+#if FEATURE_AUTOTASK
+// Loop lives under Features/Loop, which `libExcludes` drops entirely when
+// `auto_tasks` is not in LLMIDE_FEATURES (build-mac-min: agent_chat only —
+// see Package.swift's `libExcludes.append(..., "Features/Loop")`). Wrapped
+// in `#if` for the same reason ChatContractLab wraps its Graph block: this
+// lab gets the same featureDefines as the library, so the whole thing simply
+// vanishes from the reduced builds instead of failing to compile.
+
 // MARK: - Fixture helpers
 
 /// A throwaway directory standing in for a project's git root, cleaned up
@@ -170,6 +178,9 @@ do {
     expect(note.contains("command not found") && note.contains("pytest"),
            "the composed note names the command and says it was not found / not on PATH")
 }
+#else
+print("  skipped — Loop is excluded from this build (auto_tasks not in LLMIDE_FEATURES)")
+#endif
 
 if failures.isEmpty {
     print("loop-contract-lab: all assertions passed")

@@ -323,7 +323,14 @@ let package = Package(
         .executableTarget(
             name: "LoopContractLab",
             dependencies: ["LlmIdeMacLib"],
-            path: "Sources/LoopContractLab"
+            path: "Sources/LoopContractLab",
+            // Same reason as ChatContractLab: Loop lives under Features/Loop,
+            // which `libExcludes` drops entirely when `auto_tasks` is not in
+            // LLMIDE_FEATURES (build-mac-min: agent_chat only) — see
+            // Package.swift's `libExcludes.append(..., "Features/Loop")`.
+            // Without this the lab could not even name LoopStageDetector in
+            // the reduced builds.
+            swiftSettings: featureDefines
         ),
         .testTarget(
             name: "LlmIdeMacTests",
