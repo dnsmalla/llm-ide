@@ -8,12 +8,15 @@ import Combine
 @MainActor
 final class TaskLogStore: ObservableObject {
 
-    enum Level: String { case info, error }
+    // `Level` moved to Core/Contracts/TaskLogWriting.swift as top-level
+    // `TaskLogLevel` — `LoopRunService` mirrors its runner's log into this
+    // store through the `TaskLogWriting` protocol and must not name
+    // `TaskLogStore` to do so.
 
     struct LogLine: Identifiable, Equatable {
         let id: UUID
         let timestamp: Date
-        let level: Level
+        let level: TaskLogLevel
         let text: String
     }
 
@@ -22,7 +25,7 @@ final class TaskLogStore: ObservableObject {
 
     @Published private(set) var buffers: [String: [LogLine]] = [:]
 
-    func append(_ id: String, _ text: String, level: Level = .info) {
+    func append(_ id: String, _ text: String, level: TaskLogLevel = .info) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         var lines = buffers[id] ?? []
@@ -33,7 +36,7 @@ final class TaskLogStore: ObservableObject {
         buffers[id] = lines
     }
 
-    func append(_ task: AutoTask, _ text: String, level: Level = .info) {
+    func append(_ task: AutoTask, _ text: String, level: TaskLogLevel = .info) {
         append(task.rawValue, text, level: level)
     }
 
@@ -57,6 +60,12 @@ final class TaskLogStore: ObservableObject {
         lines(for: task.rawValue)
     }
 }
+
+// `append(_:_:level:)`'s default `level` argument is irrelevant to
+// conformance (protocol requirements never carry it), and `TaskLogLevel`
+// already matches `Level` exactly — so, like `LoopEngineRunner: LoopRunning`,
+// this is a one-liner.
+extension TaskLogStore: TaskLogWriting {}
 
 /// Pure line splitter for streaming subprocess output. Feed it decoded
 /// chunks; it emits complete lines and retains any trailing partial line

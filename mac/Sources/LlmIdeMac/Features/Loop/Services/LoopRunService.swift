@@ -29,7 +29,7 @@ final class LoopRunService: ObservableObject {
     /// Reporting sinks, wired at boot. Weak: the service must not keep the
     /// app-level stores alive, mirroring `AutoCodeUpdateService.activity`.
     weak var activity: ActivityStore?
-    weak var logStore: TaskLogStore?
+    weak var logStore: (any TaskLogWriting)?
 
     private let api: LlmIdeAPIClient
     private var runners: [String: LoopEngineRunner] = [:]
