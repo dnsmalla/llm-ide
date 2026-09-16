@@ -151,12 +151,12 @@ final class LoopDefaultLoopsTests: XCTestCase {
     func testEveryDefaultStageKeyIsOwnedByTheLoopThatEmitsIt() throws {
         try writeLlmIdeLayout()
         let store = LoopStageDetector.ensureDefaultLoops(
-            in: LoopEngineProjectStore(loops: []), gitRoot: repo)
+            in: LoopEngineProjectStore(loops: []), gitRoot: repo).store
         for loop in store.loops {
             guard let loopKey = loop.defaultKey else { continue }
             // Re-running the ensure must move nothing, which is only true if
             // every stage the loop emits is owned by that same loop.
-            let again = LoopStageDetector.ensureDefaultLoops(in: store, gitRoot: repo)
+            let again = LoopStageDetector.ensureDefaultLoops(in: store, gitRoot: repo).store
             XCTAssertEqual(again.loop(defaultKey: loopKey)?.config.stages.compactMap(\.defaultKey),
                            loop.config.stages.compactMap(\.defaultKey),
                            "\(loopKey) loses or gains stages on a second ensure")
@@ -221,7 +221,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
 
     func testLegacyAggregateLoopSplitsIntoTheDefaultLoops() throws {
         try writeLlmIdeLayout()
-        let migrated = LoopStageDetector.ensureDefaultLoops(in: legacyAggregateStore(), gitRoot: repo)
+        let migrated = LoopStageDetector.ensureDefaultLoops(in: legacyAggregateStore(), gitRoot: repo).store
         XCTAssertEqual(Set(migrated.loops.compactMap(\.defaultKey)),
                        Set(LoopDefaultLoopKey.all))
         // The aggregate loop SURVIVES as the project's editable loop — the
@@ -254,7 +254,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
         store.loops[0].config.stages[index].command = "cd extension && npm run test:fast"
         store.loops[0].config.stages[index].enabled = false
 
-        let migrated = LoopStageDetector.ensureDefaultLoops(in: store, gitRoot: repo)
+        let migrated = LoopStageDetector.ensureDefaultLoops(in: store, gitRoot: repo).store
         let backend = migrated.loop(defaultKey: LoopDefaultLoopKey.systemCheck)?
             .config.stages.first { $0.defaultKey == "backend" }
         XCTAssertEqual(backend?.command, "cd extension && npm run test:fast")
@@ -273,7 +273,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
     /// land on the stage-less loop the split leaves behind.
     func testMigrationMovesPrimaryOffTheEmptiedEditableLoop() throws {
         try writeLlmIdeLayout()
-        let migrated = LoopStageDetector.ensureDefaultLoops(in: legacyAggregateStore(), gitRoot: repo)
+        let migrated = LoopStageDetector.ensureDefaultLoops(in: legacyAggregateStore(), gitRoot: repo).store
         XCTAssertEqual(migrated.loops.first(where: \.isPrimary)?.defaultKey,
                        LoopDefaultLoopKey.regression)
         XCTAssertEqual(migrated.loops.first { $0.name == "Main Loop" }?.isPrimary, false)
@@ -283,7 +283,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
     func testFirstTimeProjectGetsOneEditableLoopBesideTheBuiltIns() throws {
         try writeLlmIdeLayout()
         let store = LoopStageDetector.ensureDefaultLoops(
-            in: LoopEngineProjectStore(loops: []), gitRoot: repo)
+            in: LoopEngineProjectStore(loops: []), gitRoot: repo).store
         let editable = store.loops.filter { !$0.isDefault }
         XCTAssertEqual(editable.map(\.name), ["Main Loop"])
         XCTAssertTrue(editable[0].config.stages.isEmpty, "an empty canvas, not a copy of the built-ins")
@@ -294,9 +294,9 @@ final class LoopDefaultLoopsTests: XCTestCase {
     func testDeletingTheEditableLoopIsNotUndoneOnTheNextLoad() throws {
         try writeLlmIdeLayout()
         var store = LoopStageDetector.ensureDefaultLoops(
-            in: LoopEngineProjectStore(loops: []), gitRoot: repo)
+            in: LoopEngineProjectStore(loops: []), gitRoot: repo).store
         store.loops.removeAll { !$0.isDefault }
-        let reloaded = LoopStageDetector.ensureDefaultLoops(in: store, gitRoot: repo)
+        let reloaded = LoopStageDetector.ensureDefaultLoops(in: store, gitRoot: repo).store
         XCTAssertTrue(reloaded.loops.allSatisfy(\.isDefault))
         XCTAssertEqual(reloaded.loops.filter(\.isPrimary).count, 1)
     }
@@ -308,7 +308,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
         let mine = LoopStage(id: "u1", name: "My lint", kind: .shellCommand,
                              command: "make lint", order: 99)
         let migrated = LoopStageDetector.ensureDefaultLoops(
-            in: legacyAggregateStore(extraStages: [mine]), gitRoot: repo)
+            in: legacyAggregateStore(extraStages: [mine]), gitRoot: repo).store
         let survivor = migrated.loops.first { $0.name == "Main Loop" }
         XCTAssertEqual(survivor?.config.stages.map(\.id), ["u1"])
         XCTAssertNil(survivor?.defaultKey, "a surviving aggregate is an ordinary user loop")
@@ -332,7 +332,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
             LoopDefinition(name: "Second", isPrimary: false, config: cloned("second cmd")),
             LoopDefinition(name: "Main Loop", isPrimary: true, config: cloned("primary cmd"))
         ])
-        let migrated = LoopStageDetector.ensureDefaultLoops(in: store, gitRoot: repo)
+        let migrated = LoopStageDetector.ensureDefaultLoops(in: store, gitRoot: repo).store
         let skills = migrated.loop(defaultKey: LoopDefaultLoopKey.systemCheck)?
             .config.stages.filter { $0.defaultKey == "skills" }
         XCTAssertEqual(skills?.count, 1)
@@ -348,8 +348,8 @@ final class LoopDefaultLoopsTests: XCTestCase {
     /// reshuffle the user's loops) every time the page opened.
     func testEnsureDefaultLoopsIsIdempotent() throws {
         try writeLlmIdeLayout()
-        let once = LoopStageDetector.ensureDefaultLoops(in: legacyAggregateStore(), gitRoot: repo)
-        let twice = LoopStageDetector.ensureDefaultLoops(in: once, gitRoot: repo)
+        let once = LoopStageDetector.ensureDefaultLoops(in: legacyAggregateStore(), gitRoot: repo).store
+        let twice = LoopStageDetector.ensureDefaultLoops(in: once, gitRoot: repo).store
         XCTAssertEqual(once, twice)
     }
 
@@ -358,9 +358,9 @@ final class LoopDefaultLoopsTests: XCTestCase {
     func testAMissingDefaultLoopIsRecreated() throws {
         try writeLlmIdeLayout()
         var store = LoopStageDetector.ensureDefaultLoops(
-            in: LoopEngineProjectStore(loops: []), gitRoot: repo)
+            in: LoopEngineProjectStore(loops: []), gitRoot: repo).store
         store.loops.removeAll { $0.defaultKey == LoopDefaultLoopKey.systemCheck }
-        let restored = LoopStageDetector.ensureDefaultLoops(in: store, gitRoot: repo)
+        let restored = LoopStageDetector.ensureDefaultLoops(in: store, gitRoot: repo).store
         XCTAssertNotNil(restored.loop(defaultKey: LoopDefaultLoopKey.systemCheck))
     }
 
@@ -369,8 +369,8 @@ final class LoopDefaultLoopsTests: XCTestCase {
     func testAnUnresolvableGitRootDeletesNothing() throws {
         try writeLlmIdeLayout()
         let full = LoopStageDetector.ensureDefaultLoops(
-            in: LoopEngineProjectStore(loops: []), gitRoot: repo)
-        let withoutRoot = LoopStageDetector.ensureDefaultLoops(in: full, gitRoot: nil)
+            in: LoopEngineProjectStore(loops: []), gitRoot: repo).store
+        let withoutRoot = LoopStageDetector.ensureDefaultLoops(in: full, gitRoot: nil).store
         XCTAssertEqual(withoutRoot.loops.compactMap(\.defaultKey).sorted(),
                        full.loops.compactMap(\.defaultKey).sorted())
         XCTAssertEqual(withoutRoot.loop(defaultKey: LoopDefaultLoopKey.systemCheck)?
@@ -384,7 +384,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
     func testFreshDefaultLoopsAreNotScheduledUntilOptedIn() throws {
         try writeLlmIdeLayout()
         let store = LoopStageDetector.ensureDefaultLoops(
-            in: LoopEngineProjectStore(loops: []), gitRoot: repo)
+            in: LoopEngineProjectStore(loops: []), gitRoot: repo).store
         XCTAssertEqual(store.loops.compactMap(\.defaultKey).sorted(),
                        LoopDefaultLoopKey.all.sorted(),
                        "every default loop still exists — it is only unscheduled")
@@ -396,7 +396,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
     func testScheduledLoopsSkipsOptedOutAndFullyDisabledLoops() throws {
         try writeLlmIdeLayout()
         var store = LoopStageDetector.ensureDefaultLoops(
-            in: LoopEngineProjectStore(loops: []), gitRoot: repo)
+            in: LoopEngineProjectStore(loops: []), gitRoot: repo).store
         // Opt every loop in, the way the user does from the Loop page — the
         // schedule is opt-in, so there is nothing to filter until they have.
         store.loops = store.loops.map { loop in
@@ -423,7 +423,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
     func testLoopContainingFindsAStageOutsideThePrimaryLoop() throws {
         try writeLlmIdeLayout()
         let store = LoopStageDetector.ensureDefaultLoops(
-            in: LoopEngineProjectStore(loops: []), gitRoot: repo)
+            in: LoopEngineProjectStore(loops: []), gitRoot: repo).store
         let macApp = store.loop(defaultKey: LoopDefaultLoopKey.systemCheck)?
             .config.stages.first { $0.defaultKey == "mac-app" }
         XCTAssertNotNil(macApp)

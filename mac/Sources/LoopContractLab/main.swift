@@ -249,7 +249,10 @@ do {
     // The Test default loop already exists, but its one stage is the user's
     // own (`defaultKey == nil`) — e.g. right after a previous run's removal
     // path deleted the keyed stage and the user added their own before the
-    // next load.
+    // next load. Round 3's fix to `pinning()` means this stage's command
+    // ("npm run e2e") does not match what detection produces ("swift test"),
+    // so it is no longer a KIND-ALONE match at all: it is never adopted, and
+    // a separate, genuinely fresh Test default is appended alongside it.
     let userStage = LoopStage(name: "E2E", kind: .shellCommand, command: "npm run e2e", order: 0,
                               isDefault: false, defaultKey: nil)
     let testLoopWithUserStage = LoopDefinition(
@@ -257,15 +260,20 @@ do {
         config: LoopEngineConfig(stages: [userStage]))
     let saved = LoopEngineProjectStore(loops: [testLoopWithUserStage])
 
-    let (ensured, _) = LoopStageDetector.ensureDefaultLoops(in: saved, gitRoot: swiftRoot)
+    let (ensured, changes) = LoopStageDetector.ensureDefaultLoops(in: saved, gitRoot: swiftRoot)
     let testLoopResult = ensured.loops.first { $0.defaultKey == LoopDefaultLoopKey.test }
-    expect(testLoopResult?.config.stages.count == 1, "the Test loop still has exactly one stage")
-    expect(testLoopResult?.config.stages.first?.command == "npm run e2e",
-           "a stage pinning() adopts (stamps defaultKey='test' onto) DURING THIS SAME `ensureDefaultLoops` call "
-               + "is not modified by step 4.5 — it was not eligible (not present at load) even though it now "
-               + "carries isDefault/defaultKey/kind that would otherwise match")
-    expect(testLoopResult?.config.stages.first?.isDefault == true,
-           "pinning() still does its own job — the stage IS stamped as default — only the revalidation is withheld")
+    expect(testLoopResult?.config.stages.count == 2,
+           "the user's stage is joined by a separate, genuine Test default — never merged into it")
+    let mineStage = testLoopResult?.config.stages.first { $0.defaultKey == nil }
+    let defaultStage = testLoopResult?.config.stages.first { $0.defaultKey == LoopDefaultLoopKey.test }
+    expect(mineStage?.command == "npm run e2e" && mineStage?.isDefault == false,
+           "the user's stage is completely untouched: not adopted, not renamed, not marked default — "
+               + "pinning() now refuses a kind-alone match whose command isn't what detection currently produces")
+    expect(defaultStage?.command == "swift test" && defaultStage?.detectedCommand == "swift test",
+           "the genuinely detected Test default is appended fresh, with correct provenance from the moment "
+               + "it is created — not merged into the user's differently-commanded stage")
+    expect(changes.isEmpty,
+           "appending a brand-new default is pinning()'s job, not revalidatingTestStages's — nothing to report")
 }
 
 do {
@@ -286,6 +294,58 @@ do {
     expect(changes.contains(LoopStageDetector.RevalidationChange(
         loopName: "Test", stageName: "Test", kind: .updated(from: "pytest", to: "swift test"))),
            "ensureDefaultLoops surfaces the change for the caller to log")
+}
+
+// MARK: 7c. THE ROUND-2 GAP, permanently guarded. Round 2's `eligibleStageIDs`
+// snapshot only protects the ONE `ensureDefaultLoops` call in which
+// `pinning()` adopts a user's stage. Once that adoption round-trips through a
+// save/reload, the stage carries the key AS LOADED on the next call — so
+// `eligibleStageIDs` alone cannot tell a freshly-adopted user stage apart from
+// a genuine legacy one on the SECOND (or any later) load. The actual fix is in
+// `pinning()` itself: the kind-alone/name+kind fallback for the two test-role
+// keys now requires the candidate's `command` to already equal what detection
+// currently produces, so a stage whose command was never the detected one is
+// never adopted in the FIRST place — no second-load gap to guard against.
+// This scenario drives `ensureDefaultLoops` three times in a row (feeding each
+// call's output into the next, exactly like real save → reload → save cycles)
+// so a regression here fails immediately instead of surviving to a later load
+// nobody happened to simulate.
+
+do {
+    let userStage = LoopStage(name: "E2E", kind: .shellCommand, command: "npm run e2e", order: 0,
+                              isDefault: false, defaultKey: nil)
+    let saved = LoopEngineProjectStore(loops: [LoopDefinition(
+        name: "Test", defaultKey: LoopDefaultLoopKey.test, config: LoopEngineConfig(stages: [userStage]))])
+
+    // A root where detection finds a DIFFERENT command ("swift test") — the
+    // reviewer's exact attack: naively matching by kind alone would adopt
+    // "npm run e2e" as the Test default, then "correct" it to "swift test".
+    var current = saved
+    for load in 1...3 {
+        let (ensured, changes) = LoopStageDetector.ensureDefaultLoops(in: current, gitRoot: swiftRoot)
+        let stage = ensured.loops.first { $0.defaultKey == LoopDefaultLoopKey.test }?.config.stages.first
+        expect(stage?.command == "npm run e2e",
+               "load #\(load) (differing-command root): the user's command must never be overwritten")
+        expect(stage?.defaultKey == nil,
+               "load #\(load) (differing-command root): the user's stage must never be adopted as a default at all "
+                   + "— that is what makes every later load safe, not a snapshot that only covers load #1")
+        expect(changes.isEmpty, "load #\(load) (differing-command root): nothing to report — nothing was touched")
+        current = ensured
+    }
+
+    // A root where detection finds NOTHING — same attack, `.removed` instead
+    // of `.updated` is what round 2's gap would have produced.
+    current = saved
+    for load in 1...3 {
+        let (ensured, changes) = LoopStageDetector.ensureDefaultLoops(in: current, gitRoot: bareRoot)
+        let stage = ensured.loops.first { $0.defaultKey == LoopDefaultLoopKey.test }?.config.stages.first
+        expect(stage?.command == "npm run e2e",
+               "load #\(load) (no-detection root): the user's command must never be removed")
+        expect(stage?.defaultKey == nil,
+               "load #\(load) (no-detection root): the user's stage must never be adopted as a default at all")
+        expect(changes.isEmpty, "load #\(load) (no-detection root): nothing to report — nothing was touched")
+        current = ensured
+    }
 }
 
 // MARK: 8. `detectedCommand` round-trips through Codable, including the

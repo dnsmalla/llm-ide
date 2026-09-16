@@ -149,6 +149,36 @@ public enum LoopStageDetector {
     /// default is pinned IN PLACE (its command/edits/enabled flag preserved);
     /// a default with no match is appended. Shared by both `ensureDefaultStages`
     /// overloads so the match rules below cannot drift between them.
+    ///
+    /// **Command-gated adoption for the two TEST-ROLE keys.** Round 2 of this
+    /// fix gave `revalidatingTestStages` the power to overwrite or DELETE any
+    /// stage carrying `defaultKey ∈ {"test", "regression-test"}` by that key
+    /// alone. That made this function's own legacy fallback — adopting a
+    /// key-less `.shellCommand` stage into one of those two slots by KIND
+    /// ALONE, no command check — dangerous in a way it never used to be: a
+    /// user's own stage (say, `npm run e2e`) sitting unkeyed in the Test loop
+    /// got silently promoted into an auto-managed slot, and from the NEXT
+    /// load onward (once that adoption round-trips through
+    /// `LoopEngineConfigStore`'s save) it looked exactly like a genuine
+    /// legacy stage forever — `loadedTestStageIDs` in `ensureDefaultLoops`
+    /// only protects the ONE call in which the adoption happens; it cannot
+    /// tell a freshly-adopted user stage apart from a real legacy one on
+    /// every load after that, because both look identical: keyed,
+    /// `detectedCommand == nil`.
+    ///
+    /// The actual defect was never "no command check" as a general rule — it
+    /// is scoped precisely to the two keys `revalidatingTestStages` can act
+    /// on destructively. Requiring the candidate's `command` to already equal
+    /// `def.command` (the command detection just produced) means only a
+    /// stage that IS, in fact, running the currently-detected test command
+    /// gets treated as "this was auto-detected before keys existed" — a
+    /// stage whose command was never what detection produces is, by
+    /// definition, not auto-detected, and is left alone (appended as a
+    /// separate fresh default instead of adopting the user's stage). The
+    /// System Check fallback (the final `else` below) is UNCHANGED: nothing
+    /// else in this file revisits a System Check stage destructively by key
+    /// alone, so the "only a flag, harmless" invariant this function always
+    /// relied on still holds there.
     private static func pinning(_ defaults: [LoopStage], into config: LoopEngineConfig) -> LoopEngineConfig {
         var stages = config.stages
         for def in defaults {
@@ -160,27 +190,58 @@ public enum LoopStageDetector {
             // Legacy fallback, for stages saved before `defaultKey` existed
             // (restricted to key-less stages so it can never steal a stage
             // that already carries a different default's identity):
-            // "Test" predates every other `.shellCommand` default and was
-            // always matched by kind alone, so a renamed Test keeps its
-            // pinned status; the System Check stages match by exact name.
-            // Whichever way a stage matches, its key is stamped, so every
-            // config migrates to key-matching on first load.
+            // "Test"/"regression-test" predate every other `.shellCommand`
+            // default and were always matched by kind alone; the System
+            // Check stages match by exact name. Whichever way a stage
+            // matches, its key is stamped, so every config migrates to
+            // key-matching on first load.
             let matches: (LoopStage) -> Bool
+            // Whether this match, if it succeeds, is a genuine first-time
+            // ADOPTION into a test-role slot — as opposed to a stage that
+            // already carries this key (handled above) or a System Check
+            // stage (handled below, never revisited destructively). Only an
+            // adoption needs `detectedCommand` stamped: that is what gives a
+            // legitimately-adopted stage correct provenance from the moment
+            // it is adopted, instead of manufacturing a permanent
+            // `detectedCommand == nil` population every load could mint one
+            // of.
+            var isTestRoleAdoption = false
             if stages.contains(where: { $0.defaultKey == def.defaultKey }) {
                 matches = { $0.defaultKey == def.defaultKey }
-            } else if def.defaultKey == "test" || def.kind == .regressionSweep {
-                // Kind-alone is unambiguous for these two: there is exactly one
-                // Test default and one Regression default, so even a legacy
-                // stage renamed before keys existed is recovered, not duplicated.
+            } else if def.kind == .regressionSweep {
+                // The Regression sweep never carries a command (it is not a
+                // `.shellCommand` stage at all), so kind alone is unambiguous
+                // and safe here — there is nothing for a command check to
+                // gate, and nothing here is a "test-role" key either.
                 matches = { $0.kind == def.kind && $0.defaultKey == nil }
+            } else if def.defaultKey == "test" || def.defaultKey == "regression-test" {
+                matches = { $0.kind == def.kind && $0.defaultKey == nil && $0.command == def.command }
+                isTestRoleAdoption = true
             } else {
                 matches = { $0.kind == def.kind && $0.name == def.name && $0.defaultKey == nil }
             }
             if let idx = stages.firstIndex(where: matches) {
                 stages[idx].isDefault = true
                 stages[idx].defaultKey = def.defaultKey
+                if isTestRoleAdoption {
+                    stages[idx].detectedCommand = def.detectedCommand
+                }
             } else {
-                stages.append(def)
+                // `def.order` is only ever correct for a BRAND NEW loop, where
+                // it is the whole stage list's own position. Appending it
+                // VERBATIM into an existing `stages` array — which is exactly
+                // what happens the moment a test-role adoption is refused
+                // (see the doc above: a rejected match falls through to this
+                // append) — can collide with a stage already occupying that
+                // `order` (a fresh loop's Test def is `order: 0`, the same
+                // value a lone user stage already has). `LoopStage.runOrder`
+                // tie-breaks a collision by `id`, i.e. by comparing random
+                // UUIDs, which reorders the array UNPREDICTABLY on the very
+                // next pass through `runOrder` (the split step, every load).
+                // Placing it at the current end always avoids the collision.
+                var appended = def
+                appended.order = stages.count
+                stages.append(appended)
             }
         }
         // Rebuild via `stages` assignment rather than the memberwise initializer:
