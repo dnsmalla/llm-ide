@@ -179,6 +179,21 @@ public enum LoopStageDetector {
     /// else in this file revisits a System Check stage destructively by key
     /// alone, so the "only a flag, harmless" invariant this function always
     /// relied on still holds there.
+    ///
+    /// **The real cost, stated plainly.** "Left alone" is not free for a
+    /// GENUINE pre-`defaultKey` legacy stage whose command has drifted (it
+    /// was auto-detected once — say `pytest`, when the repo was Python — and
+    /// the repo has since moved to `swift test`): that stage is refused
+    /// adoption exactly like a user's own stage would be, so it is left
+    /// running its stale `pytest` command, unkeyed, forever, while a
+    /// separate, correctly-provisioned `swift test` default appears beside
+    /// it in the same loop. This is not a bug to fix here: an unkeyed
+    /// drifted-legacy stage and a user's own unkeyed stage are byte-for-byte
+    /// indistinguishable (both `.shellCommand`, both `defaultKey == nil`),
+    /// so protecting one necessarily means abandoning the other, and
+    /// protecting the user's own work is the correct tradeoff. It is
+    /// recorded here so the cost is visible, not silently implied by "left
+    /// alone."
     private static func pinning(_ defaults: [LoopStage], into config: LoopEngineConfig) -> LoopEngineConfig {
         var stages = config.stages
         for def in defaults {
@@ -215,7 +230,23 @@ public enum LoopStageDetector {
                 // gate, and nothing here is a "test-role" key either.
                 matches = { $0.kind == def.kind && $0.defaultKey == nil }
             } else if def.defaultKey == "test" || def.defaultKey == "regression-test" {
-                matches = { $0.kind == def.kind && $0.defaultKey == nil && $0.command == def.command }
+                // BOTH gates are required. Round 3 added the command gate but
+                // (for `"regression-test"` specifically) dropped a name gate
+                // that already existed: before this branch was unified,
+                // `"regression-test"` fell through to the final `else` below,
+                // which already required `$0.name == def.name` (it is a
+                // `.shellCommand` named "Test", never `.regressionSweep`, so
+                // it never took the old kind-alone path either). Without the
+                // name gate, a user's OWN differently-named stage in the
+                // Regression loop whose command happens to equal what
+                // detection currently produces (e.g. "My sweep check",
+                // command "swift test") gets adopted as `regression-test` —
+                // gaining `isDefault` (hiding Delete, showing the "can't be
+                // deleted" lock in the UI) and becoming eligible for
+                // `revalidatingTestStages`'s destructive path, exactly the
+                // category of defect this whole fix exists to close.
+                matches = { $0.kind == def.kind && $0.name == def.name
+                    && $0.defaultKey == nil && $0.command == def.command }
                 isTestRoleAdoption = true
             } else {
                 matches = { $0.kind == def.kind && $0.name == def.name && $0.defaultKey == nil }

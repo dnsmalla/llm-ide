@@ -333,8 +333,15 @@ do {
         current = ensured
     }
 
-    // A root where detection finds NOTHING — same attack, `.removed` instead
-    // of `.updated` is what round 2's gap would have produced.
+    // A root where detection finds NOTHING. NOTE, honestly: with no
+    // detection, `defaultStages(forLoop: .test, gitRoot:)` returns `[]`, so
+    // `pinning()` never even receives a "test" `def` to adopt anything
+    // into — there is no adoption attempt to defend against here at all.
+    // This half of the scenario is therefore VACUOUS as a guard on the
+    // adoption defect: it cannot fail under a mutation that reintroduces the
+    // defect, because the code path it would need to exercise never runs.
+    // Kept only for symmetry/documentation of the removed-not-updated shape;
+    // do not read it as coverage.
     current = saved
     for load in 1...3 {
         let (ensured, changes) = LoopStageDetector.ensureDefaultLoops(in: current, gitRoot: bareRoot)
@@ -344,6 +351,48 @@ do {
         expect(stage?.defaultKey == nil,
                "load #\(load) (no-detection root): the user's stage must never be adopted as a default at all")
         expect(changes.isEmpty, "load #\(load) (no-detection root): nothing to report — nothing was touched")
+        current = ensured
+    }
+}
+
+// MARK: 7d. PROBE F (round 4). Round 3's fix for `"regression-test"` command-
+// gated the SAME predicate used for `"test"`, but dropped the NAME gate that
+// `"regression-test"` already had before the two branches were unified (it
+// fell through to the final `else`, which requires `$0.name == def.name`,
+// since a `regression-test` def is a `.shellCommand` named "Test", never
+// `.regressionSweep`). Without the name gate back, a user's own DIFFERENTLY
+// NAMED stage in the Regression loop whose command happens to already equal
+// the current detection — "My sweep check", `.shellCommand`,
+// `command: "swift test"`, `defaultKey: nil` — got adopted as
+// `regression-test` purely because the command matched, gaining `isDefault`
+// (which hides the Delete action and shows the "can't be deleted" lock in
+// `LoopEngineView`) and becoming eligible for `revalidatingTestStages`'s
+// destructive path — a narrower recurrence of the exact defect round 3
+// closed. Driven three loads deep, same shape as MARK 7c, because that is
+// the shape that actually catches a regression here (a single load is not
+// enough to prove `eligibleStageIDs` isn't quietly doing the protecting).
+
+do {
+    let sweep = LoopStage(name: "Regression", kind: .regressionSweep, order: 0,
+                          isDefault: true, defaultKey: "regression")
+    let mine = LoopStage(name: "My sweep check", kind: .shellCommand, command: "swift test", order: 1,
+                         isDefault: false, defaultKey: nil)
+    let saved = LoopEngineProjectStore(loops: [LoopDefinition(
+        name: "Regression", defaultKey: LoopDefaultLoopKey.regression,
+        config: LoopEngineConfig(stages: [sweep, mine]))])
+
+    var current = saved
+    for load in 1...3 {
+        let (ensured, _) = LoopStageDetector.ensureDefaultLoops(in: current, gitRoot: swiftRoot)
+        let regressionLoop = ensured.loops.first { $0.defaultKey == LoopDefaultLoopKey.regression }
+        let mineNow = regressionLoop?.config.stages.first { $0.name == "My sweep check" }
+        expect(mineNow?.command == "swift test" && mineNow?.defaultKey == nil && mineNow?.isDefault == false,
+               "load #\(load): a differently-NAMED stage is never adopted as regression-test, even though its "
+                   + "command already equals what detection currently produces")
+        let regressionTestStage = regressionLoop?.config.stages.first { $0.defaultKey == "regression-test" }
+        expect(regressionTestStage != nil && regressionTestStage?.name == "Test",
+               "load #\(load): a separate, genuine regression-test default is appended instead — "
+                   + "named \"Test\", not merged into the user's differently-named stage")
         current = ensured
     }
 }
