@@ -31,6 +31,6 @@ Mac app paths previously used `LLM-IDE` (with a space). `AppIdentity` renames le
 
 ## Consequences
 
-- Single source for Mac display name and paths: `mac/Sources/LlmIdeMac/Models/AppIdentity.swift` and `Strings.swift`
+- Single source for Mac display name and paths: `mac/Sources/LlmIdeMac/Core/Platform/AppIdentity.swift` and `Strings.swift`
 - User-facing prose and UI strings use **LLM-IDE**
 - Filesystem paths use **llm-ide** (kebab-case, lowercase)

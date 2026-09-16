@@ -141,8 +141,8 @@ LlmIdeMac (MobileControlManager :3006)
 
 | Area | Path |
 |------|------|
-| Mac server | `mac/Sources/LlmIdeMac/Services/MobileWebSocketServer.swift`, `MobileControlManager.swift` |
-| Mac settings UI | `mac/Sources/LlmIdeMac/Views/Settings/MobileControlSettingsSection.swift` |
+| Mac server | `mac/Sources/LlmIdeMac/Features/MobileControl/Services/MobileWebSocketServer.swift`, `MobileControlManager.swift` |
+| Mac settings UI | `mac/Sources/LlmIdeMac/Features/MobileControl/Views/MobileControlSettingsSection.swift` |
 | Wire protocol | `ios_app/SharedProtocol/` |
 | iOS app | `ios_app/MyApp/` |
 | Loopback test | `scripts/mobile/verify-native-pairing.swift` |

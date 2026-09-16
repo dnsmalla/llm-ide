@@ -385,7 +385,7 @@ Run through this against a real meeting before merging:
 
 ---
 
-## macOS Code Assistant panel (`mac/Sources/LlmIdeMac/Chat/Views/Panel/CodeAssistantPanel.swift`, `Chat/Views/Panel/HistoryTextEditor.swift`)
+## macOS Code Assistant panel (`mac/Sources/LlmIdeMac/Features/Chat/Views/Panel/CodeAssistantPanel.swift`, `Features/Chat/Views/Panel/HistoryTextEditor.swift`)
 
 ### ✅ MUST preserve
 
@@ -418,7 +418,7 @@ Run through this against a real meeting before merging:
 
 ---
 
-## Shell execution (`mac/Sources/LlmIdeMac/Services/BashService.swift`)
+## Shell execution (`mac/Sources/LlmIdeMac/Core/Platform/BashService.swift`)
 
 ### ✅ MUST preserve
 
@@ -593,6 +593,15 @@ Connectivity (`comps`/`largest`) is the *producer's* responsibility, not the
 layout's — a real repo graph genuinely arrives fragmented.
 
 ---
+
+## macOS feature-slice migration (`mac/Scripts/feature-boundaries.sh`, `mac/Package.swift`)
+
+### ✅ MUST preserve
+
+- **A file moved out from under a `Package.swift` exclude list must have that list updated in the same change.** SwiftPM's exclude-path validation only *warns* on a path that no longer exists and still exits 0 — it never fails the build. During the `Core`/`Features`/`Shell` migration, a file moved out from under the lite-build exclude silently rejoined `build-mac-lite` because nothing enforced the exclude path stayed valid. `feature-boundaries.sh` now asserts every `Package.swift` exclude path exists on disk and exits 1 if not; this is the ONLY thing that catches it, so never move a file without checking whether an exclude list names its old path.
+- **A file move can break something outside Swift without ever breaking `swift build`.** Swift is one module in this app, so the compiler cannot see a boundary violation and a `git mv` never fails a Swift build on its own — but a non-Swift script that hardcodes a path can silently go stale. `scripts/conformance-agent-v2.mjs` hardcoded `Views/DocGen/DocGenView.swift`, and `make chat-gates` was red for four tasks of the migration before anyone noticed, because every task's review checked Swift builds and the boundary gate but nothing checked non-Swift references to moved paths. `feature-boundaries.sh` now also asserts every `mac/Sources/LlmIdeMac/…` path named by a literal in `scripts/`, `mac/Scripts/`, or `Makefile` exists on disk.
+- **`Shell/` is exempt from the feature/feature boundary rule, but NOT from the build-exclusion rule.** `Shell/AppShell.swift` referenced `TerminalPanelState` unguarded; moving that type into the build-excludable `Features/Terminal/` broke `build-mac-lite` and `build-mac-min` with "cannot find type in scope", because Shell is compiled into every configuration but the type it named was not. `TerminalPanelState` stays in `Shell/Chrome/` for exactly this reason — do not move a type Shell references unconditionally into an excludable feature folder without first guarding or relocating the reference.
+- **Never un-seal a `sealed` feature in `mac/Scripts/feature-map.txt` to land a change.** If a change needs to reach across features, move the shared type to `Core/` (a capability subfolder, not a feature-named one) or add/extend a protocol in `Core/Contracts/` instead. Un-sealing to route around the gate reintroduces exactly the coupling sealing exists to prevent.
 
 ## Quick reference: where to add X
 
