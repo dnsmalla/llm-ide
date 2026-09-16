@@ -16,7 +16,7 @@ Core/           Core
 ClaudeLink/     Core
 Features/Chat/          Feature:Chat
 Features/AutoTask/     Feature:AutoTask
-LoopEngine/     Feature:Loop
+Features/Loop/          Feature:Loop
 Features/CodeGraph/    Feature:CodeGraph
 Features/Search/    Feature:Search
 Features/Gantt/    Feature:Gantt

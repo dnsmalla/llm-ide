@@ -85,7 +85,7 @@ if terminalIncluded {
 if autoTasksIncluded {
     featureDefines.append(.define("FEATURE_AUTOTASK"))
 } else {
-    libExcludes.append(contentsOf: ["Features/AutoTask", "LoopEngine"])
+    libExcludes.append(contentsOf: ["Features/AutoTask", "Features/Loop"])
     testExcludes.append(contentsOf: [
         "AgentLoopStageRepairerTests.swift",
         "AutoCodeCustomSchedulingTests.swift",
