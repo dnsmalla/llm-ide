@@ -1,0 +1,34 @@
+# path-prefix   layer            sealed?
+# First matching prefix wins, so list most-specific prefixes first.
+# Layer is: Core | Shell | Feature:<Name>
+# A third column of `sealed` means the feature is enforced at ZERO
+# cross-feature references. Unsealed features are reported only.
+# Unlisted paths default to Unclassified, a real (non-exempt-from-reporting)
+# layer: a classified Feature referencing Unclassified code produces a
+# non-failing `pending` line instead of vanishing silently. Shell/Core stay
+# exempt from the cross-feature BOUNDARY rule (they may reference anything)
+# but are NOT exempt from the build-exclusion rule (see feature-boundaries.sh).
+# Seal a feature only once its collaborators are classified too — sealing
+# early hides real edges to still-unclassified code (see Gantt history).
+
+Shell/          Shell
+Core/           Core
+ClaudeLink/     Core
+Features/Chat/          Feature:Chat
+Features/AutoTask/     Feature:AutoTask
+Features/Loop/          Feature:Loop
+Features/CodeGraph/    Feature:CodeGraph
+Features/Search/    Feature:Search
+Features/Gantt/    Feature:Gantt
+Features/Issues/    Feature:Issues
+Features/ReviewConflicts/    Feature:ReviewConflicts
+Features/Visual/    Feature:Visual
+Features/Terminal/    Feature:Terminal
+Features/Live/    Feature:Live
+Features/Explorer/    Feature:Explorer
+Features/SourceControl/    Feature:SourceControl
+Features/DocGen/    Feature:DocGen
+Features/Generation/    Feature:Generation
+Features/Settings/    Feature:Settings
+Features/Library/    Feature:Library
+Features/MobileControl/    Feature:MobileControl

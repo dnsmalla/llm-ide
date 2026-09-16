@@ -48,7 +48,7 @@ The macOS app (`LlmIdeMac`) is the primary IDE client — a single-window SwiftU
 
 ### Entry point and scene shape
 
-**Source:** `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift`
+**Source:** `mac/Sources/LlmIdeMac/Shell/LlmIdeMacApp.swift`
 
 The `@main` struct is `LlmIdeMacApp: App` (line 29). It uses a **`Window`** scene (not `WindowGroup`), declared at line 140:
 
@@ -104,7 +104,7 @@ A `MenuBarExtra` is declared at lines 272–285. Its icon (`record.circle.fill` 
 
 ### ContentView and AppShell
 
-**Source:** `mac/Sources/LlmIdeMac/Views/ContentView.swift`
+**Source:** `mac/Sources/LlmIdeMac/Shell/ContentView.swift`
 
 `ContentView` (line 5) switches on `session.bootstrapping` and `session.isAuthenticated`:
 
@@ -112,9 +112,9 @@ A `MenuBarExtra` is declared at lines 272–285. Its icon (`record.circle.fill` 
 - Not authenticated → `LoginView(api: api)`
 - Authenticated → `AppShell(api: api)`
 
-**Source:** `mac/Sources/LlmIdeMac/Views/AppShell.swift`
+**Source:** `mac/Sources/LlmIdeMac/Shell/AppShell.swift`
 
-`AppShell` is the authenticated shell. It renders `WelcomeView` when `projectStore.activeProject == nil` (lines 39–40), and the full section layout when a project is active. The section layout is driven by `ShellState.section` (an `@Observable` object, `mac/Sources/LlmIdeMac/Services/ShellState.swift`). `ShellState` is created once at the `AppShell` root and injected via `.environment(shell)`, so it has **app-session scope**: it survives section navigation (which tears the section views down and recreates them) and is reset only when the app relaunches. UI state that must outlive a section switch lives here rather than as the section view's `@State` — e.g. `ShellState.exploreChatVisible` keeps the Explorer's chat panel open across navigation (it would otherwise reset to closed every time `ExplorerView` is rebuilt), while still starting closed on a fresh launch.
+`AppShell` is the authenticated shell. It renders `WelcomeView` when `projectStore.activeProject == nil` (lines 39–40), and the full section layout when a project is active. The section layout is driven by `ShellState.section` (an `@Observable` object, `mac/Sources/LlmIdeMac/Shell/ShellState.swift`). `ShellState` is created once at the `AppShell` root and injected via `.environment(shell)`, so it has **app-session scope**: it survives section navigation (which tears the section views down and recreates them) and is reset only when the app relaunches. UI state that must outlive a section switch lives here rather than as the section view's `@State` — e.g. `ShellState.exploreChatVisible` keeps the Explorer's chat panel open across navigation (it would otherwise reset to closed every time `ExplorerView` is rebuilt), while still starting closed on a fresh launch.
 
 **Sections** (`ShellState.Section`, `ShellState.swift` line 9):
 
@@ -637,7 +637,7 @@ The activity feed surfaces backend events in the Mac status bar without requirin
 
 The nine `ActivityKind` cases (with matching backend string raw values): `knowledgeUpdated`, `regressionDone`, `issueCreated`, `commentAdded`, `dispatchIssueCreated`, `outcomeChanged`, `meetingAdded`, `emailFetched`, `slackFetched`.
 
-### ActivityBell + ActivityPanel (`mac/Sources/LlmIdeMac/Views/Shell/ActivityBell.swift`)
+### ActivityBell + ActivityPanel (`mac/Sources/LlmIdeMac/Shell/Chrome/ActivityBell.swift`)
 
 `ActivityBell` sits in `StatusBar` alongside `AgentStatusBadge` (added inside the trailing `HStack(spacing: 12)`).  It renders:
 

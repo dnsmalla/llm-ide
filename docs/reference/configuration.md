@@ -11,7 +11,7 @@ at the bottom to pick where it lives.
 
 ## UI preferences (macOS)
 
-Owned by `AppConfig` (`mac/Sources/LlmIdeMac/Models/Config.swift`) and
+Owned by `AppConfig` (`mac/Sources/LlmIdeMac/Core/Platform/Config.swift`) and
 written through `UserDefaults`. `@Published` for SwiftUI binding.
 
 | Setting | Store | Default | Notes |

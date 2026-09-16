@@ -126,38 +126,48 @@ llm-ide/
 │   │       ├── typescript/          # TS implementation + CLI (plugin runtime)
 │   │       ├── schema/              # canonical JSON schema + conformance fixtures
 │   │       └── graph-engine.json    # plugin manifest
-│   ├── Sources/LlmIdeMac/
-│   │   ├── Graph/       # ALL app-side graph code, one folder:
-│   │   │   ├── Engine/  #   GraphEngine protocol + builtin/plugin impls
-│   │   │   ├── Services/#   KnowledgeGraphService, GraphAutoUpdater, upload, watcher
-│   │   │   ├── Notes/   #   Code-notes writer (CodeNoteService/Generator, Analyze)
-│   │   │   └── Views/   #   UAGraphView, canvas, 3D view, palette, session store
-│   │   ├── AutoTask/    # ALL Auto Task code, one folder:
-│   │   │   ├── Models/  #   AutoTask, AutoTaskConfig/Settings, templates, run history
-│   │   │   ├── Services/#   AutoCodeUpdateService(+ext), config/template stores, catalogs
-│   │   │   └── Views/   #   AutoCodeView, settings/template sections, cron field
-│   │   ├── LoopEngine/  # ALL Loop Engine code, one folder (same shape as AutoTask/):
-│   │   │   ├── Models/  #   LoopDefinition, stages, config store, templates, status
-│   │   │   ├── Services/#   LoopEngineRunner, journal, repairers, guards, parsers
-│   │   │   └── Views/   #   LoopEngineView(+panes), wizard, budget editors
-│   │   ├── Chat/        # ALL chat code, one folder. Like Graph/ (not AutoTask/)
-│   │   │                #   it splits further than Models/Services/Views:
-│   │   │   ├── Models/  #   ChatMessage, ChatSession
-│   │   │   ├── Engine/  #   ChatEngine(+History/+PanelWrites/+ExternalTurn),
-│   │   │   │            #   ChatAutoChainPolicy, ChatStreamBuffer
-│   │   │   ├── Session/ #   ChatEngine+Session, ChatSessionStore, QuickChatContext,
-│   │   │   │            #   ExplorerMobileEngineResolver
-│   │   │   ├── Transport/#  ChatTransport + AgentV2Selection, which today also
-│   │   │   │            #   holds AgentV2EngineTransport (moving to ClaudeLink/)
-│   │   │   ├── Services/#   ChatEngineRegistry, slash commands, voice state, module
-│   │   │   └── Views/   #   Panel/ (CodeAssistant), Quick/ (menu bar + sheet),
-│   │   │                #   Shared/ (approval cards, AgentV2ApprovalState)
-│   │   ├── Models/      # Data models
-│   │   ├── Services/    # Long-lived work (*Service, *Store, *Client, *Manager, *Router);
-│   │   │                #   also RepoFileWatcher, RepoGraphLocator, and Memory/ (core-owned
-│   │   │                #   faults/ + q&a/ store, fault reports — works with Graph compiled out)
-│   │   ├── Views/       # SwiftUI views
-│   │   └── ViewModels/  # View models
+│   ├── Sources/LlmIdeMac/     # Shell → Features → Core (see "Module Boundaries (macOS app)" below)
+│   │   ├── Core/        # Leaf infrastructure — never build-excluded, importable by ANY layer.
+│   │   │   │            #   Subfolders are named by CAPABILITY, not by feature:
+│   │   │   ├── Contracts/   #   Cross-feature protocols: LoopRunning, TaskLogWriting,
+│   │   │   │                #   MobileFeatureBridge
+│   │   │   ├── DesignSystem/#   Shared SwiftUI chrome: FileTreePanel, EditorTabBar,
+│   │   │   │                #   FileDetailView, SettingsSectionCard, Components/
+│   │   │   ├── Editor/      #   CompletionController/Menu, HunkStagingList
+│   │   │   ├── Generation/  #   GenerationRegistry + GenerationViewModel (concrete type,
+│   │   │   │                #   referenced unconditionally by Shell — see invariants.md)
+│   │   │   ├── Memory/      #   Fault reports, Q&A store — works with CodeGraph compiled out
+│   │   │   ├── Networking/  #   API/ — LlmIdeAPIClient and extensions
+│   │   │   ├── Platform/    #   BashService, Config, AppIdentity, RegressionRunner,
+│   │   │   │                #   RepoGraphLocator, Memory/ (verification/fault-repair)
+│   │   │   ├── Project/     #   WorkspaceRoot, FileSystemTree, ExplorerPaths, ProjectLayout
+│   │   │   ├── Repo/        #   Models/ + Services/ — git clients shared by SourceControl,
+│   │   │   │                #   Issues, Gantt, AutoTask (RepoBackend seam not yet extracted)
+│   │   │   └── Verification/#   Verify-approval store, used by Loop
+│   │   ├── Features/    # One folder per ShellState.Section menu item + 4 non-menu features
+│   │   │   │            #   (Chat, MobileControl, Generation, Terminal). Normally
+│   │   │   │            #   {Models,Services,Views}; MUST NOT reference another feature.
+│   │   │   ├── Library/ · Live/ · Explorer/ · Search/ · ReviewConflicts/ · SourceControl/
+│   │   │   ├── Issues/ · Gantt/ · Visual/ · DocGen/ · AutoTask/ · CodeGraph/ · Loop/ · Settings/
+│   │   │   ├── Chat/    #   splits further: Models/ Engine/ Session/ Transport/ Services/
+│   │   │   │            #   Views/ (Panel/ = CodeAssistant, Quick/ = menu bar + sheet)
+│   │   │   ├── MobileControl/  # WebSocket server, Bonjour, PIN cache, pairing UI
+│   │   │   ├── Generation/     # Doc Gen + Visual's shared generation VIEWS (not the
+│   │   │   │                   #   registry/view-model, which stay in Core/Generation)
+│   │   │   └── Terminal/       # excludable; Shell/Chrome/TerminalPanelState.swift stays
+│   │   │                       #   in Shell — see invariants.md
+│   │   ├── Shell/       # Composition root — the ONLY layer permitted to name every feature:
+│   │   │   │            #   app entry (LlmIdeMacApp.swift), AppShell, ContentView,
+│   │   │   │            #   FeatureCatalog, FeatureRegistry, AppFeature, ShellState,
+│   │   │   │            #   DeepLinkRouter
+│   │   │   └── Chrome/  #   StatusBar, ActivityBell, TerminalPanelState (exempt from the
+│   │   │                #   feature/boundary rule, NOT from build-exclusion — see invariants.md)
+│   │   ├── ClaudeLink/  # Top-level (not under Core/), but declared Core in the feature map —
+│   │   │                #   see docs/explanation/claude-linker.md
+│   │   └── Agent/ · Services/ · Models/ · Utilities/ · ViewModels/ · Views/
+│   │       │            #   UNCLASSIFIED — 44 files not yet placed into Core or Features,
+│   │       │            #   exempt from the boundary rule until a follow-up task sorts them
+│   │       └──          #   (see mac/Scripts/feature-map.txt)
 │   └── Tests/           # XCTest suite
 ├── docs/                # mkdocs site (Diátaxis framework)
 └── kb/                  # Runtime data only (SQLite db, dev secrets)
@@ -203,6 +213,24 @@ L4 routes       → any Node layer, never src/    (server.mjs, routes/*,
 - **`graphkit/`** — Code-graph primitives (graph model, layouts, memory writer); consumed by `agents/planner.mjs` + `agents/code-sync.mjs`, rendered by the Mac app
 - **`plugins/`** — Discovers/loads/install extension plugins; `claude-adapter.mjs` bridges the plugin tool surface to the agent runtime
 
+### Module Boundaries (macOS app)
+
+Rule: **`Shell → Features → Core`**. A feature may import `Core`. A feature must **never** reference another feature, and never `Shell`.
+
+Enforced **textually** by `mac/Scripts/feature-boundaries.sh` (run by `make regression`), because Swift has one module here — nothing at the compiler level stops one feature folder from importing another.
+
+**The gate currently REPORTS but does not yet ENFORCE the feature/feature rule.** Enforcement is per-feature, via a `sealed` third column in `mac/Scripts/feature-map.txt`, and **no feature carries it yet**. 46 known cross-feature references currently emit `warn` and the gate still exits 0 because of them — do not assume a cross-feature reference fails the build today; it does not.
+
+The gate's four checks that **do** fail the build (exit 1) today:
+1. `Shell`/`Core` referencing symbols owned by a build-excludable `Features/` folder.
+2. An `#elseif` anywhere under `Shell`/`Core` (flag-guard code must fail closed, not branch on an untracked condition).
+3. Every exclude path in `mac/Package.swift` must exist on disk — SwiftPM itself only *warns* on a bad exclude path and still exits 0, so this is the only thing that catches a moved file silently rejoining a build it should be excluded from.
+4. Every `mac/Sources/LlmIdeMac/…` path named by a literal in `scripts/`, `mac/Scripts/`, or `Makefile` must exist — a move never breaks Swift (one module), but it silently breaks anything outside Swift that names a path.
+
+Known limitation, stated plainly: **the gate cannot see edges that pass through `Core/`.** Several features' backing code legitimately lives in `Core/` today — `Core/Repo/` is Source Control's, `Core/Generation/` is Doc Gen + Visual's, `Core/Memory/` and `Core/Verification/` are Loop's — and references into those from other features are invisible to the check by design (it only flags edges into `Unclassified`-owned symbols and other sealed/unsealed feature folders). Sealing every feature will therefore produce a *clean* gate over a tree that still has real coupling running through `Core`.
+
+Cross-feature protocols belong in `Core/Contracts/`: `LoopRunning`, `TaskLogWriting`, `MobileFeatureBridge`. When two features need to talk, add or extend a protocol there rather than importing one feature's concrete type from another — and never un-seal a sealed feature to land a change; move the shared type to `Core/` or add a `Core/Contracts/` protocol instead.
+
 ## Critical Invariants
 
 **Before modifying any file, read the relevant section from [`docs/explanation/invariants.md`](docs/explanation/invariants.md).** Each invariant maps to a previous regression.
@@ -246,7 +274,7 @@ Swift type suffixes communicate role — pick matching suffix when adding new ty
 
 ### Apply & Rebuild (Settings → Workspace)
 
-On a source checkout with a Swift toolchain, Settings → Workspace shows a **Build** card with **"Apply & Rebuild (remove disabled code)"** — an in-app rebuild that actually excludes disabled features from the compiled binary, not just hides them. Owned by `FeatureRebuildService` (`mac/Sources/LlmIdeMac/Services/FeatureRebuildService.swift`); the card (`BuildRebuildSettingsCard` in `mac/Sources/LlmIdeMac/Views/Settings/FeatureProfileSettingsView.swift`) renders nothing when `isEligible` is false, so it never appears on a non-engineer machine or a distributed release build (`Scripts/release.sh` sets `LLMIDE_OMIT_SOURCE_ROOT=1`, which omits the `LLMIDESourceRoot` Info.plist key eligibility depends on). Flow: confirmation dialog → `mac/Scripts/rebuild-features.sh` stages a release build + `mac/Scripts/sign.sh` off to the side (running app untouched) → "Restart & Install" spawns `mac/Scripts/rebuild-swap.sh` detached, which waits for this process to exit, keeps the previous `.app` as `<name>.app.bak` (one rollback slot), installs the staged bundle, and relaunches — logging to `<install-target-minus-.app>.rebuild.log`. See `docs/spec/macos-app.md` ("Apply & Rebuild") for the full contract.
+On a source checkout with a Swift toolchain, Settings → Workspace shows a **Build** card with **"Apply & Rebuild (remove disabled code)"** — an in-app rebuild that actually excludes disabled features from the compiled binary, not just hides them. Owned by `FeatureRebuildService` (`mac/Sources/LlmIdeMac/Features/Settings/Services/FeatureRebuildService.swift`); the card (`BuildRebuildSettingsCard` in `mac/Sources/LlmIdeMac/Features/Settings/Views/FeatureProfileSettingsView.swift`) renders nothing when `isEligible` is false, so it never appears on a non-engineer machine or a distributed release build (`Scripts/release.sh` sets `LLMIDE_OMIT_SOURCE_ROOT=1`, which omits the `LLMIDESourceRoot` Info.plist key eligibility depends on). Flow: confirmation dialog → `mac/Scripts/rebuild-features.sh` stages a release build + `mac/Scripts/sign.sh` off to the side (running app untouched) → "Restart & Install" spawns `mac/Scripts/rebuild-swap.sh` detached, which waits for this process to exit, keeps the previous `.app` as `<name>.app.bak` (one rollback slot), installs the staged bundle, and relaunches — logging to `<install-target-minus-.app>.rebuild.log`. See `docs/spec/macos-app.md` ("Apply & Rebuild") for the full contract.
 
 ## Mobile Control System
 
@@ -339,7 +367,7 @@ ios_app/MyApp/Services/
 | Add new tab | `TABS` array in `extension/src/sidepanel/App.tsx` + new panel block |
 | Persist meeting data | Extend `SavedTranscript` in `extension/src/lib/storage.ts`; write in `stopRecording()` |
 | Install agent skills into a user project | Auto on New Project / Rebuild via `POST /kb/project/install-skills` (`extension/kb/install-project-skills.mjs`); kit lives in `.skills` |
-| Add mobile control feature | `mac/Sources/LlmIdeMac/Services/MobileControlManager.swift` (Mac dispatch) + `ios_app/MyApp/Services/ConnectionService.swift` (iOS client) + `ios_app/SharedProtocol/` (wire types) |
+| Add mobile control feature | `mac/Sources/LlmIdeMac/Features/MobileControl/Services/MobileControlManager.swift` (Mac dispatch) + `ios_app/MyApp/Services/ConnectionService.swift` (iOS client) + `ios_app/SharedProtocol/` (wire types) |
 | Extend LLM-IDE mobile API | Add endpoint to `extension/server.mjs` + expose via `LlmIdeAPIClient` on Mac (mobile chat proxies through Mac app) |
 
 ### Starting Points for Reading
@@ -347,15 +375,15 @@ ios_app/MyApp/Services/
 - **Server internals** — `extension/server.mjs` → follow router into `extension/routes/router.mjs`
 - **Claude linker** — [`docs/explanation/claude-linker.md`](docs/explanation/claude-linker.md): the two layers (`extension/llm_agent/sdk/` + `extension/providers/`, `mac/…/ClaudeLink/`) that own ALL Claude SDK/CLI knowledge; SDK updates edit only these
 - **KB operations** — `extension/kb/db.mjs` (every state-mutating helper takes `userId` first)
-- **Graph generation** — [`extension/graph_generation/README.md`](extension/graph_generation/README.md): the engine contract, how a plugin supplies one, and how to unplug the compiled-in engine. Everything graph lives in `mac/LocalPackages/graph-kit/` — a **git submodule** of `github.com/dnsmalla/graph-kit` (one folder, two products: `GraphCore` always linked, `GraphKit` unpluggable) — and `mac/Sources/LlmIdeMac/Graph/` (app side). Changes to the engine are commits in that repo; land them there, then bump **both** pins here — the `revision:` on the `.package(url:)` in `mac/Package.swift` (what the build actually resolves) and the submodule gitlink (the local working tree)
-- **Chat slice** — `mac/Sources/LlmIdeMac/Chat/` (see the structure tree above). Logic lifted out of `ChatEngine` is asserted by `make chat-gates` → `cd mac && swift run chat-contract-lab`, an executable for the same reason the graph labs are: **this toolchain has no XCTest, so `make regression` skips `swift test` entirely** (`test-mac` guards it behind `HAS_XCTEST`) and `swift build --build-tests` fails too. A type the lab asserts must be `public` — the lab is a separate target, and `@testable import` is test-target-only
+- **Graph generation** — [`extension/graph_generation/README.md`](extension/graph_generation/README.md): the engine contract, how a plugin supplies one, and how to unplug the compiled-in engine. Everything graph lives in `mac/LocalPackages/graph-kit/` — a **git submodule** of `github.com/dnsmalla/graph-kit` (one folder, two products: `GraphCore` always linked, `GraphKit` unpluggable) — and `mac/Sources/LlmIdeMac/Features/CodeGraph/` (app side). Changes to the engine are commits in that repo; land them there, then bump **both** pins here — the `revision:` on the `.package(url:)` in `mac/Package.swift` (what the build actually resolves) and the submodule gitlink (the local working tree)
+- **Chat slice** — `mac/Sources/LlmIdeMac/Features/Chat/` (see the structure tree above). Logic lifted out of `ChatEngine` is asserted by `make chat-gates` → `cd mac && swift run chat-contract-lab`, an executable for the same reason the graph labs are: **this toolchain has no XCTest, so `make regression` skips `swift test` entirely** (`test-mac` guards it behind `HAS_XCTEST`) and `swift build --build-tests` fails too. A type the lab asserts must be `public` — the lab is a separate target, and `@testable import` is test-target-only
 - **Graph layout** — `mac/LocalPackages/graph-kit/Sources/GraphCore/Layout/GraphLayoutEngine.swift` is the single entry point. Verify any change with `cd mac/LocalPackages/graph-kit && swift run -c release graph-layout-lab --compare` (this toolchain has no XCTest, so the gate is an executable). **Never prune edges to make a dense graph legible** — weight them (`EdgeWeight`) and filter at render; the previous `capDegree(6)` deleted 82–100% of dependency edges
 - **Caption capture** — `extension/src/content/caption-scraper.ts` → `extension/src/sidepanel/hooks/useTranscript.ts`
 - **Central skills kit** — `.skills/` submodule + `docs/how-to/install-central-skills.md`
 - **Agent-loop tool defs** — `extension/llm_agent/{global,internal/skills}/` (mirrors of central)
-- **Mac app entry** — `mac/Sources/LlmIdeMac/LlmIdeMacApp.swift`
-- **Mac services** — `mac/Sources/LlmIdeMac/Services/` (follow suffix taxonomy)
-- **Mobile control** — `docs/mobile/quick-start.md` → `mac/Sources/LlmIdeMac/Services/MobileControlManager.swift` → `ios_app/SharedProtocol/`
+- **Mac app entry** — `mac/Sources/LlmIdeMac/Shell/LlmIdeMacApp.swift`
+- **Mac services** — `mac/Sources/LlmIdeMac/Core/` (leaf infrastructure) and each `Features/<Name>/Services/` (follow suffix taxonomy)
+- **Mobile control** — `docs/mobile/quick-start.md` → `mac/Sources/LlmIdeMac/Features/MobileControl/Services/MobileControlManager.swift` → `ios_app/SharedProtocol/`
 
 ## Testing Checklist
 

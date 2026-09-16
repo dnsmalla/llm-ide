@@ -100,7 +100,16 @@ endif
 # CSV's `status` column is the release checklist.
 # graph-kit-checkout goes FIRST: it is a one-line precondition, and failing it
 # after four Mac builds (many minutes in) is the wrong place to learn about it.
-regression: graph-kit-checkout test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates
+regression: graph-kit-checkout feature-gates test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates
+
+.PHONY: feature-gates
+# Enforces the layering rule: Shell -> Features -> Core. Swift has no
+# intra-target boundary enforcement, so this is a textual check over the
+# symbol declarations/references in mac/Sources/LlmIdeMac. Runs first in
+# `regression` (~16s) because failing fast beats failing after four Swift
+# builds.
+feature-gates:
+	cd mac && ./Scripts/feature-boundaries.sh
 
 # The graph verification gates. These are plain executables precisely so they
 # run where `swift test` cannot (a Command-Line-Tools-only toolchain has no

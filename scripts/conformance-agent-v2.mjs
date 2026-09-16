@@ -343,8 +343,8 @@ if (retiredInChain.length) {
 // it fails on exactly the edit that reintroduces the bug — which the registry's
 // own unit assertions do not.
 for (const rel of [
-  'mac/Sources/LlmIdeMac/Views/DocGen/DocGenView.swift',
-  'mac/Sources/LlmIdeMac/Views/Visual/VisualView.swift',
+  'mac/Sources/LlmIdeMac/Features/DocGen/Views/DocGenView.swift',
+  'mac/Sources/LlmIdeMac/Features/Visual/Views/VisualView.swift',
 ]) {
   // Strip comments first: the fix's own explanatory doc comment QUOTES the
   // broken line, and a naive scan flags it — which it did, on the first run.
