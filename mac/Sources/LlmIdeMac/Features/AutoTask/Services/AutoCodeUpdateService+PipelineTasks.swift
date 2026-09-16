@@ -928,24 +928,25 @@ extension AutoCodeUpdateService {
             logStore.append(.loopEngineering,
                             "▸ \(loop.name) — \(enabledStageCount) enabled stage(s)")
 
-            let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
-            let judge = CodeAssistJudge(api: api)
-            let repairer = AgentFaultRepairer(api: api)
-            let regressionRunner = RegressionRunner(prompter: prompter, judge: judge,
-                                                    verifier: ShellFaultVerifier(), repairer: repairer,
-                                                    verifyTimeout: autoTaskSettings.regressionVerifyTimeout, config: config)
-            // Mirrors runRegressionSweep: without this, the inner Regression
-            // stage's per-fault activity reporting is silently dropped.
-            regressionRunner.activity = activity
-            let runner = LoopEngineRunner(
-                stageRepairer: AgentLoopStageRepairer(api: api),
-                regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
-                skillExecutor: AgentLoopSkillExecutor(api: api),
-                // The journal must be able to tell an unattended run from one
-                // a human asked for — `.autoTask` for the scheduler, `.phone`
-                // when the request came from the iPhone.
-                trigger: journalTrigger
-            )
+            guard let provider = FeatureCatalog.loopRunnerProviding() else {
+                // Should be unreachable — Loop and AutoTask are excluded
+                // together under one build flag (Package.swift), so a build
+                // that compiles this call site always registers a provider.
+                // Reaching here means the registration itself is missing or
+                // broken. Say so in the task log AND record it as a failure:
+                // a silent skip reads as a successful empty run on the Auto
+                // Tasks card, and this is the degrade path the compiled-out
+                // case would otherwise be indistinguishable from.
+                failures.append("Loop is not included in this build")
+                logStore.append(.loopEngineering,
+                                "Loop is not included in this build — skipping.", level: .error)
+                break sweep
+            }
+            // The journal must be able to tell an unattended run from one a
+            // human asked for — `.autoTask` for the scheduler, `.phone` when
+            // the request came from the iPhone.
+            let runner = provider.makeRunner(trigger: journalTrigger,
+                                             regressionVerifyTimeout: autoTaskSettings.regressionVerifyTimeout)
             // Mirror every line into the shared per-task log as it happens. Before
             // this the buffer only ever received the TERMINAL line below, so the
             // Auto Tasks page — and the iPhone, which reads the same buffer —

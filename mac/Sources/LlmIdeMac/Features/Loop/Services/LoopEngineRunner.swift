@@ -23,13 +23,9 @@ import CryptoKit
 ///   non-improving streak, wall clock, and repairs per stage.
 @MainActor
 final class LoopEngineRunner: ObservableObject {
-    struct LogLine: Identifiable, Equatable {
-        enum Level: Equatable { case info, warn, error }
-        let id = UUID()
-        let at: Date
-        let level: Level
-        let text: String
-    }
+    // `LoopLogLine` (was a nested `LogLine` here) now lives in
+    // Core/Contracts/LoopRunning.swift — `LoopRunning.onLog` must be able to
+    // name this type without naming `LoopEngineRunner` itself.
 
     @Published private(set) var running = false
     /// Admission covers queue/worktree provisioning as well as execution.
@@ -39,7 +35,7 @@ final class LoopEngineRunner: ObservableObject {
     /// True while this instance is waiting in `LoopRunQueue` for another run
     /// on the same git root to finish.
     @Published private(set) var waitingInQueue = false
-    @Published private(set) var log: [LogLine] = []
+    @Published private(set) var log: [LoopLogLine] = []
     @Published private(set) var status: LoopEngineStatus?
     @Published private(set) var iteration = 0
 
@@ -128,7 +124,7 @@ final class LoopEngineRunner: ObservableObject {
     /// page, the activity feed, the iPhone — could see progress WITHIN a run;
     /// they got the terminal outcome and nothing else. A sink at the single
     /// append site is enough to fix that without moving any ownership.
-    var onLog: ((LogLine) -> Void)?
+    var onLog: ((LoopLogLine) -> Void)?
 
     /// Whether ANY runner instance is mid-run on `gitRoot`, resolved the same
     /// way `LoopRunQueue` keys it. Read-only view of the process-wide lock, for
@@ -1179,8 +1175,8 @@ final class LoopEngineRunner: ObservableObject {
     /// as long as the app stays open. Mirrors `TaskLogStore`'s own cap.
     private static let maxLogLines = 2000
 
-    private func appendLog(_ level: LogLine.Level, _ text: String) {
-        let line = LogLine(at: Date(), level: level, text: text)
+    private func appendLog(_ level: LoopLogLine.Level, _ text: String) {
+        let line = LoopLogLine(at: Date(), level: level, text: text)
         log.append(line)
         if log.count > Self.maxLogLines {
             // Trim in one chunk, not per append — removeFirst(1) per line
@@ -1282,8 +1278,15 @@ final class LoopEngineRunner: ObservableObject {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
-    private func logLevel(for status: LoopEngineStatus) -> LogLine.Level {
+    private func logLevel(for status: LoopEngineStatus) -> LoopLogLine.Level {
         if case .success = status { return .info }
         return .error
     }
 }
+
+// The protocol was written FROM this type's existing members (see
+// Core/Contracts/LoopRunning.swift), so conformance is a one-liner. If this
+// stops compiling after an unrelated change to `run`'s signature, fix the
+// protocol to match — never change `run` to satisfy a signature the seam
+// guessed at.
+extension LoopEngineRunner: LoopRunning {}

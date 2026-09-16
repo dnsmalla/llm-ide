@@ -88,7 +88,7 @@ struct LoopEngineView: View {
     /// left on across a relaunch would hide a later run's lines with no
     /// visible cause.
     @State private var logFilter = ""
-    @State private var logLevelFilter: LoopEngineRunner.LogLine.Level?
+    @State private var logLevelFilter: LoopLogLine.Level?
     @State private var didCopyLog = false
     // The last run's terminal status is NOT view state — the toolbar reads
     // `runner.status` directly. A @State copy written from the run-completion
@@ -999,7 +999,7 @@ struct LoopEngineView: View {
     /// in a pane 320pt wide.
     /// Scrolls the log pane to its newest visible line. Shared by both
     /// `onChange` keys so the two can never drift apart.
-    private func scrollToNewest(_ visible: [LoopEngineRunner.LogLine],
+    private func scrollToNewest(_ visible: [LoopLogLine],
                                 proxy: ScrollViewProxy) {
         guard let last = visible.last else { return }
         withAnimation(.linear(duration: 0.1)) {
@@ -1010,7 +1010,7 @@ struct LoopEngineView: View {
     /// - Parameter visible: the already-filtered lines, passed in rather than
     ///   re-derived so one render filters the log once.
     @ViewBuilder
-    private func logFilterBar(_ visible: [LoopEngineRunner.LogLine]) -> some View {
+    private func logFilterBar(_ visible: [LoopLogLine]) -> some View {
         let t = theme.current
         if !runner.log.isEmpty {
             HStack(spacing: 4) {
@@ -1045,7 +1045,7 @@ struct LoopEngineView: View {
     /// The log lines the filter bar admits. `warn` as the level filter means
     /// "warn and error" — a user asking for problems wants both, and the two
     /// are one tap apart in severity, not in intent.
-    var visibleLog: [LoopEngineRunner.LogLine] {
+    var visibleLog: [LoopLogLine] {
         let needle = logFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return runner.log.filter { line in
             if let level = logLevelFilter {
@@ -1250,7 +1250,7 @@ struct LoopEngineView: View {
     }
 
     @ViewBuilder
-    private func logRow(_ line: LoopEngineRunner.LogLine) -> some View {
+    private func logRow(_ line: LoopLogLine) -> some View {
         let t = theme.current
         HStack(alignment: .top, spacing: 6) {
             Text(AppDateFormatter.hourMinuteSecond(line.at))
@@ -1268,7 +1268,7 @@ struct LoopEngineView: View {
         }
     }
 
-    private func levelColor(_ level: LoopEngineRunner.LogLine.Level) -> Color {
+    private func levelColor(_ level: LoopLogLine.Level) -> Color {
         let t = theme.current
         switch level {
         case .info:  return t.text

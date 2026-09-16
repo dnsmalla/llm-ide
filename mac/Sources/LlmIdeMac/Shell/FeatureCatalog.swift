@@ -353,7 +353,19 @@ enum FeatureCatalog {
     private static var autoTaskSkills: AutoTaskSkillCatalog?
     private static var autoTaskLogStore: TaskLogStore?
     private static var loopRunService: LoopRunService?
+    private static var loopRunnerProvider: LoopRunnerProviding?
     #endif
+
+    /// Nil when Loop is compiled out. A caller that gets nil must degrade
+    /// visibly, not silently: a scheduled Loop task that quietly no-ops is
+    /// indistinguishable from one that ran and found nothing.
+    static func loopRunnerProviding() -> LoopRunnerProviding? {
+        #if FEATURE_AUTOTASK
+        return loopRunnerProvider
+        #else
+        return nil
+        #endif
+    }
 
     /// Build + wire the ENTIRE Auto Task / Loop stack (scheduler + settings +
     /// templates + skills + log store + on-disk run/action history) and
@@ -432,12 +444,18 @@ enum FeatureCatalog {
         loopRuns.activity = activity
         loopRuns.logStore = taskLog
 
+        // The scheduled Loop Engineering sweep (AutoCodeUpdateService+PipelineTasks)
+        // asks FeatureCatalog for a runner instead of constructing
+        // LoopEngineRunner and its collaborators itself.
+        let loopProvider = LoopRunnerProvider(api: api, config: config, activity: activity)
+
         autoTaskSettings = settings
         autoCodeService = service
         autoTaskTemplates = templates
         autoTaskSkills = skills
         autoTaskLogStore = taskLog
         loopRunService = loopRuns
+        loopRunnerProvider = loopProvider
 
         // Wire the Auto Task + Loop feature bridges onto the mobile manager
         // so the phone can query scheduler state (`auto_task_list`), toggle
