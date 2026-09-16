@@ -227,6 +227,7 @@ let package = Package(
         // same rationale as graph-kit's graph-layout-lab / graph-engine-lab.
         .executable(name: "chat-contract-lab", targets: ["ChatContractLab"]),
         .executable(name: "generation-contract-lab", targets: ["GenerationContractLab"]),
+        .executable(name: "loop-contract-lab", targets: ["LoopContractLab"]),
     ],
     dependencies: [
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"),
@@ -317,6 +318,18 @@ let package = Package(
             // simply vanish from the reduced builds. Without this the lab could
             // assert nothing about Graph at all — naming a Graph type would
             // break build-mac-lite/min, where `Graph/` is excluded.
+            swiftSettings: featureDefines
+        ),
+        .executableTarget(
+            name: "LoopContractLab",
+            dependencies: ["LlmIdeMacLib"],
+            path: "Sources/LoopContractLab",
+            // Same reason as ChatContractLab: Loop lives under Features/Loop,
+            // which `libExcludes` drops entirely when `auto_tasks` is not in
+            // LLMIDE_FEATURES (build-mac-min: agent_chat only) — see
+            // Package.swift's `libExcludes.append(..., "Features/Loop")`.
+            // Without this the lab could not even name LoopStageDetector in
+            // the reduced builds.
             swiftSettings: featureDefines
         ),
         .testTarget(

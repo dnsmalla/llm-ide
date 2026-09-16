@@ -1,7 +1,7 @@
 import Foundation
 
 /// What to do when a repair edits a path it was not allowed to touch.
-enum ProtectedPathPolicy: String, Codable, CaseIterable {
+public enum ProtectedPathPolicy: String, Codable, CaseIterable {
     /// Undo the offending edits (`git checkout --`) and stop the run. The
     /// default: the working tree is left as the agent found it, and the stage is
     /// reported as blocked rather than fixed.

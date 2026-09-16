@@ -129,8 +129,35 @@ enum LoopEngineConfigStore {
     static func loops(projectRoot: URL?, projectId: String, gitRoot: URL?,
                       defaults: UserDefaults = .standard) -> LoopEngineProjectStore {
         let saved = load(projectRoot: projectRoot, projectId: projectId, defaults: defaults)
-        var ensured = LoopStageDetector.ensureDefaultLoops(
+        let (ensuredStore, revalidationChanges) = LoopStageDetector.ensureDefaultLoops(
             in: saved ?? LoopEngineProjectStore(loops: []), gitRoot: gitRoot, defaults: defaults)
+        var ensured = ensuredStore
+        // `revalidatingTestStages` (inside `ensureDefaultLoops`) is a pure
+        // function on purpose — it never writes anything itself. This is the
+        // one place its result actually reaches disk (`system/loop.json` is a
+        // committed, team-shared contract per this file's own doc comment),
+        // so an automatic rewrite of a stage's test command MUST be
+        // explainable, not a silent diff someone finds in `git diff` later.
+        //
+        // An `ActivityStore` entry would be the richer notice, but
+        // `ActivityStore` is a `@MainActor` SwiftUI environment object owned
+        // by the app shell (`LlmIdeMacApp`) — not reachable from this static,
+        // non-UI enum, which is also called from background contexts
+        // (the Auto Task pipeline sweep) that never touch the shell. Wiring
+        // it through would mean threading an ActivityStore reference into
+        // every one of this function's callers (Loop views, MobileLoopBridge,
+        // the Auto Task pipeline) for one log line — out of scope for this
+        // fix. `NSLog`, matching `write(_:to:)` below, is the honest minimum.
+        for change in revalidationChanges {
+            switch change.kind {
+            case let .updated(from, to):
+                NSLog("LoopEngineConfigStore: [%@ / %@] test command re-detected, updating \"%@\" -> \"%@\"",
+                      change.loopName, change.stageName, from, to)
+            case let .removed(command):
+                NSLog("LoopEngineConfigStore: [%@ / %@] test command \"%@\" no longer detected — stage removed",
+                      change.loopName, change.stageName, command)
+            }
+        }
         // Only where there is a file to write the result to — see the helper.
         let unscheduled = projectRoot != nil
             && normalizeScheduleOptIn(&ensured, projectId: projectId, defaults: defaults)

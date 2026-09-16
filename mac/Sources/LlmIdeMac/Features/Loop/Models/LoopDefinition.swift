@@ -7,26 +7,26 @@ import Foundation
 /// per-loop contract, so a project can hold several unrelated loops (e.g.
 /// "fix flaky tests" and "refactor auth") instead of being forced to share
 /// one pipeline.
-struct LoopDefinition: Codable, Equatable, Identifiable {
-    var id: String
-    var name: String
+public struct LoopDefinition: Codable, Equatable, Identifiable {
+    public var id: String
+    public var name: String
     /// Exactly one loop per project is Primary — the loop the scheduled
     /// `.loopEngineering` Auto Task and the phone target. Not enforced at
     /// the type level; `LoopEngineConfigStore` and the Loop page's "Set as
     /// Primary" action are what keep the invariant.
-    var isPrimary: Bool
+    public var isPrimary: Bool
     /// Free text: what this loop is trying to achieve. When set, appended to
     /// the repair/skill prompts `LoopEngineRunner` builds, so a loop's "done"
     /// signal is more than "the stages passed".
-    var goal: String?
+    public var goal: String?
     /// Free text: the observable condition that means done. Same treatment
     /// as `goal`.
-    var acceptanceCriteria: String?
+    public var acceptanceCriteria: String?
     /// Optional path allowlist. Empty (the default) means unrestricted —
     /// today's behavior for every existing and migrated loop. When non-empty,
     /// `LoopEngineRunner.withScopeGuard` treats a changed path outside every
     /// glob here the same way it treats a protected-path violation.
-    var scopeGlobs: [String]
+    public var scopeGlobs: [String]
     /// Stable identity of the built-in default loop this IS
     /// (`LoopDefaultLoopKey`), or `nil` for a loop the user created.
     ///
@@ -41,7 +41,7 @@ struct LoopDefinition: Codable, Equatable, Identifiable {
     /// and is re-created by `ensureDefaultLoops` if it goes missing. The escape
     /// hatch is per-stage `enabled` plus `runsOnSchedule`, exactly as it was
     /// for pinned stages.
-    var defaultKey: String?
+    public var defaultKey: String?
     /// Whether the scheduled `.loopEngineering` Auto Task includes this loop.
     ///
     /// **Opt-in.** A newly created loop — a built-in default included — starts
@@ -57,14 +57,14 @@ struct LoopDefinition: Codable, Equatable, Identifiable {
     /// into one long pipeline. They are run one after another only because a
     /// single working tree runs one at a time; extra callers wait in
     /// `LoopRunQueue` (`LoopEngineRunner`'s FIFO per git root).
-    var runsOnSchedule: Bool
+    public var runsOnSchedule: Bool
 
-    var config: LoopEngineConfig
+    public var config: LoopEngineConfig
 
     /// Whether this is one of the built-in default loops.
-    var isDefault: Bool { defaultKey != nil }
+    public var isDefault: Bool { defaultKey != nil }
 
-    init(id: String = UUID().uuidString, name: String, isPrimary: Bool = false,
+    public init(id: String = UUID().uuidString, name: String, isPrimary: Bool = false,
          goal: String? = nil, acceptanceCriteria: String? = nil,
          scopeGlobs: [String] = [], defaultKey: String? = nil,
          runsOnSchedule: Bool = false, config: LoopEngineConfig) {
@@ -89,7 +89,7 @@ struct LoopDefinition: Codable, Equatable, Identifiable {
     /// Every field beyond `name`/`config` is `decodeIfPresent` + a default —
     /// same rule `LoopStage.init(from:)` documents, so a future field added
     /// here can't turn an existing `LoopDefinition` into a decode failure.
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
         name = try container.decode(String.self, forKey: .name)
@@ -113,28 +113,32 @@ struct LoopDefinition: Codable, Equatable, Identifiable {
 /// These strings are persisted in `system/loop.json` and MUST NOT change once
 /// shipped: a changed key orphans the loop it named and a fresh empty copy is
 /// created beside it on the next load.
-enum LoopDefaultLoopKey {
+public enum LoopDefaultLoopKey {
     /// Find the code, check the known faults, repair, re-verify — the loop the
     /// `.regressionSweep` stage drives.
-    static let regression = "regression"
+    public static let regression = "regression"
     /// The project's own test suite, on its own budget.
-    static let test = "test"
+    public static let test = "test"
     /// llm-ide's per-subsystem checks (Skills, Plugins, Connectors, …), each a
     /// marker-gated stage inside this one loop.
-    static let systemCheck = "system-check"
+    public static let systemCheck = "system-check"
     /// The plan-generation loop: refresh the structure indexes, then
     /// consolidate every plan collected in `llm-doc/plans/` into one
     /// hierarchical master plan (the "plan director").
-    static let plan = "plan"
+    public static let plan = "plan"
 
     /// Creation/display order.
-    static let all = [regression, test, systemCheck, plan]
+    public static let all = [regression, test, systemCheck, plan]
 }
 
 /// A project's full set of Loops — the schema `system/loop.json` holds. See
 /// `LoopEngineConfigStore` for the load/save/migration contract.
-struct LoopEngineProjectStore: Codable, Equatable {
-    var loops: [LoopDefinition]
+public struct LoopEngineProjectStore: Codable, Equatable {
+    public var loops: [LoopDefinition]
+
+    public init(loops: [LoopDefinition]) {
+        self.loops = loops
+    }
 
     /// The loops the scheduled `.loopEngineering` Auto Task should run, in list
     /// order — those opted in AND with at least one enabled stage. A loop whose

@@ -18,7 +18,7 @@ import Foundation
 /// System Check markers match, so that loop is never created, and a repo with
 /// no detectable test tooling gets Regression alone — exactly what such a repo
 /// got before the split.
-enum LoopStageDetector {
+public enum LoopStageDetector {
     /// The PRE-SPLIT flat catalogue of default stages, each marked
     /// `isDefault = true`. It is deliberately still the legacy nine and does
     /// NOT include the Regression loop's own `regression-test` verify stage
@@ -41,7 +41,8 @@ enum LoopStageDetector {
         guard let gitRoot else { return stages }
         if let testCommand = detectTestCommand(gitRoot: gitRoot) {
             stages.append(LoopStage(name: "Test", kind: .shellCommand, command: testCommand,
-                                    order: stages.count, isDefault: true, defaultKey: "test"))
+                                    order: stages.count, isDefault: true, defaultKey: "test",
+                                    detectedCommand: testCommand))
         }
         for check in systemCheckStages(gitRoot: gitRoot) {
             stages.append(LoopStage(name: check.name, kind: .shellCommand, command: check.command,
@@ -148,6 +149,51 @@ enum LoopStageDetector {
     /// default is pinned IN PLACE (its command/edits/enabled flag preserved);
     /// a default with no match is appended. Shared by both `ensureDefaultStages`
     /// overloads so the match rules below cannot drift between them.
+    ///
+    /// **Command-gated adoption for the two TEST-ROLE keys.** Round 2 of this
+    /// fix gave `revalidatingTestStages` the power to overwrite or DELETE any
+    /// stage carrying `defaultKey ∈ {"test", "regression-test"}` by that key
+    /// alone. That made this function's own legacy fallback — adopting a
+    /// key-less `.shellCommand` stage into one of those two slots by KIND
+    /// ALONE, no command check — dangerous in a way it never used to be: a
+    /// user's own stage (say, `npm run e2e`) sitting unkeyed in the Test loop
+    /// got silently promoted into an auto-managed slot, and from the NEXT
+    /// load onward (once that adoption round-trips through
+    /// `LoopEngineConfigStore`'s save) it looked exactly like a genuine
+    /// legacy stage forever — `loadedTestStageIDs` in `ensureDefaultLoops`
+    /// only protects the ONE call in which the adoption happens; it cannot
+    /// tell a freshly-adopted user stage apart from a real legacy one on
+    /// every load after that, because both look identical: keyed,
+    /// `detectedCommand == nil`.
+    ///
+    /// The actual defect was never "no command check" as a general rule — it
+    /// is scoped precisely to the two keys `revalidatingTestStages` can act
+    /// on destructively. Requiring the candidate's `command` to already equal
+    /// `def.command` (the command detection just produced) means only a
+    /// stage that IS, in fact, running the currently-detected test command
+    /// gets treated as "this was auto-detected before keys existed" — a
+    /// stage whose command was never what detection produces is, by
+    /// definition, not auto-detected, and is left alone (appended as a
+    /// separate fresh default instead of adopting the user's stage). The
+    /// System Check fallback (the final `else` below) is UNCHANGED: nothing
+    /// else in this file revisits a System Check stage destructively by key
+    /// alone, so the "only a flag, harmless" invariant this function always
+    /// relied on still holds there.
+    ///
+    /// **The real cost, stated plainly.** "Left alone" is not free for a
+    /// GENUINE pre-`defaultKey` legacy stage whose command has drifted (it
+    /// was auto-detected once — say `pytest`, when the repo was Python — and
+    /// the repo has since moved to `swift test`): that stage is refused
+    /// adoption exactly like a user's own stage would be, so it is left
+    /// running its stale `pytest` command, unkeyed, forever, while a
+    /// separate, correctly-provisioned `swift test` default appears beside
+    /// it in the same loop. This is not a bug to fix here: an unkeyed
+    /// drifted-legacy stage and a user's own unkeyed stage are byte-for-byte
+    /// indistinguishable (both `.shellCommand`, both `defaultKey == nil`),
+    /// so protecting one necessarily means abandoning the other, and
+    /// protecting the user's own work is the correct tradeoff. It is
+    /// recorded here so the cost is visible, not silently implied by "left
+    /// alone."
     private static func pinning(_ defaults: [LoopStage], into config: LoopEngineConfig) -> LoopEngineConfig {
         var stages = config.stages
         for def in defaults {
@@ -159,27 +205,74 @@ enum LoopStageDetector {
             // Legacy fallback, for stages saved before `defaultKey` existed
             // (restricted to key-less stages so it can never steal a stage
             // that already carries a different default's identity):
-            // "Test" predates every other `.shellCommand` default and was
-            // always matched by kind alone, so a renamed Test keeps its
-            // pinned status; the System Check stages match by exact name.
-            // Whichever way a stage matches, its key is stamped, so every
-            // config migrates to key-matching on first load.
+            // "Test"/"regression-test" predate every other `.shellCommand`
+            // default and were always matched by kind alone; the System
+            // Check stages match by exact name. Whichever way a stage
+            // matches, its key is stamped, so every config migrates to
+            // key-matching on first load.
             let matches: (LoopStage) -> Bool
+            // Whether this match, if it succeeds, is a genuine first-time
+            // ADOPTION into a test-role slot — as opposed to a stage that
+            // already carries this key (handled above) or a System Check
+            // stage (handled below, never revisited destructively). Only an
+            // adoption needs `detectedCommand` stamped: that is what gives a
+            // legitimately-adopted stage correct provenance from the moment
+            // it is adopted, instead of manufacturing a permanent
+            // `detectedCommand == nil` population every load could mint one
+            // of.
+            var isTestRoleAdoption = false
             if stages.contains(where: { $0.defaultKey == def.defaultKey }) {
                 matches = { $0.defaultKey == def.defaultKey }
-            } else if def.defaultKey == "test" || def.kind == .regressionSweep {
-                // Kind-alone is unambiguous for these two: there is exactly one
-                // Test default and one Regression default, so even a legacy
-                // stage renamed before keys existed is recovered, not duplicated.
+            } else if def.kind == .regressionSweep {
+                // The Regression sweep never carries a command (it is not a
+                // `.shellCommand` stage at all), so kind alone is unambiguous
+                // and safe here — there is nothing for a command check to
+                // gate, and nothing here is a "test-role" key either.
                 matches = { $0.kind == def.kind && $0.defaultKey == nil }
+            } else if def.defaultKey == "test" || def.defaultKey == "regression-test" {
+                // BOTH gates are required. Round 3 added the command gate but
+                // (for `"regression-test"` specifically) dropped a name gate
+                // that already existed: before this branch was unified,
+                // `"regression-test"` fell through to the final `else` below,
+                // which already required `$0.name == def.name` (it is a
+                // `.shellCommand` named "Test", never `.regressionSweep`, so
+                // it never took the old kind-alone path either). Without the
+                // name gate, a user's OWN differently-named stage in the
+                // Regression loop whose command happens to equal what
+                // detection currently produces (e.g. "My sweep check",
+                // command "swift test") gets adopted as `regression-test` —
+                // gaining `isDefault` (hiding Delete, showing the "can't be
+                // deleted" lock in the UI) and becoming eligible for
+                // `revalidatingTestStages`'s destructive path, exactly the
+                // category of defect this whole fix exists to close.
+                matches = { $0.kind == def.kind && $0.name == def.name
+                    && $0.defaultKey == nil && $0.command == def.command }
+                isTestRoleAdoption = true
             } else {
                 matches = { $0.kind == def.kind && $0.name == def.name && $0.defaultKey == nil }
             }
             if let idx = stages.firstIndex(where: matches) {
                 stages[idx].isDefault = true
                 stages[idx].defaultKey = def.defaultKey
+                if isTestRoleAdoption {
+                    stages[idx].detectedCommand = def.detectedCommand
+                }
             } else {
-                stages.append(def)
+                // `def.order` is only ever correct for a BRAND NEW loop, where
+                // it is the whole stage list's own position. Appending it
+                // VERBATIM into an existing `stages` array — which is exactly
+                // what happens the moment a test-role adoption is refused
+                // (see the doc above: a rejected match falls through to this
+                // append) — can collide with a stage already occupying that
+                // `order` (a fresh loop's Test def is `order: 0`, the same
+                // value a lone user stage already has). `LoopStage.runOrder`
+                // tie-breaks a collision by `id`, i.e. by comparing random
+                // UUIDs, which reorders the array UNPREDICTABLY on the very
+                // next pass through `runOrder` (the split step, every load).
+                // Placing it at the current end always avoids the collision.
+                var appended = def
+                appended.order = stages.count
+                stages.append(appended)
             }
         }
         // Rebuild via `stages` assignment rather than the memberwise initializer:
@@ -504,13 +597,14 @@ enum LoopStageDetector {
                                     isDefault: true, defaultKey: "regression")]
             if let testCommand = detectTestCommand(gitRoot: gitRoot) {
                 stages.append(LoopStage(name: "Test", kind: .shellCommand, command: testCommand,
-                                        order: 1, isDefault: true, defaultKey: "regression-test"))
+                                        order: 1, isDefault: true, defaultKey: "regression-test",
+                                        detectedCommand: testCommand))
             }
             return stages
         case LoopDefaultLoopKey.test:
             guard let gitRoot, let testCommand = detectTestCommand(gitRoot: gitRoot) else { return [] }
             return [LoopStage(name: "Test", kind: .shellCommand, command: testCommand, order: 0,
-                              isDefault: true, defaultKey: "test")]
+                              isDefault: true, defaultKey: "test", detectedCommand: testCommand)]
         case LoopDefaultLoopKey.systemCheck:
             guard let gitRoot else { return [] }
             return systemCheckStages(gitRoot: gitRoot).enumerated().map { index, check in
@@ -622,9 +716,32 @@ enum LoopStageDetector {
     /// 6. **Primary.** Exactly one, and never a stage-less loop (the phone and
     ///    the chat command run the Primary, and an empty one would run
     ///    nothing).
-    static func ensureDefaultLoops(in store: LoopEngineProjectStore, gitRoot: URL?,
-                                   defaults: UserDefaults = .standard) -> LoopEngineProjectStore {
+    public static func ensureDefaultLoops(in store: LoopEngineProjectStore, gitRoot: URL?,
+                                          defaults: UserDefaults = .standard)
+        -> (store: LoopEngineProjectStore, changes: [RevalidationChange]) {
         var loops = store.loops
+
+        // Snapshot of which stage IDs already carried a test-role `defaultKey`
+        // ("test" / "regression-test") AT LOAD TIME — i.e. in `store.loops`,
+        // before step 1's stamp, step 2's split, or step 4's re-pin have run.
+        // This is the eligibility set step 4.5 (`revalidatingTestStages`)
+        // checks against, and it exists specifically because `pinning()`'s
+        // legacy kind-alone fallback (used by both step 1's aggregate
+        // `ensureDefaultStages(in: config:)` and step 4's loop-scoped one) can
+        // ADOPT a user's own unkeyed `.shellCommand` stage as "test" or
+        // "regression-test" — by kind alone, not by name — stamping
+        // `defaultKey` onto it moments before step 4.5 would otherwise run.
+        // Before this snapshot existed, that stamping was harmless (only a
+        // flag; the command was preserved); once step 4.5 gained the power to
+        // overwrite or delete a stage by that flag, the same stamping became
+        // destructive. Capturing eligibility from the ORIGINAL loaded state —
+        // never from anything stamped during this call — is what keeps a
+        // user's own stage safe on the very load that adopts it.
+        let loadedStages: [LoopStage] = store.loops.flatMap { (loop: LoopDefinition) -> [LoopStage] in loop.config.stages }
+        let loadedTestStages: [LoopStage] = loadedStages.filter { (stage: LoopStage) -> Bool in
+            stage.defaultKey == "test" || stage.defaultKey == "regression-test"
+        }
+        let loadedTestStageIDs: Set<String> = Set(loadedTestStages.map { (stage: LoopStage) -> String in stage.id })
 
         // 1. Stamp. Skipped without a git root: the stamping rules are what
         // route each stage to its own loop, so migrating on a load where the
@@ -696,6 +813,19 @@ enum LoopStageDetector {
         // 4. Re-pin each default loop's own stages.
         loops = loops.map { ensureDefaultStages(in: $0, gitRoot: gitRoot) }
 
+        // 4.5 Re-validate default test-role stage commands against detection
+        // right now (see `revalidatingTestStages`). Step 4's `pinning` helper
+        // deliberately never touches an existing match's command — it exists
+        // to ADD a missing default and preserve a stage's edits otherwise — so
+        // a Test/Regression stage whose command was auto-detected once against
+        // a nested subproject (or a project that has since dropped its test
+        // tooling) would otherwise carry that command forever. Gated by
+        // `loadedTestStageIDs` (captured above, before any stamping this call
+        // performs) so a stage `pinning()` just adopted is never in scope.
+        let (revalidatedLoops, revalidationChanges) = revalidatingTestStages(
+            in: loops, gitRoot: gitRoot, eligibleStageIDs: loadedTestStageIDs)
+        loops = revalidatedLoops
+
         // 5. Keep one editable loop. A first-time project gets one; an
         //    existing project keeps whatever it has (including a loop this
         //    call emptied), so a deletion is never undone.
@@ -728,7 +858,131 @@ enum LoopStageDetector {
                 return copy
             }
         }
-        return LoopEngineProjectStore(loops: loops)
+        return (LoopEngineProjectStore(loops: loops), revalidationChanges)
+    }
+
+    /// One change `revalidatingTestStages` made, for the caller that actually
+    /// persists `system/loop.json` to explain (log, and — where reachable —
+    /// surface as an activity entry). The file is a committed contract
+    /// (`LoopEngineConfigStore`'s own doc), so an automatic edit to it must
+    /// never be silent.
+    public struct RevalidationChange: Equatable {
+        public enum Kind: Equatable {
+            /// The command changed because detection found a different one.
+            case updated(from: String, to: String)
+            /// The stage was dropped because detection found nothing at all.
+            case removed(command: String)
+        }
+        public var loopName: String
+        public var stageName: String
+        public var kind: Kind
+
+        public init(loopName: String, stageName: String, kind: Kind) {
+            self.loopName = loopName
+            self.stageName = stageName
+            self.kind = kind
+        }
+    }
+
+    /// Re-validate every DEFAULT test-role stage — `isDefault == true`,
+    /// `kind == .shellCommand`, `defaultKey` one of `"test"` /
+    /// `"regression-test"`, AND its id present in `eligibleStageIDs` — against
+    /// what `detectTestCommand` finds RIGHT NOW, and reconcile:
+    /// - a stage whose command no longer matches detection is UPDATED to the
+    ///   freshly detected command (`detectedCommand` updated alongside it, so
+    ///   the two stay in sync for the next pass's provenance check below);
+    /// - a stage whose tooling detection no longer finds ANYTHING is REMOVED.
+    ///   **Only the stage** — never the loop it lived in. A `LoopDefinition`
+    ///   carries its own goal, acceptance criteria, budgets, `scopeGlobs`,
+    ///   `runsOnSchedule`, and an id that `LoopRunService` keys run history by
+    ///   (`projectId::loopId`); deleting it loses all of that, and if
+    ///   detection later returns, step 3 would recreate the loop from a
+    ///   template with fresh default budgets, silently discarding whatever
+    ///   the user had tuned. `ensureDefaultLoops` step 6 already drops Primary
+    ///   from a stage-less loop, so nothing dead runs from leaving it be.
+    ///
+    /// **Eligibility, not just shape.** `isEligible` requires BOTH `isDefault`
+    /// scoping AND stage-id membership in `eligibleStageIDs` — the set of
+    /// stage ids that already carried this exact key when the config was
+    /// LOADED, passed in by `ensureDefaultLoops` from `store.loops` before any
+    /// stamping this same call performs. Without that second check, a
+    /// worse-than-the-original-bug hole opens: `pinning()`'s legacy
+    /// kind-alone fallback (this file, `pinning(_:into:)`) can ADOPT a user's
+    /// own unkeyed `.shellCommand` stage as "test" by kind alone — no name
+    /// match required — moments before this function used to run. Before this
+    /// change existed that stamping only ever set a flag, harmless because
+    /// the command was preserved; letting THIS function act on the freshly
+    /// stamped flag would promote it into delete-and-overwrite authority over
+    /// a stage the user wrote themselves. `eligibleStageIDs` closes that.
+    ///
+    /// **Provenance, not just eligibility.** Even an eligible stage is only
+    /// touched when it is PROVABLY untouched auto-detection:
+    /// `stage.command == stage.detectedCommand`. `detectedCommand` is set
+    /// only where a stage's command is actually seeded from detection (see
+    /// `defaultStages(forLoop:gitRoot:)`), so if a user edits `command`
+    /// afterward without this function ever having a chance to update
+    /// `detectedCommand` alongside it, the two diverge and this function
+    /// leaves the stage alone from then on — permanently, with no
+    /// "detach from default" UI action needed. A `detectedCommand == nil`
+    /// stage (saved before this field existed) has no such proof either way;
+    /// it is still eligible for update/removal, but the caller in
+    /// `LoopEngineConfigStore` MUST log it — an unprovable, unannounced
+    /// rewrite of a committed file is the failure mode this whole
+    /// mechanism exists to end.
+    ///
+    /// Requires a resolvable `gitRoot`; with none, nothing changes — acting on
+    /// a temporarily unresolvable working tree is exactly the failure mode
+    /// every other detector path already refuses (see `ensureDefaultLoops`
+    /// step 1's own git-root guard).
+    public static func revalidatingTestStages(
+        in loops: [LoopDefinition], gitRoot: URL?, eligibleStageIDs: Set<String>
+    ) -> (loops: [LoopDefinition], changes: [RevalidationChange]) {
+        guard let gitRoot else { return (loops, []) }
+        let detected = detectTestCommand(gitRoot: gitRoot)
+
+        func isEligible(_ stage: LoopStage) -> Bool {
+            guard stage.isDefault, stage.kind == .shellCommand, let key = stage.defaultKey,
+                  key == "test" || key == "regression-test" else { return false }
+            return eligibleStageIDs.contains(stage.id)
+        }
+
+        var changes: [RevalidationChange] = []
+        let updatedLoops: [LoopDefinition] = loops.map { loop in
+            var mutated = false
+            var kept: [LoopStage] = []
+            for stage in loop.config.stages {
+                guard isEligible(stage) else { kept.append(stage); continue }
+                // Provenance check: only a stage whose saved command is
+                // EXACTLY what was last recorded as auto-detected is provably
+                // untouched. `detectedCommand == nil` (legacy, pre-dates the
+                // field) is treated as "provenance unknown, not disproven" —
+                // still eligible below, but the caller must log it.
+                if let recorded = stage.detectedCommand, recorded != stage.command {
+                    kept.append(stage)   // edited since — never touch
+                    continue
+                }
+                guard let command = stage.command else { kept.append(stage); continue }
+                guard let detected else {
+                    changes.append(RevalidationChange(loopName: loop.name, stageName: stage.name,
+                                                       kind: .removed(command: command)))
+                    mutated = true
+                    continue   // drop the stage — loop itself is never removed
+                }
+                guard detected != command else { kept.append(stage); continue }
+                var updatedStage = stage
+                updatedStage.command = detected
+                updatedStage.detectedCommand = detected
+                changes.append(RevalidationChange(loopName: loop.name, stageName: stage.name,
+                                                   kind: .updated(from: command, to: detected)))
+                mutated = true
+                kept.append(updatedStage)
+            }
+            guard mutated else { return loop }
+            var updated = loop
+            updated.config.stages = LoopStage.renumbered(kept)
+            return updated
+        }
+        return (updatedLoops, changes)
     }
 
 }

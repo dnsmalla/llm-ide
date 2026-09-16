@@ -100,7 +100,7 @@ endif
 # CSV's `status` column is the release checklist.
 # graph-kit-checkout goes FIRST: it is a one-line precondition, and failing it
 # after four Mac builds (many minutes in) is the wrong place to learn about it.
-regression: graph-kit-checkout feature-gates test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates
+regression: graph-kit-checkout feature-gates test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates loop-gates
 
 .PHONY: feature-gates
 # Enforces the layering rule: Shell -> Features -> Core. Swift has no
@@ -157,6 +157,14 @@ chat-gates:
 .PHONY: generation-gates
 generation-gates:
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run generation-contract-lab
+
+# The Loop feature's stale-default-command reconciliation, plus the exit-127
+# "command not found" message. Same rationale as chat-gates: this toolchain
+# has no XCTest, so pure logic in LoopStageDetector/StageOutputParser would
+# otherwise have no gate at all.
+.PHONY: loop-gates
+loop-gates:
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run loop-contract-lab
 
 # Enable the repo's git hooks (.githooks/). The pre-push hook runs the
 # regression gate before any push that touches mac/. Run once per clone.
