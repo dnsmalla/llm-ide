@@ -42,7 +42,7 @@ var featureDefines: [SwiftSetting] = []
 if graphIncluded {
     featureDefines.append(.define("FEATURE_GRAPH"))
 } else {
-    libExcludes.append("Graph")
+    libExcludes.append("Features/CodeGraph")
     testExcludes.append(contentsOf: [
         "CodeGraphUploadServiceTests.swift",
         "CodeNotePruneTests.swift",
@@ -180,12 +180,18 @@ if mobileIncluded && !autoTasksIncluded {
     ])
 }
 
-// GraphCore/GraphKit are only imported from within Sources/LlmIdeMac/Graph/
-// (verified in Task 1 Step 1: Services/Memory has zero GraphCore imports, and
-// the only non-Graph-folder importer, LlmIdeAPIClient+CodeGraph.swift, was
-// moved INTO Graph/ by Task 1). So when Graph is excluded, neither product is
-// referenced anywhere in the target and both can be dropped from the
-// dependency list.
+// GraphCore/GraphKit are only imported from within
+// Sources/LlmIdeMac/Features/CodeGraph/ (verified in Task 1 Step 1:
+// Services/Memory has zero GraphCore imports, and the only non-Graph-folder
+// importer, LlmIdeAPIClient+CodeGraph.swift, was moved INTO Graph/ by Task 1;
+// Task 18 then relocated the whole folder to Features/CodeGraph/, re-verified
+// with `grep -rln "import GraphCore\|import GraphKit" Sources/LlmIdeMac` —
+// every hit is still under Features/CodeGraph/). RepoGraphLocator.swift moved
+// to Core/Platform/ in the same task instead of into Features/CodeGraph/: it
+// has zero GraphCore/GraphKit imports and is a concrete Core dependency (see
+// its own doc comment — the auto-task pipeline calls it even when Graph is
+// excluded). So when Graph is excluded, neither product is referenced
+// anywhere in the target and both can be dropped from the dependency list.
 // SharedProtocol (the mac↔iOS wire-format package) is imported ONLY from
 // within the Mobile Control unit (verified: `grep -rln "import SharedProtocol"
 // mac/Sources/LlmIdeMac --include="*.swift"` — every hit is one of the

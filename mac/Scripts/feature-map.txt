@@ -17,7 +17,7 @@ ClaudeLink/     Core
 Chat/           Feature:Chat
 AutoTask/       Feature:AutoTask
 LoopEngine/     Feature:Loop
-Graph/          Feature:CodeGraph
+Features/CodeGraph/    Feature:CodeGraph
 Features/Search/    Feature:Search
 Features/Gantt/    Feature:Gantt
 Features/Issues/    Feature:Issues
