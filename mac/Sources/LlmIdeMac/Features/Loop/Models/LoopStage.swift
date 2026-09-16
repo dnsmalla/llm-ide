@@ -86,12 +86,28 @@ public struct LoopStage: Identifiable, Codable, Equatable {
     /// `nil` ⇒ use the runner's default. A full `swift build` + test cycle and a
     /// 2-second formatter check do not belong under one number.
     public var timeoutSeconds: Int? = nil
+    /// The command `LoopStageDetector` last auto-detected FOR THIS STAGE, or
+    /// `nil` when unknown (every stage saved before this field existed, or a
+    /// user-added stage that was never seeded from detection).
+    ///
+    /// This is what makes re-validating a stale default command (see
+    /// `LoopStageDetector.revalidatingTestStages`) provably safe instead of a
+    /// guess: a stage is touched only when `command == detectedCommand` —
+    /// proof the saved command is still exactly what detection last put
+    /// there, never edited since. A stage `pinning()`'s legacy kind-alone
+    /// fallback stamps `defaultKey` onto (adopting a user's own unkeyed
+    /// `.shellCommand` stage) never gets this field set by that stamping, so
+    /// its `command` and `detectedCommand` disagree (or `detectedCommand` is
+    /// nil) and it is left alone. Set only where a stage's command is
+    /// actually seeded FROM detection; never touched by hand-authoring.
+    public var detectedCommand: String? = nil
 
     // Explicit memberwise initializer (preserved for existing call sites)
     public init(id: String = UUID().uuidString, name: String, kind: Kind, command: String? = nil, order: Int,
          skillId: String? = nil, targetPath: String? = nil, outputPath: String? = nil, prompt: String? = nil,
          isDefault: Bool = false, enabled: Bool = true, defaultKey: String? = nil,
-         severity: LoopStageSeverity = .blocking, timeoutSeconds: Int? = nil) {
+         severity: LoopStageSeverity = .blocking, timeoutSeconds: Int? = nil,
+         detectedCommand: String? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
@@ -106,13 +122,14 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         self.defaultKey = defaultKey
         self.severity = severity
         self.timeoutSeconds = timeoutSeconds
+        self.detectedCommand = detectedCommand
     }
 
     // MARK: - Codable backward compatibility
 
     enum CodingKeys: String, CodingKey {
         case id, name, kind, command, order, skillId, targetPath, outputPath, prompt, isDefault
-        case enabled, defaultKey, severity, timeoutSeconds
+        case enabled, defaultKey, severity, timeoutSeconds, detectedCommand
     }
 
     /// Every field added after the first shipped version MUST be decoded with
@@ -137,6 +154,7 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         defaultKey = try container.decodeIfPresent(String.self, forKey: .defaultKey)
         severity = try container.decodeIfPresent(LoopStageSeverity.self, forKey: .severity) ?? .blocking
         timeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds)
+        detectedCommand = try container.decodeIfPresent(String.self, forKey: .detectedCommand)
     }
 }
 

@@ -136,6 +136,10 @@ public enum LoopDefaultLoopKey {
 public struct LoopEngineProjectStore: Codable, Equatable {
     public var loops: [LoopDefinition]
 
+    public init(loops: [LoopDefinition]) {
+        self.loops = loops
+    }
+
     /// The loops the scheduled `.loopEngineering` Auto Task should run, in list
     /// order — those opted in AND with at least one enabled stage. A loop whose
     /// every stage is switched off is PARKED, not broken (the reasoning

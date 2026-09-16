@@ -8,8 +8,9 @@ import LlmIdeMacLib
 // toolchain has no XCTest, so `swift test` never runs (see the Makefile's
 // HAS_XCTEST guard) and `make regression` skips it entirely. `swift run`
 // works regardless, so the reconciliation logic in
-// `LoopStageDetector.revalidatingTestStages` and the exit-127 message in
-// `StageOutputParser.missingCommandName` are asserted here instead.
+// `LoopStageDetector.revalidatingTestStages`/`ensureDefaultLoops` and the
+// exit-127 message in `StageOutputParser.failureNote` are asserted here
+// instead.
 //
 // This is a SEPARATE target, so it sees only `public` symbols of
 // LlmIdeMacLib — `@testable import` is test-target-only. Every type and
@@ -62,39 +63,71 @@ defer {
     try? FileManager.default.removeItem(at: swiftRoot)
 }
 
-func testStage(command: String, isDefault: Bool = true, defaultKey: String? = "test") -> LoopStage {
+/// A stage that already carries provenance — `detectedCommand` set to
+/// whatever `command` currently is, exactly what `defaultStages(forLoop:)`
+/// does when it seeds a stage from detection. This is the shape a "provably
+/// untouched auto-detected" stage has.
+func provenancedStage(command: String, defaultKey: String? = "test") -> LoopStage {
     LoopStage(name: "Test", kind: .shellCommand, command: command, order: 0,
-              isDefault: isDefault, defaultKey: defaultKey)
+              isDefault: true, defaultKey: defaultKey, detectedCommand: command)
+}
+
+/// A LEGACY stage — saved before `detectedCommand` existed, so it decodes
+/// with `detectedCommand == nil`. Eligible for update/removal, but only with
+/// a mandatory log line (asserted separately at the `ensureDefaultLoops`
+/// level is out of scope for a pure-function lab; the log call itself lives
+/// in `LoopEngineConfigStore.loops`, which this lab does not exercise, since
+/// it needs a real project root file. `revalidatingTestStages` returning a
+/// `RevalidationChange` for the legacy-nil case, asserted below, IS what
+/// makes that caller-side log possible.)
+func legacyStage(command: String, defaultKey: String? = "test") -> LoopStage {
+    LoopStage(name: "Test", kind: .shellCommand, command: command, order: 0,
+              isDefault: true, defaultKey: defaultKey, detectedCommand: nil)
 }
 
 func testLoop(stages: [LoopStage], defaultKey: String? = LoopDefaultLoopKey.test) -> LoopDefinition {
     LoopDefinition(name: "Test", defaultKey: defaultKey, config: LoopEngineConfig(stages: stages))
 }
 
-// MARK: 1. Stale command is UPDATED to the newly detected command.
+// MARK: 1. Stale command is UPDATED to the newly detected command, only when
+// provenance is provable (`command == detectedCommand`).
 
 do {
     // This is the exact shape of the diagnosed bug: a `Test` stage that was
     // once auto-detected against a nested subproject (`pytest`) now sits in a
-    // project whose real tooling is Swift.
-    let loop = testLoop(stages: [testStage(command: "pytest")])
-    let result = LoopStageDetector.revalidatingTestStages(in: [loop], gitRoot: swiftRoot)
+    // project whose real tooling is Swift. `detectedCommand` matches
+    // `command` — provably untouched since it was seeded.
+    let stage = provenancedStage(command: "pytest")
+    let loop = testLoop(stages: [stage])
+    let (result, changes) = LoopStageDetector.revalidatingTestStages(
+        in: [loop], gitRoot: swiftRoot, eligibleStageIDs: [stage.id])
     expect(result.count == 1, "the loop survives when a fresh command is detected")
     expect(result.first?.config.stages.first?.command == "swift test",
-           "a stale isDefault test stage's command is corrected to the current detection")
+           "a stale, provenance-provable test stage's command is corrected to the current detection")
+    expect(result.first?.config.stages.first?.detectedCommand == "swift test",
+           "detectedCommand is kept in sync with the corrected command")
+    expect(changes == [LoopStageDetector.RevalidationChange(
+        loopName: "Test", stageName: "Test", kind: .updated(from: "pytest", to: "swift test"))],
+           "the change is reported so the caller can log it")
 }
 
-// MARK: 2. Stage REMOVED when detection now yields nothing; empty default
-// loop removed with it.
+// MARK: 2. Stage REMOVED when detection now yields nothing — the LOOP itself
+// is NEVER removed (it owns goal/acceptance/budgets/scopeGlobs/id that a
+// recreated template loop would not have).
 
 do {
     // The reported bug precisely: `pytest` pinned, but the real project has
     // none of the markers `detectTestCommand` looks for.
-    let loop = testLoop(stages: [testStage(command: "pytest")])
-    let result = LoopStageDetector.revalidatingTestStages(in: [loop], gitRoot: bareRoot)
-    expect(result.isEmpty,
-           "a Test loop whose only stage goes stale-and-undetectable is removed entirely, "
-               + "not left behind as a dead loop that can never succeed")
+    let stage = provenancedStage(command: "pytest")
+    let loop = testLoop(stages: [stage])
+    let (result, changes) = LoopStageDetector.revalidatingTestStages(
+        in: [loop], gitRoot: bareRoot, eligibleStageIDs: [stage.id])
+    expect(result.count == 1, "a loop is NEVER removed by this pass, even when it ends up with no stages")
+    expect(result.first?.id == loop.id, "the surviving loop keeps its original id (LoopRunService keys history by it)")
+    expect(result.first?.config.stages.isEmpty == true, "only the undetectable stage is dropped")
+    expect(changes == [LoopStageDetector.RevalidationChange(
+        loopName: "Test", stageName: "Test", kind: .removed(command: "pytest"))],
+           "the removal is reported so the caller can log it")
 }
 
 do {
@@ -104,54 +137,189 @@ do {
     // untouched by this pass.
     let sweep = LoopStage(name: "Regression", kind: .regressionSweep, order: 0,
                           isDefault: true, defaultKey: "regression")
-    let verify = LoopStage(name: "Test", kind: .shellCommand, command: "pytest", order: 1,
-                           isDefault: true, defaultKey: "regression-test")
+    let verify = provenancedStage(command: "pytest", defaultKey: "regression-test")
     let loop = testLoop(stages: [sweep, verify], defaultKey: LoopDefaultLoopKey.regression)
-    let result = LoopStageDetector.revalidatingTestStages(in: [loop], gitRoot: bareRoot)
+    let (result, _) = LoopStageDetector.revalidatingTestStages(
+        in: [loop], gitRoot: bareRoot, eligibleStageIDs: [verify.id])
     expect(result.count == 1, "the Regression loop is not removed")
     expect(result.first?.config.stages.count == 1, "only the stale regression-test stage is dropped")
     expect(result.first?.config.stages.first?.kind == .regressionSweep,
            "the untouched Regression sweep stage remains")
 }
 
-// MARK: 3. A user-authored stage (isDefault == false) with the same command
-// is NEVER touched, even when it would otherwise be "stale" or "undetectable".
+// MARK: 3. A user-authored stage (isDefault == false) is NEVER touched.
 
 do {
-    let userStage = testStage(command: "pytest", isDefault: false, defaultKey: nil)
+    let userStage = LoopStage(name: "E2E", kind: .shellCommand, command: "npm run e2e", order: 0,
+                              isDefault: false, defaultKey: nil)
     let loop = testLoop(stages: [userStage], defaultKey: nil)
-    let result = LoopStageDetector.revalidatingTestStages(in: [loop], gitRoot: bareRoot)
+    let (result, changes) = LoopStageDetector.revalidatingTestStages(
+        in: [loop], gitRoot: bareRoot, eligibleStageIDs: [userStage.id])
     expect(result.count == 1, "a user's own loop is never removed by this pass")
-    expect(result.first?.config.stages.first?.command == "pytest",
-           "a user-authored stage's command is left exactly as they wrote it, "
-               + "even though the same command on a `isDefault` stage would be dropped")
+    expect(result.first?.config.stages.first?.command == "npm run e2e",
+           "a user-authored stage's command is left exactly as they wrote it")
+    expect(changes.isEmpty, "nothing is reported for a stage this pass never touches")
 }
 
-// MARK: 4. gitRoot == nil changes nothing.
+// MARK: 3b. A stage whose command was EDITED since it was seeded (provenance
+// disproven: command != detectedCommand) is never touched, even though it is
+// otherwise eligible (isDefault, shellCommand, keyed, in eligibleStageIDs).
 
 do {
-    let loop = testLoop(stages: [testStage(command: "pytest")])
-    let result = LoopStageDetector.revalidatingTestStages(in: [loop], gitRoot: nil)
+    var edited = provenancedStage(command: "swift test --filter Foo")
+    edited.detectedCommand = "swift test"   // what detection put there originally
+    let loop = testLoop(stages: [edited])
+    let (result, changes) = LoopStageDetector.revalidatingTestStages(
+        in: [loop], gitRoot: swiftRoot, eligibleStageIDs: [edited.id])
+    expect(result.first?.config.stages.first?.command == "swift test --filter Foo",
+           "a stage the user tuned after it was seeded (command != detectedCommand) is never rewritten, "
+               + "even when detection still finds a command and the stage is otherwise eligible")
+    expect(changes.isEmpty, "no change is reported for a stage this pass correctly leaves alone")
+}
+
+// MARK: 4. A stage NOT in `eligibleStageIDs` — i.e. it did not already carry
+// this defaultKey when the config was LOADED — is never touched, even when
+// every other eligibility condition (isDefault, kind, defaultKey) matches.
+// This is the Critical fix: `pinning()`'s legacy kind-alone fallback can
+// stamp `defaultKey` onto a user's own unkeyed stage in step 4, immediately
+// before this pass would otherwise run on it.
+
+do {
+    let stage = provenancedStage(command: "pytest")
+    let loop = testLoop(stages: [stage])
+    // Deliberately NOT including stage.id — simulating a stage that was just
+    // stamped with defaultKey="test" in this same pass, not one that already
+    // held it when the config was loaded.
+    let (result, changes) = LoopStageDetector.revalidatingTestStages(
+        in: [loop], gitRoot: bareRoot, eligibleStageIDs: [])
+    expect(result.first?.config.stages.first?.command == "pytest",
+           "a stage stamped with defaultKey in THIS pass (not present in eligibleStageIDs) is left untouched")
+    expect(changes.isEmpty, "nothing is reported for a stage outside the eligible set")
+}
+
+// MARK: 5. gitRoot == nil changes nothing.
+
+do {
+    let stage = provenancedStage(command: "pytest")
+    let loop = testLoop(stages: [stage])
+    let (result, changes) = LoopStageDetector.revalidatingTestStages(
+        in: [loop], gitRoot: nil, eligibleStageIDs: [stage.id])
     expect(result.count == 1 && result.first?.config.stages.first?.command == "pytest",
            "with no resolvable git root, nothing is updated or removed — "
                + "acting on half the evidence is worse than waiting")
+    expect(changes.isEmpty, "nothing is reported when gitRoot is nil")
 }
 
-// MARK: 5. Idempotent — running twice yields the same result as running once.
+// MARK: 6. Idempotent — running twice yields the same result as running once.
 
 do {
-    let loop = testLoop(stages: [testStage(command: "pytest")])
-    let once = LoopStageDetector.revalidatingTestStages(in: [loop], gitRoot: swiftRoot)
-    let twice = LoopStageDetector.revalidatingTestStages(in: once, gitRoot: swiftRoot)
+    let stage = provenancedStage(command: "pytest")
+    let loop = testLoop(stages: [stage])
+    let (once, _) = LoopStageDetector.revalidatingTestStages(
+        in: [loop], gitRoot: swiftRoot, eligibleStageIDs: [stage.id])
+    let onceIDs = Set(once.flatMap { $0.config.stages.map(\.id) })
+    let (twice, twiceChanges) = LoopStageDetector.revalidatingTestStages(
+        in: once, gitRoot: swiftRoot, eligibleStageIDs: onceIDs)
     expect(once == twice, "re-running the pass on its own output is a no-op")
+    expect(twiceChanges.isEmpty, "the second pass reports no changes — there is nothing left to correct")
 
-    let bareOnce = LoopStageDetector.revalidatingTestStages(in: [loop], gitRoot: bareRoot)
-    let bareTwice = LoopStageDetector.revalidatingTestStages(in: bareOnce, gitRoot: bareRoot)
+    let (bareOnce, _) = LoopStageDetector.revalidatingTestStages(
+        in: [loop], gitRoot: bareRoot, eligibleStageIDs: [stage.id])
+    let bareOnceIDs = Set(bareOnce.flatMap { $0.config.stages.map(\.id) })
+    let (bareTwice, bareTwiceChanges) = LoopStageDetector.revalidatingTestStages(
+        in: bareOnce, gitRoot: bareRoot, eligibleStageIDs: bareOnceIDs)
     expect(bareOnce == bareTwice, "re-running the pass after a removal is also a no-op")
+    expect(bareTwiceChanges.isEmpty, "nothing left to remove the second time")
 }
 
-// MARK: 6. Exit code 127 produces a command-not-found message, not just
-// "failure count not recognised".
+// MARK: 7. Integration — `ensureDefaultLoops` end-to-end, driving the exact
+// Critical the reviewer found: a user's own unkeyed `.shellCommand` stage in
+// the Test loop gets ADOPTED by `pinning()`'s legacy kind-alone fallback
+// (stamped defaultKey="test") in the very same call that would otherwise
+// revalidate it. Asserting only `revalidatingTestStages` in isolation cannot
+// catch this — the adoption happens one step earlier, inside
+// `ensureDefaultLoops` itself. This also covers "the call site is
+// unasserted": deleting the step-4.5 wiring from `ensureDefaultLoops` would
+// make the FIRST integration check below fail (the user's stage doesn't stay
+// "npm run e2e" for the wrong reason if 4.5 never runs — see the mutation
+// test in the report), and the SECOND check independently proves the wiring
+// exists at all by observing a real update happen end-to-end.
+
+do {
+    // The Test default loop already exists, but its one stage is the user's
+    // own (`defaultKey == nil`) — e.g. right after a previous run's removal
+    // path deleted the keyed stage and the user added their own before the
+    // next load.
+    let userStage = LoopStage(name: "E2E", kind: .shellCommand, command: "npm run e2e", order: 0,
+                              isDefault: false, defaultKey: nil)
+    let testLoopWithUserStage = LoopDefinition(
+        name: "Test", defaultKey: LoopDefaultLoopKey.test,
+        config: LoopEngineConfig(stages: [userStage]))
+    let saved = LoopEngineProjectStore(loops: [testLoopWithUserStage])
+
+    let (ensured, _) = LoopStageDetector.ensureDefaultLoops(in: saved, gitRoot: swiftRoot)
+    let testLoopResult = ensured.loops.first { $0.defaultKey == LoopDefaultLoopKey.test }
+    expect(testLoopResult?.config.stages.count == 1, "the Test loop still has exactly one stage")
+    expect(testLoopResult?.config.stages.first?.command == "npm run e2e",
+           "a stage pinning() adopts (stamps defaultKey='test' onto) DURING THIS SAME `ensureDefaultLoops` call "
+               + "is not modified by step 4.5 — it was not eligible (not present at load) even though it now "
+               + "carries isDefault/defaultKey/kind that would otherwise match")
+    expect(testLoopResult?.config.stages.first?.isDefault == true,
+           "pinning() still does its own job — the stage IS stamped as default — only the revalidation is withheld")
+}
+
+do {
+    // A project loaded from disk with an already-keyed, provenanced Test
+    // stage whose command has genuinely gone stale — the reported bug,
+    // driven through the real entry point end to end.
+    let staleStage = provenancedStage(command: "pytest")
+    let staleTestLoop = LoopDefinition(
+        name: "Test", defaultKey: LoopDefaultLoopKey.test,
+        config: LoopEngineConfig(stages: [staleStage]))
+    let saved = LoopEngineProjectStore(loops: [staleTestLoop])
+
+    let (ensured, changes) = LoopStageDetector.ensureDefaultLoops(in: saved, gitRoot: swiftRoot)
+    let testLoopResult = ensured.loops.first { $0.defaultKey == LoopDefaultLoopKey.test }
+    expect(testLoopResult?.config.stages.first?.command == "swift test",
+           "driven end-to-end through ensureDefaultLoops, an already-keyed stale command is still corrected — "
+               + "proving step 4.5 is actually wired in, not just correct in isolation")
+    expect(changes.contains(LoopStageDetector.RevalidationChange(
+        loopName: "Test", stageName: "Test", kind: .updated(from: "pytest", to: "swift test"))),
+           "ensureDefaultLoops surfaces the change for the caller to log")
+}
+
+// MARK: 8. `detectedCommand` round-trips through Codable, including the
+// legacy nil case (a stage saved before this field existed).
+
+do {
+    let stage = provenancedStage(command: "swift test")
+    let encoder = JSONEncoder()
+    let decoder = JSONDecoder()
+    if let data = try? encoder.encode(stage), let decoded = try? decoder.decode(LoopStage.self, from: data) {
+        expect(decoded.detectedCommand == "swift test", "detectedCommand round-trips through Codable")
+        expect(decoded == stage, "the whole stage round-trips identically")
+    } else {
+        expect(false, "a LoopStage with detectedCommand set should encode and decode")
+    }
+
+    // A legacy JSON blob with no "detectedCommand" key at all — exactly what
+    // every stage saved before this field existed looks like on disk.
+    let legacyJSON = """
+    {"id":"abc","name":"Test","kind":"shellCommand","command":"pytest","order":0,
+     "isDefault":true,"enabled":true,"defaultKey":"test","severity":"blocking"}
+    """
+    if let data = legacyJSON.data(using: .utf8),
+       let decoded = try? decoder.decode(LoopStage.self, from: data) {
+        expect(decoded.detectedCommand == nil,
+               "a legacy stage with no detectedCommand key decodes to nil, not a decode failure")
+    } else {
+        expect(false, "a legacy stage JSON blob (no detectedCommand key) must still decode")
+    }
+}
+
+// MARK: 9. Exit code 127 produces a command-not-found message, asserted
+// against the REAL code path `LoopEngineRunner` calls
+// (`StageOutputParser.failureNote`) — not a hand-copied string.
 
 do {
     let shOutput = "/bin/sh: pytest: command not found\n"
@@ -169,14 +337,31 @@ do {
     expect(StageOutputParser.missingCommandName(in: "3 failed, 9 passed in 1.2s") == nil,
            "ordinary test output is never mistaken for a command-not-found line")
 
-    // The message LoopEngineRunner.runShellStage composes for an exit-127
-    // stage failure — same format, asserted here so a change to either
-    // drifts loudly instead of silently. This is exactly the bug report's
-    // "failure count not recognised" note replaced with something actionable.
-    let missing = StageOutputParser.missingCommandName(in: shOutput) ?? "pytest"
-    let note = " · command not found: \"\(missing)\" is not installed or not on PATH"
-    expect(note.contains("command not found") && note.contains("pytest"),
-           "the composed note names the command and says it was not found / not on PATH")
+    // The REAL function LoopEngineRunner.runShellStage calls to build its
+    // failure note — a change to either drifts loudly instead of silently.
+    let note127 = StageOutputParser.failureNote(
+        exitCode: 127, command: "pytest", output: shOutput, score: nil, didTimeOut: false)
+    expect(note127.text == " · command not found: \"pytest\" is not installed or not on PATH",
+           "exit 127 produces the actionable command-not-found note, ahead of the failure-count logic")
+    expect(note127.isUnrecognised == false,
+           "exit 127 must NOT also fire the once-per-run 'failure count not recognised' side effect")
+
+    let noteScored = StageOutputParser.failureNote(
+        exitCode: 1, command: "pytest", output: "3 failed, 9 passed in 1.2s", score: 3, didTimeOut: false)
+    expect(noteScored.text == " · 3 failing", "a recognised failure count still reports the count, unchanged")
+    expect(noteScored.isUnrecognised == false, "a recognised runner never fires the unrecognised side effect")
+
+    let noteTimeout = StageOutputParser.failureNote(
+        exitCode: -1, command: "pytest", output: "stage timed out after 30s", score: nil, didTimeOut: true)
+    expect(noteTimeout.text == " · timed out before reporting", "a timeout is reported as a timeout, not blamed on the runner's format")
+    expect(noteTimeout.isUnrecognised == false, "a timeout never fires the unrecognised side effect")
+
+    let noteUnrecognised = StageOutputParser.failureNote(
+        exitCode: 1, command: "some-runner", output: "??? unrecognisable output ???", score: nil, didTimeOut: false)
+    expect(noteUnrecognised.text == " · failure count not recognised",
+           "a genuinely unparseable, non-127, non-timeout failure keeps the original warning")
+    expect(noteUnrecognised.isUnrecognised == true,
+           "and DOES fire the once-per-run side effect, unlike every case above")
 }
 #else
 print("  skipped — Loop is excluded from this build (auto_tasks not in LLMIDE_FEATURES)")

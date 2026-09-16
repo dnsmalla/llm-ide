@@ -774,38 +774,20 @@ final class LoopEngineRunner: ObservableObject {
         stageStates[stage.id] = .failed
         let score = StageOutputParser.parseFailureCount(outcome.output)
         let excerpt = String(outcome.output.suffix(500))
-        // An unrecognised runner is not a neutral fact: it silently downgrades
-        // the loop's stall detector from "did the failure COUNT shrink" to
-        // "is the output byte-identical", which cannot see thrashing at all.
-        // Said once per stage per run, not every iteration.
-        let scoreNote: String
-        if outcome.exitCode == 127 {
-            // Exit 127 is the shell's own convention for "command not found" —
-            // not a test failure at all. Reporting that plainly, ahead of the
-            // failure-count logic below, is what turns a confusing "failure
-            // count not recognised" (true, but useless — of course pytest's
-            // "command not found" line has no failure count) into an
-            // actionable "pytest isn't installed". This does not suppress the
-            // underlying failure: the stage still fails and still repairs/gives
-            // up exactly as any other failure would.
-            let missing = StageOutputParser.missingCommandName(in: outcome.output) ?? command
-            scoreNote = " · command not found: \"\(missing)\" is not installed or not on PATH"
-        } else if let score {
-            scoreNote = " · \(score) failing"
-        } else if didTimeOut {
-            // The parser was handed "stage timed out after Ns", not the
-            // runner's output — blaming the runner's FORMAT here would
-            // libel a format we may well recognise (XCTest's, say), and
-            // would spend the once-per-run notice on a false claim,
-            // suppressing the accurate one for a genuinely unparseable
-            // stage later in the same run.
-            scoreNote = " · timed out before reporting"
-        } else {
-            scoreNote = " · failure count not recognised"
-            if !unrecognisedRunnerStages.contains(stage.id) {
-                unrecognisedRunnerStages.insert(stage.id)
-                appendLog(.warn, "  [\(stage.name)] this runner's output has no failure count we recognise — progress is judged by comparing output instead, which cannot tell a changing failure from a shrinking one")
-            }
+        // The note text itself is pure — composed by `StageOutputParser.failureNote`
+        // (exit 127 > a recognised failure count > a timeout > "not recognised", in
+        // that priority order) and asserted directly against that real code path in
+        // loop-contract-lab, not reimplemented there. Only the once-per-run SIDE
+        // EFFECT below (an unrecognised runner silently downgrades the loop's stall
+        // detector from "did the failure COUNT shrink" to "is the output
+        // byte-identical", which cannot see thrashing at all) stays here, since it
+        // needs the runner's mutable `unrecognisedRunnerStages` state.
+        let (scoreNote, isUnrecognised) = StageOutputParser.failureNote(
+            exitCode: outcome.exitCode, command: command, output: outcome.output,
+            score: score, didTimeOut: didTimeOut)
+        if isUnrecognised, !unrecognisedRunnerStages.contains(stage.id) {
+            unrecognisedRunnerStages.insert(stage.id)
+            appendLog(.warn, "  [\(stage.name)] this runner's output has no failure count we recognise — progress is judged by comparing output instead, which cannot tell a changing failure from a shrinking one")
         }
         appendLog(.warn, "  [\(stage.name)] FAILED (exit \(outcome.exitCode))\(scoreNote): \(excerpt)")
 
