@@ -31,3 +31,4 @@ Features/DocGen/    Feature:DocGen
 Features/Generation/    Feature:Generation
 Features/Settings/    Feature:Settings
 Features/Library/    Feature:Library
+Features/MobileControl/    Feature:MobileControl

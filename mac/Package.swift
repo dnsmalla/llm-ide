@@ -135,37 +135,10 @@ if autoTasksIncluded {
 if mobileIncluded {
     featureDefines.append(.define("FEATURE_MOBILE"))
 } else {
-    // File-level excludes (not a single folder): Mobile Control's 16-file
-    // unit is scattered across Services/, Chat/Session/,
-    // AutoTask/Services/, and LoopEngine/Services/ (see the plan's Verified
-    // facts — the 16th file counted in the audit, Services/MobileFeatureBridge.swift,
-    // is the seam PROTOCOL and stays core). The two bridge files below live
-    // inside folders `auto_tasks` already excludes wholesale (AutoTask/,
-    // LoopEngine/) when it is off — only append them here when auto_tasks
-    // IS included, so a file-level exclude never overlaps an already-excluded
-    // parent folder.
-    libExcludes.append(contentsOf: [
-        "Services/MobileControlManager.swift",
-        "Services/MobileWebSocketServer.swift",
-        "Services/MobileBonjourAdvertiser.swift",
-        "Services/MobilePin.swift",
-        "Services/MobilePairedDeviceStore.swift",
-        "Services/MobileConnectionInfo.swift",
-        "Services/MobileModule.swift",
-        "Services/MobileExploreBridge.swift",
-        "Services/MobileExploreIndexStore.swift",
-        "Services/MobileSkillCatalog.swift",
-        "Services/MobileWorkspaceSearch.swift",
-        "Services/PairingThrottle.swift",
-        "Services/MobileControlSettingsSection.swift",
-        "Chat/Session/ExplorerMobileEngineResolver.swift",
-    ])
-    if autoTasksIncluded {
-        libExcludes.append(contentsOf: [
-            "AutoTask/Services/MobileAutoTaskBridge.swift",
-            "LoopEngine/Services/MobileLoopBridge.swift",
-        ])
-    }
+    // One folder, one line. Was a 14-entry file list plus a nested
+    // auto_tasks conditional, because the unit was scattered across
+    // Services/, Views/Settings/, Chat/Session/, AutoTask/ and LoopEngine/.
+    libExcludes.append("Features/MobileControl")
     let mobileTestExcludes: Set<String> = [
         "MobilePairingFrameTests.swift",
         "MobileWebSocketServerBindTests.swift",
@@ -187,6 +160,25 @@ if mobileIncluded {
         testExcludes.append(name)
     }
 }
+if mobileIncluded && !autoTasksIncluded {
+    // MobileAutoTaskBridge / MobileLoopBridge are UNSEALED (Task 23 pending
+    // Tasks 17-18's protocol work): they still name AutoTask/Loop concrete
+    // types directly. Before this task they lived inside AutoTask/ and
+    // LoopEngine/, so `auto_tasks`'s own wholesale folder exclude (above)
+    // removed them for free whenever auto_tasks was off, mobile or not. Now
+    // that both live under the always-compiled Features/MobileControl/, that
+    // free protection is gone — build-mac-mobile-only (mobile ON, auto_tasks
+    // OFF) is exactly the config that exercises this, so these two files
+    // need their own exclude. Kept as its OWN top-level `if` (not nested
+    // inside the `if mobileIncluded { featureDefines... } else { ... }`
+    // above) so feature-boundaries.sh's flagmap parser — which requires that
+    // if-body to contain only the featureDefines.append call — still
+    // recognizes Features/MobileControl as FEATURE_MOBILE-gated.
+    libExcludes.append(contentsOf: [
+        "Features/MobileControl/Services/MobileAutoTaskBridge.swift",
+        "Features/MobileControl/Services/MobileLoopBridge.swift",
+    ])
+}
 
 // GraphCore/GraphKit are only imported from within Sources/LlmIdeMac/Graph/
 // (verified in Task 1 Step 1: Services/Memory has zero GraphCore imports, and
@@ -196,14 +188,10 @@ if mobileIncluded {
 // dependency list.
 // SharedProtocol (the mac↔iOS wire-format package) is imported ONLY from
 // within the Mobile Control unit (verified: `grep -rln "import SharedProtocol"
-// mac/Sources/LlmIdeMac --include="*.swift"` — every hit is one of the 15
-// mobile_sync unit files: LoopEngine/Services/MobileLoopBridge.swift,
-// Services/MobileBonjourAdvertiser.swift, Services/MobileExploreBridge.swift,
-// Services/MobileSkillCatalog.swift, Services/MobileControlManager.swift,
-// Services/MobileExploreIndexStore.swift, Services/MobileWorkspaceSearch.swift,
-// Services/MobileWebSocketServer.swift, AutoTask/Services/MobileAutoTaskBridge.swift).
-// So the product can be dropped from the dependency list entirely when
-// mobile_sync is excluded, same UNPLUG-style gating as GraphCore/GraphKit below.
+// mac/Sources/LlmIdeMac --include="*.swift"` — every hit is one of the
+// Features/MobileControl/ unit files). So the product can be dropped from
+// the dependency list entirely when mobile_sync is excluded, same
+// UNPLUG-style gating as GraphCore/GraphKit below.
 var libDependencies: [Target.Dependency] = [
     "Yams",
     .product(name: "Sparkle", package: "Sparkle"),
