@@ -110,15 +110,21 @@ enum MobileWorkspaceSearch {
               !((try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false) else { return nil }
         let name = url.lastPathComponent
         if isDenied(relPath: rel, name: name) { return nil }
-        guard let data = try? Data(contentsOf: url), data.count <= maxReadBytes else {
-            if let data = try? Data(contentsOf: url), data.count > maxReadBytes {
-                let prefix = data.prefix(maxReadBytes)
-                let text = String(decoding: prefix, as: UTF8.self)
-                return LlmIdeAPIClient.CodeAttachment(
-                    path: rel,
-                    content: text + "\n\n[… truncated — file exceeds \(maxReadBytes) bytes on Mac …]")
-            }
-            return nil
+        // Bounded read. This used to be `Data(contentsOf:)` and only THEN a
+        // size check — so a multi-gigabyte file in the workspace was pulled
+        // into memory in full before being rejected, and the oversize branch
+        // read the whole thing a SECOND time to take its prefix. A paired
+        // phone naming such a file could drive the Mac's memory on its own.
+        // `FileHandle` reads at most one byte past the cap, which is all that
+        // is needed to know the file was truncated.
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: maxReadBytes + 1) else { return nil }
+        if data.count > maxReadBytes {
+            let text = String(decoding: data.prefix(maxReadBytes), as: UTF8.self)
+            return LlmIdeAPIClient.CodeAttachment(
+                path: rel,
+                content: text + "\n\n[… truncated — file exceeds \(maxReadBytes) bytes on Mac …]")
         }
         guard let text = String(data: data, encoding: .utf8) else { return nil }
         return LlmIdeAPIClient.CodeAttachment(path: rel, content: text)

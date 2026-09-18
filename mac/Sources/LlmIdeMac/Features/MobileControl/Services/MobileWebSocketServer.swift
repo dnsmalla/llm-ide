@@ -407,13 +407,26 @@ final class MobileWebSocketServer: @unchecked Sendable {
                 }
                 return
             }
-            let preview = String(data: data, encoding: .utf8)?.prefix(60) ?? "<binary>"
-            self.onLog("📥 Received \(data.count) bytes: \(preview)")
             // Only the PAIRED connection's frames reach the app; everyone else
-            // is still in the pairing handshake.
+            // is still in the pairing handshake. The preview is emitted INSIDE
+            // each branch, because only one of them is safe to print.
             if conn === self.client, self.paired {
+                let preview = String(data: data, encoding: .utf8)?.prefix(60) ?? "<binary>"
+                self.onLog("📥 Received \(data.count) bytes: \(preview)")
                 self.routeInbound(data: data)
             } else {
+                // NEVER preview an unpaired peer's frame. Its first frame is a
+                // `Pairing`, encoded in CodingKeys order as
+                // {"type":…,"pin":…,"token":…,…} — so a 60-character preview
+                // printed the WHOLE 6-digit PIN plus the first ~18 characters
+                // of the reconnect token, into a log pane that is on screen and
+                // `.textSelection(.enabled)`.
+                //
+                // That undid the two mitigations this file already carries: the
+                // wrong-PIN branch logs only the candidate's SHAPE, and `admit`
+                // bypasses `send` precisely so a `Connected{token}` is not
+                // previewed. The inbound path simply never got the same care.
+                self.onLog("📥 Received \(data.count) bytes (pairing handshake — contents withheld)")
                 self.handlePairing(data: data, from: conn)
             }
             self.receive(on: conn)   // continue the receive loop

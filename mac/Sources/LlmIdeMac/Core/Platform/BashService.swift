@@ -244,28 +244,98 @@ final class BashService: Sendable {
         }
     }
 
-    /// Validate a command for basic safety
+    /// Validate a command for basic safety.
+    ///
+    /// A last-ditch guard against a catastrophic one-liner, NOT a security
+    /// boundary: anything determined gets through (`$(echo cm0gLXJmIC8= |
+    /// base64 -d)`), and it is not trying to stop that. It matters because in
+    /// Bypass mode (`EditAcceptanceMode.auto`) it is the only thing between a
+    /// model-proposed command and the shell, so it is worth it being both
+    /// harder to trip over accidentally and harder to walk past by accident.
+    ///
+    /// Previously a raw `lowercased().contains(...)` over a literal list,
+    /// which failed in both directions:
+    ///
+    ///   * `"format"` matched as a bare substring, so `make format`,
+    ///     `npm run format`, `swift-format` and `git log --pretty=format:%h`
+    ///     were all refused as "potentially dangerous" — `make format` is one
+    ///     of this repo's own documented commands.
+    ///   * `"rm -rf /"` was an exact string, so `rm  -rf  /` (two spaces),
+    ///     `rm -fr /` and `rm --recursive --force /` all sailed through.
+    ///
+    /// Whitespace is normalized and `rm` is parsed as arguments rather than
+    /// text, which fixes both. `format` is gone; the filesystem-destroying
+    /// intent behind it is covered by `mkfs`/`newfs`/`diskutil erasedisk`.
     func validateCommand(_ command: String) -> Bool {
-        // Basic validation - prevent obvious dangerous operations
-        let dangerousPatterns = [
-            "rm -rf /",
-            "rm -rf /*",
-            ":(){ :|:& };:", // fork bomb
-            "dd if=/dev/zero",
-            "mkfs",
-            "format",
-            "> /dev/sd",  // disk writes
-            "chmod 000",   // remove all permissions
-        ]
+        // Collapse whitespace runs so `rm   -rf   /` reads as `rm -rf /`.
+        let normalized = command.lowercased()
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
 
-        let lowercased = command.lowercased()
-        for pattern in dangerousPatterns {
-            if lowercased.contains(pattern) {
-                return false
-            }
+        // The classic fork bomb is punctuation, so compare with ALL spaces
+        // stripped rather than trying to pin one spelling of it.
+        if normalized.replacingOccurrences(of: " ", with: "").contains(":(){:|:&};:") {
+            return false
         }
 
-        return true
+        let dangerousLiterals = [
+            "dd if=/dev/zero",
+            "dd if=/dev/random",
+            "> /dev/sd",        // raw disk writes
+            "> /dev/disk",
+            "chmod 000",
+            "mkfs",             // also mkfs.ext4, mkfs.xfs, …
+            "newfs",
+            "diskutil erasedisk",
+        ]
+        if dangerousLiterals.contains(where: { normalized.contains($0) }) { return false }
+
+        return !Self.removesARootPath(normalized)
+    }
+
+    /// True for an `rm` that recursively force-deletes a root-ish target.
+    ///
+    /// Parsed per command segment, because `cd /tmp && rm -rf /` is two
+    /// commands and only the second one matters. Flags are read as a SET
+    /// (`-rf`, `-fr`, `-r -f`, `--recursive --force` are the same thing), and
+    /// the target must be a whole-filesystem or whole-home path — `rm -rf
+    /// ./build` is ordinary and must stay allowed.
+    private static func removesARootPath(_ normalized: String) -> Bool {
+        let segments = normalized
+            .replacingOccurrences(of: "&&", with: ";")
+            .replacingOccurrences(of: "||", with: ";")
+            .components(separatedBy: CharacterSet(charactersIn: ";|"))
+
+        for segment in segments {
+            var tokens = segment.split(separator: " ").map(String.init)
+            // Step past wrappers that don't change what runs.
+            while let first = tokens.first,
+                  ["sudo", "command", "time", "nohup", "eval"].contains(first) {
+                tokens.removeFirst()
+            }
+            // `\rm` is the standard way to bypass an `rm` alias.
+            guard let head = tokens.first, head == "rm" || head == "\\rm" else { continue }
+
+            let args = tokens.dropFirst()
+            let flags = args.filter { $0.hasPrefix("-") }
+            let shortFlags = flags.filter { !$0.hasPrefix("--") }.joined()
+            let recursive = shortFlags.contains("r") || flags.contains("--recursive")
+            let force = shortFlags.contains("f") || flags.contains("--force")
+            guard recursive, force else { continue }
+
+            if args.contains(where: { !$0.hasPrefix("-") && isWholeFilesystemPath($0) }) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// `/`, `/*`, the home directory, or a quoted spelling of either.
+    private static func isWholeFilesystemPath(_ target: String) -> Bool {
+        let bare = target.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        return ["/", "/*", "~", "~/", "~/*",
+                "$home", "$home/", "$home/*", "${home}", "${home}/"].contains(bare)
     }
 }
 

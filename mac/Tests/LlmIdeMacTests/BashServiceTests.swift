@@ -132,4 +132,42 @@ final class BashServiceTests: XCTestCase {
         XCTAssertTrue(service.validateCommand("npm test"))
         XCTAssertTrue(service.validateCommand("rm -rf ./build"))
     }
+
+    /// The old check was `lowercased().contains("rm -rf /")`, so every spelling
+    /// below walked straight past it.
+    func testValidateCommandBlocksRootDeletionWhateverItsSpelling() {
+        for command in ["rm  -rf  /",                    // collapsed whitespace
+                        "rm -fr /",                      // flag order
+                        "rm -r -f /",                    // split flags
+                        "rm --recursive --force /",      // long flags
+                        "rm -rf --no-preserve-root /",
+                        "sudo rm -rf /*",
+                        "\\rm -rf /",                    // alias bypass
+                        "cd /tmp && rm -rf /",           // second segment
+                        "rm -rf ~",
+                        "rm -rf $HOME"] {
+            XCTAssertFalse(service.validateCommand(command), "should be blocked: \(command)")
+        }
+    }
+
+    /// The old `"format"` substring refused these — `make format` is one of
+    /// this repo's own documented commands, and `--pretty=format:` appears
+    /// throughout its git plumbing.
+    func testValidateCommandAllowsOrdinaryCommandsContainingScaryWords() {
+        for command in ["make format",
+                        "npm run format",
+                        "swift-format --in-place Sources/",
+                        "git log --pretty=format:%h",
+                        "rm -rf ./build",
+                        "rm -rf node_modules",
+                        "rm -f /tmp/scratch.txt",        // force, but not recursive
+                        "rm -r ./dist"] {                // recursive, but not force
+            XCTAssertTrue(service.validateCommand(command), "should be allowed: \(command)")
+        }
+    }
+
+    func testValidateCommandBlocksForkBombWhateverItsSpacing() {
+        XCTAssertFalse(service.validateCommand(":(){ :|:& };:"))
+        XCTAssertFalse(service.validateCommand(":(){:|:&};:"))
+    }
 }
