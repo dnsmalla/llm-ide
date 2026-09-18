@@ -330,21 +330,15 @@ struct CodeAssistantPanel: View {
             .onChange(of: initialURL) { _, newURL in
                 handleInitialURLChange(newURL)
             }
-            // The mode the server resolved becomes the picker's selection, so the
-            // chip names what the agent is actually doing. `ModePolicy` gates this
-            // to "picker is on Auto" — moving OFF auto is the point (the next
-            // message sends in the resolved mode instead of being re-classified);
-            // changing the picker back to Auto restores per-turn classification.
-            // A release (`releaseStickyMode`) retracts `resolvedMode` in the same
-            // frame it fires, so this handler only ever sees resolutions the
-            // lifecycle has NOT already taken back.
-            .onChange(of: engine.resolvedMode) { _, raw in
-                guard let raw,
-                      let next = ModePolicy.pickerMode(current: modelState.selectedMode.rawValue, resolved: raw),
-                      let mode = CodeAssistMode(rawValue: next)
-                else { return }
-                modelState.selectedMode = mode
-            }
+            // Both picker observers — "follow the resolved mode while on Auto"
+            // and "a changed conversation resets to Auto" — live in
+            // `ModePickerObservers`, OFF this chain. The chain sits at the
+            // type-checker's budget: adding the second observer here failed
+            // `body` outright ("unable to type-check this expression in
+            // reasonable time", reported at the chain's root), and one
+            // `.modifier` in place of two `.onChange`s leaves it lighter than
+            // it was, not merely restored.
+            .modifier(ModePickerObservers(engine: engine, modelState: modelState))
             .sheet(isPresented: $sheets.showingIssueSheet) {
                 showingIssueSheetContent
             }
@@ -752,6 +746,64 @@ struct CodeAssistantPanel: View {
             attachNotice = "Could not read file: " + url.lastPathComponent + "."
         case .duplicate:
             break
+        }
+    }
+
+    /// The mode picker's two lifecycle observers, kept OFF `body`'s modifier
+    /// chain — see the `.modifier(ModePickerObservers(...))` call there for
+    /// why. A `ViewModifier` rather than a method taking `self`: it needs
+    /// only the engine and the picker state, and holding those directly is
+    /// what lets both observers mutate them without a callback hop.
+    struct ModePickerObservers: ViewModifier {
+        let engine: ChatEngine
+        let modelState: CodeAssistantModelState
+
+        func body(content: Content) -> some View {
+            content
+                // The mode the server resolved becomes the picker's selection, so
+                // the chip names what the agent is actually doing. `ModePolicy`
+                // gates this to "picker is on Auto" — moving OFF auto is the point
+                // (the next message sends in the resolved mode instead of being
+                // re-classified); changing the picker back to Auto restores
+                // per-turn classification. A release (`releaseStickyMode`)
+                // retracts `resolvedMode` in the same frame it fires, so this
+                // handler only ever sees resolutions the lifecycle has NOT
+                // already taken back.
+                .onChange(of: engine.resolvedMode) { _, raw in
+                    guard let raw,
+                          let next = ModePolicy.pickerMode(current: modelState.selectedMode.rawValue,
+                                                           resolved: raw),
+                          let mode = CodeAssistMode(rawValue: next)
+                    else { return }
+                    modelState.selectedMode = mode
+                }
+                // The conversation itself changed — cleared, replaced by a new
+                // chat, or switched to another session. Every one of those
+                // reassigns the engine's session id (a registry engine swap
+                // included), so this single observer covers them all, the
+                // phone-driven ones too. The picker goes back to Auto: a mode is
+                // chosen FOR a conversation, and this one has none yet.
+                // `ModePolicy.pickerModeAfterSessionChange` is where it is decided
+                // that this — unlike `releaseStickyMode` — overrules a hand-pick,
+                // and why.
+                //
+                // Gated on the OLD id being non-empty: the first-load restore
+                // (`""` → the remembered id) replaces nothing, and the picker is
+                // already on its default, so it must not read as a change.
+                .onChange(of: engine.currentSessionIDString) { old, _ in
+                    guard !old.isEmpty,
+                          let mode = CodeAssistMode(rawValue: ModePolicy.pickerModeAfterSessionChange(
+                              from: modelState.selectedMode.rawValue))
+                    else { return }
+                    modelState.selectedMode = mode
+                    // Same retraction `releaseStickyMode` performs. The engine
+                    // already clears the outgoing chat's resolution in
+                    // `resetTransientSessionState`, but staying on Auto through
+                    // this frame must not depend on that ordering: a resolution
+                    // that survived would pass the "follow only while on Auto"
+                    // gate above and move the picker straight back off it.
+                    engine.resolvedMode = nil
+                }
         }
     }
 

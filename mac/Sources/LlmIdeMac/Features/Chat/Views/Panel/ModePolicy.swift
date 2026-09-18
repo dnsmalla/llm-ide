@@ -30,6 +30,27 @@ public enum ModePolicy {
         return resolved
     }
 
+    /// Where the picker goes when the CONVERSATION changes underneath it —
+    /// cleared, replaced by a new chat, or switched to another session:
+    /// always Auto, whatever it held.
+    ///
+    /// This is the one rule here that overrules a hand-picked mode, and
+    /// deliberately so. `releasesStickyMode` refuses to, because within a
+    /// conversation a choice the user made is theirs. But a mode is chosen
+    /// FOR a conversation: Execute picked for chat A says nothing about what
+    /// chat B needs, and carrying it across was the same "set once and
+    /// forgotten" failure stickiness had — a freshly cleared chat that asked
+    /// for a plan got an Execute turn because the picker still remembered
+    /// the previous one. A new or cleared conversation has no choice yet, so
+    /// Auto — the only setting that re-decides — is the only honest start.
+    ///
+    /// `current` is accepted and ignored on purpose: the answer does not
+    /// depend on where the picker was, and taking it lets `chat-contract-lab`
+    /// assert exactly that from every origin (flow-set, hand-picked, Auto).
+    public static func pickerModeAfterSessionChange(from current: String) -> String {
+        autoMode
+    }
+
     // Release sets, named once. Each caller says WHICH lifecycle moment it
     // is instead of spelling the modes — adding a stage is one edit here.
 

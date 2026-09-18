@@ -1005,6 +1005,23 @@ do {
            "an unknown wire value moves nothing")
 }
 
+// ModePolicy.pickerModeAfterSessionChange — a cleared, new or switched
+// conversation starts on Auto, from ANY origin. The one rule that overrules a
+// hand-picked mode: a mode is chosen for a conversation, not for the panel,
+// and the conversation it was chosen for is gone.
+do {
+    expect(ModePolicy.pickerModeAfterSessionChange(from: "plan") == ModePolicy.autoMode,
+           "a flow-set mode does not survive the conversation it was set in")
+    expect(ModePolicy.pickerModeAfterSessionChange(from: "execute") == ModePolicy.autoMode,
+           "a hand-picked mode does not carry into a different conversation")
+    expect(ModePolicy.pickerModeAfterSessionChange(from: "auto") == ModePolicy.autoMode,
+           "Auto stays Auto")
+    expect(ModePolicy.pickerModeAfterSessionChange(from: "not-a-mode") == ModePolicy.autoMode,
+           "an unknown origin lands on Auto too — there is nothing else safe to land on")
+    expect(ModePolicy.knownModes.contains(ModePolicy.pickerModeAfterSessionChange(from: "review")),
+           "the landing mode is one the picker can actually hold")
+}
+
 // PlanTurnLanding — what a finished turn does to the chat's plan file, decided
 // in one place from the last two messages. Order matters: a review landing
 // never also rewrites the plan.
