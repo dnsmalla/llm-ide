@@ -489,10 +489,39 @@ public struct LlmIdeMacApp: App {
                 // already applies the same fix for the main window scene.
                 .preferredColorScheme(theme.current.isDark ? .dark : .light)
         } label: {
-            Image(systemName: "bubble.left.and.text.bubble.right")
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(session.isAuthenticated ? theme.current.accent : .secondary)
-                .accessibilityLabel("\(L.App.name) chat")
+            // NO `foregroundStyle` and no `.hierarchical` rendering, in
+            // either state.
+            //
+            // The menu bar is a SYSTEM surface: it follows the macOS
+            // appearance (and the wallpaper behind it), never the in-app
+            // theme, and the two disagree constantly because the app's theme
+            // is chosen independently of macOS's. Tinting with
+            // `theme.current.accent` therefore painted a fixed brand colour
+            // onto a surface the app does not control — app theme Light +
+            // macOS Dark put the Light palette's dark teal (#2E7D8F) on a
+            // dark menu bar at ~3.5:1, and `.hierarchical` then dropped the
+            // glyph's secondary layers (the text strokes, the second bubble)
+            // to roughly half that, which is most of this symbol.
+            //
+            // Untinted, the symbol is a TEMPLATE image — what a menu bar
+            // extra is supposed to be. macOS renders it black on a light menu
+            // bar and white on a dark one (~16:1 either way) and inverts it
+            // against the click highlight for free; an explicit foreground is
+            // what stopped that inversion, so the icon appeared to change
+            // whenever the popover was opened.
+            //
+            // Signed-out is signalled by a DIFFERENT GLYPH rather than by
+            // dimming, for the same reason: `.secondary` is ~50% opacity on
+            // that uncontrolled surface, so the button faded to near-invisible
+            // in exactly the situation where it most needs to be findable —
+            // the backend is not running, and clicking this is how the user
+            // finds that out.
+            Image(systemName: session.isAuthenticated
+                  ? "bubble.left.and.text.bubble.right"
+                  : "bubble.left.and.exclamationmark.bubble.right")
+                .accessibilityLabel(session.isAuthenticated
+                                    ? "\(L.App.name) chat"
+                                    : "\(L.App.name) chat — signed out")
         }
         .menuBarExtraStyle(.window)
     }
