@@ -46,7 +46,12 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
 <dict>
     <key>CFBundleExecutable</key><string>LlmIdeMac</string>
     <key>CFBundleIdentifier</key><string>com.llmide.macapp</string>
-    <key>CFBundleName</key><string>LlmIdeMac</string>
+    <!-- Same brand as Scripts/build.sh: this throwaway dev bundle is what
+         macOS names in the recording indicator and the Privacy pane during a
+         `run.sh` session, and a TCC grant is remembered per bundle id — so a
+         different name here just makes the same app look like two. -->
+    <key>CFBundleName</key><string>LLM-IDE</string>
+    <key>CFBundleDisplayName</key><string>LLM-IDE</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>CFBundleVersion</key><string>1</string>

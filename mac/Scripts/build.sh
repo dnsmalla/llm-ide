@@ -127,10 +127,18 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.llmide.macapp</string>
+    <!-- The user-visible brand, per ADR 0016 and AppIdentity.displayName —
+         NOT the `llm-ide` slug, which is for the repo, the package and
+         on-disk paths. These two keys are how macOS ITSELF names the app:
+         the Control Center recording indicator, System Settings → Privacy &
+         Security, Force Quit, notifications, the Dock. Carrying the slug
+         here meant the app called itself "LLM-IDE" in every string it drew
+         and "llm-ide" everywhere the system spoke for it. The iOS target has
+         always used the brand here; this brings the Mac in line. -->
     <key>CFBundleName</key>
-    <string>llm-ide</string>
+    <string>LLM-IDE</string>
     <key>CFBundleDisplayName</key>
-    <string>llm-ide</string>
+    <string>LLM-IDE</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
