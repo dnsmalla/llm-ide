@@ -147,7 +147,17 @@ final class LoopEngineConfigTests: XCTestCase {
         XCTAssertTrue(ensured.stages.contains { $0.kind == .regressionSweep && $0.isDefault })
     }
 
-    func testEnsurePinsExistingTestWhenToolingDetected() throws {
+    /// A user's own shell stage running a DIFFERENT command than detection
+    /// produces is left alone — it is not adopted as the Test default, and the
+    /// default is added beside it instead.
+    ///
+    /// This test used to assert the opposite (adopt it in place, keep its
+    /// command), which was the pre-`defaultKey` kind-alone rule. Requiring a
+    /// command match is deliberate: adoption sets `isDefault`, which hides
+    /// Delete, shows the "can't be deleted" lock, and makes the stage eligible
+    /// for `revalidatingTestStages`'s destructive path — none of which should
+    /// happen to a stage the user wrote themselves.
+    func testEnsureDoesNotAdoptAUserStageRunningADifferentCommand() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ensure-tooling-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -159,10 +169,18 @@ final class LoopEngineConfigTests: XCTestCase {
         ])
         let ensured = LoopStageDetector.ensureDefaultStages(in: config, gitRoot: dir)
         XCTAssertEqual(ensured.stages.first { $0.kind == .regressionSweep }?.isDefault, true)
-        // Tooling detected → the existing shell stage is pinned in place; its command is NOT overwritten.
-        let shell = ensured.stages.first { $0.kind == .shellCommand }
-        XCTAssertEqual(shell?.isDefault, true)
-        XCTAssertEqual(shell?.command, "npm test")
+
+        // The user's stage: untouched, unadopted, command intact.
+        let mine = ensured.stages.first { $0.name == "My Tests" }
+        XCTAssertEqual(mine?.command, "npm test", "the user's command was overwritten")
+        XCTAssertEqual(mine?.isDefault, false, "the user's own stage was adopted as a default")
+        XCTAssertNil(mine?.defaultKey)
+
+        // The Test default: added alongside, carrying the detected command.
+        let added = ensured.stages.first { $0.defaultKey == "test" }
+        XCTAssertNotNil(added, "no Test default was added")
+        XCTAssertEqual(added?.command, "swift test")
+        XCTAssertEqual(added?.isDefault, true)
     }
 
     func testEnsureAddsTestIfToolingButMissing() throws {

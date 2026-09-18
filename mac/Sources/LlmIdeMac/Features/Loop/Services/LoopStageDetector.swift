@@ -229,10 +229,10 @@ public enum LoopStageDetector {
                 // and safe here — there is nothing for a command check to
                 // gate, and nothing here is a "test-role" key either.
                 matches = { $0.kind == def.kind && $0.defaultKey == nil }
-            } else if def.defaultKey == "test" || def.defaultKey == "regression-test" {
-                // BOTH gates are required. Round 3 added the command gate but
-                // (for `"regression-test"` specifically) dropped a name gate
-                // that already existed: before this branch was unified,
+            } else if def.defaultKey == "regression-test" {
+                // BOTH gates are required HERE. Round 3 added the command gate
+                // but (for `"regression-test"` specifically) dropped a name
+                // gate that already existed: before this branch was unified,
                 // `"regression-test"` fell through to the final `else` below,
                 // which already required `$0.name == def.name` (it is a
                 // `.shellCommand` named "Test", never `.regressionSweep`, so
@@ -247,6 +247,23 @@ public enum LoopStageDetector {
                 // category of defect this whole fix exists to close.
                 matches = { $0.kind == def.kind && $0.name == def.name
                     && $0.defaultKey == nil && $0.command == def.command }
+                isTestRoleAdoption = true
+            } else if def.defaultKey == "test" {
+                // NO name gate — and that asymmetry with `"regression-test"`
+                // above is the point. `"test"` is the one key whose legacy
+                // fallback was always KIND-ALONE, so a pre-`defaultKey` Test
+                // default that the user renamed ("My Tests") still has to
+                // migrate. Sharing `regression-test`'s name gate orphaned it
+                // instead: it was left key-less and a second, identical "Test"
+                // default was appended beside it, so the loop ran the same
+                // suite twice every iteration.
+                //
+                // Round 3's command gate is kept, so this is still strictly
+                // tighter than the kind-alone rule it restores — a renamed
+                // stage only adopts the key when it is also running exactly
+                // what detection currently produces.
+                matches = { $0.kind == def.kind && $0.defaultKey == nil
+                    && $0.command == def.command }
                 isTestRoleAdoption = true
             } else {
                 matches = { $0.kind == def.kind && $0.name == def.name && $0.defaultKey == nil }
