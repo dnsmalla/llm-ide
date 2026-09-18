@@ -651,7 +651,13 @@ struct MenuBarChatView: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.white)
                 } else {
-                    Image(systemName: "sparkles")
+                    // An arrow, not "sparkles". This is the Send control, and
+                    // the main Code Assistant composer has always used an
+                    // arrow for it — the sparkle both broke that consistency
+                    // and collided with the sparkle the mic button was
+                    // wearing, so two adjacent controls showed the same glyph
+                    // for unrelated jobs.
+                    Image(systemName: "arrow.up")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(canSend ? .white : theme.current.textMuted)
                 }
@@ -666,22 +672,21 @@ struct MenuBarChatView: View {
         Button {
             toggleVoiceInput()
         } label: {
-            ZStack(alignment: .topTrailing) {
+            // Centred, and no badge. This was `ZStack(alignment: .topTrailing)`
+            // carrying an 8pt "sparkles" overlay — which aligned the MIC into
+            // the corner of its own 36pt tile too, since the alignment applies
+            // to every child. The badge decorated a control whose icon already
+            // says what it does, at a size too small to read, in the one spot
+            // that knocked the real glyph off centre.
+            ZStack {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(voiceState.isRecording ? theme.current.danger : theme.current.surface2)
                     .frame(width: 36, height: 36)
-                
+
                 Image(systemName: voiceState.isRecording ? "waveform" : "mic.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(voiceState.isRecording ? .white : theme.current.textMuted)
                     .symbolEffect(.pulse, options: .speed(1.5), isActive: voiceState.isRecording)
-                
-                if !voiceState.isRecording {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 8))
-                        .foregroundStyle(theme.current.accent)
-                        .padding(4)
-                }
             }
         }
         .buttonStyle(.plain)

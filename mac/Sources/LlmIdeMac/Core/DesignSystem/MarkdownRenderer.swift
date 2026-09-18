@@ -241,11 +241,41 @@ enum MarkdownRenderer {
       html = extractTables(html, tables);
       // Lists (after tables so table pipes aren't mistaken for list items).
       html = html.replace(/^[\\*\\-] (.+)$/gm, '<li>$1</li>');
+      // Join items separated by a BLANK line before wrapping. The wrap below
+      // allows only a single `\\n` between items, so a model that spaces its
+      // bullets out — most do — got one <ul> PER BULLET, each carrying the
+      // list's own bottom margin.
+      html = html.replace(/<\\/li>\\n{2,}(?=<li>)/g, '</li>\\n');
       html = html.replace(/(<li>.*<\\/li>\\n?)+/g, '<ul>$&</ul>');
       html = html.replace(/^\\d+\\. (.+)$/gm, '<li>$1</li>');
       html = html.replace(/\\n\\n/g, '</p><p>');
       html = '<p>' + html + '</p>';
       html = html.replace(/\\n/g, '<br>');
+      // Structural repair, and the reason a bulleted reply used to open a
+      // hole in the middle of itself.
+      //
+      // The three transforms above are line-based and know nothing about
+      // block structure, so they emit markup no browser accepts as written:
+      // `<br>` lands hard against list boundaries, and `<p>` ends up wrapping
+      // block elements. The browser silently repairs the nesting by closing
+      // the paragraph early — which leaves an EMPTY `<p>`, and an empty `<p>`
+      // still costs its 14px bottom margin plus a 1.6 line-height. Stack two
+      // or three of those between a list and the next sentence and the reply
+      // has ~80pt of dead space through it.
+      //
+      // So: drop the breaks that sit against block edges, then hoist block
+      // elements out of paragraphs explicitly (close before, reopen after)
+      // and discard whatever empties that leaves. `<br>` BETWEEN two lines of
+      // one paragraph is a real line break and is deliberately untouched.
+      // The code/table placeholders are lifted too — they expand into
+      // `<div>`/`<table>` after this, and would otherwise land inside a `<p>`
+      // and be split back out the same way.
+      html = html.replace(/<br>\\s*(?=<\\/?(?:ul|ol|blockquote|table|h[1-6]|hr|div|li)\\b)/g, '');
+      html = html.replace(/(<\\/(?:ul|ol|blockquote|table|h[1-6]|div|li)>|<hr>)\\s*<br>/g, '$1');
+      html = html.replace(/(<(?:ul|ol|blockquote|table|h[1-6]|hr|div)\\b)/g, '</p>$1');
+      html = html.replace(/(<\\/(?:ul|ol|blockquote|table|h[1-6]|div)>|<hr>)/g, '$1<p>');
+      html = html.replace(/(\\x00(?:CODE|TABLE)\\d+\\x00)/g, '</p>$1<p>');
+      html = html.replace(/<p>\\s*<\\/p>/g, '');
       // Function replacements, not string ones: String.replace expands the
       // dollar patterns ($&, $' and the backtick one) inside a STRING
       // replacement, so a code block containing any of those (shell, awk,

@@ -106,6 +106,47 @@ do {
     expect(fenced.contains("\\${y}"), "${…} inside a mermaid fence is escaped too")
 }
 
+// The structural-repair pass in parseMarkdown. Its three line-based transforms
+// (list wrap, \n\n -> </p><p>, \n -> <br>) know nothing about block structure
+// and emit markup no browser accepts: <br> against list edges, and <p>
+// wrapping block elements. The browser repairs the nesting by closing the
+// paragraph early, leaving an EMPTY <p> that still costs its 14px margin and a
+// 1.6 line-height — which is what opened ~80pt of dead space through the middle
+// of any reply with spaced-out bullets.
+//
+// These assert the repair steps are PRESENT, not that they work: the parser is
+// JavaScript that only runs inside the WKWebView, so nothing reachable from
+// Swift can execute it. Behaviour is verified by extracting parseMarkdown from
+// this template, unescaping it, and running it under node — the check that
+// found the bug. What this pins is that the steps are not quietly dropped, and
+// that the ORDER holds: the join must precede the <ul> wrap, and the repairs
+// must follow the <br> substitution, or each one silently does nothing.
+do {
+    let page = GenerationConformance.renderedHTML(for: "- a\n\n- b\n")
+
+    guard let joinAt = page.range(of: "<\\/li>\\n{2,}(?=<li>)")?.lowerBound,
+          let wrapAt = page.range(of: "(<li>.*<\\/li>\\n?)+")?.lowerBound,
+          let brAt = page.range(of: "html.replace(/\\n/g, '<br>')")?.lowerBound,
+          let stripAt = page.range(of: "<br>\\s*(?=<\\/?(?:ul|ol|blockquote|table|h[1-6]|hr|div|li)\\b)")?.lowerBound,
+          let emptyAt = page.range(of: "<p>\\s*<\\/p>")?.lowerBound
+    else {
+        expect(false, "the parseMarkdown repair pass is missing from the rendered template")
+        exit(1)
+    }
+
+    expect(joinAt < wrapAt,
+           "blank-line-separated bullets are joined BEFORE the <ul> wrap, or each bullet gets its own list")
+    expect(brAt < stripAt,
+           "the <br> cleanup runs AFTER \\n becomes <br>, or there are no breaks to clean")
+    expect(stripAt < emptyAt,
+           "empty paragraphs are dropped LAST, after the block hoist creates them")
+    // The hoist itself — a block element can never legally live inside <p>.
+    expect(page.contains("(<(?:ul|ol|blockquote|table|h[1-6]|hr|div)\\b)"),
+           "block opens are hoisted out of the enclosing paragraph")
+    expect(page.contains("(\\x00(?:CODE|TABLE)\\d+\\x00)"),
+           "code/table placeholders are hoisted too — they expand into block elements after this")
+}
+
 // Markdown preview gating. The generated doc is where a ```mermaid dependency
 // graph turns up, but the same renderer draws every chat reply — where an async
 // diagram would land after the synchronous height measurement.
