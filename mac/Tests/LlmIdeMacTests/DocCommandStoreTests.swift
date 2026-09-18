@@ -11,18 +11,56 @@ final class DocCommandStoreTests: XCTestCase {
         return root
     }
 
-    func testSeederWritesEveryDefaultCommand() throws {
+    /// Build one kit entry the way the server sends it.
+    ///
+    /// Goes through `JSONDecoder` because `GenerationLibraryEntry` declares
+    /// `init(from:)` in its body, which suppresses the memberwise init — and
+    /// decoding is what production does anyway, so a field renamed on the wire
+    /// breaks these tests too. `folderName` is the last `/` component of `id`.
+    private func kitEntry(id: String, body: String,
+                          surface: String = "doc") throws -> LlmIdeAPIClient.GenerationLibraryEntry {
+        let json: [String: Any] = ["id": id, "name": id, "description": "",
+                                   "surface": surface, "body": body]
+        return try JSONDecoder().decode(
+            LlmIdeAPIClient.GenerationLibraryEntry.self,
+            from: try JSONSerialization.data(withJSONObject: json))
+    }
+
+    // These four tests used to seed with no `kit` at all and assert against
+    // `DocCommand.seedDefinitions`. Both are `[]` now — the shipped defaults
+    // moved to the server-supplied kit (`/kb/agent/generation-library`) so
+    // adding one no longer needs an app release. Against an empty kit the
+    // seeder writes nothing, so two of these failed outright and two passed
+    // while asserting nothing at all (`0 == 0`, and `allSatisfy` over an
+    // empty array). Each now supplies its own kit and asserts the real
+    // contract.
+
+    func testSeederWritesEveryKitCommand() throws {
         let root = try makeTempProject()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        ProjectDocCommandsSeeder.seedIfNeeded(at: root)
+        let kit = [try kitEntry(id: "doc/summarize", body: "# Summarize\n\nShorten it."),
+                   try kitEntry(id: "doc/translate", body: "# Translate\n\nInto Japanese.")]
+        ProjectDocCommandsSeeder.seedIfNeeded(at: root, kit: kit)
 
-        for def in DocCommand.seedDefinitions {
+        for entry in kit {
             let file = ProjectLayout(root: root)
-                .commandDir(named: def.folderName)
+                .commandDir(named: entry.folderName)
                 .appendingPathComponent("command.md")
             XCTAssertTrue(FileManager.default.fileExists(atPath: file.path),
-                          "missing \(def.folderName)/command.md")
+                          "missing \(entry.folderName)/command.md")
+            let written = try String(contentsOf: file, encoding: .utf8)
+            // Asserted in two parts, not as one `contains(entry.body)`: the
+            // marker is INSERTED directly under the title, so the body is no
+            // longer contiguous in the written file.
+            for fragment in entry.body.components(separatedBy: "\n\n") where !fragment.isEmpty {
+                XCTAssertTrue(written.contains(fragment),
+                              "\(entry.folderName)/command.md is missing kit text: \(fragment)")
+            }
+            // The scanner reads this marker to decide which menu the command
+            // belongs in; seeding without it files every command in the wrong one.
+            XCTAssertTrue(written.contains("llmide:doc-command"),
+                          "\(entry.folderName)/command.md lost its surface marker")
         }
     }
 
@@ -30,32 +68,39 @@ final class DocCommandStoreTests: XCTestCase {
         let root = try makeTempProject()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        ProjectDocCommandsSeeder.seedIfNeeded(at: root)
+        let kit = [try kitEntry(id: "doc/summarize", body: "# Summarize\n\nShipped text.")]
+        ProjectDocCommandsSeeder.seedIfNeeded(at: root, kit: kit)
         let file = ProjectLayout(root: root)
             .commandDir(named: "summarize")
             .appendingPathComponent("command.md")
-        try "# Summarize\n\n<!-- llmide:doc-command -->\n\nEdited.".write(
-            to: file, atomically: true, encoding: .utf8)
 
-        ProjectDocCommandsSeeder.seedIfNeeded(at: root)
+        let edited = "# Summarize\n\n<!-- llmide:doc-command -->\n\nEdited."
+        try edited.write(to: file, atomically: true, encoding: .utf8)
 
-        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8),
-                       "# Summarize\n\n<!-- llmide:doc-command -->\n\nEdited.")
+        // Re-seeding the SAME kit must not clobber the user's copy: this is
+        // the write-if-absent guarantee, and it runs on every project open.
+        ProjectDocCommandsSeeder.seedIfNeeded(at: root, kit: kit)
+
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), edited,
+                       "re-seeding overwrote an edited command")
     }
 
     func testReloadPublishesProjectCommands() throws {
         let root = try makeTempProject()
         defer { try? FileManager.default.removeItem(at: root) }
-        ProjectDocCommandsSeeder.seedIfNeeded(at: root)
+        // Folder order and display-name order deliberately DISAGREE (aa-→Zulu,
+        // zz-→Alpha), so the sort assertion below fails if the store ever
+        // publishes in directory-scan order instead of by name.
+        let kit = [try kitEntry(id: "doc/aa-long", body: "# Zulu Long\n\nBody."),
+                   try kitEntry(id: "doc/zz-brief", body: "# Alpha Brief\n\nBody.")]
+        ProjectDocCommandsSeeder.seedIfNeeded(at: root, kit: kit)
 
         let store = DocCommandStore()
         store.reloadProjectCommands(at: root)
 
-        XCTAssertEqual(store.commands.count, DocCommand.seedDefinitions.count)
+        XCTAssertEqual(store.commands.count, kit.count)
         XCTAssertTrue(store.commands.allSatisfy { $0.isProjectCommand })
-        XCTAssertEqual(store.commands.map(\.name), store.commands.map(\.name).sorted {
-            $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
-        })
+        XCTAssertEqual(store.commands.map(\.name), ["Alpha Brief", "Zulu Long"])
     }
 
     func testFallsBackToBuiltinsWithNoProject() {
@@ -90,7 +135,8 @@ final class DocCommandStoreTests: XCTestCase {
     func testDeleteRemovesTheFolder() throws {
         let root = try makeTempProject()
         defer { try? FileManager.default.removeItem(at: root) }
-        ProjectDocCommandsSeeder.seedIfNeeded(at: root)
+        ProjectDocCommandsSeeder.seedIfNeeded(
+            at: root, kit: [try kitEntry(id: "doc/summarize", body: "# Summarize\n\nShorten it.")])
 
         let store = DocCommandStore()
         store.reloadProjectCommands(at: root)

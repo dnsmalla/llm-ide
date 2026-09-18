@@ -37,8 +37,16 @@ final class DocCommandTests: XCTestCase {
         XCTAssertNotEqual(a, DocTemplate.stableID(forFolder: "my-command"))
     }
 
-    func testSeedIDsAreUsedForSeedFolders() {
-        let seed = DocCommand.seedDefinitions[0]
+    func testSeedIDsAreUsedForSeedFolders() throws {
+        // `seedDefinitions` is `[]` since the shipped defaults moved to the
+        // server-supplied kit, which makes `stableID`'s pinning branch
+        // unreachable for now. SKIP rather than subscript: `[0]` on the empty
+        // array trapped with "Index out of range" and killed the whole XCTest
+        // process, so every suite ordered after this one silently never ran.
+        // The assertion still stands if pinned seeds ever come back.
+        try XCTSkipIf(DocCommand.seedDefinitions.isEmpty,
+                      "no seed definitions — stableID's pinning branch is unreachable")
+        let seed = try XCTUnwrap(DocCommand.seedDefinitions.first)
         XCTAssertEqual(DocCommand.stableID(forFolder: seed.folderName), seed.id)
     }
 
