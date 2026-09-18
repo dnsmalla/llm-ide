@@ -99,7 +99,12 @@ final class GenerationTreeSelectionTests: XCTestCase {
         XCTAssertEqual(states["/repo"], .partial)
         XCTAssertEqual(states["/repo/src"], .partial)
         XCTAssertEqual(states["/repo/src/a.swift"], .all)
-        XCTAssertEqual(states["/repo/src/b.swift"], .none)
+        // `State.none` spelled out, NOT a bare `.none`: the subscript returns
+        // `State?`, so bare `.none` resolves to `Optional.none` — i.e. the
+        // assertion silently becomes "this key is ABSENT" instead of "this key
+        // is `.none`". Every `.none` expectation in this file has to be
+        // qualified for that reason.
+        XCTAssertEqual(states["/repo/src/b.swift"], GenerationTreeSelection.State.none)
         XCTAssertEqual(states["/repo/README.md"], .all)
     }
 
@@ -116,8 +121,11 @@ final class GenerationTreeSelectionTests: XCTestCase {
         let states = GenerationTreeSelection.states(forForest: [tree], selected: everyLeaf)
 
         XCTAssertEqual(states["/repo"], .all)
-        XCTAssertEqual(states["/repo/empty-parent"], .none)
-        XCTAssertEqual(states["/repo/empty-parent/empty-child"], .none)
+        // Qualified for the same reason as above — a bare `.none` here would
+        // assert the key is missing, which is exactly the vacuous pass this
+        // test exists to rule out.
+        XCTAssertEqual(states["/repo/empty-parent"], GenerationTreeSelection.State.none)
+        XCTAssertEqual(states["/repo/empty-parent/empty-child"], GenerationTreeSelection.State.none)
     }
 
     func testStatesForForestAgreesWithPerNodeStateForEveryNode() {

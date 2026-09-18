@@ -21,8 +21,13 @@ final class DocGenOutputConfigTests: XCTestCase {
     func testResolvedDirectoryPrefersExplicitPath() {
         var config = DocGenOutputConfig()
         config.localFolderPath = "/tmp/custom-out"
+        // `isDirectory: true` so the expected URL carries the trailing slash
+        // the resolver produces. `URL` compares the string form, so
+        // "/tmp/custom-out" and "/tmp/custom-out/" are unequal despite naming
+        // the same directory — without this the assertion fails on a purely
+        // cosmetic difference.
         XCTAssertEqual(config.resolvedDirectory(projectRoot: URL(fileURLWithPath: "/tmp/proj")),
-                       URL(fileURLWithPath: "/tmp/custom-out"))
+                       URL(fileURLWithPath: "/tmp/custom-out", isDirectory: true))
     }
 
     func testResolvedDirectoryIsNilWithNoProjectAndNoPath() {

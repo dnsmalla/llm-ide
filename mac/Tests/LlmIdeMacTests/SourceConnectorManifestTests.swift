@@ -88,9 +88,22 @@ final class SourceConnectorManifestTests: XCTestCase {
     /// `swift test` can catch that (here the bundle exists), so the contract is
     /// pinned against the source text.
     func testLoaderSourceNeverReferencesBundleModule() throws {
-        let source = URL(fileURLWithPath: #filePath)          // Tests/LlmIdeMacTests/…
+        // SEARCHED, not hard-coded. This test pinned
+        // "Sources/LlmIdeMac/SourceConnectors/SourceConnectorManifest.swift",
+        // and the Shell→Features→Core refactor moved the file to
+        // Features/Library/Services/ — so the test stopped reading anything and
+        // failed on the unwrap instead of checking the contract. The
+        // feature-boundaries gate catches stale source paths in scripts/ and
+        // the Makefile, but not ones written inside a test, so nothing flagged
+        // it. Finding the file by name survives the next move too.
+        let sourcesRoot = URL(fileURLWithPath: #filePath)     // Tests/LlmIdeMacTests/…
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/LlmIdeMac/SourceConnectors/SourceConnectorManifest.swift")
+            .appendingPathComponent("Sources/LlmIdeMac")
+        let found = FileManager.default.enumerator(atPath: sourcesRoot.path)?
+            .compactMap { $0 as? String }
+            .first { ($0 as NSString).lastPathComponent == "SourceConnectorManifest.swift" }
+        let source = sourcesRoot.appendingPathComponent(try XCTUnwrap(
+            found, "SourceConnectorManifest.swift not found under \(sourcesRoot.path)"))
         let text = try XCTUnwrap(try? String(contentsOf: source, encoding: .utf8),
                                  "expected the loader source at \(source.path)")
         let code = text.split(separator: "\n").filter {

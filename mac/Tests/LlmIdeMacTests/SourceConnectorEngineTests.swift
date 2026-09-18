@@ -147,8 +147,17 @@ extension SourceConnectorEngineTests {
 
         let canonicalNotesDir = projectRoot.appendingPathComponent("llm-doc").appendingPathComponent("slack")
         let misplacedNotesDir = sourceRoot.appendingPathComponent("llm-doc").appendingPathComponent("slack")
+        // RECURSIVE: the writer files notes by year/month, so the note lands at
+        // llm-doc/slack/<yyyy>/<MM>/<name>.md. A flat `contentsOfDirectory`
+        // here only ever saw ["2026"] and so reported the note missing even
+        // though it was written to exactly the right place — the assertion was
+        // wrong, not the path logic it guards.
+        let canonicalMarkdown = FileManager.default
+            .enumerator(atPath: canonicalNotesDir.path)?
+            .compactMap { $0 as? String }
+            .contains { $0.hasSuffix(".md") } ?? false
         XCTAssertTrue(
-            try FileManager.default.contentsOfDirectory(atPath: canonicalNotesDir.path).contains { $0.hasSuffix(".md") },
+            canonicalMarkdown,
             "note should be written under <projectRoot>/llm-doc/slack/, not nested inside source/")
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: misplacedNotesDir.path)
