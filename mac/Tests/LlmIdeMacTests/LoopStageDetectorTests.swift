@@ -98,6 +98,39 @@ final class LoopStageDetectorTests: XCTestCase {
 
     // MARK: - System Check markers (llm-ide's own layout, gated per-check)
 
+    /// A keyed stage saved before `detectedCommand` existed gets its
+    /// provenance backfilled — but only when its command is provably still the
+    /// auto-detected one. Without this, `detectedCommand` stayed nil forever on
+    /// every stage already on disk, and `revalidatingTestStages` reads nil as
+    /// "provenance unknown", so a later user edit was eligible to be
+    /// overwritten (or the stage removed outright, on a repo with no
+    /// detectable tooling).
+    func testEnsureBackfillsProvenanceOntoAnUnstampedKeyedTestStage() throws {
+        try write("Package.swift")   // detection → "swift test"
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test",
+                      order: 0, isDefault: true, defaultKey: "test")
+        ])
+        let ensured = LoopStageDetector.ensureDefaultStages(in: config, gitRoot: tempDir)
+        XCTAssertEqual(ensured.stages.first { $0.id == "t1" }?.detectedCommand, "swift test")
+    }
+
+    /// The mismatched case stays nil: an edited command and one whose tooling
+    /// moved on are indistinguishable here, so stamping either value would be a
+    /// guess. Backfilling the DETECTED value in particular would mark a stale
+    /// default as user-edited and freeze it permanently.
+    func testEnsureLeavesProvenanceNilWhenTheSavedCommandDiffersFromDetection() throws {
+        try write("Package.swift")   // detection → "swift test"
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "npm test",
+                      order: 0, isDefault: true, defaultKey: "test")
+        ])
+        let ensured = LoopStageDetector.ensureDefaultStages(in: config, gitRoot: tempDir)
+        let stage = ensured.stages.first { $0.id == "t1" }
+        XCTAssertNil(stage?.detectedCommand)
+        XCTAssertEqual(stage?.command, "npm test", "the saved command must not be rewritten here")
+    }
+
     private func writeNested(_ relativePath: String, _ contents: String = "") throws {
         let url = tempDir.appendingPathComponent(relativePath)
         try FileManager.default.createDirectory(

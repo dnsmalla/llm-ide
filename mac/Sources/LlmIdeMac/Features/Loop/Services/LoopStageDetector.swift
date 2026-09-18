@@ -221,8 +221,20 @@ public enum LoopStageDetector {
             // `detectedCommand == nil` population every load could mint one
             // of.
             var isTestRoleAdoption = false
+            // A stage that ALREADY carries this key but predates the
+            // `detectedCommand` field. Adoption was the only thing that ever
+            // stamped provenance, so every such stage sits on
+            // `detectedCommand == nil` forever — and nil is exactly what
+            // `revalidatingTestStages` reads as "unknown, not disproven",
+            // which falls through to its rewrite path and, when the repo has
+            // no detectable tooling at all, to its REMOVE path. The guard
+            // therefore protected nobody in the population that exists on disk.
+            var backfillProvenance = false
             if stages.contains(where: { $0.defaultKey == def.defaultKey }) {
                 matches = { $0.defaultKey == def.defaultKey }
+                // Only the two test-role keys are ever revalidated, so only
+                // they need provenance (`revalidatingTestStages.isEligible`).
+                backfillProvenance = def.defaultKey == "test" || def.defaultKey == "regression-test"
             } else if def.kind == .regressionSweep {
                 // The Regression sweep never carries a command (it is not a
                 // `.shellCommand` stage at all), so kind alone is unambiguous
@@ -273,6 +285,24 @@ public enum LoopStageDetector {
                 stages[idx].defaultKey = def.defaultKey
                 if isTestRoleAdoption {
                     stages[idx].detectedCommand = def.detectedCommand
+                } else if backfillProvenance, stages[idx].detectedCommand == nil,
+                          let detected = def.detectedCommand,
+                          stages[idx].command == detected {
+                    // Backfill ONLY when the saved command still equals what
+                    // detection produces right now. That makes the stage
+                    // provably untouched, so recording it changes nothing
+                    // today and protects the user's NEXT edit — which is
+                    // otherwise invisible to the guard forever.
+                    //
+                    // The mismatched case is deliberately left nil. There, an
+                    // edited command and a command whose tooling simply moved
+                    // on (npm → swift) are indistinguishable, and stamping
+                    // either way would be a guess: stamping the detected value
+                    // would freeze a genuinely stale default, and stamping the
+                    // saved one would silently bless an edit as auto-detected.
+                    // nil keeps the documented "unknown, and the caller logs
+                    // it" contract for exactly the case that is unknown.
+                    stages[idx].detectedCommand = detected
                 }
             } else {
                 // `def.order` is only ever correct for a BRAND NEW loop, where
