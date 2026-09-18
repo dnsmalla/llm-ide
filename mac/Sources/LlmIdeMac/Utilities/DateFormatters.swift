@@ -166,22 +166,43 @@ enum AppDateFormatter {
         return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
     }
 
-    /// Relative string from a Date: "Today at 2:15 PM", "Yesterday at…", "3 days ago", or absolute.
-    static func relativeDate(_ date: Date) -> String {
-        let ago = Date().timeIntervalSince(date)
+    /// Relative string from a Date: "Today at 2:15 PM", "Yesterday at…",
+    /// "3 days ago", or an absolute stamp past a week (and for any future
+    /// date, which only a clock skew produces).
+    ///
+    /// Bucketed by CALENDAR DAY, not by elapsed hours. It used to ask
+    /// `RelativeDateTimeFormatter` to name a raw interval, which measures in
+    /// 24-hour blocks and has no notion of midnight — so the label disagreed
+    /// with the calendar at both ends:
+    ///
+    ///   * 24–48 h back was named "yesterday" whatever the date. A meeting at
+    ///     23:02 on the 16th still read "Yesterday at 11:02 PM" all through
+    ///     the 18th, two calendar days later — and sat under a "This Week"
+    ///     header, because `LibraryViewModel.dateGroup` buckets by
+    ///     `isDateInYesterday` and was right. The row and its own section
+    ///     header contradicted each other.
+    ///   * Under 24 h it never said "today" or "yesterday" at all: the named
+    ///     style falls back to hours below a day, so the `at <time>` suffix
+    ///     was glued onto a duration — "9 Hours Ago at 11:02 PM". The "Today
+    ///     at 2:15 PM" this doc comment has always promised was unreachable.
+    ///
+    /// The day count is computed from `startOfDay` on both sides and handed
+    /// to the formatter as `DateComponents`, so the wording stays localized
+    /// (a Japanese locale still gets 昨日) while the bucket is the calendar's.
+    ///
+    /// `now` is injectable for tests only; production passes today's date.
+    static func relativeDate(_ date: Date, now: Date = Date()) -> String {
+        let cal = Calendar.current
+        let days = cal.dateComponents([.day],
+                                      from: cal.startOfDay(for: date),
+                                      to: cal.startOfDay(for: now)).day ?? 0
+        guard days >= 0, days < 7 else { return mediumDateTime.string(from: date) }
         let rel = RelativeDateTimeFormatter()
-        if ago < 7 * 24 * 3600 {
-            rel.dateTimeStyle = .named
-            let s = rel.localizedString(for: date, relativeTo: .now)
-            if ago < 2 * 24 * 3600 {
-                return "\(s.capitalized) at \(shortTimeFmt.string(from: date))"
-            }
-            return s.capitalized
-        }
-        let abs = DateFormatter()
-        abs.dateStyle = .medium
-        abs.timeStyle = .short
-        return abs.string(from: date)
+        rel.dateTimeStyle = .named
+        let named = rel.localizedString(from: DateComponents(day: -days)).capitalized
+        // Only today and yesterday get a clock time: at two days out the time
+        // of day stops being the thing that identifies the meeting.
+        return days <= 1 ? "\(named) at \(shortTimeFmt.string(from: date))" : named
     }
 
     /// Formats "2024-04-03" to "Apr 3"; falls back to raw string on parse failure.
