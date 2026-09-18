@@ -1,5 +1,5 @@
 import XCTest
-@testable import LlmIdeMac
+@testable import LlmIdeMacLib
 
 @MainActor
 final class DocCommandStoreTests: XCTestCase {
@@ -61,7 +61,13 @@ final class DocCommandStoreTests: XCTestCase {
     func testFallsBackToBuiltinsWithNoProject() {
         let store = DocCommandStore()
         store.reloadProjectCommands(at: nil)
-        XCTAssertEqual(store.commands.map(\.id), DocCommand.builtins.map(\.id))
+        // `DocCommand.builtins` is deliberately `[]` now — the shipped
+        // fallback moved to `GenerationLibraryStore` (cached, so it survives
+        // offline), so comparing against it asserted "the store is empty",
+        // which stopped being the contract. What must hold with no project
+        // open is that nothing claims to BE a project command.
+        XCTAssertFalse(store.commands.isEmpty)
+        XCTAssertTrue(store.commands.allSatisfy { !$0.isProjectCommand })
     }
 
     func testImportWritesIntoProjectAndSelectsIt() throws {

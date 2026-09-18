@@ -36,7 +36,7 @@ struct ChatAcknowledgeTests {
     func acknowledgeIfIdleStartsATurnWhenIdle() async {
         let (engine, t) = makeEngine()
         t.result = .init(reply: "Got it.", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: nil)
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         let payload = ChatMessage.ToolResultPayload(
             kind: .edit, summary: "applied update to a.swift: +3 lines",
             exitCode: nil, command: nil, output: nil, url: nil, isFailure: false
@@ -88,7 +88,7 @@ struct ChatAcknowledgeTests {
         // silently dropped and `busy` isn't left stuck `true` forever.
         let (engine, t) = makeEngine()
         t.result = .init(reply: "done", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: nil)
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         engine.beginPanelRun()   // sets busy = true, as an in-flight turn would
         #expect(engine.busy == true)
 
@@ -116,7 +116,7 @@ struct ChatAcknowledgeTests {
         // with `runTask` tracking only one so Stop can't cancel both.
         let (engine, t) = makeEngine()
         t.result = .init(reply: "should not appear", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: nil)
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         engine.beginPanelRun()   // sets busy = true, as a mid-stream turn would
         #expect(engine.busy == true)
 

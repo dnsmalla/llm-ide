@@ -18,7 +18,18 @@ struct CodeAssistModeTests {
     @Test("assistPlan is included in allCases alongside every other mode")
     func assistPlanInAllCases() {
         #expect(CodeAssistMode.allCases.contains(.assistPlan))
-        #expect(CodeAssistMode.allCases.count == 6)
+        // A named SET, not a count — and not a bag of `contains` checks
+        // either, which would silently tolerate a mode being ADDED. Tripping
+        // on an addition is the whole point: a new mode has to be carried
+        // through the exhaustive label/icon/help switches asserted below.
+        // `count == 6` did trip, but failed as "7 != 6" and named nothing;
+        // a symmetric difference names exactly what moved. (It sat undetected
+        // regardless, because the suite stopped compiling before it could run.)
+        let expected: Set<CodeAssistMode> = [.auto, .ask, .plan, .assistPlan,
+                                             .review, .document, .execute]
+        let actual = Set(CodeAssistMode.allCases)
+        #expect(actual == expected,
+                "allCases differs: \(actual.symmetricDifference(expected).map(\.rawValue).sorted())")
     }
 
     @Test("assistPlan has a non-empty label, icon, and help string — the 3 exhaustive switches all cover it")

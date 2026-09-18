@@ -163,7 +163,7 @@ struct ChatEngineMessageTests {
     func userPromptIsNeverClassified() async {
         let (engine, t) = makeEngine()
         t.result = .init(reply: "ok", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: nil)
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("(this is just how I write)")
         #expect(engine.messages[0].role == .user)
         #expect(engine.messages[0].toolResult == nil)

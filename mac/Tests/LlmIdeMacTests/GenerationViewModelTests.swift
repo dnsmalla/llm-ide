@@ -1,5 +1,5 @@
 import XCTest
-@testable import LlmIdeMac
+@testable import LlmIdeMacLib
 
 @MainActor
 final class GenerationViewModelTests: XCTestCase {

@@ -29,7 +29,7 @@ struct ChatEngineTurnTests {
         let (engine, t) = makeEngine()
         t.scripted = [.chunk("Hel"), .chunk("lo")]
         t.result = .init(reply: "Hello", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: nil)
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("hi")
         #expect(engine.messages.map(\.role) == [.user, .assistant])
         #expect(engine.messages[1].content == "Hello")
@@ -120,7 +120,7 @@ struct ChatEngineTurnTests {
         engine.stop()
         #expect(engine.agent.agentStopRequested == true)
         t.result = .init(reply: "ok", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: nil)
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("next")
         #expect(engine.agent.agentStopRequested == false)
     }
@@ -165,7 +165,7 @@ struct ChatEngineTurnTests {
     func queueDrain() async {
         let (engine, t) = makeEngine()
         t.result = .init(reply: "ok", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: nil)
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         engine.enqueue("first", skillIds: [])
         engine.enqueue("second", skillIds: [])
         await engine.runTurn("zero")
@@ -185,7 +185,7 @@ struct ChatEngineTurnTests {
                       .progress("Reading Foo.swift", "read-file"),
                       .progress("Running npm test", "bash")]
         t.result = .init(reply: "done", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: nil)
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("go")
         // Task 9: steps live on the message that produced them, not in an
         // engine-side dictionary keyed by turn id.
@@ -194,26 +194,32 @@ struct ChatEngineTurnTests {
         #expect(engine.statusText == "Running npm test")
     }
 
-    @Test("Non-default reply mode is recorded for the turn; default modes are not")
+    // EVERY resolved mode is now recorded, `.execute`/`.auto` included. This
+    // test used to assert the opposite — that default modes were skipped —
+    // which was true when only `ModeBadge` consumed the field and rendered
+    // nothing for them. `ChatEngine` dropped that exclusion deliberately:
+    // "which mode did the agent actually work in?" is a question about every
+    // turn, and under Auto the recorded mode is the only way to answer it.
+    @Test("Every resolved reply mode is recorded for the turn, defaults included")
     func turnModeRecording() async {
         let (engine, t) = makeEngine()
         t.result = .init(reply: "planned", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: CodeAssistMode.plan.rawValue)
+                         continueNeeded: nil, usage: nil, mode: CodeAssistMode.plan.rawValue, tokenUsage: nil)
         await engine.runTurn("plan it")
         #expect(engine.messages[1].metadata?.mode == CodeAssistMode.plan.rawValue)
 
         let (engine2, t2) = makeEngine()
         t2.result = .init(reply: "ran", pendingTool: nil, tasks: nil,
-                          continueNeeded: nil, usage: nil, mode: CodeAssistMode.execute.rawValue)
+                          continueNeeded: nil, usage: nil, mode: CodeAssistMode.execute.rawValue, tokenUsage: nil)
         await engine2.runTurn("run it")
-        #expect(engine2.messages[1].metadata?.mode == nil)
+        #expect(engine2.messages[1].metadata?.mode == CodeAssistMode.execute.rawValue)
     }
 
     @Test("Follow-up sends (continue), appends one assistant turn, never drains the queue")
     func followup() async {
         let (engine, t) = makeEngine()
         t.result = .init(reply: "ack", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: nil)
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("hi")           // ends with busy == false
         engine.enqueue("ignored", skillIds: [])  // not drained by sendFollowup
         await engine.sendFollowup()
@@ -264,7 +270,7 @@ struct ChatEngineTurnTests {
             pendingTool: nil,
             tasks: [AgentTask(id: "1", title: "Add tokens", status: .completed),
                     AgentTask(id: "2", title: "Wire the toggle", status: .completed)],
-            continueNeeded: false, usage: nil, mode: nil)
+            continueNeeded: false, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("execute the plan")
         #expect(engine.agent.planExecution?.phase == .finished)
         #expect(engine.agent.planExecution?.lastTasks.count == 2)
@@ -283,7 +289,7 @@ struct ChatEngineTurnTests {
             reply: "Verified: deletions confirmed, tests pass.",
             pendingTool: nil,
             tasks: [],
-            continueNeeded: false, usage: nil, mode: nil)
+            continueNeeded: false, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("execute the plan")
         #expect(engine.agent.planExecution?.phase == .finished)
     }
@@ -298,7 +304,7 @@ struct ChatEngineTurnTests {
             reply: "done",
             pendingTool: nil,
             tasks: nil,
-            continueNeeded: false, usage: nil, mode: nil)
+            continueNeeded: false, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("execute the plan")
         #expect(engine.agent.planExecution?.phase == .finished)
     }
@@ -321,7 +327,7 @@ struct ChatEngineTurnTests {
             pendingTool: PendingTool(name: "update-file",
                                      arguments: .init(raw: Data("{}".utf8))),
             tasks: [],
-            continueNeeded: false, usage: nil, mode: nil)
+            continueNeeded: false, usage: nil, mode: nil, tokenUsage: nil)
         await engine1.runTurn("execute the plan")
         #expect(engine1.agent.planExecution?.phase == .running)
 
@@ -332,7 +338,7 @@ struct ChatEngineTurnTests {
             reply: "answered from the phone",
             pendingTool: nil,
             tasks: [],
-            continueNeeded: nil, usage: nil, mode: nil)
+            continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         await engine2.runTurn("quick question")
         #expect(engine2.agent.planExecution?.phase == .running)
 
@@ -343,7 +349,7 @@ struct ChatEngineTurnTests {
             reply: "here's what that step means",
             pendingTool: nil,
             tasks: [],
-            continueNeeded: false, usage: nil, mode: "plan")
+            continueNeeded: false, usage: nil, mode: "plan", tokenUsage: nil)
         await engine3.runTurn("clarifying question mid-run")
         #expect(engine3.agent.planExecution?.phase == .running)
     }
@@ -357,7 +363,7 @@ struct ChatEngineTurnTests {
             pendingTool: nil,
             tasks: [AgentTask(id: "1", title: "Add tokens", status: .failed),
                     AgentTask(id: "2", title: "Wire the toggle", status: .pending)],
-            continueNeeded: false, usage: nil, mode: nil)
+            continueNeeded: false, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("execute the plan")
         #expect(engine.agent.planExecution?.phase == .failed)
     }
@@ -471,7 +477,7 @@ struct ChatEngineTurnTests {
             pendingTool: nil,
             tasks: [AgentTask(id: "1", title: "Add tokens", status: .completed),
                     AgentTask(id: "2", title: "Wire the toggle", status: .pending)],
-            continueNeeded: true, usage: nil, mode: nil)
+            continueNeeded: true, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("execute the plan")
         #expect(engine.agent.planExecution?.phase == .running)
     }
@@ -482,7 +488,7 @@ struct ChatEngineTurnTests {
         var announced: [String] = []
         engine.sendAnnouncement = { announced.append($0) }
         t.result = .init(reply: "the complete answer", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: nil)
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("hi")
         #expect(announced == ["the complete answer"])
     }

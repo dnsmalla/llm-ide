@@ -262,7 +262,7 @@ struct AgentV2TransportTests {
             .init_(AgentV2Init(sessionId: "sdk-9", claudeCodeVersion: nil, model: nil,
                                tools: [], capabilities: [], mcpServers: [])),
             .usage(AgentV2Usage(inputTokens: 100, outputTokens: 50, cacheReadTokens: 10,
-                                contextPercent: nil)),
+                                cacheCreationTokens: nil, contextPercent: nil)),
             .delta("hi"),
             .result(AgentV2Result(subtype: "success", costUsd: 0.01, numTurns: 2,
                                   durationMs: 1500, sessionId: nil, stopReason: nil)),

@@ -95,7 +95,7 @@ struct AgentV2EventTests {
     func usageWithPercent() {
         #expect(decode(#"{"type":"usage","inputTokens":100,"outputTokens":50,"cacheReadTokens":10,"contextPercent":42.5}"#)
                 == .usage(AgentV2Usage(inputTokens: 100, outputTokens: 50,
-                                       cacheReadTokens: 10, contextPercent: 42.5)))
+                                       cacheReadTokens: 10, cacheCreationTokens: nil, contextPercent: 42.5)))
     }
 
     /// events.mjs does not emit contextPercent yet (the spec table reserves
@@ -104,7 +104,7 @@ struct AgentV2EventTests {
     func usageWithoutPercent() {
         #expect(decode(#"{"type":"usage","inputTokens":7,"outputTokens":3,"cacheReadTokens":0}"#)
                 == .usage(AgentV2Usage(inputTokens: 7, outputTokens: 3,
-                                       cacheReadTokens: 0, contextPercent: nil)))
+                                       cacheReadTokens: 0, cacheCreationTokens: nil, contextPercent: nil)))
     }
 
     // --- approvals ------------------------------------------------------------

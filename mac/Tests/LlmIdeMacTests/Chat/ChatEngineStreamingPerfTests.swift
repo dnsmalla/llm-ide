@@ -110,7 +110,7 @@ struct ChatEngineStreamingPerfTests {
         let (engine, t) = makeEngine()
         t.scripted = [.chunk("Hel"), .chunk("lo")]
         t.result = .init(reply: "Hello", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: nil)
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("hi")
         // If the buffer were FLUSHED rather than discarded before the
         // overwrite, a late flush could re-append "Hello" onto itself.
@@ -187,7 +187,7 @@ struct ChatEngineRetryTests {
         // Land a user turn + reply first, so the follow-up's placeholder is
         // preceded by an assistant turn rather than a user one.
         t.result = .init(reply: "ok", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: nil)
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("first")
         t.thrownError = APIError.agent(message: "follow-up failed")
         await engine.sendFollowup()
@@ -208,7 +208,7 @@ struct ChatEngineRetryTests {
 
         t.thrownError = nil
         t.result = .init(reply: "Here you go.", pendingTool: nil, tasks: nil,
-                         continueNeeded: nil, usage: nil, mode: nil)
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         engine.retryFailedTurn(engine.messages[1].id)
         await engine.runTask?.value
 

@@ -83,7 +83,7 @@ struct ChatEngineSessionTests {
             // A reply that asks the agent to keep going — this is what
             // schedules the delayed follow-up turn against `old`.
             t.result = .init(reply: "working", pendingTool: nil, tasks: nil,
-                             continueNeeded: true, usage: nil, mode: nil)
+                             continueNeeded: true, usage: nil, mode: nil, tokenUsage: nil)
             await engine.runTurn("kick off")
             #expect(engine.agent.agentIsAutonomous == true)
 
@@ -112,11 +112,11 @@ struct ChatEngineSessionTests {
             let (control, ct) = makeEngine()
             control.continueDelayNanos = 0
             ct.result = .init(reply: "working", pendingTool: nil, tasks: nil,
-                              continueNeeded: true, usage: nil, mode: nil)
+                              continueNeeded: true, usage: nil, mode: nil, tokenUsage: nil)
             await control.runTurn("kick off")
             // Stop the chain after one hop so a 0-delay continue can't loop.
             ct.result = .init(reply: "done", pendingTool: nil, tasks: nil,
-                              continueNeeded: nil, usage: nil, mode: nil)
+                              continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
             await settle(100)
             #expect(control.messages.map(\.content).contains("Continue working on your pending tasks."))
         }
@@ -224,7 +224,7 @@ struct ChatEngineSessionTests {
             // Run one real turn — appends "second question" (user) and
             // "first answer" (assistant) to history.
             t.result = .init(reply: "first answer", pendingTool: nil, tasks: nil,
-                             continueNeeded: nil, usage: nil, mode: nil)
+                             continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
             await engine.runTurn("second question")
             engine.persistCurrentChat()
 
@@ -253,7 +253,7 @@ struct ChatEngineSessionTests {
             // the fix must not freeze the array, only stabilize the part
             // that didn't change.
             t.result = .init(reply: "second answer", pendingTool: nil, tasks: nil,
-                             continueNeeded: nil, usage: nil, mode: nil)
+                             continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
             await engine.runTurn("third question")
             engine.persistCurrentChat()
             let thirdSave = ChatSessionStore.load(id: session.id)

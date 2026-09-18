@@ -278,7 +278,7 @@ struct ChatEngineRunExternalTurnTests {
             engine.continueDelayNanos = 0
 
             t.result = .init(reply: "working on it", pendingTool: nil, tasks: nil,
-                             continueNeeded: true, usage: nil, mode: nil)
+                             continueNeeded: true, usage: nil, mode: nil, tokenUsage: nil)
             _ = try? await engine.runExternalTurn(
                 message: "kick off", skillIds: [], attachments: [],
                 agentContext: nil, model: nil, provider: nil,

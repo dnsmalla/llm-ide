@@ -604,10 +604,19 @@ struct AgentV2SelectionTests {
 
     // MARK: - Save-plan action visibility
 
+    // `contentLooksLikePlan: true` is explicit on the POSITIVE cases because
+    // it became a hard precondition of the guard (a plan-like mode alone is
+    // no longer enough — see `showsSavePlanAction`, which added it to stop
+    // the "📋 Deliverables Created" summaries offering a Save Plan button).
+    // The negative cases leave it at its default: they must stay false for
+    // their own reason, and passing it would hide which condition is doing
+    // the work.
     @Test("Save Plan action: plan-like v2 results only")
     func savePlanActionVisibility() {
-        #expect(AgentV2Selection.showsSavePlanAction(mode: "plan", v2Selected: true, hasPendingTool: false))
-        #expect(AgentV2Selection.showsSavePlanAction(mode: "assist_plan", v2Selected: true, hasPendingTool: false))
+        #expect(AgentV2Selection.showsSavePlanAction(mode: "plan", v2Selected: true, hasPendingTool: false,
+                                                     contentLooksLikePlan: true))
+        #expect(AgentV2Selection.showsSavePlanAction(mode: "assist_plan", v2Selected: true, hasPendingTool: false,
+                                                     contentLooksLikePlan: true))
         #expect(!AgentV2Selection.showsSavePlanAction(mode: "execute", v2Selected: true, hasPendingTool: false))
         #expect(!AgentV2Selection.showsSavePlanAction(mode: "auto", v2Selected: true, hasPendingTool: false))
         #expect(!AgentV2Selection.showsSavePlanAction(mode: nil, v2Selected: true, hasPendingTool: false))
@@ -623,7 +632,8 @@ struct AgentV2SelectionTests {
         #expect(!AgentV2Selection.showsSavePlanAction(
             mode: "plan", v2Selected: true, hasPendingTool: false, planSaved: true))
         #expect(AgentV2Selection.showsSavePlanAction(
-            mode: "plan", v2Selected: true, hasPendingTool: false, planSaved: false))
+            mode: "plan", v2Selected: true, hasPendingTool: false, planSaved: false,
+            contentLooksLikePlan: true))
     }
 
     // The Execute action must never fire "Execute the attached plan" with
