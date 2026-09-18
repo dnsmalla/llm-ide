@@ -107,6 +107,33 @@ test('liveAppend profile allows high burst then throttles', () => {
   assert.ok(denied.retryAfterSec >= 1, 'retryAfterSec should be ≥1');
 });
 
+// A route that refuses a request without doing the work (agent-v2's 409
+// turn lock) gives the token back. Without this the Mac's four post-Stop
+// retries drained the 3-token `llm` bucket on their own.
+test('refund hands a consumed token back — once, and never above capacity', () => {
+  _resetForTests();
+  const first = tryConsume('llm', 'u3');
+  assert.equal(typeof first.refund, 'function');
+  tryConsume('llm', 'u3');
+  tryConsume('llm', 'u3');
+  assert.equal(tryConsume('llm', 'u3').ok, false, 'bucket drained');
+
+  first.refund();
+  assert.equal(tryConsume('llm', 'u3').ok, true, 'a refunded token is spendable again');
+
+  first.refund();   // a second call must not mint another token
+  assert.equal(tryConsume('llm', 'u3').ok, false, 'refund is one-shot');
+
+  // Refunding into a full bucket cannot push it past capacity.
+  _resetForTests();
+  const spare = tryConsume('llm', 'u4');
+  spare.refund();
+  assert.equal(tryConsume('llm', 'u4').ok, true);
+  assert.equal(tryConsume('llm', 'u4').ok, true);
+  assert.equal(tryConsume('llm', 'u4').ok, true);
+  assert.equal(tryConsume('llm', 'u4').ok, false, 'capacity is still 3, not 4');
+});
+
 test('tryConsume returns remaining count on success', () => {
   _resetForTests();
   const r = tryConsume('liveAppend', 'u2');

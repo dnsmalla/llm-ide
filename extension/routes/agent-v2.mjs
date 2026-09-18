@@ -66,7 +66,17 @@ function chatSessionLockKey(userId, chatSessionId) {
 
 // The 409 both lock checks in handleV2Stream answer with — one body so the
 // early probe and the authoritative check can never drift apart.
-function sendTurnInProgress(res) {
+//
+// Refunds the request's rate-limit token (attached by server.mjs's limiter,
+// which runs before routing). A 409 is a refusal, not a turn: the Mac client
+// replays it up to four times after Stop while the previous SDK subprocess
+// unwinds, and each replay was charged against the `llm` bucket (capacity 3,
+// refill 1/30 s). The retries alone emptied it, so the user's next genuine
+// turn — the one the retries were waiting to send — was met with a 429 and
+// a half-minute lockout. The early probe below already spares a refused
+// retry the classifier's LLM call; this spares it the token too.
+function sendTurnInProgress(req, res) {
+  req.rateLimitRefund?.();
   sendJSON(res, 409, {
     error: { code: 'TURN_IN_PROGRESS', message: 'A turn is already in progress for this chat session' },
   });
@@ -148,7 +158,7 @@ async function handleV2Stream(req, res, userId, deps) {
   // gap between this probe and the real check is absorbed by that check.
   const lockKey = chatSessionLockKey(userId, chatSessionId);
   if (inFlightChatSessions.has(lockKey)) {
-    sendTurnInProgress(res);
+    sendTurnInProgress(req, res);
     return true;
   }
 
@@ -202,7 +212,7 @@ async function handleV2Stream(req, res, userId, deps) {
   const provider = typeof body.provider === 'string' && body.provider ? body.provider : AGENT_SDK_PROVIDER;
 
   if (inFlightChatSessions.has(lockKey)) {
-    sendTurnInProgress(res);
+    sendTurnInProgress(req, res);
     return true;
   }
   inFlightChatSessions.add(lockKey);

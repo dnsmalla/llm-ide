@@ -117,7 +117,20 @@ export function tryConsume(profileName, scope = 'global', tokens = 1) {
   const b = getBucket(key, profile.capacity, profile.refillRate);
   if (b.tokens >= tokens) {
     b.tokens -= tokens;
-    return { ok: true, remaining: Math.floor(b.tokens) };
+    // `refund` hands the token back. For a route that REFUSED the request
+    // without doing the work the bucket budgets for — agent-v2's 409 turn
+    // lock is the case that needed it: the Mac client retries a 409 up to
+    // four times after Stop, and with `llm` at capacity 3 those retries
+    // alone drained the bucket, so the user's next real turn met a 429 with
+    // a 30 s refill behind it. One-shot, and capped at capacity, so a route
+    // cannot mint tokens by calling it twice.
+    let refunded = false;
+    const refund = () => {
+      if (refunded) return;
+      refunded = true;
+      b.tokens = Math.min(b.capacity, b.tokens + tokens);
+    };
+    return { ok: true, remaining: Math.floor(b.tokens), refund };
   }
   const need = tokens - b.tokens;
   const retryAfterSec = Math.ceil(need / b.refillRate);

@@ -507,6 +507,13 @@ const server = http.createServer(async (req, res) => {
       sendError(res, errRateLimit(r.retryAfterSec), { logger: reqLog });
       return;
     }
+    // The token is spent HERE, before routing, so a route that then refuses
+    // the request without doing the budgeted work would otherwise still
+    // charge for it. Handing the refund down on the request keeps this
+    // middleware generic — it needs no knowledge of which routes refuse, and
+    // a route needs no knowledge of profile names or scopes to give a token
+    // back. Consumed by agent-v2's `sendTurnInProgress` (409).
+    req.rateLimitRefund = r.refund;
   }
 
 

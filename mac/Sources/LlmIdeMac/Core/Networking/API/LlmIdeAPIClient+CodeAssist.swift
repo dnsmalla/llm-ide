@@ -437,11 +437,14 @@ extension LlmIdeAPIClient {
     /// seconds. Without this, hitting Stop and immediately sending a
     /// follow-up surfaced that gap as a hard 409 error. Safe to replay: the
     /// route answers 409 before any engine or session-row work (its early
-    /// lock probe runs even ahead of the "auto" mode classifier), so no side
-    /// effect from a refused attempt exists to duplicate. Bounded: three
-    /// sleeps (0.4 s + 0.8 s + 1.6 s = 2.8 s) plus connect time, then the
-    /// fourth 409 is surfaced as `TURN_IN_PROGRESS` by the caller. A Stop
-    /// during the wait cancels through `Task.sleep`'s `CancellationError`.
+    /// lock probe runs even ahead of the "auto" mode classifier), and it
+    /// refunds the request's rate-limit token — a refused attempt used to
+    /// keep its charge against the server's `llm` bucket (capacity 3), so
+    /// these retries alone could drain it and the follow-up they were
+    /// waiting to send met a 429 instead. Bounded: three sleeps (0.4 s +
+    /// 0.8 s + 1.6 s = 2.8 s) plus connect time, then the fourth 409 is
+    /// surfaced as `TURN_IN_PROGRESS` by the caller. A Stop during the wait
+    /// cancels through `Task.sleep`'s `CancellationError`.
     private func connectAgentV2Stream(
         _ req: URLRequest,
         attempt: Int = 1,
@@ -521,6 +524,18 @@ extension LlmIdeAPIClient {
             if http.statusCode >= 500 {
                 throw APIError.http(status: http.statusCode, code: "SERVER_ERROR",
                                     message: "The server couldn't start this turn (HTTP \(http.statusCode)). Check the Backend log in Settings — is `node server.mjs` still healthy?",
+                                    details: nil)
+            }
+            // The server's per-user token bucket for chat turns is empty. It
+            // sets `Retry-After`, so say how long rather than the bare status
+            // the generic branch below produces — a user who has just pressed
+            // Stop and re-sent has no way to connect "429" to "wait a moment".
+            if http.statusCode == 429 {
+                let wait = http.value(forHTTPHeaderField: "Retry-After")
+                    .flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+                    .map { " Try again in about \($0) s." } ?? " Try again in a moment."
+                throw APIError.http(status: 429, code: "RATE_LIMITED",
+                                    message: "Chat turns are being rate-limited by the server.\(wait)",
                                     details: nil)
             }
             throw APIError.http(status: http.statusCode, code: "HTTP_ERROR",

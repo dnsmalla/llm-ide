@@ -456,6 +456,87 @@ test('stream: a second turn for the same chat session while one is in flight get
   assert.equal(getOrCreateAgentSession(db, user.id, 'chat-conc', 'explorer').sdk_session_id, 'sdk-conc');
 });
 
+// The third contract the post-Stop retry leans on: a refused turn must not
+// COST a rate-limit token. server.mjs's limiter charges `/agent/v2/stream`
+// against the `llm` bucket (capacity 3) before routing; if the 409 kept
+// that token, the retries themselves emptied the bucket and the user's next
+// real turn got a 429 with a 30 s refill behind it — the "error when I stop
+// mid-turn" report. A served turn keeps its token.
+test('stream: a 409 refunds the rate-limit token; a served turn does not', async () => {
+  const user = newUser('v2route-409-refund@example.com');
+  let releaseFirst;
+  const firstGate = new Promise((r) => { releaseFirst = r; });
+  let firstStarted = false;
+  const fakeTurn = async ({ onEvent }) => {
+    firstStarted = true;
+    onEvent({ type: 'init', sessionId: 'sdk-refund', claudeCodeVersion: '2.1.234', tools: [], capabilities: [] });
+    await firstGate;
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-refund', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: {} };
+  };
+  const req = () => makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-refund', workspaceRoot: WS } },
+    user,
+  });
+
+  const servedReq = req();
+  let servedRefunds = 0;
+  servedReq.rateLimitRefund = () => { servedRefunds += 1; };
+  const firstP = handleAgentV2Routes(servedReq, makeRes(), { runTurn: fakeTurn });
+  while (!firstStarted) await new Promise((r) => setImmediate(r));
+
+  const refusedReq = req();
+  let refusedRefunds = 0;
+  refusedReq.rateLimitRefund = () => { refusedRefunds += 1; };
+  const refusedRes = makeRes();
+  await handleAgentV2Routes(refusedReq, refusedRes, {
+    runTurn: async () => { throw new Error('must not run while a turn is in flight'); },
+  });
+  assert.equal(refusedRes.statusCode, 409);
+  assert.equal(refusedRefunds, 1, 'the refused retry gets its token back');
+
+  releaseFirst();
+  assert.equal(await firstP, true);
+  assert.equal(servedRefunds, 0, 'a turn that actually ran keeps its charge');
+});
+
+// A request that arrived without a limiter (no profile, or a test double)
+// carries no refund — the 409 must not assume one.
+test('stream: a 409 with no rateLimitRefund on the request is still a plain 409', async () => {
+  const user = newUser('v2route-409-norefund@example.com');
+  let releaseFirst;
+  const firstGate = new Promise((r) => { releaseFirst = r; });
+  let firstStarted = false;
+  const req = () => makeReq({
+    method: 'POST',
+    url: '/agent/v2/stream',
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-norefund', workspaceRoot: WS } },
+    user,
+  });
+  const firstP = handleAgentV2Routes(req(), makeRes(), {
+    runTurn: async ({ onEvent }) => {
+      firstStarted = true;
+      onEvent({ type: 'init', sessionId: 'sdk-nr', claudeCodeVersion: '2.1.234', tools: [], capabilities: [] });
+      await firstGate;
+      onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-nr', stopReason: 'end_turn' });
+      return { result: { subtype: 'success' }, usageTotals: {} };
+    },
+  });
+  while (!firstStarted) await new Promise((r) => setImmediate(r));
+
+  const refusedRes = makeRes();
+  await handleAgentV2Routes(req(), refusedRes, {
+    runTurn: async () => { throw new Error('must not run while a turn is in flight'); },
+  });
+  assert.equal(refusedRes.statusCode, 409);
+  assert.equal(refusedRes.json().error.code, 'TURN_IN_PROGRESS');
+
+  releaseFirst();
+  assert.equal(await firstP, true);
+});
+
 // The Mac client retries a 409 for a few seconds after Stop (the lock
 // outlives the client's cancel while the SDK subprocess unwinds). Two
 // contracts that retry leans on: a refused turn must be cheap — no "auto"
