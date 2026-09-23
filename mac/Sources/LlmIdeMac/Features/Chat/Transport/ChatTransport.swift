@@ -196,8 +196,12 @@ extension ChatTransportResult {
 /// A class (not the struct it started as) solely for `onLiveTasks`: the
 /// engine-selection composite holds its legacy transport as a `let`
 /// existential, and a callback wired after construction has to land on the
-/// same instance the round trips run on.
-final class CodeAssistTransport: ChatTransport, @unchecked Sendable {
+/// same instance the round trips run on. `@MainActor` (like
+/// `AgentV2Transport`) rather than `@unchecked Sendable`, so that mutable
+/// callback is written and read on one actor instead of racing a round trip
+/// running off the main actor.
+@MainActor
+final class CodeAssistTransport: ChatTransport {
     let api: LlmIdeAPIClient
 
     /// Mid-turn task list from the stream's `tasks_progress` events (server
