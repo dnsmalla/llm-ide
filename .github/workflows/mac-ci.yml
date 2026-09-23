@@ -235,8 +235,12 @@ jobs:
         uses: actions/cache@v6
         with:
           path: mac/.build
-          key: spm-gates-${{ runner.os }}-${{ hashFiles('mac/Package.resolved') }}
+          # github.sha makes every run save a fresh cache (an exact-key hit
+          # never re-saves, so a fixed key froze the first build forever);
+          # restore-keys still starts each run from the newest one.
+          key: spm-gates-${{ runner.os }}-${{ hashFiles('mac/Package.resolved') }}-${{ github.sha }}
           restore-keys: |
+            spm-gates-${{ runner.os }}-${{ hashFiles('mac/Package.resolved') }}-
             spm-gates-${{ runner.os }}-
 
       - name: Feature boundaries (Shell → Features → Core)
@@ -248,9 +252,31 @@ jobs:
       # 35881385566) before it printed a line. The build-test job never hit
       # this because its `swift build` comes first, so `swift run` only
       # re-links; do the same here.
+      # Retried once: on main (run 35883350038) SwiftPM downloaded the Sparkle
+      # binary artifact that the earlier resolve had already put in its global
+      # cache and failed with "…zip already exists in file system". Clearing
+      # that artifact cache and building again is the documented way out.
       - name: Build (debug)
         working-directory: mac
-        run: swift build
+        run: |
+          swift build || {
+            echo "::warning::swift build failed — clearing the SwiftPM artifact cache and retrying once"
+            rm -rf ~/Library/Caches/org.swift.swiftpm/artifacts
+            swift build
+          }
+
+      # The app builds graph-kit from the `revision:` pin in mac/Package.swift;
+      # the graph gates run the SUBMODULE checkout. Bumping only one of them
+      # would gate a different engine than the one that ships.
+      - name: graph-kit pin matches the submodule
+        run: |
+          gitlink=$(git ls-files -s mac/LocalPackages/graph-kit | awk '{print $2}')
+          pin=$(grep -E 'graph-kit\.git", *revision:' mac/Package.swift | grep -oE '[0-9a-f]{40}')
+          echo "submodule=$gitlink  Package.swift pin=$pin"
+          if [ -z "$pin" ] || [ "$gitlink" != "$pin" ]; then
+            echo "::error::graph-kit submodule ($gitlink) and mac/Package.swift revision pin ($pin) differ — bump both"
+            exit 1
+          fi
 
       - name: Build graph-kit labs (release)
         working-directory: mac/LocalPackages/graph-kit
@@ -289,8 +315,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: mac/.build
-          key: spm-${{ matrix.target }}-${{ runner.os }}-${{ hashFiles('mac/Package.resolved') }}
+          key: spm-${{ matrix.target }}-${{ runner.os }}-${{ hashFiles('mac/Package.resolved') }}-${{ github.sha }}
           restore-keys: |
+            spm-${{ matrix.target }}-${{ runner.os }}-${{ hashFiles('mac/Package.resolved') }}-
             spm-${{ matrix.target }}-${{ runner.os }}-
 
       - name: Build
