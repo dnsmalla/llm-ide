@@ -740,6 +740,33 @@ struct AgentV2ApprovalTests {
         }
     }
 
+    @Test("On a phone turn only the CURRENT question goes to the phone, not a queued one")
+    func externalTurnForwardsOnlyTheCurrentApproval() async throws {
+        try await withTempStore {
+            let stream = ScriptedAgentV2Stream()
+            let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
+            var forwarded: [String] = []
+            engine.hooks.onExternalApproval = { forwarded.append($0.requestId) }
+            let session = ChatSession(scope: .explorer, title: "Phone chat")
+            ChatSessionStore.save(session)
+            engine.handleOnAppearSessions()
+
+            var events = approvalTurnEvents(requestId: "req-1", sdkSessionId: "sdk-phone")
+            events.insert(.approvalRequest(makeApproval(id: "req-2")), at: 3)
+            stream.events = events
+            _ = try await engine.runExternalTurn(
+                message: "from iPhone", skillIds: [], attachments: [],
+                agentContext: nil, model: nil, provider: nil,
+                expectedSessionID: session.id, onProgress: { _ in })
+            // Regression (pre-merge review): the queued req-2 was forwarded at
+            // arrival and replaced req-1 on the phone, whose answer then failed
+            // the requestId check — neither question could be answered.
+            #expect(forwarded == ["req-1"])
+            #expect(engine.pendingApproval?.approval.requestId == "req-1")
+            #expect(engine.queuedApprovals.map(\.approval.requestId) == ["req-2"])
+        }
+    }
+
     // MARK: - Card answer building
 
     @Test("Card answer mapping: keyed by question text, multi-select comma-joined")

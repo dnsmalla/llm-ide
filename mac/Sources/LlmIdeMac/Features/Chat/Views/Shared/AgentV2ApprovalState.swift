@@ -168,9 +168,18 @@ extension ChatEngine {
     func handleApprovalArrival(_ approval: AgentV2Approval, legacySessionId: String? = nil) {
         if let current = pendingApproval, !current.submitted, !current.isExpired {
             queuedApprovals.append((approval, legacySessionId))
-        } else {
-            pendingApproval = AgentV2ApprovalState(approval: approval, legacySessionId: legacySessionId)
+            return
         }
+        presentApproval(approval, legacySessionId: legacySessionId)
+    }
+
+    /// Make `approval` the current card — and, on a phone-driven turn, the
+    /// phone's. Only the CURRENT card goes to the phone: it keeps one pending
+    /// question per command, so forwarding a queued one at arrival replaced
+    /// the question it was showing, its answer then failed the requestId
+    /// check ("no longer open"), and neither could be answered from it.
+    func presentApproval(_ approval: AgentV2Approval, legacySessionId: String?) {
+        pendingApproval = AgentV2ApprovalState(approval: approval, legacySessionId: legacySessionId)
         guard isExternalTurn else { return }
         recordProgress(LlmIdeAPIClient.AgentProgress(
             label: Self.externalApprovalNote, phase: "tool", tool: nil, detail: nil
@@ -250,8 +259,7 @@ extension ChatEngine {
             pendingApproval = nil
         } else {
             let next = queuedApprovals.removeFirst()
-            pendingApproval = AgentV2ApprovalState(approval: next.approval,
-                                                   legacySessionId: next.legacySessionId)
+            presentApproval(next.approval, legacySessionId: next.legacySessionId)
         }
     }
 
