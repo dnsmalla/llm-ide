@@ -195,6 +195,10 @@ extension ChatEngine {
             drainQueueOrRelease()
             throw ExternalTurnError.sessionMoved
         }
+        // Every exit below this point — success, failure, cancel — passes
+        // the defer, so the flag can't outlive the turn.
+        externalTurnActive = true
+        defer { externalTurnActive = false }
         hooks.onTurnStart()
         hooks.onRecordPrompt(message)
         hooks.onNudge(message)

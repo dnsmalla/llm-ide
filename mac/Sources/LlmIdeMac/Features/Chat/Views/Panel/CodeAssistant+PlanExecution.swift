@@ -8,12 +8,15 @@ extension CodeAssistantPanel {
     /// the agent was actually told to execute whenever the card carries no
     /// plan text and the body came off the attached file.
     @MainActor
-    func beginPlanExecution(messageId: UUID, payload: ChatMessage.ToolResultPayload, planContent content: String) {
-        let steps = Self.parsePlanSteps(from: content)
-        let title = payload.planTitle ?? Self.planTitle(from: content)
-        engine.agent.planExecution = PlanExecutionTracker(
-            planTitle: title,
-            steps: steps,
+    /// The tracker for one "Execute plan" run. Built at click time (the
+    /// step count feeds the transcript line) but handed to the engine with
+    /// the turn, which installs it when that turn STARTS — see
+    /// `ChatEngine.QueuedMessage.planTracker`.
+    func makePlanExecutionTracker(messageId: UUID, payload: ChatMessage.ToolResultPayload,
+                                  planContent content: String) -> PlanExecutionTracker {
+        PlanExecutionTracker(
+            planTitle: payload.planTitle ?? Self.planTitle(from: content),
+            steps: Self.parsePlanSteps(from: content),
             planCardMessageId: messageId
         )
     }
@@ -89,7 +92,7 @@ extension CodeAssistantPanel {
         // is exactly right for a review — and exactly why the diff is
         // ATTACHED rather than left for the agent to fetch: in this mode it
         // could not run `git diff` itself.
-        modelState.selectedMode = .review
+        modelState.setModeByFlow(.review)
         var attachments = attachmentState.attachments
         if let idx = attachments.firstIndex(where: { $0.path == Self.reviewDiffLabel }) {
             attachments[idx] = LlmIdeAPIClient.CodeAttachment(

@@ -137,3 +137,24 @@ public struct PlanExecutionTracker: Equatable {
         return true
     }
 }
+
+extension ChatEngine {
+    /// The action a saved-plan card should show as in progress, derived from
+    /// live state instead of the tap persisted on the message.
+    ///
+    /// Persisted, the lock outlived everything that could end it: a run that
+    /// failed or was dismissed, an app restart (no live run at all), or an
+    /// "Edit in chat" the user never followed with a message all left the
+    /// card on "Executing plan…" / "Editing in chat…" with no buttons, so
+    /// the plan could never be run again. Execute now reads as in progress
+    /// only while THIS card's run is queued or running; Edit never locks.
+    func livePlanCardAction(for cardId: UUID,
+                            persisted: ChatMessage.PlanCardAction?) -> ChatMessage.PlanCardAction? {
+        guard persisted == .execute else { return nil }
+        if let run = agent.planExecution, run.planCardMessageId == cardId, run.phase == .running {
+            return .execute
+        }
+        if queued.contains(where: { $0.planTracker?.planCardMessageId == cardId }) { return .execute }
+        return nil
+    }
+}

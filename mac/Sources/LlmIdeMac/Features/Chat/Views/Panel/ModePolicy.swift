@@ -51,6 +51,62 @@ public enum ModePolicy {
         autoMode
     }
 
+    /// What the picker holds, and who put it there. The provenance is what
+    /// every release rule below keys on: a hand-picked mode and a mode the
+    /// flow set (following the server off Auto, or a card action such as
+    /// Execute / Review / Edit in chat) look identical as a bare string, and
+    /// deciding releases by the string alone released hand-picks too — a
+    /// user who chose Execute had it taken away when a run finished.
+    public struct Selection: Equatable, Sendable {
+        public var mode: String
+        public var setByFlow: Bool
+        public init(mode: String, setByFlow: Bool) {
+            self.mode = mode
+            // Auto has no provenance: it is the absence of a choice.
+            self.setByFlow = mode == ModePolicy.autoMode ? false : setByFlow
+        }
+        public static let auto = Selection(mode: ModePolicy.autoMode, setByFlow: false)
+    }
+
+    /// Where the picker goes when the displayed conversation changes to
+    /// `remembered`'s chat: back to what THAT chat held when it was last on
+    /// screen, else Auto. A mode is chosen for a conversation, so it travels
+    /// with the conversation — switching A → B → A in the middle of a plan
+    /// pipeline used to drop A back to Auto, and A's next answer ("option 2")
+    /// was then classified from scratch, possibly as an Execute.
+    public static func pickerSelectionAfterSessionChange(remembered: Selection?) -> Selection {
+        remembered ?? .auto
+    }
+
+    /// The selection as it will be once a resolution the picker has not
+    /// followed YET lands. The legacy engine reports its mode on the
+    /// terminal event, and the panel follows it on the next view update —
+    /// after the engine has already gone idle. A release decided from the
+    /// picker alone would see Auto, do nothing, and let the follow then park
+    /// the picker on a mode nothing will release.
+    public static func selection(_ picker: Selection, afterPendingResolution resolved: String?) -> Selection {
+        guard let resolved, let next = pickerMode(current: picker.mode, resolved: resolved) else { return picker }
+        return Selection(mode: next, setByFlow: true)
+    }
+
+    /// Whether the mode the FLOW set should be handed back to Auto now that
+    /// the work that needed it has settled (the engine went idle with no
+    /// auto-continue round, card or approval pending).
+    ///
+    /// Plan / Assist Plan are multi-turn conversations — questions, answers,
+    /// a plan — so they stay until the plan is saved (`planStages`). Every
+    /// other flow-set mode (Execute, Review, Document) is one piece of work:
+    /// before this rule nothing ever released a classified Execute or
+    /// Document outside a plan run, so after one edit every later message in
+    /// the chat ran in Execute and was never classified again. A live plan
+    /// run keeps its Execute until the run settles.
+    public static func releasesAtWorkEnd(_ selection: Selection, planRunActive: Bool) -> Bool {
+        selection.setByFlow
+            && selection.mode != autoMode
+            && !planStages.contains(selection.mode)
+            && !planRunActive
+    }
+
     // Release sets, named once. Each caller says WHICH lifecycle moment it
     // is instead of spelling the modes — adding a stage is one edit here.
 
@@ -89,5 +145,12 @@ public enum ModePolicy {
     /// never overrules a choice.
     public static func releasesStickyMode(current: String, releasing: Set<String>) -> Bool {
         current != autoMode && releasing.contains(current)
+    }
+
+    /// `releasesStickyMode`, restricted to a mode the flow set — the rule
+    /// the doc above always promised ("never overrules a choice") but could
+    /// not enforce without provenance.
+    public static func releasesStickyMode(_ selection: Selection, releasing: Set<String>) -> Bool {
+        selection.setByFlow && releasesStickyMode(current: selection.mode, releasing: releasing)
     }
 }

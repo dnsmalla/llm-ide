@@ -54,7 +54,7 @@ extension CodeAssistantPanel {
             attachNotice = "Resolve the pending action card first, then execute the plan."
             return
         }
-        modelState.selectedMode = .execute
+        modelState.setModeByFlow(.execute)
         var attached = false
         if let path = payload.url {
             switch addFile(url: URL(fileURLWithPath: path)) {
@@ -99,8 +99,8 @@ extension CodeAssistantPanel {
         let outgoing = directives.isEmpty
             ? baseMessage
             : directives.joined(separator: "\n") + "\n\n" + baseMessage
-        beginPlanExecution(messageId: messageId, payload: payload, planContent: planContent)
-        let stepCount = engine.agent.planExecution?.steps.count ?? 0
+        let tracker = makePlanExecutionTracker(messageId: messageId, payload: payload, planContent: planContent)
+        let stepCount = tracker.steps.count
         let displayTitle = payload.planTitle ?? Self.planTitle(from: planContent)
         // No count rather than a wrong one: an unparseable plan sent the
         // generic execute message, so there is no step list to promise.
@@ -113,12 +113,18 @@ extension CodeAssistantPanel {
         // composer live when it finally drains, by which point a message sent
         // in between has cleared the chips (or staged different ones).
         let attachmentsSnapshot = attachmentState.attachments
+        // One-shot, like the composer's own send: the snapshot carries the
+        // plan into this turn (and `currentTurnAttachments` into its
+        // auto-continue rounds). Left staged — with the attachment bar hidden
+        // during the run — the plan document rode along on every later turn,
+        // the Review turn included, until the user found and removed it.
+        attachmentState.attachments.removeAll()
         if engine.busy {
             engine.enqueue(outgoing, skillIds: skillIds, userMetadata: userMeta, planExecute: true,
-                           attachments: attachmentsSnapshot)
+                           attachments: attachmentsSnapshot, planTracker: tracker)
         } else {
             engine.startTurn(outgoing, skillIds: skillIds, userMetadata: userMeta, planExecute: true,
-                             attachments: attachmentsSnapshot)
+                             attachments: attachmentsSnapshot, planTracker: tracker)
         }
     }
 
@@ -282,7 +288,7 @@ extension CodeAssistantPanel {
     func editSavedPlanInChat(_ payload: ChatMessage.ToolResultPayload, messageId: UUID) {
         markPlanCardAction(.edit, for: messageId)
         if modelState.selectedMode != .plan && modelState.selectedMode != .assistPlan {
-            modelState.selectedMode = .plan
+            modelState.setModeByFlow(.plan)
         }
         if draft.isEmpty {
             draft = PlanEditPolicy.refineSeed(title: payload.planTitle ?? "")
@@ -296,7 +302,7 @@ extension CodeAssistantPanel {
     @MainActor
     func refinePlanInChat(from message: ChatMessage) {
         if modelState.selectedMode != .plan && modelState.selectedMode != .assistPlan {
-            modelState.selectedMode = .plan
+            modelState.setModeByFlow(.plan)
         }
         if draft.isEmpty {
             draft = PlanEditPolicy.refineSeed(title: Self.planTitle(from: message.content))
@@ -420,11 +426,9 @@ extension CodeAssistantPanel {
     /// stickiness, never to overrule a choice.
     @MainActor
     func releaseStickyMode(from stages: Set<String> = ModePolicy.planStages) {
-        guard ModePolicy.releasesStickyMode(
-            current: modelState.selectedMode.rawValue,
-            releasing: stages)
+        guard ModePolicy.releasesStickyMode(modelState.modeSelection, releasing: stages)
         else { return }
-        modelState.selectedMode = .auto
+        modelState.setModeByFlow(.auto)
         // The lifecycle has just taken the picker back. The turn that ended in
         // THIS same frame also recorded its resolved mode, and the panel's
         // `.onChange(of: engine.resolvedMode)` is delivered on the next view

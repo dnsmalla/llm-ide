@@ -27,7 +27,7 @@ extension CodeAssistantPanel {
                 .lineLimit(2).truncationMode(.tail)
             Spacer(minLength: 8)
             Button("Switch to Plan") {
-                modelState.selectedMode = .plan
+                modelState.setModeByFlow(.plan)
                 planSwitchDismissed = true
             }
             .buttonStyle(.borderedProminent)

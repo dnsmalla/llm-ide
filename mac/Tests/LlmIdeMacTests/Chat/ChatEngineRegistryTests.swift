@@ -93,6 +93,28 @@ struct ChatEngineRunExternalTurnTests {
         try await body()
     }
 
+    @Test("A phone-driven turn records its mode but never publishes it to the Mac picker")
+    func externalTurnDoesNotDriveThePicker() async throws {
+        try await withTempStore {
+            let (engine, t) = makeEngine()
+            let session = ChatSession(scope: Self.scope, title: "New chat")
+            ChatSessionStore.save(session)
+            engine.handleOnAppearSessions()
+            // auto_read_only clamps anything that could write to `ask`.
+            t.result = .init(reply: "read-only answer", pendingTool: nil, tasks: nil,
+                             continueNeeded: nil, usage: nil, mode: "ask", tokenUsage: nil)
+            _ = try await engine.runExternalTurn(
+                message: "fix the bug", skillIds: [], attachments: [],
+                agentContext: nil, model: nil, provider: nil,
+                expectedSessionID: session.id, onProgress: { _ in })
+            // Regression: `resolvedMode = "ask"` moved a Mac picker on Auto to
+            // Ask, and every later panel turn in the chat ran read-only.
+            #expect(engine.resolvedMode == nil)
+            #expect(engine.messages.last?.metadata?.mode == "ask")   // still on the badge
+            #expect(engine.externalTurnActive == false)
+        }
+    }
+
     @Test("Appends user+assistant turns, forwards scripted progress, persists to disk, and is visible with no reload")
     func appendsAndPersistsAndStreams() async throws {
         try await withTempStore {
