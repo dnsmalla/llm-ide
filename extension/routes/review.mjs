@@ -9,31 +9,43 @@
 //     ctx = { userId, url }
 
 import * as kb from '../kb/db.mjs';
-import { dispatchPlan } from '../agents/dispatcher.mjs';
+import { dispatchPlan, resolveDispatchItems } from '../agents/dispatcher.mjs';
 import { applyCodegen } from '../agents/codegen-apply.mjs';
 import { openPullRequest } from '../agents/github-pr.mjs';
 import { runGuardrails } from '../guardrails/rules.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+
+// Replace every client-suppliable field the guardrail engine judges with
+// the server's own copy, so a client can't pass review with data that
+// differs from what actually executes:
+//   - codegen-apply: the per-user repo allow-list (a client could
+//     otherwise escape its sandbox by sending {allowedRepos: ['/']}).
+//   - dispatch: the stored plan tasks dispatchPlan will send, not the
+//     client's `items`.
+function withAuthoritativeData(userId, kind, payload) {
+  const out = { ...payload };
+  if (kind === 'codegen-apply') {
+    out.allowedRepos = kb.userRepoAllowlist(userId);
+  } else if (kind === 'dispatch') {
+    out.items = resolveDispatchItems(userId, { planId: out.planId, taskIds: out.taskIds });
+  }
+  return out;
+}
 
 export async function handleReviewRoutes(req, res, ctx) {
   const { userId, url } = ctx;
   if (!url.startsWith('/kb/review')) return false;
 
   // POST /kb/review/submit — drop an action onto the user's queue.
-  // For codegen-apply, OVERRIDE the client-supplied allowedRepos with
-  // the server-side per-user list. The guardrail engine then checks
-  // against authoritative data, so a malicious client can't escape
-  // its sandbox by sending {allowedRepos: ['/']}.
+  // Guardrails run against authoritative server data (see
+  // withAuthoritativeData), never the client's copy.
   if (req.method === 'POST' && url === '/kb/review/submit') {
     const body = parseJSON(await readBody(req, 8 * 1024 * 1024));
     if (!body?.kind || !body?.payload) {
       sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'kind and payload required' } });
       return true;
     }
-    const payload = { ...body.payload };
-    if (body.kind === 'codegen-apply') {
-      payload.allowedRepos = kb.userRepoAllowlist(userId);
-    }
+    const payload = withAuthoritativeData(userId, body.kind, body.payload);
     const guardrails = runGuardrails(body.kind, payload);
     try {
       const item = kb.submitReview(userId, {
@@ -96,13 +108,9 @@ export async function handleReviewRoutes(req, res, ctx) {
     }
 
     // Re-run guardrails right before execution — payloads can be
-    // tampered with on disk and the cost is microseconds. For
-    // codegen-apply, ALWAYS use the server-side allow-list at decision
-    // time, even if the stored payload has a stale value from submit.
-    const evalPayload = { ...item.payload };
-    if (item.kind === 'codegen-apply') {
-      evalPayload.allowedRepos = kb.userRepoAllowlist(userId);
-    }
+    // tampered with on disk, and the plan's tasks may have been edited
+    // since submit. Server-side data is re-read at decision time.
+    const evalPayload = withAuthoritativeData(userId, item.kind, item.payload);
     const guardrails = runGuardrails(item.kind, evalPayload);
     if (!guardrails.passed) {
       const refreshed = kb.setReviewStatus(userId, body.id, {
