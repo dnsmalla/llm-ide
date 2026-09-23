@@ -382,8 +382,11 @@ struct ChatEngineTurnTests {
         while t.receivedInputs.count < 2 { await Task.yield(); try? await Task.sleep(nanoseconds: 1_000_000) }
         await engine.runTask?.value
         // Regression: continuation rounds dropped the flag, so the server
-        // injected no execution skill after round 1.
-        #expect(t.receivedInputs.map(\.planExecute) == [true, true])
+        // injected no execution skill after round 1. (How many rounds run
+        // depends on whether the 1 ms timer beats the result swap above, so
+        // assert the property, not a count.)
+        let flags = t.receivedInputs.map(\.planExecute)
+        #expect(flags.count >= 2 && flags.allSatisfy { $0 }, "got: \(flags)")
     }
 
     @Test("onWorkSettled fires only once the work is really over")
