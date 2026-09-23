@@ -145,6 +145,38 @@ private struct FlatErrorEnvelope: Decodable {
     let error: String?
 }
 
+extension LlmIdeAPIClient {
+    /// The server's own error — the structured `{ "error": { code, message } }`
+    /// envelope, or the flat `{ "error": "message" }` — from a failed
+    /// request's body, redacted. nil when the body carries neither, so the
+    /// caller keeps its generic status message.
+    static func serverError(fromBody data: Data) -> (code: String?, message: String)? {
+        let decoder = JSONDecoder()
+        if let env = try? decoder.decode(ErrorEnvelope.self, from: data),
+           let message = env.error?.message, !message.isEmpty {
+            return (env.error?.code, SecretRedactor.redact(message))
+        }
+        if let flat = try? decoder.decode(FlatErrorEnvelope.self, from: data),
+           let message = flat.error, !message.isEmpty {
+            return (nil, SecretRedactor.redact(message))
+        }
+        return nil
+    }
+
+    /// Up to `limit` bytes of a streamed response's body — for reading the
+    /// JSON error a route answers with before it would have started SSE.
+    static func readErrorBody(_ bytes: URLSession.AsyncBytes, limit: Int = 64 * 1024) async -> Data {
+        var data = Data()
+        do {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count >= limit { break }
+            }
+        } catch {}
+        return data
+    }
+}
+
 /// Single-tenant client paired with the `SessionStore`.  Reads its
 /// access token from the store on every call so token rotation
 /// (background refresh) is transparent to call sites.

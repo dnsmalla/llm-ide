@@ -335,6 +335,13 @@ extension LlmIdeAPIClient {
             return (bytes, http)
         }
         guard http.statusCode == 200 else {
+            // A refused turn (validation, unknown slash command, rate limit)
+            // answers JSON before SSE starts; show the server's reason, not
+            // just its status code.
+            if let e = Self.serverError(fromBody: await Self.readErrorBody(bytes)) {
+                throw APIError.http(status: http.statusCode, code: e.code ?? "HTTP_ERROR",
+                                    message: e.message, details: nil)
+            }
             throw APIError.http(status: http.statusCode, code: "HTTP_ERROR",
                                 message: "Code Assistant request failed (\(http.statusCode))", details: nil)
         }
@@ -548,6 +555,13 @@ extension LlmIdeAPIClient {
                 throw APIError.http(status: 429, code: "RATE_LIMITED",
                                     message: "Chat turns are being rate-limited by the server.\(wait)",
                                     details: nil)
+            }
+            // 400s carry the reason as pre-SSE JSON — SLASH_COMMAND_FAILED
+            // ("unknown command /foo"), VALIDATION_FAILED (no workspace
+            // root). Discarding it left the user a bare "(400)".
+            if let e = Self.serverError(fromBody: await Self.readErrorBody(bytes)) {
+                throw APIError.http(status: http.statusCode, code: e.code ?? "HTTP_ERROR",
+                                    message: e.message, details: nil)
             }
             throw APIError.http(status: http.statusCode, code: "HTTP_ERROR",
                                 message: "Agent v2 stream request failed (\(http.statusCode))", details: nil)
