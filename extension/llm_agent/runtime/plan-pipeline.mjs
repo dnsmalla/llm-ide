@@ -230,6 +230,28 @@ const QUESTION_CLAUSE_LEGACY =
   + 'what changes what you do next, put the questions of one round in one '
   + 'reply, and say which answer you would pick.';
 
+// Nothing used to say where this mode ENDS, and two things pushed past it:
+// writing-plans' own ending ("offer execution choice") is removed by the
+// clauses above with no stop in its place, and brainstorming's bounded path
+// says a small task goes "directly" to implementation with no plan. So a plan
+// turn that had just delivered its plan went on to do the work in chat — or
+// did the next message's "ok, go" as an implementation. The plan card's
+// Execute is the ONLY start of work, because it is what loads the execution
+// skill and the progress tracker.
+function stopClause(engine) {
+  const delivered = engine === 'agent'
+    ? 'Delivering the plan document ends your work in this mode'
+    : 'Calling `save-plan` ends your work in this mode';
+  return `- **The saved plan is where this mode stops.** ${delivered}: the user `
+    + 'starts the work with the Execute action on the plan card. Never implement '
+    + 'the plan, write its code, or walk through its steps in chat here — not in '
+    + 'this turn and not when a later message says "ok", "go ahead" or "do it": '
+    + 'answer that by pointing to Execute, or revise the plan if they asked for a '
+    + 'change. Where a skill says a small or bounded task proceeds directly to '
+    + 'implementation without a plan, write the plan anyway — nothing is '
+    + 'implemented in this mode.';
+}
+
 /**
  * When stage 1 is finished and the model should move on to writing the plan.
  *
@@ -316,6 +338,7 @@ export function buildPlanBinding(mode, { skillName, engine = 'legacy', planWrite
     + 'skip ahead to a finished plan because the request sounds simple.\n'
     + writingClause(mode, planWrite)
     + `${questionClause}\n`
+    + `${stopClause(engine)}\n`
     + artifactClauses
     + `${FACTS_CLAUSE}\n`
     + '- **No other write tool.** File edits, shell commands, git operations '

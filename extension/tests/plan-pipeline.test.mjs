@@ -353,3 +353,21 @@ test('every pipeline skill id resolves through load-skill', async (t) => {
       `"${id}" resolved but returned almost nothing — the pointer would promise a process that isn't there`);
   }
 });
+
+// A plan turn used to carry on past its own plan: nothing said where the mode
+// ends, writing-plans' "offer execution choice" ending is removed by the
+// bindings, and brainstorming's bounded path says small tasks go "directly"
+// to implementation. The binding now names the stop on both engines.
+test('plan bindings say the saved plan ends the mode and Execute starts the work, on both engines', () => {
+  for (const mode of ['plan', 'assist_plan']) {
+    for (const engine of ['legacy', 'agent']) {
+      const b = buildPlanBinding(mode, { skillName: 'x', engine });
+      assert.match(b, /The saved plan is where this mode stops/, `${mode}/${engine}: names the stop`);
+      assert.match(b, /Execute action on the plan card/, `${mode}/${engine}: names Execute as the start`);
+      assert.match(b, /Never implement/, `${mode}/${engine}: forbids implementing in chat`);
+      assert.match(b, /write the plan anyway/, `${mode}/${engine}: overrides the skip-the-plan path`);
+    }
+  }
+  assert.match(buildPlanBinding('plan', { engine: 'legacy' }), /Calling `save-plan` ends/);
+  assert.match(buildPlanBinding('plan', { engine: 'agent' }), /Delivering the plan document ends/);
+});
