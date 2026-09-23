@@ -46,5 +46,9 @@ jobs:
       - name: Build site (strict)
         run: mkdocs build --strict
 
+      # `make docs-check` defaults PY to the local `.venv-docs` (make docs-venv);
+      # this job installs the same requirements into the runner's Python
+      # instead, so point PY there — otherwise the step dies with exit 127
+      # before any guard runs.
       - name: Drift guards (API coverage + rate-limit mapping)
-        run: make docs-check
+        run: make docs-check PY=python

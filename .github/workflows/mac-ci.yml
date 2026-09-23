@@ -16,6 +16,8 @@ on:
       - 'scripts/conformance-agent-v2.mjs'
       - 'extension/llm_agent/sdk/**'
       - 'extension/routes/agent-v2.mjs'
+      # The gates/feature-builds jobs run Makefile targets.
+      - 'Makefile'
       - '.github/workflows/mac-ci.yml'
   pull_request:
     paths:
@@ -24,6 +26,8 @@ on:
       - 'scripts/conformance-agent-v2.mjs'
       - 'extension/llm_agent/sdk/**'
       - 'extension/routes/agent-v2.mjs'
+      # The gates/feature-builds jobs run Makefile targets.
+      - 'Makefile'
       - '.github/workflows/mac-ci.yml'
 
 concurrency:
@@ -200,3 +204,88 @@ jobs:
             mac/swift-test.log
             mac/sample-*.txt
           if-no-files-found: ignore
+
+  # The rest of `make regression` (the pre-push gate) — until now these ran
+  # only on a developer's machine, so a push with hooks off (or from anywhere
+  # else) skipped them entirely. Same commands as the Makefile, so CI and the
+  # local gate cannot drift apart.
+  gates:
+    name: Regression gates
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      # graph-gates run FROM the graph-kit submodule (the Mac build itself
+      # resolves graph-kit by URL). Only that submodule — `.skills` is private
+      # and not needed here (see the build-test job's checkout note).
+      - name: Check out graph-kit submodule
+        run: git submodule update --init mac/LocalPackages/graph-kit
+
+      - name: Select latest stable Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Cache SwiftPM (mac)
+        uses: actions/cache@v6
+        with:
+          path: mac/.build
+          key: spm-gates-${{ runner.os }}-${{ hashFiles('mac/Package.resolved') }}
+          restore-keys: |
+            spm-gates-${{ runner.os }}-
+
+      - name: Feature boundaries (Shell → Features → Core)
+        run: make feature-gates
+
+      # Build every product BEFORE the labs run. On a cold cache, `swift run`
+      # linked + signed ("Applying …") the lab and exec'd it in the same breath,
+      # and the kernel killed it at launch (Killed: 9, exit 137 — run
+      # 35881385566) before it printed a line. The build-test job never hit
+      # this because its `swift build` comes first, so `swift run` only
+      # re-links; do the same here.
+      - name: Build (debug)
+        working-directory: mac
+        run: swift build
+
+      - name: Build graph-kit labs (release)
+        working-directory: mac/LocalPackages/graph-kit
+        run: swift build -c release
+
+      - name: Generation contract gate
+        run: make generation-gates
+
+      - name: Loop contract gate
+        run: make loop-gates
+
+      # graph-kit's own CI runs its unit tests, not these labs (exact-layout
+      # ground truth, engine invariants, Swift↔TS memory conformance) — so
+      # without this step they gate nothing anywhere.
+      - name: Graph gates
+        run: make graph-gates
+
+  # The reduced builds `make regression` compiles: a feature compiled OUT must
+  # not leave Shell/Core referencing it. Each variant compiles a different
+  # file set, so each gets its own build cache.
+  feature-builds:
+    name: Feature build (${{ matrix.target }})
+    runs-on: macos-15
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [build-mac-lite, build-mac-min, build-mac-mobile-only]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select latest stable Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v6
+        with:
+          path: mac/.build
+          key: spm-${{ matrix.target }}-${{ runner.os }}-${{ hashFiles('mac/Package.resolved') }}
+          restore-keys: |
+            spm-${{ matrix.target }}-${{ runner.os }}-
+
+      - name: Build
+        run: make ${{ matrix.target }}

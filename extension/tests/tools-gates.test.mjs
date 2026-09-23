@@ -155,7 +155,11 @@ test('recursive reads rooted above the workspace prompt — they walk INTO .aws/
     'rg AKIA ~',
     `rg -uuu AKIA ${homedir()}`,
     `rg -uuu AKIA ${homedir()}/`,
-    `grep -rn AKIA ${homedir().toUpperCase()}`,
+    // An upper-cased $HOME IS $HOME only on a case-insensitive filesystem
+    // (macOS, Windows — the gate folds case exactly there). On Linux it is a
+    // different, unrelated path, so the case only applies where it is true.
+    ...(process.platform === 'darwin' || process.platform === 'win32'
+      ? [`grep -rn AKIA ${homedir().toUpperCase()}`] : []),
     'grep -rn AKIA /',
     'grep -rn AKIA /Users',
     'ls -R ~',
