@@ -228,6 +228,12 @@ struct MarkdownWebView: NSViewRepresentable {
                      decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if navigationAction.navigationType == .linkActivated {
+                // A `#fragment` inside this same document (a table of
+                // contents) is safe to follow — it never leaves the page.
+                if let url = navigationAction.request.url, url.scheme == "about", url.fragment != nil {
+                    decisionHandler(.allow)
+                    return
+                }
                 // Every click is cancelled (see SelfSizingMarkdownView): a
                 // relative link let through blanked the preview.
                 if let url = navigationAction.request.url,

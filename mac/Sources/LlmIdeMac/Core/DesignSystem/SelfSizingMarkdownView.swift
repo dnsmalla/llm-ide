@@ -218,6 +218,12 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
                      decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if navigationAction.navigationType == .linkActivated {
+                // A `#fragment` inside this same document (a table of
+                // contents) is safe to follow — it never leaves the page.
+                if let url = navigationAction.request.url, url.scheme == "about", url.fragment != nil {
+                    decisionHandler(.allow)
+                    return
+                }
                 // EVERY click is cancelled; only web and mail links are handed
                 // to the system. Letting the rest through — a relative
                 // `[Parser.swift](Sources/Parser.swift)` the model wrote —
