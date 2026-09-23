@@ -124,7 +124,13 @@ struct ChatEngineStreamingPerfTests {
         let id = engine.beginStreamingTurn()
         engine.appendStreamedChunk(id, "tick")
         #expect(engine.messages.last?.content == "")
-        try await Task.sleep(nanoseconds: 60_000_000)
+        // Poll rather than one fixed 60 ms sleep: under the full parallel
+        // suite the main actor can be busy past that, and the timer's publish
+        // (a main-actor hop) then lands after the check — a flaky failure.
+        let deadline = Date().addingTimeInterval(2)
+        while engine.messages.last?.content != "tick", Date() < deadline {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
         // The turn is still live (nothing finalized it) — the only thing that
         // can have written this is the coalescing task itself.
         #expect(engine.messages.last?.content == "tick")
