@@ -109,16 +109,50 @@ export function safeJSONStringify(v) {
 // `mode` argument controls how the terms are combined:
 //   'and' (default) — every term must appear (precise search box use)
 //   'or'            — any term may appear (fuzzy retrieval, ranked by bm25)
-function buildMatchExpr(raw, mode = 'and') {
+//
+// The index uses the trigram tokenizer (migration 0033) so CJK text, which
+// has no spaces between words, is searchable by substring. A trigram MATCH
+// needs 3+ characters, so a 2-character term (会議, 資料, "ui") becomes a
+// LIKE filter instead. LIKE can't use the trigram index below 3 characters,
+// so those terms scan — acceptable for a single-install DB, and in AND mode
+// the MATCH terms (when any) narrow the rows first. OR mode can't mix a
+// MATCH with a non-MATCH alternative, so there the short terms only count
+// when the query has nothing longer.
+//
+// Returns null when the query has no usable term, else { match, likes, mode }.
+function buildSearchFilter(raw, mode = 'and') {
   if (typeof raw !== 'string') return null;
   const tokens = raw
     .toLowerCase()
-    .split(/[^\p{L}\p{N}_]+/u)
+    .split(/[^\p{L}\p{M}\p{N}_]+/u)
     .filter((t) => t.length >= 2 && t.length <= 64)
     .slice(0, 12);
   if (tokens.length === 0) return null;
+  // Trigram counts characters (code points), not UTF-16 units.
+  const long = tokens.filter((t) => [...t].length >= 3);
+  let likes = tokens.filter((t) => [...t].length < 3);
   const joiner = mode === 'or' ? ' OR ' : ' ';
-  return tokens.map((t) => `"${t.replace(/"/g, '""')}"`).join(joiner);
+  const match = long.length ? long.map((t) => `"${t.replace(/"/g, '""')}"`).join(joiner) : null;
+  if (mode === 'or' && match) likes = [];
+  return { match, likes, mode };
+}
+
+// SQL for a buildSearchFilter() result: the WHERE fragment, its bind
+// params (in order), and the rank expression. bm25() is only valid with a
+// MATCH, so a LIKE-only query ranks newest-first instead.
+function searchFilterSql(f) {
+  const parts = [];
+  const params = [];
+  if (f.match) { parts.push('search MATCH ?'); params.push(f.match); }
+  if (f.likes.length) {
+    const clauses = f.likes.map((t) => {
+      const pattern = `%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      params.push(pattern, pattern);
+      return "(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')";
+    });
+    parts.push(f.mode === 'or' ? `(${clauses.join(' OR ')})` : clauses.join(' AND '));
+  }
+  return { where: parts.join(' AND '), params, rank: f.match ? 'bm25(search)' : '-rowid' };
 }
 
 // Meeting + entity CRUD + stats live in meetings.mjs. Re-exported
@@ -166,7 +200,7 @@ export function search(userId, { q, kind, limit = 20, projectId, maxCap = 100 } 
   // The projectId filter runs in SQL (PROJECT_META_FILTER), before LIMIT —
   // filtering after it returned short or empty pages for a project whose
   // rows weren't among the newest `cap` overall.
-  if (!q || !buildMatchExpr(q)) {
+  if (!q || !buildSearchFilter(q)) {
     const pid = projectId || null;
     if (kind === 'meeting' || !kind) {
       const rows = lazyPrepare(db, `
@@ -246,16 +280,16 @@ export function search(userId, { q, kind, limit = 20, projectId, maxCap = 100 } 
     }));
   }
 
-  const match = buildMatchExpr(q);
-  const params = [match];
-  let where = 'search MATCH ?';
+  const filter = searchFilterSql(buildSearchFilter(q));
+  const params = [...filter.params];
+  let where = filter.where;
   if (kind) {
     where += ' AND kind = ?';
     params.push(kind);
   }
   // bm25() ranks more relevant rows first; lower is better.
   const sql = `
-    SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
+    SELECT meeting_id, entity_id, kind, title, body, ${filter.rank} AS rank
     FROM search
     WHERE ${where}
     ORDER BY rank LIMIT ?
@@ -590,8 +624,8 @@ export { exportProject } from './project-export.mjs';
 // always filter further on rank, but a strict-AND no-match starves it.
 export function findContext(userId, query, limit = 5) {
   requireUser(userId);
-  const expr = buildMatchExpr(query, 'or');
-  if (!expr) return { meetings: [], tasks: [], code: [], tickets: [], blockers: [] };
+  const built = buildSearchFilter(query, 'or');
+  if (!built) return { meetings: [], tasks: [], code: [], tickets: [], blockers: [] };
   const db = getDb();
   const cap = Math.max(1, Math.min(20, Number(limit) || 5));
 
@@ -619,13 +653,15 @@ export function findContext(userId, query, limit = 5) {
     return owned.slice(0, cap);
   };
 
+  const filter = searchFilterSql(built);
+  const binds = filter.params;
   const RANKED_SQL_BY_KIND = `
-      SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
-      FROM search WHERE search MATCH ? AND kind = ?
+      SELECT meeting_id, entity_id, kind, title, body, ${filter.rank} AS rank
+      FROM search WHERE ${filter.where} AND kind = ?
       ORDER BY rank LIMIT ?
     `;
 
-  const sliceMeetings = (k) => fetchRanked(RANKED_SQL_BY_KIND, [expr, k], (hits) => {
+  const sliceMeetings = (k) => fetchRanked(RANKED_SQL_BY_KIND, [...binds, k], (hits) => {
     const ids = [...new Set(hits.map((h) => h.meeting_id))];
     const ph = ids.map(() => '?').join(',');
     const owned = new Set(
@@ -635,7 +671,7 @@ export function findContext(userId, query, limit = 5) {
     return hits.filter((h) => owned.has(h.meeting_id));
   });
 
-  const sliceEntities = (kind) => fetchRanked(RANKED_SQL_BY_KIND, [expr, kind], (hits) => {
+  const sliceEntities = (kind) => fetchRanked(RANKED_SQL_BY_KIND, [...binds, kind], (hits) => {
     const ids = [...new Set(hits.map((h) => h.entity_id))];
     const ph = ids.map(() => '?').join(',');
     const owned = new Set(
@@ -645,7 +681,7 @@ export function findContext(userId, query, limit = 5) {
     return hits.filter((h) => owned.has(h.entity_id));
   });
 
-  const sliceTasks = () => fetchRanked(RANKED_SQL_BY_KIND, [expr, 'task'], (hits) => {
+  const sliceTasks = () => fetchRanked(RANKED_SQL_BY_KIND, [...binds, 'task'], (hits) => {
     const ids = [...new Set(hits.map((h) => h.entity_id))];
     const ph = ids.map(() => '?').join(',');
     const owned = new Set(
@@ -655,7 +691,7 @@ export function findContext(userId, query, limit = 5) {
     return hits.filter((h) => owned.has(h.entity_id));
   });
 
-  const sliceCode = () => fetchRanked(RANKED_SQL_BY_KIND, [expr, 'code'], (hits) => {
+  const sliceCode = () => fetchRanked(RANKED_SQL_BY_KIND, [...binds, 'code'], (hits) => {
     const ids = [...new Set(hits.map((h) => Number(h.entity_id)).filter(Number.isFinite))];
     if (ids.length === 0) return [];
     const ph = ids.map(() => '?').join(',');
@@ -668,7 +704,7 @@ export function findContext(userId, query, limit = 5) {
       .map((h) => ({ ...h, ref: refByOwnedId.get(h.entity_id) }));
   });
 
-  const sliceTickets = () => fetchRanked(RANKED_SQL_BY_KIND, [expr, 'ticket'], (hits) => {
+  const sliceTickets = () => fetchRanked(RANKED_SQL_BY_KIND, [...binds, 'ticket'], (hits) => {
     const ids = [...new Set(hits.map((h) => Number(h.entity_id)).filter(Number.isFinite))];
     if (ids.length === 0) return [];
     const ph = ids.map(() => '?').join(',');
