@@ -468,6 +468,16 @@ export default function App() {
         </div>
       )}
 
+      {transcript.recoveredCount > 0 && (
+        <div className="quota-warning" role="status">
+          Restored the transcript of a recording that was interrupted before Stop
+          {transcript.recoveredCount > 1
+            ? ` (${transcript.recoveredCount - 1} older one(s) kept in local storage)`
+            : ''}
+          . Download it or generate notes before starting a new recording.
+        </div>
+      )}
+
       {transcript.saveError && (
         <div className="error-message" role="alert">
           {transcript.saveError}
