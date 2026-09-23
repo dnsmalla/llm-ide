@@ -15,6 +15,17 @@ struct UpdateIssueSheet: View {
         case failure(String)
     }
 
+    /// The open/close transition for a sheet `state` (GitLab's vocabulary —
+    /// the picker's tags — plus the GitHub and verb spellings an agent may
+    /// send). nil = leave the state alone.
+    static func stateChange(for state: String?) -> RepoIssuePayload.StateChange? {
+        switch state?.lowercased() {
+        case "closed", "close": return .close
+        case "opened", "open", "reopened", "reopen": return .reopen
+        default: return nil
+        }
+    }
+
     let initialArgs: Args
     let issueTitle: String?
     let projectId: String
@@ -121,12 +132,20 @@ struct UpdateIssueSheet: View {
 
         let labels = labelsText.isEmpty ? [] : labelsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
 
+        // Only a state the agent asked for, or one the user picked, is a
+        // change: the picker DEFAULTS to "opened" when the agent named none,
+        // and sending that would reopen a closed issue whose title was edited.
+        let stateTouched = initialArgs.state != nil
+            || selectedState != (initialArgs.state ?? "opened")
+        // An emptied field clears the labels the issue came in with; an
+        // untouched empty field leaves them alone.
+        let clearedLabels = initialArgs.labels?.isEmpty == false ? [String]() : nil
         let args = Args(
             iid: initialArgs.iid,
             title: title.isEmpty ? nil : title,
             body: bodyText.isEmpty ? nil : bodyText,
-            state: selectedState,
-            labels: labels.isEmpty ? nil : labels
+            state: stateTouched ? selectedState : nil,
+            labels: labels.isEmpty ? clearedLabels : labels
         )
 
         let result = await onConfirm(args)
