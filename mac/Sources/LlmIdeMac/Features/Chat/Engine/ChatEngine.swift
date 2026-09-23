@@ -161,6 +161,14 @@ final class ChatEngine {
     /// reopening the chat loaded a second engine onto the same session.
     var hasPendingWork: Bool { busy || agent.agentIsAutonomous }
 
+    /// True while a phone-driven turn (`runExternalTurn`) is in flight. Its
+    /// resolved mode is recorded on the message but NOT published through
+    /// `resolvedMode`, which is what moves the Mac's mode picker: the phone
+    /// sends `auto_read_only`, so anything that could write resolves to
+    /// `ask`, and following that left the Mac user's picker on Ask — every
+    /// later panel turn in that chat ran read-only until they noticed.
+    var externalTurnActive = false
+
     /// True while this engine is running a turn with no view observing it —
     /// a session the user switched AWAY from while it was mid-turn, kept
     /// alive by `ChatEngineRegistry` instead of being cancelled.
@@ -459,7 +467,8 @@ final class ChatEngine {
             self?.applyLiveTasks(tasks)
         }
         engineTransport.onModeResolved = { [weak self] mode in
-            self?.resolvedMode = mode
+            guard let self, !self.externalTurnActive else { return }
+            self.resolvedMode = mode
         }
         // D3 clean cut: selection is per-chat, so the composite must see the
         // CURRENT session's engine marker — only this engine knows which
@@ -1174,8 +1183,9 @@ final class ChatEngine {
                 metadata.mode = resolved.rawValue
                 // Legacy engines report their mode only here, on the terminal
                 // event — the Agent engine has already fired this live from
-                // `mode_set`, where a repeat is a no-op.
-                resolvedMode = resolved.rawValue
+                // `mode_set`, where a repeat is a no-op. Not for a phone-driven
+                // turn: see `externalTurnActive`.
+                if !externalTurnActive { resolvedMode = resolved.rawValue }
             }
             metadata.usage = usage
             // Unconditional, matching `usage` above: every abbreviated
