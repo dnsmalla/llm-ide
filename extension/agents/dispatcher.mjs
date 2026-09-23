@@ -464,6 +464,30 @@ export async function retryFailedDispatches(userId, config = {}) {
 
 // --- Public entry ---------------------------------------------------------
 
+// Optional whitelist — if taskIds is provided, only dispatch those.
+// Useful when the user reviews the preview and wants to dispatch a
+// subset rather than the whole plan.
+function selectTasks(plan, taskIds) {
+  if (!Array.isArray(taskIds) || taskIds.length === 0) return plan.tasks;
+  const set = new Set(taskIds.map(String));
+  return plan.tasks.filter((t) => set.has(t.id));
+}
+
+/**
+ * The exact title/body pairs `dispatchPlan` would send for this plan +
+ * subset, read from the DB — what the dispatch guardrail must scan.
+ * Scanning a client-supplied item list instead would let clean text pass
+ * review while different stored tasks leave the machine. Returns [] when
+ * the plan doesn't exist, which the guardrail blocks as "No tasks".
+ */
+export function resolveDispatchItems(userId, { planId, taskIds } = {}) {
+  if (!planId) return [];
+  const plan = getPlan(userId, String(planId));
+  if (!plan) return [];
+  return dispatchPreview({ plan, tasks: selectTasks(plan, taskIds) })
+    .map(({ taskId, title, body }) => ({ taskId, title, body }));
+}
+
 export async function dispatchPlan(userId, { planId, target = 'preview', taskIds, config = {} }) {
   if (!ALLOWED_TARGETS.has(target)) {
     throw new Error(`Unknown dispatch target: ${target}`);
@@ -471,14 +495,7 @@ export async function dispatchPlan(userId, { planId, target = 'preview', taskIds
   const plan = getPlan(userId, planId);
   if (!plan) throw new Error(`Plan ${planId} not found`);
 
-  // Optional whitelist — if taskIds is provided, only dispatch those.
-  // Useful when the user reviews the preview and wants to dispatch a
-  // subset rather than the whole plan.
-  let tasks = plan.tasks;
-  if (Array.isArray(taskIds) && taskIds.length > 0) {
-    const set = new Set(taskIds.map(String));
-    tasks = tasks.filter((t) => set.has(t.id));
-  }
+  const tasks = selectTasks(plan, taskIds);
 
   if (target === 'preview') {
     return { target, plan: { id: plan.id, title: plan.title }, results: dispatchPreview({ plan, tasks }) };

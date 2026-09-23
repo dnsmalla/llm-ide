@@ -71,3 +71,63 @@ test('isHumanTranscriptSource excludes agent commentary', () => {
   assert.equal(isHumanTranscriptSource('agent-system'), false);
   assert.equal(isHumanTranscriptSource('agent-question'), false);
 });
+
+// Regression (2026-09 review): UI_PATTERNS was an unbounded `^(call|share|…)`
+// prefix and ICON_PATTERN matched bare words like `chat` anywhere, so real
+// speech and names were silently dropped from transcripts.
+test('isValidCaption keeps speakers whose names start with a UI word', () => {
+  for (const name of ['Callum Smith', 'Moreno', 'Hostetler', 'Sharon', 'Leavitt', 'Opal', 'Chatterjee', 'Micah']) {
+    assert.equal(isValidCaption(name, 'Hello everyone.'), true, name);
+  }
+});
+
+test('isValidCaption keeps real speech that starts with or contains a UI word', () => {
+  for (const text of [
+    'Share your screen, please.',
+    'Call me later.',
+    'Meeting moved to Friday.',
+    'More or less, yes.',
+    'Video looks good now.',
+    'Open the PR when you are ready.',
+    "Let's chat about it tomorrow.",
+    'Can you raise that with the team?',
+    'Moreover the build is green',
+    'Meetings on Mondays are too long for everyone here',
+    'I will turn off my camera for a bit.',
+    'More info is in the doc.',
+  ]) {
+    assert.equal(isValidCaption('Alice', text), true, text);
+  }
+});
+
+test('isValidCaption still rejects every UI label from the invariants table', () => {
+  for (const text of [
+    'Turn off microphone',
+    'Turn on captions',
+    'Open caption settings',
+    'Live captions',
+    'Font size',
+    'Reframe',
+    'Backgrounds and effects',
+    'Portrait',
+    'Blur',
+    'Dial-in',
+    'PIN: 123 456',
+    "Your meeting's ready",
+    'close Close',
+    'More options',
+    'Share screen',
+    'Leave call',
+    'Raise hand',
+    'chat',
+    'mic',
+    'Settings',
+    'Connect, collaborate, and celebrate from anywhere with Google Meet.',
+    'Tap to open more_vert settings.',
+  ]) {
+    assert.equal(isValidCaption('Alice', text), false, text);
+  }
+  for (const speaker of ['Present now', 'Meeting details', 'Chat', 'People', 'frame_person', 'ume-xkgs-oqf']) {
+    assert.equal(isValidCaption(speaker, 'Hello everyone.'), false, speaker);
+  }
+});

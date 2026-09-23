@@ -146,6 +146,13 @@ export {
 // entities, sources, plans, plan_tasks, outcomes) so an FTS hit that
 // matches the index but belongs to another user won't survive
 // hydration.
+// SQL twin of `!projectId || safeParseMeta(meta)?.projectId === projectId`,
+// bound as (pid, pid). Malformed meta must be treated as {} (safeParseMeta's
+// fallback), but json_extract throws on it — and SQLite doesn't promise
+// short-circuit AND, so the json_valid() guard has to be a CASE.
+const PROJECT_META_FILTER = (col) =>
+  `(? IS NULL OR CASE WHEN json_valid(${col}) THEN json_extract(${col}, '$.projectId') END = ?)`;
+
 export function search(userId, { q, kind, limit = 20, projectId, maxCap = 100 } = {}) {
   requireUser(userId);
   const db = getDb();
@@ -156,15 +163,18 @@ export function search(userId, { q, kind, limit = 20, projectId, maxCap = 100 } 
 
   // Plain "list everything" path — used by the History pane when the search
   // box is empty.  We don't hit FTS at all so empty queries are O(rows).
+  // The projectId filter runs in SQL (PROJECT_META_FILTER), before LIMIT —
+  // filtering after it returned short or empty pages for a project whose
+  // rows weren't among the newest `cap` overall.
   if (!q || !buildMatchExpr(q)) {
+    const pid = projectId || null;
     if (kind === 'meeting' || !kind) {
       const rows = lazyPrepare(db, `
         SELECT id, title, date, duration_sec, meta FROM meetings
-        WHERE user_id = ?
+        WHERE user_id = ? AND ${PROJECT_META_FILTER('meta')}
         ORDER BY date DESC LIMIT ?
-      `).all(userId, cap);
+      `).all(userId, pid, pid, cap);
       return rows
-        .filter((r) => !projectId || safeParseMeta(r.meta)?.projectId === projectId)
         .map((r) => ({
           kind: 'meeting',
           meetingId: r.id,
@@ -180,11 +190,10 @@ export function search(userId, { q, kind, limit = 20, projectId, maxCap = 100 } 
       const rows = lazyPrepare(db, `
         SELECT e.id, e.meeting_id, e.kind, e.text, e.quote, e.meta, m.title, m.date, m.meta AS m_meta
         FROM entities e JOIN meetings m ON m.id = e.meeting_id
-        WHERE e.kind = ? AND e.user_id = ?
+        WHERE e.kind = ? AND e.user_id = ? AND ${PROJECT_META_FILTER('m.meta')}
         ORDER BY m.date DESC LIMIT ?
-      `).all(kind, userId, cap);
+      `).all(kind, userId, pid, pid, cap);
       return rows
-        .filter((r) => !projectId || safeParseMeta(r.m_meta)?.projectId === projectId)
         .map((r) => ({
           kind: r.kind,
           meetingId: r.meeting_id,
@@ -221,11 +230,10 @@ export function search(userId, { q, kind, limit = 20, projectId, maxCap = 100 } 
     // Phase-3 external sources live in the `sources` table.
     const rows = lazyPrepare(db, `
       SELECT id, kind, ref, title, body, meta, indexed_at FROM sources
-      WHERE kind = ? AND user_id = ?
+      WHERE kind = ? AND user_id = ? AND ${PROJECT_META_FILTER('meta')}
       ORDER BY indexed_at DESC LIMIT ?
-    `).all(kind, userId, cap);
+    `).all(kind, userId, pid, pid, cap);
     return rows
-      .filter((r) => !projectId || safeParseMeta(r.meta)?.projectId === projectId)
       .map((r) => ({
       kind: r.kind,
       meetingId: null,
@@ -246,13 +254,41 @@ export function search(userId, { q, kind, limit = 20, projectId, maxCap = 100 } 
     params.push(kind);
   }
   // bm25() ranks more relevant rows first; lower is better.
-  const rows = lazyPrepare(db, `
+  const sql = `
     SELECT meeting_id, entity_id, kind, title, body, bm25(search) AS rank
     FROM search
     WHERE ${where}
     ORDER BY rank LIMIT ?
-  `).all(...params, cap);
+  `;
 
+  // The FTS index is shared by every tenant, and the projectId filter is
+  // applied during hydration — so a LIMIT of `cap` on the raw ranking can
+  // be filled by rows this caller may not see, starving them of real
+  // matches further down. Same overshoot strategy as findContext: fetch
+  // cap*4, and if hydration comes up short while that window was full
+  // (more rows exist), re-fetch once with a deeper, hard-bounded window.
+  // Both passes are LIMIT-bounded indexed queries, never a full scan.
+  const shallow = cap * 4;
+  let hits = lazyPrepare(db, sql).all(...params, shallow);
+  let owned = hydrateSearchRows(db, userId, hits, projectId);
+  if (owned.length < cap && hits.length === shallow) {
+    const deep = Math.min(Math.max(cap * 20, 400), SEARCH_DEEP_LIMIT);
+    if (deep > shallow) {
+      hits = lazyPrepare(db, sql).all(...params, deep);
+      owned = hydrateSearchRows(db, userId, hits, projectId);
+    }
+  }
+  return owned.slice(0, cap);
+}
+
+// Upper bound on the deep re-fetch window in search(). Kept well under
+// SQLite's bound-parameter limit, since hydration binds one id per row
+// in a single IN (...) per backing table.
+const SEARCH_DEEP_LIMIT = 10_000;
+
+// Hydrate raw FTS rows through their owning tables, dropping anything the
+// caller doesn't own or that falls outside `projectId`. Order is preserved.
+function hydrateSearchRows(db, userId, rows, projectId) {
   // Per-kind hydration.  Tenancy enforcement: build an
   // owned-by-this-user allow-set per backing table, then drop any FTS
   // row whose hydration came up empty.

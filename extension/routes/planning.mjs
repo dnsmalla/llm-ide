@@ -181,6 +181,7 @@ export async function handlePlanningRoutes(req, res, ctx) {
       return true;
     }
     const target = body.target || 'preview';
+    let taskIds = body.taskIds;
     // Guardrail gate: non-preview dispatch pushes tasks to external
     // systems (GitHub, Linear, Backlog) — require a pre-approved review
     // item so the user explicitly signs off before anything leaves the
@@ -208,7 +209,18 @@ export async function handlePlanningRoutes(req, res, ctx) {
         });
         return true;
       }
-      if (review.planId && review.planId !== String(body.planId)) {
+      if (review.kind !== 'dispatch') {
+        sendJSON(res, 403, {
+          error: { code: 'REVIEW_KIND_MISMATCH', message: 'reviewId is not a dispatch review' },
+        });
+        return true;
+      }
+      // The approval covered one plan, target and task subset — dispatch
+      // exactly that, so a request can't reuse an approval for different
+      // tasks or another tracker.
+      const approved = review.payload || {};
+      const approvedPlanId = approved.planId ?? review.planId;
+      if (approvedPlanId == null || String(approvedPlanId) !== String(body.planId)) {
         sendJSON(res, 403, {
           error: {
             code: 'REVIEW_PLAN_MISMATCH',
@@ -217,6 +229,16 @@ export async function handlePlanningRoutes(req, res, ctx) {
         });
         return true;
       }
+      if (approved.target !== target) {
+        sendJSON(res, 403, {
+          error: {
+            code: 'REVIEW_TARGET_MISMATCH',
+            message: `reviewId was approved for target "${approved.target}", not "${target}"`,
+          },
+        });
+        return true;
+      }
+      taskIds = approved.taskIds;
       // Atomically consume the review (CAS: 'approved' → 'executed') so
       // two concurrent /kb/dispatch calls — or a race between this route
       // and /kb/review/approve's own execution — cannot both fire a
@@ -241,7 +263,7 @@ export async function handlePlanningRoutes(req, res, ctx) {
       const result = await dispatchPlan(userId, {
         planId: body.planId,
         target,
-        taskIds: body.taskIds,
+        taskIds,
         config: body.config || {},
       });
       sendJSON(res, 200, result);
