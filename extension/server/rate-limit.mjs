@@ -62,6 +62,17 @@ const PROFILES = {
   // exists to reject obvious mashing.
   llm:        { capacity: 3, refillRate: 1 / 30 }, // ~1 every 30s, burst 3
 
+  // Chat agent turns — /code-assist and /agent/v2/stream. Split out of
+  // `llm` because a chat turn is not one request per user action: the Mac
+  // engine starts turns on its own (auto-continue rounds 0.8 s apart, up to
+  // 8; a "(continue)" follow-up after every auto-run tool; queue drains), so
+  // a single Bypass-mode plan routinely sends 4+ requests inside 30 s. At
+  // `llm`'s burst of 3 the 4th met a 429 and failed the plan midway — and it
+  // also shared that budget with generate-plan/analyze-risks. Turns cannot
+  // pile up regardless: the server holds one in-flight turn per chat
+  // (TURN_IN_PROGRESS), so this bucket only has to stop a runaway client.
+  agentTurn:  { capacity: 12, refillRate: 1 / 5 }, // ~1 every 5s, burst 12
+
   // Cheap LLM jobs — chat, generate-questions, generate-notes.
   llmFast:    { capacity: 6, refillRate: 1 / 5 },  // ~1 every 5s, burst 6
 

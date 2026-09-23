@@ -11,6 +11,7 @@ Token-bucket per `(profile, scope)`. Scope is `userId` for authenticated routes,
 
 | Profile | Burst | Refill window | Notes |
 |---|---|---|---|
+| `agentTurn` | 12 | 5 s / token | ~1 every 5s, burst 12 |
 | `authPublic` | 10 | 1 s / token | Shared bucket for login + refresh — keyed by remote IP. 10-burst then 1/sec to absorb a password-manager fill without blocking the UI, but still stop credential-stuffing loops. |
 | `authRegister` | 3 | 60 s / token | Tighter dedicated bucket for account registration. 3 burst (covers a mistype/retry flow) then 1 per 60 s per IP. Registration is infrequent by design; spam registrations create real DB rows so the cost of being too permissive is higher here. |
 | `dispatch` | 4 | 10 s / token | ~1 every 10s, burst 4 |
@@ -20,3 +21,4 @@ Token-bucket per `(profile, scope)`. Scope is `userId` for authenticated routes,
 | `llm` | 3 | 30 s / token | ~1 every 30s, burst 3 |
 | `llmFast` | 6 | 5 s / token | ~1 every 5s, burst 6 |
 | `outcomePoll` | 6 | 30 s / token | ~1 every 30s, burst 6 |
+| `unknownFallback` | 10 | 1 s / token | Applied to any profile name tryConsume does not recognize. Before this existed an unknown name FAILED OPEN — a route whose profile was typo'd or never added ran unthrottled forever, with only a one-line warning to show for it. Tight enough that a runaway loop is still stopped, loose enough that a config gap degrades to back-pressure rather than an outage. |

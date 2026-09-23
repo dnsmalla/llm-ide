@@ -458,7 +458,8 @@ test('stream: a second turn for the same chat session while one is in flight get
 
 // The third contract the post-Stop retry leans on: a refused turn must not
 // COST a rate-limit token. server.mjs's limiter charges `/agent/v2/stream`
-// against the `llm` bucket (capacity 3) before routing; if the 409 kept
+// against a rate-limit bucket before routing (`llm`, capacity 3, when this
+// was written; now `agentTurn`); if the 409 kept
 // that token, the retries themselves emptied the bucket and the user's next
 // real turn got a 429 with a 30 s refill behind it — the "error when I stop
 // mid-turn" report. A served turn keeps its token.
