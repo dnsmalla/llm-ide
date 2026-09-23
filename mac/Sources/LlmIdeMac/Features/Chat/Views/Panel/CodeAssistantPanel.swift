@@ -449,6 +449,8 @@ struct CodeAssistantPanel: View {
                 onApplyEdit: { await applyPendingEdit() },
                 onSkipEdit: { await skipPendingEdit() },
                 onSavePlan: { await autoSavePendingPlan() },
+                onAnswerQuestion: { answers in await answerPendingQuestion(answers) },
+                onDismissQuestion: { await dismissPendingQuestion() },
                 onSavePlanFromMessage: { message in
                     Task { await savePlanFromMessage(message) }
                 },

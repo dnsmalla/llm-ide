@@ -63,6 +63,11 @@ struct ChatMessageList: View {
     /// only; the normal path already resolves this in `autoChainPendingAction`
     /// before the card can render.
     let onSavePlan: () async -> Void
+    /// The classic engine's `ask-user` question: the chosen label(s), keyed
+    /// by question text (the `ApprovalQuestionCard` answer shape).
+    let onAnswerQuestion: ([String: String]) async -> Void
+    /// The user closed the question card without choosing.
+    let onDismissQuestion: () async -> Void
     /// Wraps `CodeAssistantPanel.savePlanFromMessage(_:)` — the "Save Plan"
     /// action on a v2 plan-like RESULT turn (no pendingTool: on the v2
     /// engine the plan IS the reply, so saving is a client-side action on
@@ -494,7 +499,18 @@ struct ChatMessageList: View {
     /// it pushed the transcript body past what the type-checker will solve.
     @ViewBuilder
     private func pendingActionCardIfAny(for turn: ChatMessage, isLastTurn: Bool) -> some View {
-            if let pt = pendingTool, isLastTurn, turn.role == .assistant {
+            if let pt = pendingTool, isLastTurn, turn.role == .assistant, let question = pt.askUserArgs {
+                // A fixed-choice question: the tappable card, not a
+                // confirm-this-action card. Keyed by the question so a second
+                // one mints fresh selection state.
+                AskUserQuestionCard(
+                    args: question,
+                    onSubmit: { answers in await onAnswerQuestion(answers) },
+                    onDismiss: { Task { await onDismissQuestion() } })
+                    .id(question.question + question.options.joined(separator: "\u{1F}"))
+                    .padding(.top, 4)
+                    .transition(.opacity)
+            } else if let pt = pendingTool, isLastTurn, turn.role == .assistant {
                 PendingActionCard(
                     pendingTool: pt,
                     diffPreview: diffPreview,
@@ -529,6 +545,10 @@ struct ChatMessageList: View {
                             Task { await onBash(pt.bashArgs) }
                         case .savePlan:
                             Task { await onSavePlan() }
+                        case .askUser:
+                            // Only reached for an unusable question (see
+                            // `askUserArgs`); there is nothing to open.
+                            break
                         case nil:
                             break
                         }
