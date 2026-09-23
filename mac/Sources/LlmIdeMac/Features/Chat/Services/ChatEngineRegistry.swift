@@ -18,6 +18,8 @@ protocol ExternalEngineHolder: AnyObject {
     func heldEngine(for sessionID: UUID) -> ChatEngine?
     /// Stop tracking `sessionID` — the registry has taken the engine over.
     func releaseHeldEngine(for sessionID: UUID)
+    /// Sign-out: forget every held engine without persisting it.
+    func forgetAllHeldEngines()
 }
 
 /// Per-`ChatScope` shared `ChatEngine` instances, plus the background lot of
@@ -153,12 +155,12 @@ final class ChatEngineRegistry {
     /// Drives the "still working" marker in the session picker, so a chat
     /// left running is visibly distinct from one that was stopped.
     func isRunning(_ sessionID: UUID) -> Bool {
-        liveEngine(for: sessionID)?.busy == true
+        liveEngine(for: sessionID)?.hasPendingWork == true
     }
 
     /// Session ids currently mid-turn off-screen. Read by the session list.
     var backgroundRunningSessionIDs: Set<UUID> {
-        Set(background.filter { $0.value.busy }.keys)
+        Set(background.filter { $0.value.hasPendingWork }.keys)
     }
 
     /// Every engine — displayed or parked — currently blocked on an approval,
@@ -239,7 +241,7 @@ final class ChatEngineRegistry {
             return held
         }
 
-        guard current.busy else {
+        guard current.hasPendingWork else {
             current.switchSession(to: sessionID)
             sweepBackground()
             return current
@@ -264,7 +266,7 @@ final class ChatEngineRegistry {
     /// Returns the engine the panel should render.
     func newDisplayedSession(scope: ChatScope, api: LlmIdeAPIClient) -> ChatEngine {
         let current = engine(for: scope, api: api)
-        guard current.busy else {
+        guard current.hasPendingWork else {
             current.createNewSession()
             sweepBackground()
             return current
@@ -283,6 +285,18 @@ final class ChatEngineRegistry {
         displayed[scope] = fresh
         sweepBackground()
         return fresh
+    }
+
+    /// Sign-out: every engine this registry (and its external holder) keeps
+    /// forgets the signed-out user's chats without writing them back. Must
+    /// run BEFORE `ChatSessionStore.clear()` — see
+    /// `ChatEngine.forgetForSignOut`.
+    func forgetAllForSignOut() {
+        for engine in background.values { engine.forgetForSignOut() }
+        background.removeAll()
+        backgroundOrder.removeAll()
+        for engine in displayed.values { engine.forgetForSignOut() }
+        externalHolder?.forgetAllHeldEngines()
     }
 
     /// Stop and drop the background engine holding `sessionID`, if any.
@@ -354,7 +368,7 @@ final class ChatEngineRegistry {
     /// The outgoing engine when the incoming one comes from the lot: park it
     /// if it is mid-turn, otherwise let it go after landing its writes.
     private func retire(_ engine: ChatEngine) {
-        if engine.busy {
+        if engine.hasPendingWork {
             park(engine)
         } else {
             engine.flushPendingPersist()
@@ -364,7 +378,7 @@ final class ChatEngineRegistry {
     /// Drop parked engines that have finished their turn, then — only if the
     /// lot is still over its limit — the oldest still-running ones.
     private func sweepBackground() {
-        for (id, engine) in background where !engine.busy {
+        for (id, engine) in background where !engine.hasPendingWork {
             engine.persistsUnobserved = false
             background.removeValue(forKey: id)
             backgroundOrder.removeAll { $0 == id }

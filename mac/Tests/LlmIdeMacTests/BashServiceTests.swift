@@ -126,6 +126,38 @@ final class BashServiceTests: XCTestCase {
                           "cancel must kill the child, not wait out the sleep")
     }
 
+    // Regression (2026-09 chat review): Stop SIGTERMed only the shell. A
+    // grandchild (`npm test` → node) kept running and holding the pipes, so
+    // the drains waited on EOF until it finished on its own. Here zsh can't
+    // `exec` away its child (commands follow), and the inner `sh` does the same
+    // to its `sleep`, so the sleep is a real grandchild holding stdout.
+    func testCancellationKillsGrandchildrenHoldingThePipe() async {
+        let task = Task {
+            await service.execute("sh -c 'sleep 30; true'; true", timeout: 60)
+        }
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        task.cancel()
+        let started = Date()
+        let r = await task.value
+        XCTAssertFalse(r.isSuccess)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 10,
+                          "cancel must tear down the whole tree, not wait out the grandchild")
+    }
+
+    func testProcessTreeFindsGrandchildren() async throws {
+        let shell = Process()
+        shell.executableURL = URL(fileURLWithPath: "/bin/sh")
+        shell.arguments = ["-c", "sh -c 'sleep 20; true'; true"]
+        try shell.run()
+        defer {
+            for pid in ProcessTree.descendants(of: shell.processIdentifier) { kill(pid, SIGKILL) }
+            shell.terminate()
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        // The inner sh and its sleep.
+        XCTAssertGreaterThanOrEqual(ProcessTree.descendants(of: shell.processIdentifier).count, 2)
+    }
+
     func testValidateCommandBlocksObviouslyDestructiveCommands() {
         XCTAssertFalse(service.validateCommand("rm -rf /"))
         XCTAssertFalse(service.validateCommand("sudo mkfs /dev/disk2"))

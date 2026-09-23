@@ -40,7 +40,23 @@ extension CodeAssistantPanel {
             return
         }
 
-        let result = await bashService.execute(args.command, workingDirectory: args.workingDirectory)
+        let directory: URL
+        switch ChatBashDirectory.resolve(args.workingDirectory, repoRoot: activeRepoRoot) {
+        case .success(let url):
+            directory = url
+        case .failure(let refusal):
+            let payload = ChatMessage.ToolResultPayload(
+                kind: .bash,
+                summary: "(bash \(refusal.message))",
+                exitCode: nil, command: nil,
+                output: refusal.message,
+                url: nil, isFailure: true
+            )
+            await engine.acknowledge(payload, followUp: .forceUnblock)
+            return
+        }
+
+        let result = await bashService.execute(args.command, workingDirectory: directory.path)
 
         // The header line always carries the exit code so success and failure
         // render consistently; `command` is collapsed to a single line for

@@ -15,7 +15,7 @@
 import {
   appendCaptions, getCaptionsSince, listActiveSessions, finalizeSession, liveEvents,
 } from '../agents/live-sessions.mjs';
-import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
 import { tryConsume } from '../server/rate-limit.mjs';
 
 // Per-user cap on concurrent SSE streams. A hostile or buggy client
@@ -160,7 +160,7 @@ export async function handleLiveRoutes(req, res, ctx) {
     liveEvents.on(`session-caption-${sessionId}`, onUpdate);
     liveEvents.on(`session-list-update-${userId}`, onUpdate);
 
-    req.on('close', cleanup);
+    onClientDisconnect(req, res, cleanup);
     req.on('error', cleanup);
 
     onUpdate();

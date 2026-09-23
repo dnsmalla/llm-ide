@@ -115,10 +115,15 @@ enum ChatSessionStore {
         }
     }
 
-    /// Sign-out: wipe the whole sessions directory.
+    /// Sign-out: wipe the whole sessions directory, and every scope's
+    /// "current chat" pointer with it — a pointer outliving its file is how
+    /// the next user's panel would resolve (and re-create) a deleted chat.
     static func clear() {
-        guard let dir = sessionsDir else { return }
-        try? FileManager.default.removeItem(at: dir)
+        if let dir = sessionsDir { try? FileManager.default.removeItem(at: dir) }
+        let defaults = UserDefaults.standard
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("chat.current.") {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     /// If `sessions/<scope>.json` exists, convert once to a UUID file with

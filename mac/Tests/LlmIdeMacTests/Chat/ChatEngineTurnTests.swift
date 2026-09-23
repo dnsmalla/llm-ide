@@ -215,20 +215,132 @@ struct ChatEngineTurnTests {
         #expect(engine2.messages[1].metadata?.mode == CodeAssistMode.execute.rawValue)
     }
 
-    @Test("Follow-up sends (continue), appends one assistant turn, never drains the queue")
+    @Test("Follow-up sends (continue), appends one assistant turn, then drains the queue")
     func followup() async {
         let (engine, t) = makeEngine()
         t.result = .init(reply: "ack", pendingTool: nil, tasks: nil,
                          continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
         await engine.runTurn("hi")           // ends with busy == false
-        engine.enqueue("ignored", skillIds: [])  // not drained by sendFollowup
+        engine.enqueue("queued", skillIds: [])
         await engine.sendFollowup()
+        await engine.runTask?.value
+        // Regression: a sheet-started follow-up ended with a bare
+        // `busy = false`, so a message queued during it sat until some later
+        // turn ended. It now drains like any other turn's tail, in order.
+        #expect(t.receivedInputs.map(\.message) == ["hi", "(continue)", "queued"])
+        #expect(engine.queued.isEmpty)
+        #expect(engine.busy == false)
         // A follow-up appends only the assistant placeholder — the synthetic
         // "(continue)" user message is a wire-only detail, never in `history`.
-        #expect(engine.messages.count == 3)
-        #expect(engine.messages.last?.content == "ack")
-        #expect(t.receivedInputs.last?.message == "(continue)")
-        #expect(engine.queued.map(\.text) == ["ignored"])
+        #expect(engine.messages.map(\.role) == [.user, .assistant, .assistant, .user, .assistant])
+    }
+
+    @Test("Wire history never repeats the current prompt")
+    func historyExcludesCurrentPrompt() async {
+        let (engine, t) = makeEngine()
+        t.result = .init(reply: "first reply", pendingTool: nil, tasks: nil,
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
+        await engine.runTurn("first")
+        #expect(t.receivedInputs.last?.history.isEmpty == true)
+        await engine.runTurn("second")
+        // Regression: the placeholder was appended before packing, so
+        // `dropLast()` dropped IT and the prompt stayed at the end of the
+        // history — the server then appended it again ("User: X / User: X").
+        let history = t.receivedInputs.last?.history ?? []
+        #expect(history.map(\.content) == ["first", "first reply"])
+        #expect(t.receivedInputs.last?.message == "second")
+    }
+
+    @Test("A follow-up's history ends with the ack, not an empty placeholder")
+    func followupHistoryExcludesPlaceholder() async {
+        let (engine, t) = makeEngine()
+        t.result = .init(reply: "ok", pendingTool: nil, tasks: nil,
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
+        await engine.runTurn("run it")
+        await engine.sendFollowup()
+        let history = t.receivedInputs.last?.history ?? []
+        #expect(history.map(\.content) == ["run it", "ok"])
+    }
+
+    @Test("Stop reaches a sheet-started follow-up, and no tool chains after it")
+    func stopReachesSheetFollowup() async {
+        let t = SuspendableChatTransport()
+        let engine = ChatEngine(scope: .explorer, transport: t)
+        engine.hooks.resolveTransportInput = { msg, history, _, skills in
+            ChatTransportInput(message: msg, history: history, attachments: [],
+                               skills: skills, agentContext: nil, language: "en",
+                               model: nil, provider: nil, mode: "auto")
+        }
+        var chained = false
+        engine.hooks.autoChain = { _, _ in chained = true }
+        let followup = Task { await engine.sendFollowup() }
+        while !t.isSuspended { await Task.yield() }
+        // Regression: the follow-up ran in the caller's task, so `runTask`
+        // was nil and Stop had nothing to cancel.
+        #expect(engine.runTask != nil)
+        engine.stop()
+        t.resume()   // the transport returns a reply anyway, after the Stop
+        await followup.value
+        #expect(engine.messages.last?.status == .stopped)
+        #expect(chained == false)
+        #expect(engine.busy == false)
+    }
+
+    @Test(".forceUnblock does not start a second round-trip while one is streaming")
+    func forceUnblockSkipsWhileStreaming() async {
+        let (engine, t) = makeEngine()
+        engine.beginPanelRun()
+        _ = engine.beginStreamingTurn()   // a round-trip is mid-stream
+        let payload = ChatMessage.ToolResultPayload(
+            kind: .git, summary: "(git status result)",
+            exitCode: nil, command: nil, output: "clean", url: nil, isFailure: false
+        )
+        await engine.acknowledge(payload, followUp: .forceUnblock)
+        // Regression: `unblockAndFollowUp` forced `busy = false` and started
+        // a concurrent follow-up.
+        #expect(t.receivedInputs.isEmpty)
+        #expect(engine.busy == true)
+        #expect(engine.messages.filter { $0.role == .toolResult }.count == 1)
+    }
+
+    @Test("A turn's truncated attachments stay flagged through its follow-ups")
+    func truncatedPathsSurviveFollowups() async {
+        let (engine, t) = makeEngine()
+        let usage = LlmIdeAPIClient.CodeAssistResponse.Usage(
+            attachmentCount: 1, attachmentChars: 80_000, paths: ["/r/big.swift"],
+            truncatedPaths: ["/r/big.swift"], memoryApproxTokens: nil, memoryChars: nil,
+            memoryHasChatMemory: nil)
+        t.result = .init(reply: "editing", pendingTool: nil, tasks: nil,
+                         continueNeeded: nil, usage: usage, mode: nil, tokenUsage: nil)
+        await engine.runTurn("refactor big.swift")
+        #expect(engine.currentTurnTruncatedPaths == ["/r/big.swift"])
+        // Regression: a "(continue)" follow-up sends no attachments, so its
+        // response reports nothing truncated — deciding from that let a
+        // whole-file rewrite of big.swift auto-apply and drop its tail.
+        t.result = .init(reply: "next step", pendingTool: nil, tasks: nil,
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
+        await engine.sendFollowup()
+        #expect(engine.currentTurnTruncatedPaths == ["/r/big.swift"])
+        // A new user turn starts clean.
+        await engine.runTurn("something else")
+        #expect(engine.currentTurnTruncatedPaths.isEmpty)
+    }
+
+    @Test("A reset-cancelled turn's ack does not start a follow-up in the new chat")
+    func cancelledCallerStartsNoFollowup() async {
+        let (engine, t) = makeEngine()
+        // A reset (chat deleted, quick-chat project switched) cancels the turn
+        // and clears `busy` while its tool is still returning; the tool then
+        // acks from the cancelled task. Regression: `sendFollowup` spawned an
+        // uncancelled Task and ran a real round-trip against the new chat.
+        let caller = Task {
+            while !Task.isCancelled { await Task.yield() }
+            await engine.unblockAndFollowUp()
+        }
+        caller.cancel()
+        await caller.value
+        #expect(t.receivedInputs.isEmpty)
+        #expect(engine.busy == false)
     }
 
     // MARK: - Plan execution tracker

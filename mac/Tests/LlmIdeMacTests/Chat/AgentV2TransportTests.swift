@@ -114,6 +114,29 @@ struct AgentV2TransportTests {
         #expect(result.continueNeeded == false)
     }
 
+    @Test("An error_* result fails the turn instead of reading as a finished reply")
+    func errorResultSubtypeFails() async throws {
+        // Regression: any `result` set the terminal flag as success, so a
+        // turn the SDK stopped (max turns, budget, execution error) showed
+        // its partial reply as complete and could auto-continue on it.
+        let stream = ScriptedAgentV2Stream()
+        stream.events = [
+            .delta("partial"),
+            .result(AgentV2Result(subtype: "error_max_turns", costUsd: nil, numTurns: 40,
+                                  durationMs: nil, sessionId: nil, stopReason: nil)),
+        ]
+        let transport = AgentV2Transport(streamer: stream)
+        await #expect(throws: AgentV2Error.engine(
+            code: "error_max_turns",
+            message: "The agent hit its step limit before finishing this turn.")) {
+            _ = try await transport.roundTrip(makeInput(), onProgress: { _ in },
+                                              onChunk: { _ in }, onApproval: { _ in })
+        }
+        #expect(AgentV2Error.resultFailureMessage(subtype: "success") == nil)
+        #expect(AgentV2Error.resultFailureMessage(subtype: nil) == nil)
+        #expect(AgentV2Error.resultFailureMessage(subtype: "error_new_kind") != nil)
+    }
+
     @Test("tasks event after result maps continueNeeded and task list")
     func tasksEventMapped() async throws {
         let stream = ScriptedAgentV2Stream()

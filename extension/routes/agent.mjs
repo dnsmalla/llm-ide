@@ -11,7 +11,7 @@
 import * as kb from '../kb/db.mjs';
 import { dispatchAgent, stopAgent, listRuns, getDiagnostics } from '../agents/meeting-agent.mjs';
 import { runClaude } from '../providers/runtime.mjs';
-import { sendJSON, readBody, parseJSON, sanitizeForPrompt } from '../core/utils.mjs';
+import { sendJSON, readBody, parseJSON, sanitizeForPrompt, onClientDisconnect } from '../core/utils.mjs';
 import { listAllSkills, listInstalledPlugins, buildPerUserSkillSet, listSkillLibrary } from '../llm_agent/skills/index.mjs';
 import { sanitizePersonaSuffix, personaConfigBlock } from '../providers/prompt-utils.mjs';
 import {
@@ -252,7 +252,7 @@ export async function handleAgentRoutes(req, res, ctx) {
 
     // Abort when the client disconnects (Stop cancels URLSessionTask).
     const ac = new AbortController();
-    req.on('close', () => ac.abort());
+    onClientDisconnect(req, res, () => ac.abort());
 
     try {
       const result = await runClaude(prompt, { userId, images, provider, model, signal: ac.signal });

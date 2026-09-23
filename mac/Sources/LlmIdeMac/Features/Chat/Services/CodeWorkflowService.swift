@@ -648,10 +648,11 @@ final class CodeWorkflowService: ObservableObject {
         busy = true; stepError = nil
         defer { busy = false }
         do {
-            // Write AI-generated files to disk if parseable
-            for file in diffFiles where file.isNew {
-                try repo.write(content: file.newContent, to: file.path, in: repoURL)
-            }
+            // No write-back step: `diffFiles` is parsed from the worktree's
+            // own diff, so every file in it is already on disk. The old loop
+            // rewrote each new file from the diff's `+` lines — dropping its
+            // trailing newline and any line starting with "++", and replacing
+            // a staged-then-edited file with its older staged content.
             try await repo.stageAll(at: repoURL)
             let msg = commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !msg.isEmpty else { stepError = "Commit message cannot be empty."; return }
@@ -799,11 +800,8 @@ final class CodeWorkflowService: ObservableObject {
         let id = UUID()
         let path: String
         let isNew: Bool
-        let newContent: String
         /// Parsed via `UnifiedDiffParser.parse(rawDiff)` — the real parser
-        /// every other diff consumer in the app uses, replacing this type's
-        /// former `+`-line-grep reconstruction of `newContent` as the ONLY
-        /// way this file's change was represented.
+        /// every other diff consumer in the app uses.
         let hunks: [DiffHunk]
     }
 
@@ -818,14 +816,8 @@ final class CodeWorkflowService: ObservableObject {
             let path = String(bLine.dropFirst(6))
             guard !path.isEmpty else { continue }
             let isNew = aLine.contains("/dev/null")
-
-            // Reconstruct file content from + lines
-            let contentLines = lines.filter { $0.hasPrefix("+") && !$0.hasPrefix("+++") }
-                .map { String($0.dropFirst()) }
-            let content = contentLines.joined(separator: "\n")
-
             let rawDiff = "--- \(chunk)"
-            files.append(DiffFile(path: path, isNew: isNew, newContent: content,
+            files.append(DiffFile(path: path, isNew: isNew,
                                    hunks: UnifiedDiffParser.parse(rawDiff)))
         }
         return files

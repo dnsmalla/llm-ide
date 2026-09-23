@@ -1,5 +1,5 @@
 import { runClaude, runClaudeStream, streamModelReply, resolveLanguage } from '../providers/runtime.mjs';
-import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
+import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON, onClientDisconnect } from '../core/utils.mjs';
 import { selectAttachments, splitImageAttachments, buildSkillsText } from '../core/prompt-framing.mjs';
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
 import { makeTaskProgressEmitter } from '../llm_agent/runtime/task-session-context.mjs';
@@ -155,7 +155,7 @@ export async function handleAIRoutes(req, res) {
       // Without this, the Anthropic API call continues consuming
       // tokens for a result nobody will see.
       const ac = new AbortController();
-      req.on('close', () => ac.abort());
+      onClientDisconnect(req, res, () => ac.abort());
 
       let fullText = '';
       try {
@@ -281,7 +281,7 @@ export async function handleAIRoutes(req, res) {
       'X-Accel-Buffering': 'no',
     });
     const ac = new AbortController();
-    req.on('close', () => ac.abort());
+    onClientDisconnect(req, res, () => ac.abort());
     const writeEvent = (obj) => {
       if (!res.writableEnded && !ac.signal.aborted) {
         res.write(`data: ${JSON.stringify(obj)}\n\n`);
@@ -488,7 +488,7 @@ export async function handleAIRoutes(req, res) {
           // routes/agent-v2.mjs does on its own SSE close, against the SAME
           // session key run-bash's execute parks under (agentContext.sessionId
           // — also the `legacySessionId` the Mac card posts back).
-          req.on('close', () => {
+          onClientDisconnect(req, res, () => {
             ac.abort();
             if (sessionId) abortDecisionsForSession(sessionId);
           });

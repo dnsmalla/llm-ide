@@ -155,6 +155,33 @@ export function sanitizeLine(text, maxLen = 120) {
     .slice(0, maxLen);
 }
 
+/**
+ * Run `onGone` once if the client disconnects before `res` has finished.
+ *
+ * Listens on the RESPONSE, never the request: since Node 16 an
+ * IncomingMessage emits 'close' as soon as its body has been fully read, so
+ * a `req.on('close')` registered after `readBody` never fires for a later
+ * disconnect. That is how Stop failed to abort a streaming chat turn — the
+ * SDK subprocess ran the rest of the turn's tools and the chat stayed locked
+ * until it ended. A client that already left before this is registered
+ * (during the body read, or an await before the stream starts) fires at once.
+ */
+export function onClientDisconnect(req, res, onGone) {
+  let fired = false;
+  const fire = () => {
+    if (fired) return;
+    fired = true;
+    onGone();
+  };
+  if (res?.destroyed || req?.socket?.destroyed) {
+    fire();
+    return;
+  }
+  if (typeof res?.on === 'function') {
+    res.on('close', () => { if (!res.writableFinished) fire(); });
+  }
+}
+
 export function sendJSON(res, statusCode, data) {
   if (res.headersSent) return;
   res.writeHead(statusCode, { 'Content-Type': 'application/json' });

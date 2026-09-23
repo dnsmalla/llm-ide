@@ -49,7 +49,6 @@ const { handleAgentV2Routes } = await import('../routes/agent-v2.mjs');
 
 function makeReq({ method, url, body, user }) {
   const chunks = body == null ? [] : [Buffer.from(JSON.stringify(body))];
-  const closeCbs = [];
   const req = {
     method,
     url,
@@ -58,16 +57,23 @@ function makeReq({ method, url, body, user }) {
     on(event, cb) {
       if (event === 'data') chunks.forEach((c) => cb(c));
       else if (event === 'end') cb();
-      else if (event === 'close') closeCbs.push(cb);
+      // Real Node (>=16): an IncomingMessage emits 'close' once its body has
+      // been read — i.e. before any route could register for it. Firing at
+      // registration models that, so a route that listened on `req` would
+      // abort its turn instantly and the abort test below would catch it.
+      else if (event === 'close') cb();
       return req;
     },
   };
-  req.fireClose = () => closeCbs.forEach((cb) => cb());
   return req;
 }
 
 function makeRes() {
+  const closeCbs = [];
   return {
+    on(event, cb) { if (event === 'close') closeCbs.push(cb); return this; },
+    /** The client dropping the connection mid-response (Stop). */
+    fireClose() { closeCbs.forEach((cb) => cb()); },
     statusCode: 200,
     headers: {},
     _body: '',
@@ -387,7 +393,7 @@ test('stream: client close aborts the turn and unparks decisions for the live sd
   assert.equal(turnArgs.signal, turnArgs.abortController.signal,
     'signal and abortController must be two views of ONE controller');
   assert.equal(turnArgs.abortController.signal.aborted, false, 'not aborted while the turn is live');
-  req.fireClose();
+  res.fireClose();
   assert.equal(turnArgs.abortController.signal.aborted, true,
     'a client disconnect must abort the controller the SDK holds — this is what makes Stop real');
   assert.equal(await handledP, true);
@@ -458,7 +464,8 @@ test('stream: a second turn for the same chat session while one is in flight get
 
 // The third contract the post-Stop retry leans on: a refused turn must not
 // COST a rate-limit token. server.mjs's limiter charges `/agent/v2/stream`
-// against the `llm` bucket (capacity 3) before routing; if the 409 kept
+// against a rate-limit bucket before routing (`llm`, capacity 3, when this
+// was written; now `agentTurn`); if the 409 kept
 // that token, the retries themselves emptied the bucket and the user's next
 // real turn got a 429 with a 30 s refill behind it — the "error when I stop
 // mid-turn" report. A served turn keeps its token.
@@ -561,7 +568,8 @@ test('stream: 409 is answered before the auto classifier, and a client-close abo
   });
 
   const firstReq = req({});
-  const firstP = handleAgentV2Routes(firstReq, makeRes(), {
+  const firstRes = makeRes();
+  const firstP = handleAgentV2Routes(firstReq, firstRes, {
     runTurn: fakeTurn,
     classifyMode: async () => ({ mode: 'plan' }),
   });
@@ -579,7 +587,7 @@ test('stream: 409 is answered before the auto classifier, and a client-close abo
 
   // The user pressed Stop: the client drops the connection. The route must
   // unwind and release the lock without any further client action.
-  firstReq.fireClose();
+  firstRes.fireClose();
   assert.equal(await firstP, true);
 
   const thirdRes = makeRes();

@@ -233,7 +233,8 @@ When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: 
 
 | Profile | Capacity | Refill rate | Applied to |
 |---|---|---|---|
-| `llm` | 3 | 1/30 s | `/code-assist`, `/agent/v2/stream`, `/kb/generate-plan`, `/kb/analyze-risks`, `/kb/generate-code`, `/kb/summarize`, `/kb/email/classify`, `/kb/mcp-connector/classify`, `/kb/conflict-questions` |
+| `agentTurn` | 12 | 1/5 s | `/code-assist`, `/agent/v2/stream` (chat turns — the Mac engine starts auto-continue and follow-up turns on its own; one in-flight turn per chat is enforced separately) |
+| `llm` | 3 | 1/30 s | `/kb/generate-plan`, `/kb/analyze-risks`, `/kb/generate-code`, `/kb/summarize`, `/kb/email/classify`, `/kb/mcp-connector/classify`, `/kb/conflict-questions` |
 | `llmFast` | 6 | 1/5 s | `/generate-notes`, `/chat`, `/kb/agent/ask`, `/generate-questions`, `/extract-entities`, `/generate-docx`, `/generate-doc`, `/kb/providers/verify`, `/kb/providers/models` |
 | `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/email/test`, `/kb/email/fetch`, `/kb/slack/test`, `/kb/slack/fetch`, `/kb/box/test`, `/kb/mcp-connector/test`, `/kb/mcp-connector/fetch`, `/kb/slack/conversations`, `/kb/connect-box` (full external crawl — special-cased before the generic connect prefix) |
 | `outcomePoll` | 6 | 1/30 s | `/kb/outcomes/refresh` |

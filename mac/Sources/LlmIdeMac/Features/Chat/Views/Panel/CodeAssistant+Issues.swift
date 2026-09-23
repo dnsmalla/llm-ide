@@ -36,10 +36,14 @@ extension CodeAssistantPanel {
         let client = RepoBackendFactory.backend(for: target.kind, config: config)
 
         do {
+            // `state` used to be dropped here, so picking Closed (or the
+            // agent's `state: "closed"`) did nothing while the chat reported
+            // "executed update-issue".
             let payload = RepoIssuePayload(
                 title: args.title,
                 body: args.body,
-                labels: args.labels
+                labels: args.labels,
+                stateChange: UpdateIssueSheet.stateChange(for: args.state)
             )
             _ = try await client.updateIssue(
                 projectId: target.projectId,

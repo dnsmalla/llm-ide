@@ -111,9 +111,10 @@ def test_real_source_extracts_all_profiles() -> None:
     if not real_src.exists():
         pytest.skip("real source not found")
     rows = extract(real_src)
-    # 8 in PROFILES block + 2 appended (authPublic, authRegister) = 10
-    assert len(rows) == 10
+    # 9 in PROFILES block + 2 appended (authPublic, authRegister) = 11
+    assert len(rows) == 11
     names = {r["name"] for r in rows}
+    assert "agentTurn" in names
     assert "llm" in names
     assert "llmFast" in names
     assert "dispatch" in names

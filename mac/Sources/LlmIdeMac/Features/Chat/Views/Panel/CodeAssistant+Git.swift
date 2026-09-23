@@ -12,10 +12,11 @@ extension CodeAssistantPanel {
 
         let repoManager = RepoManager()
         do {
-            // Build the git command arguments
-            var gitArgs = ["branch", args.branch]
+            // Both names come from the agent. Unvalidated, `branch: "-D",
+            // start: "main"` deleted main and `branch: "-f"` reset it.
+            var gitArgs = ["branch", try RepoManager.safeRef(args.branch)]
             if let startPoint = args.startPoint {
-                gitArgs.append(startPoint)
+                gitArgs.append(try RepoManager.safeRef(startPoint))
             }
 
             _ = try await repoManager.runGit(gitArgs, at: repoURL)
@@ -74,17 +75,19 @@ extension CodeAssistantPanel {
         // Resolve auth token: prefer the active GitLab project's token, fall back to GitHub.
         // For read/local ops the token may be nil; push/pull/merge_to_main use it for the remote.
         let token: String?
+        var backend: RepoManager.Backend = .gitlab
         if !config.gitLabToken.isEmpty,
            config.gitLabSavedProjects.first(where: { $0.isActive }) != nil {
             token = config.gitLabToken
         } else if !config.gitHubToken.isEmpty,
                   config.gitHubSavedRepos.first(where: { $0.isActive }) != nil {
             token = config.gitHubToken
+            backend = .github
         } else {
             token = nil
         }
         do {
-            let out = try await RepoManager().runGitOp(args, at: repoURL, token: token)
+            let out = try await RepoManager().runGitOp(args, at: repoURL, token: token, backend: backend)
             let payload = ChatMessage.ToolResultPayload(
                 kind: .git, summary: "(git \(args.op.rawValue) result)",
                 exitCode: nil, command: nil, output: String(out.prefix(4000)), url: nil, isFailure: false)

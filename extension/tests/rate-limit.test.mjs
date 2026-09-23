@@ -141,3 +141,17 @@ test('tryConsume returns remaining count on success', () => {
   assert.ok(typeof r.remaining === 'number', 'remaining should be a number');
   assert.ok(r.remaining >= 0);
 });
+
+test('agentTurn absorbs an auto-chain burst that llm would 429', () => {
+  // Regression: chat turns shared `llm` (burst 3), and the Mac engine's own
+  // auto-continue / follow-up turns routinely send 4+ inside 30 s.
+  _resetForTests();
+  let allowed = 0;
+  for (let i = 0; i < 12; i += 1) if (tryConsume('agentTurn', 'u-chain').ok) allowed += 1;
+  assert.equal(allowed, 12);
+  const denied = tryConsume('agentTurn', 'u-chain');
+  assert.equal(denied.ok, false, 'still bounded — a runaway client is stopped');
+  assert.ok(denied.retryAfterSec <= 5);
+  // And it no longer drains the budget of generate-plan & co.
+  assert.equal(tryConsume('llm', 'u-chain').ok, true);
+});

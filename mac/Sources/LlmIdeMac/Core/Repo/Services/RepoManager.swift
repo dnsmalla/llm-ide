@@ -106,11 +106,69 @@ final class RepoManager {
 
     // MARK: - Status / diff
 
-    /// Returns unified diff of staged + unstaged changes.
+    /// Returns unified diff of staged + unstaged changes, plus every
+    /// untracked (non-ignored) file as a new-file diff.
+    ///
+    /// Untracked files used to be left out, while the workflow's commit runs
+    /// `git add -A` — so files the CLI created (and anything already lying in
+    /// the worktree, a `.env` say) were committed and pushed without ever
+    /// appearing in Review, and a run that only CREATED files reported
+    /// "produced no file changes".
     func diff(at repoURL: URL) async throws -> String {
         let staged = (try? await gitOutput(["diff", "--cached"], cwd: repoURL)) ?? ""
         let unstaged = (try? await gitOutput(["diff"], cwd: repoURL)) ?? ""
-        return (staged + unstaged).trimmingCharacters(in: .whitespacesAndNewlines)
+        let untracked = (try? await gitOutput(
+            ["ls-files", "--others", "--exclude-standard", "-z"], cwd: repoURL)) ?? ""
+        let paths = untracked.split(separator: "\0").map(String.init)
+        // Off the main actor, and bounded: an un-ignored venv / dist /
+        // node_modules is thousands of files, and reading them all here hung
+        // the UI and built a diff hundreds of MB long.
+        let created = await Task.detached(priority: .userInitiated) {
+            Self.newFileDiffs(paths: paths, in: repoURL)
+        }.value
+        return ([staged, unstaged] + created).joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Budget for rendering untracked files' CONTENT in `diff(at:)`. Past
+    /// either limit the remaining files are still listed — header-only, no
+    /// read — so Review shows everything the commit would include.
+    nonisolated static let maxRenderedNewFiles = 200
+    nonisolated static let maxRenderedNewFileBytes = 4 * 1024 * 1024
+
+    nonisolated static func newFileDiffs(paths: [String], in repoURL: URL) -> [String] {
+        var budget = maxRenderedNewFileBytes
+        return paths.enumerated().map { index, path in
+            guard index < maxRenderedNewFiles, budget > 0 else {
+                return newFileDiff(path: path, contents: nil)
+            }
+            let data = try? Data(contentsOf: repoURL.appendingPathComponent(path), options: .mappedIfSafe)
+            budget -= min(data?.count ?? 0, maxNewFileDiffBytes)
+            return newFileDiff(path: path, contents: data)
+        }
+    }
+
+    /// Largest untracked file rendered line by line in `diff(at:)`; bigger
+    /// or non-UTF-8 files get a header-only entry so they still show up.
+    nonisolated static let maxNewFileDiffBytes = 512 * 1024
+
+    /// A git-style new-file diff for an untracked `path` — the shape
+    /// `git diff` prints for a staged new file, so every diff reader parses
+    /// it the same way.
+    nonisolated static func newFileDiff(path: String, contents: Data?) -> String {
+        var out = "diff --git a/\(path) b/\(path)\nnew file mode 100644\n--- /dev/null\n+++ b/\(path)\n"
+        guard let contents, contents.count <= maxNewFileDiffBytes,
+              let text = String(data: contents, encoding: .utf8) else {
+            return out + "Binary or large file not shown\n"
+        }
+        guard !text.isEmpty else { return out }
+        var lines = text.components(separatedBy: "\n")
+        let endsWithNewline = text.hasSuffix("\n")
+        if endsWithNewline { lines.removeLast() }
+        out += "@@ -0,0 +1,\(lines.count) @@\n"
+        out += lines.map { "+" + $0 }.joined(separator: "\n") + "\n"
+        if !endsWithNewline { out += "\\ No newline at end of file\n" }
+        return out
     }
 
     // MARK: - Commit & push
@@ -128,16 +186,6 @@ final class RepoManager {
         try await stripRemoteCredentials(at: repoURL, remote: remote)
         _ = try await git(["push", "--set-upstream", remote, branch], cwd: repoURL, token: token, backend: backend)
         log.info("pushed branch=\(branch, privacy: .public)")
-    }
-
-    // MARK: - File helpers
-
-    /// Write content to a file inside the repo, creating intermediate directories.
-    func write(content: String, to relativePath: String, in repoURL: URL) throws {
-        let fileURL = repoURL.appendingPathComponent(relativePath)
-        try FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try content.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 
     // MARK: - Agent git-op
@@ -161,13 +209,22 @@ final class RepoManager {
     /// whitespace. We do NOT use `--` to guard these: for checkout/diff/reset/log
     /// `--` switches git to pathspec mode and would reinterpret the ref as a file
     /// path. Rejecting flag-like values is the correct guard for a ref/branch.
-    private func safeRef(_ s: String) throws -> String {
+    private func safeRef(_ s: String) throws -> String { try Self.safeRef(s) }
+
+    /// A git ref/branch/URL argument that git can't read as an option: no
+    /// leading `-` (`-D`, `--template=…`, `--config=…`), no whitespace.
+    nonisolated static func safeRef(_ s: String) throws -> String {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, !t.hasPrefix("-"),
               t.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
             throw RepoError.commandFailed("invalid git ref/branch: \(s)")
         }
         return t
+    }
+
+    /// A remote repository URL `clone` accepts from the agent.
+    nonisolated static func isCloneURL(_ s: String) -> Bool {
+        s.hasPrefix("https://") || s.hasPrefix("ssh://") || s.hasPrefix("git@")
     }
 
     /// The repo's default branch: whichever of main/master exists, preferring main.
@@ -183,7 +240,14 @@ final class RepoManager {
     /// Execute an allow-listed git op on `repoURL`, enforcing branch-first /
     /// protected-main. Returns combined output text. Throws on git failure or a
     /// policy violation (which the caller surfaces to the agent).
-    func runGitOp(_ a: GitOpArgs, at repoURL: URL, token: String? = nil) async throws -> String {
+    ///
+    /// `backend` says which host `token` belongs to — it selects the auth
+    /// header `git` sends on push/pull/merge_to_main. The default used to be
+    /// the only option, so a GitHub PAT went out as GitLab's `PRIVATE-TOKEN`
+    /// and every chat push/pull to GitHub failed unless a keychain helper
+    /// happened to hold credentials.
+    func runGitOp(_ a: GitOpArgs, at repoURL: URL, token: String? = nil,
+                  backend: Backend = .gitlab) async throws -> String {
         // Confirm it's a git repo (clean error if not).
         _ = try await git(["rev-parse", "--is-inside-work-tree"], cwd: repoURL)
         let branch = try await currentBranch(at: repoURL)
@@ -195,7 +259,7 @@ final class RepoManager {
         let detached = branch == "HEAD" || branch.isEmpty
 
         func run(_ argv: [String], tok: String? = nil) async throws -> String {
-            let (out, err) = try await git(argv, cwd: repoURL, token: tok)
+            let (out, err) = try await git(argv, cwd: repoURL, token: tok, backend: backend)
             return [out, err].filter { !$0.isEmpty }.joined(separator: "\n")
         }
 
@@ -262,8 +326,15 @@ final class RepoManager {
         case .clean:
             return try await run(["clean", "-fd"])   // NOT -x; never nukes ignored files without explicit intent
         case .clone:
-            guard let url = a.ref else { throw RepoError.commandFailed("clone needs a repository URL") }
-            return try await run(["clone", url, repoURL.path])
+            guard let raw = a.ref else { throw RepoError.commandFailed("clone needs a repository URL") }
+            // Model-supplied, so it must not be able to act as a git option
+            // (`--template=…`, `--config=core.sshCommand=…`) — `safeRef` plus
+            // `--` — and must actually be a remote URL.
+            let url = try Self.safeRef(raw)
+            guard Self.isCloneURL(url) else {
+                throw RepoError.commandFailed("clone needs an https://, ssh:// or git@ repository URL")
+            }
+            return try await run(["clone", "--", url, repoURL.path])
         case .merge_to_main:
             // The ONLY op allowed to reach origin/<default>. Caller (sheet) has
             // confirmed at destructive tier.

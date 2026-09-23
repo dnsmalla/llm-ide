@@ -151,6 +151,16 @@ final class ChatEngine {
     /// history.
     var sessionEpoch: UInt = 0
 
+    /// Whether this engine still has work of its own to do: a turn in
+    /// flight, OR an autonomous chain between rounds — the 0.8 s
+    /// auto-continue gap, when `busy` is false but a "Continue working…" turn
+    /// is already scheduled. `ChatEngineRegistry` keeps such an engine
+    /// parked instead of letting it go on `busy` alone: a released engine
+    /// still started that turn (up to 8 rounds of edits) with nothing holding
+    /// it — Stop could not reach it, its replies were never persisted, and
+    /// reopening the chat loaded a second engine onto the same session.
+    var hasPendingWork: Bool { busy || agent.agentIsAutonomous }
+
     /// True while this engine is running a turn with no view observing it —
     /// a session the user switched AWAY from while it was mid-turn, kept
     /// alive by `ChatEngineRegistry` instead of being cancelled.
@@ -327,6 +337,17 @@ final class ChatEngine {
     /// Overwritten by each new user turn (a message sent with no files
     /// snapshots an empty list, which is the reset).
     var currentTurnAttachments: [LlmIdeAPIClient.CodeAttachment] = []
+
+    /// The attachment paths the server reported TRUNCATED when it received
+    /// `currentTurnAttachments` (`usage.truncatedPaths`, 80K-char cap) — the
+    /// files the agent only saw the head of. Recorded from the user turn that
+    /// sent them and kept for every round-trip that turn drives, because a
+    /// "(continue)" follow-up sends no attachments, so ITS response reports
+    /// nothing truncated while edits still resolve against the cut-down
+    /// copies. Deciding from the follow-up's own (empty) list let a
+    /// whole-file rewrite of a big file auto-apply and drop its tail.
+    /// Reset with `currentTurnAttachments`.
+    var currentTurnTruncatedPaths: Set<String> = []
 
     /// Forget the deleted chat's session memory (the server's
     /// `kb/session-memory.mjs` table, distinct from durable project memory).
@@ -540,7 +561,8 @@ final class ChatEngine {
         // confirmers' synthetic acks): this one is known statically to be a
         // real human turn, so a prompt that happens to start with "(" must
         // not be classified as a tool result.
-        messages.append(ChatMessage(role: .user, content: message, status: .done, createdAt: Date(), metadata: userMetadata))
+        let prompt = ChatMessage(role: .user, content: message, status: .done, createdAt: Date(), metadata: userMetadata)
+        messages.append(prompt)
         busy = true
         statusText = ""
         error = nil
@@ -592,7 +614,7 @@ final class ChatEngine {
             // Replay as much of the conversation as fits (see
             // historyForRequest); the server applies its own prompt-aware
             // budget on top.
-            let recent = hooks.packHistory(messages)
+            let recent = historyBeforeTurn(streamingID: streamingID, promptID: prompt.id)
             // A background turn (auto-continue on a parked engine) must not
             // pick up the files staged in the composer of whatever chat is on
             // screen NOW — those belong to the displayed chat's next message.
@@ -604,9 +626,10 @@ final class ChatEngine {
             // Published so the rest of the turn — edit resolution, the
             // auto-continue chain — can see what this turn was actually sent.
             currentTurnAttachments = turnAttachments
+            currentTurnTruncatedPaths = []
             var input = await hooks.resolveTransportInput(
                 message,
-                Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
+                recent,
                 turnAttachments,
                 skillIds
             )
@@ -634,6 +657,7 @@ final class ChatEngine {
             )
             // If Stop fired during the await, don't append the (now-unwanted) reply.
             try Task.checkCancellation()
+            currentTurnTruncatedPaths = Set(resp.usage?.truncatedPaths ?? [])
             // If the buffered fallback path fired (no chunk events ever
             // arrived), the placeholder turn is still empty — fill it from
             // the complete reply now. If chunks DID arrive this is usually a
@@ -735,35 +759,47 @@ final class ChatEngine {
         queued.removeAll { $0.id == id }
     }
 
-    /// `sendFollowup` guards on `!busy` so a rapid double-confirm, a manual
-    /// ⌘↵ mid-stream, or a sheet confirm racing the 0.8s auto-continue window
-    /// `finishStreamingTurn` schedules after a `pendingTool` turn can't stack
-    /// overlapping round-trips. But `acknowledge(_:followUp: .forceUnblock)`
-    /// runs its action from INSIDE a turn that already set `busy = true` —
-    /// the Bypass-mode auto-chain path through `autoChainPendingAction`
-    /// (bash / update-file / git-op executed without a card) — and needs its
-    /// own ack's follow-up to actually fire, not be silently skipped by that
-    /// guard. This is the one place that unblocks it.
+    /// Continue the conversation after an acknowledged tool action, from
+    /// wherever `acknowledge(_:followUp: .forceUnblock)` is called. Three cases:
     ///
-    /// As of Task 10's Issue-1 fix, `acknowledge`'s `.forceUnblock` case is
-    /// this method's ONLY caller — every confirmer that runs from a
-    /// user-driven SHEET tap instead (create/comment/update issue, create PR,
-    /// create branch) uses `.ifIdle`, which goes through plain
-    /// `sendFollowup()` so it correctly no-ops if an autonomous turn is still
-    /// streaming when the sheet confirms, rather than starting a second
-    /// concurrent round-trip. `busy = false` here is safe ONLY because
-    /// `.forceUnblock` is reserved for call sites that are themselves the
-    /// tail of an action whose own work already finished (the auto-chained
-    /// tool's execution, not a network call, has already completed by the
-    /// time its ack is appended) — `runTurn`/`sendFollowup` re-set
-    /// `busy = false` at their own tail regardless (a benign no-op once
-    /// already false). A future direct call site here (or a new
-    /// `.forceUnblock` use) must re-derive that same argument, not assume it.
+    /// - **Idle** (a card or sheet confirmed with no turn running): start the
+    ///   follow-up as its own turn through `sendFollowup()`, so it owns the
+    ///   `runTask` slot — Stop reaches it and the queue drains after it.
+    /// - **Inside a turn whose round-trip has finished** (the Bypass-mode
+    ///   auto-chain: `runTurn`/a follow-up's `autoChain` executed bash / an
+    ///   edit / a git op and is acking it): run the follow-up round-trip
+    ///   inline, in the task that already holds the slot. That task's own tail
+    ///   releases `busy` and drains the queue, exactly once. Used to force
+    ///   `busy = false` and start a fresh follow-up, which dropped the flag
+    ///   mid-turn — a composer send in that window started a second turn.
+    /// - **A round-trip is streaming right now** (a sheet confirmed while an
+    ///   auto-continue turn is mid-stream): don't start another — two
+    ///   placeholders would race `revealingTurnID` and Stop could only reach
+    ///   one. The ack is already in `messages`, so the turn in flight's
+    ///   successor sees it; that is the `.ifIdle` behavior for this case.
     func unblockAndFollowUp() async {
-        busy = false
-        await sendFollowup()
+        guard busy else {
+            await sendFollowup()
+            return
+        }
+        guard revealingTurnID == nil else { return }
+        await followUpRoundTrip()
     }
 
+    /// Start a follow-up turn ("(continue)" after a synthetic tool-result ack)
+    /// if the engine is idle. A no-op while busy, so a rapid double-confirm,
+    /// a manual ⌘↵ mid-stream, or a sheet confirm racing the 0.8 s
+    /// auto-continue window can't stack overlapping round-trips.
+    ///
+    /// Runs as the engine's `runTask`, with `drainQueueOrRelease()` as its
+    /// tail — the same slot contract as `startTurn`. It used to run in the
+    /// CALLER's task (a sheet confirmer's SwiftUI `Task`) behind a bare
+    /// `defer { busy = false }`: Stop cancels `runTask`, which was nil, so the
+    /// follow-up — and any tool its `autoChain` ran next — could not be
+    /// stopped; and a message the composer queued during it (it queues
+    /// whenever `busy`) was never drained, so it sat until some LATER turn
+    /// ended and then ran out of order. Awaits the turn so callers (and tests)
+    /// still resume after it.
     func sendFollowup() async {
         // No quick-chat version re-probe here, deliberately: the gate is
         // per-USER-send (`QuickChatContext.confirmServerSupportsAsk`, called
@@ -771,22 +807,34 @@ final class ChatEngine {
         // passed it. Probing again mid-chain would put a loopback GET between
         // every auto-continue round-trip to close a window measured in the
         // seconds between two halves of one authorized turn.
-        //
-        // Don't fire a second round-trip if one is already in flight.
-        // Without this guard, rapid confirms or a manual ⌘↵ during
-        // model streaming would stack overlapping /code-assist requests.
-        guard !busy else { return }
+        // `!Task.isCancelled`: a caller whose own turn was just cancelled by a
+        // reset (chat deleted, quick-chat project switched) sees `busy` false
+        // — the reset cleared it — while its tool is still returning. The
+        // Task below does NOT inherit that cancellation, so without this the
+        // stale ack's follow-up ran for real against the NEW chat's history.
+        guard !busy, !Task.isCancelled else { return }
         busy = true
+        let task = Task { [self] in
+            await followUpRoundTrip()
+            drainQueueOrRelease()
+        }
+        runTask = task
+        await task.value
+    }
+
+    /// One "(continue)" round-trip, run by whichever task owns the turn slot
+    /// (see `sendFollowup` / `unblockAndFollowUp`). Does not claim or release
+    /// `busy` itself.
+    private func followUpRoundTrip() async {
         statusText = ""
         agentV2Notice = nil
-        defer { busy = false }
         // Captured once, fixed for this whole invocation, and declared
         // OUTSIDE the do block below — see runTurn's matching comment for
         // why the catch clause must compare against this exact id instead
         // of re-reading the (possibly now-different) global `revealingTurnID`.
         let streamingID = beginStreamingTurn()
         do {
-            let recent = hooks.packHistory(messages)
+            let recent = historyBeforeTurn(streamingID: streamingID)
             // The synthetic "(executed create-gitlab-issue …)" turn we
             // pushed before this call IS the signal the agent needs to
             // see. Keep it in `messages`; pass "(continue)" as the user
@@ -801,6 +849,11 @@ final class ChatEngine {
                     handleApprovalArrival(approval, legacySessionId: legacySessionIdForApproval(input))
                 }
             )
+            // Same as runTurn: a Stop that lands while the transport is
+            // returning must not write the reply — and above all must not
+            // reach `autoChain` below, which would run the NEXT Bypass-mode
+            // tool (bash, git) after the user asked to stop.
+            try Task.checkCancellation()
             // `resp.reply` is the authoritative full text, so anything still
             // sitting in the coalescing buffer is about to be overwritten by
             // it — drop it rather than flushing a tail the next line discards.
@@ -857,8 +910,16 @@ final class ChatEngine {
     /// (its prompt is the synthetic "(continue)"), and re-running it would
     /// mean re-driving a tool chain — so it stays un-retryable rather than
     /// offering a button that does something subtly different from what it says.
+    ///
+    /// And only for the LATEST reply. A retry re-sends `currentTurnAttachments`,
+    /// which holds the files of the most recent turn only; retrying an older
+    /// failure after a newer turn went out re-sent that newer turn's files
+    /// with the old prompt, cut the pair out of the middle of the transcript
+    /// and replayed it at the end. The files an older turn was sent with
+    /// aren't recorded anywhere, so the honest answer there is no button.
     func canRetryFailedTurn(_ id: UUID) -> Bool {
         guard let idx = messages.firstIndex(where: { $0.id == id }),
+              idx == messages.count - 1,
               messages[idx].status == .failed,
               idx > 0, messages[idx - 1].role == .user else { return false }
         return true

@@ -415,7 +415,10 @@ extension CodeAssistantPanel {
             editMode: editMode,
             autoOpsUsed: autoGitOpsThisTurn,
             maxAutoOpsPerTurn: Self.maxAutoGitOpsPerTurn,
-            truncatedPaths: Set(usage?.truncatedPaths ?? []),
+            // The follow-up round-trips of a turn send no attachments, so
+            // their own `usage` reports nothing truncated — the turn's
+            // recorded set is what covers them.
+            truncatedPaths: Set(usage?.truncatedPaths ?? []).union(engine.currentTurnTruncatedPaths),
             isWholeFileRewrite: updateArgs?.content != nil,
             matchPath: matchPath,
             shouldAutoRunGitOp: shouldAutoRunGitOp,

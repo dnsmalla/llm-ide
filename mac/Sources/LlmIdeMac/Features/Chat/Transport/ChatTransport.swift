@@ -196,8 +196,12 @@ extension ChatTransportResult {
 /// A class (not the struct it started as) solely for `onLiveTasks`: the
 /// engine-selection composite holds its legacy transport as a `let`
 /// existential, and a callback wired after construction has to land on the
-/// same instance the round trips run on.
-final class CodeAssistTransport: ChatTransport, @unchecked Sendable {
+/// same instance the round trips run on. `@MainActor` (like
+/// `AgentV2Transport`) rather than `@unchecked Sendable`, so that mutable
+/// callback is written and read on one actor instead of racing a round trip
+/// running off the main actor.
+@MainActor
+final class CodeAssistTransport: ChatTransport {
     let api: LlmIdeAPIClient
 
     /// Mid-turn task list from the stream's `tasks_progress` events (server
@@ -221,7 +225,7 @@ final class CodeAssistTransport: ChatTransport, @unchecked Sendable {
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
-                planExecute: input.planExecute,
+                planExecute: input.planExecute, planWrite: input.planWrite,
                 onProgress: onProgress, onChunk: onChunk,
                 onLiveTasks: onLiveTasks)
             return ChatTransportResult(response)
@@ -233,7 +237,7 @@ final class CodeAssistTransport: ChatTransport, @unchecked Sendable {
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
-                planExecute: input.planExecute)
+                planExecute: input.planExecute, planWrite: input.planWrite)
             return ChatTransportResult(response)
         }
     }
@@ -260,7 +264,7 @@ final class CodeAssistTransport: ChatTransport, @unchecked Sendable {
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
-                planExecute: input.planExecute,
+                planExecute: input.planExecute, planWrite: input.planWrite,
                 onProgress: onProgress, onChunk: onChunk, onApproval: onApproval,
                 onLiveTasks: onLiveTasks)
             return ChatTransportResult(response)
@@ -270,7 +274,7 @@ final class CodeAssistTransport: ChatTransport, @unchecked Sendable {
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
-                planExecute: input.planExecute)
+                planExecute: input.planExecute, planWrite: input.planWrite)
             return ChatTransportResult(response)
         }
     }
@@ -292,8 +296,12 @@ final class CodeAssistTransport: ChatTransport, @unchecked Sendable {
     /// dropped) so the rule is provable as a pure function independent of
     /// that upstream folding, and so a future caller with its own liveness
     /// signal can still assert it directly.
-    static func shouldFallbackBuffered(error: APIError, sawProgress: Bool) -> Bool {
-        guard case .http = error else { return false }
+    nonisolated static func shouldFallbackBuffered(error: APIError, sawProgress: Bool) -> Bool {
+        // Only a server-side failure can be transient enough for the other
+        // endpoint to succeed. A 4xx is the server REFUSING this request —
+        // re-POSTing it spent another rate-limit token on a 429 (and lost its
+        // Retry-After message) and simply failed again on a 400.
+        guard case .http(let status, _, _, _) = error, status >= 500 || status == 0 else { return false }
         return !sawProgress
     }
 }

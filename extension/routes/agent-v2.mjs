@@ -31,7 +31,7 @@ import {
   deleteAgentSession,
 } from '../kb/agent-sessions.mjs';
 import { recordUsage } from '../kb/usage.mjs';
-import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
 
 // Mirrors buildEngineOptions' mode default so the mode_set echo reports
 // what actually ran. Keep the two in sync.
@@ -248,7 +248,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   // alongside the engine's own abort wiring (its canUseTool listeners
   // target the same id).
   let currentSdkSessionId = resumeSdkSessionId;
-  req.on('close', () => {
+  onClientDisconnect(req, res, () => {
     ac.abort();
     if (currentSdkSessionId) abortDecisionsForSession(currentSdkSessionId);
   });

@@ -222,6 +222,25 @@ struct ChatEngineRetryTests {
         #expect(engine.error == nil)
     }
 
+    @Test("Only the latest failed reply is retryable")
+    func olderFailureNotRetryable() async {
+        let (engine, t) = makeEngine()
+        t.thrownError = APIError.agent(message: "transient")
+        await engine.runTurn("first")
+        let olderFailed = engine.messages[1].id
+        t.thrownError = nil
+        t.result = .init(reply: "fine", pendingTool: nil, tasks: nil,
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
+        await engine.runTurn("second")
+        // Regression: retrying it re-sent the NEWER turn's attachments with
+        // the older prompt and moved the pair to the end of the transcript.
+        #expect(engine.canRetryFailedTurn(olderFailed) == false)
+        engine.retryFailedTurn(olderFailed)
+        #expect(engine.messages.count == 4)
+        #expect(engine.messages[1].id == olderFailed)
+        #expect(engine.messages.last?.content == "fine")
+    }
+
     @Test("Retry is refused while another turn is running")
     func retryRefusedWhileBusy() async {
         let (engine, t) = makeEngine()

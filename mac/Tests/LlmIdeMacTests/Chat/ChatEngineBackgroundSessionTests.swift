@@ -124,6 +124,64 @@ struct ChatEngineBackgroundSessionTests {
         }
     }
 
+    @Test("A chat between auto-continue rounds is parked, not released, on switch")
+    func midChainChatIsParked() async {
+        await withTempStore {
+            let blocking = BlockingChatTransport()
+            let (registry, a, b) = makeFixture(transport: blocking)
+
+            let engineA = registry.engine(for: Self.scope, api: Self.api)
+            engineA.switchSession(to: a)
+            // The 0.8 s gap: the round finished (`busy` false) and the next
+            // "Continue working…" turn is scheduled.
+            engineA.agent.agentIsAutonomous = true
+            #expect(!engineA.busy)
+
+            let engineB = registry.switchDisplayedSession(scope: Self.scope, to: b, api: Self.api)
+            // Regression: on `busy` alone the engine was re-pointed or let go,
+            // and its scheduled turn then ran with nothing holding it — Stop
+            // couldn't reach it and nothing persisted its replies.
+            #expect(engineB !== engineA)
+            #expect(engineA.currentSessionIDString == a.uuidString)
+            #expect(registry.isRunning(a))
+            #expect(registry.backgroundRunningSessionIDs.contains(a))
+
+            // Once the chain is over, the next sweep lets it go.
+            engineA.agent.agentIsAutonomous = false
+            _ = registry.newDisplayedSession(scope: Self.scope, api: Self.api)
+            #expect(!registry.backgroundRunningSessionIDs.contains(a))
+        }
+    }
+
+    @Test("Sign-out forgets displayed AND parked chats, and nothing writes them back")
+    func signOutForgetsLiveChats() async {
+        await withTempStore {
+            let blocking = BlockingChatTransport()
+            let (registry, a, b) = makeFixture(transport: blocking)
+            let engineA = registry.engine(for: Self.scope, api: Self.api)
+            engineA.switchSession(to: a)
+            engineA.startTurn("still running when the user signs out")
+            await settle()
+            let engineB = registry.switchDisplayedSession(scope: Self.scope, to: b, api: Self.api)
+            #expect(engineA.busy)   // parked, mid-turn
+
+            registry.forgetAllForSignOut()
+            ChatSessionStore.clear()
+            // The parked turn unwinds after the sign-out — the path that used
+            // to re-create the sessions directory with the old transcript.
+            blocking.finish()
+            await settle()
+            engineB.persistCurrentChat()
+            engineA.persistCurrentChat()
+
+            #expect(engineA.messages.isEmpty && engineB.messages.isEmpty)
+            #expect(engineA.currentSessionIDString.isEmpty && engineB.currentSessionIDString.isEmpty)
+            #expect(ChatSessionStore.list(for: Self.scope).isEmpty)
+            #expect(registry.backgroundRunningSessionIDs.isEmpty)
+            #expect(UserDefaults.standard.string(forKey: Self.pointerKey) == nil)
+        }
+    }
+
     @Test("Switching back hands the SAME still-running engine to the panel")
     func switchingBackReturnsTheParkedEngine() async {
         await withTempStore {

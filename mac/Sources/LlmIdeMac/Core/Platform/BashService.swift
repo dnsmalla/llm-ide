@@ -223,7 +223,13 @@ final class BashService: Sendable {
                 }
             }
         } onCancel: {
+            // Same teardown as every other stop reason: SIGTERM the tree now,
+            // SIGKILL whatever ignored it after the grace period. Used to be
+            // the SIGTERM alone, so a child that ignored it ran on.
             box.terminate()
+            DispatchQueue.global().asyncAfter(deadline: .now() + grace) {
+                box.forceKill()
+            }
         }
     }
 
@@ -432,24 +438,67 @@ private final class ProcessBox: @unchecked Sendable {
         resourceStop = reason
     }
 
+    /// Descendants seen by `terminate()`, remembered for `forceKill()`:
+    /// once the shell dies its children are re-parented to launchd, so a
+    /// fresh process-table walk from the shell's pid can no longer find them.
+    private var tree: Set<pid_t> = []
+
+    /// SIGTERM the shell AND every process it spawned. `zsh -c "npm test"`
+    /// runs `node` as a grandchild that holds the pipes' write ends; the
+    /// shell is never a process-group leader (`Process` can't make it one),
+    /// so the old `kill(-pid)` hit nothing, the grandchild kept running, and
+    /// the drains waited on EOF until it finished — Stop did not stop.
     func terminate() {
         lock.lock(); defer { lock.unlock() }
         cancelled = true
-        if let p = process, p.isRunning { p.terminate() }
-    }
-
-    /// SIGKILL the child, and its process group when it happens to lead one:
-    /// `zsh -c "npm test"` spawns grandchildren that keep the pipe's write end
-    /// open, so killing only the shell can leave the drains waiting on EOF.
-    /// `kill(-pid)` is safe here — a process-group id only exists while its
-    /// leader does, and that leader can only be this child (pids are unique
-    /// among live processes), so the worst case is a harmless ESRCH.
-    func forceKill() {
-        lock.lock(); defer { lock.unlock() }
         guard let p = process, p.isRunning else { return }
         let pid = p.processIdentifier
         guard pid > 0 else { return }
-        kill(-pid, SIGKILL)
-        kill(pid, SIGKILL)
+        tree.formUnion(ProcessTree.descendants(of: pid))
+        for child in tree { kill(child, SIGTERM) }
+        p.terminate()
+    }
+
+    /// SIGKILL whatever of the tree survived the grace period. Runs even when
+    /// the shell itself already exited — the grandchildren are the point.
+    func forceKill() {
+        lock.lock(); defer { lock.unlock() }
+        if let p = process, p.isRunning {
+            let pid = p.processIdentifier
+            if pid > 0 {
+                tree.formUnion(ProcessTree.descendants(of: pid))
+                kill(pid, SIGKILL)
+            }
+        }
+        for child in tree { kill(child, SIGKILL) }
+    }
+}
+
+/// Process-table walk for tearing down a command's whole tree.
+enum ProcessTree {
+    /// Every live descendant of `root` (children, grandchildren, …) from one
+    /// `sysctl(KERN_PROC_ALL)` snapshot. Empty on any sysctl failure — the
+    /// caller still signals `root` itself.
+    static func descendants(of root: pid_t) -> Set<pid_t> {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+        var size = 0
+        guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return [] }
+        // Headroom for processes spawned between the size probe and the read.
+        let stride = MemoryLayout<kinfo_proc>.stride
+        var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / stride + 32)
+        size = procs.count * stride
+        guard sysctl(&mib, u_int(mib.count), &procs, &size, nil, 0) == 0 else { return [] }
+        var children: [pid_t: [pid_t]] = [:]
+        for proc in procs.prefix(size / stride) {
+            children[proc.kp_eproc.e_ppid, default: []].append(proc.kp_proc.p_pid)
+        }
+        var found: Set<pid_t> = []
+        var frontier = [root]
+        while let next = frontier.popLast() {
+            for child in children[next] ?? [] where child != root && found.insert(child).inserted {
+                frontier.append(child)
+            }
+        }
+        return found
     }
 }

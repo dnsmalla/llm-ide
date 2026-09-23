@@ -52,12 +52,16 @@ struct HeaderAccountMenu: View {
                             // signing back in landed on "No repository
                             // connected". Use the option below to drop those.
                             session.clear()
+                            // Engines first: a live one would otherwise write
+                            // the previous user's chats straight back.
+                            ChatEngineRegistry.shared.forgetAllForSignOut()
                             ChatSessionStore.clear()
                         }
                     }
                     Button("Sign out and disconnect all accounts", role: .destructive) {
                         Task { @MainActor in
                             session.clear()
+                            ChatEngineRegistry.shared.forgetAllForSignOut()
                             ChatSessionStore.clear()
                             KeychainStore.wipeAllSecrets()
                         }
