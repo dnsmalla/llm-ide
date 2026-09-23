@@ -110,8 +110,15 @@ final class DocCommandStoreTests: XCTestCase {
         // fallback moved to `GenerationLibraryStore` (cached, so it survives
         // offline), so comparing against it asserted "the store is empty",
         // which stopped being the contract. What must hold with no project
-        // open is that nothing claims to BE a project command.
-        XCTAssertFalse(store.commands.isEmpty)
+        // open is that the store shows the kit's commands — whatever the
+        // library holds — and that nothing claims to BE a project command.
+        //
+        // Not `XCTAssertFalse(store.commands.isEmpty)`: that library is a
+        // machine-local cache of a server fetch, so the assertion passed on a
+        // dev machine that had ever reached the server and failed on a fresh
+        // CI runner, which has no cache and no server.
+        let kitFolders = GenerationLibraryStore.shared.commands.filter { !$0.folderName.isEmpty }
+        XCTAssertEqual(store.commands.count, kitFolders.count)
         XCTAssertTrue(store.commands.allSatisfy { !$0.isProjectCommand })
     }
 
