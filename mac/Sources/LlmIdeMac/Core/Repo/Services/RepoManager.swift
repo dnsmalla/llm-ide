@@ -106,11 +106,48 @@ final class RepoManager {
 
     // MARK: - Status / diff
 
-    /// Returns unified diff of staged + unstaged changes.
+    /// Returns unified diff of staged + unstaged changes, plus every
+    /// untracked (non-ignored) file as a new-file diff.
+    ///
+    /// Untracked files used to be left out, while the workflow's commit runs
+    /// `git add -A` — so files the CLI created (and anything already lying in
+    /// the worktree, a `.env` say) were committed and pushed without ever
+    /// appearing in Review, and a run that only CREATED files reported
+    /// "produced no file changes".
     func diff(at repoURL: URL) async throws -> String {
         let staged = (try? await gitOutput(["diff", "--cached"], cwd: repoURL)) ?? ""
         let unstaged = (try? await gitOutput(["diff"], cwd: repoURL)) ?? ""
-        return (staged + unstaged).trimmingCharacters(in: .whitespacesAndNewlines)
+        let untracked = (try? await gitOutput(
+            ["ls-files", "--others", "--exclude-standard", "-z"], cwd: repoURL)) ?? ""
+        let created = untracked.split(separator: "\0").map(String.init).map { path in
+            Self.newFileDiff(path: path, contents: try? Data(
+                contentsOf: repoURL.appendingPathComponent(path), options: .mappedIfSafe))
+        }
+        return ([staged, unstaged] + created).joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Largest untracked file rendered line by line in `diff(at:)`; bigger
+    /// or non-UTF-8 files get a header-only entry so they still show up.
+    nonisolated static let maxNewFileDiffBytes = 512 * 1024
+
+    /// A git-style new-file diff for an untracked `path` — the shape
+    /// `git diff` prints for a staged new file, so every diff reader parses
+    /// it the same way.
+    nonisolated static func newFileDiff(path: String, contents: Data?) -> String {
+        var out = "diff --git a/\(path) b/\(path)\nnew file mode 100644\n--- /dev/null\n+++ b/\(path)\n"
+        guard let contents, contents.count <= maxNewFileDiffBytes,
+              let text = String(data: contents, encoding: .utf8) else {
+            return out + "Binary or large file not shown\n"
+        }
+        guard !text.isEmpty else { return out }
+        var lines = text.components(separatedBy: "\n")
+        let endsWithNewline = text.hasSuffix("\n")
+        if endsWithNewline { lines.removeLast() }
+        out += "@@ -0,0 +1,\(lines.count) @@\n"
+        out += lines.map { "+" + $0 }.joined(separator: "\n") + "\n"
+        if !endsWithNewline { out += "\\ No newline at end of file\n" }
+        return out
     }
 
     // MARK: - Commit & push
@@ -128,16 +165,6 @@ final class RepoManager {
         try await stripRemoteCredentials(at: repoURL, remote: remote)
         _ = try await git(["push", "--set-upstream", remote, branch], cwd: repoURL, token: token, backend: backend)
         log.info("pushed branch=\(branch, privacy: .public)")
-    }
-
-    // MARK: - File helpers
-
-    /// Write content to a file inside the repo, creating intermediate directories.
-    func write(content: String, to relativePath: String, in repoURL: URL) throws {
-        let fileURL = repoURL.appendingPathComponent(relativePath)
-        try FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try content.write(to: fileURL, atomically: true, encoding: .utf8)
     }
 
     // MARK: - Agent git-op
