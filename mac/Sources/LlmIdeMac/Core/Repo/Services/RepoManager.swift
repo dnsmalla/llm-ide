@@ -161,13 +161,22 @@ final class RepoManager {
     /// whitespace. We do NOT use `--` to guard these: for checkout/diff/reset/log
     /// `--` switches git to pathspec mode and would reinterpret the ref as a file
     /// path. Rejecting flag-like values is the correct guard for a ref/branch.
-    private func safeRef(_ s: String) throws -> String {
+    private func safeRef(_ s: String) throws -> String { try Self.safeRef(s) }
+
+    /// A git ref/branch/URL argument that git can't read as an option: no
+    /// leading `-` (`-D`, `--template=…`, `--config=…`), no whitespace.
+    nonisolated static func safeRef(_ s: String) throws -> String {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, !t.hasPrefix("-"),
               t.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else {
             throw RepoError.commandFailed("invalid git ref/branch: \(s)")
         }
         return t
+    }
+
+    /// A remote repository URL `clone` accepts from the agent.
+    nonisolated static func isCloneURL(_ s: String) -> Bool {
+        s.hasPrefix("https://") || s.hasPrefix("ssh://") || s.hasPrefix("git@")
     }
 
     /// The repo's default branch: whichever of main/master exists, preferring main.
@@ -269,8 +278,15 @@ final class RepoManager {
         case .clean:
             return try await run(["clean", "-fd"])   // NOT -x; never nukes ignored files without explicit intent
         case .clone:
-            guard let url = a.ref else { throw RepoError.commandFailed("clone needs a repository URL") }
-            return try await run(["clone", url, repoURL.path])
+            guard let raw = a.ref else { throw RepoError.commandFailed("clone needs a repository URL") }
+            // Model-supplied, so it must not be able to act as a git option
+            // (`--template=…`, `--config=core.sshCommand=…`) — `safeRef` plus
+            // `--` — and must actually be a remote URL.
+            let url = try Self.safeRef(raw)
+            guard Self.isCloneURL(url) else {
+                throw RepoError.commandFailed("clone needs an https://, ssh:// or git@ repository URL")
+            }
+            return try await run(["clone", "--", url, repoURL.path])
         case .merge_to_main:
             // The ONLY op allowed to reach origin/<default>. Caller (sheet) has
             // confirmed at destructive tier.

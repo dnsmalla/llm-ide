@@ -12,10 +12,11 @@ extension CodeAssistantPanel {
 
         let repoManager = RepoManager()
         do {
-            // Build the git command arguments
-            var gitArgs = ["branch", args.branch]
+            // Both names come from the agent. Unvalidated, `branch: "-D",
+            // start: "main"` deleted main and `branch: "-f"` reset it.
+            var gitArgs = ["branch", try RepoManager.safeRef(args.branch)]
             if let startPoint = args.startPoint {
-                gitArgs.append(startPoint)
+                gitArgs.append(try RepoManager.safeRef(startPoint))
             }
 
             _ = try await repoManager.runGit(gitArgs, at: repoURL)
