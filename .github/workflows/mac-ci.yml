@@ -18,6 +18,9 @@ on:
       - 'extension/routes/agent-v2.mjs'
       # The gates/feature-builds jobs run Makefile targets.
       - 'Makefile'
+      # mac/Package.swift links this package (Mobile Control) — a wire-type
+      # change can break the Mac while ios-ci stays green.
+      - 'ios_app/SharedProtocol/**'
       - '.github/workflows/mac-ci.yml'
   pull_request:
     paths:
@@ -28,6 +31,9 @@ on:
       - 'extension/routes/agent-v2.mjs'
       # The gates/feature-builds jobs run Makefile targets.
       - 'Makefile'
+      # mac/Package.swift links this package (Mobile Control) — a wire-type
+      # change can break the Mac while ios-ci stays green.
+      - 'ios_app/SharedProtocol/**'
       - '.github/workflows/mac-ci.yml'
 
 concurrency:
