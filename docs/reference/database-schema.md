@@ -522,7 +522,7 @@ FTS5 virtual tables power keyword search. They are maintained by triggers (see b
 _From `0001_initial.sql`._
 
 ```sql
-CREATE VIRTUAL TABLE search USING fts5(meeting_id UNINDEXED, entity_id UNINDEXED, kind UNINDEXED, title, body, tokenize = 'unicode61 remove_diacritics 2');
+CREATE VIRTUAL TABLE search USING fts5(meeting_id UNINDEXED, entity_id UNINDEXED, kind UNINDEXED, title, body, tokenize = 'trigram remove_diacritics 1');
 ```
 
 ## Indexes
