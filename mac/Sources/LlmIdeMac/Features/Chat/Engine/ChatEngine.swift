@@ -1319,7 +1319,11 @@ final class ChatEngine {
                     // supplied them cleared its chips when the first message
                     // was sent, so a live read here would find nothing.
                     self.nextTurnIsAutoContinue = true
+                    // A continuation of a plan run is still the run: without
+                    // `planExecute` the server injected no execution skill,
+                    // so only round 1 followed the executing-plans protocol.
                     self.startTurn("Continue working on your pending tasks.",
+                                   planExecute: self.agent.planExecution?.phase == .running,
                                    attachments: self.currentTurnAttachments)
                 }
             }

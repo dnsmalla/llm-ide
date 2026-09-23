@@ -343,6 +343,65 @@ struct ChatEngineTurnTests {
         #expect(engine.busy == false)
     }
 
+    @Test("A queued Execute installs its tracker when it starts, not at click time")
+    func queuedExecuteTrackerStartsWithItsTurn() async {
+        let (engine, t) = makeEngine()
+        t.result = .init(reply: "done", pendingTool: nil, tasks: [],
+                         continueNeeded: false, usage: nil, mode: nil, tokenUsage: nil)
+        let tracker = PlanExecutionTracker(planTitle: "P", steps: ["a"], planCardMessageId: UUID())
+        engine.busy = true   // a turn is running, so Execute queues
+        engine.enqueue("Execute the plan", skillIds: [], planExecute: true, planTracker: tracker)
+        #expect(engine.livePlanCardAction(for: tracker.planCardMessageId, persisted: .execute) == .execute)
+        engine.busy = false
+        await engine.runTurn("the turn ahead")
+        // Regression: the tracker was installed at click time, so the turn
+        // ahead settled it with ITS tasks (`.finished`, "Push" offered)
+        // before the plan had run. The queued turn has not started yet here.
+        #expect(engine.agent.planExecution == nil)
+        await engine.runTask?.value
+        #expect(engine.agent.planExecution?.planCardMessageId == tracker.planCardMessageId)
+        #expect(t.receivedInputs.last?.planExecute == true)
+        // Settled by its own turn; the card unlocks so the plan can run again.
+        #expect(engine.agent.planExecution?.phase == .finished)
+        #expect(engine.livePlanCardAction(for: tracker.planCardMessageId, persisted: .execute) == nil)
+        #expect(engine.livePlanCardAction(for: tracker.planCardMessageId, persisted: .edit) == nil)
+    }
+
+    @Test("An auto-continue round of a plan run still sends planExecute")
+    func autoContinueKeepsPlanExecute() async {
+        let (engine, t) = makeEngine()
+        engine.continueDelayNanos = 1_000_000
+        let tracker = PlanExecutionTracker(planTitle: "P", steps: ["a", "b"], planCardMessageId: UUID())
+        t.result = .init(reply: "step 1 done", pendingTool: nil,
+                         tasks: [AgentTask(id: "1", title: "b", status: .pending)],
+                         continueNeeded: true, usage: nil, mode: nil, tokenUsage: nil)
+        engine.startTurn("Execute the plan", planExecute: true, planTracker: tracker)
+        await engine.runTask?.value
+        t.result = .init(reply: "all done", pendingTool: nil, tasks: [],
+                         continueNeeded: false, usage: nil, mode: nil, tokenUsage: nil)
+        while t.receivedInputs.count < 2 { await Task.yield(); try? await Task.sleep(nanoseconds: 1_000_000) }
+        await engine.runTask?.value
+        // Regression: continuation rounds dropped the flag, so the server
+        // injected no execution skill after round 1.
+        #expect(t.receivedInputs.map(\.planExecute) == [true, true])
+    }
+
+    @Test("onWorkSettled fires only once the work is really over")
+    func workSettledHook() async {
+        let (engine, t) = makeEngine()
+        var settled = 0
+        engine.hooks.onWorkSettled = { settled += 1 }
+        t.result = .init(reply: "ok", pendingTool: nil, tasks: nil,
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
+        await engine.runTurn("hi")
+        #expect(settled == 1)
+        // A card the agent is waiting on keeps the work open.
+        t.result = .init(reply: "run this?", pendingTool: PendingTool(name: "bash", arguments: .init(raw: Data("{}".utf8))),
+                         tasks: nil, continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
+        await engine.runTurn("run the tests")
+        #expect(settled == 1)
+    }
+
     // MARK: - Plan execution tracker
 
     private func runningTracker() -> PlanExecutionTracker {
