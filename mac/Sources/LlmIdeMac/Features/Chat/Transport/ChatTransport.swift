@@ -221,7 +221,7 @@ final class CodeAssistTransport: ChatTransport, @unchecked Sendable {
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
-                planExecute: input.planExecute,
+                planExecute: input.planExecute, planWrite: input.planWrite,
                 onProgress: onProgress, onChunk: onChunk,
                 onLiveTasks: onLiveTasks)
             return ChatTransportResult(response)
@@ -233,7 +233,7 @@ final class CodeAssistTransport: ChatTransport, @unchecked Sendable {
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
-                planExecute: input.planExecute)
+                planExecute: input.planExecute, planWrite: input.planWrite)
             return ChatTransportResult(response)
         }
     }
@@ -260,7 +260,7 @@ final class CodeAssistTransport: ChatTransport, @unchecked Sendable {
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
-                planExecute: input.planExecute,
+                planExecute: input.planExecute, planWrite: input.planWrite,
                 onProgress: onProgress, onChunk: onChunk, onApproval: onApproval,
                 onLiveTasks: onLiveTasks)
             return ChatTransportResult(response)
@@ -270,7 +270,7 @@ final class CodeAssistTransport: ChatTransport, @unchecked Sendable {
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
-                planExecute: input.planExecute)
+                planExecute: input.planExecute, planWrite: input.planWrite)
             return ChatTransportResult(response)
         }
     }

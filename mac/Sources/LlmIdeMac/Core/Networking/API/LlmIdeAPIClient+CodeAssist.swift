@@ -64,6 +64,13 @@ extension LlmIdeAPIClient {
         /// server's call — only it knows this user's subagents). Optional so
         /// every other request omits it entirely.
         let planExecute: Bool?
+        /// Set only by the plan card's "Write full plan" action: the design
+        /// is approved, so the server injects the plan-WRITING stage instead
+        /// of re-running stage-1 discovery. Omitted on every other request.
+        /// (Was missing from this request entirely — `/code-assist` reads
+        /// `body.planWrite`, so a legacy chat, or a v2 turn falling back to
+        /// legacy, re-ran discovery on "Write full plan".)
+        var planWrite: Bool? = nil
     }
     struct CodeAssistResponse: Codable {
         let reply: String
@@ -111,6 +118,7 @@ extension LlmIdeAPIClient {
         agentContext: AgentContext? = nil,
         mode: String? = nil,
         planExecute: Bool = false,
+        planWrite: Bool = false,
     ) async throws -> CodeAssistResponse {
         try await post(
             "/code-assist",
@@ -126,6 +134,7 @@ extension LlmIdeAPIClient {
                 agentContext: agentContext,
                 mode: mode,
                 planExecute: planExecute ? true : nil,
+                planWrite: planWrite ? true : nil,
             ),
             authenticated: true,
         )
@@ -296,6 +305,7 @@ extension LlmIdeAPIClient {
         agentContext: AgentContext? = nil,
         mode: String? = nil,
         planExecute: Bool = false,
+        planWrite: Bool = false,
         onProgress: @escaping @MainActor (AgentProgress) -> Void,
         onChunk: @escaping @MainActor (String) -> Void,
         onApproval: (@MainActor (AgentV2Approval) -> Void)? = nil,
@@ -312,7 +322,8 @@ extension LlmIdeAPIClient {
         req.httpBody = try JSONEncoder().encode(CodeAssistRequest(
             message: message, language: language, model: model, provider: provider,
             tier: tier, history: history, attachments: attachments, skills: skills,
-            agentContext: agentContext, mode: mode, planExecute: planExecute ? true : nil))
+            agentContext: agentContext, mode: mode, planExecute: planExecute ? true : nil,
+            planWrite: planWrite ? true : nil))
 
         // 401 here = the access token expired between turns; refresh and
         // re-open once (see `connectAuthedStream`) instead of reporting it.
