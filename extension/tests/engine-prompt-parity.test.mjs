@@ -66,15 +66,20 @@ function agentPrompt({ mode, message, sessionId }) {
 test('both engines frame a plan turn with the mode binding and its stage skill', async (t) => {
   // The legacy engine reads its stage skill from the real kit (the agent
   // side is stubbed above), so without the private .skills submodule — as
-  // in CI — it has no skill block to compare. Same skip as plan-pipeline's.
+  // in CI — only the legacy skill block is uncheckable. Everything else
+  // (mode binding, write action, one-document rule, the agent's block) does
+  // not need the kit and is asserted everywhere.
   const { resolveCentralSkillsRepo } = await import('../core/skills-repo.mjs');
-  if (!resolveCentralSkillsRepo()) { t.skip('.skills is not initialized locally — run `git submodule update --init .skills`'); return; }
+  const haveKit = Boolean(resolveCentralSkillsRepo());
+  if (!haveKit) t.diagnostic('.skills not initialized — legacy stage-skill block not checked (run `git submodule update --init .skills`)');
   const args = { mode: 'plan', message: 'plan the refactor', sessionId: 'parity-plan' };
   const legacy = await legacyPrompt(args);
   const agent = agentPrompt(args);
   for (const [name, text] of [['legacy', legacy], ['agent', agent]]) {
     assert.match(text, /PLAN mode/, `${name} must say which mode it is in`);
-    assert.match(text, /# Skills to apply/, `${name} must carry the stage skill block`);
+    if (name === 'agent' || haveKit) {
+      assert.match(text, /# Skills to apply/, `${name} must carry the stage skill block`);
+    }
     assert.match(text, /save-plan/, `${name} must name the one write action plan modes get`);
     assert.match(text, /One document per piece of work/, `${name} must carry the one-document rule`);
   }
