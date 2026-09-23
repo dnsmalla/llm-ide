@@ -292,8 +292,12 @@ final class CodeAssistTransport: ChatTransport, @unchecked Sendable {
     /// dropped) so the rule is provable as a pure function independent of
     /// that upstream folding, and so a future caller with its own liveness
     /// signal can still assert it directly.
-    static func shouldFallbackBuffered(error: APIError, sawProgress: Bool) -> Bool {
-        guard case .http = error else { return false }
+    nonisolated static func shouldFallbackBuffered(error: APIError, sawProgress: Bool) -> Bool {
+        // Only a server-side failure can be transient enough for the other
+        // endpoint to succeed. A 4xx is the server REFUSING this request —
+        // re-POSTing it spent another rate-limit token on a 429 (and lost its
+        // Retry-After message) and simply failed again on a 400.
+        guard case .http(let status, _, _, _) = error, status >= 500 || status == 0 else { return false }
         return !sawProgress
     }
 }
