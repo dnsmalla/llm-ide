@@ -667,6 +667,29 @@ final class AppConfig: ObservableObject {
     /// outcome for an id we can't reason about.
     /// Claude rows live in the linker (`ClaudeCLI.retiredModelIds`) so a
     /// Claude model-line refresh stays a linker-only edit.
+    /// The model id to start with, from what was persisted.
+    ///
+    /// - Recognised (built-in or user-added) → kept.
+    /// - A retired predecessor → its successor, so a user who picked a
+    ///   Sonnet keeps a Sonnet rather than silently landing on Opus.
+    /// - Anything else under a NON-Claude provider → kept, unless it is a
+    ///   Claude id. Those providers' model lists are fetched live
+    ///   (`CodeAssistantModelState.loadModels`), so an id this build doesn't
+    ///   list is still a real pick; resetting it (the old rule) swapped in the
+    ///   Claude default while the provider stayed OpenAI/GLM, and every turn
+    ///   — the phone proxy's included — then sent a Claude model to it.
+    /// - Otherwise → the ACTIVE provider's default (was: always Claude's).
+    static func startupModelId(stored: String?, activeCLI: String, knownModelIds: Set<String>) -> String {
+        if let stored, knownModelIds.contains(stored) { return stored }
+        if let stored, let mapped = retiredModelIds[stored] { return mapped }
+        let tool = AICliTool(rawValue: activeCLI) ?? .claudeCode
+        if let stored, !stored.isEmpty, tool != .claudeCode, !stored.lowercased().hasPrefix("claude") {
+            return stored
+        }
+        let fallback = tool.defaultModelId
+        return fallback.isEmpty ? AICliTool.claudeCode.defaultModelId : fallback
+    }
+
     static let retiredModelIds: [String: String] = ClaudeCLI.retiredModelIds.merging([
         "gpt-4o": "gpt-5.6-sol",
         "gpt-4o-mini": "gpt-5.4-mini",
@@ -704,17 +727,12 @@ final class AppConfig: ObservableObject {
            let custom = try? JSONDecoder().decode([String: [String]].self, from: Data(raw.utf8)) {
             knownModelIds.formUnion(custom.values.flatMap { $0 })
         }
-        let storedModelId = defaults.string(forKey: "defaultModelId")
-        if let storedModelId, knownModelIds.contains(storedModelId) {
-            self.defaultModelId = storedModelId
-        } else if let mapped = AppConfig.retiredModelIds[storedModelId ?? ""] {
-            // A known predecessor maps to its successor instead of collapsing
-            // to the Claude default, so a user who had picked a Sonnet keeps a
-            // Sonnet rather than silently landing on Opus.
-            self.defaultModelId = mapped
-        } else {
-            self.defaultModelId = AICliTool.claudeCode.defaultModelId
-        }
+        self.defaultModelId = AppConfig.startupModelId(
+            stored: defaults.string(forKey: "defaultModelId"),
+            // Read from defaults, not `self`: init hasn't finished assigning
+            // stored properties yet. Same value line ~688 just stored.
+            activeCLI: defaults.string(forKey: "activeCLI") ?? AICliTool.claudeCode.rawValue,
+            knownModelIds: knownModelIds)
         self.lastSeenAppVersion = defaults.string(forKey: "lastSeenAppVersion") ?? ""
         if defaults.object(forKey: "lastRegressionRunAt") != nil {
             let ts = defaults.double(forKey: "lastRegressionRunAt")
