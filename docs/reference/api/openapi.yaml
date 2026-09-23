@@ -26,6 +26,17 @@ components:
       bearerFormat: JWT
 
   schemas:
+    GenerationLibraryEntry:
+      type: object
+      properties:
+        id:          { type: string, description: "<family>/<file-stem>" }
+        family:      { type: string }
+        name:        { type: string }
+        description: { type: string }
+        surface:     { type: string, nullable: true, enum: [doc, visual, null] }
+        body:        { type: string }
+        sourceId:    { type: string }
+        sourceName:  { type: string }
     Error:
       type: object
       required: [error]
@@ -2681,6 +2692,29 @@ paths:
                         name:        { type: string }
                         description: { type: string }
                         path:        { type: string }
+
+  /kb/agent/generation-library:
+    get:
+      summary: Doc Gen / Visual template and command catalog from the enabled skills sources
+      description: >
+        The kit's `templates/` and `commands/` families for the Mac app's Doc Gen and
+        Visual menus. Each entry carries its `surface` (doc | visual), which divides the
+        two menus. First enabled source wins on an id collision. Added in API v51.
+      responses:
+        '200':
+          description: Generation library
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  repo: { type: string, nullable: true, description: Built-in skills repo path }
+                  templates:
+                    type: array
+                    items: { $ref: '#/components/schemas/GenerationLibraryEntry' }
+                  commands:
+                    type: array
+                    items: { $ref: '#/components/schemas/GenerationLibraryEntry' }
 
   /kb/agent/project-memory:
     get:
