@@ -22,14 +22,14 @@ npm run server        # Start the local Node server (127.0.0.1:3456)
 # macOS app development
 cd mac
 swift build           # Build the app
-swift test            # Run XCTest suite
+LLMIDE_KEYCHAIN_BACKEND=memory swift test   # Run the tests (XCTest + swift-testing) — see Running Tests
 make build-mac-lite   # Build lite app: excludes Graph, Explorer, Gantt, Issues, DocGen, Terminal; leaves Chat, Auto Tasks, Mobile Sync, Live Capture, Library
 make build-mac-min    # Build minimum app: Chat only (excludes all 7 excludable features: Graph, Explorer, Gantt/Issues, DocGen, Terminal, Auto Tasks, Mobile Sync)
 ./build_app.sh        # Legacy build script (use `swift build` instead)
 
 # Testing
 make test             # Run extension tests (Node test runner)
-make test-mac         # Run macOS app tests (XCTest)
+make test-mac         # Run macOS app tests (sets the memory keychain for you)
 npm test              # Extension tests directly
 make regression       # Pre-push regression gate
 
@@ -56,9 +56,13 @@ npm run test:watch                                # Watch mode
 # Single test file
 node --test tests/auth-routes.test.mjs
 
-# macOS app tests (swift-testing)
-cd mac && swift test                              # All tests
-swift test --filter testAuthFlow                  # Filter by test name
+# macOS app tests (XCTest + swift-testing). ALWAYS set the memory keychain
+# (make test-mac does): without it KeychainStore uses the real login keychain,
+# and from a terminal a SecItem call blocks in securityd waiting for a prompt
+# nobody answers — one test then takes minutes and fails, and a full run
+# stretches from ~60 s to 10+ min. Pipe output to a file, not `| grep`.
+cd mac && LLMIDE_KEYCHAIN_BACKEND=memory swift test          # All tests (~60 s)
+LLMIDE_KEYCHAIN_BACKEND=memory swift test --filter testAuthFlow   # Filter by name
 
 # Mac↔iOS shared wire types (swift-testing in a standalone SPM package)
 make test-shared-protocol                         # builds + tests ios_app/SharedProtocol
@@ -89,7 +93,7 @@ LLM-IDE is a **local-first AI meeting intelligence system** comprising four surf
 - **Pure Node HTTP** — No framework (Express/Fastify); reduces dependency surface
 - **SQLite WAL+FTS5** — Single database per install, full-text search across meetings/code/tickets
 - **Per-user tenancy** — Every owned row carries `user_id`; FTS5 hits are hydrated with user-scoped queries
-- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/` (0001–0028)
+- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/` (0001–0032)
 
 ## Project Structure
 
@@ -142,7 +146,8 @@ llm-ide/
 │   │   │   │                #   RepoGraphLocator, Memory/ (verification/fault-repair)
 │   │   │   ├── Project/     #   WorkspaceRoot, FileSystemTree, ExplorerPaths, ProjectLayout
 │   │   │   ├── Repo/        #   Models/ + Services/ — git clients shared by SourceControl,
-│   │   │   │                #   Issues, Gantt, AutoTask (RepoBackend seam not yet extracted)
+│   │   │   │                #   Issues, Gantt, AutoTask behind the RepoBackend protocol
+│   │   │   │                #   (GitHub/GitLab adapters + RepoBackendFactory in Services/Repo/)
 │   │   │   └── Verification/#   Verify-approval store, used by Loop
 │   │   ├── Features/    # One folder per ShellState.Section menu item + 4 non-menu features
 │   │   │   │            #   (Chat, MobileControl, Generation, Terminal). Normally
@@ -168,7 +173,7 @@ llm-ide/
 │   │       │            #   UNCLASSIFIED — 44 files not yet placed into Core or Features,
 │   │       │            #   exempt from the boundary rule until a follow-up task sorts them
 │   │       └──          #   (see mac/Scripts/feature-map.txt)
-│   └── Tests/           # XCTest suite
+│   └── Tests/           # XCTest + swift-testing suites
 ├── docs/                # mkdocs site (Diátaxis framework)
 └── kb/                  # Runtime data only (SQLite db, dev secrets)
 ```
@@ -341,7 +346,7 @@ cd ~/llm-ide/ios_app && open MyApp.xcodeproj
 ### Key Files (Mac)
 
 ```
-mac/Sources/LlmIdeMac/Services/
+mac/Sources/LlmIdeMac/Features/MobileControl/Services/
 ├── MobileControlManager.swift   # WebSocket dispatch + backend proxy
 ├── MobileWebSocketServer.swift  # NWListener on :3006
 ├── MobileBonjourAdvertiser.swift
@@ -376,8 +381,8 @@ ios_app/MyApp/Services/
 - **Claude linker** — [`docs/explanation/claude-linker.md`](docs/explanation/claude-linker.md): the two layers (`extension/llm_agent/sdk/` + `extension/providers/`, `mac/…/ClaudeLink/`) that own ALL Claude SDK/CLI knowledge; SDK updates edit only these
 - **KB operations** — `extension/kb/db.mjs` (every state-mutating helper takes `userId` first)
 - **Graph generation** — [`extension/graph_generation/README.md`](extension/graph_generation/README.md): the engine contract, how a plugin supplies one, and how to unplug the compiled-in engine. Everything graph lives in `mac/LocalPackages/graph-kit/` — a **git submodule** of `github.com/dnsmalla/graph-kit` (one folder, two products: `GraphCore` always linked, `GraphKit` unpluggable) — and `mac/Sources/LlmIdeMac/Features/CodeGraph/` (app side). Changes to the engine are commits in that repo; land them there, then bump **both** pins here — the `revision:` on the `.package(url:)` in `mac/Package.swift` (what the build actually resolves) and the submodule gitlink (the local working tree)
-- **Chat slice** — `mac/Sources/LlmIdeMac/Features/Chat/` (see the structure tree above). Logic lifted out of `ChatEngine` is asserted by `make chat-gates` → `cd mac && swift run chat-contract-lab`, an executable for the same reason the graph labs are: **this toolchain has no XCTest, so `make regression` skips `swift test` entirely** (`test-mac` guards it behind `HAS_XCTEST`) and `swift build --build-tests` fails too. A type the lab asserts must be `public` — the lab is a separate target, and `@testable import` is test-target-only
-- **Graph layout** — `mac/LocalPackages/graph-kit/Sources/GraphCore/Layout/GraphLayoutEngine.swift` is the single entry point. Verify any change with `cd mac/LocalPackages/graph-kit && swift run -c release graph-layout-lab --compare` (this toolchain has no XCTest, so the gate is an executable). **Never prune edges to make a dense graph legible** — weight them (`EdgeWeight`) and filter at render; the previous `capDegree(6)` deleted 82–100% of dependency edges
+- **Chat slice** — `mac/Sources/LlmIdeMac/Features/Chat/` (see the structure tree above). Logic lifted out of `ChatEngine` is asserted by `make chat-gates` → `cd mac && swift run chat-contract-lab`, an executable for the same reason the graph labs are: **a Command-Line-Tools-only toolchain has no XCTest, so there `make regression` skips `swift test` entirely** (`test-mac` guards it behind `HAS_XCTEST`) and `swift build --build-tests` fails too — with full Xcode the suite runs, and the lab still gates the lifted logic. A type the lab asserts must be `public` — the lab is a separate target, and `@testable import` is test-target-only
+- **Graph layout** — `mac/LocalPackages/graph-kit/Sources/GraphCore/Layout/GraphLayoutEngine.swift` is the single entry point. Verify any change with `cd mac/LocalPackages/graph-kit && swift run -c release graph-layout-lab --compare` (an executable, so the gate also runs on a toolchain without XCTest). **Never prune edges to make a dense graph legible** — weight them (`EdgeWeight`) and filter at render; the previous `capDegree(6)` deleted 82–100% of dependency edges
 - **Caption capture** — `extension/src/content/caption-scraper.ts` → `extension/src/sidepanel/hooks/useTranscript.ts`
 - **Central skills kit** — `.skills/` submodule + `docs/how-to/install-central-skills.md`
 - **Agent-loop tool defs** — `extension/llm_agent/{global,internal/skills}/` (mirrors of central)
