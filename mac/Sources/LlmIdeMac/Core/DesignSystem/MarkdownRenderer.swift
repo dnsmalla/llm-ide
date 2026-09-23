@@ -218,11 +218,20 @@ enum MarkdownRenderer {
       html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
       html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
       html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+      // Inline code first, out to placeholders like the fenced blocks
+      // above: emphasis used to run over it, so `__init__` rendered as a
+      // bold "init" and `a*b*c` grew an <em> inside the code.
+      const inlineCodes = [];
+      html = html.replace(/`([^`\\n]+)`/g, function(_m, code) {
+        inlineCodes.push('<code>' + code + '</code>');
+        return '\\x00IC' + (inlineCodes.length - 1) + '\\x00';
+      });
       html = html.replace(/\\*\\*\\*(.+?)\\*\\*\\*/g, '<strong><em>$1</em></strong>');
       html = html.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
       html = html.replace(/\\*(.+?)\\*/g, '<em>$1</em>');
-      html = html.replace(/_(.+?)_/g, '<em>$1</em>');
-      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+      // Underscore emphasis only at word boundaries (as CommonMark does):
+      // intraword, `snake_case_name` — or a URL's `a_b_c` — turned italic.
+      html = html.replace(/(^|[^A-Za-z0-9_])_([^_\\n]+?)_(?![A-Za-z0-9_])/gm, '$1<em>$2</em>');
       // `&gt;`, not `>` — the source went through escHtml above, so a
       // blockquote marker reaches this line already encoded.
       html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
@@ -283,6 +292,8 @@ enum MarkdownRenderer {
       // inserted verbatim.
       codeBlocks.forEach((block, i) => { html = html.replace('\\x00CODE' + i + '\\x00', () => block); });
       tables.forEach((t, i) => { html = html.replace('\\x00TABLE' + i + '\\x00', () => t); });
+      // After tables: a placeholder can sit inside a table cell.
+      inlineCodes.forEach((c, i) => { html = html.replace('\\x00IC' + i + '\\x00', () => c); });
       return html;
     }
     // Scan line-by-line for a header row + `|---|---|` separator, then collect
