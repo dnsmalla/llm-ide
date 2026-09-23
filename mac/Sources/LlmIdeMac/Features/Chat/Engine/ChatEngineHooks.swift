@@ -98,16 +98,16 @@ struct ChatEngineHooks {
     /// can still reassign this after construction.
     var packHistory: ([ChatMessage]) -> [LlmIdeAPIClient.CodeAssistTurn] = { $0.map { $0.wireTurn() } }
 
+    /// The engine went idle with nothing left to resume the work it was
+    /// doing: turn slot released, no auto-continue round scheduled, no card
+    /// or approval pending (`ChatEngine.isWorkOpen` false). The panel hands a
+    /// mode the FLOW set back to Auto here (see `ModePolicy.releasesAtWorkEnd`).
+    var onWorkSettled: () -> Void = {}
+
     /// Auto-chain the next pending action (file edit / git op / shell command)
     /// when the budget allows — the panel's `autoChainPendingAction`, which is
     /// extracted later. Both round-trip sites call it so a chained plan keeps
     /// the same truncated-path data-loss guard.
-    /// The engine went idle with nothing left to resume the work it was
-    /// doing: turn slot released, no auto-continue round scheduled, no card
-    /// or approval pending. The panel hands a mode the FLOW set back to Auto
-    /// here (see `ModePolicy.releasesAtWorkEnd`).
-    var onWorkSettled: () -> Void = {}
-
     var autoChain: ((PendingTool?, LlmIdeAPIClient.CodeAssistResponse.Usage?) async -> Void)?
 
     /// Called with the messages that just replaced `messages` wholesale

@@ -176,6 +176,17 @@ final class ChatEngine {
     /// later panel turn in that chat ran read-only until they noticed.
     var externalTurnActive = false
 
+    /// Whether the piece of work this engine is doing is still open: a turn
+    /// in flight, an auto-continue round scheduled, or a card / approval the
+    /// agent is waiting on. Its true → false edge is "the work settled" —
+    /// observed by the panel as well as fired from `drainQueueOrRelease`,
+    /// because several idle exits never pass through a drain (Stop inside
+    /// the auto-continue gap, "Stop autonomous agent", a card dismissed or an
+    /// approval expired after the turn ended).
+    var isWorkOpen: Bool {
+        busy || agent.agentIsAutonomous || agent.pendingTool != nil || pendingApproval != nil
+    }
+
     /// True while this engine is running a turn with no view observing it —
     /// a session the user switched AWAY from while it was mid-turn, kept
     /// alive by `ChatEngineRegistry` instead of being cancelled.
@@ -776,9 +787,7 @@ final class ChatEngine {
             // auto-continue round scheduled, and no card or approval the
             // agent is waiting on (answering one sends a "(continue)"
             // follow-up that belongs to the same piece of work).
-            if !agent.agentIsAutonomous, agent.pendingTool == nil, pendingApproval == nil {
-                hooks.onWorkSettled()
-            }
+            if !isWorkOpen { hooks.onWorkSettled() }
         }
     }
 

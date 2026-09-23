@@ -402,6 +402,43 @@ struct ChatEngineTurnTests {
         #expect(settled == 1)
     }
 
+    @Test("Work stays open while a card is pending, and closes when it is dismissed")
+    func isWorkOpenTracksCards() async {
+        let (engine, t) = makeEngine()
+        t.result = .init(reply: "run this?", pendingTool: PendingTool(name: "bash", arguments: .init(raw: Data("{}".utf8))),
+                         tasks: nil, continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
+        await engine.runTurn("run the tests")
+        #expect(!engine.busy && engine.isWorkOpen)
+        // Dismissed without a follow-up: no drain runs, so the panel's
+        // `isWorkOpen` observer is what sees the work settle.
+        engine.agent.pendingTool = nil
+        #expect(!engine.isWorkOpen)
+    }
+
+    @Test("releaseModeAfterWork: flow-set work modes go back to Auto; hand-picks and open work stay")
+    func releaseModeAfterWork() async {
+        let (engine, _) = makeEngine()
+        let state = CodeAssistantModelState()
+        state.setModeByFlow(.execute)
+        CodeAssistantPanel.releaseModeAfterWork(engine: engine, modelState: state)
+        #expect(state.selectedMode == .auto)
+
+        state.pickMode(.execute)
+        CodeAssistantPanel.releaseModeAfterWork(engine: engine, modelState: state)
+        #expect(state.selectedMode == .execute, "a hand-picked Execute is the user's")
+
+        state.pickMode(.auto)
+        engine.resolvedMode = "document"   // legacy: resolved, not yet followed
+        CodeAssistantPanel.releaseModeAfterWork(engine: engine, modelState: state)
+        #expect(state.selectedMode == .auto && engine.resolvedMode == nil,
+                "the pending follow is retracted, so it cannot park the picker")
+
+        state.setModeByFlow(.execute)
+        engine.agent.agentIsAutonomous = true
+        CodeAssistantPanel.releaseModeAfterWork(engine: engine, modelState: state)
+        #expect(state.selectedMode == .execute, "not while the work is still open")
+    }
+
     // MARK: - Plan execution tracker
 
     private func runningTracker() -> PlanExecutionTracker {

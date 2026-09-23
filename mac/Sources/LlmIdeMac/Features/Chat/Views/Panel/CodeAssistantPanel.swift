@@ -542,13 +542,7 @@ struct CodeAssistantPanel: View {
         // a resolution the picker is about to follow, and retracts it.
         engine.hooks.onWorkSettled = {
             guard ObjectIdentifier(engine) == wiredID else { return }
-            let effective = ModePolicy.selection(modelState.modeSelection,
-                                                 afterPendingResolution: engine.resolvedMode)
-            guard ModePolicy.releasesAtWorkEnd(
-                effective, planRunActive: engine.agent.planExecution?.phase == .running)
-            else { return }
-            modelState.setModeByFlow(.auto)
-            engine.resolvedMode = nil
+            Self.releaseModeAfterWork(engine: engine, modelState: modelState)
         }
         engine.hooks.onRecordPrompt = { _ = session.record(prompt: $0) }
         engine.hooks.onNudge = { prompt in
@@ -666,6 +660,10 @@ struct CodeAssistantPanel: View {
         // in the OUTGOING transcript, and its Save appends the saved-plan card
         // to whatever `engine` holds at write time.
         sheets.planEditTarget = nil
+        // A parked engine that resolved a mode off screen still holds it;
+        // adopting it would make the "follow while on Auto" observer park the
+        // picker on a finished turn's mode that nothing then releases.
+        next.resolvedMode = nil
         engine = next
         wireEngine()
         // A parked engine's `sessions` list was last refreshed when it went
@@ -768,12 +766,35 @@ struct CodeAssistantPanel: View {
     /// why. A `ViewModifier` rather than a method taking `self`: it needs
     /// only the engine and the picker state, and holding those directly is
     /// what lets both observers mutate them without a callback hop.
+    /// Hand a mode the FLOW set back to Auto once its work has settled —
+    /// see `ModePolicy.releasesAtWorkEnd`. Counts a resolution the picker is
+    /// about to follow, and retracts it. Idempotent: reached from both the
+    /// engine's `onWorkSettled` and the `isWorkOpen` observer.
+    static func releaseModeAfterWork(engine: ChatEngine, modelState: CodeAssistantModelState) {
+        guard !engine.isWorkOpen else { return }
+        let effective = ModePolicy.selection(modelState.modeSelection,
+                                             afterPendingResolution: engine.resolvedMode)
+        guard ModePolicy.releasesAtWorkEnd(
+            effective, planRunActive: engine.agent.planExecution?.phase == .running)
+        else { return }
+        modelState.setModeByFlow(.auto)
+        engine.resolvedMode = nil
+    }
+
     struct ModePickerObservers: ViewModifier {
         let engine: ChatEngine
         let modelState: CodeAssistantModelState
 
         func body(content: Content) -> some View {
             content
+                // The work settled by a path that never drains the turn slot
+                // (Stop in the auto-continue gap, "Stop autonomous agent", a
+                // card dismissed, an approval expired): same release as
+                // `onWorkSettled`.
+                .onChange(of: engine.isWorkOpen) { _, open in
+                    guard !open else { return }
+                    CodeAssistantPanel.releaseModeAfterWork(engine: engine, modelState: modelState)
+                }
                 // The mode the server resolved becomes the picker's selection, so
                 // the chip names what the agent is actually doing. `ModePolicy`
                 // gates this to "picker is on Auto" — moving OFF auto is the point
@@ -795,11 +816,11 @@ struct CodeAssistantPanel: View {
                 // chat, or switched to another session. Every one of those
                 // reassigns the engine's session id (a registry engine swap
                 // included), so this single observer covers them all, the
-                // phone-driven ones too. The picker goes back to Auto: a mode is
-                // chosen FOR a conversation, and this one has none yet.
-                // `ModePolicy.pickerModeAfterSessionChange` is where it is decided
-                // that this — unlike `releaseStickyMode` — overrules a hand-pick,
-                // and why.
+                // phone-driven ones too. A mode is chosen FOR a conversation,
+                // so it travels with it: the outgoing chat's selection is
+                // remembered and the incoming chat's restored
+                // (`ModePolicy.pickerSelectionAfterSessionChange`) — Auto for
+                // a chat not seen this run.
                 //
                 // Gated on the OLD id being non-empty: the first-load restore
                 // (`""` → the remembered id) replaces nothing, and the picker is
