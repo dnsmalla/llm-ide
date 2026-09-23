@@ -44,7 +44,6 @@ const { handleAgentV2Routes } = await import('../routes/agent-v2.mjs');
 
 function makeReq({ method, url, body, user }) {
   const chunks = body == null ? [] : [Buffer.from(JSON.stringify(body))];
-  const closeCbs = [];
   const req = {
     method,
     url,
@@ -53,16 +52,23 @@ function makeReq({ method, url, body, user }) {
     on(event, cb) {
       if (event === 'data') chunks.forEach((c) => cb(c));
       else if (event === 'end') cb();
-      else if (event === 'close') closeCbs.push(cb);
+      // Real Node (>=16): an IncomingMessage emits 'close' once its body has
+      // been read — i.e. before any route could register for it. Firing at
+      // registration models that, so a route that listened on `req` would
+      // abort its turn instantly and the abort test below would catch it.
+      else if (event === 'close') cb();
       return req;
     },
   };
-  req.fireClose = () => closeCbs.forEach((cb) => cb());
   return req;
 }
 
 function makeRes() {
+  const closeCbs = [];
   return {
+    on(event, cb) { if (event === 'close') closeCbs.push(cb); return this; },
+    /** The client dropping the connection mid-response (Stop). */
+    fireClose() { closeCbs.forEach((cb) => cb()); },
     statusCode: 200,
     headers: {},
     _body: '',

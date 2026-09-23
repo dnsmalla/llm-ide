@@ -248,7 +248,6 @@ test('the SSE /code-assist close handler aborts the session\'s parked decisions'
     headers: { accept: 'text/event-stream' },
     user: { id: user.id },
     on(event, cb) {
-      if (event === 'close') closeHandlers.push(cb);
       if (event === 'data') cb(Buffer.from(JSON.stringify({
         message: 'hi',
         // `provider` without `model` is route.mjs's fail-fast guard: the turn
@@ -264,6 +263,7 @@ test('the SSE /code-assist close handler aborts the session\'s parked decisions'
   const events = [];
   const res = {
     writableEnded: false,
+    on(event, cb) { if (event === 'close') closeHandlers.push(cb); return res; },
     writeHead() {},
     write(chunk) { events.push(chunk); },
     end() { res.writableEnded = true; },
