@@ -651,6 +651,14 @@ struct CodeAssistantPanel: View {
         next.resolvedMode = nil
         engine = next
         wireEngine()
+        // A different engine is a different chat, and this path never runs
+        // the engine's own `switchSession` reset (the registry built or
+        // un-parked it before the panel's hooks were attached). So the
+        // composer kept the OUTGOING chat's draft, staged files and skill
+        // chips — Enter then sent them into the new chat — and ↑ recalled
+        // the old chat's prompts.
+        engine.hooks.onResetTransientStateExtra()
+        engine.hooks.onHistoryReplaced(engine.messages)
         // A parked engine's `sessions` list was last refreshed when it went
         // off-screen; anything created or renamed since then is missing.
         engine.refreshSessions()
