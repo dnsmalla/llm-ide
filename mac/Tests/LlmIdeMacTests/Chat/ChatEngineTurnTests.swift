@@ -231,6 +231,22 @@ struct ChatEngineTurnTests {
         #expect(engine.queued.map(\.text) == ["ignored"])
     }
 
+    @Test("Wire history never repeats the current prompt")
+    func historyExcludesCurrentPrompt() async {
+        let (engine, t) = makeEngine()
+        t.result = .init(reply: "first reply", pendingTool: nil, tasks: nil,
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
+        await engine.runTurn("first")
+        #expect(t.receivedInputs.last?.history.isEmpty == true)
+        await engine.runTurn("second")
+        // Regression: the placeholder was appended before packing, so
+        // `dropLast()` dropped IT and the prompt stayed at the end of the
+        // history — the server then appended it again ("User: X / User: X").
+        let history = t.receivedInputs.last?.history ?? []
+        #expect(history.map(\.content) == ["first", "first reply"])
+        #expect(t.receivedInputs.last?.message == "second")
+    }
+
     // MARK: - Plan execution tracker
 
     private func runningTracker() -> PlanExecutionTracker {

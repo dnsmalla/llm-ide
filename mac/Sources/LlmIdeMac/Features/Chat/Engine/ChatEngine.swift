@@ -540,7 +540,8 @@ final class ChatEngine {
         // confirmers' synthetic acks): this one is known statically to be a
         // real human turn, so a prompt that happens to start with "(" must
         // not be classified as a tool result.
-        messages.append(ChatMessage(role: .user, content: message, status: .done, createdAt: Date(), metadata: userMetadata))
+        let prompt = ChatMessage(role: .user, content: message, status: .done, createdAt: Date(), metadata: userMetadata)
+        messages.append(prompt)
         busy = true
         statusText = ""
         error = nil
@@ -592,7 +593,7 @@ final class ChatEngine {
             // Replay as much of the conversation as fits (see
             // historyForRequest); the server applies its own prompt-aware
             // budget on top.
-            let recent = hooks.packHistory(messages)
+            let recent = historyBeforeTurn(streamingID: streamingID, promptID: prompt.id)
             // A background turn (auto-continue on a parked engine) must not
             // pick up the files staged in the composer of whatever chat is on
             // screen NOW — those belong to the displayed chat's next message.
@@ -606,7 +607,7 @@ final class ChatEngine {
             currentTurnAttachments = turnAttachments
             var input = await hooks.resolveTransportInput(
                 message,
-                Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
+                recent,
                 turnAttachments,
                 skillIds
             )

@@ -16,6 +16,24 @@ extension ChatEngine {
     /// must not be able to consume the entire budget by itself.
     static let maxHistoryTurnChars = 24_000
 
+    /// The wire history for the turn whose streaming placeholder is
+    /// `streamingID`: the transcript as it stood BEFORE this turn, packed.
+    ///
+    /// Excludes the placeholder and, for a turn with a prompt of its own,
+    /// that prompt (`promptID`) — the server appends the current message
+    /// itself after replaying history (`loop.mjs`, `messages.push({ role:
+    /// 'user', content: userMessage })`). Both turn paths append the prompt
+    /// and then the placeholder before packing, so the old
+    /// `packHistory(messages).dropLast()` dropped the PLACEHOLDER, not the
+    /// prompt, and every legacy turn reached the model as "User: X / User: X".
+    /// Excluded by id rather than position so the rule can't silently shift
+    /// if the append order changes again.
+    func historyBeforeTurn(streamingID: UUID, promptID: UUID? = nil)
+        -> [LlmIdeAPIClient.CodeAssistTurn]
+    {
+        hooks.packHistory(messages.filter { $0.id != streamingID && $0.id != promptID })
+    }
+
     /// The history to replay on the wire: as much as fits `maxHistoryChars`,
     /// newest-first, ALWAYS including the first user turn.
     ///

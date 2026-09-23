@@ -198,7 +198,8 @@ extension ChatEngine {
         hooks.onTurnStart()
         hooks.onRecordPrompt(message)
         hooks.onNudge(message)
-        messages.append(ChatMessage(role: .user, content: message, status: .done, createdAt: Date()))
+        let prompt = ChatMessage(role: .user, content: message, status: .done, createdAt: Date())
+        messages.append(prompt)
         busy = true
         statusText = ""
         error = nil
@@ -218,10 +219,9 @@ extension ChatEngine {
         persistCurrentChat()
         let streamingID = beginStreamingTurn()
         do {
-            let recent = hooks.packHistory(messages)
             var input = ChatTransportInput(
                 message: message,
-                history: Array(recent.dropLast()),  // exclude the just-pushed user turn — server appends it
+                history: historyBeforeTurn(streamingID: streamingID, promptID: prompt.id),
                 attachments: attachments,
                 skills: skillIds,
                 agentContext: agentContext,
