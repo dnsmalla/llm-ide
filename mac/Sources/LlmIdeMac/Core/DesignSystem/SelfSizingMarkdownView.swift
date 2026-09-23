@@ -90,11 +90,19 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
 
         init(_ parent: SelfSizingMarkdownView) { self.parent = parent }
 
+        /// A `__renderMarkdown` call is running; `queuedMarkdown` holds the
+        /// newest text that arrived meanwhile (see `applyMarkdown`).
+        private var renderInFlight = false
+        private var queuedMarkdown: String?
+
         func load(into web: WKWebView, markdown: String, isDark: Bool) {
             lastMarkdown = markdown
             lastDark = isDark
             documentReady = false
             deferredMarkdown = nil
+            // A reload supersedes any in-place render still in flight.
+            renderInFlight = false
+            queuedMarkdown = nil
             loadedWithHighlighting = MarkdownRenderer.needsHighlighting(markdown)
             web.loadHTMLString(
                 MarkdownRenderer.html(for: markdown, isDark: isDark, compact: true),
@@ -126,6 +134,16 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
                 deferredMarkdown = markdown
                 return
             }
+            // Backpressure, same rule: while a render is running, keep only
+            // the newest text and render it when this one lands. Every chunk
+            // (~20/s) used to start a full re-parse + highlight of the WHOLE
+            // reply regardless, so on a long answer the web process fell
+            // further behind with each one and heights/scroll lagged.
+            guard !renderInFlight else {
+                queuedMarkdown = markdown
+                return
+            }
+            renderInFlight = true
             web.callAsyncJavaScript(
                 "return window.__renderMarkdown(md);",
                 arguments: ["md": markdown],
@@ -133,6 +151,11 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
                 in: .page
             ) { [weak self, weak web] result in
                 guard let self else { return }
+                self.renderInFlight = false
+                if let next = self.queuedMarkdown, let web {
+                    self.queuedMarkdown = nil
+                    if next != markdown { self.applyMarkdown(next, to: web) }
+                }
                 switch result {
                 case .success(let value):
                     self.report(height: value)
