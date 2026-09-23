@@ -318,8 +318,14 @@ struct ChatMessageList: View {
                     guard old != nil, new == nil, isPinnedToBottom else { return }
                     withAnimation { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
                 }
+                // Same rule as every handler above: only while following. A
+                // new busy cycle starts for autonomous rounds, phone-driven
+                // turns and plan updates too — not just a turn the user sent
+                // (that case re-pins through `messages.count` above) — and
+                // this used to yank a reader who had scrolled up back down.
                 .onChange(of: engine.busy) { _, b in
-                    if b { withAnimation { proxy.scrollTo("typing-indicator", anchor: .bottom) } }
+                    guard b, isPinnedToBottom else { return }
+                    withAnimation { proxy.scrollTo("typing-indicator", anchor: .bottom) }
                 }
                 // "Jump to latest" — only while there is live text to miss,
                 // and only once the user has actually scrolled away from it.
