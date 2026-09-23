@@ -2,7 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { MsgType, isMessage } from '../../lib/messages';
 import { debug } from '../../lib/config';
 import { isValidCaption } from '../../content/caption-validation';
-import { saveTranscript as persistTranscript, StorageQuotaError } from '../../lib/storage';
+import {
+  saveTranscript as persistTranscript,
+  saveTranscriptDraft,
+  clearTranscriptDraft,
+  recoverTranscriptDrafts,
+  StorageQuotaError,
+} from '../../lib/storage';
 import { isSupportedUrl, stripPlatformSuffix } from '../../lib/platforms';
 
 export interface TranscriptSegment {
@@ -44,6 +50,9 @@ export interface TranscriptOptions {
 
 const SILENCE_THRESHOLD_MS = 2000;
 const MAX_SEGMENTS = 5000;
+// How often a recording checkpoints its draft (must stay well under
+// storage.ts DRAFT_STALE_MS, or a live draft would look abandoned).
+const DRAFT_CHECKPOINT_MS = 20_000;
 
 type CaptureMode = 'captions' | 'mic';
 
@@ -85,6 +94,9 @@ export function useTranscript() {
   });
   const [segmentLimitReached, setSegmentLimitReached] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Transcripts recovered from a panel that closed mid-recording (see the
+  // draft checkpoint below); shown once so the user knows where they went.
+  const [recoveredCount, setRecoveredCount] = useState(0);
 
   const primaryRecRef = useRef<SpeechRecognition | null>(null);
   const secondaryRecRef = useRef<SpeechRecognition | null>(null);
@@ -110,6 +122,9 @@ export function useTranscript() {
   const meetingTitleRef = useRef('');
   const elapsedRef = useRef(0);
   const primaryLangRef = useRef('ja');
+  // Id of the recording in progress: the draft checkpoint and the final
+  // save on Stop share it, so a recovered draft never duplicates a save.
+  const sessionIdRef = useRef<string | null>(null);
   useEffect(() => {
     segmentsRef.current = segments;
   }, [segments]);
@@ -142,6 +157,63 @@ export function useTranscript() {
     if (mode) captureModeRef.current = mode;
     setIsRecording(recording);
     if (mode) setCaptureMode(mode);
+  }, []);
+
+  // The current session as a saveable transcript, read from refs so callers
+  // don't need segments/elapsed/etc. in their deps. Null when nothing to save.
+  const snapshot = useCallback(() => {
+    const id = sessionIdRef.current;
+    const segs = segmentsRef.current;
+    if (!id || segs.length === 0) return null;
+    const names = speakerNamesRef.current;
+    return {
+      id,
+      meetingTitle: meetingTitleRef.current || 'Untitled meeting',
+      date: new Date().toISOString(),
+      duration: elapsedRef.current,
+      language: primaryLangRef.current,
+      transcript: segs.map((s) => `[${names[s.speaker] || s.speaker}] ${s.text}`).join('\n'),
+      segments: segs,
+      speakerNames: names,
+    };
+  }, []);
+
+  // Crash-safe checkpoint. The transcript is only saved for real on Stop, so
+  // closing the panel / a crash / quitting the browser mid-meeting used to
+  // lose all of it. While recording, rewrite a draft on a fixed heartbeat
+  // (even when no captions arrive, so a live draft never looks abandoned)
+  // and on pagehide; the next panel to open recovers drafts left behind.
+  useEffect(() => {
+    if (!isRecording) return;
+    const flush = () => {
+      const snap = snapshot();
+      if (snap) saveTranscriptDraft(snap).catch(() => {});
+    };
+    const timer = setInterval(flush, DRAFT_CHECKPOINT_MS);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, [isRecording, snapshot]);
+
+  // Recover drafts left by a panel that never reached Stop. Nothing in the
+  // panel lists the saved archive, so the newest one is also restored into
+  // the live view (when idle and empty) — there it can be downloaded or
+  // turned into notes like any just-stopped recording.
+  useEffect(() => {
+    recoverTranscriptDrafts()
+      .then((recovered) => {
+        if (recovered.length === 0) return;
+        setRecoveredCount(recovered.length);
+        const newest = recovered[recovered.length - 1];
+        if (isRecordingRef.current || segmentsRef.current.length > 0) return;
+        setSegments(newest.segments);
+        setSpeakerNames((prev) => ({ ...prev, ...newest.speakerNames }));
+        setMeetingTitle(newest.meetingTitle);
+        setElapsed(newest.duration);
+      })
+      .catch(() => {});
   }, []);
 
   // Load preferences
@@ -562,6 +634,8 @@ export function useTranscript() {
       setElapsed(0);
       setSegmentLimitReached(false);
       setSaveError(null);
+      setRecoveredCount(0);
+      sessionIdRef.current = crypto.randomUUID();
       currentSpeakerNumRef.current = 1;
       lastSpeechEndRef.current = 0;
       activeSpeakerRef.current = null;
@@ -630,29 +704,21 @@ export function useTranscript() {
     setRecordingSync(false);
     setInterimText('');
 
-    // Auto-persist the session.  We read from refs so this callback
-    // doesn't need segments/elapsed/etc. in its deps (which would
-    // re-register the useEffect listeners on every caption update).
-    const segs = segmentsRef.current;
-    if (segs.length === 0) return;
-    const names = speakerNamesRef.current;
-    const rendered = segs.map((s) => `[${names[s.speaker] || s.speaker}] ${s.text}`).join('\n');
-    persistTranscript({
-      meetingTitle: meetingTitleRef.current || 'Untitled meeting',
-      date: new Date().toISOString(),
-      duration: elapsedRef.current,
-      language: primaryLangRef.current,
-      transcript: rendered,
-      segments: segs,
-      speakerNames: names,
-    }).catch((err) => {
-      const msg =
-        err instanceof StorageQuotaError
-          ? 'Transcript too large to save — download it manually before closing.'
-          : 'Failed to save transcript to local storage.';
-      setSaveError(msg);
-    });
-  }, [stopAllRecognition, cleanupMic, setRecordingSync]);
+    // Auto-persist the session (from refs — see snapshot()), then drop its
+    // draft. A failed save keeps the draft, so the next open recovers it.
+    const snap = snapshot();
+    sessionIdRef.current = null;
+    if (!snap) return;
+    persistTranscript(snap)
+      .then(() => clearTranscriptDraft(snap.id).catch(() => {}))
+      .catch((err) => {
+        const msg =
+          err instanceof StorageQuotaError
+            ? 'Transcript too large to save — download it manually before closing.'
+            : 'Failed to save transcript to local storage.';
+        setSaveError(msg);
+      });
+  }, [stopAllRecognition, cleanupMic, setRecordingSync, snapshot]);
 
   const clearTranscript = useCallback(() => {
     setSegments([]);
@@ -701,6 +767,7 @@ export function useTranscript() {
     diagnostics,
     segmentLimitReached,
     saveError,
+    recoveredCount,
     changePrimaryLang,
     changeSecondaryLang,
     toggleBilingual,
