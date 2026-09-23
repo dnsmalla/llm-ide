@@ -216,19 +216,20 @@ const QUESTION_CLAUSE_AGENT =
   + 'with a header of at most 12 characters and 2-4 labelled options, your '
   + 'recommendation first; set `multiSelect` when answers are not exclusive.';
 
-// The classic engine has NO `AskUserQuestion`: its registry mounts
-// `ask-internal`, `ask-subagent`, the read tools, the task tools and
-// `run-bash`, and that is the whole list. Naming the tool here anyway does
-// not get a card — it gets the model DRAWING one in prose, because that is
-// the only way left to obey: "Question 1 of N", options A/B/C, recommendation
-// first — the clause above, rendered as text. So this engine is told what it
-// actually has: ask in the reply, the way the skill already says to.
+// The classic engine has no `AskUserQuestion`; it has `ask-user` (a
+// `kind: write` tool the Mac renders as the same answerable card, returning
+// the chosen label as the tool result). Before it existed this clause said
+// "ask in your reply", and every fixed-choice question came back as a typed
+// A/B/C list the user had to answer by retyping it. A client that cannot
+// render the card (quick surfaces, the phone) is not offered the tool — the
+// roster note then omits it, and this clause's fallback line applies.
 const QUESTION_CLAUSE_LEGACY =
-  '- **Asking ends the turn here.** You have no question tool on this engine, '
-  + 'so a question goes in your reply and the user answers in the composer — '
-  + 'ask the way the skill says to. Because each round costs a turn, ask only '
-  + 'what changes what you do next, put the questions of one round in one '
-  + 'reply, and say which answer you would pick.';
+  '- **Ask with `ask-user` when the answer is a fixed choice.** The app shows '
+  + 'the options as a card the user taps, and the choice returns as the tool '
+  + 'result. One question per call, 2-4 options, your recommendation first. '
+  + 'Asking ends the turn, so ask only what changes what you do next. If '
+  + '`ask-user` is not in your tool list, or the answer is open-ended, ask in '
+  + 'your reply the way the skill says to.';
 
 // Nothing used to say where this mode ENDS, and two things pushed past it:
 // writing-plans' own ending ("offer execution choice") is removed by the
@@ -242,14 +243,11 @@ function stopClause(engine) {
   const delivered = engine === 'agent'
     ? 'Delivering the plan document ends your work in this mode'
     : 'Calling `save-plan` ends your work in this mode';
-  return `- **The saved plan is where this mode stops.** ${delivered}: the user `
-    + 'starts the work with the Execute action on the plan card. Never implement '
-    + 'the plan, write its code, or walk through its steps in chat here — not in '
-    + 'this turn and not when a later message says "ok", "go ahead" or "do it": '
-    + 'answer that by pointing to Execute, or revise the plan if they asked for a '
-    + 'change. Where a skill says a small or bounded task proceeds directly to '
-    + 'implementation without a plan, write the plan anyway — nothing is '
-    + 'implemented in this mode.';
+  return `- **The saved plan is where this mode stops.** ${delivered}; the user `
+    + 'starts the work with Execute on the plan card. Never implement the plan or '
+    + 'write its code here — not even when a later message says "ok" or "go '
+    + 'ahead": point to Execute, or revise the plan if asked. If a skill says a '
+    + 'small task skips the plan, write the plan anyway.';
 }
 
 /**
@@ -380,8 +378,8 @@ export function buildExecuteBinding({ skillName, hasSubagents, engine = 'legacy'
     // Execute turn hand-draw an options card in the chat.
     + (engine === 'agent'
       ? ' — with `AskUserQuestion`, so the answer returns inside this turn.\n'
-      : ', and expect that question to end the turn: you have no question tool '
-        + 'on this engine, so it goes in your reply.\n')
+      : ' — with `ask-user` when the answer is a fixed choice (it ends the turn '
+        + 'and the choice returns as its result), in your reply otherwise.\n')
     + '- **Stay on the current branch.** Do not check out, create or switch '
     + 'branches unless a plan step says so — a commit made after a checkout '
     + 'lands where the user is not looking, and the working tree they review '

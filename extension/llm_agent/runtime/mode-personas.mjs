@@ -30,6 +30,12 @@ const READ_ONLY_TOOL_NAMES = new Set(entries().filter((e) => e.kind === 'read' &
 export const PLAN_LIKE_MODES = new Set(['plan', 'assist_plan']);
 const PLAN_LIKE_EXTRA_TOOL_NAMES = new Set(['save-plan']);
 
+// ask-user is `kind: write` only so the loop hands it to the client and ENDS
+// the turn (the answer has to come from the user) — it changes nothing, so
+// every restricted mode may ask. Exported so route.mjs can drop it for a
+// client that cannot render the card (see QUESTION_CARD_CLIENT there).
+export const QUESTION_TOOL_NAME = 'ask-user';
+
 // Plan-like personas are NOT written here. Both modes' process is an upstream
 // skill mirrored verbatim into the central skills repo (brainstorming for
 // `plan`, grilling for `assist_plan`), injected into the turn as trusted
@@ -110,6 +116,7 @@ export function restrictsTools(mode) {
  */
 export function allowedToolNames(mode) {
   const names = new Set(READ_ONLY_TOOL_NAMES);
+  names.add(QUESTION_TOOL_NAME);
   if (PLAN_LIKE_MODES.has(mode)) {
     for (const n of PLAN_LIKE_EXTRA_TOOL_NAMES) names.add(n);
   }

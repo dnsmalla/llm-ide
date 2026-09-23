@@ -177,17 +177,17 @@ test('no binding names AskUserQuestion on the engine that lacks it', () => {
   for (const mode of ['plan', 'assist_plan']) {
     const legacy = buildPlanBinding(mode, { skillName: 'brainstorming' });
     assert.doesNotMatch(legacy, /AskUserQuestion/);
-    // Still told HOW to ask — the channel it has, with the cost named, so it
-    // batches a round instead of asking one question per turn.
-    assert.match(legacy, /Asking ends the turn here/);
-    assert.match(legacy, /one round in one\s+reply/);
+    // Told the channel it DOES have: ask-user, the classic engine's own
+    // question card — with the prose fallback for a client that lacks it.
+    assert.match(legacy, /Ask with `ask-user` when the answer is a fixed choice/);
+    assert.match(legacy, /not in your tool list/);
   }
   // Execute asks too, when a step needs a decision the plan does not settle.
   // That sentence named the tool unconditionally, which is the path a plan
   // request typed while still in Execute mode takes.
   const legacyExec = buildExecuteBinding({ skillName: 'executing-plans', hasSubagents: false });
   assert.doesNotMatch(legacyExec, /AskUserQuestion/);
-  assert.match(legacyExec, /no question tool/);
+  assert.match(legacyExec, /`ask-user`/);
   const agentExec = buildExecuteBinding({
     skillName: 'executing-plans', hasSubagents: false, engine: 'agent' });
   assert.match(agentExec, /AskUserQuestion/);
@@ -363,7 +363,7 @@ test('plan bindings say the saved plan ends the mode and Execute starts the work
     for (const engine of ['legacy', 'agent']) {
       const b = buildPlanBinding(mode, { skillName: 'x', engine });
       assert.match(b, /The saved plan is where this mode stops/, `${mode}/${engine}: names the stop`);
-      assert.match(b, /Execute action on the plan card/, `${mode}/${engine}: names Execute as the start`);
+      assert.match(b, /Execute on the plan card/, `${mode}/${engine}: names Execute as the start`);
       assert.match(b, /Never implement/, `${mode}/${engine}: forbids implementing in chat`);
       assert.match(b, /write the plan anyway/, `${mode}/${engine}: overrides the skip-the-plan path`);
     }

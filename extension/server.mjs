@@ -205,7 +205,12 @@ const HOST = config.host;
 //     still behaves identically. The Mac client treats the ABSENCE of
 //     `truncated` as "this server is pre-v52" and warns when it sent more
 //     than 20 sources, since such a server drops the rest silently.
-const SERVER_API_VERSION = 52;
+//   v53 — classic engine: new `ask-user` pendingTool (a question with 2-4
+//     fixed options, rendered as a tappable card; the chosen label returns
+//     as the tool result). Offered only to the Code Assistant panel — the
+//     quick surfaces (`mode: ask`) and the phone (`auto_read_only`) never get
+//     it. A pre-v53 client simply never receives one.
+const SERVER_API_VERSION = 53;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

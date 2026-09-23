@@ -10,7 +10,9 @@ import * as yaml from 'js-yaml';
 
 const VALID_KINDS = new Set(['read', 'write']);
 const VALID_SCHEMA_TYPES = new Set(['string', 'number', 'boolean', 'string[]']);
-const VALID_CONFIRMATIONS = new Set(['editable-sheet', 'gitop-sheet']);
+// `question-card`: ask-user — the client renders the question as a tappable
+// card and returns the chosen label(s) as the tool result.
+const VALID_CONFIRMATIONS = new Set(['editable-sheet', 'gitop-sheet', 'question-card']);
 
 // Per-file content cap — prevents a single oversized skill from
 // exhausting the Claude context window.  Core skills are small and

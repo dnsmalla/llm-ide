@@ -57,7 +57,10 @@ export function skillsToOpenAITools(skillsMap, { readOnly = false } = {}) {
   const out = [];
   if (!skillsMap || typeof skillsMap[Symbol.iterator] !== 'function') return out;
   for (const skill of skillsMap.values()) {
-    if (readOnly && skill.kind !== 'read') continue;
+    // A question card (ask-user) is `kind: write` only so the turn ends and
+    // waits for the user; it runs nothing and changes nothing, so it is not
+    // the confirm-sheet cycle `readOnly` exists to avoid.
+    if (readOnly && skill.kind !== 'read' && skill.confirmation !== 'question-card') continue;
     out.push(skillToOpenAITool(skill));
   }
   return out;
