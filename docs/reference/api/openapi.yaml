@@ -2968,6 +2968,11 @@ paths:
   /kb/custom-providers:
     post:
       summary: Sync the Mac app's custom model providers to the server
+      description: >
+        Replaces the CALLER's custom-provider list (other users are untouched).
+        The list is persisted per user, so it survives a server restart; an
+        empty array deletes it. Entries without an id, a name, or an http(s)
+        baseURL are dropped.
       requestBody:
         required: true
         content:
@@ -2988,6 +2993,7 @@ paths:
                   count:   { type: integer }
         '400': { description: Invalid request body }
         '405': { description: Method not allowed }
+        '413': { description: Request body too large }
 
   /kb/ingest-scip:
     post:

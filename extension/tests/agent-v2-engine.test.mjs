@@ -731,7 +731,7 @@ test('per-user CLAUDE_CONFIG_DIR: composed for every KEYED turn',
 // LLM-gateway one — ANTHROPIC_BASE_URL + the provider's key — and anything
 // without such a door is refused BEFORE the SDK spawns.
 
-// Registers ONE provider (syncCustomProviders replaces the registry) with its
+// Registers ONE provider (syncCustomProviders replaces the user's registry) with its
 // key in the vault; `anthropicBaseURL: null` registers a plain OpenAI-form
 // provider that the engine must refuse.
 function registerGatewayProvider(userId, {
@@ -742,7 +742,7 @@ function registerGatewayProvider(userId, {
     id, name: 'GLM', baseURL: 'https://api.z.ai/api/paas/v4', apiKey: vaultKey, models: [],
     isOpenAICompatible: true, isEnabled: true,
     ...(anthropicBaseURL ? { anthropicBaseURL } : {}),
-  }]);
+  }], userId);
   if (key) setSecret(getDb(), userId, vaultKey, key);
   return `custom:${id}`;
 }
@@ -768,7 +768,7 @@ test('resolveAgentEngineAuth: first-party keeps the ladder; a gateway brings its
         assert.throws(() => resolveAgentEngineAuth(builtIn, user.id),
           (e) => e.code === 'PROVIDER_NOT_AGENT_CAPABLE', `${builtIn} has no Anthropic door`);
       }
-    } finally { syncCustomProviders([]); }
+    } finally { syncCustomProviders([], user.id); }
   }));
 
 test('gateway turn: ANTHROPIC_BASE_URL + the provider key ride the SDK env; the model id goes verbatim',
@@ -826,7 +826,7 @@ test('gateway turn: ANTHROPIC_BASE_URL + the provider key ride the SDK env; the 
         );
       }
       assert.equal(spawned, false);
-    } finally { syncCustomProviders([]); }
+    } finally { syncCustomProviders([], user.id); }
   }));
 
 test('first-party turn: no gateway env is injected (operator process.env semantics unchanged)',
