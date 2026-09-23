@@ -48,6 +48,12 @@ protocol FaultVerifier: Sendable {
 }
 
 struct ShellFaultVerifier: FaultVerifier {
+    /// Poll until `process` has exited. See the note at the end of `verify`
+    /// for why this is not `waitUntilExit()`.
+    static func waitForExit(_ process: Process) async {
+        while process.isRunning { try? await Task.sleep(nanoseconds: 25_000_000) }
+    }
+
     func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
@@ -91,7 +97,7 @@ struct ShellFaultVerifier: FaultVerifier {
         }
         defer { guardToken.cancel() }
         // Every path below that ends this call after the process has already
-        // exited calls `waitUntilExit()` first, so `isRunning` is false and this
+        // exited has already seen `isRunning` go false, so this
         // is a no-op there. The path it actually exists for is cancellation: the
         // plain `try await Task.sleep` in the poll loop below throws
         // `CancellationError` on its own the moment the task is cancelled, with
@@ -122,12 +128,23 @@ struct ShellFaultVerifier: FaultVerifier {
                     try? await Task.sleep(nanoseconds: 25_000_000)
                 }
                 if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                process.waitUntilExit()                   // reap; closes pipe → reader unblocks
+                await Self.waitForExit(process)            // closes pipe → reader unblocks
                 throw VerifyError.timedOut(timeout)
             }
             try await Task.sleep(nanoseconds: 50_000_000) // 50ms poll
         }
-        process.waitUntilExit()
+        // The loop above only ends once `isRunning` is false — the process
+        // has exited. No `waitUntilExit()` here: from an async context it
+        // parks this cooperative thread in a run loop waiting for the task's
+        // termination notification, and when that never reaches this thread
+        // it never returns. A Loop verification (and the test suite) hung
+        // forever that way with `sh` already gone.
+        //
+        // Wait for the READER, though: the output used to be read the moment
+        // the process ended, before `readDataToEndOfFile` had necessarily
+        // returned, so a result could come back empty or cut short. Bounded,
+        // because a backgrounded grandchild can hold the pipe open.
+        await dataBox.waitUntilDone(timeout: 2)
         let output = String(data: dataBox.get(), encoding: .utf8) ?? ""
         // A guard stop must never be reported as a verification result: the
         // command was killed, so its exit code says nothing about the code under
@@ -141,7 +158,7 @@ struct ShellFaultVerifier: FaultVerifier {
 }
 
 /// Thread-safe one-shot box for the guard's stop reason. The guard's handler runs
-/// on its own queue while the awaiting task reads this after `waitUntilExit`.
+/// on its own queue while the awaiting task reads this after the process exits.
 private final class ResourceStopBox: @unchecked Sendable {
     private let lock = NSLock()
     private var reason: String?
@@ -154,6 +171,13 @@ private final class ResourceStopBox: @unchecked Sendable {
 private final class OutputBox: @unchecked Sendable {
     private let lock = NSLock()
     private var data = Data()
-    func set(_ d: Data) { lock.lock(); data = d; lock.unlock() }
+    private var done = false
+    func set(_ d: Data) { lock.lock(); data = d; done = true; lock.unlock() }
     func get() -> Data { lock.lock(); defer { lock.unlock() }; return data }
+    var isDone: Bool { lock.lock(); defer { lock.unlock() }; return done }
+    /// Until the reader has delivered the whole stream, or `timeout` elapses.
+    func waitUntilDone(timeout: TimeInterval) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !isDone, Date() < deadline { try? await Task.sleep(nanoseconds: 10_000_000) }
+    }
 }
