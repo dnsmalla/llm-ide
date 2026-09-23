@@ -41,6 +41,17 @@ final class AgentV2ApprovalState {
     /// fails forever. The card must say so and stop offering a retry — a
     /// fresh question needs a new turn, not a resubmit.
     private(set) var isExpired = false
+    /// A decision POST for this card is in flight. The buttons used to lock
+    /// only on `submitted` / `isExpired`, so a double-click — or Deny then
+    /// Allow Once — raced two different decisions and the server applied
+    /// whichever arrived first, not the user's last click.
+    private(set) var isSubmitting = false
+    func beginSubmit() -> Bool {
+        guard !isSubmitting, !submitted, !isExpired else { return false }
+        isSubmitting = true
+        return true
+    }
+    func endSubmit() { isSubmitting = false }
 
     init(approval: AgentV2Approval, legacySessionId: String? = nil) {
         self.approval = approval
@@ -155,6 +166,19 @@ extension ChatEngine {
     /// `toolSteps`, persisted with the turn and visible wherever the session
     /// renders.
     func handleApprovalArrival(_ approval: AgentV2Approval, legacySessionId: String? = nil) {
+        if let current = pendingApproval, !current.submitted, !current.isExpired {
+            queuedApprovals.append((approval, legacySessionId))
+            return
+        }
+        presentApproval(approval, legacySessionId: legacySessionId)
+    }
+
+    /// Make `approval` the current card — and, on a phone-driven turn, the
+    /// phone's. Only the CURRENT card goes to the phone: it keeps one pending
+    /// question per command, so forwarding a queued one at arrival replaced
+    /// the question it was showing, its answer then failed the requestId
+    /// check ("no longer open"), and neither could be answered from it.
+    func presentApproval(_ approval: AgentV2Approval, legacySessionId: String?) {
         pendingApproval = AgentV2ApprovalState(approval: approval, legacySessionId: legacySessionId)
         guard isExternalTurn else { return }
         recordProgress(LlmIdeAPIClient.AgentProgress(
@@ -186,6 +210,8 @@ extension ChatEngine {
             state.recordSubmitFailure("No SDK session id for this engine — cannot post the decision. Try a new turn.")
             return
         }
+        guard state.beginSubmit() else { return }
+        defer { state.endSubmit() }
         do {
             let ok = try await postApprovalDecision(state.approval.requestId, sdkSessionId, answers)
             guard ok else {
@@ -197,7 +223,7 @@ extension ChatEngine {
             // the POST was in flight, its card must not be dropped for a
             // decision that answered the old question.
             if pendingApproval === state {
-                pendingApproval = nil
+                finishCurrentApproval()
             }
         } catch {
             recordDecisionFailure(error, on: state)
@@ -212,7 +238,35 @@ extension ChatEngine {
     /// answers 409 TURN_IN_PROGRESS); posting a deny here would free it
     /// sooner but changes turn semantics — revisit if abandoned cards become
     /// a complaint.
+    /// The server settled `requestId` on its own (timed out, aborted, denied
+    /// by policy). Its card was left up, still clickable, for a tool the turn
+    /// had already been told was denied — and a click then read "timed out".
+    func handleApprovalResolved(requestId: String) {
+        queuedApprovals.removeAll { $0.approval.requestId == requestId }
+        guard let state = pendingApproval, state.approval.requestId == requestId,
+              !state.isSubmitting else { return }
+        finishCurrentApproval()
+    }
+
     func dismissApproval() {
+        finishCurrentApproval()
+    }
+
+    /// The card on screen is done with (answered, resolved server-side, or
+    /// dismissed): show the next queued approval, if any.
+    func finishCurrentApproval() {
+        if queuedApprovals.isEmpty {
+            pendingApproval = nil
+        } else {
+            let next = queuedApprovals.removeFirst()
+            presentApproval(next.approval, legacySessionId: next.legacySessionId)
+        }
+    }
+
+    /// Turn start, Stop, session reset: every card belongs to a turn that is
+    /// gone, queued ones included.
+    func clearApprovals() {
+        queuedApprovals.removeAll()
         pendingApproval = nil
     }
 
@@ -239,6 +293,8 @@ extension ChatEngine {
     func submitToolDecision(action: String) async {
         guard let state = pendingApproval else { return }
         guard !state.isExpired else { return }
+        guard state.beginSubmit() else { return }
+        defer { state.endSubmit() }
         do {
             let ok: Bool
             if let legacySessionId = state.legacySessionId {
@@ -255,7 +311,7 @@ extension ChatEngine {
             }
             state.markSubmitted()
             if pendingApproval === state {
-                pendingApproval = nil
+                finishCurrentApproval()
             }
         } catch {
             recordDecisionFailure(error, on: state)

@@ -159,6 +159,11 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
     /// picker updates as the agent starts, not after it finishes.
     var onModeResolved: (@MainActor (String) -> Void)?
 
+    /// `approval_resolved` — the server settled a parked request (answered,
+    /// timed out, aborted). Lets the engine drop a card that is no longer
+    /// answerable instead of leaving it live until the next turn.
+    var onApprovalResolved: (@MainActor (String) -> Void)?
+
     init(streamer: AgentV2Streaming) {
         self.streamer = streamer
     }
@@ -359,8 +364,11 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 tokenTotals.cacheCreation += u.cacheCreationTokens ?? 0
             case .approvalRequest(let approval):
                 onApproval(approval)
-            case .approvalResolved:
-                break  // informational: the decision's effect arrives as continued events
+            case .approvalResolved(let requestId, _):
+                // The decision's effect arrives as continued events; this
+                // just lets the engine drop a card that can no longer be
+                // answered (timed out / aborted server-side).
+                self.onApprovalResolved?(requestId)
             case .modeSet(let mode):
                 resolvedMode = mode
                 self.onModeResolved?(mode)

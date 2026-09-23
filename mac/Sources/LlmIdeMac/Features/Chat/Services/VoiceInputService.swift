@@ -172,7 +172,11 @@ final class VoiceInputService: NSObject {
                     if ns.domain == "kAFAssistantErrorDomain", ns.code == 216 { return }
                     if ns.code == 1 { return }
                     self.log.error("voice_recognition_error err=\(error.localizedDescription, privacy: .public)")
+                    // Keep what was dictated before the failure — teardown
+                    // clears it, and it used to be discarded with it.
+                    let partial = self.latestTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
                     self.teardown()
+                    if !partial.isEmpty { self.onFinalResult?(partial) }
                     self.onError?("Voice recognition failed: \(error.localizedDescription)")
                 }
             }

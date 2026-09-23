@@ -226,21 +226,7 @@ struct QuickChatContext {
         // `CodeAssistantPanel.wireEngine()`'s; kept here instead of letting
         // each surface duplicate it, same reasoning as the transport closure
         // above.
-        engine.postApprovalDecision = { requestId, sdkSessionId, answers in
-            try await api.agentV2Decision(requestId: requestId,
-                                          sdkSessionId: sdkSessionId,
-                                          answers: answers)
-        }
-        engine.postToolDecision = { requestId, sdkSessionId, action in
-            try await api.agentV2ToolDecision(requestId: requestId,
-                                              sdkSessionId: sdkSessionId,
-                                              action: action)
-        }
-        engine.postLegacyToolDecision = { requestId, sessionId, action in
-            try await api.codeAssistDecision(requestId: requestId,
-                                             sessionId: sessionId,
-                                             action: action)
-        }
+        engine.wireDecisionPosting(api: api)
     }
 
     /// The label a model picker shows for the model that will actually be

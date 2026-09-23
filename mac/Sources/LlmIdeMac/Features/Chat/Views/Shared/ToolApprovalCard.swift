@@ -182,7 +182,7 @@ struct ToolApprovalCard: View {
     /// registry entry is gone — `submitToolDecision` would no-op anyway, and
     /// an enabled button that silently does nothing reads as a frozen app).
     private var actionsDisabled: Bool {
-        state.submitted || state.isExpired
+        state.submitted || state.isExpired || state.isSubmitting
     }
 
     private var actionRow: some View {
@@ -197,6 +197,9 @@ struct ToolApprovalCard: View {
             Button(Self.alwaysAllowLabel(toolName: state.approval.toolName)) { Task { await onDecide("always-allow") } }
                 .controlSize(.small)
                 .disabled(actionsDisabled)
+                // The card shows ONE call, but the grant is per tool, for
+                // every project and chat — say so before it's given.
+                .help(Self.alwaysAllowHelp(toolName: state.approval.toolName))
             if state.isExpired {
                 Text("Expired")
                     .font(.system(size: 11))
@@ -209,6 +212,12 @@ struct ToolApprovalCard: View {
     /// Delegating shim, same reasoning as `title`/`icon` above — a
     /// permanent grant must name the tool it always-allows, and which tools
     /// exist is linker knowledge.
+    static func alwaysAllowHelp(toolName: String?) -> String {
+        let tool = (toolName?.isEmpty == false) ? toolName! : "this tool"
+        return "Stop asking for \(tool) — in every project and chat, not just this call. "
+            + "Revoke it in Settings → Tool permissions."
+    }
+
     static func alwaysAllowLabel(toolName: String?) -> String {
         ClaudeToolPresentation.alwaysAllowLabel(toolName: toolName)
     }

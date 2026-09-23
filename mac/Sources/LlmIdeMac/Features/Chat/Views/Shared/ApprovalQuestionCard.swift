@@ -31,6 +31,7 @@ struct ApprovalQuestionCard: View {
     private var canSubmit: Bool {
         !state.submitted
             && !state.isExpired
+            && !state.isSubmitting
             && !state.approval.questions.isEmpty
             && state.approval.questions.indices.allSatisfy { !(selection[$0]?.isEmpty ?? true) }
     }
@@ -100,7 +101,9 @@ struct ApprovalQuestionCard: View {
             Text(question.question)
                 .font(.system(size: 13, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
-            ForEach(question.options, id: \.label) { option in
+            // By position: two options sharing a label (the model's
+            // output) made SwiftUI identity ambiguous and rows misbehaved.
+            ForEach(Array(question.options.enumerated()), id: \.offset) { _, option in
                 optionRow(option, question: question, index: index)
             }
         }

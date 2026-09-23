@@ -335,7 +335,7 @@ extension ChatEngine {
         // recorded SDK session id with it, so the next chat's submits can't
         // post against the old chat's SDK session either (its own `init`
         // event re-records the new id on the next turn).
-        pendingApproval = nil
+        clearApprovals()
         agentV2Transport?.resetSdkSessionId()
         error = nil
         // A resolution left over from the OUTGOING chat's last turn must not

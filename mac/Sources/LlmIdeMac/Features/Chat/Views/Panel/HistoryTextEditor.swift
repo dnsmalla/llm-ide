@@ -16,6 +16,12 @@ import AppKit
 /// movement — the gating logic lives in the caller's `historyUp`/`historyDown`.
 struct HistoryTextEditor: NSViewRepresentable {
     @Binding var text: String
+    /// True while an input method holds uncommitted (marked) text — a
+    /// Japanese/Chinese composition in progress. The composer refuses to send
+    /// then: `text` already mirrors the marked text, and ⌘↵ (a key
+    /// equivalent, so it fires before `keyDown`'s own marked-text guard)
+    /// sent the half-composed kana and then clobbered the live composition.
+    var isComposing: Binding<Bool>? = nil
     var font: NSFont
     var textColor: NSColor
     /// Fish-style inline suggestion: the REMAINDER of a predicted prompt
@@ -110,6 +116,12 @@ struct HistoryTextEditor: NSViewRepresentable {
         // keystroke via the textDidChange → binding round-trip).
         if textView.string != text {
             textView.string = text
+            // A programmatic replace (↑ recall, voice, reset) ends any
+            // composition — and `textDidChange` doesn't fire for it, so the
+            // flag would stay true and Send would do nothing.
+            if isComposing?.wrappedValue == true {
+                DispatchQueue.main.async { isComposing?.wrappedValue = false }
+            }
             // After a recall, drop the caret at the end so the next ↑ keeps
             // walking back rather than landing mid-text.
             textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
@@ -125,6 +137,7 @@ struct HistoryTextEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
             parent.text = tv.string
+            parent.isComposing?.wrappedValue = tv.hasMarkedText()
         }
     }
 }

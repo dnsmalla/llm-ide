@@ -29,6 +29,7 @@ extension CodeAssistantPanel {
             switch addFile(url: url) {
             case .added, .duplicate: break
             case .notText:   attachNotice = "That file isn't text — not attached."
+            case .refused(let reason): attachNotice = reason
             case .unreadable: attachNotice = "Couldn't read that file."
             }
             draft = newDraft
@@ -246,6 +247,7 @@ extension CodeAssistantPanel {
                 // already browsing; otherwise the caret moves normally.
                 HistoryTextEditor(
                     text: $draft,
+                    isComposing: $imeComposing,
                     font: .systemFont(ofSize: 12),
                     textColor: NSColor(theme.current.text),
                     // Suffix only — the editor paints it after the typed text.
@@ -706,7 +708,7 @@ extension CodeAssistantPanel {
         attachmentState.attachments.reduce(0) { $0 + $1.content.count }
     }
 
-    enum AttachOutcome { case added, duplicate, notText, unreadable }
+    enum AttachOutcome: Equatable { case added, duplicate, notText, unreadable, refused(String) }
 
 
     // MARK: - Send
@@ -716,6 +718,9 @@ extension CodeAssistantPanel {
     /// when a turn is already running (queued messages auto-send in FIFO order,
     /// one per turn).
     func submit() {
+        // Mid-composition the draft holds uncommitted kana; the IME owns the
+        // keystroke (see `HistoryTextEditor.isComposing`).
+        guard !imeComposing else { return }
         let msg = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !msg.isEmpty else { return }
         draft = ""

@@ -112,6 +112,8 @@ struct CodeAssistantPanel: View {
     @State var sentPrompts: [String] = []
     @State var historyIndex: Int? = nil
     @State var draftStash: String = ""
+    /// Mirrors the composer's IME composition state (`HistoryTextEditor.isComposing`).
+    @State var imeComposing = false
     /// Esc pressed on a visible ghost prediction — suppresses it until the
     /// draft next changes (see `promptSuggestion` / the composer's onEscape).
     /// Without this the only way to get rid of a ghost is to type a
@@ -282,6 +284,14 @@ struct CodeAssistantPanel: View {
                 // what sending leaves behind, so the next request is judged
                 // fresh.
                 if newValue.isEmpty { planSwitchDismissed = false }
+                // Edited away from the ↑-recalled entry: it's the user's own
+                // draft now. Leaving the recall active kept ↑/↓ swapping in
+                // history (the edit was lost; ↓ restored only the stash) and
+                // kept the "/" and "@" menus closed for as long as it lasted.
+                if let i = historyIndex, sentPrompts.indices.contains(i), newValue != sentPrompts[i] {
+                    historyIndex = nil
+                    draftStash = ""
+                }
                 if historyIndex == nil {
                     completion.update(draft: newValue)
                 } else {
@@ -296,6 +306,19 @@ struct CodeAssistantPanel: View {
             .onAppear { handleOnAppear() }
             .onChange(of: engine.messages) { oldValue, newValue in
                 engine.announceAndPersist(oldValue: oldValue, newValue: newValue)
+            }
+            // A turn starting while dictating (Enter mid-recording): stop, so
+            // the transcript lands in the composer now as the NEXT draft,
+            // instead of arriving a minute later into whatever is there.
+            .onChange(of: engine.busy) { _, busy in
+                guard busy, voiceState.isRecording else { return }
+                voiceState.setRecording(false)
+                voiceService.stopListening()
+            }
+            .onDisappear {
+                guard voiceState.isRecording else { return }
+                voiceState.setRecording(false)
+                voiceService.cancel()
             }
             .onChange(of: config.activeCLI) { _, _ in
                 modelState.followDefaultProvider(activeCLI: config.activeCLI,
@@ -571,6 +594,7 @@ struct CodeAssistantPanel: View {
         engine.hooks.onResetTransientStateExtra = {
             sentPrompts = []; historyIndex = nil; draftStash = ""
             draft = ""
+            imeComposing = false
             attachmentState.attachments.removeAll()
             attachmentState.selectedSkills.removeAll()
             autoAttachedPath = nil
@@ -585,27 +609,9 @@ struct CodeAssistantPanel: View {
         engine.forgetSessionMemory = { id in
             _ = try? await api.forgetSessionMemory(sessionId: id)
         }
-        // Task 12: the real v2 decision client. The engine's default reports
-        // failure on the approval card; this wiring makes Submit actually
-        // post `POST /agent/v2/decision` through the shared api client.
-        engine.postApprovalDecision = { requestId, sdkSessionId, answers in
-            try await api.agentV2Decision(requestId: requestId,
-                                          sdkSessionId: sdkSessionId,
-                                          answers: answers)
-        }
-        // Task 9: ToolApproval decisions, one endpoint per engine — the v2
-        // engine's `/agent/v2/decision` (with `action`, no `answers`) and the
-        // legacy engine's `/code-assist/decision` (Task 8).
-        engine.postToolDecision = { requestId, sdkSessionId, action in
-            try await api.agentV2ToolDecision(requestId: requestId,
-                                              sdkSessionId: sdkSessionId,
-                                              action: action)
-        }
-        engine.postLegacyToolDecision = { requestId, sessionId, action in
-            try await api.codeAssistDecision(requestId: requestId,
-                                             sessionId: sessionId,
-                                             action: action)
-        }
+        // The real decision clients (v2 `/agent/v2/decision`, legacy
+        // `/code-assist/decision`) — shared wiring, see the method.
+        engine.wireDecisionPosting(api: api)
         // Task 12: delete-session's server-side v2 cleanup. The client
         // swallows its own failures to the log (best-effort by contract);
         // `try?` is belt-and-braces so nothing here can reject the call.
@@ -669,6 +675,14 @@ struct CodeAssistantPanel: View {
         next.resolvedMode = nil
         engine = next
         wireEngine()
+        // A different engine is a different chat, and this path never runs
+        // the engine's own `switchSession` reset (the registry built or
+        // un-parked it before the panel's hooks were attached). So the
+        // composer kept the OUTGOING chat's draft, staged files and skill
+        // chips — Enter then sent them into the new chat — and ↑ recalled
+        // the old chat's prompts.
+        engine.hooks.onResetTransientStateExtra()
+        engine.hooks.onHistoryReplaced(engine.messages)
         // A parked engine's `sessions` list was last refreshed when it went
         // off-screen; anything created or renamed since then is missing.
         engine.refreshSessions()
@@ -756,7 +770,11 @@ struct CodeAssistantPanel: View {
         case .added:
             autoAttachedPath = displayPath(url)
         case .notText:
-            attachNotice = "\u{201C}\(url.lastPathComponent)\u{201D} can't be attached \u{2014} images and binary files aren't supported in chat yet."
+            // Not "images and binary files aren't supported" — images and
+            // PDFs are; this is a file that is neither text nor one of those.
+            attachNotice = "\u{201C}\(url.lastPathComponent)\u{201D} can't be attached \u{2014} it isn't text, an image, or a PDF."
+        case .refused(let reason):
+            attachNotice = reason
         case .unreadable:
             attachNotice = "Could not read file: " + url.lastPathComponent + "."
         case .duplicate:
