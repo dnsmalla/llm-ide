@@ -1,4 +1,5 @@
 import Foundation
+import JavaScriptCore
 import LlmIdeMacLib
 
 // An executable assertion gate for the Chat slice.
@@ -114,17 +115,14 @@ do {
 // 1.6 line-height — which is what opened ~80pt of dead space through the middle
 // of any reply with spaced-out bullets.
 //
-// These assert the repair steps are PRESENT, not that they work: the parser is
-// JavaScript that only runs inside the WKWebView, so nothing reachable from
-// Swift can execute it. Behaviour is verified by extracting parseMarkdown from
-// this template, unescaping it, and running it under node — the check that
-// found the bug. What this pins is that the steps are not quietly dropped, and
+// These assert the repair steps are PRESENT; the block after this one runs
+// the parser itself under JavaScriptCore to check what it produces. What this pins is that the steps are not quietly dropped, and
 // that the ORDER holds: the join must precede the <ul> wrap, and the repairs
 // must follow the <br> substitution, or each one silently does nothing.
 do {
     let page = GenerationConformance.renderedHTML(for: "- a\n\n- b\n")
 
-    guard let joinAt = page.range(of: "<\\/li>\\n{2,}(?=<li>)")?.lowerBound,
+    guard let joinAt = page.range(of: "<\\/li>\\n{2,}(?=<li[ >])")?.lowerBound,
           let wrapAt = page.range(of: "(<li>.*<\\/li>\\n?)+")?.lowerBound,
           let brAt = page.range(of: "html.replace(/\\n/g, '<br>')")?.lowerBound,
           let stripAt = page.range(of: "<br>\\s*(?=<\\/?(?:ul|ol|blockquote|table|h[1-6]|hr|div|li)\\b)")?.lowerBound,
@@ -145,6 +143,33 @@ do {
            "block opens are hoisted out of the enclosing paragraph")
     expect(page.contains("(\\x00(?:CODE|TABLE)\\d+\\x00)"),
            "code/table placeholders are hoisted too — they expand into block elements after this")
+}
+
+// parseMarkdown BEHAVIOUR — executed, not just pattern-matched: the template's
+// parser script runs under JavaScriptCore with a stubbed DOM. Numbered lists
+// used to become bare <li> after the <ul> wrap (one empty-paragraph gap per
+// item, numbering lost), and emphasis ran over inline code.
+do {
+    let page = GenerationConformance.renderedHTML(for: "x")
+    let script = page.components(separatedBy: "<script>")
+        .first { $0.contains("function parseMarkdown") }?
+        .components(separatedBy: "</script>").first ?? ""
+    let ctx = JSContext()!
+    ctx.evaluateScript("var window = this; var document = { body: { scrollHeight: 0 }, "
+        + "getElementById: function() { return { innerHTML: '' }; }, "
+        + "querySelectorAll: function() { return []; }, createElement: function() { return {}; } };")
+    ctx.evaluateScript(script)
+    func parse(_ md: String) -> String {
+        ctx.objectForKeyedSubscript("parseMarkdown")?.call(withArguments: [md])?.toString() ?? ""
+    }
+    expect(parse("Steps:\n\n1. a\n\n2. b\n\nDone") == "<p>Steps:</p><ol><li>a</li><li>b</li></ol><p>Done</p>",
+           "spaced numbered items render as ONE <ol> with no empty paragraphs")
+    expect(parse("3. c\n4. d").contains("<ol start=\"3\">"), "a continued list keeps its start number")
+    expect(parse("- a\n\n- b").contains("<ul><li>a</li>"), "bullets are unchanged")
+    expect(parse("`__init__` and `a*b*c`").contains("<code>__init__</code> and <code>a*b*c</code>"),
+           "emphasis never runs inside inline code")
+    expect(parse("my_var_name and _this_").contains("my_var_name and <em>this</em>"),
+           "underscores inside a word stay literal; real _emphasis_ still works")
 }
 
 // Markdown preview gating. The generated doc is where a ```mermaid dependency

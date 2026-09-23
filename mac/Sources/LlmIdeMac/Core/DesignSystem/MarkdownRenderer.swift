@@ -250,13 +250,25 @@ enum MarkdownRenderer {
       html = extractTables(html, tables);
       // Lists (after tables so table pipes aren't mistaken for list items).
       html = html.replace(/^[\\*\\-] (.+)$/gm, '<li>$1</li>');
-      // Join items separated by a BLANK line before wrapping. The wrap below
-      // allows only a single `\\n` between items, so a model that spaces its
-      // bullets out — most do — got one <ul> PER BULLET, each carrying the
+      // Numbered items get their own marker so they wrap in <ol>, not <ul>.
+      // They used to become bare <li> AFTER the <ul> wrap had run — never
+      // wrapped at all, never joined across blank lines, so the browser
+      // repaired each one out of its <p> and left empty paragraphs (dead
+      // space per item, the gap cf564532 fixed for bullets) and no numbers.
+      html = html.replace(/^(\\d+)\\. (.+)$/gm, '<li data-ol="$1">$2</li>');
+      // Join items separated by a BLANK line before wrapping. The wraps below
+      // allow only a single `\\n` between items, so a model that spaces its
+      // items out — most do — got one list PER item, each carrying the
       // list's own bottom margin.
-      html = html.replace(/<\\/li>\\n{2,}(?=<li>)/g, '</li>\\n');
+      html = html.replace(/<\\/li>\\n{2,}(?=<li[ >])/g, '</li>\\n');
       html = html.replace(/(<li>.*<\\/li>\\n?)+/g, '<ul>$&</ul>');
-      html = html.replace(/^\\d+\\. (.+)$/gm, '<li>$1</li>');
+      // Keeps the first item's number, so a list the model continues after
+      // a paragraph ("3. …") still counts from 3.
+      html = html.replace(/(<li data-ol="\\d+">.*<\\/li>\\n?)+/g, function(run) {
+        var first = /data-ol="(\\d+)"/.exec(run);
+        var start = first && first[1] !== '1' ? ' start="' + first[1] + '"' : '';
+        return '<ol' + start + '>' + run.replace(/<li data-ol="\\d+">/g, '<li>') + '</ol>';
+      });
       html = html.replace(/\\n\\n/g, '</p><p>');
       html = '<p>' + html + '</p>';
       html = html.replace(/\\n/g, '<br>');
