@@ -882,8 +882,16 @@ final class ChatEngine {
     /// (its prompt is the synthetic "(continue)"), and re-running it would
     /// mean re-driving a tool chain — so it stays un-retryable rather than
     /// offering a button that does something subtly different from what it says.
+    ///
+    /// And only for the LATEST reply. A retry re-sends `currentTurnAttachments`,
+    /// which holds the files of the most recent turn only; retrying an older
+    /// failure after a newer turn went out re-sent that newer turn's files
+    /// with the old prompt, cut the pair out of the middle of the transcript
+    /// and replayed it at the end. The files an older turn was sent with
+    /// aren't recorded anywhere, so the honest answer there is no button.
     func canRetryFailedTurn(_ id: UUID) -> Bool {
         guard let idx = messages.firstIndex(where: { $0.id == id }),
+              idx == messages.count - 1,
               messages[idx].status == .failed,
               idx > 0, messages[idx - 1].role == .user else { return false }
         return true
