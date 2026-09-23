@@ -100,12 +100,13 @@ extension CustomProvider {
         CustomProvider.saveAll(all)
     }
 
-    /// Re-push every locally-persisted provider into the backend registry
-    /// (POST /kb/custom-providers). The server keeps this map in memory only,
-    /// so call after backend restart and once the user is authenticated.
+    /// Push every locally-persisted provider into the backend registry
+    /// (POST /kb/custom-providers), which replaces this user's list there.
+    /// The server persists it per user, so this Mac's list is the source of
+    /// truth: an EMPTY list is sent too — skipping it would leave the last
+    /// deleted provider registered on the server forever.
     static func syncAllToBackend(api: LlmIdeAPIClient) {
         let all = loadAll()
-        guard !all.isEmpty else { return }
         Task { try? await api.syncCustomProviders(all) }
     }
 }
