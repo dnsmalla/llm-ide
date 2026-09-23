@@ -807,7 +807,12 @@ final class ChatEngine {
         // passed it. Probing again mid-chain would put a loopback GET between
         // every auto-continue round-trip to close a window measured in the
         // seconds between two halves of one authorized turn.
-        guard !busy else { return }
+        // `!Task.isCancelled`: a caller whose own turn was just cancelled by a
+        // reset (chat deleted, quick-chat project switched) sees `busy` false
+        // — the reset cleared it — while its tool is still returning. The
+        // Task below does NOT inherit that cancellation, so without this the
+        // stale ack's follow-up ran for real against the NEW chat's history.
+        guard !busy, !Task.isCancelled else { return }
         busy = true
         let task = Task { [self] in
             await followUpRoundTrip()

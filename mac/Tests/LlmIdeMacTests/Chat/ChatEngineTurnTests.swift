@@ -326,6 +326,23 @@ struct ChatEngineTurnTests {
         #expect(engine.currentTurnTruncatedPaths.isEmpty)
     }
 
+    @Test("A reset-cancelled turn's ack does not start a follow-up in the new chat")
+    func cancelledCallerStartsNoFollowup() async {
+        let (engine, t) = makeEngine()
+        // A reset (chat deleted, quick-chat project switched) cancels the turn
+        // and clears `busy` while its tool is still returning; the tool then
+        // acks from the cancelled task. Regression: `sendFollowup` spawned an
+        // uncancelled Task and ran a real round-trip against the new chat.
+        let caller = Task {
+            while !Task.isCancelled { await Task.yield() }
+            await engine.unblockAndFollowUp()
+        }
+        caller.cancel()
+        await caller.value
+        #expect(t.receivedInputs.isEmpty)
+        #expect(engine.busy == false)
+    }
+
     // MARK: - Plan execution tracker
 
     private func runningTracker() -> PlanExecutionTracker {
