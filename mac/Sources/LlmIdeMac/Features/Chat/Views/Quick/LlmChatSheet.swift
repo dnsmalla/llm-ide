@@ -159,7 +159,8 @@ struct LlmChatSheet: View {
             // that's `.stopped`, not `.failed`) leaves the user's prompt
             // sent-and-gone with no retry affordance yet; restoring it into
             // the composer at least means the words aren't lost.
-            if let recovered = viewModel.recoverableDraftAfterFailure(oldValue: oldValue, newValue: newValue) {
+            if let recovered = viewModel.recoverableDraftAfterFailure(oldValue: oldValue, newValue: newValue,
+                                                                  currentDraft: draft) {
                 draft = recovered
             }
         }
