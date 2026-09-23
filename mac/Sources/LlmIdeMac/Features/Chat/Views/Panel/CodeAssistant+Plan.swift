@@ -113,6 +113,12 @@ extension CodeAssistantPanel {
         // composer live when it finally drains, by which point a message sent
         // in between has cleared the chips (or staged different ones).
         let attachmentsSnapshot = attachmentState.attachments
+        // One-shot, like the composer's own send: the snapshot carries the
+        // plan into this turn (and `currentTurnAttachments` into its
+        // auto-continue rounds). Left staged — with the attachment bar hidden
+        // during the run — the plan document rode along on every later turn,
+        // the Review turn included, until the user found and removed it.
+        attachmentState.attachments.removeAll()
         if engine.busy {
             engine.enqueue(outgoing, skillIds: skillIds, userMetadata: userMeta, planExecute: true,
                            attachments: attachmentsSnapshot, planTracker: tracker)
