@@ -211,7 +211,11 @@ const HOST = config.host;
 //     `clientCaps: ["question-card"]` (the Code Assistant panel); every other
 //     caller — quick surfaces, the phone, headless callers, pre-v53 clients —
 //     never receives one.
-const SERVER_API_VERSION = 53;
+//   v54 — POST /agent/v2/cancel {chatSessionId}: stops the caller's
+//     in-flight Agent-engine turn for that chat. The Mac calls it when a send
+//     keeps getting TURN_IN_PROGRESS while its own chat is idle — a turn it
+//     lost track of that would otherwise hold the chat's lock until done.
+const SERVER_API_VERSION = 54;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -223,6 +227,7 @@ const ENDPOINTS = [
   '/agent/v2/stream',
   '/agent/v2/decision',
   '/agent/v2/session',
+  '/agent/v2/cancel',
   '/generate-questions',
   '/extract-entities',
   '/kb/ingest',
