@@ -59,6 +59,13 @@ final class ChatEngine {
         /// pick up whatever the composer holds when it FINALLY runs, which by
         /// then may be empty or belong to a different, later message.
         var attachments: [LlmIdeAPIClient.CodeAttachment]?
+        /// The plan-run tracker an "Execute plan" turn installs WHEN IT
+        /// STARTS. Installing it at click time — before a queued execute had
+        /// run — let the turn still ahead of it settle the tracker with its
+        /// own tasks (`.finished`, finish card and "Push" offered before the
+        /// plan ran, sticky mode released), after which the real run was
+        /// untracked.
+        var planTracker: PlanExecutionTracker?
     }
 
     // MARK: - Observable state (moved 1:1 from the panel)
@@ -484,7 +491,8 @@ final class ChatEngine {
     /// Launch a turn as an unstructured Task whose handle Stop can cancel.
     func startTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil,
                    planExecute: Bool = false, planWrite: Bool = false,
-                   attachments: [LlmIdeAPIClient.CodeAttachment]? = nil) {
+                   attachments: [LlmIdeAPIClient.CodeAttachment]? = nil,
+                   planTracker: PlanExecutionTracker? = nil) {
         // Mark the slot taken SYNCHRONOUSLY. `runTurn` doesn't set `busy`
         // until the Task below is scheduled, so a caller that reached here
         // after an `await` (the quick chat's send-path version probe) could
@@ -503,7 +511,7 @@ final class ChatEngine {
         busy = true
         runTask = Task { await runTurn(message, skillIds: skillIds, userMetadata: userMetadata,
                                        planExecute: planExecute, planWrite: planWrite,
-                                       attachments: attachments) }
+                                       attachments: attachments, planTracker: planTracker) }
     }
 
     /// Cancel the in-flight turn — panel-driven (`runTask`) or phone-driven
@@ -550,9 +558,11 @@ final class ChatEngine {
     /// one per turn, by `runTurn`'s tail.
     func enqueue(_ text: String, skillIds: [String], userMetadata: ChatMessage.Metadata? = nil,
                  planExecute: Bool = false, planWrite: Bool = false,
-                 attachments: [LlmIdeAPIClient.CodeAttachment]? = nil) {
+                 attachments: [LlmIdeAPIClient.CodeAttachment]? = nil,
+                 planTracker: PlanExecutionTracker? = nil) {
         queued.append(.init(text: text, skillIds: skillIds, userMetadata: userMetadata,
-                            planExecute: planExecute, planWrite: planWrite, attachments: attachments))
+                            planExecute: planExecute, planWrite: planWrite, attachments: attachments,
+                            planTracker: planTracker))
     }
 
     /// Run one user turn end-to-end. On completion it drains `queued` (if any)
@@ -560,7 +570,11 @@ final class ChatEngine {
     /// task's cancellation, so a stopped turn still lets the queued message run.
     func runTurn(_ message: String, skillIds: [String] = [], userMetadata: ChatMessage.Metadata? = nil,
                  planExecute: Bool = false, planWrite: Bool = false,
-                 attachments: [LlmIdeAPIClient.CodeAttachment]? = nil) async {
+                 attachments: [LlmIdeAPIClient.CodeAttachment]? = nil,
+                 planTracker: PlanExecutionTracker? = nil) async {
+        // Installed now, as the run's own turn begins — see
+        // `QueuedMessage.planTracker`.
+        if let planTracker { agent.planExecution = planTracker }
         hooks.onTurnStart()
         hooks.onRecordPrompt(message)
         hooks.onNudge(message)
@@ -727,7 +741,7 @@ final class ChatEngine {
             let next = queued.removeFirst()
             startTurn(next.text, skillIds: next.skillIds, userMetadata: next.userMetadata,
                       planExecute: next.planExecute, planWrite: next.planWrite,
-                      attachments: next.attachments)
+                      attachments: next.attachments, planTracker: next.planTracker)
         } else {
             busy = false
             runTask = nil

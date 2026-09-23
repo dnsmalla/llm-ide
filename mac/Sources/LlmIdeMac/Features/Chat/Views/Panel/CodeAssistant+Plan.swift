@@ -99,8 +99,8 @@ extension CodeAssistantPanel {
         let outgoing = directives.isEmpty
             ? baseMessage
             : directives.joined(separator: "\n") + "\n\n" + baseMessage
-        beginPlanExecution(messageId: messageId, payload: payload, planContent: planContent)
-        let stepCount = engine.agent.planExecution?.steps.count ?? 0
+        let tracker = makePlanExecutionTracker(messageId: messageId, payload: payload, planContent: planContent)
+        let stepCount = tracker.steps.count
         let displayTitle = payload.planTitle ?? Self.planTitle(from: planContent)
         // No count rather than a wrong one: an unparseable plan sent the
         // generic execute message, so there is no step list to promise.
@@ -115,10 +115,10 @@ extension CodeAssistantPanel {
         let attachmentsSnapshot = attachmentState.attachments
         if engine.busy {
             engine.enqueue(outgoing, skillIds: skillIds, userMetadata: userMeta, planExecute: true,
-                           attachments: attachmentsSnapshot)
+                           attachments: attachmentsSnapshot, planTracker: tracker)
         } else {
             engine.startTurn(outgoing, skillIds: skillIds, userMetadata: userMeta, planExecute: true,
-                             attachments: attachmentsSnapshot)
+                             attachments: attachmentsSnapshot, planTracker: tracker)
         }
     }
 

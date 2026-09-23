@@ -738,7 +738,8 @@ struct ChatMessageList: View {
                 // on it. Centered like the other tool notices.
                 PlanSavedCard(payload: payload,
                               stage: marks.writtenPlanCards.contains(turn.id) ? .written : .design,
-                              actionTaken: turn.metadata?.planCardAction,
+                              actionTaken: engine.livePlanCardAction(
+                                  for: turn.id, persisted: turn.metadata?.planCardAction),
                               executingStepCount: planExecution?.planCardMessageId == turn.id
                                   ? planExecution?.steps.count : nil,
                               onExecute: { onExecutePlan(turn.id, payload) },

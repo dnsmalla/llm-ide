@@ -28,7 +28,8 @@ struct PlanSavedCard: View {
 
     let payload: ChatMessage.ToolResultPayload
     let stage: Stage
-    /// Persisted choice from the owning tool-result message, if any.
+    /// The action in progress for this card — live-derived by the list
+    /// (`ChatEngine.livePlanCardAction`), not the raw persisted tap.
     let actionTaken: ChatMessage.PlanCardAction?
     /// When executing, the parsed step count (hides plan preview and file link).
     let executingStepCount: Int?
@@ -208,7 +209,8 @@ struct PlanSavedCard: View {
                 .controlSize(.small)
                 .help("Switch to Execute mode with this plan attached")
                 Button {
-                    localAction = .edit
+                    // No lock: nothing marks an edit as finished, so a
+                    // locked card stayed locked.
                     onEdit()
                 } label: {
                     Label("Edit in chat", systemImage: "pencil")
