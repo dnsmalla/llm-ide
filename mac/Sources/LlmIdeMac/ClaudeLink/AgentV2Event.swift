@@ -127,6 +127,25 @@ struct AgentV2ApprovalQuestion: Sendable, Equatable, Codable {
     enum CodingKeys: String, CodingKey {
         case question, header, options, multiSelect
     }
+
+    init(question: String, header: String?, options: [AgentV2ApprovalOption], multiSelect: Bool) {
+        self.question = question
+        self.header = header
+        self.options = options
+        self.multiSelect = multiSelect
+    }
+
+    /// `multiSelect` defaults to false when absent. Required, one question
+    /// without it failed the whole `approval_request` decode, the event was
+    /// skipped, and the turn sat parked for the full decision timeout with
+    /// no card on screen to answer.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        question = try c.decode(String.self, forKey: .question)
+        header = try c.decodeIfPresent(String.self, forKey: .header)
+        options = try c.decode([AgentV2ApprovalOption].self, forKey: .options)
+        multiSelect = try c.decodeIfPresent(Bool.self, forKey: .multiSelect) ?? false
+    }
 }
 
 /// Structured payload of a ToolApproval — what the card renders as a diff /

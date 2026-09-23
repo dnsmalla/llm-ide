@@ -139,6 +139,22 @@ struct AgentV2EventTests {
         )))
     }
 
+    @Test("approval_request without multiSelect still decodes (defaults to single-select)")
+    func approvalRequestWithoutMultiSelect() {
+        // Regression: a required `multiSelect` made the whole event fail to
+        // decode — skipped silently, the turn waited out the decision timeout
+        // with no card to answer.
+        let evt = decode(#"{"type":"approval_request","requestId":"r3","kind":"AskUserQuestion","questions":[{"question":"Q?","options":[{"label":"A"}]}]}"#)
+        #expect(evt == .approvalRequest(AgentV2Approval(
+            requestId: "r3",
+            kind: "AskUserQuestion",
+            questions: [AgentV2ApprovalQuestion(
+                question: "Q?", header: nil,
+                options: [AgentV2ApprovalOption(label: "A", description: nil)],
+                multiSelect: false)],
+        )))
+    }
+
     @Test("approval_resolved decodes requestId + outcome")
     func approvalResolved() {
         #expect(decode(#"{"type":"approval_resolved","requestId":"r1","outcome":"answer"}"#)
