@@ -435,16 +435,31 @@ final class CompletionController: ObservableObject {
 
     // MARK: File walk
 
+    /// How long a finished file scan is trusted before the next "@" rescans,
+    /// so files created since (by the agent, or the user) show up.
+    static let fileScanTTL: TimeInterval = 30
+    private var filesLoadedAt: Date?
+
     private func ensureFilesLoaded() {
-        guard let root = repoRoot, filesLoadedFor != root, !loadingFiles else { return }
+        guard let root = repoRoot, !loadingFiles else { return }
+        if filesLoadedFor == root, let at = filesLoadedAt,
+           Date().timeIntervalSince(at) < Self.fileScanTTL { return }
         loadingFiles = true
         let cap = maxFilesScanned
         Task.detached(priority: .userInitiated) {
             let scanned = Self.walk(root: root, cap: cap)
             await MainActor.run {
+                self.loadingFiles = false
+                // The repo changed while this scan ran: its results belong to
+                // the old one. Storing them offered — and attached — the
+                // previous repo's files under "@"; scan the current root instead.
+                guard self.repoRoot == root else {
+                    self.ensureFilesLoaded()
+                    return
+                }
                 self.fileItems = scanned
                 self.filesLoadedFor = root
-                self.loadingFiles = false
+                self.filesLoadedAt = Date()
                 if self.mode == .file { self.rebuild() }
             }
         }
