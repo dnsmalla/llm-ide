@@ -27,3 +27,18 @@ Use **Bash** for installs, builds, and tests. Locate code with **Read**, **Grep*
 - **ask-internal** — LLM-IDE app state only (issues, meetings, library), not attached file edits.
 
 For small single-step requests, skip task management.`;
+
+// Every NON-plan Agent-engine turn (Execute, Review, Document, Ask, …). The
+// plan bindings carry their own question clause; nothing told the other
+// modes the card exists, so a "which one?" came back as a typed A/B/C list
+// the user had to answer by retyping it in the composer.
+export const V2_QUESTION_GUIDANCE = `# Asking the user
+
+When you need the user to choose from a fixed set of answers — which option,
+which file or target, keep/replace, a yes/no with a named alternative — call
+\`AskUserQuestion\` instead of typing the choices: the app shows a card they
+answer with one tap, and the answer comes back inside this same turn. Give each
+question a header of at most 12 characters and 2-4 labelled options, your
+recommendation first; set \`multiSelect\` when the answers are not exclusive.
+Ask in prose only when the answer is open-ended, and never ask what you can
+look up yourself.`;
