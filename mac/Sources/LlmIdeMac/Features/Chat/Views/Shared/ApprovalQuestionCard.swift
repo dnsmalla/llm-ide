@@ -101,7 +101,9 @@ struct ApprovalQuestionCard: View {
             Text(question.question)
                 .font(.system(size: 13, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
-            ForEach(question.options, id: \.label) { option in
+            // By position: two options sharing a label (the model's
+            // output) made SwiftUI identity ambiguous and rows misbehaved.
+            ForEach(Array(question.options.enumerated()), id: \.offset) { _, option in
                 optionRow(option, question: question, index: index)
             }
         }
