@@ -18,6 +18,8 @@ protocol ExternalEngineHolder: AnyObject {
     func heldEngine(for sessionID: UUID) -> ChatEngine?
     /// Stop tracking `sessionID` — the registry has taken the engine over.
     func releaseHeldEngine(for sessionID: UUID)
+    /// Sign-out: forget every held engine without persisting it.
+    func forgetAllHeldEngines()
 }
 
 /// Per-`ChatScope` shared `ChatEngine` instances, plus the background lot of
@@ -283,6 +285,18 @@ final class ChatEngineRegistry {
         displayed[scope] = fresh
         sweepBackground()
         return fresh
+    }
+
+    /// Sign-out: every engine this registry (and its external holder) keeps
+    /// forgets the signed-out user's chats without writing them back. Must
+    /// run BEFORE `ChatSessionStore.clear()` — see
+    /// `ChatEngine.forgetForSignOut`.
+    func forgetAllForSignOut() {
+        for engine in background.values { engine.forgetForSignOut() }
+        background.removeAll()
+        backgroundOrder.removeAll()
+        for engine in displayed.values { engine.forgetForSignOut() }
+        externalHolder?.forgetAllHeldEngines()
     }
 
     /// Stop and drop the background engine holding `sessionID`, if any.

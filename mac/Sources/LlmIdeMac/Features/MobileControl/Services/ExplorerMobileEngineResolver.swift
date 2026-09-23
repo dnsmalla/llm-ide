@@ -200,4 +200,10 @@ final class ExplorerMobileEngineResolver: ExternalEngineHolder {
     func releaseHeldEngine(for sessionID: UUID) {
         forget(sessionID: sessionID)
     }
+
+    func forgetAllHeldEngines() {
+        for engine in offScreen.values { engine.forgetForSignOut() }
+        offScreen.removeAll()
+        offScreenOrder.removeAll()
+    }
 }

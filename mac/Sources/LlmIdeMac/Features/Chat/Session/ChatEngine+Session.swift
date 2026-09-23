@@ -501,6 +501,29 @@ extension ChatEngine {
     /// already hides the composer for this state; this just makes sure the
     /// engine's OWN state matches "nothing is loaded" rather than leaking
     /// the outgoing project's transcript into a screen with no composer.
+    /// Sign-out: drop everything this engine holds for the signed-out user
+    /// WITHOUT writing any of it back. Cancels the turn, the debounced write
+    /// and the unobserved-persist duty, then lands in the same "nothing
+    /// loaded" state a fresh engine starts in. With no session id,
+    /// `persistCurrentChat` has nothing to write to, so a cancelled turn
+    /// unwinding afterwards can't recreate the file either.
+    ///
+    /// Clearing the store alone wasn't enough: displayed and parked engines
+    /// kept the previous user's transcripts in memory, the next persist (a
+    /// parked turn ending, any message change) recreated the sessions
+    /// directory with them, and the panel kept showing them to whoever
+    /// signed in next.
+    func forgetForSignOut() {
+        stop()
+        persistDebounceTask?.cancel()
+        persistDebounceTask = nil
+        persistsUnobserved = false
+        currentSessionIDString = ""
+        messages = []
+        sessions = []
+        resetTransientSessionState()
+    }
+
     func switchQuickChatProject(to newProjectId: String?) {
         assert(scope == .quick, "switchQuickChatProject called on a non-.quick engine")
         stopOutgoingTurnBeforeSwap()
