@@ -214,7 +214,7 @@ extension ChatEngine {
         agent.pendingTool = nil
         agent.agentPendingTasks = []
         // Stale v2 approval card — same turn-start rule as runTurn.
-        pendingApproval = nil
+        clearApprovals()
         // Persist the user turn immediately, mirroring the old
         // MobileControlManager behavior of writing it before the round
         // trip starts — disk should not lag a full round-trip behind in

@@ -236,6 +236,11 @@ final class ChatEngine {
     /// `AgentV2Approval` so submit/lastError can evolve on the card without
     /// the engine re-publishing a new value. See AgentV2ApprovalState.swift.
     var pendingApproval: AgentV2ApprovalState?
+    /// Approvals that arrived while `pendingApproval` was still unanswered,
+    /// shown one at a time (`finishCurrentApproval`). A second request used
+    /// to REPLACE the first, which was then never shown and waited out the
+    /// 15-minute decision timeout with the chat locked.
+    var queuedApprovals: [(approval: AgentV2Approval, legacySessionId: String?)] = []
 
     /// Saved chats for `scope`, newest `lastUsedAt` first. Reloaded from disk
     /// by `refreshSessions()` — deliberately NOT on every history change; see
@@ -482,6 +487,11 @@ final class ChatEngine {
             }
             return
         }
+        // On the v2 transport itself, so it holds whether that transport is
+        // bare or inside the engine-selection composite.
+        agentV2Transport?.onApprovalResolved = { [weak self] requestId in
+            self?.handleApprovalResolved(requestId: requestId)
+        }
         guard let engineTransport = transport as? AgentV2EngineTransport else { return }
         engineTransport.onStaleServer = { [weak self] in
             self?.agentV2Notice = AgentV2EngineTransport.staleServerBannerText
@@ -635,7 +645,7 @@ final class ChatEngine {
         // the old question was never answered (or already expired/aborted
         // server-side), so its card must not stay interactive against the
         // previous turn's requestId.
-        pendingApproval = nil
+        clearApprovals()
         // Same reasoning for a finished plan's checklist: without this, a prior
         // turn's completed/failed task list stays in agentPendingTasks and
         // (since PlanTimelineCard pins to the latest assistant turn) would
@@ -1263,7 +1273,7 @@ final class ChatEngine {
             // `aborted` the moment the stream closes (no tombstone), so the
             // card would otherwise stay interactive under the stopped turn
             // and its Submit come back 404 as a misleading "timed out".
-            pendingApproval = nil
+            clearApprovals()
             return
         }
         self.agent.pendingTool = pendingTool

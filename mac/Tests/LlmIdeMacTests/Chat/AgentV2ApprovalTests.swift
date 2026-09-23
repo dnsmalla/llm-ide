@@ -292,6 +292,53 @@ struct AgentV2ApprovalTests {
         #expect(engine.pendingApproval == nil)
     }
 
+    @Test("A second decision while the first POST is in flight is not sent")
+    func noConcurrentDecisions() async throws {
+        let stream = ScriptedAgentV2Stream()
+        let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
+        var actions: [String] = []
+        var release: CheckedContinuation<Void, Never>?
+        engine.postToolDecision = { _, _, action in
+            actions.append(action)
+            await withCheckedContinuation { release = $0 }   // the POST is slow
+            return true
+        }
+        stream.events = toolApprovalTurnEvents(requestId: "req-tool-1", sdkSessionId: "sdk-99")
+        await engine.runTurn("run a command")
+
+        // Regression: Deny then Allow Once (or a double-click) raced two
+        // different decisions; the server applied whichever arrived first.
+        let first = Task { await engine.submitToolDecision(action: "deny") }
+        while release == nil { await Task.yield() }
+        #expect(engine.pendingApproval?.isSubmitting == true)
+        await engine.submitToolDecision(action: "allow")   // refused while in flight
+        release?.resume()
+        await first.value
+        #expect(actions == ["deny"])
+        #expect(engine.pendingApproval == nil)
+    }
+
+    @Test("A request the server resolved on its own drops its card")
+    func serverResolvedApprovalClearsCard() async throws {
+        let stream = ScriptedAgentV2Stream()
+        let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
+        var events = toolApprovalTurnEvents(requestId: "req-tool-1", sdkSessionId: "sdk-99")
+        // Timed out server-side before the turn ended.
+        events.insert(.approvalResolved(requestId: "req-tool-1", outcome: "expired"), at: 3)
+        stream.events = events
+        await engine.runTurn("run a command")
+        // Regression: `approval_resolved` was ignored, so a dead card stayed
+        // clickable until the next turn ("timed out" on click).
+        #expect(engine.pendingApproval == nil)
+
+        // A resolution for some OTHER request leaves a live card alone.
+        var other = toolApprovalTurnEvents(requestId: "req-tool-2", sdkSessionId: "sdk-99")
+        other.insert(.approvalResolved(requestId: "req-unrelated", outcome: "answer"), at: 3)
+        stream.events = other
+        await engine.runTurn("again")
+        #expect(engine.pendingApproval?.approval.requestId == "req-tool-2")
+    }
+
     @Test("v2 ToolApproval: failed submit keeps the card and records the error; retry succeeds and clears")
     func v2ToolDecisionFailedSubmitKeepsCardForRetry() async throws {
         let stream = ScriptedAgentV2Stream()
@@ -559,6 +606,31 @@ struct AgentV2ApprovalTests {
         stream.events = plainTurnEvents(sdkSessionId: "sdk-77")
         await engine.runTurn("three")
         #expect(engine.pendingApproval == nil)
+    }
+
+    @Test("Two approvals in one turn are shown one after the other, not overwritten")
+    func concurrentApprovalsQueue() async throws {
+        let stream = ScriptedAgentV2Stream()
+        let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
+        var events = toolApprovalTurnEvents(requestId: "req-A", sdkSessionId: "sdk-99")
+        events.insert(.approvalRequest(AgentV2Approval(requestId: "req-B", kind: "ToolApproval",
+                                                       toolName: "Edit", argsSummary: "x.swift")), at: 3)
+        stream.events = events
+        await engine.runTurn("two tools at once")
+        // Regression: B replaced A, so A was never shown and waited out the
+        // 15-minute decision timeout.
+        #expect(engine.pendingApproval?.approval.requestId == "req-A")
+        #expect(engine.queuedApprovals.map(\.approval.requestId) == ["req-B"])
+        engine.dismissApproval()
+        #expect(engine.pendingApproval?.approval.requestId == "req-B")
+        engine.dismissApproval()
+        #expect(engine.pendingApproval == nil)
+        // A queued request the server resolves is dropped from the queue.
+        stream.events = events
+        await engine.runTurn("again")
+        engine.handleApprovalResolved(requestId: "req-B")
+        #expect(engine.queuedApprovals.isEmpty)
+        #expect(engine.pendingApproval?.approval.requestId == "req-A")
     }
 
     @Test("Session swap drops a parked approval and its SDK session id — a later submit posts nothing")

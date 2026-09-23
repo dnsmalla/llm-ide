@@ -31,6 +31,7 @@ struct ApprovalQuestionCard: View {
     private var canSubmit: Bool {
         !state.submitted
             && !state.isExpired
+            && !state.isSubmitting
             && !state.approval.questions.isEmpty
             && state.approval.questions.indices.allSatisfy { !(selection[$0]?.isEmpty ?? true) }
     }

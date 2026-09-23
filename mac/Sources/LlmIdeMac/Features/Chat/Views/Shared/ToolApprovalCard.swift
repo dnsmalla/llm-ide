@@ -182,7 +182,7 @@ struct ToolApprovalCard: View {
     /// registry entry is gone — `submitToolDecision` would no-op anyway, and
     /// an enabled button that silently does nothing reads as a frozen app).
     private var actionsDisabled: Bool {
-        state.submitted || state.isExpired
+        state.submitted || state.isExpired || state.isSubmitting
     }
 
     private var actionRow: some View {
