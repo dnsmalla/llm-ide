@@ -544,7 +544,9 @@ struct CodeAssistantPanel: View {
                 // Read live, per turn, like the mode above: the chip is a
                 // setting the user can change between messages, and the
                 // agent has to follow the one on screen when they send.
-                permissionMode: editMode.agentPermissionMode)
+                permissionMode: editMode.agentPermissionMode,
+                // This panel renders the classic engine's ask-user card.
+                questionCard: true)
         }
         // Fresh budget of auto-run git ops for this user turn (commit→push→…).
         // Panel-owned because `autoChainPendingAction` — which spends it — is.

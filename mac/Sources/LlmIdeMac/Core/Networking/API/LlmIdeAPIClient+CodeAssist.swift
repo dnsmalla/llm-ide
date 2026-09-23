@@ -71,6 +71,10 @@ extension LlmIdeAPIClient {
         /// `body.planWrite`, so a legacy chat, or a v2 turn falling back to
         /// legacy, re-ran discovery on "Write full plan".)
         var planWrite: Bool? = nil
+        /// What this client can render. `["question-card"]` = the classic
+        /// engine may ask with `ask-user` (server API v53); omitted otherwise,
+        /// and then the server never offers that tool.
+        var clientCaps: [String]? = nil
     }
     struct CodeAssistResponse: Codable {
         let reply: String
@@ -119,6 +123,7 @@ extension LlmIdeAPIClient {
         mode: String? = nil,
         planExecute: Bool = false,
         planWrite: Bool = false,
+        questionCard: Bool = false,
     ) async throws -> CodeAssistResponse {
         try await post(
             "/code-assist",
@@ -135,6 +140,7 @@ extension LlmIdeAPIClient {
                 mode: mode,
                 planExecute: planExecute ? true : nil,
                 planWrite: planWrite ? true : nil,
+                clientCaps: questionCard ? ["question-card"] : nil,
             ),
             authenticated: true,
         )
@@ -306,6 +312,7 @@ extension LlmIdeAPIClient {
         mode: String? = nil,
         planExecute: Bool = false,
         planWrite: Bool = false,
+        questionCard: Bool = false,
         onProgress: @escaping @MainActor (AgentProgress) -> Void,
         onChunk: @escaping @MainActor (String) -> Void,
         onApproval: (@MainActor (AgentV2Approval) -> Void)? = nil,
@@ -323,7 +330,8 @@ extension LlmIdeAPIClient {
             message: message, language: language, model: model, provider: provider,
             tier: tier, history: history, attachments: attachments, skills: skills,
             agentContext: agentContext, mode: mode, planExecute: planExecute ? true : nil,
-            planWrite: planWrite ? true : nil))
+            planWrite: planWrite ? true : nil,
+            clientCaps: questionCard ? ["question-card"] : nil))
 
         // 401 here = the access token expired between turns; refresh and
         // re-open once (see `connectAuthedStream`) instead of reporting it.
