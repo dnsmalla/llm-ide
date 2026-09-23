@@ -453,6 +453,24 @@ extension LlmIdeAPIClient {
     /// Number of times `connectAgentV2Stream` retries a 409 before giving up.
     private static let turnLockMaxAttempts = 4
 
+    /// The chat id an agent/v2 request body carries (`agentContext.chatSessionId`).
+    static func chatSessionId(inAgentV2Body body: [String: Any]) -> String? {
+        guard let ctx = body["agentContext"] as? [String: Any],
+              let id = ctx["chatSessionId"] as? String, !id.isEmpty else { return nil }
+        return id
+    }
+
+    /// POST /agent/v2/cancel — stop this user's in-flight Agent-engine turn
+    /// for `chatSessionId` (see `agentV2Stream`'s orphaned-lock recovery).
+    /// Returns whether a turn was running.
+    func cancelAgentV2Turn(chatSessionId: String) async throws -> Bool {
+        struct Req: Encodable { let chatSessionId: String }
+        struct Resp: Decodable { let cancelled: Bool? }
+        let r: Resp = try await post("/agent/v2/cancel", body: Req(chatSessionId: chatSessionId),
+                                     authenticated: true)
+        return r.cancelled ?? false
+    }
+
     /// Opens the SSE connection, absorbing the TURN_IN_PROGRESS race left by
     /// Stop: cancelling the previous turn's `URLSession` task closes the
     /// connection on the client immediately, but the server only frees its
@@ -523,8 +541,26 @@ extension LlmIdeAPIClient {
         // refresh re-enters `connectAgentV2Stream`, so the retried connect
         // gets its own 409 budget — bounded, because the refresh itself
         // happens at most once per turn.
-        let (bytes, http) = try await connectAuthedStream(req) { attempt in
+        var (bytes, http) = try await connectAuthedStream(req) { attempt in
             try await self.connectAgentV2Stream(attempt)
+        }
+        // Still locked after the short retries: the server is running a turn
+        // for this chat that THIS app is not — the caller only sends from an
+        // idle chat, and a phone turn on the displayed chat would make it
+        // busy. It is an orphan (a Stop still unwinding, a stream the app let
+        // go of), and it used to hold the lock until it ran to completion —
+        // minutes, during which every message failed with TURN_IN_PROGRESS
+        // and there was no Stop to press. Stop it (server API v54), give the
+        // SDK a moment to unwind (~2 s), and try again. An older server
+        // answers the cancel with a 404, which just leaves the old behaviour.
+        if http.statusCode == 409, let chatId = Self.chatSessionId(inAgentV2Body: body) {
+            let cancelled = (try? await cancelAgentV2Turn(chatSessionId: chatId)) ?? false
+            Self.agentV2Log.info("agent/v2 turn lock still held — cancelled orphaned turn: \(cancelled)")
+            for _ in 0..<2 where http.statusCode == 409 {
+                (bytes, http) = try await connectAuthedStream(req) { attempt in
+                    try await self.connectAgentV2Stream(attempt)
+                }
+            }
         }
         guard http.statusCode == 200 else {
             // Validation failures answer as plain JSON before the SSE
