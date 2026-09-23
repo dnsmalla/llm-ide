@@ -41,6 +41,15 @@ extension CodeAssistantPanel {
             summary: "(the user dismissed the question without choosing: \(args.question))",
             exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
         await engine.acknowledge(payload, followUp: .none)
+        // Mid plan run nothing else will settle the run now: the auto-continue
+        // stood down for the card, and no follow-up is sent. Left as is, the
+        // run card stays on "Executing plan…" with no Dismiss and the picker
+        // stays pinned to Execute. `.failed`-style interruption is the phase
+        // whose card offers Dismiss — the same exit the round-cap takes.
+        if var tracker = engine.agent.planExecution, tracker.settleInterrupted() {
+            engine.agent.planExecution = tracker
+            engine.hooks.onPlanExecutionSettled()
+        }
     }
 
     /// The chosen label(s) as one quoted, human-readable phrase. The card
@@ -51,9 +60,18 @@ extension CodeAssistantPanel {
                                          for args: PendingTool.AskUserArgs) -> String {
         guard let raw = answers[args.question] ?? answers.values.first, !raw.isEmpty else { return "" }
         guard args.multiSelect == true else { return "\"\(raw)\"" }
-        let picked = args.options.filter { option in
-            raw == option || raw.hasPrefix(option + ",") || raw.hasSuffix("," + option)
-                || raw.contains("," + option + ",")
+        // The card sorts the chosen labels and comma-joins them, so find the
+        // subset of offered options that joins to exactly `raw` — at most 6
+        // options, so 63 subsets. Substring matching mis-read labels that
+        // contain commas (["A,B", "B"], picking "A,B" also reported "B").
+        let options = args.options
+        var picked: [String] = []
+        for mask in 1..<(1 << options.count) {
+            let subset = options.indices.filter { mask & (1 << $0) != 0 }.map { options[$0] }
+            if subset.sorted().joined(separator: ",") == raw {
+                picked = subset
+                break
+            }
         }
         let labels = picked.isEmpty ? [raw] : picked
         return labels.map { "\"\($0)\"" }.joined(separator: " and ")

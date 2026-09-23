@@ -903,6 +903,10 @@ final class ChatEngine {
             // message purely to pass the server's empty-message guard.
             var input = await hooks.resolveTransportInput("(continue)", recent, [], [])
             stampOwnIdentity(&input)
+            // Inside a running plan run this round IS the run (an answered
+            // question, a confirmed card): without the flag the server drops
+            // the execution skill for it — same rule as the auto-continue.
+            if agent.planExecution?.phase == .running { input.planExecute = true }
             let resp = try await transport.roundTrip(
                 input,
                 onProgress: { [self] progress in recordProgress(progress) },

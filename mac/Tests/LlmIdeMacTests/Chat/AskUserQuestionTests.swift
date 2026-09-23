@@ -78,4 +78,29 @@ struct AskUserQuestionTests {
         #expect(engine.agent.pendingTool?.kind == .askUser)
         #expect(!engine.agent.agentIsAutonomous)
     }
+    @Test("A multi-select label that itself contains a comma is not mistaken for two answers")
+    func commaLabels() {
+        let args = PendingTool.AskUserArgs(question: "Q?", options: ["A,B", "B"], header: nil, multiSelect: true)
+        #expect(CodeAssistantPanel.chosenAnswer(["Q?": "A,B"], for: args) == "\"A,B\"")
+        #expect(CodeAssistantPanel.chosenAnswer(["Q?": "A,B,B"], for: args) == "\"A,B\" and \"B\"")
+    }
+
+    @Test("Answering a question inside a plan run keeps the run's planExecute on the follow-up round")
+    func followUpKeepsPlanExecute() async {
+        let t = ScriptedChatTransport()
+        let engine = ChatEngine(scope: .explorer, transport: t)
+        engine.hooks.resolveTransportInput = { msg, history, _, skills in
+            ChatTransportInput(message: msg, history: history, attachments: [],
+                               skills: skills, agentContext: nil, language: "en",
+                               model: nil, provider: nil, mode: "execute")
+        }
+        engine.agent.planExecution = PlanExecutionTracker(planTitle: "P", steps: ["a"], planCardMessageId: UUID())
+        t.result = .init(reply: "ok", pendingTool: nil, tasks: [], continueNeeded: false,
+                         usage: nil, mode: nil, tokenUsage: nil)
+        let payload = ChatMessage.ToolResultPayload(
+            kind: .other, summary: "(the user chose \"SQLite\" for: Which DB?)",
+            exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
+        await engine.acknowledge(payload, followUp: .forceUnblock)
+        #expect(t.receivedInputs.last?.planExecute == true)
+    }
 }
