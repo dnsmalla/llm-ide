@@ -49,7 +49,7 @@ enum ChatAttachmentReader {
         if ext == "pdf" {
             // Its TEXT, not its bytes: a PDF sent as base64 reached the model
             // as 80K characters of meaningless base64 (~60K tokens spent).
-            guard let text = PDFDocument(data: data)?.string?
+            guard let text = pdfText(data)?
                 .trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
                 return .refused("\u{201C}\(name)\u{201D} has no text layer (a scanned PDF?) — nothing to attach.")
             }
@@ -65,6 +65,25 @@ enum ChatAttachmentReader {
         }
         guard let text = decodeText(data) else { return .notText }
         return .content(text)
+    }
+
+    /// Most text taken from a PDF. The server keeps 80K characters of an
+    /// attachment, so reading past this is work nobody sees — and
+    /// `PDFDocument.string` extracted EVERY page up front, which for a
+    /// several-hundred-page PDF blocked the UI for seconds.
+    static let maxPDFTextChars = 200_000
+
+    /// Page by page, stopping once `maxPDFTextChars` is reached.
+    static func pdfText(_ data: Data) -> String? {
+        guard let doc = PDFDocument(data: data) else { return nil }
+        var out = ""
+        for i in 0..<doc.pageCount {
+            guard let page = doc.page(at: i)?.string, !page.isEmpty else { continue }
+            if !out.isEmpty { out += "\n\n" }
+            out += page
+            if out.count >= maxPDFTextChars { return String(out.prefix(maxPDFTextChars)) }
+        }
+        return out
     }
 
     /// UTF-8 first; then UTF-16 when it carries a BOM, then the Japanese
