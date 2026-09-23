@@ -98,8 +98,30 @@ struct ExplorerProjectScopeTests {
             ChatSessionStore.save(legacy)
             let e = engine(project: p)
             e.switchSession(to: legacy.id)
+            // Just opening it (the load's own persist) must NOT claim it —
+            // that made every project switch move an old chat into whichever
+            // project was open.
+            e.persistCurrentChat()
+            #expect(ChatSessionStore.load(id: legacy.id)?.projectId == nil)
+            // Working in it does.
+            e.messages.append(ChatMessage(role: .user, content: "hi", status: .done, createdAt: Date()))
             e.persistCurrentChat()
             #expect(ChatSessionStore.load(id: legacy.id)?.projectId == p)
+        }
+    }
+
+    @Test("After a project switch or a delete, this project's own chat is preferred over an unassigned one")
+    func ownChatPreferred() async {
+        await withTempStore {
+            let p = "proj-\(UUID().uuidString)"
+            defer { cleanPointer(p) }
+            let own = ChatSession(scope: .explorer, title: "own", lastUsedAt: Date(timeIntervalSinceNow: -60), projectId: p)
+            let legacy = ChatSession(scope: .explorer, title: "legacy", lastUsedAt: Date())
+            ChatSessionStore.save(own)
+            ChatSessionStore.save(legacy)
+            let e = engine(project: p)
+            e.refreshSessions()
+            #expect(e.preferredSessionForCurrentProject() == own.id)
         }
     }
 

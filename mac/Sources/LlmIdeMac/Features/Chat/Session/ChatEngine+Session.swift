@@ -97,8 +97,14 @@ extension ChatEngine {
             ?? ChatSession(id: id, scope: scope, projectId: projectIdForNewSession)
         session.scope = scope
         // An unassigned (pre-stamping) Explorer chat belongs to the first
-        // project that saves it — see `ChatSessionStore.list(for:visibleInProject:)`.
-        if scope == .explorer, session.projectId == nil, let project = explorerProjectId {
+        // project that WORKS in it — see `ChatSessionStore.list(for:visibleInProject:)`.
+        // Only when the transcript actually changed: this method also runs
+        // right after a plain history load (`.onChange(of: messages)`), and
+        // claiming there made merely OPENING an old chat — the fallback after
+        // a project switch or a delete, or the old global pointer — move it
+        // into whichever project happened to be open.
+        if scope == .explorer, session.projectId == nil, let project = explorerProjectId,
+           session.messages.map(\.id) != capped.map(\.id) {
             session.projectId = project
         }
         // A straight assignment as of Task 9 — `messages` IS the persisted
@@ -181,7 +187,8 @@ extension ChatEngine {
            session.scope == scope, sessionBelongsToCurrentProject(session) {
             return id
         }
-        return sessions.first?.id
+        // This project's own chats before unassigned ones.
+        return (sessions.first { $0.projectId != nil } ?? sessions.first)?.id
     }
 
     /// Whether `session` may be shown by this engine for its current project.
@@ -254,6 +261,12 @@ extension ChatEngine {
         // ONLY legitimate way a `.quick` engine resumes a session.
         guard scope != .quick, let newest = sessions.first else {
             return .mintFresh
+        }
+        // Explorer: this project's own chats before unassigned ones (the list
+        // holds only those two kinds — see `refreshSessions`).
+        if scope == .explorer, explorerProjectId != nil,
+           let own = sessions.first(where: { $0.projectId != nil }) {
+            return .adopt(own)
         }
         return .adopt(newest)
     }
