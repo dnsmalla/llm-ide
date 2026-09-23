@@ -177,7 +177,7 @@ extension CodeAssistantPanel {
         // Work from the document on disk, exactly as the execute turn does.
         switch addFile(url: url) {
         case .added, .duplicate: break
-        case .notText, .unreadable: return   // nothing to rewrite from
+        case .notText, .unreadable, .refused: return   // nothing to rewrite from
         }
         let title = engine.agent.planExecution?.planTitle
             ?? url.deletingPathExtension().lastPathComponent

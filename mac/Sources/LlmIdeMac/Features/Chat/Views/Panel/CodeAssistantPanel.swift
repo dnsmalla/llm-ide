@@ -738,7 +738,11 @@ struct CodeAssistantPanel: View {
         case .added:
             autoAttachedPath = displayPath(url)
         case .notText:
-            attachNotice = "\u{201C}\(url.lastPathComponent)\u{201D} can't be attached \u{2014} images and binary files aren't supported in chat yet."
+            // Not "images and binary files aren't supported" — images and
+            // PDFs are; this is a file that is neither text nor one of those.
+            attachNotice = "\u{201C}\(url.lastPathComponent)\u{201D} can't be attached \u{2014} it isn't text, an image, or a PDF."
+        case .refused(let reason):
+            attachNotice = reason
         case .unreadable:
             attachNotice = "Could not read file: " + url.lastPathComponent + "."
         case .duplicate:

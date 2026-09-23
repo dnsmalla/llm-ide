@@ -259,13 +259,20 @@ extension CodeAssistantPanel {
         ) { items in
             attachNotice = nil
             var rejected: [String] = []
-            for item in items where addFile(url: item.url) == .notText {
-                rejected.append(item.name)
+            var reasons: [String] = []
+            for item in items {
+                switch addFile(url: item.url) {
+                case .notText, .unreadable: rejected.append(item.name)
+                case .refused(let reason): rejected.append(item.name); reasons.append(reason)
+                case .added, .duplicate: break
+                }
             }
-            if !rejected.isEmpty {
+            if rejected.count == 1, let reason = reasons.first {
+                attachNotice = reason
+            } else if !rejected.isEmpty {
                 attachNotice = rejected.count == 1
-                    ? "File: " + rejected[0] + " - can not be attached"
-                    : "\(rejected.count) files couldn't be attached — images and binary files aren't supported in chat yet."
+                    ? "\u{201C}\(rejected[0])\u{201D} can't be attached — it isn't text, an image, or a PDF."
+                    : "\(rejected.count) files couldn't be attached: " + rejected.joined(separator: ", ") + "."
             }
         }
     }

@@ -60,7 +60,7 @@ extension CodeAssistantPanel {
             switch addFile(url: URL(fileURLWithPath: path)) {
             case .added, .duplicate:
                 attached = true
-            case .notText, .unreadable:
+            case .notText, .unreadable, .refused:
                 break
             }
         }

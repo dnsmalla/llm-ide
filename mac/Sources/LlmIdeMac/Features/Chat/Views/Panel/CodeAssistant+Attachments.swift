@@ -13,43 +13,15 @@ extension CodeAssistantPanel {
         let path = displayPath(url)
         // Idempotent — re-adding the same file does nothing.
         if attachmentState.attachments.contains(where: { $0.path == path }) { return .duplicate }
-        do {
-            let data = try Data(contentsOf: url)
-            let ext = url.pathExtension.lowercased()
-
-            // Known binary types that we support
-            let binaryTypes = ["pdf", "png", "jpg", "jpeg", "gif", "webp"]
-
-            if binaryTypes.contains(ext) {
-                // Encode binary files as base64 with mime type prefix
-                let mime: String
-                switch ext {
-                case "pdf": mime = "application/pdf"
-                case "png": mime = "image/png"
-                case "jpg", "jpeg": mime = "image/jpeg"
-                case "gif": mime = "image/gif"
-                case "webp": mime = "image/webp"
-                default: mime = "application/octet-stream"
-                }
-
-                let base64Content = "[binary:\(mime)]\n" + data.base64EncodedString()
-                attachmentState.attachments.append(LlmIdeAPIClient.CodeAttachment(path: path, content: base64Content))
-                return .added
-            }
-
-            // Text files: reject obviously-binary files (≥1% NUL bytes in the first 4K).
-            // An empty file has no bytes to probe — it's valid (empty) text, so
-            // don't let the `0 >= 0` ratio misclassify it as binary.
-            let probe = data.prefix(4096)
-            if !probe.isEmpty {
-                let nulCount = probe.reduce(into: 0) { acc, b in if b == 0 { acc += 1 } }
-                if nulCount * 100 >= probe.count { return .notText }
-            }
-            guard let text = String(data: data, encoding: .utf8) else { return .notText }
-            attachmentState.attachments.append(LlmIdeAPIClient.CodeAttachment(path: path, content: text))
+        // The rules (size caps, PDF text extraction, encodings) live in
+        // `ChatAttachmentReader` so they are testable without a panel.
+        switch ChatAttachmentReader.read(url) {
+        case .content(let content):
+            attachmentState.attachments.append(LlmIdeAPIClient.CodeAttachment(path: path, content: content))
             return .added
-        } catch {
-            return .unreadable
+        case .refused(let reason): return .refused(reason)
+        case .notText: return .notText
+        case .unreadable: return .unreadable
         }
     }
 

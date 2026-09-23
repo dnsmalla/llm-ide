@@ -29,6 +29,7 @@ extension CodeAssistantPanel {
             switch addFile(url: url) {
             case .added, .duplicate: break
             case .notText:   attachNotice = "That file isn't text — not attached."
+            case .refused(let reason): attachNotice = reason
             case .unreadable: attachNotice = "Couldn't read that file."
             }
             draft = newDraft
@@ -706,7 +707,7 @@ extension CodeAssistantPanel {
         attachmentState.attachments.reduce(0) { $0 + $1.content.count }
     }
 
-    enum AttachOutcome { case added, duplicate, notText, unreadable }
+    enum AttachOutcome: Equatable { case added, duplicate, notText, unreadable, refused(String) }
 
 
     // MARK: - Send
