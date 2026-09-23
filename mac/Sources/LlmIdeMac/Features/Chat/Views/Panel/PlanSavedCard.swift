@@ -78,6 +78,17 @@ struct PlanSavedCard: View {
             header
             if !content.isEmpty, !isExecuting { preview }
             actions
+            if effectiveAction == nil, !isExecuting {
+                // Saving no longer hands the picker back to Auto (which ran
+                // "ok" as an Execute turn in chat), so say what happens next:
+                // nothing runs until Execute, and later messages revise the
+                // plan until the mode is changed.
+                Text("Nothing runs until you press Execute plan. This chat stays in Plan mode — "
+                     + "reply to change the plan, or switch the mode for other work.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.current.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(12)
         .frame(maxWidth: 720, alignment: .leading)
