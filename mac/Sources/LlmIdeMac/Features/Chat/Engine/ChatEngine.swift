@@ -1346,6 +1346,17 @@ final class ChatEngine {
                     // ability to cancel the REAL chain (this closure would
                     // reassign runTask out from under it via startTurn).
                     guard !self.busy else { return }
+                    // A card is still waiting on the USER (a question, or an
+                    // action they confirm by hand). Continuing now would talk
+                    // past it — the agent carrying on without the answer it
+                    // just asked for. Checked here, at fire time, not when
+                    // scheduling: an auto-applied edit is still pending then
+                    // and resolved by now. Answering the card follows up
+                    // itself (`acknowledge`), so nothing is lost by stopping.
+                    guard self.agent.pendingTool == nil else {
+                        self.agent.agentIsAutonomous = false
+                        return
+                    }
                     // Carry the chain's files forward explicitly: they aren't
                     // replayed through `packHistory`, and the composer that
                     // supplied them cleared its chips when the first message
