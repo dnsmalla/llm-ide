@@ -1,0 +1,56 @@
+name: ios-ci
+
+# The iPhone companion and the Mac↔iOS wire types. Nothing built or tested
+# them in CI: a change to a SharedProtocol message could compile on the Mac
+# (which links the package) and still break the iPhone app, and only a manual
+# Xcode build would ever notice.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ios_app/**'
+      - 'Makefile'
+      - '.github/workflows/ios-ci.yml'
+  pull_request:
+    paths:
+      - 'ios_app/**'
+      - 'Makefile'
+      - '.github/workflows/ios-ci.yml'
+
+concurrency:
+  group: ios-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shared-protocol:
+    name: SharedProtocol (wire types)
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select latest stable Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build & test
+        run: make test-shared-protocol
+
+  ios-app:
+    name: iPhone app (unsigned build)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select latest stable Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      # Device SDK, signing off: this proves the app compiles against the
+      # current SharedProtocol without needing a certificate or a simulator
+      # runtime. The project has no shared scheme, so build the target.
+      - name: Build
+        working-directory: ios_app
+        run: |
+          xcodebuild -project MyApp.xcodeproj -target MyApp -configuration Debug \
+            -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
