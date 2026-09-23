@@ -282,6 +282,14 @@ struct CodeAssistantPanel: View {
                 // what sending leaves behind, so the next request is judged
                 // fresh.
                 if newValue.isEmpty { planSwitchDismissed = false }
+                // Edited away from the ↑-recalled entry: it's the user's own
+                // draft now. Leaving the recall active kept ↑/↓ swapping in
+                // history (the edit was lost; ↓ restored only the stash) and
+                // kept the "/" and "@" menus closed for as long as it lasted.
+                if let i = historyIndex, sentPrompts.indices.contains(i), newValue != sentPrompts[i] {
+                    historyIndex = nil
+                    draftStash = ""
+                }
                 if historyIndex == nil {
                     completion.update(draft: newValue)
                 } else {
