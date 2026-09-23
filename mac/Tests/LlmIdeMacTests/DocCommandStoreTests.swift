@@ -103,22 +103,36 @@ final class DocCommandStoreTests: XCTestCase {
         XCTAssertEqual(store.commands.map(\.name), ["Alpha Brief", "Zulu Long"])
     }
 
-    func testFallsBackToBuiltinsWithNoProject() {
-        let store = DocCommandStore()
-        store.reloadProjectCommands(at: nil)
+    func testFallsBackToBuiltinsWithNoProject() throws {
         // `DocCommand.builtins` is deliberately `[]` now — the shipped
         // fallback moved to `GenerationLibraryStore` (cached, so it survives
-        // offline), so comparing against it asserted "the store is empty",
-        // which stopped being the contract. What must hold with no project
-        // open is that the store shows the kit's commands — whatever the
-        // library holds — and that nothing claims to BE a project command.
+        // offline). With no project open the store must show exactly the
+        // kit's commands, and none may claim to BE a project command.
         //
-        // Not `XCTAssertFalse(store.commands.isEmpty)`: that library is a
-        // machine-local cache of a server fetch, so the assertion passed on a
-        // dev machine that had ever reached the server and failed on a fresh
-        // CI runner, which has no cache and no server.
-        let kitFolders = GenerationLibraryStore.shared.commands.filter { !$0.folderName.isEmpty }
-        XCTAssertEqual(store.commands.count, kitFolders.count)
+        // The library is seeded here rather than read as-is: it is a
+        // machine-local cache of a server fetch, so reading it made the test
+        // pass on a dev machine that had ever reached the server and fail on
+        // a fresh CI runner (no cache, no server) — and comparing against it
+        // unseeded would be `0 == 0`, which asserts nothing.
+        let library = GenerationLibraryStore.shared
+        let (savedTemplates, savedCommands) = (library.templates, library.commands)
+        defer { library.replaceEntriesForTesting(templates: savedTemplates, commands: savedCommands) }
+        func entry(_ id: String, _ name: String) throws -> LlmIdeAPIClient.GenerationLibraryEntry {
+            let json = try JSONSerialization.data(withJSONObject: [
+                "id": id, "name": name, "description": "d", "surface": "doc",
+                "body": "# \(name)\n\nDo it.",
+            ])
+            return try JSONDecoder().decode(LlmIdeAPIClient.GenerationLibraryEntry.self, from: json)
+        }
+        library.replaceEntriesForTesting(templates: [], commands: [
+            try entry("doc/brief-summary", "Brief Summary"),
+            try entry("doc/risk-review", "Risk Review"),
+            try entry("", "No Folder"),   // no folder → never shown
+        ])
+
+        let store = DocCommandStore()
+        store.reloadProjectCommands(at: nil)
+        XCTAssertEqual(Set(store.commands.map(\.name)), ["Brief Summary", "Risk Review"])
         XCTAssertTrue(store.commands.allSatisfy { !$0.isProjectCommand })
     }
 

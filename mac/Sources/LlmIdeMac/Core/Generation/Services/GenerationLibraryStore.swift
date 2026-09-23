@@ -36,6 +36,17 @@ final class GenerationLibraryStore: ObservableObject {
 
     private init() { loadCache() }
 
+    /// Test seam: set the in-memory entries directly — no server, no disk
+    /// cache write, no `.generationLibraryChanged` post. The library is
+    /// otherwise only a machine-local cache of a server fetch, so a test that
+    /// read it saw whatever that machine last fetched (and nothing at all on
+    /// a fresh CI runner). Callers restore the previous values when done.
+    func replaceEntriesForTesting(templates: [LlmIdeAPIClient.GenerationLibraryEntry],
+                                  commands: [LlmIdeAPIClient.GenerationLibraryEntry]) {
+        self.templates = templates
+        self.commands = commands
+    }
+
     /// Fetch from the server and refresh the cache. Best-effort: on any
     /// failure the previously cached entries stay in place.
     func refresh(api: LlmIdeAPIClient) async {
