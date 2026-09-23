@@ -459,6 +459,21 @@ Run through this against a real meeting before merging:
 
 ---
 
+## Mac chat mode picker (`mac/Sources/LlmIdeMac/Features/Chat/Views/Panel/ModePolicy.swift`)
+
+The picker holds the mode the NEXT turn is sent in. Every rule is a pure function in `ModePolicy`, asserted by `swift run chat-contract-lab` (`make chat-gates`).
+
+### ✅ MUST preserve
+
+- **Provenance decides releases, not the mode string.** `CodeAssistantModelState` records who set the picker: `pickMode` (the picker control — the ONLY user write) vs `setModeByFlow` (following the server off Auto, and every card action: Execute, Review, Edit in chat, "Switch to Plan"). Lifecycle releases (`releasesStickyMode`, `releasesAtWorkEnd`) act only on `setByFlow`. Deciding by string released hand-picks too — a user's chosen Execute was taken away when a run settled. Never assign `selectedMode` directly (it is `private(set)`).
+- **The picker follows the server only while it is on Auto** (`pickerMode`), and a phone-driven turn never publishes its mode (`ChatEngine.externalTurnActive`): the phone sends `auto_read_only`, which clamps writes to `ask`, and following it left the Mac on Ask.
+- **One-piece-of-work modes are released when the work settles.** `hooks.onWorkSettled` fires from `drainQueueOrRelease` only when idle with no auto-continue scheduled and no card/approval pending; the panel then releases a flow-set Execute / Review / Document (`releasesAtWorkEnd`). Plan / Assist Plan are multi-turn and stay until the plan is saved; a live plan run keeps its Execute until it settles. Before this, a classified Execute stuck for the rest of the chat and nothing was classified again.
+- **Count a pending follow.** The legacy engine reports its mode on the terminal event and the picker follows it a view-update later — after the engine is already idle. `onWorkSettled` decides on `ModePolicy.selection(_:afterPendingResolution:)` and retracts `resolvedMode`, or the late follow parks the picker on a mode nothing releases.
+- **A mode travels with its conversation.** On a session change the outgoing chat's selection is remembered (in memory) and the incoming chat's restored (`pickerSelectionAfterSessionChange`); a chat not seen this run — new or cleared — starts on Auto.
+- **A plan run's tracker is installed when its turn STARTS** (`QueuedMessage.planTracker` → `runTurn`), never at click time — the turn still ahead of a queued Execute otherwise settles it. Auto-continue rounds of a live run keep `planExecute`. The saved-plan card's lock is live-derived (`ChatEngine.livePlanCardAction`), never the persisted tap.
+
+---
+
 ## Loop Engineering (`mac/Sources/LlmIdeMac/{Models,Services}/LoopEngine/`)
 
 Design rationale lives in [Loop Engineering](loop-engineering.md); this is the operational checklist.

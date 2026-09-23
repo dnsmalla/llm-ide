@@ -98,7 +98,38 @@ final class CodeAssistantModelState {
     var customProviders: [CustomProvider] = []
     var showAddModel = false
     var newModelId = ""
-    /// User-selected mode for the NEXT turn. Defaults to `.auto` — the
-    /// server classifies the request itself when this is sent as "auto".
-    var selectedMode: CodeAssistMode = .auto
+    /// Mode for the NEXT turn. Defaults to `.auto` — the server classifies
+    /// the request itself when this is sent as "auto". Write it through
+    /// `pickMode` (the user) or `setModeByFlow` (everything else), never
+    /// directly: which of the two set it decides whether the lifecycle may
+    /// release it (`ModePolicy.Selection`).
+    private(set) var selectedMode: CodeAssistMode = .auto
+    /// Whether `selectedMode` was set by the flow rather than the user.
+    private(set) var modeSetByFlow = false
+    /// The picker as each chat left it, keyed by session id, so switching
+    /// back restores it. In memory only: a relaunch starts every chat on Auto.
+    var rememberedModes: [String: ModePolicy.Selection] = [:]
+
+    var modeSelection: ModePolicy.Selection {
+        ModePolicy.Selection(mode: selectedMode.rawValue, setByFlow: modeSetByFlow)
+    }
+
+    /// The user chose `mode` in the picker.
+    func pickMode(_ mode: CodeAssistMode) {
+        selectedMode = mode
+        modeSetByFlow = false
+    }
+
+    /// The flow set `mode`: the picker followed the server off Auto, or a
+    /// card action (Execute, Review, Edit in chat) moved it.
+    func setModeByFlow(_ mode: CodeAssistMode) {
+        selectedMode = mode
+        modeSetByFlow = mode != .auto
+    }
+
+    /// Restore a remembered (or default) selection wholesale.
+    func restore(_ selection: ModePolicy.Selection) {
+        selectedMode = CodeAssistMode(rawValue: selection.mode) ?? .auto
+        modeSetByFlow = selectedMode == .auto ? false : selection.setByFlow
+    }
 }

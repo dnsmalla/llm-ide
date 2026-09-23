@@ -89,7 +89,7 @@ extension CodeAssistantPanel {
         // is exactly right for a review — and exactly why the diff is
         // ATTACHED rather than left for the agent to fetch: in this mode it
         // could not run `git diff` itself.
-        modelState.selectedMode = .review
+        modelState.setModeByFlow(.review)
         var attachments = attachmentState.attachments
         if let idx = attachments.firstIndex(where: { $0.path == Self.reviewDiffLabel }) {
             attachments[idx] = LlmIdeAPIClient.CodeAttachment(

@@ -54,7 +54,7 @@ extension CodeAssistantPanel {
             attachNotice = "Resolve the pending action card first, then execute the plan."
             return
         }
-        modelState.selectedMode = .execute
+        modelState.setModeByFlow(.execute)
         var attached = false
         if let path = payload.url {
             switch addFile(url: URL(fileURLWithPath: path)) {
@@ -282,7 +282,7 @@ extension CodeAssistantPanel {
     func editSavedPlanInChat(_ payload: ChatMessage.ToolResultPayload, messageId: UUID) {
         markPlanCardAction(.edit, for: messageId)
         if modelState.selectedMode != .plan && modelState.selectedMode != .assistPlan {
-            modelState.selectedMode = .plan
+            modelState.setModeByFlow(.plan)
         }
         if draft.isEmpty {
             draft = PlanEditPolicy.refineSeed(title: payload.planTitle ?? "")
@@ -296,7 +296,7 @@ extension CodeAssistantPanel {
     @MainActor
     func refinePlanInChat(from message: ChatMessage) {
         if modelState.selectedMode != .plan && modelState.selectedMode != .assistPlan {
-            modelState.selectedMode = .plan
+            modelState.setModeByFlow(.plan)
         }
         if draft.isEmpty {
             draft = PlanEditPolicy.refineSeed(title: Self.planTitle(from: message.content))
@@ -420,11 +420,9 @@ extension CodeAssistantPanel {
     /// stickiness, never to overrule a choice.
     @MainActor
     func releaseStickyMode(from stages: Set<String> = ModePolicy.planStages) {
-        guard ModePolicy.releasesStickyMode(
-            current: modelState.selectedMode.rawValue,
-            releasing: stages)
+        guard ModePolicy.releasesStickyMode(modelState.modeSelection, releasing: stages)
         else { return }
-        modelState.selectedMode = .auto
+        modelState.setModeByFlow(.auto)
         // The lifecycle has just taken the picker back. The turn that ended in
         // THIS same frame also recorded its resolved mode, and the panel's
         // `.onChange(of: engine.resolvedMode)` is delivered on the next view

@@ -749,6 +749,13 @@ final class ChatEngine {
             // registry adopting this engine) lands here, where there is no
             // round-trip holding the old one.
             applyPendingTransportIfAny()
+            // The work is over only if nothing is about to resume it: no
+            // auto-continue round scheduled, and no card or approval the
+            // agent is waiting on (answering one sends a "(continue)"
+            // follow-up that belongs to the same piece of work).
+            if !agent.agentIsAutonomous, agent.pendingTool == nil, pendingApproval == nil {
+                hooks.onWorkSettled()
+            }
         }
     }
 

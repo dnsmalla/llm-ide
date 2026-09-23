@@ -648,7 +648,10 @@ extension CodeAssistantPanel {
 
     /// Code-assist mode selector (Auto / Plan / Assist Plan / Code Review / Document / Execute).
     var modePicker: some View {
-        chipMenu($modelState.selectedMode)
+        // The picker is the one place the USER sets the mode; every other
+        // write is the flow's (`setModeByFlow`) — see ModePolicy.Selection.
+        chipMenu(Binding(get: { modelState.selectedMode },
+                         set: { modelState.pickMode($0) }))
     }
 
     func currentModelDisplayName(for cli: AICliTool) -> String {

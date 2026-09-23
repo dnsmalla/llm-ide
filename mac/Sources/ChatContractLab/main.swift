@@ -1046,6 +1046,61 @@ do {
            "an unknown wire value moves nothing")
 }
 
+// ModePolicy.Selection — provenance. Releases act only on a mode the FLOW
+// set; a hand-pick is never taken away (it used to be: a hand-picked Execute
+// was released when a run settled, because releases keyed on the string).
+do {
+    let flowExecute = ModePolicy.Selection(mode: "execute", setByFlow: true)
+    let userExecute = ModePolicy.Selection(mode: "execute", setByFlow: false)
+    expect(ModePolicy.releasesStickyMode(flowExecute, releasing: ModePolicy.runStages),
+           "a flow-set Execute is released when its run settles")
+    expect(!ModePolicy.releasesStickyMode(userExecute, releasing: ModePolicy.runStages),
+           "a hand-picked Execute is NOT released by the run lifecycle")
+    expect(!ModePolicy.Selection(mode: "auto", setByFlow: true).setByFlow,
+           "Auto carries no provenance")
+}
+
+// ModePolicy.releasesAtWorkEnd — one-piece-of-work modes the flow set go back
+// to Auto when the work settles; multi-turn planning stays; a live plan run
+// keeps its Execute; a hand-pick stays. Before this, a classified Execute or
+// Document stuck for the rest of the chat and nothing was classified again.
+do {
+    let flow = { ModePolicy.Selection(mode: $0, setByFlow: true) }
+    expect(ModePolicy.releasesAtWorkEnd(flow("execute"), planRunActive: false),
+           "a classified Execute is released when the work is over")
+    expect(ModePolicy.releasesAtWorkEnd(flow("document"), planRunActive: false),
+           "a classified Document is released too")
+    expect(ModePolicy.releasesAtWorkEnd(flow("review"), planRunActive: false),
+           "and a classified Review")
+    expect(!ModePolicy.releasesAtWorkEnd(flow("plan"), planRunActive: false),
+           "Plan is a multi-turn conversation — it stays until the plan is saved")
+    expect(!ModePolicy.releasesAtWorkEnd(flow("assist_plan"), planRunActive: false),
+           "so is Assist Plan")
+    expect(!ModePolicy.releasesAtWorkEnd(flow("execute"), planRunActive: true),
+           "a live plan run keeps its Execute until the run settles")
+    expect(!ModePolicy.releasesAtWorkEnd(ModePolicy.Selection(mode: "execute", setByFlow: false),
+                                         planRunActive: false),
+           "a hand-picked Execute survives the end of the work")
+    // The legacy engine's mode lands on the terminal event and the picker
+    // follows it a view-update later — the release must count it.
+    let pending = ModePolicy.selection(.auto, afterPendingResolution: "execute")
+    expect(pending == flow("execute"), "a pending follow counts as flow-set")
+    expect(ModePolicy.releasesAtWorkEnd(pending, planRunActive: false),
+           "so a turn that resolved Execute on Auto does not park the picker there")
+    expect(ModePolicy.selection(flow("plan"), afterPendingResolution: "execute") == flow("plan"),
+           "off Auto, a resolution changes nothing")
+}
+
+// ModePolicy.pickerSelectionAfterSessionChange — a chat gets its own picker
+// back; a chat never seen this run starts on Auto.
+do {
+    let planning = ModePolicy.Selection(mode: "plan", setByFlow: true)
+    expect(ModePolicy.pickerSelectionAfterSessionChange(remembered: planning) == planning,
+           "switching back mid-pipeline restores Plan (was: dropped to Auto)")
+    expect(ModePolicy.pickerSelectionAfterSessionChange(remembered: nil) == .auto,
+           "a new or never-seen chat starts on Auto")
+}
+
 // ModePolicy.pickerModeAfterSessionChange — a cleared, new or switched
 // conversation starts on Auto, from ANY origin. The one rule that overrules a
 // hand-picked mode: a mode is chosen for a conversation, not for the panel,

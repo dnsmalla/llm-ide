@@ -536,6 +536,20 @@ struct CodeAssistantPanel: View {
             guard ObjectIdentifier(engine) == wiredID else { return }
             releaseStickyMode(from: ModePolicy.runStages)
         }
+        // The work is over (idle, nothing scheduled or waiting): a mode the
+        // FLOW set for it goes back to Auto so the next message is
+        // classified on its own — see ModePolicy.releasesAtWorkEnd. Counts
+        // a resolution the picker is about to follow, and retracts it.
+        engine.hooks.onWorkSettled = {
+            guard ObjectIdentifier(engine) == wiredID else { return }
+            let effective = ModePolicy.selection(modelState.modeSelection,
+                                                 afterPendingResolution: engine.resolvedMode)
+            guard ModePolicy.releasesAtWorkEnd(
+                effective, planRunActive: engine.agent.planExecution?.phase == .running)
+            else { return }
+            modelState.setModeByFlow(.auto)
+            engine.resolvedMode = nil
+        }
         engine.hooks.onRecordPrompt = { _ = session.record(prompt: $0) }
         engine.hooks.onNudge = { prompt in
             if session.shouldNudge(for: prompt) { engine.agent.nudgePrompt = prompt }
@@ -775,7 +789,7 @@ struct CodeAssistantPanel: View {
                                                            resolved: raw),
                           let mode = CodeAssistMode(rawValue: next)
                     else { return }
-                    modelState.selectedMode = mode
+                    modelState.setModeByFlow(mode)
                 }
                 // The conversation itself changed — cleared, replaced by a new
                 // chat, or switched to another session. Every one of those
@@ -790,12 +804,22 @@ struct CodeAssistantPanel: View {
                 // Gated on the OLD id being non-empty: the first-load restore
                 // (`""` → the remembered id) replaces nothing, and the picker is
                 // already on its default, so it must not read as a change.
-                .onChange(of: engine.currentSessionIDString) { old, _ in
-                    guard !old.isEmpty,
-                          let mode = CodeAssistMode(rawValue: ModePolicy.pickerModeAfterSessionChange(
-                              from: modelState.selectedMode.rawValue))
-                    else { return }
-                    modelState.selectedMode = mode
+                .onChange(of: engine.currentSessionIDString) { old, new in
+                    guard !old.isEmpty else { return }
+                    // The outgoing chat keeps its picker; the incoming one
+                    // gets back whatever it held (Auto for a chat never seen
+                    // this run — a new or cleared chat included).
+                    modelState.rememberedModes[old] = modelState.modeSelection
+                    var next = ModePolicy.pickerSelectionAfterSessionChange(
+                        remembered: modelState.rememberedModes[new])
+                    // A remembered one-piece-of-work mode whose work finished
+                    // while the chat was off screen is not worth restoring.
+                    if !engine.hasPendingWork,
+                       ModePolicy.releasesAtWorkEnd(
+                           next, planRunActive: engine.agent.planExecution?.phase == .running) {
+                        next = .auto
+                    }
+                    modelState.restore(next)
                     // Same retraction `releaseStickyMode` performs. The engine
                     // already clears the outgoing chat's resolution in
                     // `resetTransientSessionState`, but staying on Auto through
