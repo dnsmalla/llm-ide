@@ -139,7 +139,7 @@ extension CodeAssistantPanel {
                                     // FIRST: left running, its turn-end
                                     // persist would write the session file
                                     // straight back after the delete.
-                                    ChatEngineRegistry.shared.discardBackground(sessionID: session.id)
+                                    ChatEngineRegistry.shared.discardOffScreenEngines(sessionID: session.id)
                                     Task { await engine.deleteSession(session.id) }
                                 },
                                 onRename: { newTitle in
@@ -160,6 +160,11 @@ extension CodeAssistantPanel {
     /// it was the last remaining session for this scope).
     var clearChatButton: some View {
         Button {
+            // Same as the picker's delete: no off-screen engine may write
+            // this chat back after it is gone.
+            if let id = UUID(uuidString: engine.currentSessionIDString) {
+                ChatEngineRegistry.shared.discardOffScreenEngines(sessionID: id)
+            }
             Task { await engine.clearCurrentChat() }
         } label: {
             Image(systemName: "trash")

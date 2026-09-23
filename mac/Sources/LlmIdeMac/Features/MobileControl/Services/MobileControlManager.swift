@@ -970,10 +970,12 @@ final class MobileControlManager {
     /// session its engine is showing (cancel + finalize the in-flight turn,
     /// delete, fall back to the next session or mint a fresh one — which is
     /// also what moves the engine OFF the deleted id so nothing can
-    /// re-persist it), so both holders go through it. The shared engine and
-    /// a cached off-screen engine can BOTH hold the same id (Mac switched to
-    /// a session the phone had opened off-screen), so check each. A session
-    /// nobody holds takes the raw delete — plus the memory forget the raw
+    /// re-persist it), so the shared engine goes through it when it is
+    /// showing the session. Off-screen engines — parked by the Mac mid-turn
+    /// or held by this bridge — are detached and dropped instead
+    /// (`ChatEngineRegistry.discardOffScreenEngines`); the parked lot used
+    /// to be skipped entirely, so a parked turn resurrected the chat. The
+    /// file itself is then removed directly — plus the memory forget the raw
     /// path used to skip, which is also re-issued unconditionally because
     /// off-screen engines never get a panel to wire their
     /// `forgetSessionMemory` hook (a duplicate server DELETE is idempotent).
@@ -985,11 +987,15 @@ final class MobileControlManager {
         // must not be skipped when it's nil, or the phone silently keeps a
         // session it deleted.
         let shared = api.map { ChatEngineRegistry.shared.engine(for: .explorer, api: $0) }
+        // Off-screen engines FIRST — the one the Mac parked mid-turn and the
+        // one this bridge holds for a phone turn. Left running, either would
+        // persist the chat again at turn end and resurrect it. They are
+        // forgotten rather than `deleteSession`ed: that would move an engine
+        // nothing displays onto a fallback chat and overwrite the Explorer's
+        // "last active chat" pointer from it.
+        ChatEngineRegistry.shared.discardOffScreenEngines(sessionID: uid)
         if shared?.currentSessionIDString == uid.uuidString {
             await shared?.deleteSession(uid)
-        }
-        if let cached = explorerMobileEngineResolver.cachedEngine(for: uid) {
-            await cached.deleteSession(uid)
         }
         if ChatSessionStore.load(id: uid) != nil {
             ChatSessionStore.delete(id: uid)

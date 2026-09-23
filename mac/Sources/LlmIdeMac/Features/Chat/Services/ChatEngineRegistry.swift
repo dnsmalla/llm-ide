@@ -312,17 +312,27 @@ final class ChatEngineRegistry {
         externalHolder?.forgetAllHeldEngines()
     }
 
-    /// Stop and drop the background engine holding `sessionID`, if any.
+    /// Stop and drop every OFF-SCREEN engine holding `sessionID` — the one
+    /// parked in this registry's background lot and the one the external
+    /// holder (the phone bridge) keeps — without writing either back.
     ///
-    /// Required before deleting a chat: a parked engine still running that
-    /// session would persist it again at turn end and RESURRECT the file the
-    /// delete just removed — and `ChatEngine.deleteSession` can only reach
-    /// the engine it is called on, which by definition is not this one.
-    func discardBackground(sessionID: UUID) {
-        guard let engine = background.removeValue(forKey: sessionID) else { return }
-        backgroundOrder.removeAll { $0 == sessionID }
-        engine.stop()
-        engine.persistsUnobserved = false
+    /// Required before deleting a chat: an engine still running that session
+    /// would persist it again at turn end and RESURRECT the file the delete
+    /// just removed (`persistCurrentChat` recreates a missing file by id), and
+    /// `ChatEngine.deleteSession` can only reach the engine it is called on,
+    /// which by definition is not one of these. `stop()` alone was not enough:
+    /// a cancelled PHONE turn persists in its cancel path, so the engine is
+    /// also detached from the session (`forgetForSignOut` blanks its id,
+    /// which makes that late persist a no-op).
+    func discardOffScreenEngines(sessionID: UUID) {
+        if let engine = background.removeValue(forKey: sessionID) {
+            backgroundOrder.removeAll { $0 == sessionID }
+            engine.forgetForSignOut()
+        }
+        if let held = externalHolder?.heldEngine(for: sessionID) {
+            externalHolder?.releaseHeldEngine(for: sessionID)
+            held.forgetForSignOut()
+        }
     }
 
     // MARK: - Lot management

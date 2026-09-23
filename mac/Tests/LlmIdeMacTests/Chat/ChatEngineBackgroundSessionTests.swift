@@ -318,7 +318,7 @@ struct ChatEngineBackgroundSessionTests {
     // Deleting a chat that is still working has to stop it first: its
     // turn-end persist would otherwise write the session file straight back
     // after the delete removed it.
-    @Test("discardBackground stops the parked turn so a delete can't be undone by it")
+    @Test("discardOffScreenEngines stops the parked turn so a delete can't be undone by it")
     func discardBackgroundStopsTheTurn() async {
         await withTempStore {
             let blocking = BlockingChatTransport()
@@ -331,7 +331,7 @@ struct ChatEngineBackgroundSessionTests {
             _ = registry.switchDisplayedSession(scope: Self.scope, to: b, api: Self.api)
             await settle()
 
-            registry.discardBackground(sessionID: a)
+            registry.discardOffScreenEngines(sessionID: a)
             blocking.finish()
             await settle()
 
@@ -339,4 +339,46 @@ struct ChatEngineBackgroundSessionTests {
             #expect(registry.backgroundRunningSessionIDs.isEmpty)
         }
     }
+    // The phone bridge's off-screen engine is the other writer a delete used
+    // to miss: a phone turn running there persisted the chat again at turn
+    // end (or in its cancel path) and brought the deleted chat back.
+    @Test("discardOffScreenEngines drops the phone-held engine too, and nothing writes the chat back")
+    func discardDropsHeldEngine() async {
+        await withTempStore {
+            let blocking = BlockingChatTransport()
+            let (registry, a, _) = makeFixture(transport: blocking)
+            let held = ChatEngine(scope: Self.scope, transport: blocking)
+            held.hooks.resolveTransportInput = { msg, history, _, skills in
+                ChatTransportInput(message: msg, history: history, attachments: [],
+                                   skills: skills, agentContext: nil, language: "en",
+                                   model: nil, provider: nil, mode: "auto")
+            }
+            held.switchSession(to: a)
+            let holder = FakeEngineHolder(engines: [a: held])
+            registry.externalHolder = holder
+            held.startTurn("from the phone")
+            await settle()
+
+            registry.discardOffScreenEngines(sessionID: a)
+            ChatSessionStore.delete(id: a)
+            blocking.finish()
+            await settle()
+            held.persistCurrentChat()
+
+            #expect(holder.engines[a] == nil, "the holder no longer keeps it")
+            #expect(held.currentSessionIDString.isEmpty)
+            #expect(!held.busy)
+            #expect(ChatSessionStore.load(id: a) == nil, "the deleted chat stays deleted")
+        }
+    }
+}
+
+@MainActor
+private final class FakeEngineHolder: ExternalEngineHolder {
+    var engines: [UUID: ChatEngine]
+    init(engines: [UUID: ChatEngine]) { self.engines = engines }
+    func heldEngine(for sessionID: UUID) -> ChatEngine? { engines[sessionID] }
+    func releaseHeldEngine(for sessionID: UUID) { engines[sessionID] = nil }
+    func forgetAllHeldEngines() { engines.removeAll() }
+    var heldEngines: [ChatEngine] { Array(engines.values) }
 }
