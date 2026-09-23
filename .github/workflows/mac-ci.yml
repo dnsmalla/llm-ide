@@ -236,6 +236,20 @@ jobs:
       - name: Feature boundaries (Shell → Features → Core)
         run: make feature-gates
 
+      # Build every product BEFORE the labs run. On a cold cache, `swift run`
+      # linked + signed ("Applying …") the lab and exec'd it in the same breath,
+      # and the kernel killed it at launch (Killed: 9, exit 137 — run
+      # 35881385566) before it printed a line. The build-test job never hit
+      # this because its `swift build` comes first, so `swift run` only
+      # re-links; do the same here.
+      - name: Build (debug)
+        working-directory: mac
+        run: swift build
+
+      - name: Build graph-kit labs (release)
+        working-directory: mac/LocalPackages/graph-kit
+        run: swift build -c release
+
       - name: Generation contract gate
         run: make generation-gates
 

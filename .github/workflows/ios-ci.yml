@@ -48,9 +48,13 @@ jobs:
 
       # Device SDK, signing off: this proves the app compiles against the
       # current SharedProtocol without needing a certificate or a simulator
-      # runtime. The project has no shared scheme, so build the target.
+      # runtime. The project has no shared scheme, so build the target — and
+      # give it ONE SYMROOT: a `-target` build otherwise writes the local
+      # package to SharedProtocol/build and the app to ios_app/build, and the
+      # app then fails with "no such module 'SharedProtocol'".
       - name: Build
         working-directory: ios_app
         run: |
           xcodebuild -project MyApp.xcodeproj -target MyApp -configuration Debug \
-            -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+            -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            SYMROOT="$RUNNER_TEMP/ios-build" build
