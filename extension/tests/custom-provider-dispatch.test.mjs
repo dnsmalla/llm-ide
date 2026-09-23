@@ -22,7 +22,7 @@ const tmpDb = path.join(os.tmpdir(), `_customprov-${process.pid}-${Math.floor(pe
 process.env.LLMIDE_DB_PATH = tmpDb;
 
 const { handleCodeAssist } = await import('../llm_agent/runtime/route.mjs');
-const { syncCustomProviders } = await import('../server/custom-providers.mjs');
+const { syncCustomProviders, getCustomProvider, handleCustomProvidersSync, _resetCustomProviderCacheForTests } = await import('../server/custom-providers.mjs');
 
 let getDb, registerUser, setSecret, closeDb;
 
@@ -83,7 +83,7 @@ function registerProvider(userId, overrides = {}) {
     id, name: 'GLM', baseURL, apiKey: vaultKey, models: [],
     isOpenAICompatible: true, isEnabled: overrides.isEnabled !== false,
     ...(overrides.anthropicBaseURL ? { anthropicBaseURL: overrides.anthropicBaseURL } : {}),
-  }]);
+  }], userId);
   if (overrides.seedKey !== false) {
     setSecret(getDb(), userId, vaultKey, overrides.keyValue ?? 'sk-glm-test');
   }
@@ -110,13 +110,13 @@ test('handleCodeAssist custom:<uuid>: routes to the provider baseURL with the st
     assert.ok(!out.reply.includes('CLAUDE-FALLBACK'), 'reply must not come from the Anthropic fallback');
   } finally {
     restore();
-    syncCustomProviders([]);
+    syncCustomProviders([], userId);
   }
 });
 
 test('handleCodeAssist custom:<uuid>: throws when the provider is not registered', async () => {
   const { userId } = await setupUser();
-  syncCustomProviders([]); // empty registry
+  syncCustomProviders([], userId); // empty registry
   try {
     await assert.rejects(
       () => handleCodeAssist({
@@ -126,7 +126,7 @@ test('handleCodeAssist custom:<uuid>: throws when the provider is not registered
       }),
       /not found/,
     );
-  } finally { syncCustomProviders([]); }
+  } finally { syncCustomProviders([], userId); }
 });
 
 test('handleCodeAssist custom:<uuid>: throws when no key is stored for the provider', async () => {
@@ -141,7 +141,7 @@ test('handleCodeAssist custom:<uuid>: throws when no key is stored for the provi
       }),
       /No API key configured for GLM/,
     );
-  } finally { syncCustomProviders([]); }
+  } finally { syncCustomProviders([], userId); }
 });
 
 test('handleCodeAssist custom:<uuid>: SSRF guard blocks an internal base URL before any fetch', async () => {
@@ -160,7 +160,7 @@ test('handleCodeAssist custom:<uuid>: SSRF guard blocks an internal base URL bef
     assert.equal(captured.calls, 0, 'fetch must NOT be called for a blocked base URL');
   } finally {
     restore();
-    syncCustomProviders([]);
+    syncCustomProviders([], userId);
   }
 });
 
@@ -179,5 +179,72 @@ test('resolveCustomProviderDispatch: passes the optional anthropicBaseUrl throug
       'https://api.example.com/v1', 'the legacy OpenAI-form base URL is untouched');
     const without = registerProvider(userId);
     assert.equal(resolveCustomProviderDispatch(without, userId).anthropicBaseUrl, null);
-  } finally { syncCustomProviders([]); }
+  } finally { syncCustomProviders([], userId); }
+});
+
+// The registry used to be ONE process-global Map that every sync clear()ed:
+// user B's save wiped user A's providers, and a restart wiped everyone's.
+test('registry: per user — one user\'s sync never touches another user\'s providers', async () => {
+  const { db, userId: a } = await setupUser();
+  const { id: b } = registerUser(db, { email: `b-${Math.floor(performance.now() * 1000)}@ex.com`, password: 'pw-12345678' });
+  const pa = registerProvider(a, { id: 'only-a' });
+  syncCustomProviders([], b);
+  registerProvider(b, { id: 'only-b' });
+  assert.equal(getCustomProvider(pa, a)?.id, 'only-a', 'B\'s syncs must not wipe A');
+  assert.equal(getCustomProvider(pa, b), undefined, 'B cannot resolve A\'s provider');
+  assert.equal(getCustomProvider('custom:only-b', a), undefined, 'A cannot resolve B\'s provider');
+  assert.equal(getCustomProvider(pa, undefined), undefined, 'no user → no provider');
+  assert.throws(() => syncCustomProviders([], undefined), /userId/);
+});
+
+test('registry: persisted — survives a cache reset (server restart) and an empty sync deletes it', async () => {
+  const { db, userId } = await setupUser();
+  const p = registerProvider(userId, { id: 'persist', anthropicBaseURL: 'https://gw.example.com/anthropic/' });
+  _resetCustomProviderCacheForTests(db);
+  const got = getCustomProvider(p, userId);
+  assert.equal(got?.baseURL, 'https://api.example.com/v1');
+  assert.equal(got?.vaultKey, 'custom.abc-123.apiKey');
+  assert.equal(got?.anthropicBaseURL, 'https://gw.example.com/anthropic');
+  syncCustomProviders([], userId);
+  _resetCustomProviderCacheForTests(db);
+  assert.equal(getCustomProvider(p, userId), undefined);
+});
+
+test('registry: invalid entries are dropped (no id / name, non-http baseURL)', async () => {
+  const { userId } = await setupUser();
+  const n = syncCustomProviders([
+    { id: 'ok', name: 'OK', baseURL: 'https://ok.example.com/v1' },
+    { id: '', name: 'X', baseURL: 'https://x.example.com' },
+    { id: 'noname', name: '', baseURL: 'https://x.example.com' },
+    { id: 'file', name: 'F', baseURL: 'file:///etc/passwd' },
+    null,
+  ], userId);
+  assert.equal(n, 1);
+  assert.equal(getCustomProvider('custom:ok', userId)?.vaultKey, 'custom.ok.apiKey', 'default vault key');
+  assert.equal(getCustomProvider('custom:file', userId), undefined);
+  syncCustomProviders([], userId);
+});
+
+test('POST /kb/custom-providers: stores for the caller; 400 without a providers array', async () => {
+  const { Readable } = await import('node:stream');
+  const { userId } = await setupUser();
+  const call = async (method, body) => {
+    const req = Readable.from(body == null ? [] : [Buffer.from(body)]);
+    req.method = method;
+    req.headers = { 'content-type': 'application/json' };
+    const res = {
+      statusCode: 0, body: '', headersSent: false,
+      writeHead(code) { this.statusCode = code; this.headersSent = true; return this; },
+      setHeader() {}, end(b) { this.body = b ?? ''; },
+    };
+    await handleCustomProvidersSync(req, res, userId);
+    return { status: res.statusCode, json: res.body ? JSON.parse(res.body) : null };
+  };
+  const ok = await call('POST', JSON.stringify({ providers: [{ id: 'h', name: 'H', baseURL: 'https://h.example.com' }] }));
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.count, 1);
+  assert.equal(getCustomProvider('custom:h', userId)?.name, 'H');
+  assert.equal((await call('POST', JSON.stringify({ nope: 1 }))).status, 400);
+  assert.equal((await call('GET', null)).status, 405);
+  syncCustomProviders([], userId);
 });

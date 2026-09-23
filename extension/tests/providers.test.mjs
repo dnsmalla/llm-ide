@@ -29,16 +29,23 @@ function secretsDb() {
       ciphertext BLOB NOT NULL,
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (user_id, secret_key)
-    )
+    );
+    CREATE TABLE user_flags (
+      user_id TEXT NOT NULL,
+      flag TEXT NOT NULL,
+      value TEXT NOT NULL DEFAULT '1',
+      set_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, flag)
+    );
   `);
   return db;
 }
 
-// Register one custom provider in the in-memory registry. Returns the
-// `custom:<id>` key. Callers MUST clear the registry (syncCustomProviders([]))
-// in teardown — it is process-global.
-function registerCustom({ id = 'abc', name = 'GLM', baseURL = 'https://api.example.com/v1', vaultKey = 'custom.abc-123.apiKey', isEnabled = true } = {}) {
-  syncCustomProviders([{ id, name, baseURL, apiKey: vaultKey, models: [], isOpenAICompatible: true, isEnabled }]);
+// Register one custom provider for 'user-1' in `db`. Returns the
+// `custom:<id>` key. The registry is per user and per DB, so a fresh
+// secretsDb() starts empty — no global teardown needed.
+function registerCustom({ id = 'abc', name = 'GLM', baseURL = 'https://api.example.com/v1', vaultKey = 'custom.abc-123.apiKey', isEnabled = true } = {}, db = secretsDb()) {
+  syncCustomProviders([{ id, name, baseURL, apiKey: vaultKey, models: [], isOpenAICompatible: true, isEnabled }], 'user-1', db);
   return `custom:${id}`;
 }
 
@@ -495,7 +502,7 @@ test('completeViaApi: a rate-limit 429 (no quota marker) IS retried', async () =
 
 test('resolveCustomProviderDispatch: returns apiKey+baseUrl for a registered, keyed provider', () => {
   const db = secretsDb();
-  const pid = registerCustom();
+  const pid = registerCustom({}, db);
   try {
     setSecret(db, 'user-1', 'custom.abc-123.apiKey', 'sk-glm-test');
     const r = resolveCustomProviderDispatch(pid, 'user-1', db);
@@ -503,7 +510,7 @@ test('resolveCustomProviderDispatch: returns apiKey+baseUrl for a registered, ke
     assert.equal(r.apiKey, 'sk-glm-test');
     assert.equal(r.baseUrl, 'https://api.example.com/v1');
     assert.equal(r.name, 'GLM');
-  } finally { syncCustomProviders([]); }
+  } finally { /* per-user, per-DB registry: nothing to reset */ }
 });
 
 test('resolveCustomProviderDispatch: {error:"not_found"} for an unregistered custom:uuid', () => {
@@ -511,33 +518,36 @@ test('resolveCustomProviderDispatch: {error:"not_found"} for an unregistered cus
     const r = resolveCustomProviderDispatch('custom:bogus', 'user-1', secretsDb());
     assert.equal(r.error, 'not_found');
     assert.match(r.message, /not found/);
-  } finally { syncCustomProviders([]); }
+  } finally { /* per-user, per-DB registry: nothing to reset */ }
 });
 
 test('resolveCustomProviderDispatch: {error:"no_key"} when no secret is stored', () => {
-  const pid = registerCustom();
+  const db = secretsDb();
+  const pid = registerCustom({}, db);
   try {
-    const r = resolveCustomProviderDispatch(pid, 'user-1', secretsDb()); // no setSecret
+    const r = resolveCustomProviderDispatch(pid, 'user-1', db); // no setSecret
     assert.equal(r.error, 'no_key');
     assert.match(r.message, /No API key configured for GLM/);
-  } finally { syncCustomProviders([]); }
+  } finally { /* per-user, per-DB registry: nothing to reset */ }
 });
 
 test('resolveCustomProviderDispatch: {error:"disabled"} when isEnabled is false', () => {
-  const pid = registerCustom({ isEnabled: false });
+  const db = secretsDb();
+  const pid = registerCustom({ isEnabled: false }, db);
   try {
-    const r = resolveCustomProviderDispatch(pid, 'user-1', secretsDb());
+    const r = resolveCustomProviderDispatch(pid, 'user-1', db);
     assert.equal(r.error, 'disabled');
     assert.match(r.message, /disabled/);
-  } finally { syncCustomProviders([]); }
+  } finally { /* per-user, per-DB registry: nothing to reset */ }
 });
 
 test('resolveCustomProviderDispatch: a non-allowlisted vault key degrades to {error:"no_key"}, not a throw', () => {
   // The resolver must swallow a vault error so a misconfigured key never throws
   // into the model call. 'custom.NotAllowed.apiKey' fails the charset gate.
-  const pid = registerCustom({ vaultKey: 'custom.NotAllowed.apiKey' });
+  const db = secretsDb();
+  const pid = registerCustom({ vaultKey: 'custom.NotAllowed.apiKey' }, db);
   try {
-    const r = resolveCustomProviderDispatch(pid, 'user-1', secretsDb());
+    const r = resolveCustomProviderDispatch(pid, 'user-1', db);
     assert.equal(r.error, 'no_key');
-  } finally { syncCustomProviders([]); }
+  } finally { /* per-user, per-DB registry: nothing to reset */ }
 });

@@ -151,7 +151,7 @@ export async function handleKB(req, res) {
 
     // Sync custom providers from Mac app
     if (req.method === 'POST' && url === '/kb/custom-providers') {
-      await handleCustomProvidersSync(req, res);
+      await handleCustomProvidersSync(req, res, userId);
       return true;
     }
 

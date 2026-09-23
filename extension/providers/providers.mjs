@@ -204,7 +204,7 @@ export function providerApiKey(userId, provider) {
 // failure (e.g. a key that somehow isn't allow-listed) degrades to `no_key`
 // rather than throwing into the model call.
 export function resolveCustomProviderDispatch(provider, userId, db = getDb()) {
-  const cp = getCustomProvider(provider);
+  const cp = getCustomProvider(provider, userId, db);
   if (!cp) {
     return { error: 'not_found',
       message: `Custom provider ${provider} not found. Register it in Settings → Model Providers.` };
