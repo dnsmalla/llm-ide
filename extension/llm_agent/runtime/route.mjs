@@ -101,14 +101,16 @@ export function enforceModeToolRestriction(out, resolvedMode, { canAskCard = tru
 }
 
 /**
- * Whether the requesting client can render an `ask-user` card. Only the Code
- * Assistant panel can: the quick surfaces (menu bar, LLM Chat sheet, the
- * phone's quick chat) send `ask`, and the phone's Explorer sends
- * `auto_read_only`; neither has a place to show the card, so for them the
- * tool is not offered and the model asks in prose as before.
+ * Whether the requesting client can render an `ask-user` card: it says so
+ * itself, with the `question-card` capability. Only the Code Assistant panel
+ * sends it. Guessing from the mode was wrong both ways — headless callers
+ * (Loop, fault repair, regression) send no mode and would have been handed a
+ * question nothing shows, while the panel's own Ask mode was refused a card
+ * it can render. A client that sends nothing (older builds included) never
+ * gets the tool, so the model asks in prose as before.
  */
-export function clientCanAskCard(requestedMode) {
-  return requestedMode !== 'ask' && requestedMode !== AUTO_READ_ONLY;
+export function clientCanAskCard(clientCaps) {
+  return Array.isArray(clientCaps) && clientCaps.includes('question-card');
 }
 
 export async function handleCodeAssist({
@@ -133,6 +135,7 @@ export async function handleCodeAssist({
   mode: requestedMode,      // NEW — "auto" | "plan" | "assist_plan" | "review" | "document" | "execute" | undefined
   planExecute,              // client fired the saved-plan card's "Execute plan" — inject the execution skill
   planWrite,                // client fired "Write full plan" — inject the plan-WRITING skill, not stage 1's
+  clientCaps = [],          // what the client renders — "question-card" enables ask-user (API v53)
   // Test seam only — defaults to the real classifier. ESM named exports
   // can't be redefined by node:test's mock.method (module namespace
   // properties are non-configurable), and mock.module() needs
@@ -175,7 +178,7 @@ export async function handleCodeAssist({
   // stamped with; a clamp on one engine only would make the same request
   // behave differently depending on which chat it landed in.
   const readOnlyAuto = requestedMode === AUTO_READ_ONLY;
-  const canAskCard = clientCanAskCard(requestedMode);
+  const canAskCard = clientCanAskCard(clientCaps);
   let resolvedMode;
   if (requestedMode === 'auto' || readOnlyAuto) {
     const classified = (await _classifyMode(message, { userId, model: utilityModel })).mode;

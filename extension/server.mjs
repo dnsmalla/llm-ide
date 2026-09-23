@@ -207,9 +207,10 @@ const HOST = config.host;
 //     than 20 sources, since such a server drops the rest silently.
 //   v53 — classic engine: new `ask-user` pendingTool (a question with 2-4
 //     fixed options, rendered as a tappable card; the chosen label returns
-//     as the tool result). Offered only to the Code Assistant panel — the
-//     quick surfaces (`mode: ask`) and the phone (`auto_read_only`) never get
-//     it. A pre-v53 client simply never receives one.
+//     as the tool result). Offered only when the request carries
+//     `clientCaps: ["question-card"]` (the Code Assistant panel); every other
+//     caller — quick surfaces, the phone, headless callers, pre-v53 clients —
+//     never receives one.
 const SERVER_API_VERSION = 53;
 const ENDPOINTS = [
   '/generate-notes',

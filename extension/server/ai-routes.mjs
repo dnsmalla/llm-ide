@@ -517,6 +517,7 @@ export async function handleAIRoutes(req, res) {
               mode: body.mode,
               planExecute: body.planExecute === true,
               planWrite: body.planWrite === true,
+              clientCaps: Array.isArray(body.clientCaps) ? body.clientCaps : [],
               // Forward the agent loop's per-call opts (maxTokens budget +
               // deadline signal) — without this the loop's AbortSignal.timeout
               // and maxTokens never reach runClaude, so the deadline-abort is
@@ -594,6 +595,7 @@ export async function handleAIRoutes(req, res) {
           mode: body.mode,
           planExecute: body.planExecute === true,
           planWrite: body.planWrite === true,
+          clientCaps: Array.isArray(body.clientCaps) ? body.clientCaps : [],
           // Forward the loop's per-call opts here too (buffered path): the
           // loop's maxTokens budget + its deadline signal must reach runClaude.
           runClaude: (p, opts = {}) => runClaude(p, {
