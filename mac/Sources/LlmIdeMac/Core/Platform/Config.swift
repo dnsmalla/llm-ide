@@ -680,14 +680,18 @@ final class AppConfig: ObservableObject {
     ///   — the phone proxy's included — then sent a Claude model to it.
     /// - Otherwise → the ACTIVE provider's default (was: always Claude's).
     static func startupModelId(stored: String?, activeCLI: String, knownModelIds: Set<String>) -> String {
+        let tool = AICliTool(rawValue: activeCLI) ?? .claudeCode
+        let fallback = tool.defaultModelId.isEmpty ? AICliTool.claudeCode.defaultModelId : tool.defaultModelId
+        // A Claude id under a non-Claude BUILT-IN provider can't run there,
+        // however recognised it is — `knownModelIds` is every provider's
+        // list, so checking it first kept exactly that pairing. The generic
+        // Custom tool is exempt: Anthropic-compatible relays use claude ids.
+        let isClaudeId = stored?.lowercased().hasPrefix("claude") == true
+        if isClaudeId, tool != .claudeCode, tool != .custom { return fallback }
         if let stored, knownModelIds.contains(stored) { return stored }
         if let stored, let mapped = retiredModelIds[stored] { return mapped }
-        let tool = AICliTool(rawValue: activeCLI) ?? .claudeCode
-        if let stored, !stored.isEmpty, tool != .claudeCode, !stored.lowercased().hasPrefix("claude") {
-            return stored
-        }
-        let fallback = tool.defaultModelId
-        return fallback.isEmpty ? AICliTool.claudeCode.defaultModelId : fallback
+        if let stored, !stored.isEmpty, tool != .claudeCode { return stored }
+        return fallback
     }
 
     static let retiredModelIds: [String: String] = ClaudeCLI.retiredModelIds.merging([

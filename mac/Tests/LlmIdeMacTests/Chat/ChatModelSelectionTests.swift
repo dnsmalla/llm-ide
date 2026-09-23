@@ -25,6 +25,15 @@ struct ChatModelSelectionTests {
                                          knownModelIds: known) == openaiDefault)
         #expect(AppConfig.startupModelId(stored: nil, activeCLI: "openai",
                                          knownModelIds: known) == openaiDefault)
+        // Even a RECOGNISED Claude id can't run under OpenAI (review: the
+        // known-ids check used to come first and kept it).
+        if let knownClaude = AICliTool.claudeCode.models.first?.id {
+            #expect(AppConfig.startupModelId(stored: knownClaude, activeCLI: "openai",
+                                             knownModelIds: known) == openaiDefault)
+            // …but the generic Custom tool may front an Anthropic-compatible relay.
+            #expect(AppConfig.startupModelId(stored: knownClaude, activeCLI: "custom",
+                                             knownModelIds: known) == knownClaude)
+        }
         // Claude keeps its stricter rule: an unknown, unmapped id resets.
         #expect(AppConfig.startupModelId(stored: "claude-not-a-model", activeCLI: "claude_code",
                                          knownModelIds: known) == AICliTool.claudeCode.defaultModelId)

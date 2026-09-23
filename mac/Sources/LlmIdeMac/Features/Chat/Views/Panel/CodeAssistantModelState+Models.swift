@@ -95,7 +95,9 @@ extension CodeAssistantModelState {
     /// `custom:<uuid>` provider with a built-in id it doesn't serve), and the
     /// chip read "Claude / gpt-…".
     func followDefaultProvider(activeCLI: String, defaultModelId: String) {
-        selectedProvider = activeCLI.isEmpty ? ClaudeCLI.provider : activeCLI
+        // `.claudeCode.rawValue`, not `ClaudeCLI.provider` ("anthropic",
+        // not an `AICliTool` value — `modelsForCurrentProvider` found no models).
+        selectedProvider = activeCLI.isEmpty ? AICliTool.claudeCode.rawValue : activeCLI
         selectedModel = defaultModelId
     }
 

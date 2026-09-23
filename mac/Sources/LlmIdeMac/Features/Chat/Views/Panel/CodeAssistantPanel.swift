@@ -683,7 +683,7 @@ struct CodeAssistantPanel: View {
                 : config.defaultModelId
         }
         if modelState.selectedProvider.isEmpty {
-            modelState.selectedProvider = config.activeCLI.isEmpty ? ClaudeCLI.provider : config.activeCLI
+            modelState.selectedProvider = config.activeCLI.isEmpty ? AICliTool.claudeCode.rawValue : config.activeCLI
         }
         // Task 12: the engine is now shared (`ChatEngineRegistry`), so it may
         // already have a session loaded — from a PRIOR appearance of this
