@@ -1265,6 +1265,26 @@ test('resume failure maps to SESSION_UNRESUMABLE',
     );
   }));
 
+test('a mid-turn failure on a resumed session is NOT tagged SESSION_UNRESUMABLE',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    // Regression: the client answers SESSION_UNRESUMABLE by re-running the
+    // whole turn fresh (tools run twice) and the old transcript is deleted.
+    // Text has already streamed here, so this is a real failure, not a
+    // failed resume — even though its message mentions "session".
+    const midTurn = () => (async function* () {
+      yield { type: 'system', subtype: 'init', session_id: 'x', tools: [], capabilities: [] };
+      yield { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'working…' } } };
+      throw new Error('tool session crashed');
+    })();
+    await assert.rejects(
+      runAgentV2Turn({
+        message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
+        resumeSdkSessionId: 'x', onEvent: () => {}, queryFactory: midTurn,
+      }, turnInjectable),
+      (e) => e.code !== 'SESSION_UNRESUMABLE' && /tool session crashed/.test(e.message),
+    );
+  }));
+
 test('aborted approval denies with the no-answer message; session id captured from init',
   withAnthropicKey('sk-ant-v2-test', async () => {
     // No resumeSdkSessionId: currentSdkSessionId must be captured from the

@@ -810,6 +810,10 @@ export function approvalArgsFor(toolName, input) {
  * summed { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens,
  * costUsd, numTurns, durationMs }.
  */
+// Mapped events that mean a turn is doing real work rather than still
+// resuming (`init`, `usage` and passthrough `sdk` events don't count).
+const TURN_PROGRESS_EVENTS = new Set(['delta', 'tool_use_start', 'tool_args_delta', 'tool_result']);
+
 export async function runAgentV2Turn(
   {
     message, userId, mode, model, language, skills, agentContext, attachments,
@@ -1259,10 +1263,15 @@ export async function runAgentV2Turn(
   };
   let result = null;
   let replyText = '';
+  // Whether the turn got past resuming into real work (text streamed, a tool
+  // started or returned). Only a failure BEFORE that is a failed resume —
+  // see the catch below.
+  let progressed = false;
   try {
     for await (const msg of q) {
       if (msg?.session_id) currentSdkSessionId = msg.session_id;
       for (const ev of mapSdkMessage(msg)) {
+        if (TURN_PROGRESS_EVENTS.has(ev.type)) progressed = true;
         if (ev.type === 'delta' && typeof ev.text === 'string') {
           replyText += ev.text;
         } else if (ev.type === 'usage') {
@@ -1281,8 +1290,13 @@ export async function runAgentV2Turn(
     }
   } catch (err) {
     // A resume the SDK cannot honor (session pruned / cleared) is
-    // recoverable at the route layer: drop the mapping and start fresh.
-    if (resume && /session|conversation|resume/i.test(String(err?.message ?? ''))) {
+    // recoverable at the route layer: drop the mapping and start fresh. Only
+    // while nothing has happened yet, though — the client answers
+    // SESSION_UNRESUMABLE by re-running the whole turn with `fresh: true`,
+    // and `bindSdkSession` then deletes the old transcript. Tagging a
+    // mid-turn failure whose message merely mentions "session" re-ran tools
+    // that had already run (Bash, Edit) and threw the chat's history away.
+    if (resume && !progressed && /session|conversation|resume/i.test(String(err?.message ?? ''))) {
       throw Object.assign(new Error(err?.message ?? String(err)), { code: 'SESSION_UNRESUMABLE' });
     }
     // The SDK reports EVERY spawn-time failure of an existing CLI binary as a
