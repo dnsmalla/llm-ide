@@ -29,6 +29,25 @@ enum AgentV2Error: Error, Equatable, Sendable {
     case streamEndedWithoutResult
 }
 
+extension AgentV2Error {
+    /// The user-facing reason for a `result` whose subtype says the turn did
+    /// NOT complete, or nil for a successful one (`success`, or no subtype
+    /// from an older server).
+    static func resultFailureMessage(subtype: String?) -> String? {
+        guard let subtype, subtype.hasPrefix("error") else { return nil }
+        switch subtype {
+        case "error_max_turns":
+            return "The agent hit its step limit before finishing this turn."
+        case "error_max_budget_usd":
+            return "The agent hit its spending cap for this turn."
+        case "error_during_execution":
+            return "The agent stopped with an error while working."
+        default:
+            return "The agent stopped before finishing (\(subtype))."
+        }
+    }
+}
+
 // The panel's error banner shows `error.localizedDescription`; without this
 // conformance Foundation renders the useless "The operation couldn't be
 // completed. (LlmIdeMacLib.AgentV2Error error 0.)" and the server's actual
@@ -347,8 +366,17 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 self.onModeResolved?(mode)
             case .memory(let info):
                 memoryInfo = info
-            case .result:
+            case .result(let result):
                 sawTerminal = true
+                // The SDK ends a turn it could not finish with a `result`
+                // too — `error_max_turns`, `error_max_budget_usd`,
+                // `error_during_execution`. Accepting it as success showed a
+                // partial or empty reply as a finished turn (and let
+                // auto-continue chain on it); the route's own `error` event
+                // for the same turn is dropped by the terminal guard above.
+                if let message = AgentV2Error.resultFailureMessage(subtype: result.subtype) {
+                    failure.record(.engine(code: result.subtype, message: message))
+                }
             case .error(let code, let message):
                 sawTerminal = true
                 failure.record(code == "SESSION_UNRESUMABLE"
