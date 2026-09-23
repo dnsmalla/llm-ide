@@ -183,7 +183,14 @@ final class RepoManager {
     /// Execute an allow-listed git op on `repoURL`, enforcing branch-first /
     /// protected-main. Returns combined output text. Throws on git failure or a
     /// policy violation (which the caller surfaces to the agent).
-    func runGitOp(_ a: GitOpArgs, at repoURL: URL, token: String? = nil) async throws -> String {
+    ///
+    /// `backend` says which host `token` belongs to — it selects the auth
+    /// header `git` sends on push/pull/merge_to_main. The default used to be
+    /// the only option, so a GitHub PAT went out as GitLab's `PRIVATE-TOKEN`
+    /// and every chat push/pull to GitHub failed unless a keychain helper
+    /// happened to hold credentials.
+    func runGitOp(_ a: GitOpArgs, at repoURL: URL, token: String? = nil,
+                  backend: Backend = .gitlab) async throws -> String {
         // Confirm it's a git repo (clean error if not).
         _ = try await git(["rev-parse", "--is-inside-work-tree"], cwd: repoURL)
         let branch = try await currentBranch(at: repoURL)
@@ -195,7 +202,7 @@ final class RepoManager {
         let detached = branch == "HEAD" || branch.isEmpty
 
         func run(_ argv: [String], tok: String? = nil) async throws -> String {
-            let (out, err) = try await git(argv, cwd: repoURL, token: tok)
+            let (out, err) = try await git(argv, cwd: repoURL, token: tok, backend: backend)
             return [out, err].filter { !$0.isEmpty }.joined(separator: "\n")
         }
 
