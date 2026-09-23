@@ -447,9 +447,12 @@ async function handleV2Cancel(req, res, userId) {
     sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'chatSessionId is required' } });
     return true;
   }
+  // A Map lookup can only return what runV2Stream stored, but the key is
+  // request-derived — so call it only once it is proven to be a function.
   const abort = inFlightAborts.get(chatSessionLockKey(userId, chatSessionId));
-  if (abort) abort();
-  sendJSON(res, 200, { cancelled: Boolean(abort) });
+  const cancelled = typeof abort === 'function';
+  if (cancelled) abort();
+  sendJSON(res, 200, { cancelled });
   return true;
 }
 
