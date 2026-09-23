@@ -40,6 +40,9 @@ extension ChatEngine {
     /// keep resolving; changing them would silently orphan every user's
     /// current chat on upgrade.
     private var pointerKey: String {
+        if scope == .explorer, let project = explorerProjectId {
+            return "chat.current.explorer.\(project)"
+        }
         guard scope == .quick, let project = quickChatProjectId else {
             // A `.quick` engine reading its pointer before `quickChatProjectId`
             // is set is wired out of order: whoever resolved this engine
@@ -91,8 +94,13 @@ extension ChatEngine {
         // `ChatSessionStore.list(for:projectId:)`, which reads a nil id as
         // belonging to NO project rather than to this one.
         var session = ChatSessionStore.load(id: id)
-            ?? ChatSession(id: id, scope: scope, projectId: scope == .quick ? quickChatProjectId : nil)
+            ?? ChatSession(id: id, scope: scope, projectId: projectIdForNewSession)
         session.scope = scope
+        // An unassigned (pre-stamping) Explorer chat belongs to the first
+        // project that saves it — see `ChatSessionStore.list(for:visibleInProject:)`.
+        if scope == .explorer, session.projectId == nil, let project = explorerProjectId {
+            session.projectId = project
+        }
         // A straight assignment as of Task 9 — `messages` IS the persisted
         // shape now, so ids/`createdAt`/status/tool steps carry through
         // untouched. (Task 8 needed a position-by-position reconciliation
@@ -149,7 +157,44 @@ extension ChatEngine {
 
     /// Reload `sessions` for this scope from disk, newest first.
     func refreshSessions() {
-        sessions = ChatSessionStore.list(for: scope)
+        sessions = scope == .explorer
+            ? ChatSessionStore.list(for: scope, visibleInProject: explorerProjectId)
+            : ChatSessionStore.list(for: scope)
+    }
+
+    /// The `projectId` a chat minted by this engine is stamped with.
+    var projectIdForNewSession: String? {
+        switch scope {
+        case .quick: return quickChatProjectId
+        case .explorer: return explorerProjectId
+        default: return nil
+        }
+    }
+
+    /// The chat this engine should open for its current project: the
+    /// remembered one if it still exists and belongs here, else the newest
+    /// visible one (`sessions`, already project-filtered). Nil: mint fresh.
+    func preferredSessionForCurrentProject() -> UUID? {
+        if let raw = UserDefaults.standard.string(forKey: pointerKey),
+           let id = UUID(uuidString: raw),
+           let session = ChatSessionStore.load(id: id),
+           session.scope == scope, sessionBelongsToCurrentProject(session) {
+            return id
+        }
+        return sessions.first?.id
+    }
+
+    /// Whether `session` may be shown by this engine for its current project.
+    /// `.quick` is strict (see `pointerKey`); `.explorer` also accepts
+    /// unassigned chats (see `ChatSessionStore.list(for:visibleInProject:)`).
+    func sessionBelongsToCurrentProject(_ session: ChatSession) -> Bool {
+        switch scope {
+        case .quick: return session.projectId == quickChatProjectId
+        case .explorer:
+            guard let project = explorerProjectId else { return true }
+            return session.projectId == nil || session.projectId == project
+        default: return true
+        }
     }
 
     /// Renames a saved chat. Safe from being clobbered later:
@@ -244,7 +289,12 @@ extension ChatEngine {
         _ = ChatSessionStore.migrateScopeFileIfNeeded(for: scope)
         refreshSessions()
         if currentSessionIDString.isEmpty {
-            currentSessionIDString = UserDefaults.standard.string(forKey: pointerKey) ?? ""
+            // An Explorer project with no pointer of its own yet (first run
+            // after pointers went per-project) tries the old global one; the
+            // project check below rejects it if it is another project's chat.
+            currentSessionIDString = UserDefaults.standard.string(forKey: pointerKey)
+                ?? (scope == .explorer ? UserDefaults.standard.string(forKey: "chat.current.explorer") : nil)
+                ?? ""
         }
         suppressHistoryAnnounce = true
         // For `.quick`, the pointer must also resolve to a session belonging
@@ -257,7 +307,7 @@ extension ChatEngine {
         if let cur = UUID(uuidString: currentSessionIDString),
            let session = ChatSessionStore.load(id: cur),
            session.scope == scope,
-           scope != .quick || session.projectId == quickChatProjectId {
+           sessionBelongsToCurrentProject(session) {
             resetTransientSessionState()
             messages = session.messages
             hooks.onHistoryReplaced(session.messages)
@@ -384,7 +434,7 @@ extension ChatEngine {
         let fresh = ChatSession(scope: scope, engine: AgentV2Selection.engineForNewChat(
             resolvedProvider: resolveNewChatProvider(),
             capableProviders: AgentV2Selection.liveAgentCapableProviders()),
-            projectId: scope == .quick ? quickChatProjectId : nil)
+            projectId: projectIdForNewSession)
         ChatSessionStore.save(fresh)
         currentSessionIDString = fresh.id.uuidString
         rememberCurrentPointer()

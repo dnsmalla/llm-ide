@@ -543,7 +543,7 @@ final class MobileControlManager {
         switch type {
         case MobileProtocol.Tag.exploreListSessions:
             // `ChatSessionStore` is Mac-local JSON keyed by `ChatScope.explorer`.
-            let rows = ChatSessionStore.list(for: .explorer).map {
+            let rows = ChatSessionStore.list(for: .explorer, visibleInProject: activeExplorerProjectId).map {
                 ExploreSessionSummary(id: $0.id.uuidString,
                                       title: $0.title,
                                       lastUsedAt: $0.lastUsedAt.timeIntervalSince1970)
@@ -573,7 +573,7 @@ final class MobileControlManager {
                                         title: s.title,
                                         history: turns))
         case MobileProtocol.Tag.exploreNewSession:
-            let s = ChatSession(scope: .explorer, title: "New chat")
+            let s = ChatSession(scope: .explorer, title: "New chat", projectId: activeExplorerProjectId)
             ChatSessionStore.save(s)
             append(.info, "Explore new: \(s.id.uuidString.prefix(8))")
             reply(ExploreSessionCreated(sessionId: s.id.uuidString))
@@ -1078,7 +1078,12 @@ final class MobileControlManager {
         projectStore?.objectWillChange
             .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
             .sink { [weak self] _ in
-                Task { await self?.pushMacStatusIfPaired() }
+                Task {
+                    await self?.pushMacStatusIfPaired()
+                    // Explorer chats are listed per project, so a project
+                    // switch changes what the phone should show.
+                    self?.pushExploreSessionListIfPaired()
+                }
             }
             .store(in: &mobilePushCancellables)
 
@@ -1240,7 +1245,7 @@ final class MobileControlManager {
 
     private func pushExploreSessionListIfPaired() {
         guard mobileClientPaired else { return }
-        let rows = ChatSessionStore.list(for: .explorer).map {
+        let rows = ChatSessionStore.list(for: .explorer, visibleInProject: activeExplorerProjectId).map {
             ExploreSessionSummary(id: $0.id.uuidString,
                                   title: $0.title,
                                   lastUsedAt: $0.lastUsedAt.timeIntervalSince1970)
@@ -1282,6 +1287,13 @@ final class MobileControlManager {
         mobileInflightTasks[commandId]?.cancel()
         mobileInflightTasks.removeValue(forKey: commandId)
         reply(CommandError(commandId: commandId, message: "Cancelled"))
+    }
+
+    /// The project Explorer chats are scoped to — the Mac's active project,
+    /// same as the Explorer panel (`ChatEngine.explorerProjectId`). The phone
+    /// lists and creates Explorer chats under it.
+    private var activeExplorerProjectId: String? {
+        projectStore?.activeProject?.bundle.id
     }
 
     private func isMobileCommandCancelled(_ commandId: String) -> Bool {

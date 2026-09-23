@@ -232,6 +232,7 @@ final class ChatEngineRegistry {
 
         if let parked = background.removeValue(forKey: sessionID) {
             backgroundOrder.removeAll { $0 == sessionID }
+            parked.explorerProjectId = current.explorerProjectId
             retire(current)
             adopt(parked, scope: scope, api: api)
             sweepBackground()
@@ -248,6 +249,7 @@ final class ChatEngineRegistry {
         // copy the next time it asks `liveEngine`.
         if let held = externalHolder?.heldEngine(for: sessionID), held.busy {
             externalHolder?.releaseHeldEngine(for: sessionID)
+            held.explorerProjectId = current.explorerProjectId
             retire(current)
             adopt(held, scope: scope, api: api)
             sweepBackground()
@@ -262,6 +264,9 @@ final class ChatEngineRegistry {
 
         park(current)
         let fresh = makeEngine(scope: scope, api: api)
+        // The project scopes which chats an Explorer engine lists and stamps;
+        // a fresh engine must inherit it or it would list every project's.
+        fresh.explorerProjectId = current.explorerProjectId
         fresh.switchSession(to: sessionID)
         displayed[scope] = fresh
         sweepBackground()
@@ -294,6 +299,8 @@ final class ChatEngineRegistry {
         // live selection; carry that over so "+ New chat" during a running
         // turn stamps exactly like an idle one.
         fresh.resolveNewChatProvider = current.resolveNewChatProvider
+        // Same hand-off for the project the new chat is stamped with.
+        fresh.explorerProjectId = current.explorerProjectId
         fresh.mintFreshSession()
         displayed[scope] = fresh
         sweepBackground()
