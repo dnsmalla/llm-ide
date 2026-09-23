@@ -29,6 +29,7 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        MarkdownCopyHandler.install(in: config)
         // PassthroughWebView forwards scroll-wheel events to the enclosing
         // conversation ScrollView — the view is content-sized, so it must not
         // capture the scroll gesture (see PassthroughWebView above).
@@ -196,5 +197,23 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
             }
             decisionHandler(.allow)
         }
+    }
+}
+
+/// The code-block Copy button's pasteboard bridge (`copyCode` message). The
+/// rendered documents load with a nil base URL, where the web clipboard API
+/// may be unavailable; writing through `NSPasteboard` doesn't depend on it.
+/// Holds no reference back to the view, so the content controller retaining
+/// it creates no cycle.
+final class MarkdownCopyHandler: NSObject, WKScriptMessageHandler {
+    static func install(in config: WKWebViewConfiguration) {
+        config.userContentController.add(MarkdownCopyHandler(), name: "copyCode")
+    }
+
+    func userContentController(_ controller: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        guard let text = message.body as? String else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }

@@ -389,12 +389,22 @@ enum MarkdownRenderer {
       const block = btn.closest('.code-block');
       const code = block && block.querySelector('code');
       if (!code) return;
-      navigator.clipboard.writeText(code.textContent).then(() => {
+      const done = () => {
         const prev = btn.textContent;
         btn.textContent = 'Copied';
         btn.classList.add('copied');
         setTimeout(() => { btn.textContent = prev; btn.classList.remove('copied'); }, 1500);
-      }).catch(() => {});
+      };
+      // The app's own pasteboard bridge first (MarkdownCopyHandler): this
+      // document is loaded with a nil base URL, where `navigator.clipboard`
+      // may not exist at all — and then `.writeText` threw synchronously,
+      // past the `.catch`, and Copy silently did nothing.
+      const bridge = window.webkit && window.webkit.messageHandlers
+        && window.webkit.messageHandlers.copyCode;
+      if (bridge) { bridge.postMessage(code.textContent); done(); return; }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(code.textContent).then(done).catch(() => {});
+      }
     }
     </script>
     </body>

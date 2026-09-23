@@ -154,6 +154,7 @@ struct MarkdownWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        MarkdownCopyHandler.install(in: config)
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.setValue(false, forKey: "drawsBackground")
         // Links in the document open in the browser instead of navigating this
