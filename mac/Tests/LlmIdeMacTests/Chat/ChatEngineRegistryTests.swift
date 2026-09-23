@@ -599,6 +599,9 @@ final class SuspendableChatTransport: ChatTransport, @unchecked Sendable {
     var thrownError: Error?
     private var continuation: CheckedContinuation<Void, Never>?
 
+    /// True while a `roundTrip` is parked waiting for `resume()`.
+    var isSuspended: Bool { continuation != nil }
+
     func resume() {
         continuation?.resume()
         continuation = nil

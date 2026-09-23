@@ -85,7 +85,8 @@ struct ChatAcknowledgeTests {
         // already set `busy = true`. `.ifIdle` (plain `sendFollowup()`) would
         // no-op under its `!busy` guard; `.forceUnblock` routes through
         // `unblockAndFollowUp()` instead so the ack's follow-up isn't
-        // silently dropped and `busy` isn't left stuck `true` forever.
+        // silently dropped. It runs inline in the turn that holds the slot;
+        // that turn's own tail releases `busy`.
         let (engine, t) = makeEngine()
         t.result = .init(reply: "done", pendingTool: nil, tasks: nil,
                          continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)

@@ -736,35 +736,47 @@ final class ChatEngine {
         queued.removeAll { $0.id == id }
     }
 
-    /// `sendFollowup` guards on `!busy` so a rapid double-confirm, a manual
-    /// ⌘↵ mid-stream, or a sheet confirm racing the 0.8s auto-continue window
-    /// `finishStreamingTurn` schedules after a `pendingTool` turn can't stack
-    /// overlapping round-trips. But `acknowledge(_:followUp: .forceUnblock)`
-    /// runs its action from INSIDE a turn that already set `busy = true` —
-    /// the Bypass-mode auto-chain path through `autoChainPendingAction`
-    /// (bash / update-file / git-op executed without a card) — and needs its
-    /// own ack's follow-up to actually fire, not be silently skipped by that
-    /// guard. This is the one place that unblocks it.
+    /// Continue the conversation after an acknowledged tool action, from
+    /// wherever `acknowledge(_:followUp: .forceUnblock)` is called. Three cases:
     ///
-    /// As of Task 10's Issue-1 fix, `acknowledge`'s `.forceUnblock` case is
-    /// this method's ONLY caller — every confirmer that runs from a
-    /// user-driven SHEET tap instead (create/comment/update issue, create PR,
-    /// create branch) uses `.ifIdle`, which goes through plain
-    /// `sendFollowup()` so it correctly no-ops if an autonomous turn is still
-    /// streaming when the sheet confirms, rather than starting a second
-    /// concurrent round-trip. `busy = false` here is safe ONLY because
-    /// `.forceUnblock` is reserved for call sites that are themselves the
-    /// tail of an action whose own work already finished (the auto-chained
-    /// tool's execution, not a network call, has already completed by the
-    /// time its ack is appended) — `runTurn`/`sendFollowup` re-set
-    /// `busy = false` at their own tail regardless (a benign no-op once
-    /// already false). A future direct call site here (or a new
-    /// `.forceUnblock` use) must re-derive that same argument, not assume it.
+    /// - **Idle** (a card or sheet confirmed with no turn running): start the
+    ///   follow-up as its own turn through `sendFollowup()`, so it owns the
+    ///   `runTask` slot — Stop reaches it and the queue drains after it.
+    /// - **Inside a turn whose round-trip has finished** (the Bypass-mode
+    ///   auto-chain: `runTurn`/a follow-up's `autoChain` executed bash / an
+    ///   edit / a git op and is acking it): run the follow-up round-trip
+    ///   inline, in the task that already holds the slot. That task's own tail
+    ///   releases `busy` and drains the queue, exactly once. Used to force
+    ///   `busy = false` and start a fresh follow-up, which dropped the flag
+    ///   mid-turn — a composer send in that window started a second turn.
+    /// - **A round-trip is streaming right now** (a sheet confirmed while an
+    ///   auto-continue turn is mid-stream): don't start another — two
+    ///   placeholders would race `revealingTurnID` and Stop could only reach
+    ///   one. The ack is already in `messages`, so the turn in flight's
+    ///   successor sees it; that is the `.ifIdle` behavior for this case.
     func unblockAndFollowUp() async {
-        busy = false
-        await sendFollowup()
+        guard busy else {
+            await sendFollowup()
+            return
+        }
+        guard revealingTurnID == nil else { return }
+        await followUpRoundTrip()
     }
 
+    /// Start a follow-up turn ("(continue)" after a synthetic tool-result ack)
+    /// if the engine is idle. A no-op while busy, so a rapid double-confirm,
+    /// a manual ⌘↵ mid-stream, or a sheet confirm racing the 0.8 s
+    /// auto-continue window can't stack overlapping round-trips.
+    ///
+    /// Runs as the engine's `runTask`, with `drainQueueOrRelease()` as its
+    /// tail — the same slot contract as `startTurn`. It used to run in the
+    /// CALLER's task (a sheet confirmer's SwiftUI `Task`) behind a bare
+    /// `defer { busy = false }`: Stop cancels `runTask`, which was nil, so the
+    /// follow-up — and any tool its `autoChain` ran next — could not be
+    /// stopped; and a message the composer queued during it (it queues
+    /// whenever `busy`) was never drained, so it sat until some LATER turn
+    /// ended and then ran out of order. Awaits the turn so callers (and tests)
+    /// still resume after it.
     func sendFollowup() async {
         // No quick-chat version re-probe here, deliberately: the gate is
         // per-USER-send (`QuickChatContext.confirmServerSupportsAsk`, called
@@ -772,22 +784,29 @@ final class ChatEngine {
         // passed it. Probing again mid-chain would put a loopback GET between
         // every auto-continue round-trip to close a window measured in the
         // seconds between two halves of one authorized turn.
-        //
-        // Don't fire a second round-trip if one is already in flight.
-        // Without this guard, rapid confirms or a manual ⌘↵ during
-        // model streaming would stack overlapping /code-assist requests.
         guard !busy else { return }
         busy = true
+        let task = Task { [self] in
+            await followUpRoundTrip()
+            drainQueueOrRelease()
+        }
+        runTask = task
+        await task.value
+    }
+
+    /// One "(continue)" round-trip, run by whichever task owns the turn slot
+    /// (see `sendFollowup` / `unblockAndFollowUp`). Does not claim or release
+    /// `busy` itself.
+    private func followUpRoundTrip() async {
         statusText = ""
         agentV2Notice = nil
-        defer { busy = false }
         // Captured once, fixed for this whole invocation, and declared
         // OUTSIDE the do block below — see runTurn's matching comment for
         // why the catch clause must compare against this exact id instead
         // of re-reading the (possibly now-different) global `revealingTurnID`.
         let streamingID = beginStreamingTurn()
         do {
-            let recent = hooks.packHistory(messages)
+            let recent = historyBeforeTurn(streamingID: streamingID)
             // The synthetic "(executed create-gitlab-issue …)" turn we
             // pushed before this call IS the signal the agent needs to
             // see. Keep it in `messages`; pass "(continue)" as the user
@@ -802,6 +821,11 @@ final class ChatEngine {
                     handleApprovalArrival(approval, legacySessionId: legacySessionIdForApproval(input))
                 }
             )
+            // Same as runTurn: a Stop that lands while the transport is
+            // returning must not write the reply — and above all must not
+            // reach `autoChain` below, which would run the NEXT Bypass-mode
+            // tool (bash, git) after the user asked to stop.
+            try Task.checkCancellation()
             // `resp.reply` is the authoritative full text, so anything still
             // sitting in the coalescing buffer is about to be overwritten by
             // it — drop it rather than flushing a tail the next line discards.
