@@ -170,6 +170,9 @@ do {
            "emphasis never runs inside inline code")
     expect(parse("my_var_name and _this_").contains("my_var_name and <em>this</em>"),
            "underscores inside a word stay literal; real _emphasis_ still works")
+    let hostile = parse("[a](http://x/`\" onmouseover=\"alert(1)//`)")
+    expect(!hostile.contains("\" onmouseover") && hostile.contains("&quot;"),
+           "inline code inside a link URL is escaped into the href, never restored as markup")
 }
 
 // Markdown preview gating. The generated doc is where a ```mermaid dependency

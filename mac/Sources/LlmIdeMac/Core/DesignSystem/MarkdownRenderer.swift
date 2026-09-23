@@ -222,8 +222,10 @@ enum MarkdownRenderer {
       // above: emphasis used to run over it, so `__init__` rendered as a
       // bold "init" and `a*b*c` grew an <em> inside the code.
       const inlineCodes = [];
+      const inlineCodeText = [];
       html = html.replace(/`([^`\\n]+)`/g, function(_m, code) {
         inlineCodes.push('<code>' + code + '</code>');
+        inlineCodeText.push(code);
         return '\\x00IC' + (inlineCodes.length - 1) + '\\x00';
       });
       html = html.replace(/\\*\\*\\*(.+?)\\*\\*\\*/g, '<strong><em>$1</em></strong>');
@@ -239,7 +241,14 @@ enum MarkdownRenderer {
       html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, function(_m, text, url) {
         // Block dangerous URL schemes (javascript:, data:, vbscript:) and
         // escape the href so a crafted link can't break out of the attribute.
-        var u = String(url).trim();
+        // A code placeholder inside the URL goes back to its PLAIN text
+        // first, so the scheme check and escQuotes see — and escape — what
+        // actually lands in the attribute. Restored as markup after this,
+        // `[a](x/`" onmouseover="…//`)` put a raw quote inside href="…"
+        // and ran script in the bubble.
+        var u = String(url).replace(/\\x00IC(\\d+)\\x00/g, function(_p, i) {
+          return inlineCodeText[+i];
+        }).trim();
         var safe = /^(https?:\\/\\/|mailto:|#|\\/|\\.|[^:]+$)/i.test(u) ? u : '#';
         return '<a href="' + escQuotes(safe) + '">' + text + '</a>';
       });

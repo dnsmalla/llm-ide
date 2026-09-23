@@ -62,6 +62,17 @@ struct MarkdownParserBehaviorTests {
         #expect(!out.contains("<strong>init"))
     }
 
+    @Test("Inline code inside a link URL cannot break out of href")
+    func inlineCodeInHrefIsEscaped() throws {
+        // Regression (pre-merge review): the inline-code placeholder hid the
+        // `"` from escQuotes, and restoring it as markup put a raw quote
+        // inside href="…" — a live onmouseover from model output.
+        let out = try parse("[a](http://x/`\" onmouseover=\"alert(1)//`)")
+        #expect(!out.contains("\" onmouseover"), "got: \(out)")
+        #expect(!out.contains("href=\"http://x/<code>"))
+        #expect(out.contains("&quot;"))
+    }
+
     @Test("Intraword underscores stay literal; real _emphasis_ still works")
     func underscoreEmphasis() throws {
         let out = try parse("use my_var_name and _this_ now")
