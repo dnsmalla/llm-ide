@@ -822,6 +822,7 @@ final class MobileControlManager {
         } catch let error where ChatEngine.isCancellation(error) {
             // Covers a Mac-side Stop too — same as explore_chat below.
             append(.info, "llmide_chat cancelled: \(chat.commandId.prefix(8))")
+            await notifyStoppedOnMac(chat.commandId)
         } catch {
             // Also covers `ExternalTurnError.busy` (a Mac window mid-stream
             // on this same shared engine): a typed, sane CommandError rather
@@ -947,6 +948,7 @@ final class MobileControlManager {
             // surfaces as URLError.cancelled (streaming) or the wrapped
             // APIError.network shape (buffered fallback), not CancellationError.
             append(.info, "explore_chat cancelled: \(chat.commandId.prefix(8))")
+            await notifyStoppedOnMac(chat.commandId)
         } catch {
             guard !isMobileCommandCancelled(chat.commandId) else { return }
             append(.stderr, "code-assist failed: \(error.localizedDescription)")
@@ -1278,6 +1280,16 @@ final class MobileControlManager {
 
     private func isMobileCommandCancelled(_ commandId: String) -> Bool {
         mobileCancelledCommandIds.contains(commandId)
+    }
+
+    /// A phone-driven turn was cancelled from the MAC side (Stop, a session
+    /// switch or delete). Without a terminal message the command never gets
+    /// `done` or an error on the phone and it spins forever. A phone-side
+    /// cancel already answered "Cancelled" (`cancelMobileInflightTask`), so
+    /// that case is skipped rather than answered twice.
+    private func notifyStoppedOnMac(_ commandId: String) async {
+        guard !isMobileCommandCancelled(commandId) else { return }
+        await server?.send(CommandError(commandId: commandId, message: "Stopped on the Mac"))
     }
 
     private func handleLlmIdeCancel(data: Data) {
