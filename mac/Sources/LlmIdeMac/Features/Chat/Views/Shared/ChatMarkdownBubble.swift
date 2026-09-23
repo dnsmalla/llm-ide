@@ -62,7 +62,12 @@ struct ChatMarkdownBubble: View {
             // before the cap existed.
             .scrollDisabled(!isClipped)
             .frame(height: renderedHeight)
-            .onHover { isPointerInside = $0 }
+            .onHover { inside in
+                isPointerInside = inside
+                // Catch up the moment the pointer leaves — otherwise a reply
+                // that finished while it rested here stayed mid-scroll.
+                if !inside { pinToBottomWhileStreaming(proxy) }
+            }
             .onChange(of: contentHeight) { _, _ in pinToBottomWhileStreaming(proxy) }
             .onChange(of: markdown) { _, _ in pinToBottomWhileStreaming(proxy) }
         }
