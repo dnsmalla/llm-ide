@@ -153,12 +153,12 @@ final class ChatEngineRegistry {
     /// Drives the "still working" marker in the session picker, so a chat
     /// left running is visibly distinct from one that was stopped.
     func isRunning(_ sessionID: UUID) -> Bool {
-        liveEngine(for: sessionID)?.busy == true
+        liveEngine(for: sessionID)?.hasPendingWork == true
     }
 
     /// Session ids currently mid-turn off-screen. Read by the session list.
     var backgroundRunningSessionIDs: Set<UUID> {
-        Set(background.filter { $0.value.busy }.keys)
+        Set(background.filter { $0.value.hasPendingWork }.keys)
     }
 
     /// Every engine — displayed or parked — currently blocked on an approval,
@@ -239,7 +239,7 @@ final class ChatEngineRegistry {
             return held
         }
 
-        guard current.busy else {
+        guard current.hasPendingWork else {
             current.switchSession(to: sessionID)
             sweepBackground()
             return current
@@ -264,7 +264,7 @@ final class ChatEngineRegistry {
     /// Returns the engine the panel should render.
     func newDisplayedSession(scope: ChatScope, api: LlmIdeAPIClient) -> ChatEngine {
         let current = engine(for: scope, api: api)
-        guard current.busy else {
+        guard current.hasPendingWork else {
             current.createNewSession()
             sweepBackground()
             return current
@@ -354,7 +354,7 @@ final class ChatEngineRegistry {
     /// The outgoing engine when the incoming one comes from the lot: park it
     /// if it is mid-turn, otherwise let it go after landing its writes.
     private func retire(_ engine: ChatEngine) {
-        if engine.busy {
+        if engine.hasPendingWork {
             park(engine)
         } else {
             engine.flushPendingPersist()
@@ -364,7 +364,7 @@ final class ChatEngineRegistry {
     /// Drop parked engines that have finished their turn, then — only if the
     /// lot is still over its limit — the oldest still-running ones.
     private func sweepBackground() {
-        for (id, engine) in background where !engine.busy {
+        for (id, engine) in background where !engine.hasPendingWork {
             engine.persistsUnobserved = false
             background.removeValue(forKey: id)
             backgroundOrder.removeAll { $0 == id }

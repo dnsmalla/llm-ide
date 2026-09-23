@@ -64,7 +64,7 @@ final class ExplorerMobileEngineResolver: ExternalEngineHolder {
     /// Evict oldest non-busy entries while the cache exceeds its limit.
     private func evictOverflow() {
         while offScreen.count > Self.offScreenCacheLimit {
-            guard let victim = offScreenOrder.first(where: { offScreen[$0]?.busy != true }) else {
+            guard let victim = offScreenOrder.first(where: { offScreen[$0]?.hasPendingWork != true }) else {
                 return // everything is mid-turn; overflow stands
             }
             offScreenOrder.removeAll { $0 == victim }
@@ -126,7 +126,7 @@ final class ExplorerMobileEngineResolver: ExternalEngineHolder {
             return live
         }
         if let cached = offScreen[sessionID] {
-            guard !cached.busy else {
+            guard !cached.hasPendingWork else {
                 touch(sessionID)  // mid-turn lookups count as use too
                 return cached
             }

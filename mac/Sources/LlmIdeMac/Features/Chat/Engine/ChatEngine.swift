@@ -151,6 +151,16 @@ final class ChatEngine {
     /// history.
     var sessionEpoch: UInt = 0
 
+    /// Whether this engine still has work of its own to do: a turn in
+    /// flight, OR an autonomous chain between rounds — the 0.8 s
+    /// auto-continue gap, when `busy` is false but a "Continue working…" turn
+    /// is already scheduled. `ChatEngineRegistry` keeps such an engine
+    /// parked instead of letting it go on `busy` alone: a released engine
+    /// still started that turn (up to 8 rounds of edits) with nothing holding
+    /// it — Stop could not reach it, its replies were never persisted, and
+    /// reopening the chat loaded a second engine onto the same session.
+    var hasPendingWork: Bool { busy || agent.agentIsAutonomous }
+
     /// True while this engine is running a turn with no view observing it —
     /// a session the user switched AWAY from while it was mid-turn, kept
     /// alive by `ChatEngineRegistry` instead of being cancelled.
