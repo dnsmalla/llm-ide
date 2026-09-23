@@ -3195,6 +3195,34 @@ paths:
         '403': { description: DECISION_FORBIDDEN — belongs to another user or session, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: DECISION_EXPIRED / DECISION_UNKNOWN — nothing pending, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /agent/v2/cancel:
+    post:
+      summary: Stop the caller's in-flight Agent-engine turn for one chat
+      description: >
+        Same abort a dropped stream triggers (SDK subprocess and parked
+        decisions). The chat's turn lock is released once the turn finishes
+        unwinding (about two seconds), so a client retries its send after
+        this rather than at once. Scoped to the calling user. Server API v54.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [chatSessionId]
+              properties:
+                chatSessionId: { type: string }
+      responses:
+        '200':
+          description: Answered; `cancelled` says whether a turn was running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cancelled: { type: boolean }
+        '400': { description: VALIDATION_FAILED — chatSessionId missing, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /agent/v2/session:
     delete:
       summary: Drop a chat's SDK-session mapping (chat deletion)

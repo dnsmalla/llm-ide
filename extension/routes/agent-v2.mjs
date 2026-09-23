@@ -64,6 +64,14 @@ function chatSessionLockKey(userId, chatSessionId) {
   return `${userId}:${chatSessionId}`;
 }
 
+// The abort controller of each chat's in-flight turn, by the same lock key —
+// what POST /agent/v2/cancel reaches. A turn the client has lost track of
+// (its Stop still unwinding, or a stream the app no longer holds) otherwise
+// kept the lock until it ran to completion, and every message sent to that
+// chat meanwhile was refused with TURN_IN_PROGRESS — minutes, with no way
+// out: the app showed the chat as idle, so there was no Stop to press.
+const inFlightAborts = new Map();
+
 // The 409 both lock checks in handleV2Stream answer with — one body so the
 // early probe and the authoritative check can never drift apart.
 //
@@ -106,6 +114,9 @@ export async function handleAgentV2Routes(
   }
   if (req.method === 'DELETE' && url === '/agent/v2/session') {
     return handleV2SessionDelete(req, res, userId);
+  }
+  if (req.method === 'POST' && url === '/agent/v2/cancel') {
+    return handleV2Cancel(req, res, userId);
   }
 
   sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: `No agent/v2 route for ${req.method} ${url}` } });
@@ -220,6 +231,7 @@ async function handleV2Stream(req, res, userId, deps) {
     return await runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, provider, effectiveMessage, body, deps);
   } finally {
     inFlightChatSessions.delete(lockKey);
+    inFlightAborts.delete(lockKey);
   }
 }
 
@@ -248,10 +260,12 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   // alongside the engine's own abort wiring (its canUseTool listeners
   // target the same id).
   let currentSdkSessionId = resumeSdkSessionId;
-  onClientDisconnect(req, res, () => {
+  const abortTurn = () => {
     ac.abort();
     if (currentSdkSessionId) abortDecisionsForSession(currentSdkSessionId);
-  });
+  };
+  onClientDisconnect(req, res, abortTurn);
+  inFlightAborts.set(chatSessionLockKey(userId, chatSessionId), abortTurn);
   const send = (obj) => {
     if (!res.writableEnded && !ac.signal.aborted) {
       res.write(`data: ${JSON.stringify(obj)}\n\n`);
@@ -416,6 +430,28 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
 // Body: { requestId, sdkSessionId, answers } → resolves a parked approval
 // (llm_agent/sdk/decisions.mjs). The registry owns tenancy: the deciding
 // user AND session must match the parked entry.
+
+/**
+ * POST /agent/v2/cancel — body `{ chatSessionId }`. Stops the caller's
+ * in-flight turn for that chat, if any: the same abort a dropped stream
+ * triggers (SDK subprocess + parked decisions). Answers `{ cancelled }`;
+ * the lock itself is released when the turn finishes unwinding (about two
+ * seconds), so a client retries its send after this rather than at once.
+ * Scoped to the caller: the key includes the user id, so no user can stop
+ * another's turn.
+ */
+async function handleV2Cancel(req, res, userId) {
+  const body = parseJSON(await readBody(req, 16 * 1024)) || {};
+  const chatSessionId = typeof body.chatSessionId === 'string' ? body.chatSessionId : '';
+  if (!chatSessionId) {
+    sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'chatSessionId is required' } });
+    return true;
+  }
+  const abort = inFlightAborts.get(chatSessionLockKey(userId, chatSessionId));
+  if (abort) abort();
+  sendJSON(res, 200, { cancelled: Boolean(abort) });
+  return true;
+}
 
 async function handleV2Decision(req, res, userId) {
   const body = parseJSON(await readBody(req, 64 * 1024)) || {};

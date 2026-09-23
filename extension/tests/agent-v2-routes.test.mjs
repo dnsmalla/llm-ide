@@ -1069,3 +1069,66 @@ test('non-/agent/v2 URLs fall through untouched (returns false)', async () => {
   );
   assert.equal(res._body, '');
 });
+
+// A turn the client lost track of held the chat's lock until it ran to the
+// end, and every send meanwhile got TURN_IN_PROGRESS — with the chat shown as
+// idle, so no Stop to press. POST /agent/v2/cancel reaches it.
+test('cancel: stops the caller\'s in-flight turn so the chat accepts a new one; another user cannot', async () => {
+  const user = newUser('v2route-cancel@example.com');
+  const other = newUser('v2route-cancel-other@example.com');
+  let started = false;
+  let sawAbort = false;
+  const parkedTurn = async ({ onEvent, signal }) => {
+    started = true;
+    onEvent({ type: 'init', sessionId: 'sdk-cancel', claudeCodeVersion: '2.1.234', tools: [], capabilities: [] });
+    await new Promise((resolve) => {
+      if (signal?.aborted) return resolve();
+      signal?.addEventListener('abort', resolve, { once: true });
+    });
+    sawAbort = true;
+    return { result: null, usageTotals: {} };
+  };
+  const streamReq = () => makeReq({
+    method: 'POST', url: '/agent/v2/stream', user,
+    body: { message: 'hi', agentContext: { chatSessionId: 'chat-cancel', workspaceRoot: WS } },
+  });
+  const cancelReq = (who) => makeReq({
+    method: 'POST', url: '/agent/v2/cancel', user: who, body: { chatSessionId: 'chat-cancel' },
+  });
+
+  const firstP = handleAgentV2Routes(streamReq(), makeRes(), { runTurn: parkedTurn });
+  while (!started) await new Promise((r) => setImmediate(r));
+
+  // Someone else's cancel does nothing.
+  const foreign = makeRes();
+  await handleAgentV2Routes(cancelReq(other), foreign);
+  assert.equal(foreign.statusCode, 200);
+  assert.equal(foreign.json().cancelled, false);
+  assert.equal(sawAbort, false);
+
+  const mine = makeRes();
+  await handleAgentV2Routes(cancelReq(user), mine);
+  assert.equal(mine.json().cancelled, true);
+  await firstP;
+  assert.equal(sawAbort, true, 'the turn saw the abort');
+
+  // The lock is gone: a new turn for the same chat runs.
+  let ran = false;
+  const next = makeRes();
+  await handleAgentV2Routes(streamReq(), next, {
+    runTurn: async ({ onEvent }) => {
+      ran = true;
+      onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-cancel', stopReason: 'end_turn' });
+      return { result: { subtype: 'success' }, usageTotals: {} };
+    },
+  });
+  assert.equal(ran, true);
+
+  // Nothing in flight → cancelled:false; missing id → 400.
+  const idle = makeRes();
+  await handleAgentV2Routes(cancelReq(user), idle);
+  assert.equal(idle.json().cancelled, false);
+  const bad = makeRes();
+  await handleAgentV2Routes(makeReq({ method: 'POST', url: '/agent/v2/cancel', user, body: {} }), bad);
+  assert.equal(bad.statusCode, 400);
+});
