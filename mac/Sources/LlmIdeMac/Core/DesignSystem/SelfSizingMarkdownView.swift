@@ -181,10 +181,16 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
         func webView(_ webView: WKWebView,
                      decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            if navigationAction.navigationType == .linkActivated,
-               let url = navigationAction.request.url,
-               url.scheme == "http" || url.scheme == "https" || url.scheme == "mailto" {
-                NSWorkspace.shared.open(url)
+            if navigationAction.navigationType == .linkActivated {
+                // EVERY click is cancelled; only web and mail links are handed
+                // to the system. Letting the rest through — a relative
+                // `[Parser.swift](Sources/Parser.swift)` the model wrote —
+                // navigated this web view away from its own document and the
+                // reply went blank until the next reload.
+                if let url = navigationAction.request.url,
+                   url.scheme == "http" || url.scheme == "https" || url.scheme == "mailto" {
+                    NSWorkspace.shared.open(url)
+                }
                 decisionHandler(.cancel)
                 return
             }

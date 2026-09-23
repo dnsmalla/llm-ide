@@ -226,10 +226,13 @@ struct MarkdownWebView: NSViewRepresentable {
         func webView(_ webView: WKWebView,
                      decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            if navigationAction.navigationType == .linkActivated,
-               let url = navigationAction.request.url,
-               url.scheme == "http" || url.scheme == "https" || url.scheme == "mailto" {
-                NSWorkspace.shared.open(url)
+            if navigationAction.navigationType == .linkActivated {
+                // Every click is cancelled (see SelfSizingMarkdownView): a
+                // relative link let through blanked the preview.
+                if let url = navigationAction.request.url,
+                   url.scheme == "http" || url.scheme == "https" || url.scheme == "mailto" {
+                    NSWorkspace.shared.open(url)
+                }
                 decisionHandler(.cancel)
                 return
             }
