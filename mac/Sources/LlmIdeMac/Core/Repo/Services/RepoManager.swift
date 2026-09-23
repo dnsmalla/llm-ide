@@ -119,12 +119,33 @@ final class RepoManager {
         let unstaged = (try? await gitOutput(["diff"], cwd: repoURL)) ?? ""
         let untracked = (try? await gitOutput(
             ["ls-files", "--others", "--exclude-standard", "-z"], cwd: repoURL)) ?? ""
-        let created = untracked.split(separator: "\0").map(String.init).map { path in
-            Self.newFileDiff(path: path, contents: try? Data(
-                contentsOf: repoURL.appendingPathComponent(path), options: .mappedIfSafe))
-        }
+        let paths = untracked.split(separator: "\0").map(String.init)
+        // Off the main actor, and bounded: an un-ignored venv / dist /
+        // node_modules is thousands of files, and reading them all here hung
+        // the UI and built a diff hundreds of MB long.
+        let created = await Task.detached(priority: .userInitiated) {
+            Self.newFileDiffs(paths: paths, in: repoURL)
+        }.value
         return ([staged, unstaged] + created).joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Budget for rendering untracked files' CONTENT in `diff(at:)`. Past
+    /// either limit the remaining files are still listed — header-only, no
+    /// read — so Review shows everything the commit would include.
+    nonisolated static let maxRenderedNewFiles = 200
+    nonisolated static let maxRenderedNewFileBytes = 4 * 1024 * 1024
+
+    nonisolated static func newFileDiffs(paths: [String], in repoURL: URL) -> [String] {
+        var budget = maxRenderedNewFileBytes
+        return paths.enumerated().map { index, path in
+            guard index < maxRenderedNewFiles, budget > 0 else {
+                return newFileDiff(path: path, contents: nil)
+            }
+            let data = try? Data(contentsOf: repoURL.appendingPathComponent(path), options: .mappedIfSafe)
+            budget -= min(data?.count ?? 0, maxNewFileDiffBytes)
+            return newFileDiff(path: path, contents: data)
+        }
     }
 
     /// Largest untracked file rendered line by line in `diff(at:)`; bigger

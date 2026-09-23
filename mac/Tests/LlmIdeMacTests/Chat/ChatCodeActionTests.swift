@@ -50,6 +50,23 @@ struct ChatCodeActionTests {
         #expect(binary.contains("+++ b/img.png") && binary.contains("not shown"))
     }
 
+    @Test("Untracked rendering is bounded: past the budget files are listed, not read")
+    func newFileDiffsBudget() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("nfd-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let count = RepoManager.maxRenderedNewFiles + 5
+        var paths: [String] = []
+        for i in 0..<count {
+            let name = "f\(i).txt"
+            try "x\n".write(to: dir.appendingPathComponent(name), atomically: true, encoding: .utf8)
+            paths.append(name)
+        }
+        let diffs = RepoManager.newFileDiffs(paths: paths, in: dir)
+        #expect(diffs.count == count)                                   // every file listed
+        #expect(diffs[0].contains("+x"))                                 // within budget: content
+        #expect(diffs[count - 1].contains("not shown"))                  // past it: header only
+    }
+
     @Test("diff(at:) lists untracked files the workflow's `git add -A` would commit")
     func diffIncludesUntracked() async throws {
         let repo = FileManager.default.temporaryDirectory.appendingPathComponent("wfdiff-\(UUID().uuidString)")
