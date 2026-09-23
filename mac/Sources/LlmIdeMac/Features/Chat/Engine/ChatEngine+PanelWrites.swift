@@ -150,3 +150,32 @@ extension ChatEngine {
     }
 
 }
+
+extension ChatEngine {
+    /// Point this engine's approval / tool-decision posting at the real
+    /// server endpoints. The defaults report failure, so an engine left
+    /// unwired can never answer a parked approval — which is exactly what
+    /// happened to the phone's off-screen Explorer engines: the phone showed
+    /// the AskUserQuestion, the user answered, "The server declined the
+    /// decision" came back, and the turn held its chat lock until the
+    /// 15-minute decision timeout denied it. Every surface that owns an
+    /// engine calls this one wiring instead of keeping its own copy.
+    func wireDecisionPosting(api: LlmIdeAPIClient) {
+        decisionPostingWired = true
+        postApprovalDecision = { requestId, sdkSessionId, answers in
+            try await api.agentV2Decision(requestId: requestId,
+                                          sdkSessionId: sdkSessionId,
+                                          answers: answers)
+        }
+        postToolDecision = { requestId, sdkSessionId, action in
+            try await api.agentV2ToolDecision(requestId: requestId,
+                                              sdkSessionId: sdkSessionId,
+                                              action: action)
+        }
+        postLegacyToolDecision = { requestId, sessionId, action in
+            try await api.codeAssistDecision(requestId: requestId,
+                                             sessionId: sessionId,
+                                             action: action)
+        }
+    }
+}

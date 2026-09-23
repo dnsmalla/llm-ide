@@ -154,13 +154,18 @@ final class ExplorerMobileEngineResolver: ExternalEngineHolder {
         // question, same answer, whichever engine the phone lands on.
         //
         // A ToolApproval can still park here on Manual, exactly as it can on
-        // the displayed engine; the phone shows "Question pending on Mac" and
-        // it is answered there. On Bypass — what a phone turn inherits from
+        // the displayed engine; the phone shows "Question pending on Mac".
+        // `ChatEngineRegistry.pendingApprovals` includes this pool, so the
+        // Mac can answer it. On Bypass — what a phone turn inherits from
         // the Mac's chip — nothing parks at all.
         let engine = ChatEngine(
             scope: .explorer,
             transport: ChatTransportFactory.makeTransport(
                 api: api, useV2: AgentV2Selection.toggleEnabled()))
+        // Without this the engine's decision posting kept its failing
+        // defaults, and an approval parked on it could never be answered —
+        // from the phone or the Mac. See `wireDecisionPosting`.
+        engine.wireDecisionPosting(api: api)
         guard engine.loadSessionForBackgroundUse(id: sessionID) else { return nil }
         offScreen[sessionID] = engine
         touch(sessionID)
@@ -200,6 +205,8 @@ final class ExplorerMobileEngineResolver: ExternalEngineHolder {
     func releaseHeldEngine(for sessionID: UUID) {
         forget(sessionID: sessionID)
     }
+
+    var heldEngines: [ChatEngine] { Array(offScreen.values) }
 
     func forgetAllHeldEngines() {
         for engine in offScreen.values { engine.forgetForSignOut() }

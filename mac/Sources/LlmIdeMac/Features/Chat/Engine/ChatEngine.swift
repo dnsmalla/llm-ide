@@ -176,6 +176,11 @@ final class ChatEngine {
     /// later panel turn in that chat ran read-only until they noticed.
     var externalTurnActive = false
 
+    /// Whether `wireDecisionPosting(api:)` has run — i.e. a parked approval
+    /// on this engine can actually be answered. For assertions; nothing
+    /// branches on it.
+    var decisionPostingWired = false
+
     /// Whether the piece of work this engine is doing is still open: a turn
     /// in flight, an auto-continue round scheduled, or a card / approval the
     /// agent is waiting on. Its true → false edge is "the work settled" —

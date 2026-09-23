@@ -20,6 +20,8 @@ protocol ExternalEngineHolder: AnyObject {
     func releaseHeldEngine(for sessionID: UUID)
     /// Sign-out: forget every held engine without persisting it.
     func forgetAllHeldEngines()
+    /// Every engine the holder currently keeps (for `pendingApprovals`).
+    var heldEngines: [ChatEngine] { get }
 }
 
 /// Per-`ChatScope` shared `ChatEngine` instances, plus the background lot of
@@ -185,6 +187,17 @@ final class ChatEngineRegistry {
             guard let engine = displayed[scope], let state = engine.pendingApproval,
                   let id = UUID(uuidString: engine.currentSessionIDString) else { continue }
             result.append((scope, id, state))
+        }
+        // The phone's off-screen engines too: a Manual-mode ToolApproval
+        // parked on one (the phone can't answer those) was invisible on the
+        // Mac until the 15-minute expiry. Opening it takes the engine over
+        // (`switchDisplayedSession`'s held-engine branch).
+        let listed = Set(result.map(\.sessionID))
+        for engine in externalHolder?.heldEngines ?? [] {
+            guard let state = engine.pendingApproval,
+                  let id = UUID(uuidString: engine.currentSessionIDString),
+                  !listed.contains(id) else { continue }
+            result.append((engine.scope, id, state))
         }
         return result
     }

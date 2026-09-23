@@ -585,27 +585,9 @@ struct CodeAssistantPanel: View {
         engine.forgetSessionMemory = { id in
             _ = try? await api.forgetSessionMemory(sessionId: id)
         }
-        // Task 12: the real v2 decision client. The engine's default reports
-        // failure on the approval card; this wiring makes Submit actually
-        // post `POST /agent/v2/decision` through the shared api client.
-        engine.postApprovalDecision = { requestId, sdkSessionId, answers in
-            try await api.agentV2Decision(requestId: requestId,
-                                          sdkSessionId: sdkSessionId,
-                                          answers: answers)
-        }
-        // Task 9: ToolApproval decisions, one endpoint per engine — the v2
-        // engine's `/agent/v2/decision` (with `action`, no `answers`) and the
-        // legacy engine's `/code-assist/decision` (Task 8).
-        engine.postToolDecision = { requestId, sdkSessionId, action in
-            try await api.agentV2ToolDecision(requestId: requestId,
-                                              sdkSessionId: sdkSessionId,
-                                              action: action)
-        }
-        engine.postLegacyToolDecision = { requestId, sessionId, action in
-            try await api.codeAssistDecision(requestId: requestId,
-                                             sessionId: sessionId,
-                                             action: action)
-        }
+        // The real decision clients (v2 `/agent/v2/decision`, legacy
+        // `/code-assist/decision`) — shared wiring, see the method.
+        engine.wireDecisionPosting(api: api)
         // Task 12: delete-session's server-side v2 cleanup. The client
         // swallows its own failures to the log (best-effort by contract);
         // `try?` is belt-and-braces so nothing here can reject the call.

@@ -64,6 +64,27 @@ struct ExplorerMobileEngineResolverTests {
         }
     }
 
+    @Test("An off-screen engine can answer approvals, and shows up in the Mac's pending list")
+    func offScreenEngineIsWiredForDecisions() async {
+        await withTempStore {
+            let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+            let shared = ChatEngine(scope: .explorer, transport: ScriptedChatTransport())
+            let sessionA = ChatSession(scope: .explorer, title: "A")
+            ChatSessionStore.save(sessionA)
+            let sessionB = ChatSession(scope: .explorer, title: "B")
+            ChatSessionStore.save(sessionB)
+            shared.switchSession(to: sessionA.id)
+
+            let resolver = ExplorerMobileEngineResolver()
+            let resolved = resolver.engine(for: sessionB.id, sharedExplorerEngine: shared, api: api)
+            // Regression: a bare `ChatEngine` kept the failing default
+            // decision posters — the phone's answer came back "The server
+            // declined the decision" and the turn waited out the 15-minute expiry.
+            #expect(resolved?.decisionPostingWired == true)
+            #expect(resolver.heldEngines.contains { $0 === resolved })
+        }
+    }
+
     @Test("The same off-screen session id resolves to the SAME cached engine across calls")
     func offScreenEngineIsCachedPerSession() async {
         await withTempStore {
