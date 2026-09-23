@@ -51,7 +51,12 @@ for (const mode of ['plan', 'assist_plan']) {
     // know — see plan-pipeline.mjs's own definition of a binding. The two
     // explicit paraphrase checks above are the sharper guard; this one stays
     // as the blunt backstop it was meant to be.
-    assert.ok(persona.length < 3600, `binding should stay short, was ${persona.length} chars`);
+    //
+    // Raised 3600 → 4100 for the same reason, twice over: the stop clause
+    // (where this mode ENDS — the plan card's Execute starts the work) and
+    // the classic engine's ask-user clause are both facts about this app a
+    // skill cannot know. Neither re-describes the skill's process.
+    assert.ok(persona.length < 4100, `binding should stay short, was ${persona.length} chars`);
   });
 }
 
@@ -135,7 +140,9 @@ test('READ_ONLY_TOOL_NAMES is derived from the registry, not hand-maintained', a
 
 test('allowedToolNames(execute) includes all kind:read tools except task-list', () => {
   const names = [...allowedToolNames('execute')].sort();
-  assert.deepEqual(names, ['ask-internal', 'ask-subagent', 'fetch-url', 'find-code', 'list-files', 'load-skill', 'project_memory', 'read-file', 'search-kb', 'web-search']);
+  // ask-user is the one non-read tool every restricted mode gets: it changes
+  // nothing, it only ends the turn so the user can answer a question card.
+  assert.deepEqual(names, ['ask-internal', 'ask-subagent', 'ask-user', 'fetch-url', 'find-code', 'list-files', 'load-skill', 'project_memory', 'read-file', 'search-kb', 'web-search']);
 });
 
 test('allowedToolNames(execute) explicitly excludes task-list despite it being kind:read', () => {
@@ -143,10 +150,11 @@ test('allowedToolNames(execute) explicitly excludes task-list despite it being k
   assert.equal(names.has('task-list'), false, 'task-list should be excluded even though it is kind:read in the registry');
 });
 
-test('allowedToolNames(plan) adds save-plan on top of the base 10-tool read set', () => {
+test('allowedToolNames(plan) adds save-plan on top of the base 10-tool read set + ask-user', () => {
   const names = [...allowedToolNames('plan')].sort();
   assert.ok(names.includes('save-plan'));
-  assert.equal(names.length, 11);
+  assert.ok(names.includes('ask-user'));
+  assert.equal(names.length, 12);
 });
 
 // load-skill is what makes a skill's "now invoke <other skill>" line

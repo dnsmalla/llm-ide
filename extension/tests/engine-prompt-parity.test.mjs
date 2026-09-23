@@ -84,12 +84,12 @@ test('both engines frame a plan turn with the mode binding and its stage skill',
     assert.match(text, /One document per piece of work/, `${name} must carry the one-document rule`);
   }
   // NOT parity: the question CHANNEL is an engine capability, not a shared
-  // rule. Only the Agent engine mounts AskUserQuestion; asserting the name on
-  // both is what kept the classic engine being told to call a tool it does
-  // not have, which it obeyed by hand-drawing an options card in prose.
+  // rule. The Agent engine has AskUserQuestion; the classic engine has its
+  // own `ask-user` (same card on the Mac). Naming the other engine's tool is
+  // what once made the classic engine hand-draw an options card in prose.
   assert.match(agent, /AskUserQuestion/, 'agent must route questions through the card');
   assert.doesNotMatch(legacy, /AskUserQuestion/, 'legacy has no such tool to route to');
-  assert.match(legacy, /Asking ends the turn here/, 'legacy must still say how to ask');
+  assert.match(legacy, /Ask with `ask-user`/, 'legacy routes fixed-choice questions through its own card');
 });
 
 test('session memory reaches both engines under the same heading', async () => {

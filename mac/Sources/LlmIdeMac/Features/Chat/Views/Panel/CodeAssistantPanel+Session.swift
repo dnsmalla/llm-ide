@@ -290,16 +290,16 @@ extension CodeAssistantPanel {
     /// an edit target, which is always an existing file) — so the directory
     /// is created first.
     ///
-    /// `followUp` defaults to `.forceUnblock` — the legacy loop's caller
-    /// (`autoSavePendingPlan`) runs from inside a turn that is actively
-    /// waiting on the ack. The v2 message-action path
-    /// (`savePlanFromMessage`) passes `.none`: nothing is waiting (the v2
-    /// engine's history is server-side and never sees the ack), so a
-    /// follow-up round-trip would only produce a confused reply.
+    /// `followUp` defaults to `.none`: saving the plan is where planning
+    /// STOPS. The legacy loop used to be unblocked with a "(continue)" round
+    /// here, and that round — often classified as Execute — carried out the
+    /// plan it had just saved, in chat, without the user ever pressing
+    /// Execute. The tool result still lands in history (the next message
+    /// carries it), and the PlanSavedCard's Execute is how work starts.
     @MainActor
     func confirmSavePlan(_ args: PendingTool.SavePlanArgs,
                                  finalContent: String,
-                                 followUp: ChatEngine.FollowUp = .forceUnblock)
+                                 followUp: ChatEngine.FollowUp = .none)
         async -> SavePlanResult
     {
         let plan: ProposedPlan
@@ -326,12 +326,15 @@ extension CodeAssistantPanel {
             exitCode: nil, command: nil, output: nil, url: plan.absolutePath,
             isFailure: false, planTitle: plan.title, planContent: finalContent)
         await engine.acknowledge(payload, followUp: followUp)
-        // A plan is on disk, so the planning stage is over. Hand the picker
-        // back to Auto (see `releaseStickyMode`) — placed here, the single
-        // write every save path funnels through, so the v2 "Save Plan"
-        // action, the edit sheet's Save and the legacy `save-plan` proposal
-        // all release by the same rule instead of three of them drifting.
-        releaseStickyMode()
+        // The picker deliberately STAYS on Plan / Assist Plan. It used to go
+        // back to Auto here, and Auto classifies the next message on its own
+        // with Execute as the default — so "ok", "looks good" or "2" after a
+        // saved plan became a full Execute turn that did the work in chat,
+        // skipping the plan card's Execute (its tracker and execution skill).
+        // Staying keeps every later message read-only (revise the plan, ask
+        // about it) until the user presses Execute — which sets Execute
+        // itself — or picks another mode; the finished run then releases
+        // the picker (`ModePolicy.runStages`).
         return .success
     }
 

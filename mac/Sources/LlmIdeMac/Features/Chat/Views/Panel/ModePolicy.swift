@@ -94,7 +94,11 @@ public enum ModePolicy {
     /// auto-continue round, card or approval pending).
     ///
     /// Plan / Assist Plan are multi-turn conversations — questions, answers,
-    /// a plan — so they stay until the plan is saved (`planStages`). Every
+    /// a plan, revisions of it — so they are never released at work end
+    /// (`planStages`); not even saving the plan releases them. They stay
+    /// until the user presses the plan card's Execute (which sets Execute)
+    /// or picks another mode, so nothing after a saved plan runs as Execute
+    /// by classification alone. Every
     /// other flow-set mode (Execute, Review, Document) is one piece of work:
     /// before this rule nothing ever released a classified Execute or
     /// Document outside a plan run, so after one edit every later message in
@@ -110,7 +114,7 @@ public enum ModePolicy {
     // Release sets, named once. Each caller says WHICH lifecycle moment it
     // is instead of spelling the modes — adding a stage is one edit here.
 
-    /// Saving a plan ends the planning stages.
+    /// The planning stages — never released at work end (see above).
     public static let planStages: Set<String> = ["plan", "assist_plan"]
     /// A finished run set one of these.
     public static let runStages: Set<String> = ["execute", "plan", "assist_plan"]

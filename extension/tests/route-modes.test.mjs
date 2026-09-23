@@ -224,3 +224,50 @@ test('execute mode: no restricted-mode tool roster is injected', async () => {
   assert.ok(!prompts[0].includes('Tools available in this mode:'),
     'execute mode must not carry the restricted-mode roster');
 });
+
+// ask-user is `kind: write` only so the turn ends and waits for the user's
+// answer — no mode restricts it, but a client with nowhere to render the
+// card (quick surfaces, the phone, headless Loop/repair callers, older Mac
+// builds) must never be left waiting on it: only a client that sends the
+// `question-card` capability is offered the tool.
+test('ask-user survives every mode for the panel, and is nulled for a client without the card', async () => {
+  const { enforceModeToolRestriction, clientCanAskCard } = await import('../llm_agent/runtime/route.mjs');
+  const out = { reply: 'which?', pendingTool: { name: 'ask-user', arguments: { question: 'q?', options: ['a', 'b'] } } };
+  for (const mode of ['plan', 'assist_plan', 'review', 'document', 'execute']) {
+    assert.deepEqual(enforceModeToolRestriction(out, mode).pendingTool, out.pendingTool, `${mode} keeps ask-user`);
+  }
+  assert.equal(enforceModeToolRestriction(out, 'execute', { canAskCard: false }).pendingTool, null);
+  assert.equal(clientCanAskCard(['question-card']), true, 'the panel says it can');
+  assert.equal(clientCanAskCard([]), false, 'no capability sent');
+  assert.equal(clientCanAskCard(undefined), false, 'older client / headless caller');
+  assert.equal(clientCanAskCard('question-card'), false, 'must be the array shape');
+  // Other writes are still nulled in restricted modes.
+  const edit = { reply: 'x', pendingTool: { name: 'update-file', arguments: {} } };
+  assert.equal(enforceModeToolRestriction(edit, 'review').pendingTool, null);
+});
+
+test('ask-user loads as a question-card write tool and stays a native tool under readOnly', async () => {
+  const { globalSkills } = await import('../llm_agent/skills/registry.mjs');
+  const { skillsToOpenAITools } = await import('../llm_agent/runtime/openai-tools.mjs');
+  const skill = globalSkills.skills.get('ask-user');
+  assert.equal(skill?.kind, 'write');
+  assert.equal(skill?.confirmation, 'question-card');
+  assert.ok(!globalSkills.warnings.some((w) => w.includes('ask-user')), 'no loader warnings');
+  const names = skillsToOpenAITools(globalSkills.skills, { readOnly: true }).map((t) => t.function?.name ?? t.name);
+  assert.ok(names.includes('ask-user'), 'kept: a question changes nothing');
+  assert.ok(!names.includes('update-file'), 'other writes still dropped');
+});
+
+test('the mode roster names ask-user only for a client that sent the question-card capability', async () => {
+  for (const [clientCaps, expected] of [[['question-card'], true], [undefined, false]]) {
+    const prompts = [];
+    const runClaude = async (p) => { prompts.push(p); return 'ok'; };
+    await handleCodeAssist({
+      message: 'review this', history: [], agentContext: { sessionId: `test-caps-${expected}` },
+      runClaude, kb: fakeKb(), userId: 'u1', mode: 'review',
+      ...(clientCaps ? { clientCaps } : {}),
+    });
+    const roster = prompts[0].match(/Tools available in this mode:([^.]*)\./)?.[1] ?? '';
+    assert.equal(roster.includes('ask-user'), expected, `caps=${JSON.stringify(clientCaps)}: ${roster}`);
+  }
+});

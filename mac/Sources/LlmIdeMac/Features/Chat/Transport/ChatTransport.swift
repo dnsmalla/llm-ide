@@ -86,6 +86,13 @@ struct ChatTransportInput: Sendable {
     /// source-compatible with call sites that pass nothing.
     var permissionMode: String? = nil
 
+    /// True only when this client can render the classic engine's `ask-user`
+    /// question card — the Code Assistant panel. Sent as the `question-card`
+    /// client capability; without it the server never offers the tool, so a
+    /// headless caller (Loop, fault repair, regression) or a quick surface
+    /// cannot be handed a question it has no way to show.
+    var questionCard: Bool = false
+
     /// Determine the provider string to send: `custom:<uuid>` verbatim for a
     /// custom provider, or the built-in tool's `provider` for everything else.
     /// Moved verbatim from `CodeAssistantPanel+Session.swift`'s
@@ -226,6 +233,7 @@ final class CodeAssistTransport: ChatTransport {
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
                 planExecute: input.planExecute, planWrite: input.planWrite,
+                questionCard: input.questionCard,
                 onProgress: onProgress, onChunk: onChunk,
                 onLiveTasks: onLiveTasks)
             return ChatTransportResult(response)
@@ -237,7 +245,8 @@ final class CodeAssistTransport: ChatTransport {
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
-                planExecute: input.planExecute, planWrite: input.planWrite)
+                planExecute: input.planExecute, planWrite: input.planWrite,
+                questionCard: input.questionCard)
             return ChatTransportResult(response)
         }
     }
@@ -265,6 +274,7 @@ final class CodeAssistTransport: ChatTransport {
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
                 planExecute: input.planExecute, planWrite: input.planWrite,
+                questionCard: input.questionCard,
                 onProgress: onProgress, onChunk: onChunk, onApproval: onApproval,
                 onLiveTasks: onLiveTasks)
             return ChatTransportResult(response)
@@ -274,7 +284,8 @@ final class CodeAssistTransport: ChatTransport {
                 message: input.message, language: input.language, model: input.model,
                 provider: input.provider, history: input.history, attachments: input.attachments,
                 skills: input.skills, agentContext: input.agentContext, mode: input.mode,
-                planExecute: input.planExecute, planWrite: input.planWrite)
+                planExecute: input.planExecute, planWrite: input.planWrite,
+                questionCard: input.questionCard)
             return ChatTransportResult(response)
         }
     }

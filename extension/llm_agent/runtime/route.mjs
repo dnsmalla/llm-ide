@@ -26,7 +26,7 @@ import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, resolveCust
 import { skillsToOpenAITools } from './openai-tools.mjs';
 import { fastModelFor } from '../../kb/usage.mjs';
 import { classifyCodeAssistMode, MODES, AUTO_READ_ONLY, clampToReadOnly } from './mode-classify.mjs';
-import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES } from './mode-personas.mjs';
+import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES, QUESTION_TOOL_NAME } from './mode-personas.mjs';
 import { pipelineSkillIdFor, buildExecuteBinding } from './plan-pipeline.mjs';
 import { buildSessionTaskPromptBlock, taskTurnResponse } from './task-session-context.mjs';
 import { buildMcpConfigForUser } from '../../mcp/mcp-config.mjs';
@@ -85,12 +85,32 @@ const NATIVE_SYSTEM_PROMPT = [
  * confirmation step). review/document get no exception; a leaked save-plan
  * call there is nulled just like any other write tool.
  */
-export function enforceModeToolRestriction(out, resolvedMode) {
+export function enforceModeToolRestriction(out, resolvedMode, { canAskCard = true } = {}) {
+  const name = out?.pendingTool?.name;
+  // ask-user changes nothing, so no mode restricts it — but a client that
+  // cannot render the card would be left with a turn waiting on an answer
+  // it has no way to give, so for that client it is nulled like a write.
+  if (name === QUESTION_TOOL_NAME) {
+    return canAskCard ? out : { ...out, pendingTool: null };
+  }
   if (restrictsTools(resolvedMode) && out?.pendingTool
-      && !(PLAN_LIKE_MODES.has(resolvedMode) && out.pendingTool.name === 'save-plan')) {
+      && !(PLAN_LIKE_MODES.has(resolvedMode) && name === 'save-plan')) {
     return { ...out, pendingTool: null };
   }
   return out;
+}
+
+/**
+ * Whether the requesting client can render an `ask-user` card: it says so
+ * itself, with the `question-card` capability. Only the Code Assistant panel
+ * sends it. Guessing from the mode was wrong both ways — headless callers
+ * (Loop, fault repair, regression) send no mode and would have been handed a
+ * question nothing shows, while the panel's own Ask mode was refused a card
+ * it can render. A client that sends nothing (older builds included) never
+ * gets the tool, so the model asks in prose as before.
+ */
+export function clientCanAskCard(clientCaps) {
+  return Array.isArray(clientCaps) && clientCaps.includes('question-card');
 }
 
 export async function handleCodeAssist({
@@ -115,6 +135,7 @@ export async function handleCodeAssist({
   mode: requestedMode,      // NEW — "auto" | "plan" | "assist_plan" | "review" | "document" | "execute" | undefined
   planExecute,              // client fired the saved-plan card's "Execute plan" — inject the execution skill
   planWrite,                // client fired "Write full plan" — inject the plan-WRITING skill, not stage 1's
+  clientCaps = [],          // what the client renders — "question-card" enables ask-user (API v53)
   // Test seam only — defaults to the real classifier. ESM named exports
   // can't be redefined by node:test's mock.method (module namespace
   // properties are non-configurable), and mock.module() needs
@@ -157,6 +178,7 @@ export async function handleCodeAssist({
   // stamped with; a clamp on one engine only would make the same request
   // behave differently depending on which chat it landed in.
   const readOnlyAuto = requestedMode === AUTO_READ_ONLY;
+  const canAskCard = clientCanAskCard(clientCaps);
   let resolvedMode;
   if (requestedMode === 'auto' || readOnlyAuto) {
     const classified = (await _classifyMode(message, { userId, model: utilityModel })).mode;
@@ -349,9 +371,12 @@ export async function handleCodeAssist({
   // guidance into consecutive "Unknown tool" dead ends before ever writing
   // its plan. Derived from allowedToolNames() so it can never drift from
   // what dispatch actually accepts. Shared with the native branch below.
+  // The mode's allowlist, minus ask-user for a client that cannot show it.
+  const toolAllowlist = allowedToolNames(resolvedMode);
+  if (!canAskCard) toolAllowlist.delete(QUESTION_TOOL_NAME);
   let modeToolNote = '';
   if (restrictsTools(resolvedMode)) {
-    const roster = [...allowedToolNames(resolvedMode)].sort().join(', ');
+    const roster = [...toolAllowlist].sort().join(', ');
     modeToolNote = `\n\nTools available in this mode: ${roster}. No other tool `
       + 'exists in this mode — in particular run-bash, bash, update-file, '
       + 'git-op, and the task tools are NOT available here, and any earlier '
@@ -463,8 +488,10 @@ export async function handleCodeAssist({
   // its own dispatch would then reject as "Unknown tool" in restricted
   // modes. Both `skills:` and `tools:` now derive from this single map.
   const activeSkills = restrictsTools(resolvedMode)
-    ? new Map([...globalSkills.skills].filter(([name]) => allowedToolNames(resolvedMode).has(name)))
-    : globalSkills.skills;
+    ? new Map([...globalSkills.skills].filter(([name]) => toolAllowlist.has(name)))
+    : canAskCard
+      ? globalSkills.skills
+      : new Map([...globalSkills.skills].filter(([name]) => name !== QUESTION_TOOL_NAME));
 
   let out;
   if (nativeKey && typeof model === 'string' && model) {
@@ -585,7 +612,7 @@ export async function handleCodeAssist({
   // either way (every pendingTool always requires separate client
   // confirmation), but a "Create issue?" card mid-"prose only" Plan-mode
   // chat would still contradict the mode's own persona text.
-  out = enforceModeToolRestriction(out, resolvedMode);
+  out = enforceModeToolRestriction(out, resolvedMode, { canAskCard });
 
   // Auto project-memory capture. Distill durable, project-specific facts from
   // this turn and merge them into the active repo's chat-memory.md, which

@@ -118,6 +118,9 @@ enum PendingToolKind: CaseIterable {
     case createIssue, commentIssue, getIssue, updateIssue, listIssues
     case createBranch, createPR, triggerReviewCode, updateFile, gitOp, bash
     case savePlan
+    /// A question with fixed answers (classic engine) — rendered as the same
+    /// tappable card as the Agent engine's AskUserQuestion, never a sheet.
+    case askUser
 
     fileprivate var names: [String] {
         switch self {
@@ -133,6 +136,7 @@ enum PendingToolKind: CaseIterable {
         case .gitOp: return ["git-op"]
         case .bash: return ["bash"]
         case .savePlan: return ["save-plan"]
+        case .askUser: return ["ask-user"]
         }
     }
 
@@ -339,6 +343,43 @@ struct PendingTool: Codable, Equatable {
     var savePlanArgs: SavePlanArgs? {
         guard kind == .savePlan else { return nil }
         return try? AppJSON.decoder.decode(SavePlanArgs.self, from: arguments.raw)
+    }
+
+    /// Typed view for the ask-user variant (classic engine's question card).
+    /// Nil for another tool, or for a payload with no question or fewer than
+    /// two options — nothing to tap, so the caller treats it as unanswerable.
+    var askUserArgs: AskUserArgs? {
+        guard kind == .askUser,
+              let args = try? AppJSON.decoder.decode(AskUserArgs.self, from: arguments.raw) else { return nil }
+        let options = args.options
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !args.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              options.count >= 2 else { return nil }
+        // The card reads best with 2-4; a model that sends more still gets a
+        // card, capped, rather than no way to answer at all.
+        return AskUserArgs(question: args.question, options: Array(options.prefix(6)),
+                           header: args.header, multiSelect: args.multiSelect)
+    }
+
+    struct AskUserArgs: Codable, Equatable {
+        var question: String
+        var options: [String]
+        var header: String?
+        var multiSelect: Bool?
+
+        /// The card model `ApprovalQuestionCard` renders — the same one the
+        /// Agent engine's AskUserQuestion produces, so both engines ask with
+        /// one card.
+        func approval(requestId: String) -> AgentV2Approval {
+            AgentV2Approval(requestId: requestId, questions: [
+                AgentV2ApprovalQuestion(
+                    question: question,
+                    header: header,
+                    options: options.map { AgentV2ApprovalOption(label: $0, description: nil) },
+                    multiSelect: multiSelect ?? false),
+            ])
+        }
     }
 
     /// Deliberately no `path` field — unlike `update-file`, this tool always

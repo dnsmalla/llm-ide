@@ -295,6 +295,9 @@ struct PendingActionCard: View {
         case .gitOp: return "WILL RUN GIT OPERATION"
         case .bash: return "WILL RUN COMMAND"
         case .savePlan: return "WILL SAVE PLAN"
+        // Only reached when the question is unusable (no text, < 2 options) —
+        // a usable one renders as the question card instead.
+        case .askUser: return "QUESTION"
         case nil: return "PENDING ACTION: \(pendingTool.name.uppercased())"
         }
     }

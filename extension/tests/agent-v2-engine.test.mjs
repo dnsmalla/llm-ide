@@ -141,6 +141,18 @@ test('mode mapping: execute/auto default; review/document persona-only', () => {
   assert.equal(rev.queryOptions.permissionMode, 'default');
   assert.ok(rev.queryOptions.systemPrompt.append.length > 0);
 });
+// Only the plan bindings used to mention the question card, so every other
+// mode asked its fixed-choice questions as a typed A/B/C list.
+test('non-plan modes are told to ask fixed-choice questions with AskUserQuestion; plan modes keep their binding', () => {
+  const base = { readSkill: () => null, roots: () => [WS] };
+  for (const mode of ['execute', 'review', 'document', 'ask']) {
+    const append = buildEngineOptions({ userId: 'u', mode, agentContext: {} }, base).queryOptions.systemPrompt.append;
+    assert.match(append, /# Asking the user/, `${mode} carries the question guidance`);
+    assert.match(append, /AskUserQuestion/, `${mode} names the tool`);
+  }
+  const plan = buildEngineOptions({ userId: 'u', mode: 'plan', agentContext: {} }, base).queryOptions.systemPrompt.append;
+  assert.doesNotMatch(plan, /# Asking the user/, 'plan mode is not told twice');
+});
 test('allowlist is read-only + llmide; skills inject via append; cwd + dirs from workspace', () => {
   const { queryOptions } = buildEngineOptions({
     userId: 'u', mode: 'execute', language: 'Japanese',
