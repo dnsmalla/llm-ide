@@ -299,6 +299,14 @@ final class ChatEngine {
     /// per-scope key the panel scopes have always used.
     var quickChatProjectId: String?
 
+    /// The active project's id, for the `.explorer` scope only — set by the
+    /// Explorer panel (and handed to fresh engines by `ChatEngineRegistry`).
+    /// New chats are stamped with it, an unassigned chat is claimed by it on
+    /// save, and the session list and relaunch pointer follow it, so one
+    /// project's Explorer chats no longer show — and resume, with the wrong
+    /// project's code as context — under another. Nil: no project, unscoped.
+    var explorerProjectId: String?
+
     /// The model the quick chat sends with, for the `.quick` scope only —
     /// nil means "Auto" (fall back to `AppConfig.defaultModelId`, then to the
     /// server's own default).

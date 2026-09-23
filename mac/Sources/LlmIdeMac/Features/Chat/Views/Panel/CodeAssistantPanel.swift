@@ -304,6 +304,9 @@ struct CodeAssistantPanel: View {
             .task { await refreshRecentIssuesLoop() }
             .task { await modelState.loadModels(for: AICliTool(rawValue: config.activeCLI) ?? .claudeCode, api: api) }
             .onAppear { handleOnAppear() }
+            .onChange(of: projectStore.activeProject?.bundle.id) { _, _ in
+                applyExplorerProject()
+            }
             .onChange(of: engine.messages) { oldValue, newValue in
                 engine.announceAndPersist(oldValue: oldValue, newValue: newValue)
             }
@@ -652,6 +655,35 @@ struct CodeAssistantPanel: View {
         adoptEngine(ChatEngineRegistry.shared.newDisplayedSession(scope: scope, api: api))
     }
 
+    /// Explorer chats are per project (`ChatEngine.explorerProjectId`). Point
+    /// the engine at the active project, and when the chat on screen belongs
+    /// to ANOTHER project, move to this project's last chat (or a new one).
+    /// Goes through the registry like any switch, so a running turn is parked
+    /// rather than stopped — and the parked engine keeps its own project, so
+    /// it never claims an unassigned chat for the project just opened.
+    func applyExplorerProject() {
+        guard scope == .explorer else { return }
+        let project = projectStore.activeProject?.bundle.id
+        guard engine.explorerProjectId != project else { return }
+        let previous = engine.explorerProjectId
+        let outgoing = engine
+        outgoing.explorerProjectId = project
+        // Not resolved yet: `handleOnAppear` runs the full resolve next.
+        guard !outgoing.currentSessionIDString.isEmpty else { return }
+        outgoing.refreshSessions()
+        if let current = UUID(uuidString: outgoing.currentSessionIDString),
+           let session = ChatSessionStore.load(id: current),
+           outgoing.sessionBelongsToCurrentProject(session) {
+            return
+        }
+        if let next = outgoing.preferredSessionForCurrentProject() {
+            switchToSession(next)
+        } else {
+            newSession()
+        }
+        if engine !== outgoing { outgoing.explorerProjectId = previous }
+    }
+
     /// Re-point this panel at `next` if the registry handed back a different
     /// instance, re-running the hook wiring onto it. `wireEngine` is
     /// idempotent — each call just reassigns fresh closures over whatever
@@ -710,6 +742,7 @@ struct CodeAssistantPanel: View {
         // full resolve-or-mint path when the engine has never picked a
         // session; otherwise just refresh the sidebar list so anything
         // created/renamed/deleted (by this panel OR the phone) still shows up.
+        applyExplorerProject()
         if engine.currentSessionIDString.isEmpty {
             engine.handleOnAppearSessions()
         } else {

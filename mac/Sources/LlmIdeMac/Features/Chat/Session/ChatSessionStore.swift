@@ -71,6 +71,18 @@ enum ChatSessionStore {
         list(for: scope).filter { $0.projectId != nil && $0.projectId == projectId }
     }
 
+    /// Explorer sessions shown while `projectId` is open: its own, plus the
+    /// unassigned ones (`projectId == nil`). Unlike `.quick`, Explorer chats
+    /// predate project stamping and nothing records where they came from, so
+    /// hiding them would lose every existing chat; instead the first project
+    /// that saves one claims it (`ChatEngine.persistCurrentChat`). A nil
+    /// `projectId` here (no project open) shows everything, as before.
+    static func list(for scope: ChatScope, visibleInProject projectId: String?) -> [ChatSession] {
+        let all = list(for: scope)
+        guard let projectId else { return all }
+        return all.filter { $0.projectId == nil || $0.projectId == projectId }
+    }
+
     static func load(id: UUID) -> ChatSession? {
         guard let url = fileURL(for: id),
               FileManager.default.fileExists(atPath: url.path),

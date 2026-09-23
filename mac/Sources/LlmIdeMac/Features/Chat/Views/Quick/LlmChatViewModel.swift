@@ -24,6 +24,13 @@ final class LlmChatViewModel {
 
     var lastError: String?
 
+    /// The prompt THIS surface last sent, until its turn resolves. The
+    /// `.quick` engine is shared with the other quick surface and with the
+    /// phone, so a failed turn is only this composer's to restore when it
+    /// is the one it sent — a failed PHONE turn used to overwrite whatever
+    /// the Mac user was typing with the phone's prompt.
+    private(set) var pendingPrompt: String?
+
     init(engine: ChatEngine) {
         self.engine = engine
     }
@@ -37,6 +44,7 @@ final class LlmChatViewModel {
     /// back online and sending again.
     func send(_ text: String, skillIds: [String] = []) {
         lastError = nil
+        pendingPrompt = text
         engine.startTurn(text, skillIds: skillIds)
     }
 
@@ -55,12 +63,27 @@ final class LlmChatViewModel {
     /// unrelated `onChange` delivery for the same already-failed message
     /// returns nil, so the view doesn't stomp on whatever the user has since
     /// typed.
-    func recoverableDraftAfterFailure(oldValue: [ChatMessage], newValue: [ChatMessage]) -> String? {
-        guard let last = newValue.last, last.role == .assistant, last.status == .failed else { return nil }
+    ///
+    /// Only this surface's own prompt comes back (`pendingPrompt`), and only
+    /// into an empty composer (`currentDraft`) — never the phone's or the
+    /// other quick surface's, and never over text typed since.
+    func recoverableDraftAfterFailure(oldValue: [ChatMessage], newValue: [ChatMessage],
+                                      currentDraft: String = "") -> String? {
+        guard let last = newValue.last, last.role == .assistant else { return nil }
+        // This surface's turn ended any other way: forget its prompt, or a
+        // later failed turn from elsewhere with the same text ("yes") would
+        // be restored as if it were ours.
+        if last.status == .done || last.status == .stopped,
+           newValue.count >= 2, newValue[newValue.count - 2].content == pendingPrompt {
+            pendingPrompt = nil
+        }
+        guard last.status == .failed else { return nil }
         if let oldLast = oldValue.last, oldLast.id == last.id, oldLast.status == .failed { return nil }
         guard newValue.count >= 2 else { return nil }
         let prior = newValue[newValue.count - 2]
-        guard prior.role == .user else { return nil }
+        guard prior.role == .user, let mine = pendingPrompt, prior.content == mine else { return nil }
+        pendingPrompt = nil
+        guard currentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return prior.content
     }
 }

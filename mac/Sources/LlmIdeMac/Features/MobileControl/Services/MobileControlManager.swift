@@ -543,7 +543,7 @@ final class MobileControlManager {
         switch type {
         case MobileProtocol.Tag.exploreListSessions:
             // `ChatSessionStore` is Mac-local JSON keyed by `ChatScope.explorer`.
-            let rows = ChatSessionStore.list(for: .explorer).map {
+            let rows = ChatSessionStore.list(for: .explorer, visibleInProject: activeExplorerProjectId).map {
                 ExploreSessionSummary(id: $0.id.uuidString,
                                       title: $0.title,
                                       lastUsedAt: $0.lastUsedAt.timeIntervalSince1970)
@@ -573,7 +573,7 @@ final class MobileControlManager {
                                         title: s.title,
                                         history: turns))
         case MobileProtocol.Tag.exploreNewSession:
-            let s = ChatSession(scope: .explorer, title: "New chat")
+            let s = ChatSession(scope: .explorer, title: "New chat", projectId: activeExplorerProjectId)
             ChatSessionStore.save(s)
             append(.info, "Explore new: \(s.id.uuidString.prefix(8))")
             reply(ExploreSessionCreated(sessionId: s.id.uuidString))
@@ -822,6 +822,7 @@ final class MobileControlManager {
         } catch let error where ChatEngine.isCancellation(error) {
             // Covers a Mac-side Stop too — same as explore_chat below.
             append(.info, "llmide_chat cancelled: \(chat.commandId.prefix(8))")
+            await notifyStoppedOnMac(chat.commandId)
         } catch {
             // Also covers `ExternalTurnError.busy` (a Mac window mid-stream
             // on this same shared engine): a typed, sane CommandError rather
@@ -947,6 +948,7 @@ final class MobileControlManager {
             // surfaces as URLError.cancelled (streaming) or the wrapped
             // APIError.network shape (buffered fallback), not CancellationError.
             append(.info, "explore_chat cancelled: \(chat.commandId.prefix(8))")
+            await notifyStoppedOnMac(chat.commandId)
         } catch {
             guard !isMobileCommandCancelled(chat.commandId) else { return }
             append(.stderr, "code-assist failed: \(error.localizedDescription)")
@@ -968,10 +970,12 @@ final class MobileControlManager {
     /// session its engine is showing (cancel + finalize the in-flight turn,
     /// delete, fall back to the next session or mint a fresh one — which is
     /// also what moves the engine OFF the deleted id so nothing can
-    /// re-persist it), so both holders go through it. The shared engine and
-    /// a cached off-screen engine can BOTH hold the same id (Mac switched to
-    /// a session the phone had opened off-screen), so check each. A session
-    /// nobody holds takes the raw delete — plus the memory forget the raw
+    /// re-persist it), so the shared engine goes through it when it is
+    /// showing the session. Off-screen engines — parked by the Mac mid-turn
+    /// or held by this bridge — are detached and dropped instead
+    /// (`ChatEngineRegistry.discardOffScreenEngines`); the parked lot used
+    /// to be skipped entirely, so a parked turn resurrected the chat. The
+    /// file itself is then removed directly — plus the memory forget the raw
     /// path used to skip, which is also re-issued unconditionally because
     /// off-screen engines never get a panel to wire their
     /// `forgetSessionMemory` hook (a duplicate server DELETE is idempotent).
@@ -983,11 +987,15 @@ final class MobileControlManager {
         // must not be skipped when it's nil, or the phone silently keeps a
         // session it deleted.
         let shared = api.map { ChatEngineRegistry.shared.engine(for: .explorer, api: $0) }
+        // Off-screen engines FIRST — the one the Mac parked mid-turn and the
+        // one this bridge holds for a phone turn. Left running, either would
+        // persist the chat again at turn end and resurrect it. They are
+        // forgotten rather than `deleteSession`ed: that would move an engine
+        // nothing displays onto a fallback chat and overwrite the Explorer's
+        // "last active chat" pointer from it.
+        ChatEngineRegistry.shared.discardOffScreenEngines(sessionID: uid)
         if shared?.currentSessionIDString == uid.uuidString {
             await shared?.deleteSession(uid)
-        }
-        if let cached = explorerMobileEngineResolver.cachedEngine(for: uid) {
-            await cached.deleteSession(uid)
         }
         if ChatSessionStore.load(id: uid) != nil {
             ChatSessionStore.delete(id: uid)
@@ -1070,7 +1078,12 @@ final class MobileControlManager {
         projectStore?.objectWillChange
             .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
             .sink { [weak self] _ in
-                Task { await self?.pushMacStatusIfPaired() }
+                Task {
+                    await self?.pushMacStatusIfPaired()
+                    // Explorer chats are listed per project, so a project
+                    // switch changes what the phone should show.
+                    self?.pushExploreSessionListIfPaired()
+                }
             }
             .store(in: &mobilePushCancellables)
 
@@ -1101,7 +1114,10 @@ final class MobileControlManager {
     private func onMobileClientDisconnected() {
         mobileClientPaired = false
         connectedDeviceId = nil
-        mobileCancelledCommandIds.removeAll()
+        // The phone is gone, so these turns end for it, not "on the Mac":
+        // mark them cancelled so their catch paths send nothing
+        // (`notifyStoppedOnMac`) to a phone that reconnects quickly.
+        mobileCancelledCommandIds = Set(mobileInflightTasks.keys)
         for task in mobileInflightTasks.values { task.cancel() }
         mobileInflightTasks.removeAll()
     }
@@ -1232,7 +1248,7 @@ final class MobileControlManager {
 
     private func pushExploreSessionListIfPaired() {
         guard mobileClientPaired else { return }
-        let rows = ChatSessionStore.list(for: .explorer).map {
+        let rows = ChatSessionStore.list(for: .explorer, visibleInProject: activeExplorerProjectId).map {
             ExploreSessionSummary(id: $0.id.uuidString,
                                   title: $0.title,
                                   lastUsedAt: $0.lastUsedAt.timeIntervalSince1970)
@@ -1276,8 +1292,25 @@ final class MobileControlManager {
         reply(CommandError(commandId: commandId, message: "Cancelled"))
     }
 
+    /// The project Explorer chats are scoped to — the Mac's active project,
+    /// same as the Explorer panel (`ChatEngine.explorerProjectId`). The phone
+    /// lists and creates Explorer chats under it.
+    private var activeExplorerProjectId: String? {
+        projectStore?.activeProject?.bundle.id
+    }
+
     private func isMobileCommandCancelled(_ commandId: String) -> Bool {
         mobileCancelledCommandIds.contains(commandId)
+    }
+
+    /// A phone-driven turn was cancelled from the MAC side (Stop, a session
+    /// switch or delete). Without a terminal message the command never gets
+    /// `done` or an error on the phone and it spins forever. A phone-side
+    /// cancel already answered "Cancelled" (`cancelMobileInflightTask`), so
+    /// that case is skipped rather than answered twice.
+    private func notifyStoppedOnMac(_ commandId: String) async {
+        guard !isMobileCommandCancelled(commandId) else { return }
+        await server?.send(CommandError(commandId: commandId, message: "Stopped on the Mac"))
     }
 
     private func handleLlmIdeCancel(data: Data) {

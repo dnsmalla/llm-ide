@@ -190,7 +190,8 @@ struct MenuBarChatView: View {
             // other ask-history listeners the SHARED table changed, which,
             // for a turn run through the code pipeline, it never did. The
             // notification had no observers left and has been removed.
-            if let recovered = viewModel.recoverableDraftAfterFailure(oldValue: oldValue, newValue: newValue) {
+            if let recovered = viewModel.recoverableDraftAfterFailure(oldValue: oldValue, newValue: newValue,
+                                                                  currentDraft: draft) {
                 draft = recovered
             }
         }
