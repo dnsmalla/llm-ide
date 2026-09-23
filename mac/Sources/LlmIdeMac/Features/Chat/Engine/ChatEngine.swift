@@ -328,6 +328,17 @@ final class ChatEngine {
     /// snapshots an empty list, which is the reset).
     var currentTurnAttachments: [LlmIdeAPIClient.CodeAttachment] = []
 
+    /// The attachment paths the server reported TRUNCATED when it received
+    /// `currentTurnAttachments` (`usage.truncatedPaths`, 80K-char cap) — the
+    /// files the agent only saw the head of. Recorded from the user turn that
+    /// sent them and kept for every round-trip that turn drives, because a
+    /// "(continue)" follow-up sends no attachments, so ITS response reports
+    /// nothing truncated while edits still resolve against the cut-down
+    /// copies. Deciding from the follow-up's own (empty) list let a
+    /// whole-file rewrite of a big file auto-apply and drop its tail.
+    /// Reset with `currentTurnAttachments`.
+    var currentTurnTruncatedPaths: Set<String> = []
+
     /// Forget the deleted chat's session memory (the server's
     /// `kb/session-memory.mjs` table, distinct from durable project memory).
     /// Injected so `deleteSession` never touches the network under test; the
@@ -605,6 +616,7 @@ final class ChatEngine {
             // Published so the rest of the turn — edit resolution, the
             // auto-continue chain — can see what this turn was actually sent.
             currentTurnAttachments = turnAttachments
+            currentTurnTruncatedPaths = []
             var input = await hooks.resolveTransportInput(
                 message,
                 recent,
@@ -635,6 +647,7 @@ final class ChatEngine {
             )
             // If Stop fired during the await, don't append the (now-unwanted) reply.
             try Task.checkCancellation()
+            currentTurnTruncatedPaths = Set(resp.usage?.truncatedPaths ?? [])
             // If the buffered fallback path fired (no chunk events ever
             // arrived), the placeholder turn is still empty — fill it from
             // the complete reply now. If chunks DID arrive this is usually a

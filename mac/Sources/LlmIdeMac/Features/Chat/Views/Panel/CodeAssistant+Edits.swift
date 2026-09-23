@@ -83,6 +83,18 @@ extension CodeAssistantPanel {
             // the sheet and see the detail, or ask the agent to retry.
             engine.error = err.message
         case .success(let edit):
+            // Same data-loss rule as the auto-chain: a whole-file rewrite of
+            // a file the agent only saw truncated would drop everything past
+            // the cut. One click is no review, so route it to the diff sheet,
+            // where the deleted tail is visible, instead of writing.
+            if args.content != nil,
+               let match = matchingAttachment(for: args.path, allowBasenameFallback: false),
+               engine.currentTurnTruncatedPaths.contains(match.path) {
+                let basename = (match.path as NSString).lastPathComponent
+                engine.error = "“\(basename)” was too large to send in full — review the proposed change before applying."
+                sheets.showingUpdateFileSheet = true
+                return
+            }
             let result = await confirmUpdateFile(args, finalContent: edit.proposed)
             if case .failure(let message) = result { engine.error = message }
         }

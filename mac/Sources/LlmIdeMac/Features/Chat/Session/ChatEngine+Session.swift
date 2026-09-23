@@ -355,6 +355,7 @@ extension ChatEngine {
         nextTurnIsAutoContinue = false
         // The files the last turn carried belong to the chat being left.
         currentTurnAttachments = []
+        currentTurnTruncatedPaths = []
         sessionEpoch += 1
         // Composer/attachment state the panel still owns (Task 14 moves it).
         // Order against the engine-owned resets above is immaterial — the two

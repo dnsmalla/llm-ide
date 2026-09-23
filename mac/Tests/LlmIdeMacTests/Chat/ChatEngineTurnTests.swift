@@ -303,6 +303,29 @@ struct ChatEngineTurnTests {
         #expect(engine.messages.filter { $0.role == .toolResult }.count == 1)
     }
 
+    @Test("A turn's truncated attachments stay flagged through its follow-ups")
+    func truncatedPathsSurviveFollowups() async {
+        let (engine, t) = makeEngine()
+        let usage = LlmIdeAPIClient.CodeAssistResponse.Usage(
+            attachmentCount: 1, attachmentChars: 80_000, paths: ["/r/big.swift"],
+            truncatedPaths: ["/r/big.swift"], memoryApproxTokens: nil, memoryChars: nil,
+            memoryHasChatMemory: nil)
+        t.result = .init(reply: "editing", pendingTool: nil, tasks: nil,
+                         continueNeeded: nil, usage: usage, mode: nil, tokenUsage: nil)
+        await engine.runTurn("refactor big.swift")
+        #expect(engine.currentTurnTruncatedPaths == ["/r/big.swift"])
+        // Regression: a "(continue)" follow-up sends no attachments, so its
+        // response reports nothing truncated — deciding from that let a
+        // whole-file rewrite of big.swift auto-apply and drop its tail.
+        t.result = .init(reply: "next step", pendingTool: nil, tasks: nil,
+                         continueNeeded: nil, usage: nil, mode: nil, tokenUsage: nil)
+        await engine.sendFollowup()
+        #expect(engine.currentTurnTruncatedPaths == ["/r/big.swift"])
+        // A new user turn starts clean.
+        await engine.runTurn("something else")
+        #expect(engine.currentTurnTruncatedPaths.isEmpty)
+    }
+
     // MARK: - Plan execution tracker
 
     private func runningTracker() -> PlanExecutionTracker {
