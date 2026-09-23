@@ -112,6 +112,8 @@ struct CodeAssistantPanel: View {
     @State var sentPrompts: [String] = []
     @State var historyIndex: Int? = nil
     @State var draftStash: String = ""
+    /// Mirrors the composer's IME composition state (`HistoryTextEditor.isComposing`).
+    @State var imeComposing = false
     /// Esc pressed on a visible ghost prediction — suppresses it until the
     /// draft next changes (see `promptSuggestion` / the composer's onEscape).
     /// Without this the only way to get rid of a ghost is to type a
