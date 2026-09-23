@@ -116,6 +116,12 @@ struct HistoryTextEditor: NSViewRepresentable {
         // keystroke via the textDidChange → binding round-trip).
         if textView.string != text {
             textView.string = text
+            // A programmatic replace (↑ recall, voice, reset) ends any
+            // composition — and `textDidChange` doesn't fire for it, so the
+            // flag would stay true and Send would do nothing.
+            if isComposing?.wrappedValue == true {
+                DispatchQueue.main.async { isComposing?.wrappedValue = false }
+            }
             // After a recall, drop the caret at the end so the next ↑ keeps
             // walking back rather than landing mid-text.
             textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))

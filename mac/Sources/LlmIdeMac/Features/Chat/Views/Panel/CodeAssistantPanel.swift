@@ -594,6 +594,7 @@ struct CodeAssistantPanel: View {
         engine.hooks.onResetTransientStateExtra = {
             sentPrompts = []; historyIndex = nil; draftStash = ""
             draft = ""
+            imeComposing = false
             attachmentState.attachments.removeAll()
             attachmentState.selectedSkills.removeAll()
             autoAttachedPath = nil
