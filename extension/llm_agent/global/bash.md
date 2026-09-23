@@ -12,15 +12,15 @@ schema:
     type: string
     required: false
     maxLength: 500
-    description: absolute path to run the command in; defaults to the active workspace root.
+    description: path inside the workspace to run the command in (absolute, or relative to the workspace root); defaults to the workspace root. Directories outside the workspace are refused.
 ---
 
 # bash
 
 Run a shell command **in the user's app**, as an action they can see. Emitting
 this ends your turn: the app surfaces the command (Manual mode — the user
-confirms it; Bypass mode — it runs immediately), runs it with a 180 s timeout,
-and feeds the output back as a new turn for you to continue from.
+confirms it; Bypass mode — it runs immediately), runs it in the project folder
+with no fixed time limit (the user can Stop it), and feeds the output back as a new turn for you to continue from.
 
 Use this for commands that DO something. For commands that merely LOOK at
 something, use `run-bash` instead — it executes inside this turn, so you get the
@@ -30,7 +30,7 @@ output without a round-trip through the user.
 
 - The command CHANGES state: `npm install`, `git push`, a script that writes files.
 - The command is SLOW: `npm test`, `swift build`, a full lint or test run.
-  (`run-bash` gives up at 30 s; this tool allows 180 s.)
+  (`run-bash` gives up at 30 s; this tool has no fixed limit.)
 - The user should see the command as a discrete action before it happens.
 
 **Always prefer this over printing a command for the user to copy.**
