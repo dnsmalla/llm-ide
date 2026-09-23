@@ -94,6 +94,9 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
         /// newest text that arrived meanwhile (see `applyMarkdown`).
         private var renderInFlight = false
         private var queuedMarkdown: String?
+        /// Bumped by every `load`; an in-place render's completion from an
+        /// earlier document is ignored.
+        private var documentGeneration = 0
 
         func load(into web: WKWebView, markdown: String, isDark: Bool) {
             lastMarkdown = markdown
@@ -101,6 +104,7 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
             documentReady = false
             deferredMarkdown = nil
             // A reload supersedes any in-place render still in flight.
+            documentGeneration += 1
             renderInFlight = false
             queuedMarkdown = nil
             loadedWithHighlighting = MarkdownRenderer.needsHighlighting(markdown)
@@ -144,6 +148,7 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
                 return
             }
             renderInFlight = true
+            let generation = documentGeneration
             web.callAsyncJavaScript(
                 "return window.__renderMarkdown(md);",
                 arguments: ["md": markdown],
@@ -151,20 +156,27 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
                 in: .page
             ) { [weak self, weak web] result in
                 guard let self else { return }
+                // The document was reloaded since this call went out: its
+                // result (success OR a failure caused by that navigation)
+                // describes a page that is gone. Acting on it cleared the
+                // new load's in-flight flag — two renders at once — and a
+                // failure re-loaded THIS call's older text over the reply.
+                guard generation == self.documentGeneration else { return }
                 self.renderInFlight = false
-                if let next = self.queuedMarkdown, let web {
-                    self.queuedMarkdown = nil
-                    if next != markdown { self.applyMarkdown(next, to: web) }
-                }
                 switch result {
                 case .success(let value):
                     self.report(height: value)
+                    if let next = self.queuedMarkdown, let web {
+                        self.queuedMarkdown = nil
+                        if next != markdown { self.applyMarkdown(next, to: web) }
+                    }
                 case .failure:
                     // Older document, or the function is missing: fall back
-                    // permanently and rebuild once so the user still sees the
-                    // current text.
+                    // permanently and rebuild once with the NEWEST text (not
+                    // this call's), so nothing queued behind it is lost.
                     self.incrementalUnavailable = true
-                    if let web { self.load(into: web, markdown: markdown, isDark: self.lastDark) }
+                    self.queuedMarkdown = nil
+                    if let web { self.load(into: web, markdown: self.lastMarkdown, isDark: self.lastDark) }
                 }
             }
         }
