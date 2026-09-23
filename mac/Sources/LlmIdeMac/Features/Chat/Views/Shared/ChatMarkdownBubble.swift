@@ -62,6 +62,12 @@ struct ChatMarkdownBubble: View {
             // before the cap existed.
             .scrollDisabled(!isClipped)
             .frame(height: renderedHeight)
+            .onHover { inside in
+                isPointerInside = inside
+                // Catch up the moment the pointer leaves — otherwise a reply
+                // that finished while it rested here stayed mid-scroll.
+                if !inside { pinToBottomWhileStreaming(proxy) }
+            }
             .onChange(of: contentHeight) { _, _ in pinToBottomWhileStreaming(proxy) }
             .onChange(of: markdown) { _, _ in pinToBottomWhileStreaming(proxy) }
         }
@@ -69,8 +75,14 @@ struct ChatMarkdownBubble: View {
 
     private static let bottomAnchor = "chat-markdown-bubble-bottom"
 
+    /// The pointer is over the bubble — the only way to scroll a capped
+    /// bubble on macOS, so it is the signal that the user may be reading
+    /// back. Pinning on every chunk (~20×/s) used to undo their scroll the
+    /// moment they made it; following resumes when the pointer leaves.
+    @State private var isPointerInside = false
+
     private func pinToBottomWhileStreaming(_ proxy: ScrollViewProxy) {
-        guard isStreaming, isClipped else { return }
+        guard isStreaming, isClipped, !isPointerInside else { return }
         proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
     }
 }

@@ -298,7 +298,8 @@ struct CodeAssistantPanel: View {
                 engine.announceAndPersist(oldValue: oldValue, newValue: newValue)
             }
             .onChange(of: config.activeCLI) { _, _ in
-                modelState.selectedModel = config.defaultModelId
+                modelState.followDefaultProvider(activeCLI: config.activeCLI,
+                                                 defaultModelId: config.defaultModelId)
             }
             // Settings → Custom Providers edits while this panel is open: the
             // transport reads the live provider list every turn, but the menu
@@ -306,6 +307,8 @@ struct CodeAssistantPanel: View {
             // reload they lag until the next appear and disagree with routing.
             .onReceive(NotificationCenter.default.publisher(for: .customProvidersChanged)) { _ in
                 modelState.customProviders = CustomProvider.loadAll()
+                modelState.reconcileCustomSelection(activeCLI: config.activeCLI,
+                                                    defaultModelId: config.defaultModelId)
             }
             // AppShell's pending-approval toolbar button already primed the
             // registry with this session as `scope`'s displayed engine; if
@@ -680,7 +683,7 @@ struct CodeAssistantPanel: View {
                 : config.defaultModelId
         }
         if modelState.selectedProvider.isEmpty {
-            modelState.selectedProvider = config.activeCLI.isEmpty ? ClaudeCLI.provider : config.activeCLI
+            modelState.selectedProvider = config.activeCLI.isEmpty ? AICliTool.claudeCode.rawValue : config.activeCLI
         }
         // Task 12: the engine is now shared (`ChatEngineRegistry`), so it may
         // already have a session loaded — from a PRIOR appearance of this

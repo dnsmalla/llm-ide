@@ -29,6 +29,7 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        MarkdownCopyHandler.install(in: config)
         // PassthroughWebView forwards scroll-wheel events to the enclosing
         // conversation ScrollView — the view is content-sized, so it must not
         // capture the scroll gesture (see PassthroughWebView above).
@@ -89,11 +90,23 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
 
         init(_ parent: SelfSizingMarkdownView) { self.parent = parent }
 
+        /// A `__renderMarkdown` call is running; `queuedMarkdown` holds the
+        /// newest text that arrived meanwhile (see `applyMarkdown`).
+        private var renderInFlight = false
+        private var queuedMarkdown: String?
+        /// Bumped by every `load`; an in-place render's completion from an
+        /// earlier document is ignored.
+        private var documentGeneration = 0
+
         func load(into web: WKWebView, markdown: String, isDark: Bool) {
             lastMarkdown = markdown
             lastDark = isDark
             documentReady = false
             deferredMarkdown = nil
+            // A reload supersedes any in-place render still in flight.
+            documentGeneration += 1
+            renderInFlight = false
+            queuedMarkdown = nil
             loadedWithHighlighting = MarkdownRenderer.needsHighlighting(markdown)
             web.loadHTMLString(
                 MarkdownRenderer.html(for: markdown, isDark: isDark, compact: true),
@@ -125,6 +138,17 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
                 deferredMarkdown = markdown
                 return
             }
+            // Backpressure, same rule: while a render is running, keep only
+            // the newest text and render it when this one lands. Every chunk
+            // (~20/s) used to start a full re-parse + highlight of the WHOLE
+            // reply regardless, so on a long answer the web process fell
+            // further behind with each one and heights/scroll lagged.
+            guard !renderInFlight else {
+                queuedMarkdown = markdown
+                return
+            }
+            renderInFlight = true
+            let generation = documentGeneration
             web.callAsyncJavaScript(
                 "return window.__renderMarkdown(md);",
                 arguments: ["md": markdown],
@@ -132,15 +156,27 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
                 in: .page
             ) { [weak self, weak web] result in
                 guard let self else { return }
+                // The document was reloaded since this call went out: its
+                // result (success OR a failure caused by that navigation)
+                // describes a page that is gone. Acting on it cleared the
+                // new load's in-flight flag — two renders at once — and a
+                // failure re-loaded THIS call's older text over the reply.
+                guard generation == self.documentGeneration else { return }
+                self.renderInFlight = false
                 switch result {
                 case .success(let value):
                     self.report(height: value)
+                    if let next = self.queuedMarkdown, let web {
+                        self.queuedMarkdown = nil
+                        if next != markdown { self.applyMarkdown(next, to: web) }
+                    }
                 case .failure:
                     // Older document, or the function is missing: fall back
-                    // permanently and rebuild once so the user still sees the
-                    // current text.
+                    // permanently and rebuild once with the NEWEST text (not
+                    // this call's), so nothing queued behind it is lost.
                     self.incrementalUnavailable = true
-                    if let web { self.load(into: web, markdown: markdown, isDark: self.lastDark) }
+                    self.queuedMarkdown = nil
+                    if let web { self.load(into: web, markdown: self.lastMarkdown, isDark: self.lastDark) }
                 }
             }
         }
@@ -181,14 +217,44 @@ struct SelfSizingMarkdownView: NSViewRepresentable {
         func webView(_ webView: WKWebView,
                      decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            if navigationAction.navigationType == .linkActivated,
-               let url = navigationAction.request.url,
-               url.scheme == "http" || url.scheme == "https" || url.scheme == "mailto" {
-                NSWorkspace.shared.open(url)
+            if navigationAction.navigationType == .linkActivated {
+                // A `#fragment` inside this same document (a table of
+                // contents) is safe to follow — it never leaves the page.
+                if let url = navigationAction.request.url, url.scheme == "about", url.fragment != nil {
+                    decisionHandler(.allow)
+                    return
+                }
+                // EVERY click is cancelled; only web and mail links are handed
+                // to the system. Letting the rest through — a relative
+                // `[Parser.swift](Sources/Parser.swift)` the model wrote —
+                // navigated this web view away from its own document and the
+                // reply went blank until the next reload.
+                if let url = navigationAction.request.url,
+                   url.scheme == "http" || url.scheme == "https" || url.scheme == "mailto" {
+                    NSWorkspace.shared.open(url)
+                }
                 decisionHandler(.cancel)
                 return
             }
             decisionHandler(.allow)
         }
+    }
+}
+
+/// The code-block Copy button's pasteboard bridge (`copyCode` message). The
+/// rendered documents load with a nil base URL, where the web clipboard API
+/// may be unavailable; writing through `NSPasteboard` doesn't depend on it.
+/// Holds no reference back to the view, so the content controller retaining
+/// it creates no cycle.
+final class MarkdownCopyHandler: NSObject, WKScriptMessageHandler {
+    static func install(in config: WKWebViewConfiguration) {
+        config.userContentController.add(MarkdownCopyHandler(), name: "copyCode")
+    }
+
+    func userContentController(_ controller: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        guard let text = message.body as? String else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }

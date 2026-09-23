@@ -89,6 +89,35 @@ extension CodeAssistantModelState {
         }
     }
 
+    /// Settings changed the DEFAULT provider (`config.activeCLI`): move the
+    /// composer's provider with it, not just its model. Moving only the model
+    /// left e.g. provider `anthropic` paired with a `gpt-…` model (or a
+    /// `custom:<uuid>` provider with a built-in id it doesn't serve), and the
+    /// chip read "Claude / gpt-…".
+    func followDefaultProvider(activeCLI: String, defaultModelId: String) {
+        // `.claudeCode.rawValue`, not `ClaudeCLI.provider` ("anthropic",
+        // not an `AICliTool` value — `modelsForCurrentProvider` found no models).
+        selectedProvider = activeCLI.isEmpty ? AICliTool.claudeCode.rawValue : activeCLI
+        selectedModel = defaultModelId
+    }
+
+    /// After the custom-provider list changed: if the selected
+    /// `custom:<uuid>` was deleted or disabled, fall back to the default
+    /// provider; if only its selected model went away, take its first model.
+    /// Left alone, the dead id kept being sent (the server couldn't resolve
+    /// it) while the chip fell back to reading "Claude".
+    func reconcileCustomSelection(activeCLI: String, defaultModelId: String) {
+        guard selectedProvider.starts(with: "custom:") else { return }
+        guard let provider = customProviders.first(where: { "custom:\($0.id)" == selectedProvider }),
+              provider.isEnabled else {
+            followDefaultProvider(activeCLI: activeCLI, defaultModelId: defaultModelId)
+            return
+        }
+        if !provider.models.contains(where: { $0.id == selectedModel }) {
+            selectedModel = provider.models.first?.id ?? ""
+        }
+    }
+
     enum ProviderSwitch {
         case builtIn(AICliTool)
         case custom(CustomProvider)

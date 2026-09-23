@@ -154,6 +154,7 @@ struct MarkdownWebView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        MarkdownCopyHandler.install(in: config)
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.setValue(false, forKey: "drawsBackground")
         // Links in the document open in the browser instead of navigating this
@@ -226,10 +227,19 @@ struct MarkdownWebView: NSViewRepresentable {
         func webView(_ webView: WKWebView,
                      decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            if navigationAction.navigationType == .linkActivated,
-               let url = navigationAction.request.url,
-               url.scheme == "http" || url.scheme == "https" || url.scheme == "mailto" {
-                NSWorkspace.shared.open(url)
+            if navigationAction.navigationType == .linkActivated {
+                // A `#fragment` inside this same document (a table of
+                // contents) is safe to follow — it never leaves the page.
+                if let url = navigationAction.request.url, url.scheme == "about", url.fragment != nil {
+                    decisionHandler(.allow)
+                    return
+                }
+                // Every click is cancelled (see SelfSizingMarkdownView): a
+                // relative link let through blanked the preview.
+                if let url = navigationAction.request.url,
+                   url.scheme == "http" || url.scheme == "https" || url.scheme == "mailto" {
+                    NSWorkspace.shared.open(url)
+                }
                 decisionHandler(.cancel)
                 return
             }

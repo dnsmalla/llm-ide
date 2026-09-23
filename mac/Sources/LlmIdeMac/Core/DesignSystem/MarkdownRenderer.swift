@@ -218,11 +218,22 @@ enum MarkdownRenderer {
       html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
       html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
       html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+      // Inline code first, out to placeholders like the fenced blocks
+      // above: emphasis used to run over it, so `__init__` rendered as a
+      // bold "init" and `a*b*c` grew an <em> inside the code.
+      const inlineCodes = [];
+      const inlineCodeText = [];
+      html = html.replace(/`([^`\\n]+)`/g, function(_m, code) {
+        inlineCodes.push('<code>' + code + '</code>');
+        inlineCodeText.push(code);
+        return '\\x00IC' + (inlineCodes.length - 1) + '\\x00';
+      });
       html = html.replace(/\\*\\*\\*(.+?)\\*\\*\\*/g, '<strong><em>$1</em></strong>');
       html = html.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
       html = html.replace(/\\*(.+?)\\*/g, '<em>$1</em>');
-      html = html.replace(/_(.+?)_/g, '<em>$1</em>');
-      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+      // Underscore emphasis only at word boundaries (as CommonMark does):
+      // intraword, `snake_case_name` — or a URL's `a_b_c` — turned italic.
+      html = html.replace(/(^|[^A-Za-z0-9_])_([^_\\n]+?)_(?![A-Za-z0-9_])/gm, '$1<em>$2</em>');
       // `&gt;`, not `>` — the source went through escHtml above, so a
       // blockquote marker reaches this line already encoded.
       html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
@@ -230,7 +241,14 @@ enum MarkdownRenderer {
       html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, function(_m, text, url) {
         // Block dangerous URL schemes (javascript:, data:, vbscript:) and
         // escape the href so a crafted link can't break out of the attribute.
-        var u = String(url).trim();
+        // A code placeholder inside the URL goes back to its PLAIN text
+        // first, so the scheme check and escQuotes see — and escape — what
+        // actually lands in the attribute. Restored as markup after this,
+        // `[a](x/`" onmouseover="…//`)` put a raw quote inside href="…"
+        // and ran script in the bubble.
+        var u = String(url).replace(/\\x00IC(\\d+)\\x00/g, function(_p, i) {
+          return inlineCodeText[+i];
+        }).trim();
         var safe = /^(https?:\\/\\/|mailto:|#|\\/|\\.|[^:]+$)/i.test(u) ? u : '#';
         return '<a href="' + escQuotes(safe) + '">' + text + '</a>';
       });
@@ -241,13 +259,25 @@ enum MarkdownRenderer {
       html = extractTables(html, tables);
       // Lists (after tables so table pipes aren't mistaken for list items).
       html = html.replace(/^[\\*\\-] (.+)$/gm, '<li>$1</li>');
-      // Join items separated by a BLANK line before wrapping. The wrap below
-      // allows only a single `\\n` between items, so a model that spaces its
-      // bullets out — most do — got one <ul> PER BULLET, each carrying the
+      // Numbered items get their own marker so they wrap in <ol>, not <ul>.
+      // They used to become bare <li> AFTER the <ul> wrap had run — never
+      // wrapped at all, never joined across blank lines, so the browser
+      // repaired each one out of its <p> and left empty paragraphs (dead
+      // space per item, the gap cf564532 fixed for bullets) and no numbers.
+      html = html.replace(/^(\\d+)\\. (.+)$/gm, '<li data-ol="$1">$2</li>');
+      // Join items separated by a BLANK line before wrapping. The wraps below
+      // allow only a single `\\n` between items, so a model that spaces its
+      // items out — most do — got one list PER item, each carrying the
       // list's own bottom margin.
-      html = html.replace(/<\\/li>\\n{2,}(?=<li>)/g, '</li>\\n');
+      html = html.replace(/<\\/li>\\n{2,}(?=<li[ >])/g, '</li>\\n');
       html = html.replace(/(<li>.*<\\/li>\\n?)+/g, '<ul>$&</ul>');
-      html = html.replace(/^\\d+\\. (.+)$/gm, '<li>$1</li>');
+      // Keeps the first item's number, so a list the model continues after
+      // a paragraph ("3. …") still counts from 3.
+      html = html.replace(/(<li data-ol="\\d+">.*<\\/li>\\n?)+/g, function(run) {
+        var first = /data-ol="(\\d+)"/.exec(run);
+        var start = first && first[1] !== '1' ? ' start="' + first[1] + '"' : '';
+        return '<ol' + start + '>' + run.replace(/<li data-ol="\\d+">/g, '<li>') + '</ol>';
+      });
       html = html.replace(/\\n\\n/g, '</p><p>');
       html = '<p>' + html + '</p>';
       html = html.replace(/\\n/g, '<br>');
@@ -283,6 +313,8 @@ enum MarkdownRenderer {
       // inserted verbatim.
       codeBlocks.forEach((block, i) => { html = html.replace('\\x00CODE' + i + '\\x00', () => block); });
       tables.forEach((t, i) => { html = html.replace('\\x00TABLE' + i + '\\x00', () => t); });
+      // After tables: a placeholder can sit inside a table cell.
+      inlineCodes.forEach((c, i) => { html = html.replace('\\x00IC' + i + '\\x00', () => c); });
       return html;
     }
     // Scan line-by-line for a header row + `|---|---|` separator, then collect
@@ -366,12 +398,22 @@ enum MarkdownRenderer {
       const block = btn.closest('.code-block');
       const code = block && block.querySelector('code');
       if (!code) return;
-      navigator.clipboard.writeText(code.textContent).then(() => {
+      const done = () => {
         const prev = btn.textContent;
         btn.textContent = 'Copied';
         btn.classList.add('copied');
         setTimeout(() => { btn.textContent = prev; btn.classList.remove('copied'); }, 1500);
-      }).catch(() => {});
+      };
+      // The app's own pasteboard bridge first (MarkdownCopyHandler): this
+      // document is loaded with a nil base URL, where `navigator.clipboard`
+      // may not exist at all — and then `.writeText` threw synchronously,
+      // past the `.catch`, and Copy silently did nothing.
+      const bridge = window.webkit && window.webkit.messageHandlers
+        && window.webkit.messageHandlers.copyCode;
+      if (bridge) { bridge.postMessage(code.textContent); done(); return; }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(code.textContent).then(done).catch(() => {});
+      }
     }
     </script>
     </body>
