@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Which sidebar section a chat belongs to. A section can own many chats;
 /// `ChatSessionStore.list(for:)` filters the UUID session files down to
@@ -101,7 +102,19 @@ struct ChatSession: Identifiable, Codable, Equatable {
         // Optional decode so files persisted before project identity existed
         // (every chat today) decode as "unknown project" — nil, never a throw.
         self.projectId = try? c.decode(String.self, forKey: .projectId)
-        if let v2Messages = try? c.decode([ChatMessage].self, forKey: .messages) {
+        // Decided by which key is PRESENT, never by whether the v2 decode
+        // happened to throw: one message this build couldn't read used to
+        // fail the `[ChatMessage]` decode, fall through to the v1 branch —
+        // which requires a `history` key a v2 file doesn't have — and the
+        // store then quarantined the whole session, logging a misleading
+        // "keyNotFound history". Messages decode one by one now; an
+        // unreadable one is dropped (and logged), the chat survives.
+        if c.contains(.messages) {
+            let lossy = try c.decode([LossyChatMessage].self, forKey: .messages)
+            let v2Messages = lossy.compactMap(\.message)
+            if v2Messages.count < lossy.count {
+                chatSessionLog.warning("chat_session_messages_dropped count=\(lossy.count - v2Messages.count, privacy: .public)")
+            }
             // Already v2 — decode directly, no migration.
             self.storeVersion = (try? c.decode(Int.self, forKey: .storeVersion)) ?? 2
             // Repair interrupted turns: a message can only reach disk as
@@ -146,3 +159,11 @@ struct ChatSession: Identifiable, Codable, Equatable {
         try c.encodeIfPresent(projectId, forKey: .projectId)
     }
 }
+
+/// One persisted message that may not decode on this build.
+private struct LossyChatMessage: Decodable {
+    let message: ChatMessage?
+    init(from decoder: Decoder) throws { message = try? ChatMessage(from: decoder) }
+}
+
+private let chatSessionLog = Logger(subsystem: "com.llmide.macapp", category: "chat-session")

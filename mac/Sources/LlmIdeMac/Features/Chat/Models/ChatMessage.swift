@@ -17,7 +17,14 @@ import Foundation
 /// richer shape changes that contract.
 struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     enum Role: String, Codable { case user, assistant, toolResult }
-    enum Status: String, Codable { case streaming, done, stopped, failed }
+    enum Status: String, Codable {
+        case streaming, done, stopped, failed
+        /// Unknown values (a file written by a newer build) read as `.done`
+        /// rather than failing — see `ChatMessage.init(from:)`.
+        init(from decoder: Decoder) throws {
+            self = Status(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .done
+        }
+    }
 
     /// One tool step the agent took during a turn — "Reading Foo.swift",
     /// "Running npm test" — so the transcript shows WHAT it did instead of the
@@ -76,7 +83,13 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     /// client-executed tool produced it, plus whichever of the bash-specific
     /// fields apply.
     struct ToolResultPayload: Codable, Equatable, Sendable {
-        enum Kind: String, Codable { case edit, bash, git, issue, skip, other, plan }
+        enum Kind: String, Codable {
+            case edit, bash, git, issue, skip, other, plan
+            /// Unknown kinds read as `.other` — see `ChatMessage.init(from:)`.
+            init(from decoder: Decoder) throws {
+                self = Kind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .other
+            }
+        }
         let kind: Kind
         /// Human line shown in the capsule ("applied update to parser.swift:
         /// +3 lines") — the first line of the legacy ack text, verbatim.
@@ -109,6 +122,35 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         /// persisted before these fields existed decode with them nil.
         var planTitle: String? = nil
         var planContent: String? = nil
+
+        enum CodingKeys: String, CodingKey {
+            case kind, summary, exitCode, command, output, url, isFailure, planTitle, planContent
+        }
+
+        init(kind: Kind, summary: String, exitCode: Int?, command: String?, output: String?,
+             url: String?, isFailure: Bool = false, planTitle: String? = nil, planContent: String? = nil) {
+            self.kind = kind; self.summary = summary; self.exitCode = exitCode
+            self.command = command; self.output = output; self.url = url
+            self.isFailure = isFailure; self.planTitle = planTitle; self.planContent = planContent
+        }
+
+        /// Hand-written so a missing field falls back to its default: a
+        /// synthesized decoder decodes `isFailure` (non-optional, defaulted)
+        /// with a REQUIRED `decode`, so the `= false` above never applies on
+        /// read — any non-optional field added this way would make every
+        /// older file undecodable.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            kind = (try? c.decodeIfPresent(Kind.self, forKey: .kind)) ?? .other
+            summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? ""
+            exitCode = try? c.decodeIfPresent(Int.self, forKey: .exitCode)
+            command = try? c.decodeIfPresent(String.self, forKey: .command)
+            output = try? c.decodeIfPresent(String.self, forKey: .output)
+            url = try? c.decodeIfPresent(String.self, forKey: .url)
+            isFailure = (try? c.decodeIfPresent(Bool.self, forKey: .isFailure)) ?? false
+            planTitle = try? c.decodeIfPresent(String.self, forKey: .planTitle)
+            planContent = try? c.decodeIfPresent(String.self, forKey: .planContent)
+        }
 
         /// Parses the `"(bash result - exit code: N)\n$ <command>\n<output>"`
         /// convention (and its "(bash failed - …)" / "(bash blocked - …)"
@@ -228,6 +270,41 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         /// save that turn's reply back into the chat's plan file. Also what
         /// stops the update from triggering another update.
         var planUpdateDisplay: String?
+
+        enum CodingKeys: String, CodingKey {
+            case mode, usage, tokenUsage, skills, failedError, planSaved, planCardAction,
+                 planExecuteDisplay, planWriteDisplay, planReviewDisplay, planUpdateDisplay
+        }
+
+        init(mode: String? = nil, usage: LlmIdeAPIClient.CodeAssistResponse.Usage? = nil,
+             tokenUsage: AgentV2Usage? = nil, skills: [String]? = nil, failedError: String? = nil,
+             planSaved: Bool? = nil, planCardAction: PlanCardAction? = nil,
+             planExecuteDisplay: String? = nil, planWriteDisplay: String? = nil,
+             planReviewDisplay: String? = nil, planUpdateDisplay: String? = nil) {
+            self.mode = mode; self.usage = usage; self.tokenUsage = tokenUsage
+            self.skills = skills; self.failedError = failedError; self.planSaved = planSaved
+            self.planCardAction = planCardAction; self.planExecuteDisplay = planExecuteDisplay
+            self.planWriteDisplay = planWriteDisplay; self.planReviewDisplay = planReviewDisplay
+            self.planUpdateDisplay = planUpdateDisplay
+        }
+
+        /// Field by field, each on its own: metadata is display-only, so one
+        /// value this build can't read (an unknown `planCardAction`, a
+        /// reshaped `usage`) drops that field, not the message.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            mode = try? c.decodeIfPresent(String.self, forKey: .mode)
+            usage = try? c.decodeIfPresent(LlmIdeAPIClient.CodeAssistResponse.Usage.self, forKey: .usage)
+            tokenUsage = try? c.decodeIfPresent(AgentV2Usage.self, forKey: .tokenUsage)
+            skills = try? c.decodeIfPresent([String].self, forKey: .skills)
+            failedError = try? c.decodeIfPresent(String.self, forKey: .failedError)
+            planSaved = try? c.decodeIfPresent(Bool.self, forKey: .planSaved)
+            planCardAction = try? c.decodeIfPresent(PlanCardAction.self, forKey: .planCardAction)
+            planExecuteDisplay = try? c.decodeIfPresent(String.self, forKey: .planExecuteDisplay)
+            planWriteDisplay = try? c.decodeIfPresent(String.self, forKey: .planWriteDisplay)
+            planReviewDisplay = try? c.decodeIfPresent(String.self, forKey: .planReviewDisplay)
+            planUpdateDisplay = try? c.decodeIfPresent(String.self, forKey: .planUpdateDisplay)
+        }
     }
 
     /// User choice on a saved-plan card — persisted so reloaded sessions
@@ -261,6 +338,36 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         self.toolSteps = toolSteps
         self.toolResult = toolResult
         self.metadata = metadata
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, role, content, status, createdAt, toolSteps, toolResult, metadata
+    }
+
+    /// Tolerant by design: only `role` is required (without it the message
+    /// can't be placed in the transcript at all). Everything else falls back
+    /// — a missing `toolSteps` to `[]`, an unreadable tool result or metadata
+    /// to nil, an unknown status to `.done` — because a message that fails
+    /// to decode used to take its whole SESSION with it (see
+    /// `ChatSession.init(from:)`).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        role = try c.decode(Role.self, forKey: .role)
+        id = (try? c.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
+        content = (try? c.decodeIfPresent(String.self, forKey: .content)) ?? ""
+        status = (try? c.decodeIfPresent(Status.self, forKey: .status)) ?? .done
+        createdAt = (try? c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? .distantPast
+        toolSteps = (try? c.decodeIfPresent([LossyToolStep].self, forKey: .toolSteps))?
+            .compactMap(\.step) ?? []
+        toolResult = try? c.decodeIfPresent(ToolResultPayload.self, forKey: .toolResult)
+        metadata = try? c.decodeIfPresent(Metadata.self, forKey: .metadata)
+    }
+
+    /// One tool step that may not decode — dropped on its own instead of
+    /// failing the message's whole `toolSteps` array.
+    private struct LossyToolStep: Decodable {
+        let step: ToolStep?
+        init(from decoder: Decoder) throws { step = try? ToolStep(from: decoder) }
     }
 
     // MARK: - v1 → v2 migration
