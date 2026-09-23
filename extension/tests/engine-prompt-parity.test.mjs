@@ -63,7 +63,12 @@ function agentPrompt({ mode, message, sessionId }) {
   return `${queryOptions.systemPrompt.append}\n${prompt}`;
 }
 
-test('both engines frame a plan turn with the mode binding and its stage skill', async () => {
+test('both engines frame a plan turn with the mode binding and its stage skill', async (t) => {
+  // The legacy engine reads its stage skill from the real kit (the agent
+  // side is stubbed above), so without the private .skills submodule — as
+  // in CI — it has no skill block to compare. Same skip as plan-pipeline's.
+  const { resolveCentralSkillsRepo } = await import('../core/skills-repo.mjs');
+  if (!resolveCentralSkillsRepo()) { t.skip('.skills is not initialized locally — run `git submodule update --init .skills`'); return; }
   const args = { mode: 'plan', message: 'plan the refactor', sessionId: 'parity-plan' };
   const legacy = await legacyPrompt(args);
   const agent = agentPrompt(args);

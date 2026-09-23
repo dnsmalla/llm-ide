@@ -335,7 +335,11 @@ test('every pipeline skill id ships in .skills — no fallback copy exists any m
 // leave the model with a description, no process, and no error anyone sees.
 // Inlining used to fail loudly at build time (no text, no block); a pointer
 // fails silently at run time, so the ids need their own guard.
-test('every pipeline skill id resolves through load-skill', async () => {
+test('every pipeline skill id resolves through load-skill', async (t) => {
+  // Resolves against the real kit, like the test above — skipped the same
+  // way when the private .skills submodule is not checked out (CI).
+  const { resolveCentralSkillsRepo } = await import('../core/skills-repo.mjs');
+  if (!resolveCentralSkillsRepo()) { t.skip('.skills is not initialized locally — run `git submodule update --init .skills`'); return; }
   const { handleLoadSkill } = await import('../llm_agent/runtime/handlers/load-skill.mjs');
   const ids = [
     ...Object.values(DISCOVER_SKILL_IDS),
