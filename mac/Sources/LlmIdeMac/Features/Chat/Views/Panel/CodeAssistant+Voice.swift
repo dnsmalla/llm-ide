@@ -19,14 +19,17 @@ extension CodeAssistantPanel {
                 // only by desaturating an INHERITED foreground style, and the
                 // explicit color below wins over it — so without this the mic
                 // reads fully live mid-turn while click and ⌘M both no-op.
-                .foregroundColor(engine.busy
+                .foregroundColor(engine.busy && !voiceState.isRecording
                     ? theme.current.textMuted.opacity(0.4)
                     : (voiceState.isRecording ? theme.current.danger : theme.current.textMuted))
                 .frame(width: 24, height: 24)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(engine.busy)
+        // Busy blocks STARTING a recording, never stopping one: disabled
+        // outright, a recording running when a turn began (Enter while
+        // dictating) could not be stopped until Speech ended it itself.
+        .disabled(engine.busy && !voiceState.isRecording)
         .keyboardShortcut("m", modifiers: .command)
         .help(voiceState.isRecording ? "Stop voice input (Cmd+M)" : "Start voice input (Cmd+M)")
         .accessibilityLabel(voiceState.isRecording ? "Recording" : "Start voice input")

@@ -305,6 +305,19 @@ struct CodeAssistantPanel: View {
             .onChange(of: engine.messages) { oldValue, newValue in
                 engine.announceAndPersist(oldValue: oldValue, newValue: newValue)
             }
+            // A turn starting while dictating (Enter mid-recording): stop, so
+            // the transcript lands in the composer now as the NEXT draft,
+            // instead of arriving a minute later into whatever is there.
+            .onChange(of: engine.busy) { _, busy in
+                guard busy, voiceState.isRecording else { return }
+                voiceState.setRecording(false)
+                voiceService.stopListening()
+            }
+            .onDisappear {
+                guard voiceState.isRecording else { return }
+                voiceState.setRecording(false)
+                voiceService.cancel()
+            }
             .onChange(of: config.activeCLI) { _, _ in
                 modelState.followDefaultProvider(activeCLI: config.activeCLI,
                                                  defaultModelId: config.defaultModelId)

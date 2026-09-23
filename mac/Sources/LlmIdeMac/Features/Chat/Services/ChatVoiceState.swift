@@ -41,5 +41,7 @@ final class ChatVoiceState {
     func setError(_ message: String) {
         error = message
         isRecording = false
+        // The interim banner described a recording that is over.
+        interimText = ""
     }
 }
