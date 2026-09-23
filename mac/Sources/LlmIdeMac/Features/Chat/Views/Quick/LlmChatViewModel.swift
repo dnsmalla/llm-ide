@@ -69,7 +69,15 @@ final class LlmChatViewModel {
     /// other quick surface's, and never over text typed since.
     func recoverableDraftAfterFailure(oldValue: [ChatMessage], newValue: [ChatMessage],
                                       currentDraft: String = "") -> String? {
-        guard let last = newValue.last, last.role == .assistant, last.status == .failed else { return nil }
+        guard let last = newValue.last, last.role == .assistant else { return nil }
+        // This surface's turn ended any other way: forget its prompt, or a
+        // later failed turn from elsewhere with the same text ("yes") would
+        // be restored as if it were ours.
+        if last.status == .done || last.status == .stopped,
+           newValue.count >= 2, newValue[newValue.count - 2].content == pendingPrompt {
+            pendingPrompt = nil
+        }
+        guard last.status == .failed else { return nil }
         if let oldLast = oldValue.last, oldLast.id == last.id, oldLast.status == .failed { return nil }
         guard newValue.count >= 2 else { return nil }
         let prior = newValue[newValue.count - 2]

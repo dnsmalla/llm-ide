@@ -1114,7 +1114,10 @@ final class MobileControlManager {
     private func onMobileClientDisconnected() {
         mobileClientPaired = false
         connectedDeviceId = nil
-        mobileCancelledCommandIds.removeAll()
+        // The phone is gone, so these turns end for it, not "on the Mac":
+        // mark them cancelled so their catch paths send nothing
+        // (`notifyStoppedOnMac`) to a phone that reconnects quickly.
+        mobileCancelledCommandIds = Set(mobileInflightTasks.keys)
         for task in mobileInflightTasks.values { task.cancel() }
         mobileInflightTasks.removeAll()
     }

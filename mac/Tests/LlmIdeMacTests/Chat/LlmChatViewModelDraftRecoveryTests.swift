@@ -55,6 +55,23 @@ struct LlmChatViewModelDraftRecoveryTests {
         }
     }
 
+    @Test("A turn that finished is forgotten, so a later same-text failure from elsewhere restores nothing")
+    func finishedTurnForgotten() async {
+        await withTempStore {
+            let vm = LlmChatViewModel(engine: ChatEngine(scope: .quick, transport: ScriptedChatTransport()))
+            vm.send("yes")
+            vm.stop()
+            let user = ChatMessage(role: .user, content: "yes", status: .done, createdAt: Date())
+            let streaming = ChatMessage(role: .assistant, content: "", status: .streaming, createdAt: Date())
+            var done = streaming
+            done.status = .done
+            #expect(vm.recoverableDraftAfterFailure(oldValue: [user, streaming], newValue: [user, done]) == nil)
+            #expect(vm.pendingPrompt == nil)
+            let phone = failedTurn("yes")
+            #expect(vm.recoverableDraftAfterFailure(oldValue: phone.old, newValue: phone.new) == nil)
+        }
+    }
+
     @Test("Own prompt is not restored over text typed since")
     func keepsNewDraft() async {
         await withTempStore {
