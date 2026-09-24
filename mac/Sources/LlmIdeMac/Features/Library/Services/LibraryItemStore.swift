@@ -86,8 +86,10 @@ final class LibraryItemStore {
 
     /// Bind the store to `root` (the active project's folder).  No-op when
     /// the root is unchanged.  On a new non-nil root, runs the one-time
-    /// legacy migration before the first scan.  Always finishes with a
-    /// `rescan()` so `items` reflects the freshly-bound project.
+    /// legacy migration before the first scan.  Always finishes with an
+    /// off-main `rescanAsync()` so `items` reflects the freshly-bound project
+    /// a beat later without the directory walk blocking the main actor on a
+    /// project switch (a stale scan of the previous root is dropped there).
     func bindProject(root: URL?) {
         // Resolve to the ON-DISK canonical path (case + symlinks): the
         // recents list can carry a differently-cased spelling of the same
@@ -100,7 +102,7 @@ final class LibraryItemStore {
         if let root = normalized {
             migrateLegacyIndexIfNeeded(root: root)
         }
-        rescan()
+        Task { await rescanAsync() }
     }
 
     /// Replace the external code-folder reference list (e.g. seeded from
