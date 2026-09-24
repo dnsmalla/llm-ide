@@ -166,6 +166,11 @@ final class SearchService {
         return replacement
     }
 
+    // Every replace entry point below does its file IO and regex work on a
+    // DETACHED task, like `stream` does, never on the main actor: a Replace
+    // All over hundreds of files (or one 1 MB file with a slow regex) used to
+    // freeze the whole app until it finished.
+
     /// Replace every match of `query` in `file` with `replacement`, writing the
     /// file back as UTF-8. Returns false if the file can't be read, the regex
     /// is invalid, or nothing matched. Matching is per line, exactly as the
@@ -173,11 +178,10 @@ final class SearchService {
     /// replacement is literal (`$`/`\` included); in regex mode it is a
     /// template (so `$1` etc. work); `preserveCase` applies to non-regex only.
     func replaceInFile(file: URL, query: String, options: SearchOptions, replacement: String, preserveCase: Bool) async -> Bool {
-        guard let text = readText(file), let regex = Self.makeRegex(query: query, options: options),
-              let out = SearchEngine.replacingAll(in: text, regex: regex, replacement: replacement,
-                                                  options: options, preserveCase: preserveCase)
-        else { return false }
-        return write(out.text, to: file)
+        await Task.detached(priority: .userInitiated) {
+            Self.replaceAllOnDisk(file: file, query: query, options: options,
+                                  replacement: replacement, preserveCase: preserveCase)
+        }.value
     }
 
     /// Replace only the match the results list showed at 1-based `line`,
@@ -185,32 +189,66 @@ final class SearchService {
     /// for why it is located by position, not by ordinal). Returns false if
     /// the file can't be read, the regex is invalid, or that match is gone.
     func replaceOne(file: URL, line: Int, rangeInLine: NSRange, query: String, options: SearchOptions, replacement: String, preserveCase: Bool) async -> Bool {
-        guard let text = readText(file), let regex = Self.makeRegex(query: query, options: options),
-              let out = SearchEngine.replacingOne(in: text, line: line, rangeInLine: rangeInLine,
-                                                  regex: regex, replacement: replacement,
-                                                  options: options, preserveCase: preserveCase)
-        else { return false }
-        return write(out, to: file)
+        await Task.detached(priority: .userInitiated) {
+            guard let text = Self.readText(file),
+                  let regex = Self.makeRegex(query: query, options: options),
+                  let out = SearchEngine.replacingOne(in: text, line: line, rangeInLine: rangeInLine,
+                                                      regex: regex, replacement: replacement,
+                                                      options: options, preserveCase: preserveCase)
+            else { return false }
+            return Self.writeAtomically(out, to: file)
+        }.value
     }
 
     /// Replace all matches in each file. Returns the count of files changed.
+    /// One detached task walks every file, rather than one hop per file.
     func replaceAll(in files: [FileMatch], query: String, options: SearchOptions, replacement: String, preserveCase: Bool) async -> Int {
-        var changed = 0
-        for fm in files {
-            if await replaceInFile(file: fm.url, query: query, options: options, replacement: replacement, preserveCase: preserveCase) {
-                changed += 1
+        let urls = files.map(\.url)
+        return await Task.detached(priority: .userInitiated) {
+            urls.reduce(0) { changed, url in
+                Self.replaceAllOnDisk(file: url, query: query, options: options,
+                                      replacement: replacement, preserveCase: preserveCase)
+                    ? changed + 1 : changed
             }
-        }
-        return changed
+        }.value
     }
 
-    private func readText(_ url: URL) -> String? {
+    nonisolated private static func replaceAllOnDisk(file: URL, query: String, options: SearchOptions,
+                                                     replacement: String, preserveCase: Bool) -> Bool {
+        guard let text = readText(file),
+              let regex = makeRegex(query: query, options: options),
+              let out = SearchEngine.replacingAll(in: text, regex: regex, replacement: replacement,
+                                                  options: options, preserveCase: preserveCase)
+        else { return false }
+        return writeAtomically(out.text, to: file)
+    }
+
+    nonisolated private static func readText(_ url: URL) -> String? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    private func write(_ text: String, to url: URL) -> Bool {
+    /// Write `text` as UTF-8 via a temp file + rename, so a crash, a full
+    /// disk or a concurrent reader never sees a half-written source file —
+    /// the old plain `Data.write` truncated in place first.
+    ///
+    /// A rename replaces the inode, so two things a plain in-place write kept
+    /// for free are kept explicitly: a symlink is written THROUGH (its target
+    /// is replaced, the link survives), and the file's POSIX permissions are
+    /// restored (a replaced script must stay executable).
+    nonisolated static func writeAtomically(_ text: String, to url: URL) -> Bool {
         guard let data = text.data(using: .utf8) else { return false }
-        do { try data.write(to: url); return true } catch { return false }
+        let target = url.resolvingSymlinksInPath()
+        let fm = FileManager.default
+        let permissions = (try? fm.attributesOfItem(atPath: target.path))?[.posixPermissions]
+        do {
+            try data.write(to: target, options: .atomic)
+        } catch {
+            return false
+        }
+        if let permissions {
+            try? fm.setAttributes([.posixPermissions: permissions], ofItemAtPath: target.path)
+        }
+        return true
     }
 }

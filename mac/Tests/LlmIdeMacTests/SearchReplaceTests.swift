@@ -81,4 +81,51 @@ final class SearchReplaceTests: XCTestCase {
         XCTAssertNil(SearchEngine.replacingAll(in: "abc\n", regex: regex("zzz"), replacement: "y",
                                                options: SearchOptions(), preserveCase: false))
     }
+
+    // MARK: - On disk
+
+    private func tempDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("search-replace-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return dir
+    }
+
+    @MainActor
+    func testServiceReplacesOnDiskAndReportsChangedFiles() async throws {
+        let dir = try tempDir()
+        let a = dir.appendingPathComponent("a.txt"), b = dir.appendingPathComponent("b.txt")
+        try "foo\nfoo foo\n".write(to: a, atomically: true, encoding: .utf8)
+        try "nothing\n".write(to: b, atomically: true, encoding: .utf8)
+        let service = SearchService()
+        let files = [a, b].map { FileMatch(url: $0, displayPath: $0.lastPathComponent, lineMatches: []) }
+        let changed = await service.replaceAll(in: files, query: "foo", options: SearchOptions(),
+                                               replacement: "bar", preserveCase: false)
+        XCTAssertEqual(changed, 1, "a file with no match is not counted or rewritten")
+        XCTAssertEqual(try String(contentsOf: a, encoding: .utf8), "bar\nbar bar\n")
+
+        let one = await service.replaceOne(file: a, line: 2, rangeInLine: NSRange(location: 4, length: 3),
+                                           query: "bar", options: SearchOptions(),
+                                           replacement: "baz", preserveCase: false)
+        XCTAssertTrue(one)
+        XCTAssertEqual(try String(contentsOf: a, encoding: .utf8), "bar\nbar baz\n")
+    }
+
+    func testAtomicWriteKeepsPermissionsAndWritesThroughASymlink() throws {
+        let dir = try tempDir()
+        let script = dir.appendingPathComponent("run.sh")
+        try "echo old\n".write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        let link = dir.appendingPathComponent("link.sh")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: script)
+
+        XCTAssertTrue(SearchService.writeAtomically("echo new\n", to: link))
+
+        XCTAssertEqual(try String(contentsOf: script, encoding: .utf8), "echo new\n")
+        let linkType = try FileManager.default.attributesOfItem(atPath: link.path)[.type] as? FileAttributeType
+        XCTAssertEqual(linkType, .typeSymbolicLink, "the symlink must survive the rename")
+        let perms = try FileManager.default.attributesOfItem(atPath: script.path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(perms?.intValue, 0o755)
+    }
 }
