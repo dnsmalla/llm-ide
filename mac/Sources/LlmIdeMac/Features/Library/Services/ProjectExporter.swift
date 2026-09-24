@@ -13,7 +13,7 @@ import os.log
 /// │   └── sync.json                  ← written LAST; its presence = complete export
 /// └── source/
 ///     ├── _index.json
-///     └── YYYY/MM/
+///     └── meetings/YYYY/MM/
 ///         └── YYYY-MM-DD-slug-<id8>.md
 /// ```
 ///
@@ -87,43 +87,8 @@ final class ProjectExporter {
             throw ExportError.folderNotFound(folderURL.path)
         }
 
-        var meetingIndexEntries: [[String: String]] = []
-
         // ── Meetings ─────────────────────────────────────────────────────────
-        let meetingsRoot = ProjectLayout(root: folderURL).sourceDir
-        try fm.createDirectory(at: meetingsRoot, withIntermediateDirectories: true)
-
-        for meeting in bundle.meetings {
-            let (year, month) = validatedYearMonth(from: meeting.date)
-            let dir = meetingsRoot
-                .appendingPathComponent(year)
-                .appendingPathComponent(month)
-            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-
-            let prefix   = datePrefix(from: meeting.date)
-            let slug     = slugify(meeting.title, id: meeting.id)
-            let filename = "\(prefix)-\(slug).md"
-            let fileURL  = dir.appendingPathComponent(filename)
-
-            try meetingMarkdown(meeting: meeting, projectId: project.id)
-                .write(to: fileURL, atomically: true, encoding: .utf8)
-
-            meetingIndexEntries.append([
-                "id":    meeting.id,
-                "title": meeting.title,
-                "date":  meeting.date ?? "",
-                "path":  "source/\(year)/\(month)/\(filename)",
-            ])
-        }
-
-        // meetings/_index.json
-        try JSONSerialization
-            .data(withJSONObject: [
-                "generatedAt": nowISO(),
-                "count":       bundle.meetings.count,
-                "meetings":    meetingIndexEntries,
-            ] as [String: Any], options: [.prettyPrinted, .sortedKeys])
-            .write(to: meetingsRoot.appendingPathComponent("_index.json"), options: .atomic)
+        try writeMeetings(bundle.meetings, projectId: project.id, folderURL: folderURL)
 
         // ── Plans → <projectRoot>/llm-doc/plans/ ────────────────────────────
         // Plans belong to the project, so they export into the project's
@@ -170,6 +135,61 @@ final class ProjectExporter {
             exportedAt:      Date(),
             durationMs:      ms
         )
+    }
+
+    // MARK: - Meetings
+
+    /// Write each meeting as Markdown under
+    /// `<projectFolder>/source/meetings/YYYY/MM/` and list them in
+    /// `source/_index.json`.
+    ///
+    /// The `meetings/` segment is required: `SourceFolderMigration` runs every
+    /// launch and moves any top-level `source/<4-digit-year>/` into
+    /// `source/meetings/<year>/`, so exporting to `source/YYYY/MM/` (as this
+    /// once did) relocated the files on the next launch and left every
+    /// `_index.json` path pointing at nothing.
+    func writeMeetings(_ meetings: [ProjectExportBundle.Meeting],
+                       projectId: String,
+                       folderURL: URL) throws {
+        let fm = FileManager.default
+        let sourceRoot = ProjectLayout(root: folderURL).sourceDir
+        let meetingsDirName = NoteType.meeting.directoryName
+        let meetingsRoot = sourceRoot.appendingPathComponent(meetingsDirName, isDirectory: true)
+        try fm.createDirectory(at: meetingsRoot, withIntermediateDirectories: true)
+
+        var meetingIndexEntries: [[String: String]] = []
+        for meeting in meetings {
+            let (year, month) = validatedYearMonth(from: meeting.date)
+            let dir = meetingsRoot
+                .appendingPathComponent(year)
+                .appendingPathComponent(month)
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+
+            let prefix   = datePrefix(from: meeting.date)
+            let slug     = slugify(meeting.title, id: meeting.id)
+            let filename = "\(prefix)-\(slug).md"
+            let fileURL  = dir.appendingPathComponent(filename)
+
+            try meetingMarkdown(meeting: meeting, projectId: projectId)
+                .write(to: fileURL, atomically: true, encoding: .utf8)
+
+            meetingIndexEntries.append([
+                "id":    meeting.id,
+                "title": meeting.title,
+                "date":  meeting.date ?? "",
+                "path":  "source/\(meetingsDirName)/\(year)/\(month)/\(filename)",
+            ])
+        }
+
+        // source/_index.json — stays at the source root (not inside
+        // meetings/) so the Library's meeting scan never lists it as a note.
+        try JSONSerialization
+            .data(withJSONObject: [
+                "generatedAt": nowISO(),
+                "count":       meetings.count,
+                "meetings":    meetingIndexEntries,
+            ] as [String: Any], options: [.prettyPrinted, .sortedKeys])
+            .write(to: sourceRoot.appendingPathComponent("_index.json"), options: .atomic)
     }
 
     // MARK: - Plans
