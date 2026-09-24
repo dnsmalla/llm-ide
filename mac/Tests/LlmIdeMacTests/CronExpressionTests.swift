@@ -20,6 +20,20 @@ final class CronExpressionTests: XCTestCase {
         XCTAssertNil(CronExpression.parse("0 9 * * 8"))      // DOW out of range
     }
 
+    /// A reversed range used to trap (`lo...hi` was formed before the
+    /// `lo <= hi` check), and the schedule field re-parses on every keystroke
+    /// — so typing `10-5` crashed the app. Invalid input must parse to nil.
+    func testReversedAndMalformedRangesAreRejectedNotTrapped() {
+        XCTAssertNil(CronExpression.parse("10-5 * * * *"))
+        XCTAssertNil(CronExpression.parse("0 23-1 * * *"))
+        XCTAssertNil(CronExpression.parse("0 9 * * 5-1"))
+        XCTAssertNil(CronExpression.parse("10-5/2 * * * *"))
+        XCTAssertNil(CronExpression.parse("abc/2 * * * *"))   // used to be read as */2
+        XCTAssertNotNil(CronExpression.parse("5-10 * * * *"))
+        XCTAssertNotNil(CronExpression.parse("*/2 * * * *"))
+        XCTAssertNotNil(CronExpression.parse("1-30/5 * * * *"))
+    }
+
     func testNextFireEveryMinute() throws {
         let expr = try XCTUnwrap(CronExpression.parse("* * * * *"))
         let next = expr.nextFire(after: now, now: now)
