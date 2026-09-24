@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct BackendSettingsSection: View {
     @EnvironmentObject var theme: ThemeStore
@@ -11,13 +12,8 @@ struct BackendSettingsSection: View {
     @State private var nodeDraft: String = ""
     @State private var dirDraft: String = ""
     @State private var autoScroll: Bool = true
-
-    private var isInsecureRemote: Bool {
-        let url = serverDraft.lowercased()
-        return url.hasPrefix("http://") &&
-               !url.contains("localhost") &&
-               !url.contains("127.0.0.1")
-    }
+    /// The saved URL differs from the one this process connected with.
+    @State private var needsRelaunch = false
 
     var body: some View {
         SettingsSectionCard(icon: "server.rack", title: "Server & Backend") {
@@ -61,27 +57,51 @@ struct BackendSettingsSection: View {
             }
             .foregroundStyle(theme.current.danger)
         }
-        if isInsecureRemote {
-            HStack(spacing: 4) {
-                Image(systemName: "exclamationmark.triangle.fill")
+        if needsRelaunch {
+            HStack(spacing: Spacing.sm) {
+                Image(systemName: "arrow.clockwise.circle.fill")
                     .font(.system(size: 10))
-                Text("Unencrypted connection — tokens sent in plaintext.")
+                Text("Relaunch LLM-IDE to connect to the new server.")
                     .font(Typography.caption)
+                Button("Relaunch Now") { Self.relaunch() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
             }
             .foregroundStyle(theme.current.warning)
         }
-        SettingsHint("Changing the server signs you out. Sign in again to link your account.")
+        SettingsHint("Only a server on this Mac (localhost / 127.0.0.1) is allowed. Changing it signs you out and takes effect after a relaunch.")
     }
 
     private func saveServer() {
         let trimmed = serverDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard AppConfig.isSafeServerURL(trimmed) else {
-            serverError = "Server URL must be http(s) with a host."
+            serverError = "Server URL must be http(s) on localhost or 127.0.0.1."
             return
         }
         config.serverURL = trimmed
         serverError = nil
-        Task { @MainActor in session.clear() }
+        // The API client and session store captured the launch-time URL (both
+        // `let`), so saving used to change nothing but the setting: the app
+        // kept talking to the old server and the next sign-in stored its
+        // tokens under the old host — lost on the relaunch that finally used
+        // the new one. Sign out of both hosts and ask for a relaunch.
+        session.clear()
+        KeychainStore.deleteToken(host: trimmed)
+        needsRelaunch = true
+    }
+
+    /// Quit and reopen the bundle (a detached `open` waits for this process
+    /// to exit first). Outside an `.app` bundle this just quits.
+    static func relaunch() {
+        let bundle = Bundle.main.bundleURL
+        if bundle.pathExtension == "app" {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", "while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$0\"",
+                           bundle.path]
+            try? p.run()
+        }
+        NSApp.terminate(nil)
     }
 
     // MARK: - Backend process
@@ -122,11 +142,8 @@ struct BackendSettingsSection: View {
                         .disabled(!pathsDirty)
                     if case .running = backend.status {
                         Button("Kill & Restart") {
-                            backend.killExternalListener(port: 3456)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                                backend.start(nodePath: config.backendNodePath,
+                            backend.restart(nodePath: config.backendNodePath,
                                             workingDirectory: config.backendWorkingDir)
-                            }
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)

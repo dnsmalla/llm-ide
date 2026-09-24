@@ -63,6 +63,8 @@ final class BackendManager {
     private var userInitiatedStop = false
     private var pendingRestartTask: Task<Void, Never>?
     private var lastStartArgs: (nodePath: String, workingDirectory: String)?
+    /// Set by `restart(...)`: start again once the spawned child has exited.
+    private var startAfterExit: (nodePath: String, workingDirectory: String)?
 
     init() {
         // Best-effort cleanup so a spawned node child doesn't outlive
@@ -344,6 +346,16 @@ final class BackendManager {
                         ?? "Server exited with code \(exitCode). See Settings → Backend for the log."
                 }
                 self.status = exitCode == 0 ? .stopped : .crashed(exitCode: exitCode)
+                if let next = self.startAfterExit {
+                    // An intentional restart, not a crash: no auto-restart,
+                    // no budget spent, no lingering "crashed" error.
+                    self.startAfterExit = nil
+                    self.userInitiatedStop = false
+                    self.lastError = nil
+                    self.status = .stopped
+                    self.start(nodePath: next.nodePath, workingDirectory: next.workingDirectory)
+                    return
+                }
                 self.scheduleAutoRestartIfNeeded(exitCode: exitCode)
             }
         }
@@ -469,6 +481,30 @@ final class BackendManager {
             if case .crashed = self.status {
                 self.start(nodePath: args.nodePath, workingDirectory: args.workingDirectory)
             }
+        }
+    }
+
+    /// Settings → Kill & Restart. Previously the button killed the port
+    /// listener and called `start` 0.5 s later — which returned early (still
+    /// `.running`), so the restart actually happened via the CRASH path: it
+    /// spent an auto-restart attempt each time (three clicks exhausted the
+    /// budget for the next real crash) and briefly showed "crashed".
+    func restart(nodePath: String, workingDirectory: String) {
+        restartCount = 0
+        if process != nil {
+            startAfterExit = (nodePath, workingDirectory)
+            stop()
+            return
+        }
+        // Adopted (or unknown) listener: kill it, wait, then spawn fresh.
+        stop()
+        Task { @MainActor [weak self] in
+            await Task.detached { Self.killExternalListener(port: Self.defaultBackendPort) }.value
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard let self else { return }
+            self.userInitiatedStop = false
+            self.status = .stopped
+            self.start(nodePath: nodePath, workingDirectory: workingDirectory)
         }
     }
 
