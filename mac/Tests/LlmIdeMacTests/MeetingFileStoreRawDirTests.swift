@@ -50,6 +50,37 @@ final class MeetingFileStoreRawDirTests: XCTestCase {
         XCTAssertNotEqual(again.url, first.url)
     }
 
+    /// Slack ids are `slack-<channel>-<ts>`: the old `id.prefix(8)` suffix was
+    /// always `slack-C0`, so two same-title chunks finalized to ONE filename
+    /// and the second replaced the first.
+    func testFinalFilenamesStayDistinctForIdsSharingAPrefix() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mfs-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MeetingFileStore(root: root)
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+
+        var urls: [URL] = []
+        for id in ["slack-C0123-1700000000.000100", "slack-C0123-1700000000.000200"] {
+            let h = try store.createPartial(id: id, startedAt: date, platform: "slack", language: "")
+            try h.appendCaption(timestamp: date, speaker: "u", text: id)
+            urls.append(try store.finalize(handle: h, title: "Slack #C0123", endedAt: date, participants: []))
+        }
+
+        XCTAssertNotEqual(urls[0], urls[1])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: urls[0].path), "first chunk not overwritten")
+        XCTAssertFalse(urls[0].lastPathComponent.contains("slack-C0"))
+    }
+
+    func testIdDisambiguatorKeepsUUIDPrefixAndHashesOtherIdsStably() {
+        let uuid = "1A2B3C4D-0000-4000-8000-000000000000"
+        XCTAssertEqual(MeetingFileStore.idDisambiguator(uuid), "1A2B3C4D", "UUID filenames unchanged")
+        let a = MeetingFileStore.idDisambiguator("m-lx1abc-9f8e7d")
+        XCTAssertEqual(a.count, 8)
+        XCTAssertEqual(a, MeetingFileStore.idDisambiguator("m-lx1abc-9f8e7d"), "stable across calls")
+        XCTAssertNotEqual(a, MeetingFileStore.idDisambiguator("m-lx1abc-000000"))
+    }
+
     /// A Stop with no captions discards the partial (and CaptionOrchestrator
     /// drops its recovery record) so the next launch has nothing to recover.
     func testDiscardPartialClosesAndDeletesTheFile() throws {
