@@ -10,6 +10,10 @@ struct GitLabSettingsSection: View {
     @Environment(LibraryItemStore.self) private var library
 
     @State private var gitLabTokenDraft: String = ""
+    /// The instance the PAT is verified against and stored for. Explicit and
+    /// visible: it used to be taken from the FIRST saved project URL, so a
+    /// pasted link to another host received the PAT on Save & verify.
+    @State private var instanceDraft: String = ""
     @State private var gitLabTokenVisible: Bool = false
     @State private var gitLabStatus: String?
     @State private var gitLabBusy: Bool = false
@@ -19,7 +23,21 @@ struct GitLabSettingsSection: View {
     @State private var cloneErrors: [String: String] = [:]
     private let repoManager = RepoManager()
 
-    // Derives the GitLab host from saved project URLs; falls back to configured base.
+    /// Trimmed, without trailing slashes. The path is kept: GitLab can be
+    /// served under one (`https://host/gitlab`).
+    static func normalizedBase(_ raw: String) -> String {
+        var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while t.hasSuffix("/") { t.removeLast() }
+        return t
+    }
+
+    private static func host(_ raw: String) -> String? {
+        URL(string: normalizedBase(raw))?.host?.lowercased()
+    }
+
+    // The host of the first saved project URL — only a SUGGESTION for the
+    // Instance URL field; the PAT is never sent to it unless the user puts it
+    // in that field.
     private var detectedBase: String {
         for p in config.gitLabSavedProjects {
             let raw = p.url.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -42,7 +60,9 @@ struct GitLabSettingsSection: View {
             }
         }
         .onAppear {
-            gitLabTokenDraft = config.gitLabToken
+            // Not prefilled with the saved PAT (see GitHubSettingsSection).
+            gitLabTokenDraft = ""
+            instanceDraft = config.gitLabBaseURL
         }
     }
 
@@ -95,6 +115,27 @@ struct GitLabSettingsSection: View {
                     Divider().padding(.vertical, 4)
                 }
 
+                // Instance URL
+                HStack(spacing: Spacing.md) {
+                    Text("Instance URL")
+                        .font(Typography.body)
+                        .foregroundStyle(theme.current.textMuted)
+                        .frame(width: 110, alignment: .leading)
+                    TextField("https://gitlab.com", text: $instanceDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .font(Typography.mono)
+                        .disableAutocorrection(true)
+                    if let suggested = Self.host(detectedBase),
+                       suggested != Self.host(instanceDraft) {
+                        Button("Use \(suggested)") {
+                            instanceDraft = detectedBase
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Your saved project is on this host. Your token is only sent to the Instance URL.")
+                    }
+                }
+
                 // Access Token
                 HStack(spacing: Spacing.md) {
                     Text("Access Token")
@@ -102,25 +143,29 @@ struct GitLabSettingsSection: View {
                         .foregroundStyle(theme.current.textMuted)
                         .frame(width: 110, alignment: .leading)
                     ZStack(alignment: .trailing) {
+                        // The eye only ever shows a token being typed — the saved
+                        // one is never loaded into this field.
                         if gitLabTokenVisible {
-                            TextField("glpat-xxxxxxxxxxxxxxxxxxxx", text: $gitLabTokenDraft)
+                            TextField(config.gitLabToken.isEmpty ? "glpat-xxxxxxxxxxxxxxxxxxxx" : "Saved — paste a new token to replace it", text: $gitLabTokenDraft)
                                 .textFieldStyle(.roundedBorder)
                                 .font(Typography.mono)
                                 .disableAutocorrection(true)
                         } else {
-                            SecureField("glpat-xxxxxxxxxxxxxxxxxxxx", text: $gitLabTokenDraft)
+                            SecureField(config.gitLabToken.isEmpty ? "glpat-xxxxxxxxxxxxxxxxxxxx" : "Saved — paste a new token to replace it", text: $gitLabTokenDraft)
                                 .textFieldStyle(.roundedBorder)
                                 .font(Typography.mono)
                         }
-                        Button { gitLabTokenVisible.toggle() } label: {
-                            Image(systemName: gitLabTokenVisible ? "eye.slash" : "eye")
-                                .font(.system(size: 11))
-                                .foregroundStyle(theme.current.textMuted)
+                        if !gitLabTokenDraft.isEmpty {
+                            Button { gitLabTokenVisible.toggle() } label: {
+                                Image(systemName: gitLabTokenVisible ? "eye.slash" : "eye")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(theme.current.textMuted)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, 8)
+                            .help(gitLabTokenVisible ? "Hide token" : "Show token")
+                            .accessibilityLabel(gitLabTokenVisible ? "Hide token" : "Show token")
                         }
-                        .buttonStyle(.plain)
-                        .padding(.trailing, 8)
-                        .help(gitLabTokenVisible ? "Hide token" : "Show token")
-                        .accessibilityLabel(gitLabTokenVisible ? "Hide token" : "Show token")
                     }
                 }
 
@@ -131,7 +176,7 @@ struct GitLabSettingsSection: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .disabled(gitLabBusy || gitLabTokenDraft.isEmpty)
+                    .disabled(gitLabBusy || (gitLabTokenDraft.isEmpty && config.gitLabToken.isEmpty))
 
                     if !config.gitLabToken.isEmpty {
                         // Clears the CREDENTIAL only — see the matching note in
@@ -160,7 +205,7 @@ struct GitLabSettingsSection: View {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 11))
                             .foregroundStyle(theme.current.accent3)
-                        Text("Connected · \(detectedBase)")
+                        Text("Connected · \(config.gitLabBaseURL)")
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                     }
@@ -487,18 +532,20 @@ struct GitLabSettingsSection: View {
         if raw.hasPrefix("http"), let parsedURL = URL(string: raw),
            let scheme = parsedURL.scheme, let host = parsedURL.host {
             let candidateBase = "\(scheme)://\(host)"
-            // Validate BEFORE persisting — writing first and checking later
-            // meant a pasted http:// URL corrupted the stored Instance URL
-            // even though the request that follows correctly refuses to
-            // send it, leaving every other GitLab feature broken until the
-            // user manually repairs the field.
+            // The PAT is for the configured instance only: a pasted link
+            // must be on that host. This used to REPOINT Instance URL to the
+            // link's host (before the request even succeeded), so a typo'd
+            // or foreign URL both received the PAT and broke every other
+            // GitLab call until the field was repaired by hand.
+            guard let configuredHost = URL(string: apiBase)?.host,
+                  host.lowercased() == configuredHost.lowercased() else {
+                resolveErrors[p.id] = "This link is on \(host); the Instance URL is \(apiBase). Change Instance URL first if that is the right server."
+                return
+            }
             guard GitLabClient.isSafeBaseURL(candidateBase) else {
                 resolveErrors[p.id] = "GitLab host must use https (or be loopback)."
                 return
             }
-            apiBase = candidateBase
-            // Also update the stored base URL to match the project's host
-            config.gitLabBaseURL = apiBase
             path = parsedURL.path
         }
 
@@ -556,11 +603,14 @@ struct GitLabSettingsSection: View {
     // MARK: - Save & verify token
 
     private func saveGitLab() async {
-        let token = gitLabTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Empty draft = re-verify the saved token.
+        let typed = gitLabTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = typed.isEmpty ? config.gitLabToken : typed
         guard !token.isEmpty else { return }
 
-        // Derive base from project URLs or fall back to stored base
-        let base = detectedBase
+        // Only the instance the user entered — never a host taken from a
+        // saved project URL (see `instanceDraft`).
+        let base = Self.normalizedBase(instanceDraft.isEmpty ? config.gitLabBaseURL : instanceDraft)
 
         gitLabBusy = true
         gitLabStatus = nil

@@ -278,3 +278,43 @@ test('the SSE /code-assist close handler aborts the session\'s parked decisions'
   const outcome = await promise;
   assert.equal(outcome.action, 'aborted', 'a dropped panel must unpark its approvals immediately');
 });
+
+// A buffered (non-SSE) caller — the Mac's Loop stage repair — disconnects on
+// Stop/quit too; its parked approvals must unpark the same way.
+test('the buffered /code-assist close handler aborts the session\'s parked decisions', async () => {
+  const { handleAIRoutes } = await import('../server/ai-routes.mjs');
+  const user = registerUser(getDb(), { email: 'code-assist-decision-10@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+
+  const closeHandlers = [];
+  const req = {
+    method: 'POST',
+    url: '/code-assist',
+    headers: {},
+    user: { id: user.id },
+    on(event, cb) {
+      if (event === 'data') cb(Buffer.from(JSON.stringify({
+        message: 'hi',
+        provider: 'deepseek', // fail-fast guard: no model call (see the SSE test above)
+        agentContext: { sessionId: 'legacy-s10', workspaceRoot: process.cwd(), recentIssues: [], indexedRepos: [] },
+      })));
+      if (event === 'end') cb();
+    },
+  };
+  const res = {
+    writableEnded: false,
+    writableFinished: false,
+    headersSent: false,
+    on(event, cb) { if (event === 'close') closeHandlers.push(cb); return res; },
+    setHeader() {},
+    writeHead() { res.headersSent = true; },
+    write() {},
+    end() { res.writableEnded = true; },
+  };
+  await handleAIRoutes(req, res);
+  assert.ok(closeHandlers.length > 0, 'the buffered branch must register a close handler');
+
+  const { promise } = registerDecision({ sdkSessionId: 'legacy-s10', userId: user.id, kind: 'ToolApproval' });
+  for (const cb of closeHandlers) cb();
+  const outcome = await promise;
+  assert.equal(outcome.action, 'aborted', 'a dropped buffered caller must unpark its approvals immediately');
+});

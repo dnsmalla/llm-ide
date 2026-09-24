@@ -148,7 +148,7 @@ public struct NoteIndex: Codable, Sendable {
 /// Unified note service for managing generated notes from raw data sources.
 public final class NoteService: Sendable {
 
-    private let repoRoot: URL
+    let repoRoot: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let logger = Logger(subsystem: "LlmIdeMac", category: "NoteService")
@@ -307,19 +307,92 @@ public final class NoteService: Sendable {
 
     // MARK: - Index operations
 
-    /// Load the unified note index.
+    /// Process-wide lock serializing every read-modify-write of `index.json`.
+    /// Several `NoteService` instances write the same index concurrently
+    /// (the post-Stop summarizer in a detached task, email/Slack/connector
+    /// ingest); an unserialized load → append → save let the later save drop
+    /// the entry the earlier one added. One lock for every index path: the
+    /// critical section is a small JSON read + write, so cross-project
+    /// contention is not worth a per-path table.
+    private static let indexLock = NSLock()
+
+    /// Load the unified note index. A missing file is a new, empty index; an
+    /// undecodable one is logged and reads as the index rebuilt from the note
+    /// files (it is moved aside only when a write is about to replace it —
+    /// see `addToIndex`).
     public func loadIndex() async throws -> NoteIndex {
+        Self.indexLock.withLock { readIndex(quarantineCorrupt: false) }
+    }
+
+    /// Read `index.json`. Only "file does not exist" means "new index"; any
+    /// other read or decode failure is a damaged index. With
+    /// `quarantineCorrupt`, the damaged file is renamed to
+    /// `index.json.corrupt-<timestamp>` before the empty index is returned, so
+    /// the caller's save cannot overwrite it with a single entry.
+    /// Caller must hold `indexLock`.
+    private func readIndex(quarantineCorrupt: Bool) -> NoteIndex {
+        let data: Data
         do {
-            let data = try Data(contentsOf: indexPath)
-            return try decoder.decode(NoteIndex.self, from: data)
-        } catch {
-            // Index doesn't exist yet, return empty
+            data = try Data(contentsOf: indexPath)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             logger.info("Creating new note index")
             return NoteIndex()
+        } catch {
+            logger.error("note index unreadable: \(error.localizedDescription, privacy: .public)")
+            if quarantineCorrupt { quarantineIndex() }
+            return scannedIndex()
+        }
+        do {
+            return try decoder.decode(NoteIndex.self, from: data)
+        } catch {
+            logger.error("note index undecodable: \(error.localizedDescription, privacy: .public)")
+            if quarantineCorrupt { quarantineIndex() }
+            return scannedIndex()
         }
     }
 
-    /// Save the unified note index.
+    /// The index regenerated from the note files on disk. A damaged index
+    /// reads as THIS, not as empty: an empty one made every ingest dedup miss
+    /// (re-importing everything) and the next save persisted an index holding
+    /// only the newest note. Caller must hold `indexLock`.
+    private func scannedIndex() -> NoteIndex {
+        NoteIndex(version: 1,
+                  updated: ISO8601DateFormatter().string(from: Date()),
+                  notes: (try? scanAllNotes()) ?? [])
+    }
+
+    private func scanAllNotes() throws -> [NoteMetadata] {
+        try? FileManager.default.createDirectory(at: notesRoot, withIntermediateDirectories: true)
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: notesRoot, includingPropertiesForKeys: [.isDirectoryKey]) else {
+            return []
+        }
+        let typeDirs = contents.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+        var notes: [NoteMetadata] = []
+        for typeDir in typeDirs {
+            let type = NoteType(directoryName: typeDir.lastPathComponent)
+            notes.append(contentsOf: try scanTypeDirectory(type: type, dir: typeDir))
+        }
+        return notes
+    }
+
+    /// Move a damaged `index.json` aside as `<name>.corrupt-<timestamp>`.
+    /// `rebuildIndex()` regenerates the index from the note files; the moved
+    /// copy is kept for inspection rather than deleted.
+    private func quarantineIndex() {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let dest = indexPath.deletingLastPathComponent()
+            .appendingPathComponent("\(indexPath.lastPathComponent).corrupt-\(stamp)")
+        do {
+            try FileManager.default.moveItem(at: indexPath, to: dest)
+            logger.error("moved corrupt note index aside to \(dest.lastPathComponent, privacy: .public)")
+        } catch {
+            logger.error("could not move corrupt note index aside: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Save the unified note index. Caller must hold `indexLock`.
     private func saveIndex(_ index: NoteIndex) throws {
         var mutableIndex = index
         mutableIndex.updated = ISO8601DateFormatter().string(from: Date())
@@ -327,48 +400,43 @@ public final class NoteService: Sendable {
         try data.write(to: indexPath, options: .atomic)
     }
 
-    /// Add a note to the index.
+    /// Add a note to the index. The load → replace → save runs under
+    /// `indexLock` so concurrent writers cannot lose each other's entries.
     private func addToIndex(_ metadata: NoteMetadata) async throws {
-        var index = try await loadIndex()
+        try Self.indexLock.withLock {
+            var index = readIndex(quarantineCorrupt: true)
 
-        // Remove existing note with same ID (if any)
-        index.notes.removeAll(where: { $0.id == metadata.id })
+            // Remove existing note with same ID (if any) — or the same file:
+            // an index rebuilt from disk (see `scannedIndex`) already lists
+            // the file `saveNote` just wrote, under a generated id.
+            index.notes.removeAll(where: { $0.id == metadata.id || $0.path == metadata.path })
 
-        // Add new note
-        index.notes.append(metadata)
+            // Add new note
+            index.notes.append(metadata)
 
-        try saveIndex(index)
+            try saveIndex(index)
+        }
     }
 
     /// Rebuild the entire index by scanning the notes directory. Discovers
     /// every type subdirectory (legacy plural + new connector dirs) rather
     /// than a hardcoded list.
     public func rebuildIndex() async throws -> NoteIndex {
-        var notes: [NoteMetadata] = []
-
-        try? FileManager.default.createDirectory(at: notesRoot, withIntermediateDirectories: true)
-        guard let contents = try? FileManager.default.contentsOfDirectory(
-            at: notesRoot, includingPropertiesForKeys: [.isDirectoryKey]) else {
-            return NoteIndex()
+        // Scan AND save under the lock: a note added between an unlocked scan
+        // and the save was dropped by it — the lost update the lock exists for.
+        try Self.indexLock.withLock {
+            let index = NoteIndex(
+                version: 1,
+                updated: ISO8601DateFormatter().string(from: Date()),
+                notes: try scanAllNotes()
+            )
+            try saveIndex(index)
+            return index
         }
-        let typeDirs = contents.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
-        for typeDir in typeDirs {
-            let type = NoteType(directoryName: typeDir.lastPathComponent)
-            let typeNotes = try await scanTypeDirectory(type: type, dir: typeDir)
-            notes.append(contentsOf: typeNotes)
-        }
-
-        let index = NoteIndex(
-            version: 1,
-            updated: ISO8601DateFormatter().string(from: Date()),
-            notes: notes
-        )
-        try saveIndex(index)
-        return index
     }
 
     /// Scan a specific type directory for notes.
-    private func scanTypeDirectory(type: NoteType, dir: URL) async throws -> [NoteMetadata] {
+    private func scanTypeDirectory(type: NoteType, dir: URL) throws -> [NoteMetadata] {
         var notes: [NoteMetadata] = []
 
         guard let enumerator = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: nil) else {
@@ -396,7 +464,17 @@ public final class NoteService: Sendable {
                 continue
             }
 
-            let relativePath = file.pathComponents.suffix(from: notesRoot.pathComponents.count).joined(separator: "/")
+            // repoRoot-relative, like `saveNote` writes and its readers resolve
+            // (`repoRoot.appendingPathComponent(meta.path)`); notesRoot-relative
+            // paths from a rebuild resolved to files that do not exist.
+            // Both sides symlink-resolved: the enumerator reports `/private/var/…`
+            // for a `/var/…` root, and counting components across the two
+            // spellings kept the root's own folder name in the path.
+            let rootParts = repoRoot.resolvingSymlinksInPath().pathComponents
+            let fileParts = file.resolvingSymlinksInPath().pathComponents
+            let relativePath = fileParts.starts(with: rootParts)
+                ? fileParts.dropFirst(rootParts.count).joined(separator: "/")
+                : fileParts.suffix(from: repoRoot.pathComponents.count).joined(separator: "/")
 
             let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
             let fileSize = attributes[.size] as? Int64 ?? 0

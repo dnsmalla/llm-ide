@@ -42,4 +42,19 @@ final class FeatureRebuildServiceTests: XCTestCase {
         let csv = AppFeature.buildTimeExcludable.map(\.rawValue).sorted().joined(separator: ",")
         XCTAssertEqual(csv, "auto_tasks,code_graph_3d,doc_gen,file_explorer,gantt_issues,mobile_sync,terminal")
     }
+
+    /// sign.sh treats an empty `.sign-identity` as "none" and signs ad-hoc,
+    /// so the rebuild warning must too.
+    func testEmptySignIdentityFileIsNotAStableIdentity() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let scripts = root.appendingPathComponent("Scripts")
+        try FileManager.default.createDirectory(at: scripts, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = scripts.appendingPathComponent(".sign-identity")
+        try "  \n".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertFalse(FeatureRebuildService.hasSignIdentity(environment: [:], sourceRoot: root))
+        try "LLM-IDE Dev\n".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertTrue(FeatureRebuildService.hasSignIdentity(environment: [:], sourceRoot: root))
+        XCTAssertTrue(FeatureRebuildService.hasSignIdentity(environment: ["LLMIDE_SIGN_IDENTITY": "X"], sourceRoot: nil))
+    }
 }

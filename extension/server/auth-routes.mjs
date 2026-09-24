@@ -13,7 +13,7 @@ import {
   changePassword, findUserById, login, logout, logoutAll, refreshSession, registerUser,
   createPasswordResetToken, consumePasswordResetToken,
 } from './users.mjs';
-import { listSecretKeys, setSecret, VAULT_KEYS, isVaultError } from './vault.mjs';
+import { listSecretKeys, setSecret, VAULT_KEYS, isVaultError, isUserSettableVaultKey } from './vault.mjs';
 import {
   pkcePair, buildAuthUrl, exchangeCode, fetchEmailAddress,
   putState, getState, completeState, takeStatus,
@@ -820,7 +820,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     try { body = await readJson(req, bodyLimit); }
     catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
     try {
-      if (!body || typeof body.key !== 'string' || !VAULT_KEYS.includes(body.key)) {
+      if (!body || !isUserSettableVaultKey(body.key)) {
         throw errValidation(`Unknown secret key (allowed: ${VAULT_KEYS.join(', ')})`);
       }
       // Empty/null value => delete (logged with "deleted" outcome detail).

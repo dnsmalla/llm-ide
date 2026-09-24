@@ -103,6 +103,15 @@ extension LlmIdeAPIClient {
         let serverReportsFit: Bool
     }
 
+    /// One session for every generation (a fresh `URLSession` per call was
+    /// never invalidated, so each one leaked with its delegate queue).
+    /// 240 s per request: a long document legitimately takes minutes.
+    private static let generateDocSession: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 240
+        return URLSession(configuration: cfg)
+    }()
+
     func generateDoc(
         templateName: String?,
         sections: [String]?,
@@ -131,16 +140,17 @@ extension LlmIdeAPIClient {
             sources: sources.map { GenerateDocRequest.SourceItem(name: $0.name, content: $0.content) })
         req.httpBody = try AppJSON.encoder.encode(body)
 
-        let cfg = URLSessionConfiguration.default
-        cfg.timeoutIntervalForRequest = 240
-        let oneShot = URLSession(configuration: cfg)
-        let (data, response) = try await oneShot.data(for: req)
+        let (data, response) = try await Self.generateDocSession.data(for: req)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            let text = String(data: data, encoding: .utf8) ?? ""
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            if status == 401 { throw APIError.noSession }
+            // The server's (redacted) message, never the raw body: a provider
+            // error echoed through can carry a key.
+            let server = Self.serverError(fromBody: data)
             throw APIError.http(
-                status: (response as? HTTPURLResponse)?.statusCode ?? -1,
-                code: "GENERATE_DOC_FAILED",
-                message: text.isEmpty ? "Document generation failed" : text,
+                status: status,
+                code: server?.code ?? "GENERATE_DOC_FAILED",
+                message: server?.message ?? "Document generation failed (HTTP \(status))",
                 details: nil)
         }
         let resp = try AppJSON.decoder.decode(GenerateDocResponse.self, from: data)
@@ -237,7 +247,18 @@ extension LlmIdeAPIClient {
                         continuation.finish(throwing: APIError.noSession); return
                     }
                     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                    let (bytes, _) = try await _session.bytes(for: req)
+                    let (bytes, response) = try await _session.bytes(for: req)
+                    // A 401/500 body used to be read as NDJSON, fail to decode
+                    // line by line, and finish as a SUCCESSFUL empty export.
+                    if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                        if http.statusCode == 401 { continuation.finish(throwing: APIError.noSession); return }
+                        let body = await Self.readErrorBody(bytes)
+                        let server = Self.serverError(fromBody: body)
+                        continuation.finish(throwing: APIError.http(
+                            status: http.statusCode, code: server?.code ?? "EXPORT_FAILED",
+                            message: server?.message ?? "Export failed (HTTP \(http.statusCode))", details: nil))
+                        return
+                    }
                     for try await line in bytes.lines {
                         guard let data = line.data(using: .utf8) else { continue }
                         if let rec = try? AppJSON.decoder.decode(LegacyExporter.Record.self, from: data) {

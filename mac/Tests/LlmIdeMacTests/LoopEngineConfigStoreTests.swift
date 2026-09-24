@@ -114,6 +114,68 @@ final class LoopEngineConfigStoreTests: XCTestCase {
                                                 defaults: defaults))
     }
 
+    private func corruptCopies() throws -> [URL] {
+        let dir = LoopEngineConfigStore.fileURL(projectRoot: projectRoot).deletingLastPathComponent()
+        return try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("loop.json.corrupt-") }
+    }
+
+    /// A JSON typo must not be silently replaced by defaults: the bad file is
+    /// moved aside byte-for-byte before anything can write over it.
+    func testCorruptFileIsMovedAsideNotOverwritten() throws {
+        let url = LoopEngineConfigStore.fileURL(projectRoot: projectRoot)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        let original = Data("{ \"loops\": [ oops ] }".utf8)
+        try original.write(to: url)
+
+        // `loops(...)` is the path that used to clobber: load → nil → save defaults.
+        _ = LoopEngineConfigStore.loops(projectRoot: projectRoot, projectId: projectId,
+                                        gitRoot: projectRoot, defaults: defaults)
+
+        let copies = try corruptCopies()
+        XCTAssertEqual(copies.count, 1)
+        XCTAssertEqual(try Data(contentsOf: copies[0]), original)
+        if FileManager.default.fileExists(atPath: url.path) {
+            XCTAssertNotEqual(try Data(contentsOf: url), original)
+        }
+    }
+
+    /// A corrupt file must not resurrect the pre-file UserDefaults entry
+    /// either — that would be a second, quieter clobber.
+    func testCorruptFileDoesNotFallBackToLegacyUserDefaults() throws {
+        makeConfig(iterations: 3, stage: "Stale").save(for: projectId, defaults: defaults)
+        let url = LoopEngineConfigStore.fileURL(projectRoot: projectRoot)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try Data("{ not json".utf8).write(to: url)
+        XCTAssertNil(LoopEngineConfigStore.load(projectRoot: projectRoot, projectId: projectId,
+                                                defaults: defaults))
+        XCTAssertEqual(try corruptCopies().count, 1)
+    }
+
+    /// Two quarantines in the same second keep both copies.
+    func testQuarantineDoesNotCollideWithinOneSecond() throws {
+        let url = LoopEngineConfigStore.fileURL(projectRoot: projectRoot)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        let now = Date()
+        try Data("a".utf8).write(to: url)
+        XCTAssertNotNil(LoopEngineConfigStore.quarantineCorruptFile(at: url, now: now))
+        try Data("b".utf8).write(to: url)
+        XCTAssertNotNil(LoopEngineConfigStore.quarantineCorruptFile(at: url, now: now))
+        XCTAssertEqual(try corruptCopies().count, 2)
+    }
+
+    func testAbsentFileIsNotQuarantined() throws {
+        XCTAssertNil(LoopEngineConfigStore.load(projectRoot: projectRoot, projectId: projectId,
+                                                defaults: defaults))
+        let dir = LoopEngineConfigStore.fileURL(projectRoot: projectRoot).deletingLastPathComponent()
+        if FileManager.default.fileExists(atPath: dir.path) {
+            XCTAssertTrue(try corruptCopies().isEmpty)
+        }
+    }
+
     // MARK: - Migration: legacy bare-config FILE (pre-multi-loop)
 
     /// The exact scenario every existing project is in the moment this ships:

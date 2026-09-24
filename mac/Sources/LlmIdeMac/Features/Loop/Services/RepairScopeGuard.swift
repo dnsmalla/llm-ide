@@ -154,16 +154,45 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
 
     func revert(paths: [String], gitRoot: URL) async -> String? {
         guard !paths.isEmpty else { return nil }
-        // `--` separates paths from revisions so a path that looks like a ref
-        // cannot be reinterpreted; each path is single-quoted with embedded
-        // quotes escaped, since these strings come from git's own output rather
-        // than from a user but still reach a shell.
-        let quoted = paths.map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-            .joined(separator: " ")
-        switch await run("git checkout -- \(quoted)", gitRoot: gitRoot) {
-        case .success: return nil
-        case .failure(let reason): return reason
+        // `git checkout --` only restores TRACKED files. An untracked file the
+        // repair ADDED (a shadowing conftest.py — exactly what `dirtyPaths`
+        // lists untracked files to catch) makes it fail with "pathspec did not
+        // match", which aborts the whole command, so the rigged file stayed
+        // AND the tracked violations beside it were not reverted either.
+        // Split first: untracked paths are deleted with `git clean -f`,
+        // tracked ones restored with checkout. If the probe itself fails,
+        // fall back to treating everything as tracked (the old behaviour) so
+        // a tracked-only revert still works.
+        var untracked: Set<String> = []
+        if case .success(let output) = await run(
+            "git status --porcelain --untracked-files=all -- \(Self.shellQuoted(paths))", gitRoot: gitRoot) {
+            untracked = Set(StatusParser.parse(porcelain: output)
+                .filter { $0.status == .untracked }.map(\.path))
         }
+        let tracked = paths.filter { !untracked.contains($0) }
+        let added = paths.filter { untracked.contains($0) }
+
+        var failures: [String] = []
+        if !tracked.isEmpty,
+           case .failure(let reason) = await run("git checkout -- \(Self.shellQuoted(tracked))",
+                                                 gitRoot: gitRoot) {
+            failures.append(reason)
+        }
+        if !added.isEmpty,
+           case .failure(let reason) = await run("git clean -f -- \(Self.shellQuoted(added))",
+                                                 gitRoot: gitRoot) {
+            failures.append(reason)
+        }
+        return failures.isEmpty ? nil : failures.joined(separator: "; ")
+    }
+
+    /// `--` (at each call site) separates paths from revisions so a path that
+    /// looks like a ref cannot be reinterpreted; each path is single-quoted
+    /// with embedded quotes escaped, since these strings come from git's own
+    /// output rather than from a user but still reach a shell.
+    private static func shellQuoted(_ paths: [String]) -> String {
+        paths.map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+            .joined(separator: " ")
     }
 
     /// A git probe either produced output or explains why it could not. A plain

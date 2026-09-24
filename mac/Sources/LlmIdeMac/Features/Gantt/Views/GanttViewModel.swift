@@ -91,6 +91,12 @@ final class GanttViewModel: ObservableObject {
             } else {
                 self.schedules = [:]
             }
+        } catch is CancellationError {
+            // Superseded by a newer load (project switch → `.task(id:)`
+            // restart). Writing the error here used to land AFTER the new load
+            // had cleared it, leaving the chart stuck on a bogus error view.
+        } catch let error as URLError where error.code == .cancelled {
+            // Same, surfaced by URLSession instead of Swift concurrency.
         } catch {
             errorMessage = error.localizedDescription
         }

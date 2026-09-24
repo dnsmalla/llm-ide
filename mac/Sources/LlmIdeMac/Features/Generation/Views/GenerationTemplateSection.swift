@@ -15,6 +15,11 @@ struct GenerationTemplateSection: View {
     @State private var showTemplateImporter = false
     @State private var showCommandImporter = false
     @State private var showTemplateManager = false
+    /// The project template awaiting delete confirmation. Deleting removes
+    /// the template's whole `templates/<slug>/` folder (any extra files in
+    /// it too) and is not undoable; the manager sheet already confirmed, this
+    /// row's trash button and context menu used to delete on one click.
+    @State private var pendingTemplateDelete: DocTemplate?
 
     /// Only this menu's own templates/commands. Both generation sections are
     /// this same view over the same store, so without the filter Visual
@@ -186,21 +191,32 @@ struct GenerationTemplateSection: View {
             onSelect: {
                 vm.selectedTemplate = selected ? nil : template
             },
-            onDelete: {
-                if vm.selectedTemplate?.id == template.id {
-                    vm.selectedTemplate = nil
-                }
-                templateStore.delete(id: template.id)
-            })
+            onDelete: { pendingTemplateDelete = template })
         .contextMenu {
             if template.isEditable {
                 Button(role: .destructive) {
-                    if vm.selectedTemplate?.id == template.id { vm.selectedTemplate = nil }
-                    templateStore.delete(id: template.id)
+                    pendingTemplateDelete = template
                 } label: {
-                    Label("Delete Template", systemImage: "trash")
+                    Label("Delete Template…", systemImage: "trash")
                 }
             }
+        }
+        .confirmationDialog(
+            "Delete “\(template.name)”?",
+            isPresented: Binding(get: { pendingTemplateDelete?.id == template.id },
+                                 set: { if !$0 { pendingTemplateDelete = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if vm.selectedTemplate?.id == template.id { vm.selectedTemplate = nil }
+                templateStore.delete(id: template.id)
+                pendingTemplateDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingTemplateDelete = nil }
+        } message: {
+            Text(template.isProjectTemplate
+                 ? "The template folder and everything in it will be removed from your project."
+                 : "This template will be permanently deleted.")
         }
         .animation(.easeInOut(duration: 0.1), value: selected)
     }

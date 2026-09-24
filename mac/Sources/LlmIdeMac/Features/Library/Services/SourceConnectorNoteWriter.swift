@@ -27,7 +27,7 @@ struct SourceConnectorNoteWriter {
     ) async throws -> URL {
         if let existing = await existingNote(forSourceHash: sourceHash) {
             logger.info("Skipping connector note — already generated for \(sourceHash.prefix(8), privacy: .public)…")
-            return noteService.notesRoot.appendingPathComponent(existing.path)
+            return noteService.repoRoot.appendingPathComponent(existing.path)
         }
 
         let fm = FrontMatter(source: platform, platform: platform, noteType: noteType.rawValue,
@@ -58,7 +58,7 @@ struct SourceConnectorNoteWriter {
     ) async throws -> URL {
         if let existing = await existingNote(forSourceHash: sourceHash) {
             logger.info("Skipping connector stub — already generated for \(sourceHash.prefix(8), privacy: .public)…")
-            return noteService.notesRoot.appendingPathComponent(existing.path)
+            return noteService.repoRoot.appendingPathComponent(existing.path)
         }
 
         let fm = FrontMatter(source: platform, platform: platform, noteType: noteType.rawValue,
@@ -92,7 +92,7 @@ struct SourceConnectorNoteWriter {
             tags: tags, participants: nil, fileSize: 0)
         let saved = try await noteService.saveNote(type: noteType, filename: filename,
                                                    content: Data(md.utf8), metadata: metadata)
-        return noteService.notesRoot.appendingPathComponent(saved.path)
+        return noteService.repoRoot.appendingPathComponent(saved.path)
     }
 
     private func filename(date: Date, title: String) -> String {

@@ -110,7 +110,7 @@ final class GitTruthStore {
     /// file's current contents instead of a diff.
     func lineMarks(root: URL, path: String) async -> [Int: GitGutter.Mark] {
         if byPath[path] == .added || byPath[path] == .untracked {
-            guard let text = try? String(contentsOf: root.appendingPathComponent(path), encoding: .utf8) else {
+            guard let text = await SourceControlService.smallText(at: root.appendingPathComponent(path)) else {
                 return [:]
             }
             if text.isEmpty { return [:] }

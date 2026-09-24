@@ -36,7 +36,9 @@ struct GitHubSettingsSection: View {
             }
         }
         .onAppear {
-            tokenDraft = config.gitHubToken
+            // Not prefilled with the saved PAT: the show/hide eye would reveal
+            // it (or all but one character of it, after a one-key edit).
+            tokenDraft = ""
         }
     }
 
@@ -96,25 +98,29 @@ struct GitHubSettingsSection: View {
                         .foregroundStyle(theme.current.textMuted)
                         .frame(width: 110, alignment: .leading)
                     ZStack(alignment: .trailing) {
+                        // The eye only ever shows a token being typed — the saved
+                        // one is never loaded into this field.
                         if tokenVisible {
-                            TextField("ghp_xxxxxxxxxxxxxxxxxxxx", text: $tokenDraft)
+                            TextField(config.gitHubToken.isEmpty ? "ghp_xxxxxxxxxxxxxxxxxxxx" : "Saved — paste a new token to replace it", text: $tokenDraft)
                                 .textFieldStyle(.roundedBorder)
                                 .font(Typography.mono)
                                 .disableAutocorrection(true)
                         } else {
-                            SecureField("ghp_xxxxxxxxxxxxxxxxxxxx", text: $tokenDraft)
+                            SecureField(config.gitHubToken.isEmpty ? "ghp_xxxxxxxxxxxxxxxxxxxx" : "Saved — paste a new token to replace it", text: $tokenDraft)
                                 .textFieldStyle(.roundedBorder)
                                 .font(Typography.mono)
                         }
-                        Button { tokenVisible.toggle() } label: {
-                            Image(systemName: tokenVisible ? "eye.slash" : "eye")
-                                .font(.system(size: 11))
-                                .foregroundStyle(theme.current.textMuted)
+                        if !tokenDraft.isEmpty {
+                            Button { tokenVisible.toggle() } label: {
+                                Image(systemName: tokenVisible ? "eye.slash" : "eye")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(theme.current.textMuted)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, 8)
+                            .help(tokenVisible ? "Hide token" : "Show token")
+                            .accessibilityLabel(tokenVisible ? "Hide token" : "Show token")
                         }
-                        .buttonStyle(.plain)
-                        .padding(.trailing, 8)
-                        .help(tokenVisible ? "Hide token" : "Show token")
-                        .accessibilityLabel(tokenVisible ? "Hide token" : "Show token")
                     }
                 }
 
@@ -124,7 +130,7 @@ struct GitHubSettingsSection: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .disabled(busy || tokenDraft.isEmpty)
+                    .disabled(busy || (tokenDraft.isEmpty && config.gitHubToken.isEmpty))
 
                     if !config.gitHubToken.isEmpty {
                         // Clears the CREDENTIAL only. It used to delete every
@@ -490,7 +496,9 @@ struct GitHubSettingsSection: View {
     // MARK: - Save & verify token
 
     private func saveAndVerify() async {
-        let token = tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Empty draft = re-verify the saved token.
+        let typed = tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = typed.isEmpty ? config.gitHubToken : typed
         guard !token.isEmpty else { return }
         busy = true; status = nil
         defer { busy = false }

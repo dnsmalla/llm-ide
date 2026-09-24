@@ -312,12 +312,15 @@ final class LlmIdeAPIClient: @unchecked Sendable {
                 }
             }
         }
+        // Same contract as send(): an unrecoverable 401 is "signed out", so the
+        // UI prompts re-login instead of showing an opaque HTTP error.
+        if http.statusCode == 401 && authenticated { throw APIError.noSession }
         if !(200..<300).contains(http.statusCode) {
-            let env = try? decoder.decode(ErrorEnvelope.self, from: data)
+            let server = Self.serverError(fromBody: data)
             throw APIError.http(
                 status: http.statusCode,
-                code: env?.error?.code ?? "HTTP_ERROR",
-                message: env?.error?.message ?? "Request failed",
+                code: server?.code ?? "HTTP_ERROR",
+                message: server?.message ?? "Request failed",
                 details: nil
             )
         }

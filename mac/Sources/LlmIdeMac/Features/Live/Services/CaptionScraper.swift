@@ -177,6 +177,14 @@ final class CaptionOrchestrator: ObservableObject {
             return nil
         }
         guard !captions.isEmpty else {
+            // Nothing was captured, so the partial holds only its header.
+            // Close it, delete it, and drop its recovery record — left in
+            // place, the next launch offered to "recover" an empty meeting.
+            if let handle = capturedHandle {
+                let root = NotesFolderConfig().currentFolder
+                MeetingFileStore(root: root).discardPartial(handle: handle)
+                try? PartialRecovery(notesFolder: root).cleanup(id: handle.id)
+            }
             lastIngestStatus = .failure(message: "Nothing to save — no captions captured.")
             return nil
         }

@@ -100,6 +100,9 @@ final class ActivityStore {
 
     // MARK: - GET /kb/activity
 
+    /// How many feed items are kept in memory (newest first).
+    static let maxItems = 500
+
     /// Fetch new items since `lastId`, prepend them, and update
     /// `lastId` + `unreadCount`.  Errors are swallowed — the next
     /// tick retries automatically on the next poll interval.
@@ -117,7 +120,10 @@ final class ActivityStore {
             let newItems = resp.items.map { $0.toActivityItem() }.filter { $0.id > self.lastId }
             if !newItems.isEmpty {
                 // Prepend newest-first so the feed shows recent events at top.
-                items = newItems + items
+                // Capped: this polls every 25 s for the whole session and the
+                // popover re-buckets every item on each render, so an
+                // unbounded list grew into the thousands over a long run.
+                items = Array((newItems + items).prefix(Self.maxItems))
             }
             lastId = resp.lastId
             if !didInitialSeen {

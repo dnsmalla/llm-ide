@@ -767,8 +767,11 @@ final class AppConfig: ObservableObject {
         if !self.persistsSecrets {
             self.gitLabToken = ""
         } else if let migrated = defaults.string(forKey: "gitLabToken"), !migrated.isEmpty {
-            KeychainStore.saveGitLabToken(migrated, host: baseURLForInit)
-            defaults.removeObject(forKey: "gitLabToken")
+            // Remove the plaintext copy only once the keychain actually holds
+            // the token; a failed save used to drop it from both places.
+            if KeychainStore.saveGitLabToken(migrated, host: baseURLForInit) {
+                defaults.removeObject(forKey: "gitLabToken")
+            }
             self.gitLabToken = migrated
         } else {
             self.gitLabToken = KeychainStore.loadGitLabToken(host: baseURLForInit) ?? ""

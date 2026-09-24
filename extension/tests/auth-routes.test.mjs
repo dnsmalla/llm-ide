@@ -381,6 +381,22 @@ test('vault secrets: set → list → delete roundtrip; unknown key refused', as
   assert.equal(list.json().secrets.length, 0);
 });
 
+test('secrets: a custom provider key (custom.<uuid>.apiKey) can be set and cleared; MCP keys cannot', async () => {
+  const { user } = await registerAndLogin();
+  const u = { id: user.id };
+  const key = 'custom.3f2b8c1e-0d4a-4b7e-9a51-2c6d8e9f0a1b.apiKey';
+  const set = await callAuth({ method: 'POST', url: '/auth/me/secrets', user: u, body: { key, value: 'sk-test' } });
+  assert.equal(set.statusCode, 200, set._body);
+  let list = await callAuth({ method: 'GET', url: '/auth/me/secrets', user: u });
+  assert.ok(list.json().secrets.some((s) => s.key === key));
+  const del = await callAuth({ method: 'POST', url: '/auth/me/secrets', user: u, body: { key, value: '' } });
+  assert.equal(del.statusCode, 200);
+  list = await callAuth({ method: 'GET', url: '/auth/me/secrets', user: u });
+  assert.ok(!list.json().secrets.some((s) => s.key === key));
+  const mcp = await callAuth({ method: 'POST', url: '/auth/me/secrets', user: u, body: { key: 'mcp.github.token', value: 'x' } });
+  assert.equal(mcp.statusCode, 400, 'MCP credentials are written by their own connect flow');
+});
+
 test('prefs: PUT stores only allow-listed keys, GET returns them', async () => {
   const { user } = await registerAndLogin();
   const u = { id: user.id };

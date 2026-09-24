@@ -712,7 +712,15 @@ struct RepoIssueDetailSheet: View {
         var selected = Set(current.assignees.map(\.username))
         if selected.contains(member.username) { selected.remove(member.username) }
         else { selected.insert(member.username) }
-        let ids = availableMembers.filter { selected.contains($0.username) }.map(\.id)
+        // Ids come from the issue's own assignees first, then the member list.
+        // Building them from `availableMembers` alone (one 100-member page; on
+        // GitHub collaborators only) silently UNASSIGNED anyone not in it
+        // when the user toggled someone else.
+        var byUsername: [String: String] = [:]
+        for user in current.assignees + availableMembers where byUsername[user.username] == nil {
+            byUsername[user.username] = user.id
+        }
+        let ids = selected.compactMap { byUsername[$0] }.sorted()
         await applyMetaUpdate(RepoIssuePayload(assigneeIds: ids))
     }
 

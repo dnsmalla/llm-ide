@@ -66,6 +66,25 @@ struct SearchView: View {
             // ends the AsyncStream, whose onTermination cancels the walk.
             debounce?.cancel()
         }
+        .onChange(of: root?.path) { _, _ in projectChanged() }
+    }
+
+    /// The workspace root moved (project switch, repo activation). Results and
+    /// open tabs describe the OLD tree, and an in-flight walk would keep
+    /// appending the old project's matches under the new one — so stop it,
+    /// drop everything tied to the old root, and re-run the query against the
+    /// new root.
+    private func projectChanged() {
+        debounce?.cancel()
+        debounce = nil
+        searching = false
+        results = SearchResults()
+        tabs = []
+        activeTab = nil
+        revealTarget = nil
+        revealTargetURL = nil
+        confirmReplaceAll = false
+        scheduleSearch()
     }
 
     /// Thin panel header mirroring Explorer's / Source Control's, carrying the
@@ -156,8 +175,13 @@ struct SearchView: View {
         }
     }
 
+    /// Replace All acts on `results.files`, which stops at
+    /// `SearchEngine.maxMatches`. On a truncated run that list is only a
+    /// prefix of the files that match, so "Replace All" would silently leave
+    /// every file past the cap untouched while claiming to have replaced all
+    /// matches. Refuse instead and ask for a narrower search.
     private var replaceAllDisabled: Bool {
-        replaceText.isEmpty || results.files.isEmpty || searching
+        replaceText.isEmpty || results.files.isEmpty || searching || results.truncated
     }
 
     private var replaceRow: some View {
@@ -174,12 +198,18 @@ struct SearchView: View {
                 .font(Typography.caption)
                 .foregroundStyle(replaceAllDisabled ? theme.current.textMuted : theme.current.accent)
                 .disabled(replaceAllDisabled)
-                .help("Replace all matches")
+                .help(results.truncated
+                      ? "Too many matches (limit \(SearchEngine.maxMatches)) — narrow the search to Replace All"
+                      : "Replace all matches")
                 .confirmationDialog(
                     "Replace all matches in \(results.files.count) files?",
                     isPresented: $confirmReplaceAll, titleVisibility: .visible
                 ) {
-                    Button("Replace All", role: .destructive) { replaceAllAction() }
+                    Button("Replace All", role: .destructive) {
+                        // The dialog can outlive the state it was opened on (a
+                        // re-search can finish truncated while it is up).
+                        if !replaceAllDisabled { replaceAllAction() }
+                    }
                     Button("Cancel", role: .cancel) {}
                 }
         }
@@ -234,7 +264,17 @@ struct SearchView: View {
         if results.invalidPattern { return "Invalid pattern" }
         if !query.isEmpty && results.files.isEmpty && !searching { return "No results" }
         if results.files.isEmpty { return "" }
-        return "\(results.totalMatches) results in \(results.files.count) files"
+        return Self.headerSummary(totalMatches: results.totalMatches,
+                                  fileCount: results.files.count,
+                                  truncated: results.truncated)
+    }
+
+    /// The results-header summary. A truncated run must not read as complete:
+    /// `results` then holds only the first `SearchEngine.maxMatches` matches.
+    static func headerSummary(totalMatches: Int, fileCount: Int, truncated: Bool) -> String {
+        truncated
+            ? "Showing first \(totalMatches) matches in \(fileCount) files — narrow the search to see more"
+            : "\(totalMatches) results in \(fileCount) files"
     }
 
     // MARK: File group
@@ -283,7 +323,7 @@ struct SearchView: View {
         .onTapGesture { open(fm.url, line: lm.line) }
         .modifier(RowHoverActions(
             canReplace: showReplace && !replaceText.isEmpty,
-            onReplace: { if let m = lm.matches.first { replaceOneAction(fm, fileIndex: m.fileIndex) } },
+            onReplace: { if let m = lm.matches.first { replaceOneAction(fm, line: lm.line, rangeInLine: lm.rangeInLine(m)) } },
             onDismiss: { dismiss(fm, lm) }
         ))
     }
@@ -334,11 +374,19 @@ struct SearchView: View {
     /// maps each UTF-16 NSRange back to a Swift `String.Index` range over that
     /// exact line — correct for multibyte text (e.g. 出力調整禁止) because the
     /// engine measured length on `lineText as NSString`, so the offsets line up.
+    ///
+    /// `lineText` may be a clamped window of a long line (see
+    /// `SearchEngine.preview`): a match starting past its end is skipped and
+    /// one running past it is highlighted up to the edge.
     private func highlighted(_ lm: LineMatch) -> AttributedString {
         var attr = AttributedString(lm.lineText)
         let bg = theme.current.accent.opacity(0.35)
+        let length = (lm.lineText as NSString).length
         for m in lm.matches {
-            guard let swiftRange = Range(m.nsRange, in: lm.lineText),
+            guard m.nsRange.location <= length else { continue }
+            let visible = NSRange(location: m.nsRange.location,
+                                  length: min(m.nsRange.length, length - m.nsRange.location))
+            guard let swiftRange = Range(visible, in: lm.lineText),
                   let lo = AttributedString.Index(swiftRange.lowerBound, within: attr),
                   let hi = AttributedString.Index(swiftRange.upperBound, within: attr) else { continue }
             attr[lo..<hi].backgroundColor = bg
@@ -410,10 +458,10 @@ struct SearchView: View {
         }
     }
 
-    private func replaceOneAction(_ fm: FileMatch, fileIndex: Int) {
+    private func replaceOneAction(_ fm: FileMatch, line: Int, rangeInLine: NSRange) {
         let url = fm.url, q = query, opts = options, repl = replaceText, pc = preserveCase
         Task {
-            _ = await searchService.replaceOne(file: url, fileIndex: fileIndex, query: q, options: opts, replacement: repl, preserveCase: pc)
+            _ = await searchService.replaceOne(file: url, line: line, rangeInLine: rangeInLine, query: q, options: opts, replacement: repl, preserveCase: pc)
             scheduleSearch(resetExpanded: false)
         }
     }

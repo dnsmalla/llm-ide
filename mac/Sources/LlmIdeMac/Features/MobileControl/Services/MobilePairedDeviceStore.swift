@@ -119,7 +119,8 @@ final class MobilePairedDeviceStore: @unchecked Sendable {
 
     /// Length-independent comparison so a wrong token costs the same time as
     /// a right one regardless of where they first differ.
-    private static func constantTimeEqual(_ a: String, _ b: String) -> Bool {
+    // internal: also the pairing-PIN check (MobileControlManager.pinMatches)
+    static func constantTimeEqual(_ a: String, _ b: String) -> Bool {
         let x = Array(a.utf8), y = Array(b.utf8)
         var diff = x.count ^ y.count
         for i in 0..<min(x.count, y.count) { diff |= Int(x[i] ^ y[i]) }

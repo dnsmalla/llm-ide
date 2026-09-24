@@ -38,9 +38,14 @@ final class ProjectMigrator {
         var imported = 0
         var preferredActivePath: String?
 
+        // A legacy clone has no `system/project.json`, and openFolder's
+        // validation rejects a non-empty folder without one — so every import
+        // failed, the done-marker was never written and this re-ran (and
+        // re-failed) on every launch. Scaffold first, as the clone flow does.
         for p in gitLab {
             guard let path = p.localPath, !path.isEmpty else { continue }
             do {
+                _ = try store.ensureProjectScaffold(at: URL(fileURLWithPath: path))
                 try store.openFolder(at: URL(fileURLWithPath: path))
                 imported += 1
                 if p.isActive { preferredActivePath = path }
@@ -51,6 +56,7 @@ final class ProjectMigrator {
         for r in gitHub {
             guard let path = r.localPath, !path.isEmpty else { continue }
             do {
+                _ = try store.ensureProjectScaffold(at: URL(fileURLWithPath: path))
                 try store.openFolder(at: URL(fileURLWithPath: path))
                 imported += 1
                 if r.isActive && preferredActivePath == nil {

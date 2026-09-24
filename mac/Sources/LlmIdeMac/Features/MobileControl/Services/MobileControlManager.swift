@@ -113,6 +113,11 @@ final class MobileControlManager {
     /// `explore_chat` on whichever the resolver picked (shared or off-screen).
     /// Looking the engine up again at answer time would find the wrong one.
     private var pendingPhoneApprovals: [String: (engine: ChatEngine, requestId: String)] = [:]
+    /// Which phone command installed each engine's `onExternalApproval` hook.
+    /// The hook is a single slot per engine, so `endPhoneApprovals` may only
+    /// clear it when it still belongs to the command that is ending — see
+    /// `beginPhoneApprovals`.
+    private var phoneApprovalOwners: [ObjectIdentifier: String] = [:]
 
     private var server: MobileWebSocketServer?
     private var advertiser: MobileBonjourAdvertiser?
@@ -136,9 +141,18 @@ final class MobileControlManager {
     /// and redraws the QR.
     private(set) var pinGeneration = 0
     private var mobilePushCancellables = Set<AnyCancellable>()
-    private var mobileInflightTasks: [String: Task<Void, Never>] = [:]
+    /// One phone command's running task, tagged with a per-registration token
+    /// so a finishing task can tell whether the slot is still its own.
+    private struct MobileInflightTask {
+        let token: UUID
+        let task: Task<Void, Never>
+    }
+    private var mobileInflightTasks: [String: MobileInflightTask] = [:]
+    /// Command ids with a registered, not-yet-finished task (tests).
+    var mobileInflightCommandIds: Set<String> { Set(mobileInflightTasks.keys) }
     /// Commands the iPhone cancelled — late HTTP replies must not persist or stream.
-    private var mobileCancelledCommandIds = Set<String>()
+    // private(set), not private: pinned by MobileInflightTaskTests
+    private(set) var mobileCancelledCommandIds = Set<String>()
 
     /// Shared decoder reused across every `handleInbound` case. `JSONDecoder`
     /// is thread-safe for independent `decode(_:)` calls and this manager is
@@ -171,13 +185,34 @@ final class MobileControlManager {
 
     // MARK: - Start / stop
 
+    /// The pairing-PIN check behind `validatePin`.
+    ///
+    /// Fails CLOSED when the current PIN can't be read: falling back to the
+    /// PIN captured at start could resurrect one that has since been retired
+    /// (rotated in memory while its Keychain persist failed, then the session
+    /// cache cleared). Compared in constant time, like device tokens.
+    nonisolated static func pinMatches(candidate: String, current: String?) -> Bool {
+        guard let current, !current.isEmpty else { return false }
+        // The PIN is always 6 digits (`%06d`), but a user typing on a phone
+        // number pad often omits leading zeros (e.g. "42" for "000042").
+        // Left-zero-pad an all-ASCII-digit candidate of ≤6 chars before
+        // comparing so that omission still matches, without weakening the
+        // check for any other input.
+        let isAllDigits = !candidate.isEmpty
+            && candidate.allSatisfy { ("0"..."9").contains($0) }
+        let normalized = (candidate.count <= 6 && isAllDigits)
+            ? String(repeating: "0", count: 6 - candidate.count) + candidate
+            : candidate
+        return MobilePairedDeviceStore.constantTimeEqual(normalized, current)
+    }
+
     func start() {
         if case .running = status { return }
         if case .starting = status { return }
 
         status = .starting
 
-        guard let pin = (try? MobilePin.ensure()) ?? MobilePin.read() else {
+        guard ((try? MobilePin.ensure()) ?? MobilePin.read()) != nil else {
             lastError = "Couldn't read or create the mobile pairing PIN in Keychain. Quit and relaunch LLM-IDE, then try Start again."
             append(.stderr, "ERROR: mobile pairing PIN unavailable in Keychain")
             status = .crashed(exitCode: -1)
@@ -189,21 +224,11 @@ final class MobileControlManager {
             port: Self.configuredPort,
             deviceName: name,
             validatePin: { candidate in
-                // The PIN is always 6 digits (`%06d`), but a user typing on a
-                // phone number pad often omits leading zeros (e.g. "42" for
-                // "000042"). Left-zero-pad an all-ASCII-digit candidate of
-                // ≤6 chars before comparing so that omission still matches,
-                // without weakening the check for any other input.
-                let isAllDigits = !candidate.isEmpty
-                    && candidate.allSatisfy { ("0"..."9").contains($0) }
-                let normalized = (candidate.count <= 6 && isAllDigits)
-                    ? String(repeating: "0", count: 6 - candidate.count) + candidate
-                    : candidate
                 // Read the PIN at validation time, not the one captured when
                 // the server started: it rotates after every token-issuing
                 // pairing (`onPinConsumed`), and the stale capture would keep
                 // accepting the retired PIN. `read()` is the session cache.
-                return normalized == (MobilePin.read() ?? pin)
+                Self.pinMatches(candidate: candidate, current: MobilePin.read())
             },
             authenticateToken: { [pairedDeviceStore] deviceId, token in
                 pairedDeviceStore.authenticate(deviceId: deviceId, token: token)
@@ -563,7 +588,7 @@ final class MobileControlManager {
                 reply(CommandError(commandId: "explore_load", message: "Invalid session id"))
                 return
             }
-            guard let s = ChatSessionStore.load(id: sid) else {
+            guard let s = Self.loadExplorerSession(id: sid) else {
                 append(.info, "Explore load: session \(sid.uuidString.prefix(8)) not found")
                 reply(CommandError(commandId: "explore_load",
                                    message: "Session not found on Mac — it may have been deleted."))
@@ -874,7 +899,7 @@ final class MobileControlManager {
         // run a turn against whatever session happens to be active. Surface
         // it as a CommandError so the phone can reload its explorer session
         // list.
-        guard ChatSessionStore.load(id: sid) != nil else {
+        guard Self.loadExplorerSession(id: sid) != nil else {
             append(.info, "explore_chat: session \(chat.sessionId.prefix(8)) not found")
             await server?.send(CommandError(commandId: chat.commandId, message: "Session not found on Mac — it may have been deleted. Reload your explorer sessions."))
             return
@@ -982,9 +1007,17 @@ final class MobileControlManager {
     /// path used to skip, which is also re-issued unconditionally because
     /// off-screen engines never get a panel to wire their
     /// `forgetSessionMemory` hook (a duplicate server DELETE is idempotent).
-    @MainActor
-
-    private func handleExploreDelete(_ uid: UUID) async {
+    ///
+    /// Refuses a session that exists but is not an Explorer chat: the phone
+    /// sends a bare UUID, and without this a paired phone could delete any
+    /// ChatSession on the Mac (the quick chat, a conflicts/visual/docGen
+    /// chat). An id that no longer exists still runs the engine cleanup.
+    // internal: pinned by MobileExploreScopeTests
+    func handleExploreDelete(_ uid: UUID) async {
+        if let existing = ChatSessionStore.load(id: uid), existing.scope != .explorer {
+            append(.info, "Explore delete: \(uid.uuidString.prefix(8)) is not an Explorer chat — refused")
+            return
+        }
         // `api` is optional only so the network forget at the tail degrades
         // gracefully — the local file delete and engine routing above it
         // must not be skipped when it's nil, or the phone silently keeps a
@@ -1132,8 +1165,11 @@ final class MobileControlManager {
         // The phone is gone, so these turns end for it, not "on the Mac":
         // mark them cancelled so their catch paths send nothing
         // (`notifyStoppedOnMac`) to a phone that reconnects quickly.
-        mobileCancelledCommandIds = Set(mobileInflightTasks.keys)
-        for task in mobileInflightTasks.values { task.cancel() }
+        // Union, not assignment: a command the phone already cancelled is out
+        // of `mobileInflightTasks` but its task may still be finishing, and
+        // it must keep its flag until that task's own finish prunes it.
+        mobileCancelledCommandIds.formUnion(mobileInflightTasks.keys)
+        for entry in mobileInflightTasks.values { entry.task.cancel() }
         mobileInflightTasks.removeAll()
     }
 
@@ -1147,7 +1183,15 @@ final class MobileControlManager {
     /// of this channel was added to `llmide_chat` only, so the Explorer chat —
     /// the arm actually bound to a project, where the planning questions come
     /// from — still showed nothing but "Question pending on Mac".
-    private func beginPhoneApprovals(engine: ChatEngine, commandId: String) {
+    ///
+    /// Skipped when the engine is already busy: `runExternalTurn` is about to
+    /// throw `.busy` without running anything, and installing here would
+    /// overwrite the single-slot hook of the turn that IS running (and whose
+    /// questions must keep reaching its own phone command).
+    // internal: pinned by MobilePhoneApprovalHookTests
+    func beginPhoneApprovals(engine: ChatEngine, commandId: String) {
+        guard !engine.busy else { return }
+        phoneApprovalOwners[ObjectIdentifier(engine)] = commandId
         engine.hooks.onExternalApproval = { [weak self] approval in
             guard let self else { return }
             Task { await self.sendApprovalToPhone(approval, commandId: commandId, engine: engine) }
@@ -1157,8 +1201,17 @@ final class MobileControlManager {
     /// Stop forwarding, and take down any card still on the phone: once the
     /// turn is over the requestId is dead server-side, and a question that
     /// can no longer be answered is worse than no question.
-    private func endPhoneApprovals(engine: ChatEngine, commandId: String) {
-        engine.hooks.onExternalApproval = nil
+    ///
+    /// The hook is cleared only if this command still owns it: a command
+    /// that was rejected as busy never installed one, and clearing anyway
+    /// would silence the running turn's questions on the phone.
+    // internal: pinned by MobilePhoneApprovalHookTests
+    func endPhoneApprovals(engine: ChatEngine, commandId: String) {
+        let key = ObjectIdentifier(engine)
+        if phoneApprovalOwners[key] == commandId {
+            phoneApprovalOwners.removeValue(forKey: key)
+            engine.hooks.onExternalApproval = nil
+        }
         guard let entry = pendingPhoneApprovals.removeValue(forKey: commandId) else { return }
         Task { [weak self] in
             await self?.server?.send(ApprovalCleared(
@@ -1288,22 +1341,52 @@ final class MobileControlManager {
         }
     }
 
-    private func registerMobileInflightTask(commandId: String,
+    // internal: pinned by MobileInflightTaskTests
+    func registerMobileInflightTask(commandId: String,
                                           operation: @escaping @MainActor () async -> Void) {
-        mobileInflightTasks[commandId]?.cancel()
+        mobileInflightTasks[commandId]?.task.cancel()
         mobileCancelledCommandIds.remove(commandId)
         let cid = commandId
-        mobileInflightTasks[cid] = Task.detached(priority: .userInitiated) { @MainActor [weak self] in
+        let token = UUID()
+        let task = Task.detached(priority: .userInitiated) { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.mobileInflightTasks.removeValue(forKey: cid) }
+            defer { self.mobileInflightTaskFinished(commandId: cid, token: token) }
             await operation()
+        }
+        mobileInflightTasks[cid] = MobileInflightTask(token: token, task: task)
+    }
+
+    /// Bookkeeping when a registered task ends. A re-registration of the same
+    /// commandId cancels the old task, whose `defer` runs AFTER the new one is
+    /// stored — so it may only clear the slot if the token is still its own,
+    /// or it would orphan the new task (no longer cancellable from the phone).
+    private func mobileInflightTaskFinished(commandId: String, token: UUID) {
+        if let current = mobileInflightTasks[commandId], current.token != token {
+            // A newer task owns this commandId; its own finish cleans up.
+            return
+        }
+        mobileInflightTasks.removeValue(forKey: commandId)
+        // The command is over, so its cancelled flag has served its purpose
+        // (the catch paths already consulted it). Without this the set grew
+        // by one id per phone-side cancel / disconnect for the whole session.
+        // Pruned on a later main-actor turn so progress hops the turn already
+        // queued still see the flag and stay silent.
+        Task { @MainActor [weak self] in
+            guard let self, self.mobileInflightTasks[commandId] == nil else { return }
+            self.mobileCancelledCommandIds.remove(commandId)
         }
     }
 
-    private func cancelMobileInflightTask(commandId: String) {
-        mobileCancelledCommandIds.insert(commandId)
-        mobileInflightTasks[commandId]?.cancel()
-        mobileInflightTasks.removeValue(forKey: commandId)
+    // internal: pinned by MobileInflightTaskTests
+    func cancelMobileInflightTask(commandId: String) {
+        // Flag only a command that is actually running: its task's finish
+        // prunes the flag again. An id with no task (already finished, or not
+        // yet registered — registration clears the flag anyway) would never be
+        // pruned and only grow the set.
+        if let entry = mobileInflightTasks.removeValue(forKey: commandId) {
+            mobileCancelledCommandIds.insert(commandId)
+            entry.task.cancel()
+        }
         reply(CommandError(commandId: commandId, message: "Cancelled"))
     }
 
@@ -1399,11 +1482,21 @@ final class MobileControlManager {
         cancelMobileInflightTask(commandId: m.commandId)
     }
 
+    /// The Explorer chat with this id, or nil when there is none — including
+    /// when the id names a session of another scope (quick chat, conflicts,
+    /// visual, docGen). Every `explore_*` handler that takes a phone-supplied
+    /// session id goes through this, so the phone can reach Explorer chats
+    /// only.
+    // internal: pinned by MobileExploreScopeTests
+    static func loadExplorerSession(id: UUID) -> ChatSession? {
+        guard let session = ChatSessionStore.load(id: id), session.scope == .explorer else { return nil }
+        return session
+    }
+
     private func handleExploreRenameSession(data: Data) {
         guard let m = try? decoder.decode(ExploreRenameSession.self, from: data),
               let sid = UUID(uuidString: m.sessionId),
-              var session = ChatSessionStore.load(id: sid),
-              session.scope == .explorer else {
+              var session = Self.loadExplorerSession(id: sid) else {
             reply(CommandError(commandId: "explore_rename", message: "Session not found on Mac"))
             return
         }

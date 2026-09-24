@@ -135,6 +135,8 @@ final class FeatureRegistry: ObservableObject {
             activeFeatures = Set(AppFeature.allCases)
             return
         }
-        activeFeatures = Set(decoded.compactMap { AppFeature(rawValue: $0) })
+        // Validated like every other write: an older saved set could enable a
+        // feature whose dependency is off (3D graph without the explorer).
+        activeFeatures = AppFeature.validated(Set(decoded.compactMap { AppFeature(rawValue: $0) }))
     }
 }

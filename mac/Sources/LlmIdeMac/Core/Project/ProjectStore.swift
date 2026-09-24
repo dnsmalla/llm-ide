@@ -68,6 +68,10 @@ final class ProjectStore: ObservableObject {
     // MARK: - Public API
 
     func openFolder(at url: URL) throws {
+        // Same guard as switchTo, here so EVERY caller gets it (Welcome, the
+        // migrator, phone): closeActiveWithExport awaits and then closes
+        // whatever is active, so switching mid-export closed the NEW project.
+        guard !isExporting else { throw ProjectStoreError.exportInProgress }
         // Normalise the URL so case-insensitive filesystem differences
         // (HFS+/APFS) don't create duplicate recents for the same folder.
         let url = url.standardizedFileURL
@@ -237,6 +241,14 @@ final class ProjectStore: ObservableObject {
             api: _apiClient)
     }
 
+    /// `/Volumes/<name>/…` whose volume is not present. Anything else missing
+    /// is really gone.
+    nonisolated static func isOnUnmountedVolume(_ path: String) -> Bool {
+        let parts = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
+        guard parts.count > 2, parts[1] == "Volumes" else { return false }
+        return !FileManager.default.fileExists(atPath: "/Volumes/\(parts[2])")
+    }
+
     func switchTo(recent entry: RecentEntry) throws {
         // Prevent switching while an export is in-flight — the export holds
         // a reference to the current activeProject; switching underneath it
@@ -377,10 +389,13 @@ final class ProjectStore: ObservableObject {
             // Prune any recent whose project.json is no longer readable
             // (folder deleted, permissions revoked). Without this, a stale
             // entry stays in the sidebar forever and a click on it throws.
+            // …but NOT one on a volume that simply isn't mounted right now
+            // (external disk, network share): pruning and persisting that
+            // removed the project from recents for good.
             let pruned = state.recents.filter { entry in
                 let base = URL(fileURLWithPath: entry.path)
-                return FileManager.default.fileExists(
-                        atPath: ProjectLayout(root: base).projectJSON.path)
+                if FileManager.default.fileExists(atPath: ProjectLayout(root: base).projectJSON.path) { return true }
+                return Self.isOnUnmountedVolume(entry.path)
             }
             recents = pruned
             if let activeId = state.activeId,

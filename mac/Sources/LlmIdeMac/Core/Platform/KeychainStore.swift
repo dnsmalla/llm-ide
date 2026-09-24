@@ -143,7 +143,10 @@ enum KeychainStore {
             log.error("Refusing to persist secrets: the last keychain load failed, so writing the in-memory map would destroy the stored secrets")
             return false
         }
-        if blob[migratedKey] == nil { blob[migratedKey] = "1" }
+        // No sentinel stamping here: only a SUCCESSFUL migration may set it
+        // (see migrateIfNeeded). Stamping on every write meant the first
+        // ordinary set() after a failed migration marked it done for good,
+        // and the legacy tokens were never read again.
         guard let data = try? JSONEncoder().encode(blob) else { return false }
         let ok = writeRaw(account: blobAccount, service: service, data: data)
         if !ok { lastFailureStatus = errSecIO }
@@ -179,7 +182,18 @@ enum KeychainStore {
         for account in accounts where blob[account] == nil {
             if let v = loadLegacy(account: account) { blob[account] = v; copied.append(account) }
         }
-        persistBlobLocked()
+        // The blob write can fail (errSecInteractionNotAllowed mid-run, disk).
+        // Deleting the legacy items then would destroy the only copy of the
+        // refresh / GitLab / GitHub tokens — the exact loss this file exists
+        // to prevent. Leave them in place; the next launch migrates again.
+        blob[migratedKey] = "1"
+        guard persistBlobLocked() else {
+            for account in copied { blob[account] = nil }
+            blob[migratedKey] = nil
+            lock.unlock()
+            log.error("Keychain migration: blob write failed — legacy items kept for the next attempt")
+            return
+        }
         lock.unlock()
         for account in copied {
             deleteRaw(account: account, service: service)
@@ -236,7 +250,10 @@ enum KeychainStore {
 
     // MARK: - GitLab PAT
 
-    static func saveGitLabToken(_ token: String, host: String) {
+    /// Returns whether the token was actually stored (false while the
+    /// keychain is unreadable — see `set`).
+    @discardableResult
+    static func saveGitLabToken(_ token: String, host: String) -> Bool {
         set("gitlab::\(host)::token", token)
     }
 

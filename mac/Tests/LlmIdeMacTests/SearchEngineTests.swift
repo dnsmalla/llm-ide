@@ -68,6 +68,49 @@ final class SearchEngineTests: XCTestCase {
         XCTAssertEqual(range.map { String(line.lineText[$0]) }, "出力調整禁止")
     }
 
+    // MARK: - Long-line preview
+
+    /// REGRESSION: a minified bundle is one huge line, and the whole line was
+    /// stored in the `LineMatch` — a multi-MB string per result row.
+    func testLongLinePreviewIsClampedAroundTheFirstMatch() throws {
+        let line = String(repeating: "x", count: 200_000) + "needle" + String(repeating: "y", count: 200_000)
+        let out = SearchEngine.lineMatches(in: line, regex: regex("needle"), budget: 100)
+        let lm = try XCTUnwrap(out.lines.first)
+        XCTAssertLessThanOrEqual((lm.lineText as NSString).length, SearchEngine.maxPreviewUTF16)
+        let shown = try XCTUnwrap(Range(lm.matches[0].nsRange, in: lm.lineText))
+        XCTAssertEqual(String(lm.lineText[shown]), "needle")
+        XCTAssertEqual(lm.rangeInLine(lm.matches[0]), NSRange(location: 200_000, length: 6))
+    }
+
+    func testClampedPreviewStillLetsReplaceFindAMatchPastTheWindow() throws {
+        let text = "needle" + String(repeating: "x", count: 5_000) + "needle\n"
+        let out = SearchEngine.lineMatches(in: text, regex: regex("needle"), budget: 100)
+        let lm = try XCTUnwrap(out.lines.first)
+        XCTAssertEqual(lm.matches.count, 2)
+        XCTAssertNil(Range(lm.matches[1].nsRange, in: lm.lineText), "second match is outside the preview")
+        let replaced = SearchEngine.replacingOne(in: text, line: 1, rangeInLine: lm.rangeInLine(lm.matches[1]),
+                                                 regex: regex("needle"), replacement: "pin",
+                                                 options: SearchOptions(), preserveCase: false)
+        XCTAssertEqual(replaced, "needle" + String(repeating: "x", count: 5_000) + "pin\n")
+    }
+
+    func testShortLineIsKeptWhole() {
+        let out = SearchEngine.lineMatches(in: "let needle = 1\n", regex: regex("needle"), budget: 100)
+        XCTAssertEqual(out.lines.first?.lineText, "let needle = 1")
+        XCTAssertEqual(out.lines.first?.previewOffset, 0)
+    }
+
+    func testPreviewWindowNeverSplitsAComposedCharacter() throws {
+        // Emoji are surrogate pairs; the lead offset lands mid-pair for one of these.
+        let line = String(repeating: "😀", count: 1_000) + "needle"
+        let out = SearchEngine.lineMatches(in: line, regex: regex("needle"), budget: 100)
+        let lm = try XCTUnwrap(out.lines.first)
+        XCTAssertFalse(lm.lineText.unicodeScalars.contains { $0.value == 0xFFFD })
+        XCTAssertEqual((line as NSString).substring(with: NSRange(location: lm.previewOffset,
+                                                                  length: (lm.lineText as NSString).length)),
+                       lm.lineText)
+    }
+
     // MARK: - isBinary
 
     func testIsBinaryDetectsNulByte() {

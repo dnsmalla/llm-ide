@@ -63,6 +63,8 @@ final class BackendManager {
     private var userInitiatedStop = false
     private var pendingRestartTask: Task<Void, Never>?
     private var lastStartArgs: (nodePath: String, workingDirectory: String)?
+    /// Set by `restart(...)`: start again once the spawned child has exited.
+    private var startAfterExit: (nodePath: String, workingDirectory: String)?
 
     init() {
         // Best-effort cleanup so a spawned node child doesn't outlive
@@ -344,6 +346,16 @@ final class BackendManager {
                         ?? "Server exited with code \(exitCode). See Settings → Backend for the log."
                 }
                 self.status = exitCode == 0 ? .stopped : .crashed(exitCode: exitCode)
+                if let next = self.startAfterExit {
+                    // An intentional restart, not a crash: no auto-restart,
+                    // no budget spent, no lingering "crashed" error.
+                    self.startAfterExit = nil
+                    self.userInitiatedStop = false
+                    self.lastError = nil
+                    self.status = .stopped
+                    self.start(nodePath: next.nodePath, workingDirectory: next.workingDirectory)
+                    return
+                }
                 self.scheduleAutoRestartIfNeeded(exitCode: exitCode)
             }
         }
@@ -472,11 +484,43 @@ final class BackendManager {
         }
     }
 
+    /// Settings → Kill & Restart. Previously the button killed the port
+    /// listener and called `start` 0.5 s later — which returned early (still
+    /// `.running`), so the restart actually happened via the CRASH path: it
+    /// spent an auto-restart attempt each time (three clicks exhausted the
+    /// budget for the next real crash) and briefly showed "crashed".
+    func restart(nodePath: String, workingDirectory: String) {
+        restartCount = 0
+        if process != nil {
+            stop()
+            // After stop(), which clears it: the exit handler runs on a later
+            // main-actor turn, so this is still in place when it does.
+            startAfterExit = (nodePath, workingDirectory)
+            return
+        }
+        // Adopted (or unknown) listener: kill it, wait, then spawn fresh —
+        // unless a Stop cleared `startAfterExit` in the meantime.
+        stop()
+        startAfterExit = (nodePath, workingDirectory)
+        Task { @MainActor [weak self] in
+            await Task.detached { Self.killExternalListener(port: Self.defaultBackendPort) }.value
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard let self, self.startAfterExit != nil, self.process == nil else { return }
+            self.startAfterExit = nil
+            self.userInitiatedStop = false
+            self.status = .stopped
+            self.start(nodePath: nodePath, workingDirectory: workingDirectory)
+        }
+    }
+
     func stop() {
         // Signal the terminationHandler to skip auto-restart. Cleared
         // back to false once the next non-clean exit is handled, or
         // immediately when the user starts the backend again.
         userInitiatedStop = true
+        // A Stop after Kill & Restart (node slow to exit) wins: the exit
+        // must not relaunch against it.
+        startAfterExit = nil
         // The server we measured is going away on both paths below, so the
         // cached `apiVersion` stops describing anything. Keeping it is what
         // lets `QuickChatContext.serverSupportsAsk` answer "yes, v47" for a
