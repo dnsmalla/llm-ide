@@ -66,6 +66,25 @@ struct SearchView: View {
             // ends the AsyncStream, whose onTermination cancels the walk.
             debounce?.cancel()
         }
+        .onChange(of: root?.path) { _, _ in projectChanged() }
+    }
+
+    /// The workspace root moved (project switch, repo activation). Results and
+    /// open tabs describe the OLD tree, and an in-flight walk would keep
+    /// appending the old project's matches under the new one — so stop it,
+    /// drop everything tied to the old root, and re-run the query against the
+    /// new root.
+    private func projectChanged() {
+        debounce?.cancel()
+        debounce = nil
+        searching = false
+        results = SearchResults()
+        tabs = []
+        activeTab = nil
+        revealTarget = nil
+        revealTargetURL = nil
+        confirmReplaceAll = false
+        scheduleSearch()
     }
 
     /// Thin panel header mirroring Explorer's / Source Control's, carrying the
