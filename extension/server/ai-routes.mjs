@@ -583,6 +583,15 @@ export async function handleAIRoutes(req, res) {
           return true;
         }
 
+        // Buffered callers (the Mac's Loop stage repair) disconnect on Stop /
+        // quit too — without this the whole agent turn, and any approved
+        // run-bash it started, ran to completion for a client that was gone.
+        // Same contract as the SSE branch above.
+        const bufferedAc = new AbortController();
+        onClientDisconnect(req, res, () => {
+          bufferedAc.abort();
+          if (sessionId) abortDecisionsForSession(sessionId);
+        });
         const out = await handleCodeAssist({
           message,
           history: Array.isArray(body.history) ? body.history : [],
@@ -607,12 +616,14 @@ export async function handleAIRoutes(req, res) {
             provider: opts.model ? undefined : body.provider,
             maxTokens: opts.maxTokens,
             tools: opts.tools,
-            signal: opts.signal,
+            signal: opts.signal ? AbortSignal.any([opts.signal, bufferedAc.signal]) : bufferedAc.signal,
             mcpConfig: opts.mcpConfig,
           }),
           kb,
           userId: req.user?.id,
+          signal: bufferedAc.signal,
         });
+        if (bufferedAc.signal.aborted) return true;
         mergeMemoryUsage(usage, out);
         sendJSON(res, 200, {
           reply: out.reply,
