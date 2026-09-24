@@ -304,7 +304,7 @@ struct SearchView: View {
         .onTapGesture { open(fm.url, line: lm.line) }
         .modifier(RowHoverActions(
             canReplace: showReplace && !replaceText.isEmpty,
-            onReplace: { if let m = lm.matches.first { replaceOneAction(fm, fileIndex: m.fileIndex) } },
+            onReplace: { if let m = lm.matches.first { replaceOneAction(fm, line: lm.line, rangeInLine: m.nsRange) } },
             onDismiss: { dismiss(fm, lm) }
         ))
     }
@@ -431,10 +431,10 @@ struct SearchView: View {
         }
     }
 
-    private func replaceOneAction(_ fm: FileMatch, fileIndex: Int) {
+    private func replaceOneAction(_ fm: FileMatch, line: Int, rangeInLine: NSRange) {
         let url = fm.url, q = query, opts = options, repl = replaceText, pc = preserveCase
         Task {
-            _ = await searchService.replaceOne(file: url, fileIndex: fileIndex, query: q, options: opts, replacement: repl, preserveCase: pc)
+            _ = await searchService.replaceOne(file: url, line: line, rangeInLine: rangeInLine, query: q, options: opts, replacement: repl, preserveCase: pc)
             scheduleSearch(resetExpanded: false)
         }
     }

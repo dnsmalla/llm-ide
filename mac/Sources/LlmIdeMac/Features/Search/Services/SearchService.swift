@@ -59,11 +59,9 @@ final class SearchService {
         // Group before adding word boundaries so alternation in a regex query
         // (e.g. `foo|bar`) binds inside the \b…\b, not as `\bfoo|bar\b`.
         if options.wholeWord { pattern = "\\b(?:" + pattern + ")\\b" }
-        // `.anchorsMatchLines` makes ^/$ match at every line boundary. This is
-        // required for consistency: search matches per-line (so ^/$ are line
-        // anchors), but replace matches the full file string — without this,
-        // anchored regex would diverge and replaceOne could hit the wrong
-        // occurrence. With it, both sides see the same match ordering.
+        // Search and replace both match one line at a time, so ^/$ are line
+        // anchors either way; `.anchorsMatchLines` keeps them so for any
+        // caller that hands this regex a multi-line string.
         var opts: NSRegularExpression.Options = [.anchorsMatchLines]
         if !options.caseSensitive { opts.insert(.caseInsensitive) }
         return try? NSRegularExpression(pattern: pattern, options: opts)
@@ -155,52 +153,29 @@ final class SearchService {
     }
 
     /// Replace every match of `query` in `file` with `replacement`, writing the
-    /// file back as UTF-8. Returns false if the file can't be read or the regex
-    /// is invalid. With `preserveCase` (non-regex only) each match is spliced
-    /// individually — in REVERSE order so earlier NSRanges stay valid — applying
-    /// `preserveCaseReplacement`. Otherwise a single
-    /// `stringByReplacingMatches` pass is used: in non-regex mode the replacement
-    /// is escaped as a literal template (so `$`/`\` are literal); in regex mode it
-    /// is passed through as a template (so `$1` etc. work).
+    /// file back as UTF-8. Returns false if the file can't be read, the regex
+    /// is invalid, or nothing matched. Matching is per line, exactly as the
+    /// search matches (see `SearchEngine.replacingAll`). In non-regex mode the
+    /// replacement is literal (`$`/`\` included); in regex mode it is a
+    /// template (so `$1` etc. work); `preserveCase` applies to non-regex only.
     func replaceInFile(file: URL, query: String, options: SearchOptions, replacement: String, preserveCase: Bool) async -> Bool {
-        guard let text = readText(file), let regex = Self.makeRegex(query: query, options: options) else { return false }
-        let ns = text as NSString
-        let full = NSRange(location: 0, length: ns.length)
-        let out: String
-        if preserveCase && !options.regex {
-            let matches = regex.matches(in: text, options: [], range: full)
-            let mutable = NSMutableString(string: ns)
-            for h in matches.reversed() {
-                let matched = ns.substring(with: h.range)
-                mutable.replaceCharacters(in: h.range, with: Self.preserveCaseReplacement(matched: matched, replacement: replacement))
-            }
-            out = mutable as String
-        } else {
-            let template = options.regex ? replacement : NSRegularExpression.escapedTemplate(for: replacement)
-            out = regex.stringByReplacingMatches(in: text, options: [], range: full, withTemplate: template)
-        }
-        return write(out, to: file)
+        guard let text = readText(file), let regex = Self.makeRegex(query: query, options: options),
+              let out = SearchEngine.replacingAll(in: text, regex: regex, replacement: replacement,
+                                                  options: options, preserveCase: preserveCase)
+        else { return false }
+        return write(out.text, to: file)
     }
 
-    /// Replace only the `fileIndex`-th match (0-based, document order) of `query`
-    /// in `file`. A single splice, so ordering is moot. Returns false if the file
-    /// can't be read, the regex is invalid, or there's no such match.
-    func replaceOne(file: URL, fileIndex: Int, query: String, options: SearchOptions, replacement: String, preserveCase: Bool) async -> Bool {
-        guard let text = readText(file), let regex = Self.makeRegex(query: query, options: options) else { return false }
-        let ns = text as NSString
-        let full = NSRange(location: 0, length: ns.length)
-        let matches = regex.matches(in: text, options: [], range: full)
-        guard fileIndex >= 0, fileIndex < matches.count else { return false }
-        let h = matches[fileIndex]
-        let replText: String
-        if preserveCase && !options.regex {
-            replText = Self.preserveCaseReplacement(matched: ns.substring(with: h.range), replacement: replacement)
-        } else if options.regex {
-            replText = regex.replacementString(for: h, in: text, offset: 0, template: replacement)
-        } else {
-            replText = replacement
-        }
-        let out = ns.replacingCharacters(in: h.range, with: replText)
+    /// Replace only the match the results list showed at 1-based `line`,
+    /// UTF-16 `rangeInLine` within that line (see `SearchEngine.replacingOne`
+    /// for why it is located by position, not by ordinal). Returns false if
+    /// the file can't be read, the regex is invalid, or that match is gone.
+    func replaceOne(file: URL, line: Int, rangeInLine: NSRange, query: String, options: SearchOptions, replacement: String, preserveCase: Bool) async -> Bool {
+        guard let text = readText(file), let regex = Self.makeRegex(query: query, options: options),
+              let out = SearchEngine.replacingOne(in: text, line: line, rangeInLine: rangeInLine,
+                                                  regex: regex, replacement: replacement,
+                                                  options: options, preserveCase: preserveCase)
+        else { return false }
         return write(out, to: file)
     }
 

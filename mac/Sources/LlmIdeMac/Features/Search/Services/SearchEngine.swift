@@ -73,6 +73,98 @@ enum SearchEngine {
         return (lines, used)
     }
 
+    // MARK: - Replace (per line, like the search)
+
+    /// The UTF-16 range of every line of `text`, split EXACTLY as
+    /// `lineMatches` splits (`\.isNewline`, empty lines kept), so index `n`
+    /// is the line the search reported as line `n + 1`.
+    static func lineRanges(in text: String) -> [NSRange] {
+        text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            .map { NSRange($0.startIndex..<$0.endIndex, in: text) }
+    }
+
+    /// The text that replaces one per-line `hit`. Regex mode expands the
+    /// template (`$1` …) against the LINE the hit was found in; plain mode is
+    /// literal; `preserveCase` applies to plain mode only.
+    static func replacementText(for hit: NSTextCheckingResult,
+                                inLine line: String,
+                                regex: NSRegularExpression,
+                                replacement: String,
+                                options: SearchOptions,
+                                preserveCase: Bool) -> String {
+        if options.regex {
+            return regex.replacementString(for: hit, in: line, offset: 0, template: replacement)
+        }
+        if preserveCase {
+            let matched = (line as NSString).substring(with: hit.range)
+            return SearchService.preserveCaseReplacement(matched: matched, replacement: replacement)
+        }
+        return replacement
+    }
+
+    /// Replace every match in `text`, matching LINE BY LINE as the search
+    /// does. Matching the whole file instead also hits patterns that span a
+    /// newline (`a\s*b` over `"a\nb"`), which the search never showed —
+    /// replace must change exactly what the results list. Returns nil when
+    /// nothing matched.
+    static func replacingAll(in text: String,
+                             regex: NSRegularExpression,
+                             replacement: String,
+                             options: SearchOptions,
+                             preserveCase: Bool) -> (text: String, count: Int)? {
+        let ns = text as NSString
+        var splices: [(range: NSRange, with: String)] = []
+        for lineRange in lineRanges(in: text) {
+            let line = ns.substring(with: lineRange)
+            let hits = regex.matches(in: line, options: [],
+                                     range: NSRange(location: 0, length: (line as NSString).length))
+            for hit in hits {
+                splices.append((NSRange(location: lineRange.location + hit.range.location,
+                                        length: hit.range.length),
+                                replacementText(for: hit, inLine: line, regex: regex,
+                                                replacement: replacement, options: options,
+                                                preserveCase: preserveCase)))
+            }
+        }
+        guard !splices.isEmpty else { return nil }
+        // Reverse order so the earlier ranges stay valid while splicing.
+        let out = NSMutableString(string: text)
+        for s in splices.reversed() { out.replaceCharacters(in: s.range, with: s.with) }
+        return (out as String, splices.count)
+    }
+
+    /// Replace the ONE match the results list showed: the match on 1-based
+    /// `line` whose UTF-16 range within that line is `rangeInLine`.
+    ///
+    /// Located by (line, range), never by a file-wide ordinal: the ordinal
+    /// came from per-line matching, and re-counting over the whole file
+    /// diverges as soon as a pattern can match across a newline — it then
+    /// replaced a different occurrence than the one clicked. Returns nil when
+    /// that match is no longer there (the file changed since the search), so
+    /// a stale click changes nothing rather than the wrong text.
+    static func replacingOne(in text: String,
+                             line: Int,
+                             rangeInLine: NSRange,
+                             regex: NSRegularExpression,
+                             replacement: String,
+                             options: SearchOptions,
+                             preserveCase: Bool) -> String? {
+        let lines = lineRanges(in: text)
+        guard line >= 1, line <= lines.count else { return nil }
+        let lineRange = lines[line - 1]
+        let ns = text as NSString
+        let lineText = ns.substring(with: lineRange)
+        let hits = regex.matches(in: lineText, options: [],
+                                 range: NSRange(location: 0, length: (lineText as NSString).length))
+        guard let hit = hits.first(where: { NSEqualRanges($0.range, rangeInLine) }) else { return nil }
+        let with = replacementText(for: hit, inLine: lineText, regex: regex,
+                                   replacement: replacement, options: options,
+                                   preserveCase: preserveCase)
+        return ns.replacingCharacters(in: NSRange(location: lineRange.location + hit.range.location,
+                                                  length: hit.range.length),
+                                      with: with)
+    }
+
     /// A file whose first 4 KB contains a NUL byte is treated as binary.
     static func isBinary(_ data: Data) -> Bool { data.prefix(4096).contains(0) }
 
