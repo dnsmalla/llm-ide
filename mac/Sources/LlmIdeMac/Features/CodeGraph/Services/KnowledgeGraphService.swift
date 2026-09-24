@@ -85,21 +85,44 @@ final class KnowledgeGraphService: ObservableObject {
     ///     `<memoryRoot>/system/memory/` (the path the extension reads — see
     ///     `graphkit/paths.mjs`). Pass the repo the user has indexed in the
     ///     extension.
-    func generate(codeRepoRoot: URL?, docRoots: [URL], memoryRoot: URL? = nil) async {
+    /// What a `generate` call left in the service.
+    enum Outcome: Equatable {
+        /// This call's request was stashed behind a run in flight; that run's
+        /// caller replays it and reports its result. Nothing to publish here.
+        case deferred
+        /// The graphs now held by the service belong to `codeRepoRoot` — which
+        /// is the LAST request replayed, not necessarily this call's own.
+        case completed(codeRepoRoot: URL?)
+    }
+
+    /// Returns which repo's graphs the service holds when the call returns.
+    ///
+    /// Callers used to publish `codeGraph` under the repo THEY asked for. With
+    /// coalescing that was wrong both ways: a call made during an in-flight run
+    /// returned at once (stash + return) and published the OTHER repo's graph
+    /// under its own key, and the in-flight caller resumed after the stashed
+    /// run had replaced the graphs and published those under ITS key — the
+    /// server-side graph for project A ended up holding project B's symbols
+    /// after a project switch mid-run. Publish only under the returned root.
+    @discardableResult
+    func generate(codeRepoRoot: URL?, docRoots: [URL], memoryRoot: URL? = nil) async -> Outcome {
         // Coalesce: if a run is in flight, stash the latest request and replay
         // it once when the current run finishes — so a project switch (or any
         // newer request) mid-run isn't silently dropped until the next tick.
         if isRunning {
             pending = (codeRepoRoot, docRoots, memoryRoot)
-            return
+            return .deferred
         }
         isRunning = true
         await runOnce(codeRepoRoot: codeRepoRoot, docRoots: docRoots, memoryRoot: memoryRoot)
         isRunning = false
         if let p = pending {
             pending = nil
-            await generate(codeRepoRoot: p.code, docRoots: p.docs, memoryRoot: p.memory)
+            // The replay overwrites the graphs; report ITS root, since that
+            // is what the service holds now.
+            return await generate(codeRepoRoot: p.code, docRoots: p.docs, memoryRoot: p.memory)
         }
+        return .completed(codeRepoRoot: codeRepoRoot)
     }
 
     private func runOnce(codeRepoRoot: URL?, docRoots: [URL], memoryRoot: URL?) async {

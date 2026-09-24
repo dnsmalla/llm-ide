@@ -173,13 +173,24 @@ final class GraphAutoUpdater: ObservableObject {
         let docRoots = [repoRoot]
         Task { [weak self] in
             guard let self else { return }
-            await self.graph.generate(codeRepoRoot: repoRoot, docRoots: docRoots, memoryRoot: repoRoot)
+            // Publish under the repo whose graphs the service HOLDS, which the
+            // call reports — not the one this tick asked for. A tick made
+            // while a run was in flight gets `.deferred` and publishes
+            // nothing; the in-flight tick publishes the replayed result under
+            // the replayed root. (Before this, a project switch mid-run put
+            // project B's graph under A's key on the server and in the view.)
+            guard case .completed(let heldRoot) = await self.graph.generate(
+                codeRepoRoot: repoRoot, docRoots: docRoots, memoryRoot: repoRoot),
+                  let heldRoot else {
+                Self.log.info("skipping publish — request coalesced into another run")
+                return
+            }
             // Publish only a run that actually completed. A failed or
             // contended run leaves the graphs `.empty`, and publishing those
             // overwrote the view's session cache — see the guard in
             // `GraphSessionStore.store`, which is the backstop for this.
             if case .complete = self.graph.phase {
-                self.publishToSession(repoRoot: repoRoot)
+                self.publishToSession(repoRoot: heldRoot)
             } else {
                 Self.log.info("skipping session publish — run did not complete")
             }
@@ -187,7 +198,7 @@ final class GraphAutoUpdater: ObservableObject {
             // (not spawned separately) so two ticks can't upload concurrently;
             // the service no-ops when the graph is unchanged, which is the
             // common case for a periodic tick.
-            await self.uploader.upload(graph: self.graph.codeGraph, repoRoot: repoRoot)
+            await self.uploader.upload(graph: self.graph.codeGraph, repoRoot: heldRoot)
             self.objectWillChange.send()
         }
     }
