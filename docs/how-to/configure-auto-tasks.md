@@ -138,6 +138,11 @@ there rather than creating files that would vanish seconds later. Only a custom
 task in **Implement** mode actually writes: it commits on its own `fix/custom-*`
 branch inside the worktree, and your checkout stays on its current branch.
 
+The worktree is a fresh checkout of the current commit: it has no untracked or
+ignored files (build products, `.env`, local settings), and submodules are
+initialised best-effort. A task that depends on such files sees them missing;
+commit what the task needs, or reference it from outside the repository.
+
 Settings are per project. The same task in two projects keeps two independent
 sets of paths, skills, and template choices.
 

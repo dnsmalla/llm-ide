@@ -122,7 +122,9 @@ A: It depends on the kind of task.
   checkout. These tasks run whether or not your tree is dirty.
 - **Issue tasks** (which work an issue in your checkout) still need a clean tree:
   - **Auto-stash OFF (default):** they skip if there are uncommitted changes (safe)
-  - **Auto-stash ON:** they stash your changes, run, then restore (riskier but thorough)
+  - **Auto-stash ON:** they stash your changes, run, then restore (riskier but thorough).
+    The stash happens at the start of any run while Auto-stash is on, including
+    runs that contain only prompt-based tasks.
 
 If you work with uncommitted changes frequently, keep Auto-stash OFF.
 
