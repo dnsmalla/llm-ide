@@ -294,6 +294,9 @@ final class AutoCodeUpdateService: ObservableObject {
         isRunning = true
         let startedAt = Date()
         let loopLabel = AutoTask.loopEngineering.label
+        // Captured with `resolveBackendAndProject()` below (same main-actor
+        // turn), not re-read when the run finishes — see `appendRunRecord`.
+        let projectId = projectStore?.activeProject?.bundle.id
         // Set once the sweep reports back; read by the defer below.
         var didStart = true
         defer {
@@ -303,7 +306,7 @@ final class AutoCodeUpdateService: ObservableObject {
             lastRunDate = Date()
             appendRunRecord(taskId: AutoTask.loopEngineering.rawValue, label: loopLabel,
                             logSuffix: AutoTask.loopEngineering.logSuffix, startedAt: startedAt,
-                            trigger: trigger,
+                            trigger: trigger, projectId: projectId,
                             status: runStatus(forTaskId: AutoTask.loopEngineering.rawValue,
                                               didStart: didStart),
                             summary: statusMessage)
@@ -321,7 +324,7 @@ final class AutoCodeUpdateService: ObservableObject {
                         stageId != nil ? "Running Loop (single stage)…" : "Running Loop (one loop)…")
         didStart = await runLoopEngineeringSweep(projectRoot: resolved.projectRoot,
                                                 gitRoot: resolved.gitRoot,
-                                                projectId: projectStore?.activeProject?.bundle.id,
+                                                projectId: projectId,
                                                 onlyStageId: stageId, onlyLoopId: loopId,
                                                 journalTrigger: Self.loopTrigger(for: trigger))
         statusMessage = "\(AutoTask.loopEngineering.label) — done"
@@ -377,13 +380,15 @@ final class AutoCodeUpdateService: ObservableObject {
         isRunning = true
         currentCustomTaskId = task.id
         let startedAt = Date()
+        // Resolve-time project id — see `appendRunRecord`.
+        let projectId = projectStore?.activeProject?.bundle.id
         defer {
             isRunning = false
             currentCustomTaskId = nil
             currentStep = nil
             lastRunDate = Date()
             appendRunRecord(taskId: task.id, label: task.name, logSuffix: task.id,
-                            startedAt: startedAt, trigger: trigger,
+                            startedAt: startedAt, trigger: trigger, projectId: projectId,
                             status: runStatus(forTaskId: task.id),
                             summary: statusMessage)
         }
@@ -508,6 +513,8 @@ final class AutoCodeUpdateService: ObservableObject {
         guard !isRunning else { return }
         isRunning = true
         let startedAt = Date()
+        // Resolve-time project id — see `appendRunRecord`.
+        let projectId = projectStore?.activeProject?.bundle.id
         defer {
             isRunning = false
             currentTask = nil
@@ -518,7 +525,7 @@ final class AutoCodeUpdateService: ObservableObject {
             statusMessage = "Logs directory unavailable"
             appendRunRecord(taskId: task.rawValue, label: task.label,
                             logSuffix: task.logSuffix, startedAt: startedAt,
-                            trigger: trigger, status: .failed,
+                            trigger: trigger, projectId: projectId, status: .failed,
                             summary: "Logs directory unavailable")
             return
         }
@@ -530,13 +537,14 @@ final class AutoCodeUpdateService: ObservableObject {
                 taskErrors[task.rawValue] = reason
                 appendRunRecord(taskId: task.rawValue, label: task.label,
                                 logSuffix: task.logSuffix, startedAt: startedAt,
-                                trigger: trigger, status: .failed, summary: reason)
+                                trigger: trigger, projectId: projectId, status: .failed,
+                                summary: reason)
                 return
             }
-            await runTaskBody(task, resolved: resolved, projectId: projectStore?.activeProject?.bundle.id,
+            await runTaskBody(task, resolved: resolved, projectId: projectId,
                               logDir: logDir, startedAt: startedAt, trigger: trigger)
         } else {
-            await runTaskBody(task, resolved: nil, projectId: projectStore?.activeProject?.bundle.id,
+            await runTaskBody(task, resolved: nil, projectId: projectId,
                               logDir: logDir, startedAt: startedAt, trigger: trigger)
         }
         statusMessage = "\(task.label) — done"
@@ -561,7 +569,7 @@ final class AutoCodeUpdateService: ObservableObject {
         defer {
             appendRunRecord(taskId: task.rawValue, label: task.label,
                             logSuffix: task.logSuffix, startedAt: startedAt,
-                            trigger: trigger,
+                            trigger: trigger, projectId: projectId,
                             status: runStatus(forTaskId: task.rawValue, didStart: didStart),
                             summary: taskErrors[task.rawValue])
         }
@@ -969,8 +977,13 @@ final class AutoCodeUpdateService: ObservableObject {
         return .success
     }
 
+    /// `projectId` is the project the run was resolved against, captured by
+    /// the caller when the run STARTED. It used to be read here, at finish
+    /// time — so switching projects during a long run filed the record under
+    /// the project that happened to be active when it ended.
     private func appendRunRecord(taskId: String, label: String, logSuffix: String?,
                                  startedAt: Date, trigger: AutoTaskRunTrigger,
+                                 projectId: String?,
                                  status: AutoTaskRunStatus, summary: String?) {
         runHistory.record(AutoTaskRunRecord(
             id: UUID().uuidString,
@@ -982,7 +995,7 @@ final class AutoCodeUpdateService: ObservableObject {
             status: status,
             summary: summary,
             logFileName: logSuffix.map { "auto-task-\($0).log" },
-            projectId: projectStore?.activeProject?.bundle.id
+            projectId: projectId
         ))
         refreshRunHistory()
     }
