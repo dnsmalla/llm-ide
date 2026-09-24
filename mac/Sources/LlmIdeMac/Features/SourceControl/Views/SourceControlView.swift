@@ -1164,9 +1164,12 @@ struct SourceControlView: View {
                 Button {
                     let msg = message
                     Task {
-                        if amendOn { await scm.amend(root: root, message: msg) }
-                        else { await scm.commit(root: root, message: msg) }
-                        message = ""
+                        // Clear only on success: a hook rejection or signing
+                        // failure used to discard the typed message too.
+                        let ok = amendOn
+                            ? await scm.amend(root: root, message: msg)
+                            : await scm.commit(root: root, message: msg)
+                        if ok { message = "" }
                     }
                 } label: { Text(amendOn ? "Amend" : "Commit").frame(maxWidth: .infinity) }
                 .buttonStyle(.borderedProminent)
@@ -1176,7 +1179,7 @@ struct SourceControlView: View {
                 // for amend (push of a rewritten commit would need a force-push).
                 Button {
                     let msg = message
-                    Task { await scm.commitAndPush(root: root, message: msg); message = "" }
+                    Task { if await scm.commitAndPush(root: root, message: msg) { message = "" } }
                 } label: { Image(systemName: "arrow.up.circle") }
                 .buttonStyle(.bordered)
                 .disabled(scm.isBusy || amendOn || emptyMessage || noChanges || !hasCredentials)

@@ -95,10 +95,22 @@ final class SourceControlService {
         }
     }
 
+    /// A working-tree file's text for display, off the main actor and capped:
+    /// selecting a 500 MB untracked log used to read it synchronously on the
+    /// main actor (and the 3 s poll re-read it), freezing the UI. Nil when the
+    /// file is unreadable, not UTF-8, or over the cap.
+    nonisolated static func smallText(at url: URL) async -> String? {
+        await Task.detached(priority: .userInitiated) {
+            guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+                  size <= RepoManager.maxNewFileDiffBytes else { return nil }
+            return try? String(contentsOf: url, encoding: .utf8)
+        }.value
+    }
+
     func diff(root: URL, file: FileChange) async -> [DiffHunk] {
         if file.status == .untracked {
             let url = root.appendingPathComponent(file.path)
-            guard let content = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+            guard let content = await Self.smallText(at: url) else { return [] }
             let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
             // Drop a trailing empty element from a final newline so we don't show a phantom row.
             let trimmed = (lines.last == "" ? Array(lines.dropLast()) : lines)
@@ -128,7 +140,7 @@ final class SourceControlService {
     /// a fix, keep working).
     func diffContent(root: URL, file: FileChange) async -> (original: String, modified: String) {
         if file.status == .untracked {
-            let modified = (try? String(contentsOf: root.appendingPathComponent(file.path), encoding: .utf8)) ?? ""
+            let modified = await Self.smallText(at: root.appendingPathComponent(file.path)) ?? ""
             return (original: "", modified: modified)
         }
         if file.staged {
@@ -138,7 +150,7 @@ final class SourceControlService {
         }
         // Unstaged: baseline is the INDEX blob, not HEAD — see doc comment above.
         let indexBlob = (try? await repo.runGit(["show", ":\(file.path)"], at: root)) ?? ""
-        let workingTree = (try? String(contentsOf: root.appendingPathComponent(file.path), encoding: .utf8)) ?? ""
+        let workingTree = await Self.smallText(at: root.appendingPathComponent(file.path)) ?? ""
         return (original: indexBlob, modified: workingTree)
     }
 
@@ -176,9 +188,16 @@ final class SourceControlService {
     @discardableResult
     func commit(root: URL, message: String) async -> Bool {
         state.opError = nil
+        // Busy for the whole commit so the 3 s status poll can't interleave,
+        // and the commit-all decision is made on FRESH status: deciding from
+        // the cached list could `git add -A` files the user had just staged
+        // selectively (in a terminal) since the last poll.
+        isBusy = true; defer { isBusy = false }
         var ok = true
         do {
-            if stagedFiles.isEmpty && !state.files.isEmpty {
+            let porcelain = try await repo.runGit(["diff", "--cached", "--name-only"], at: root)
+            let nothingStaged = porcelain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if nothingStaged && !state.files.isEmpty {
                 _ = try await repo.runGit(["add", "-A"], at: root)
             }
             try await repo.commit(at: root, message: message)
@@ -394,26 +413,31 @@ final class SourceControlService {
 
     /// Amend the last commit. A non-empty message replaces the commit message
     /// (`-m`); an empty message keeps it (`--no-edit`). Refresh afterwards.
-    func amend(root: URL, message: String) async {
+    @discardableResult
+    func amend(root: URL, message: String) async -> Bool {
         state.opError = nil
         isBusy = true; defer { isBusy = false }
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         let args = trimmed.isEmpty
             ? ["commit", "--amend", "--no-edit"]
             : ["commit", "--amend", "-m", trimmed]
+        var ok = true
         do { _ = try await repo.runGit(args, at: root) }
-        catch { state.opError = error.localizedDescription }
+        catch { state.opError = error.localizedDescription; ok = false }
         await refresh(root: root)
+        return ok
     }
 
     /// Commit (commit-all-aware) then push the current branch. Both steps
     /// refresh on their own.
-    func commitAndPush(root: URL, message: String) async {
+    @discardableResult
+    func commitAndPush(root: URL, message: String) async -> Bool {
         // Only push if the commit actually succeeded — otherwise we'd publish
         // a previous/unintended HEAD. Checks the return value, not state.error,
         // which commit's trailing refresh would have cleared.
-        guard await commit(root: root, message: message) else { return }
+        guard await commit(root: root, message: message) else { return false }
         await push(root: root)
+        return true
     }
 
     /// Discard ALL working-tree changes: restore tracked files
