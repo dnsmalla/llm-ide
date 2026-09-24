@@ -106,6 +106,11 @@ struct PreferencesSettingsSection: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .disabled(!prefsLoaded || prefsBusy)
+                    if !prefsLoaded, prefsStatus != nil {
+                        Button("Retry") { Task { await loadPrefs() } }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
                     if let s = prefsStatus {
                         Text(s)
                             .font(Typography.caption)
@@ -129,10 +134,13 @@ struct PreferencesSettingsSection: View {
             // Mirror locally for the synchronous consumers (ProjectScaffolder
             // stamps this into new projects' docs and can't await the server).
             config.preferredLanguage = language
+            prefsStatus = nil
+            prefsLoaded = true
         } catch {
+            // Stay unloaded: Save was enabled after a failed load and sent
+            // the placeholder defaults, overwriting the real server prefs.
             prefsStatus = "Could not load: \(error.localizedDescription)"
         }
-        prefsLoaded = true
     }
 
     private func savePrefs() async {
