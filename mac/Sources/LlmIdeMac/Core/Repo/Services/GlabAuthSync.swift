@@ -65,7 +65,9 @@ enum GlabAuthSync {
         do {
             try proc.run()
             if let stdin {
-                inPipe.fileHandleForWriting.write(stdin)
+                // Throwing API: the legacy write(_:) raises an uncaught
+                // exception on EPIPE when glab exits before reading stdin.
+                try? inPipe.fileHandleForWriting.write(contentsOf: stdin)
                 try? inPipe.fileHandleForWriting.close()
             }
             proc.waitUntilExit()

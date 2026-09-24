@@ -492,16 +492,21 @@ final class BackendManager {
     func restart(nodePath: String, workingDirectory: String) {
         restartCount = 0
         if process != nil {
-            startAfterExit = (nodePath, workingDirectory)
             stop()
+            // After stop(), which clears it: the exit handler runs on a later
+            // main-actor turn, so this is still in place when it does.
+            startAfterExit = (nodePath, workingDirectory)
             return
         }
-        // Adopted (or unknown) listener: kill it, wait, then spawn fresh.
+        // Adopted (or unknown) listener: kill it, wait, then spawn fresh —
+        // unless a Stop cleared `startAfterExit` in the meantime.
         stop()
+        startAfterExit = (nodePath, workingDirectory)
         Task { @MainActor [weak self] in
             await Task.detached { Self.killExternalListener(port: Self.defaultBackendPort) }.value
             try? await Task.sleep(nanoseconds: 500_000_000)
-            guard let self else { return }
+            guard let self, self.startAfterExit != nil, self.process == nil else { return }
+            self.startAfterExit = nil
             self.userInitiatedStop = false
             self.status = .stopped
             self.start(nodePath: nodePath, workingDirectory: workingDirectory)
@@ -513,6 +518,9 @@ final class BackendManager {
         // back to false once the next non-clean exit is handled, or
         // immediately when the user starts the backend again.
         userInitiatedStop = true
+        // A Stop after Kill & Restart (node slow to exit) wins: the exit
+        // must not relaunch against it.
+        startAfterExit = nil
         // The server we measured is going away on both paths below, so the
         // cached `apiVersion` stops describing anything. Keeping it is what
         // lets `QuickChatContext.serverSupportsAsk` answer "yes, v47" for a
