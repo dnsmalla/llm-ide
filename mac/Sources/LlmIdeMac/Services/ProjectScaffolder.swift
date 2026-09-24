@@ -406,25 +406,21 @@ on this project. Keep it concise and focused on actionable context.*
     }
 
     /// Generate settings.json with project-level agent configuration.
-    private static func makeClaudeSettings(project: Project) -> String {
-        let lang = project.settings.language
-        // Convert to JSON string
-        return """
-{
-  "projectName": "\(project.displayName)",
-  "language": "\(lang)",
-  "enabledFeatures": {
-    "codeReview": true,
-    "docGeneration": true,
-    "issueTracking": true
-  },
-  "agentPreferences": {
-    "contextScope": "project",
-    "includeTests": true,
-    "includeDocs": true
-  }
-}
-"""
+    /// Encoded, not interpolated: the display name is the folder name, and a
+    /// folder called `Q3 "Alpha"` (or one with a backslash) produced invalid
+    /// JSON that Claude Code then failed to parse — permanently, since the
+    /// file is only written when absent.
+    static func makeClaudeSettings(project: Project) -> String {
+        let object: [String: Any] = [
+            "projectName": project.displayName,
+            "language": project.settings.language,
+            "enabledFeatures": ["codeReview": true, "docGeneration": true, "issueTracking": true],
+            "agentPreferences": ["contextScope": "project", "includeTests": true, "includeDocs": true],
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: object,
+                                                     options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]),
+              let json = String(data: data, encoding: .utf8) else { return "{}\n" }
+        return json + "\n"
     }
 
     /// README explaining the .claude directory structure.
