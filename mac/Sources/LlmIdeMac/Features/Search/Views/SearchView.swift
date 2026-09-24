@@ -304,7 +304,7 @@ struct SearchView: View {
         .onTapGesture { open(fm.url, line: lm.line) }
         .modifier(RowHoverActions(
             canReplace: showReplace && !replaceText.isEmpty,
-            onReplace: { if let m = lm.matches.first { replaceOneAction(fm, line: lm.line, rangeInLine: m.nsRange) } },
+            onReplace: { if let m = lm.matches.first { replaceOneAction(fm, line: lm.line, rangeInLine: lm.rangeInLine(m)) } },
             onDismiss: { dismiss(fm, lm) }
         ))
     }
@@ -355,11 +355,19 @@ struct SearchView: View {
     /// maps each UTF-16 NSRange back to a Swift `String.Index` range over that
     /// exact line — correct for multibyte text (e.g. 出力調整禁止) because the
     /// engine measured length on `lineText as NSString`, so the offsets line up.
+    ///
+    /// `lineText` may be a clamped window of a long line (see
+    /// `SearchEngine.preview`): a match starting past its end is skipped and
+    /// one running past it is highlighted up to the edge.
     private func highlighted(_ lm: LineMatch) -> AttributedString {
         var attr = AttributedString(lm.lineText)
         let bg = theme.current.accent.opacity(0.35)
+        let length = (lm.lineText as NSString).length
         for m in lm.matches {
-            guard let swiftRange = Range(m.nsRange, in: lm.lineText),
+            guard m.nsRange.location <= length else { continue }
+            let visible = NSRange(location: m.nsRange.location,
+                                  length: min(m.nsRange.length, length - m.nsRange.location))
+            guard let swiftRange = Range(visible, in: lm.lineText),
                   let lo = AttributedString.Index(swiftRange.lowerBound, within: attr),
                   let hi = AttributedString.Index(swiftRange.upperBound, within: attr) else { continue }
             attr[lo..<hi].backgroundColor = bg

@@ -13,6 +13,14 @@ enum SearchEngine {
     /// pathological, and reading a huge blob into memory to grep it is not
     /// acceptable in an interactive panel.
     static let maxFileBytes = 1_000_000
+    /// Longest line preview kept per `LineMatch`, in UTF-16 units. A
+    /// minified file is often ONE line of hundreds of KB; storing it whole
+    /// put a multi-MB string in every row (hashed for `ForEach`, laid out by
+    /// `Text`) and beachballed the panel. The row shows one truncated line
+    /// anyway.
+    static let maxPreviewUTF16 = 400
+    /// How much text before the first match a clamped preview keeps.
+    static let previewLeadUTF16 = 40
 
     /// One file the walk decided is worth reading.
     struct Candidate: Equatable {
@@ -67,10 +75,33 @@ enum SearchEngine {
                 used += 1
             }
             if !matches.isEmpty {
-                lines.append(LineMatch(line: lineNo, lineText: lineText, matches: matches))
+                lines.append(preview(line: lineNo, text: nsLine, matches: matches))
             }
         }
         return (lines, used)
+    }
+
+    /// Build the `LineMatch` for one line, clamping a long line to a window
+    /// of at most `maxPreviewUTF16` starting `previewLeadUTF16` before the
+    /// first match. Match ranges are re-based onto the window; a match past
+    /// its end keeps an out-of-bounds range, which the highlighter skips, and
+    /// `previewOffset` still maps it back to the real line for replace. The
+    /// window is widened to whole composed characters so it never splits a
+    /// surrogate pair or grapheme.
+    static func preview(line: Int, text nsLine: NSString, matches: [Match]) -> LineMatch {
+        guard nsLine.length > maxPreviewUTF16, let first = matches.first else {
+            return LineMatch(line: line, lineText: nsLine as String, matches: matches)
+        }
+        let start = max(0, first.nsRange.location - previewLeadUTF16)
+        let window = nsLine.rangeOfComposedCharacterSequences(
+            for: NSRange(location: start, length: min(maxPreviewUTF16, nsLine.length - start)))
+        let offset = window.location
+        let rebased = matches.map {
+            Match(nsRange: NSRange(location: $0.nsRange.location - offset, length: $0.nsRange.length),
+                  fileIndex: $0.fileIndex)
+        }
+        return LineMatch(line: line, lineText: nsLine.substring(with: window),
+                         matches: rebased, previewOffset: offset)
     }
 
     // MARK: - Replace (per line, like the search)

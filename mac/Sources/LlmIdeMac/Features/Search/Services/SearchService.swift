@@ -3,7 +3,21 @@ import Observation
 
 struct SearchOptions: Equatable { var caseSensitive = false; var wholeWord = false; var regex = false }
 struct Match: Hashable { let nsRange: NSRange; let fileIndex: Int }   // utf16 range within lineText
-struct LineMatch: Hashable { let line: Int; let lineText: String; let matches: [Match] }
+/// One matching line. `lineText` is a PREVIEW: for a long line (a minified
+/// bundle is one 900 KB line) it is a window around the first match, not the
+/// whole line — see `SearchEngine.maxPreviewUTF16`. `previewOffset` is where
+/// that window starts in the real line, so `rangeInLine(_:)` recovers the
+/// position replace needs.
+struct LineMatch: Hashable {
+    let line: Int
+    let lineText: String
+    let matches: [Match]
+    var previewOffset: Int = 0
+    /// `m`'s UTF-16 range within the FULL line (what replace locates by).
+    func rangeInLine(_ m: Match) -> NSRange {
+        NSRange(location: m.nsRange.location + previewOffset, length: m.nsRange.length)
+    }
+}
 struct FileMatch: Identifiable, Hashable { let url: URL; let displayPath: String; let lineMatches: [LineMatch]; var id: String { url.path } }
 struct SearchResults: Equatable {
     var files: [FileMatch] = []
