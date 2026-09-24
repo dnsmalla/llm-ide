@@ -10,6 +10,10 @@ struct GitLabSettingsSection: View {
     @Environment(LibraryItemStore.self) private var library
 
     @State private var gitLabTokenDraft: String = ""
+    /// The instance the PAT is verified against and stored for. Explicit and
+    /// visible: it used to be taken from the FIRST saved project URL, so a
+    /// pasted link to another host received the PAT on Save & verify.
+    @State private var instanceDraft: String = ""
     @State private var gitLabTokenVisible: Bool = false
     @State private var gitLabStatus: String?
     @State private var gitLabBusy: Bool = false
@@ -19,7 +23,21 @@ struct GitLabSettingsSection: View {
     @State private var cloneErrors: [String: String] = [:]
     private let repoManager = RepoManager()
 
-    // Derives the GitLab host from saved project URLs; falls back to configured base.
+    /// Trimmed, without trailing slashes. The path is kept: GitLab can be
+    /// served under one (`https://host/gitlab`).
+    static func normalizedBase(_ raw: String) -> String {
+        var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while t.hasSuffix("/") { t.removeLast() }
+        return t
+    }
+
+    private static func host(_ raw: String) -> String? {
+        URL(string: normalizedBase(raw))?.host?.lowercased()
+    }
+
+    // The host of the first saved project URL — only a SUGGESTION for the
+    // Instance URL field; the PAT is never sent to it unless the user puts it
+    // in that field.
     private var detectedBase: String {
         for p in config.gitLabSavedProjects {
             let raw = p.url.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -44,6 +62,7 @@ struct GitLabSettingsSection: View {
         .onAppear {
             // Not prefilled with the saved PAT (see GitHubSettingsSection).
             gitLabTokenDraft = ""
+            instanceDraft = config.gitLabBaseURL
         }
     }
 
@@ -94,6 +113,27 @@ struct GitLabSettingsSection: View {
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.current.border.opacity(0.4), lineWidth: 1))
 
                     Divider().padding(.vertical, 4)
+                }
+
+                // Instance URL
+                HStack(spacing: Spacing.md) {
+                    Text("Instance URL")
+                        .font(Typography.body)
+                        .foregroundStyle(theme.current.textMuted)
+                        .frame(width: 110, alignment: .leading)
+                    TextField("https://gitlab.com", text: $instanceDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .font(Typography.mono)
+                        .disableAutocorrection(true)
+                    if let suggested = Self.host(detectedBase),
+                       suggested != Self.host(instanceDraft) {
+                        Button("Use \(suggested)") {
+                            instanceDraft = detectedBase
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Your saved project is on this host. Your token is only sent to the Instance URL.")
+                    }
                 }
 
                 // Access Token
@@ -165,7 +205,7 @@ struct GitLabSettingsSection: View {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 11))
                             .foregroundStyle(theme.current.accent3)
-                        Text("Connected · \(detectedBase)")
+                        Text("Connected · \(config.gitLabBaseURL)")
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                     }
@@ -568,8 +608,9 @@ struct GitLabSettingsSection: View {
         let token = typed.isEmpty ? config.gitLabToken : typed
         guard !token.isEmpty else { return }
 
-        // Derive base from project URLs or fall back to stored base
-        let base = detectedBase
+        // Only the instance the user entered — never a host taken from a
+        // saved project URL (see `instanceDraft`).
+        let base = Self.normalizedBase(instanceDraft.isEmpty ? config.gitLabBaseURL : instanceDraft)
 
         gitLabBusy = true
         gitLabStatus = nil
