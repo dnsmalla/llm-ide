@@ -51,14 +51,14 @@ final class ProjectExporter {
 
     // MARK: - Shared formatters (expensive to create — reuse)
 
-    private static let iso8601Formatter: ISO8601DateFormatter = {
+    nonisolated(unsafe) private static let iso8601Formatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f
     }()
 
     /// Full ISO-8601 parser used to validate dates from the server.
-    private static let dateParser: ISO8601DateFormatter = {
+    nonisolated(unsafe) private static let dateParser: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withFullDate, .withDashSeparatorInDate]
         return f
@@ -78,6 +78,33 @@ final class ProjectExporter {
         // Fetch all project data from the backend in one round-trip.
         let bundle = try await client.exportProject(projectId: project.id)
 
+        // Every disk write runs OFF the main actor: a meeting-heavy project is
+        // hundreds of per-file atomic writes, which used to stall the UI for
+        // the whole export (it runs on project close and from the Export
+        // menu). The fetch above and the returned result stay on main.
+        let projectId = project.id
+        let (plansWritten, plansWriteFailed) = try await Task.detached(priority: .userInitiated) {
+            try self.writeExport(bundle: bundle, projectId: projectId, folderURL: folderURL)
+        }.value
+
+        let ms = Int(Date().timeIntervalSince(t0) * 1000)
+        log.info("export done: \(bundle.meetings.count) meetings, \(plansWritten) plans in \(ms)ms")
+
+        return ExportResult(
+            meetingsWritten: bundle.meetings.count,
+            plansWritten:    plansWritten,
+            plansWriteFailed: plansWriteFailed,
+            exportedAt:      Date(),
+            durationMs:      ms
+        )
+    }
+
+    /// Write the fetched `bundle` into `folderURL`: meetings, plans, README
+    /// badge, then `system/sync.json` last. Nonisolated so `export` runs it
+    /// on a background task. Returns (plans written, plans write failed).
+    nonisolated private func writeExport(bundle: ProjectExportBundle,
+                                         projectId: String,
+                                         folderURL: URL) throws -> (Int, Bool) {
         let fm = FileManager.default
 
         // Guard: project folder must still exist and be writable.
@@ -88,7 +115,7 @@ final class ProjectExporter {
         }
 
         // ── Meetings ─────────────────────────────────────────────────────────
-        try writeMeetings(bundle.meetings, projectId: project.id, folderURL: folderURL)
+        try writeMeetings(bundle.meetings, projectId: projectId, folderURL: folderURL)
 
         // ── Plans → <projectRoot>/llm-doc/plans/ ────────────────────────────
         // Plans belong to the project, so they export into the project's
@@ -125,16 +152,7 @@ final class ProjectExporter {
             ] as [String: Any], options: .prettyPrinted)
             .write(to: layout.syncJSON, options: .atomic)
 
-        let ms = Int(Date().timeIntervalSince(t0) * 1000)
-        log.info("export done: \(bundle.meetings.count) meetings, \(plansWritten) plans in \(ms)ms")
-
-        return ExportResult(
-            meetingsWritten: bundle.meetings.count,
-            plansWritten:    plansWritten,
-            plansWriteFailed: plansWriteFailed,
-            exportedAt:      Date(),
-            durationMs:      ms
-        )
+        return (plansWritten, plansWriteFailed)
     }
 
     // MARK: - Meetings
@@ -148,7 +166,7 @@ final class ProjectExporter {
     /// `source/meetings/<year>/`, so exporting to `source/YYYY/MM/` (as this
     /// once did) relocated the files on the next launch and left every
     /// `_index.json` path pointing at nothing.
-    func writeMeetings(_ meetings: [ProjectExportBundle.Meeting],
+    nonisolated func writeMeetings(_ meetings: [ProjectExportBundle.Meeting],
                        projectId: String,
                        folderURL: URL) throws {
         let fm = FileManager.default
@@ -210,7 +228,10 @@ final class ProjectExporter {
                      client: LlmIdeAPIClient,
                      projectRoot: URL) async throws -> Int {
         let bundle = try await client.exportProject(projectId: project.id)
-        return try writePlans(bundle.plans, projectRoot: projectRoot)
+        let plans = bundle.plans
+        return try await Task.detached(priority: .userInitiated) {
+            try self.writePlans(plans, projectRoot: projectRoot)
+        }.value
     }
 
     /// Write each plan in `plans` as a Markdown file under
@@ -219,7 +240,7 @@ final class ProjectExporter {
     /// (`YYYY-MM-DD-<title-slug>-<id8>.md`) so re-exporting overwrites in place
     /// rather than producing duplicates. Returns the number of files written.
     /// Empty input is a no-op (creates no plans dir).
-    func writePlans(_ plans: [ProjectExportBundle.Plan],
+    nonisolated func writePlans(_ plans: [ProjectExportBundle.Plan],
                     projectRoot: URL) throws -> Int {
         guard !plans.isEmpty else { return 0 }
         let fm = FileManager.default
@@ -256,7 +277,7 @@ final class ProjectExporter {
     /// Render a plan (and its tasks) as a self-contained Markdown document.
     /// No projectId in the frontmatter — the file lives inside the project
     /// tree (`llm-doc/plans/`), so provenance is its location.
-    func plansMarkdown(plan: ProjectExportBundle.Plan) -> String {
+    nonisolated func plansMarkdown(plan: ProjectExportBundle.Plan) -> String {
         var lines: [String] = []
         lines.append("---")
         lines.append("id: \(yamlScalar(plan.id))")
@@ -289,7 +310,7 @@ final class ProjectExporter {
     }
 
     /// One task as a GitHub-style checklist item with indented metadata.
-    private func taskLine(_ t: ProjectExportBundle.Task) -> String {
+    nonisolated private func taskLine(_ t: ProjectExportBundle.Task) -> String {
         let box: String
         switch t.status {
         case "done":      box = "- [x]"
@@ -335,7 +356,7 @@ final class ProjectExporter {
 
     // MARK: - Markdown: meeting
 
-    private func meetingMarkdown(
+    nonisolated private func meetingMarkdown(
         meeting: ProjectExportBundle.Meeting,
         projectId: String
     ) -> String {
@@ -422,7 +443,7 @@ final class ProjectExporter {
 
     // MARK: - README badge
 
-    private func updateReadme(at url: URL, meetings: Int) {
+    nonisolated private func updateReadme(at url: URL, meetings: Int) {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return }
         let badge = "**Last exported:** \(nowISO()) — \(meetings) meeting(s)"
 
@@ -446,7 +467,7 @@ final class ProjectExporter {
 
     /// Always produces a safely double-quoted YAML scalar.
     /// Escapes: backslash, double-quote, newline, carriage-return, tab.
-    private func yamlScalar(_ s: String) -> String {
+    nonisolated private func yamlScalar(_ s: String) -> String {
         let escaped = s
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -459,7 +480,7 @@ final class ProjectExporter {
     // MARK: - Markdown helpers
 
     /// Escape characters with special meaning in Markdown inline context.
-    private func escapeMd(_ s: String) -> String {
+    nonisolated private func escapeMd(_ s: String) -> String {
         var out = s
         for ch in ["\\", "`", "*", "_", "{", "}", "[", "]", "(", ")", "#", "+", "!", "|"] {
             out = out.replacingOccurrences(of: ch, with: "\\\(ch)")
@@ -469,7 +490,7 @@ final class ProjectExporter {
 
     /// Find the longest consecutive run of backticks in `s`.
     /// Used to choose a code-fence length that cannot be closed prematurely.
-    private func longestBacktickRun(in s: String) -> Int {
+    nonisolated private func longestBacktickRun(in s: String) -> Int {
         var max = 0, cur = 0
         for ch in s {
             if ch == "`" { cur += 1; if cur > max { max = cur } }
@@ -483,14 +504,14 @@ final class ProjectExporter {
     /// A short ID suffix prevents collisions between items with the same
     /// title + date. See `FilesystemSlug` for the shared slugging rules
     /// (also used by `ProposedPlanResolver` for chat's save-plan).
-    private func slugify(_ title: String, id: String) -> String {
+    nonisolated private func slugify(_ title: String, id: String) -> String {
         FilesystemSlug.make(from: title, maxLength: 40, fallback: "untitled", suffix: "-\(id.suffix(8))")
     }
 
     /// Parse an ISO-8601 date string and return ("YYYY", "MM").
     /// Uses the system ISO-8601 parser so invalid dates (e.g. month 13) are
     /// rejected and fall back to ("0000", "00"), preventing garbage directories.
-    private func validatedYearMonth(from iso: String?) -> (String, String) {
+    nonisolated private func validatedYearMonth(from iso: String?) -> (String, String) {
         guard let iso, let date = Self.dateParser.date(from: String(iso.prefix(10))) else {
             return ("0000", "00")
         }
@@ -501,7 +522,7 @@ final class ProjectExporter {
     }
 
     /// "YYYY-MM-DD" from an ISO-8601 string, validated via the date parser.
-    private func datePrefix(from iso: String?) -> String {
+    nonisolated private func datePrefix(from iso: String?) -> String {
         guard let iso, let date = Self.dateParser.date(from: String(iso.prefix(10))) else {
             return "0000-00-00"
         }
@@ -512,7 +533,7 @@ final class ProjectExporter {
         return String(format: "%04d-%02d-%02d", y, m, d)
     }
 
-    private func nowISO() -> String {
+    nonisolated private func nowISO() -> String {
         Self.iso8601Formatter.string(from: Date())
     }
 }
