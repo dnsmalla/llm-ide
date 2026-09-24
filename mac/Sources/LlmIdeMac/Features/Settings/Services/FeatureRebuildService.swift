@@ -80,6 +80,12 @@ final class FeatureRebuildService: ObservableObject {
     /// Surfaced in the Settings card as "Built with: <csv|all>".
     let builtFeaturesRaw: String?
     private var stagedAppURL: URL?
+    /// The detached `rebuild-swap.sh`, kept so the "did not terminate" path
+    /// can stop it: it waits up to 120 s for this pid with a valid staged
+    /// bundle, so after we gave up at 15 s and showed "install aborted", a
+    /// normal quit inside the remaining window would have swapped the app
+    /// anyway.
+    private var swapHelper: Process?
     private var cachedToolchainAvailable: Bool?
     /// Full stdout/stderr history from the current `rebuild-features.sh` run,
     /// capped at 200 lines. `logTail` (published) mirrors just the last 20
@@ -316,6 +322,7 @@ final class FeatureRebuildService: ObservableObject {
 
         do {
             try proc.run()
+            swapHelper = proc
         } catch {
             phase = .failed("Failed to launch swap helper: \(error.localizedDescription)")
             return
@@ -330,6 +337,10 @@ final class FeatureRebuildService: ObservableObject {
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 15_000_000_000)
             guard let self, self.phase == .swapping else { return }
+            // Really abort: the helper would otherwise keep waiting (120 s) and
+            // install on the next quit, contradicting the message below.
+            if let helper = self.swapHelper, helper.isRunning { helper.terminate() }
+            self.swapHelper = nil
             self.phase = .failed("The app did not terminate; install aborted — see the rebuild log.")
         }
 
