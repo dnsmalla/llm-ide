@@ -149,7 +149,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
         params.defaultProtocolStack.applicationProtocols.insert(opts, at: 0)
         let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: UInt16(currentPort))!)
         listener.newConnectionHandler = { [weak self] conn in self?.handle(conn) }
-        listener.stateUpdateHandler = { [weak self] state in
+        listener.stateUpdateHandler = { [weak self, weak listener] state in
             guard let self else { return }
             switch state {
             case .ready:
@@ -166,7 +166,14 @@ final class MobileWebSocketServer: @unchecked Sendable {
                 // bind a few times; only a PERSISTENT failure (e.g. another
                 // process squatting) is surfaced via onBindFailed so the manager
                 // can show the actionable `lsof -i :3006` hint.
-                self.listener = nil
+                //
+                // A failed NWListener still holds its socket until it is
+                // cancelled — nil'ing the reference alone (a `.failed` after
+                // `.ready`, e.g. the network stack dropping it) kept the port
+                // bound for the rest of the process, so a later Start hit
+                // EADDRINUSE against our own dead listener.
+                listener?.cancel()
+                if self.listener === listener { self.listener = nil }
                 if self.shouldRun, Self.isAddrInUse(error),
                    self.portIndex == 0, self.startAttempts < Self.maxStartAttempts {
                     // The BASE port only: right after a stop() it is usually
