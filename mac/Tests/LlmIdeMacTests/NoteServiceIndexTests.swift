@@ -79,4 +79,27 @@ struct NoteServiceIndexTests {
         #expect(!names.contains { $0.contains(".corrupt-") })
         #expect(try await service.loadIndex().notes.count == 1)
     }
+
+    /// A damaged index is rebuilt from the note files, so notes saved before
+    /// the damage stay listed — and the note being saved is not listed twice.
+    @Test("a corrupt index keeps existing notes and does not duplicate the new one")
+    func corruptIndexRebuildsFromDisk() async throws {
+        let root = tmpRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let service = NoteService(repoRoot: root)
+        _ = try await service.saveNote(
+            type: .meeting, filename: "old.md", content: Data("# old".utf8), metadata: metadata(1))
+        try Data("{ not json".utf8).write(to: service.indexPath)
+
+        #expect(try await service.loadIndex().notes.count == 1, "a read sees the rebuilt index, not an empty one")
+
+        _ = try await service.saveNote(
+            type: .meeting, filename: "new.md", content: Data("# new".utf8), metadata: metadata(2))
+        let notes = try await service.loadIndex().notes
+        #expect(notes.count == 2)
+        for n in notes {
+            #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(n.path).path),
+                    "paths are repoRoot-relative: \(n.path)")
+        }
+    }
 }

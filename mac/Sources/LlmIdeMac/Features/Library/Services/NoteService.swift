@@ -148,7 +148,7 @@ public struct NoteIndex: Codable, Sendable {
 /// Unified note service for managing generated notes from raw data sources.
 public final class NoteService: Sendable {
 
-    private let repoRoot: URL
+    let repoRoot: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let logger = Logger(subsystem: "LlmIdeMac", category: "NoteService")
@@ -317,8 +317,9 @@ public final class NoteService: Sendable {
     private static let indexLock = NSLock()
 
     /// Load the unified note index. A missing file is a new, empty index; an
-    /// undecodable one is logged and also reads as empty here (it is moved
-    /// aside only when a write is about to replace it — see `addToIndex`).
+    /// undecodable one is logged and reads as the index rebuilt from the note
+    /// files (it is moved aside only when a write is about to replace it —
+    /// see `addToIndex`).
     public func loadIndex() async throws -> NoteIndex {
         Self.indexLock.withLock { readIndex(quarantineCorrupt: false) }
     }
@@ -339,15 +340,40 @@ public final class NoteService: Sendable {
         } catch {
             logger.error("note index unreadable: \(error.localizedDescription, privacy: .public)")
             if quarantineCorrupt { quarantineIndex() }
-            return NoteIndex()
+            return scannedIndex()
         }
         do {
             return try decoder.decode(NoteIndex.self, from: data)
         } catch {
             logger.error("note index undecodable: \(error.localizedDescription, privacy: .public)")
             if quarantineCorrupt { quarantineIndex() }
-            return NoteIndex()
+            return scannedIndex()
         }
+    }
+
+    /// The index regenerated from the note files on disk. A damaged index
+    /// reads as THIS, not as empty: an empty one made every ingest dedup miss
+    /// (re-importing everything) and the next save persisted an index holding
+    /// only the newest note. Caller must hold `indexLock`.
+    private func scannedIndex() -> NoteIndex {
+        NoteIndex(version: 1,
+                  updated: ISO8601DateFormatter().string(from: Date()),
+                  notes: (try? scanAllNotes()) ?? [])
+    }
+
+    private func scanAllNotes() throws -> [NoteMetadata] {
+        try? FileManager.default.createDirectory(at: notesRoot, withIntermediateDirectories: true)
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: notesRoot, includingPropertiesForKeys: [.isDirectoryKey]) else {
+            return []
+        }
+        let typeDirs = contents.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+        var notes: [NoteMetadata] = []
+        for typeDir in typeDirs {
+            let type = NoteType(directoryName: typeDir.lastPathComponent)
+            notes.append(contentsOf: try scanTypeDirectory(type: type, dir: typeDir))
+        }
+        return notes
     }
 
     /// Move a damaged `index.json` aside as `<name>.corrupt-<timestamp>`.
@@ -380,8 +406,10 @@ public final class NoteService: Sendable {
         try Self.indexLock.withLock {
             var index = readIndex(quarantineCorrupt: true)
 
-            // Remove existing note with same ID (if any)
-            index.notes.removeAll(where: { $0.id == metadata.id })
+            // Remove existing note with same ID (if any) — or the same file:
+            // an index rebuilt from disk (see `scannedIndex`) already lists
+            // the file `saveNote` just wrote, under a generated id.
+            index.notes.removeAll(where: { $0.id == metadata.id || $0.path == metadata.path })
 
             // Add new note
             index.notes.append(metadata)
@@ -394,31 +422,21 @@ public final class NoteService: Sendable {
     /// every type subdirectory (legacy plural + new connector dirs) rather
     /// than a hardcoded list.
     public func rebuildIndex() async throws -> NoteIndex {
-        var notes: [NoteMetadata] = []
-
-        try? FileManager.default.createDirectory(at: notesRoot, withIntermediateDirectories: true)
-        guard let contents = try? FileManager.default.contentsOfDirectory(
-            at: notesRoot, includingPropertiesForKeys: [.isDirectoryKey]) else {
-            return NoteIndex()
+        // Scan AND save under the lock: a note added between an unlocked scan
+        // and the save was dropped by it — the lost update the lock exists for.
+        try Self.indexLock.withLock {
+            let index = NoteIndex(
+                version: 1,
+                updated: ISO8601DateFormatter().string(from: Date()),
+                notes: try scanAllNotes()
+            )
+            try saveIndex(index)
+            return index
         }
-        let typeDirs = contents.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
-        for typeDir in typeDirs {
-            let type = NoteType(directoryName: typeDir.lastPathComponent)
-            let typeNotes = try await scanTypeDirectory(type: type, dir: typeDir)
-            notes.append(contentsOf: typeNotes)
-        }
-
-        let index = NoteIndex(
-            version: 1,
-            updated: ISO8601DateFormatter().string(from: Date()),
-            notes: notes
-        )
-        try Self.indexLock.withLock { try saveIndex(index) }
-        return index
     }
 
     /// Scan a specific type directory for notes.
-    private func scanTypeDirectory(type: NoteType, dir: URL) async throws -> [NoteMetadata] {
+    private func scanTypeDirectory(type: NoteType, dir: URL) throws -> [NoteMetadata] {
         var notes: [NoteMetadata] = []
 
         guard let enumerator = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: nil) else {
@@ -446,7 +464,17 @@ public final class NoteService: Sendable {
                 continue
             }
 
-            let relativePath = file.pathComponents.suffix(from: notesRoot.pathComponents.count).joined(separator: "/")
+            // repoRoot-relative, like `saveNote` writes and its readers resolve
+            // (`repoRoot.appendingPathComponent(meta.path)`); notesRoot-relative
+            // paths from a rebuild resolved to files that do not exist.
+            // Both sides symlink-resolved: the enumerator reports `/private/var/…`
+            // for a `/var/…` root, and counting components across the two
+            // spellings kept the root's own folder name in the path.
+            let rootParts = repoRoot.resolvingSymlinksInPath().pathComponents
+            let fileParts = file.resolvingSymlinksInPath().pathComponents
+            let relativePath = fileParts.starts(with: rootParts)
+                ? fileParts.dropFirst(rootParts.count).joined(separator: "/")
+                : fileParts.suffix(from: repoRoot.pathComponents.count).joined(separator: "/")
 
             let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
             let fileSize = attributes[.size] as? Int64 ?? 0
