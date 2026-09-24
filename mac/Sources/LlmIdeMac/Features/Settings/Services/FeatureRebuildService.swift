@@ -67,12 +67,19 @@ final class FeatureRebuildService: ObservableObject {
     /// signing (`-`), which mints a fresh, content-derived identity on every
     /// rebuild — the confirmation dialog warns about that when this is false.
     var hasStableSignIdentity: Bool {
-        if ProcessInfo.processInfo.environment["LLMIDE_SIGN_IDENTITY"]?.isEmpty == false {
+        Self.hasSignIdentity(environment: ProcessInfo.processInfo.environment, sourceRoot: sourceRoot)
+    }
+
+    nonisolated static func hasSignIdentity(environment: [String: String], sourceRoot: URL?) -> Bool {
+        if environment["LLMIDE_SIGN_IDENTITY"]?.isEmpty == false {
             return true
         }
         guard let sourceRoot else { return false }
-        let signIdentityFile = sourceRoot.appendingPathComponent("Scripts/.sign-identity").path
-        return FileManager.default.fileExists(atPath: signIdentityFile)
+        // Non-empty, not merely present: sign.sh treats an empty file as "no
+        // identity" and signs ad-hoc — the case this warning exists for.
+        let signIdentityFile = sourceRoot.appendingPathComponent("Scripts/.sign-identity")
+        let identity = (try? String(contentsOf: signIdentityFile, encoding: .utf8)) ?? ""
+        return !identity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Informational: the `LLMIDEFeatures` this bundle's Info.plist recorded
