@@ -49,6 +49,11 @@ enum LoopEngineConfigStore {
     /// 3. The legacy UserDefaults entry (pre-file era) — wrapped the same way
     ///    and written to the file if a `projectRoot` is available.
     ///
+    /// A file that exists but matches neither schema is NOT "no config": it is
+    /// moved aside to `loop.json.corrupt-<timestamp>` (see
+    /// `quarantineCorruptFile`) and `nil` is returned without consulting
+    /// step 3, so the defaults the caller then saves never overwrite it.
+    ///
     /// `projectRoot == nil` (no resolvable project folder) skips the file
     /// entirely and falls back to UserDefaults, same as before this existed —
     /// there is nowhere to put a file.
@@ -58,15 +63,25 @@ enum LoopEngineConfigStore {
             return LoopEngineConfig.load(for: projectId, defaults: defaults).map(wrapAsMainLoop)
         }
         let url = fileURL(projectRoot: projectRoot)
-        if let data = try? Data(contentsOf: url) {
-            if let store = try? JSONDecoder().decode(LoopEngineProjectStore.self, from: data) {
+        if FileManager.default.fileExists(atPath: url.path) {
+            let data = try? Data(contentsOf: url)
+            if let data, let store = try? JSONDecoder().decode(LoopEngineProjectStore.self, from: data) {
                 return store
             }
-            if let legacyConfig = try? JSONDecoder().decode(LoopEngineConfig.self, from: data) {
+            if let data, let legacyConfig = try? JSONDecoder().decode(LoopEngineConfig.self, from: data) {
                 let wrapped = wrapAsMainLoop(legacyConfig)
                 write(wrapped, to: url)
                 return wrapped
             }
+            // Present but unreadable/undecodable (a hand-edit typo, a bad
+            // merge). This used to read as "no config", and `loops(...)` then
+            // wrote fresh defaults over it — silently discarding the user's
+            // loops. Move it aside first so nothing is lost, and do NOT fall
+            // through to the pre-file UserDefaults entry: a project that has
+            // a file is past that era, so resurrecting it would be a second,
+            // quieter clobber.
+            quarantineCorruptFile(at: url)
+            return nil
         }
         if let legacy = LoopEngineConfig.load(for: projectId, defaults: defaults) {
             let wrapped = wrapAsMainLoop(legacy)
@@ -222,6 +237,34 @@ enum LoopEngineConfigStore {
         let store = loops(projectRoot: projectRoot, projectId: projectId,
                           gitRoot: gitRoot, defaults: defaults)
         return store.loops.first(where: \.isPrimary) ?? store.loops.first
+    }
+
+    /// Renames an undecodable `loop.json` to `loop.json.corrupt-<timestamp>`
+    /// beside it, so the next save cannot overwrite the only copy of what the
+    /// user wrote. Returns the new location, or nil when the move failed —
+    /// in which case the file stays where it is and is still overwritten by
+    /// the next save, but the log line says so.
+    @discardableResult
+    static func quarantineCorruptFile(at url: URL, now: Date = Date()) -> URL? {
+        // Filename-safe (no colons), sortable, local time.
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let base = "\(url.lastPathComponent).corrupt-\(formatter.string(from: now))"
+        var dest = url.deletingLastPathComponent().appendingPathComponent(base)
+        // Two quarantines within one second must not collide.
+        if FileManager.default.fileExists(atPath: dest.path) {
+            dest = url.deletingLastPathComponent()
+                .appendingPathComponent("\(base)-\(UUID().uuidString.prefix(8))")
+        }
+        do {
+            try FileManager.default.moveItem(at: url, to: dest)
+            NSLog("LoopEngineConfigStore: \(url.path) could not be decoded — moved aside to \(dest.lastPathComponent); the Loop page starts from defaults")
+            return dest
+        } catch {
+            NSLog("LoopEngineConfigStore: \(url.path) could not be decoded and could not be moved aside (\(error.localizedDescription)); it will be overwritten on the next save")
+            return nil
+        }
     }
 
     /// Fail-quiet: losing a write is bad, but throwing from a SwiftUI action
