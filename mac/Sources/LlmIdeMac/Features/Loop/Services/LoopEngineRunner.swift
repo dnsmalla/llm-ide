@@ -862,7 +862,7 @@ final class LoopEngineRunner: ObservableObject {
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, score: score, repairAttempted: true,
                    repairDuration: repairDuration, repairIndex: repairIndex)
-            if error is CancellationError { return .terminate(.aborted) }
+            if Self.isCancellation(error) { return .terminate(.aborted) }
             appendLog(.error, "  [\(stage.name)] repair \(repairIndex) failed after \(Int(repairDuration))s: \(error.localizedDescription)")
             return .terminate(.error(error.localizedDescription))
         case .completed(let verdictScope, let violations, let changed):
@@ -903,7 +903,7 @@ final class LoopEngineRunner: ObservableObject {
             stageStates[stage.id] = .failed
             record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
                    passed: false, output: error.localizedDescription, score: nil)
-            if error is CancellationError { return .terminate(.aborted) }
+            if Self.isCancellation(error) { return .terminate(.aborted) }
             // A generate step that errors is non-fatal: log it and let the loop's
             // verify stages / iteration cap decide termination.
             appendLog(.warn, "  [\(stage.name)] skill error: \(error.localizedDescription)")
@@ -939,6 +939,18 @@ final class LoopEngineRunner: ObservableObject {
     /// The guard runs whether or not the edit reports success, but only when a
     /// policy other than `.off` is configured — a project that has opted out
     /// should not pay for two `git status` calls per repair.
+    /// A Stop, however it surfaced. A repair or skill call is an HTTP request:
+    /// cancelling the run cancels its URLSession task, which throws
+    /// `URLError(.cancelled)` (wrapped by the API client as `.network`), not
+    /// `CancellationError` — so a Stop mid-repair was recorded as a repair
+    /// ERROR, and mid-skill the loop simply carried on (`.proceed`).
+    nonisolated static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError || Task.isCancelled { return true }
+        if let url = error as? URLError, url.code == .cancelled { return true }
+        if case APIError.network(let inner) = error { return isCancellation(inner) }
+        return false
+    }
+
     private func withScopeGuard(stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
                                 scopeGlobs: [String] = [],
                                 edit: () async throws -> Void) async -> GuardedEditResult {

@@ -833,6 +833,33 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(runner.status, .aborted)
     }
 
+    /// Stop mid-repair cancels the repair's HTTP request, which surfaces as
+    /// `APIError.network(URLError(.cancelled))`, not `CancellationError` —
+    /// it used to end the run as a repair ERROR instead of `.aborted`.
+    func testRepairURLCancellationMapsToAborted() async {
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") }
+        let repairer = ThrowingRepairer(error: APIError.network(URLError(.cancelled)))
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 5)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .aborted)
+    }
+
+    func testIsCancellationRecognisesEveryStopShape() {
+        XCTAssertTrue(LoopEngineRunner.isCancellation(CancellationError()))
+        XCTAssertTrue(LoopEngineRunner.isCancellation(URLError(.cancelled)))
+        XCTAssertTrue(LoopEngineRunner.isCancellation(APIError.network(URLError(.cancelled))))
+        XCTAssertFalse(LoopEngineRunner.isCancellation(APIError.network(URLError(.timedOut))))
+        XCTAssertFalse(LoopEngineRunner.isCancellation(URLError(.notConnectedToInternet)))
+    }
+
     // MARK: - Fix 5: hash normalization ignores elapsed-time noise
 
     func testConsecutiveFailureDetectionIgnoresElapsedTimeNoise() async {
