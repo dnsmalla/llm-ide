@@ -208,8 +208,15 @@ final class LibraryItemStore {
     /// external referenced-folder items.  With no project bound, `items` is
     /// emptied.
     func rescan() {
+        scanGeneration &+= 1
         items = Self.performScan(root: projectRoot, externalFolders: externalCodeFolders)
     }
+
+    /// Bumped by every scan; an async scan applies its result only if no
+    /// newer scan started meanwhile. Comparing the root alone let a slow
+    /// post-bind scan land AFTER a sync rescan from a delete and bring the
+    /// deleted item back.
+    private var scanGeneration: UInt64 = 0
 
     /// Off-main variant for the hot paths (project bind, `meetingIndexChanged`
     /// fan-out) where the directory walk + per-meeting frontmatter reads would
@@ -218,6 +225,8 @@ final class LibraryItemStore {
     /// stays for the copy-on-add/remove/move paths whose callers read `items`
     /// immediately after.
     func rescanAsync() async {
+        scanGeneration &+= 1
+        let generation = scanGeneration
         let root = projectRoot
         let external = externalCodeFolders
         let scanned = await Task.detached(priority: .utility) {
@@ -227,7 +236,7 @@ final class LibraryItemStore {
         // was in flight, `scanned` is the OLD project's items — assigning it
         // would show the previous project's files until the next rescan.
         // (projectRoot only mutates on the main actor, so this is atomic.)
-        guard projectRoot == root else { return }
+        guard projectRoot == root, scanGeneration == generation else { return }
         items = scanned
     }
 
