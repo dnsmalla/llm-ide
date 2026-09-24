@@ -139,6 +139,11 @@ struct UAGraphView: View {
     /// overwrote `fullData`, `layout` AND the session cache with the stale
     /// result.
     @State private var layoutGeneration: Int = 0
+    /// Bumped by `repoChanged`. A generate task captures it at launch and
+    /// drops every status write / layout once it no longer matches — cancel
+    /// alone let a finishing (or cancelled) run for the previous project
+    /// overwrite the new project's status, or publish the old graph.
+    @State private var runGeneration: Int = 0
     @State private var selectedNode: CGNode?
     /// 3D rendering toggle + per-mode cache of settled 3D positions, so
     /// flipping 2D⇄3D (or revisiting a mode) doesn't re-run the 3D settle.
@@ -566,6 +571,7 @@ struct UAGraphView: View {
         layoutTask?.cancel()
         layoutTask = nil
         layoutGeneration += 1
+        runGeneration += 1
         hydrating = false
         focusedNode = nil
         positions3DByMode = [:]
@@ -1395,9 +1401,10 @@ struct UAGraphView: View {
         // Fingerprint only the repo-walk case so an unchanged re-generate can be
         // skipped next time; nil for file-scoped generates.
         let fingerprintRepo = selectedFiles == nil ? repo : nil
+        let gen = runGeneration
         runTask = Task.detached(priority: .userInitiated) {
             guard let engine else {
-                await MainActor.run { self.status = .error(Self.noEngineMessage) }
+                await MainActor.run { if gen == self.runGeneration { self.status = .error(Self.noEngineMessage) } }
                 return
             }
             let mem: GeneratedMemory
@@ -1407,7 +1414,7 @@ struct UAGraphView: View {
                 } else if let repo {
                     mem = try await engine.generateDocMemory(roots: [repo])
                 } else {
-                    await MainActor.run { self.status = .idle }
+                    await MainActor.run { if gen == self.runGeneration { self.status = .idle } }
                     return
                 }
             } catch {
@@ -1415,19 +1422,20 @@ struct UAGraphView: View {
                 // ignored failure left the spinner turning forever — and
                 // `applyLayout`'s empty-graph guard meant even an empty success
                 // did the same.
-                await MainActor.run { self.status = .error(error.localizedDescription) }
+                await MainActor.run { if gen == self.runGeneration { self.status = .error(error.localizedDescription) } }
                 return
             }
             guard !mem.graph.nodes.isEmpty else {
                 await MainActor.run {
-                    self.status = .error("the graph engine produced no nodes")
+                    if gen == self.runGeneration { self.status = .error("the graph engine produced no nodes") }
                 }
                 return
             }
-            if Task.isCancelled { await MainActor.run { self.status = .idle }; return }
+            if Task.isCancelled { await MainActor.run { if gen == self.runGeneration { self.status = .idle } }; return }
             let fp = fingerprintRepo.map { engine.docSetFingerprint(roots: [$0]) }
-            if Task.isCancelled { await MainActor.run { self.status = .idle }; return }
+            if Task.isCancelled { await MainActor.run { if gen == self.runGeneration { self.status = .idle } }; return }
             await MainActor.run {
+                guard gen == self.runGeneration else { return }
                 self.selectedNode = nil
                 self.memoryChunks = mem.chunks
                 self.memoryDocCount = mem.docCount
@@ -1463,6 +1471,7 @@ struct UAGraphView: View {
             (cachedDoc?.docFingerprint == docFp && !(cachedDoc?.graph.nodes.isEmpty ?? true))
             ? (cachedDoc!.graph, cachedDoc!.chunks, cachedDoc!.docCount)
             : nil
+        let gen = runGeneration
         runTask = Task {
             // Inspect the result. Discarding it meant a contended or failed
             // scan silently produced a doc-only "All" graph that looked like a
@@ -1471,13 +1480,13 @@ struct UAGraphView: View {
             case .success, .failure(.busy):
                 break   // `.busy` falls back to the cached code graph below
             case .failure(.cancelled):
-                self.status = .idle
+                if gen == self.runGeneration { self.status = .idle }
                 return
             case .failure(let error):
-                self.status = .error(error.localizedDescription)
+                if gen == self.runGeneration { self.status = .error(error.localizedDescription) }
                 return
             }
-            if Task.isCancelled { await MainActor.run { self.status = .idle }; return }
+            if Task.isCancelled { await MainActor.run { if gen == self.runGeneration { self.status = .idle } }; return }
             // "md is doc": strip code-track markdown so it isn't merged twice.
             var code = FileClassifier.strippingDocNodes(from: codeNoteService.graph)
             var codeFromCache = false
@@ -1511,14 +1520,15 @@ struct UAGraphView: View {
                 return (merged, doc.chunks, doc.docs)
                 }.value
             } catch {
-                self.status = .error(error.localizedDescription)
+                if gen == self.runGeneration { self.status = .error(error.localizedDescription) }
                 return
             }
-            if Task.isCancelled { await MainActor.run { self.status = .idle }; return }
+            if Task.isCancelled { await MainActor.run { if gen == self.runGeneration { self.status = .idle } }; return }
             // Generation telemetry (mirrors KnowledgeGraphService's count log):
             // records the code/doc contributions to the merged "All" graph, which
             // also pinpoints a code-vs-doc shortfall if the graph ever looks short.
             Self.log.info("generateAll[\(repo.lastPathComponent, privacy: .public)]: code=\(code.nodes.count, privacy: .public)\(codeFromCache ? " (cache)" : "", privacy: .public)\(reusedDoc != nil ? " doc(cache)" : "", privacy: .public) docFiles=\(result.docs, privacy: .public) docChunks=\(result.chunks.count, privacy: .public) merged=\(result.data.nodes.count, privacy: .public)")
+            guard gen == self.runGeneration else { return }
             self.selectedNode = nil
             self.memoryChunks = result.chunks
             self.memoryDocCount = result.docs
@@ -1695,9 +1705,11 @@ struct UAGraphView: View {
         // Store the Task so Cancel / onDisappear can actually stop it — the
         // memory path already does this; the code path previously used a bare
         // Task that leaked past view dismissal and ignored Cancel.
+        let gen = runGeneration
         runTask = Task {
             let result = await codeNoteService.generate(repoRoot: target)
             await MainActor.run {
+                guard gen == self.runGeneration else { return }
                 switch result {
                 case .success(let graph) where graph.nodes.isEmpty:
                     // MUST be handled here. Success rendering is driven by the
