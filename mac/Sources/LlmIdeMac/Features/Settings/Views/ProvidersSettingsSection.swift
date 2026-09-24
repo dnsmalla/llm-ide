@@ -215,24 +215,29 @@ struct ProvidersSettingsSection: View {
         guard !key.isEmpty else { return }
         busy.insert(p.id); defer { busy.remove(p.id) }
         do {
-            // Custom (OpenAI-compatible) also needs its base URL stored before
-            // verification (the server reads it back when probing /models).
+            var base: String?
             if p.needsBaseURL {
-                let base = baseURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !base.isEmpty else {
+                let b = baseURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !b.isEmpty else {
                     status[p.id] = (false, "Enter a base URL (e.g. https://openrouter.ai/api/v1).")
                     return
                 }
+                base = b
+            }
+            // Verify BEFORE saving (the server accepts the candidate key and
+            // base URL in the body). Saving first left a key that failed
+            // verification live in the vault — used by every request — while
+            // this row still said "not configured", replacing a working key.
+            let result = try await api.verifyProvider(p.id, mode: "key", apiKey: key, baseUrl: base)
+            status[p.id] = (result.ok, result.ok ? "Verified ✓" : (result.detail ?? "Verification failed — key not saved"))
+            guard result.ok else { return }
+            if let base {
                 try await api.setSecret(key: "custom.baseUrl", value: base)
                 configured.insert("custom.baseUrl")
             }
             try await api.setSecret(key: p.vaultKey, value: key)
-            let result = try await api.verifyProvider(p.id, mode: "key", apiKey: nil)
-            status[p.id] = (result.ok, result.ok ? "Verified ✓" : (result.detail ?? "Verification failed"))
-            if result.ok {
-                configured.insert(p.vaultKey)
-                drafts[p.id] = ""           // don't keep the secret in view state
-            }
+            configured.insert(p.vaultKey)
+            drafts[p.id] = ""           // don't keep the secret in view state
         } catch {
             status[p.id] = (false, error.localizedDescription)
         }

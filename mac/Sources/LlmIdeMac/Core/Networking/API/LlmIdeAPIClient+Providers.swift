@@ -12,14 +12,16 @@ extension LlmIdeAPIClient {
     /// Verify a provider credential. `mode` is "key" (live 1-token probe of
     /// `apiKey`, or the stored key when `apiKey` is nil) or "cli" (checks the
     /// provider's CLI binary is installed for subscription mode).
-    func verifyProvider(_ provider: String, mode: String, apiKey: String?) async throws -> ProviderVerifyResult {
+    func verifyProvider(_ provider: String, mode: String, apiKey: String?,
+                        baseUrl: String? = nil) async throws -> ProviderVerifyResult {
         struct Req: Encodable {
             let provider: String
             let mode: String
             let apiKey: String?
+            let baseUrl: String?
         }
         return try await post("/kb/providers/verify",
-                              body: Req(provider: provider, mode: mode, apiKey: apiKey),
+                              body: Req(provider: provider, mode: mode, apiKey: apiKey, baseUrl: baseUrl),
                               authenticated: true)
     }
 
