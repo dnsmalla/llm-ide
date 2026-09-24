@@ -58,8 +58,15 @@ enum MeetingSummarizationService {
             }
             summary = s
         } catch {
-            sumLog.error("summarize failed — using fallback: \(error.localizedDescription, privacy: .public)")
-            let fallback = MeetingSummary(
+            // Write NOTHING on failure. This path used to store the whole
+            // transcript as the "summary" (into the raw file and as the .docx
+            // and .md notes), and the note it left behind made `hasNote`
+            // suppress every later auto-summary — the meeting was stuck with
+            // a transcript-as-summary until a manual Re-summarize. With no
+            // note written, the next run retries; the raw transcript is
+            // untouched and Re-summarize still works.
+            sumLog.error("summarize failed — no note written, will retry: \(error.localizedDescription, privacy: .public)")
+            return MeetingSummary(
                 gist: title,
                 tldr: [],
                 full: transcript,
@@ -68,8 +75,6 @@ enum MeetingSummarizationService {
                 blockers: [],
                 model: "unavailable",
                 generatedAt: Date())
-            try? MeetingFileStore(root: root).writeSummary(into: transcriptFileURL, summary: fallback)
-            summary = fallback
         }
 
         // ── Step 2a: polished .docx (existing pipeline) ──
