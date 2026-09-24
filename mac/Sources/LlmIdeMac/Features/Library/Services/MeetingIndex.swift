@@ -236,7 +236,7 @@ final class MeetingIndex: @unchecked Sendable {
 
     func count() throws -> Int {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM meetings_index", -1, &stmt, nil) == SQLITE_OK
+        guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM meetings_index WHERE hidden = 0", -1, &stmt, nil) == SQLITE_OK
         else { throw err("prepare count") }
         defer { sqlite3_finalize(stmt) }
         guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }

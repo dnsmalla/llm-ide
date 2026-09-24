@@ -82,21 +82,25 @@ final class AutoTaskWorktreeTests: XCTestCase {
         let wt = AutoCodeUpdateService.taskWorktreePath(token: "t-noop-\(UUID().uuidString.prefix(6))")
         XCTAssertTrue(AutoCodeUpdateService.worktreeAdd(at: repo.path, path: wt, branch: branch))
         XCTAssertFalse(AutoCodeUpdateService.commitAll(at: wt, message: "nothing"))
-        XCTAssertTrue(AutoCodeUpdateService.branchDelete(branch, at: repo.path) || true) // may fail while checked out in the worktree
+        // Production order: the worktree that has the branch checked out goes
+        // first — `git branch -D` refuses otherwise, which is exactly how the
+        // first version of this leaked a `fix/custom-…` branch per no-op run.
         AutoCodeUpdateService.worktreeRemove(at: repo.path, path: wt)
-        _ = AutoCodeUpdateService.branchDelete(branch, at: repo.path)
+        XCTAssertTrue(AutoCodeUpdateService.branchDelete(branch, at: repo.path))
         XCTAssertFalse(AutoCodeUpdateService.localBranches(prefix: "fix/custom-noop", at: repo.path).contains(branch))
     }
 
     /// Absolute paths under the main checkout are redirected into the worktree.
     func testPromptIsRetargetedToTheWorktree() {
         let out = AutoCodeUpdateService.retargetPrompt(
-            "Read /repo/main/src/a.swift and write /repo/main/llm-doc/out.md. Root: /repo/main",
+            "Read /repo/main/src/a.swift and write /repo/main/llm-doc/out.md. Root: /repo/main. Also see /repo/main-docs/spec.md and /repo/main.bak/x",
             from: "/repo/main", to: "/tmp/wt")
         XCTAssertTrue(out.contains("/tmp/wt/src/a.swift"))
         XCTAssertTrue(out.contains("/tmp/wt/llm-doc/out.md"))
-        XCTAssertTrue(out.contains("Root: /tmp/wt"))
-        XCTAssertFalse(out.contains("/repo/main"))
+        XCTAssertTrue(out.contains("Root: /tmp/wt."))
+        // Siblings that merely share the prefix are NOT the checkout.
+        XCTAssertTrue(out.contains("/repo/main-docs/spec.md"))
+        XCTAssertTrue(out.contains("/repo/main.bak/x"))
         XCTAssertTrue(out.hasPrefix("You are working in an isolated checkout"))
     }
 }

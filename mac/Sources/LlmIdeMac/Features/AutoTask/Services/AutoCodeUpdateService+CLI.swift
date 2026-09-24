@@ -162,7 +162,22 @@ extension AutoCodeUpdateService {
                                                  withIntermediateDirectories: true)
         let args = branch.map { ["worktree", "add", "-b", $0, path, "HEAD"] }
             ?? ["worktree", "add", "--detach", path, "HEAD"]
-        return git(args, at: localPath).code == 0
+        guard git(args, at: localPath).code == 0 else { return false }
+        // A fresh worktree has empty submodule directories; a task that builds
+        // or reads through one (this repo's `.skills`, graph-kit) would see
+        // nothing. Best-effort — a missing/unreachable submodule must not fail
+        // the run, the CLI just works without it.
+        _ = git(["-C", path, "submodule", "update", "--init", "--recursive"], at: localPath)
+        return true
+    }
+
+    /// Why `worktreeAdd` would refuse, for the skip message: the one case a
+    /// user can hit on a working repo is a checkout with no commits yet.
+    nonisolated static func worktreeBlocker(at localPath: String) -> String? {
+        if git(["rev-parse", "--verify", "HEAD"], at: localPath).code != 0 {
+            return "the repository has no commits yet"
+        }
+        return nil
     }
 
     /// Drop a task's worktree and everything uncommitted in it. Tracked and
@@ -198,8 +213,16 @@ extension AutoCodeUpdateService {
         let main = URL(fileURLWithPath: localPath).standardizedFileURL.path
         var out = prompt
         for variant in Set([localPath, main]) where !variant.isEmpty {
-            out = out.replacingOccurrences(of: variant + "/", with: worktree + "/")
-            out = out.replacingOccurrences(of: variant, with: worktree)
+            // Only the path itself or a path beneath it — never a sibling
+            // that merely starts with the same characters (`proj-docs/`,
+            // `proj.bak/`), which a plain prefix replace would rewrite too.
+            // A trailing "." counts only as sentence punctuation (followed by
+            // whitespace or the end), not as the start of `.bak`.
+            let pattern = NSRegularExpression.escapedPattern(for: variant) + #"(?=/|\s|$|[)"'`,;:]|\.(?:\s|$))"#
+            if let re = try? NSRegularExpression(pattern: pattern) {
+                out = re.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out),
+                                                  withTemplate: NSRegularExpression.escapedTemplate(for: worktree))
+            }
         }
         return "You are working in an isolated checkout of the repository at \(worktree). "
             + "Make every change there; do not touch other copies of this repository.\n\n" + out
@@ -575,7 +598,9 @@ extension AutoCodeUpdateService {
             : nil
         let created = await Task.detached { Self.worktreeAdd(at: localPath, path: worktree, branch: implementBranch) }.value
         guard created else {
-            let msg = "Skipped auto-task \(logSuffix): could not create an isolated worktree of \(localPath)."
+            let why = await Task.detached { Self.worktreeBlocker(at: localPath) }.value
+            let msg = "Skipped auto-task \(logSuffix): could not create an isolated worktree of \(localPath)"
+                + (why.map { " — \($0)." } ?? ".")
             lastError = msg
             taskErrors[logSuffix] = msg
             log.error("auto_task_skip_worktree suffix=\(logSuffix, privacy: .public)")
@@ -685,6 +710,7 @@ extension AutoCodeUpdateService {
         guardToken = nil
 
         activeProcess = nil
+        var emptyImplementBranch: String?
         if let implementBranch {
             // `.implement`: persist the CLI's edits as a commit on its branch,
             // inside the worktree — the only changes there are this task's.
@@ -695,13 +721,18 @@ extension AutoCodeUpdateService {
                 logStore.append(logStoreId, "Committed on branch \(implementBranch) (your checkout is unchanged).")
             } else {
                 logStore.append(logStoreId, "No commit produced (nothing to commit, or commit failed).", level: .error)
-                _ = await Task.detached { Self.branchDelete(implementBranch, at: localPath) }.value
+                emptyImplementBranch = implementBranch
             }
         }
         // Review: everything the CLI wrote goes away with the worktree —
         // findings live in the log via stdout. Implement: the commit is on
         // its branch; the checkout itself is no longer needed.
         await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
+        // Only now: `git branch -D` refuses a branch that a worktree still
+        // has checked out, so the delete must follow the removal.
+        if let empty = emptyImplementBranch {
+            _ = await Task.detached { Self.branchDelete(empty, at: localPath) }.value
+        }
         await recordRun(model: resolvedModel, endpoint: "auto-task:\(logSuffix)")
         return result
     }

@@ -620,6 +620,13 @@ struct RepoIssuesView: View {
             Self.shouldApply(loadGeneration: generation, currentGeneration: issuesLoadGeneration,
                              loadedProject: project.id, selectedProject: selectedProject?.id)
         }
+        // A load that is still the newest but whose project is no longer
+        // selected (project list refreshed → nil) is not superseded by another
+        // load, so nothing else would ever clear the spinner.
+        func settleIfLatest() {
+            if generation == issuesLoadGeneration { issuesLoading = false }
+        }
+        defer { settleIfLatest() }
         // Refresh labels for the board's column colors and milestones for the
         // milestone filter (best-effort — failures only affect the filter UI).
         let fetchedLabels = (try? await currentClient.listLabels(projectId: project.id)) ?? []

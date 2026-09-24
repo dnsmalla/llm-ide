@@ -211,7 +211,10 @@ struct DocTemplate: Identifiable, Codable, Equatable {
     /// empty heading. A file with no `## ` headings keeps all its text and
     /// gets the sections appended.
     static func rewriting(raw: String, name: String, sections: [String]) -> String {
-        var lines = raw.components(separatedBy: "\n")
+        // Split like `sections(from:)` does (any newline, CR stripped): a CRLF
+        // file otherwise yields headings ending in "\r" that never match the
+        // section names, and every body is dropped.
+        var lines = raw.components(separatedBy: .newlines)
         // Title: replace the first `# ` line, or add one at the top.
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         if let titleIdx = lines.firstIndex(where: { $0.hasPrefix("# ") }) {
@@ -231,15 +234,20 @@ struct DocTemplate: Identifiable, Codable, Equatable {
                 blocks[blocks.count - 1].body.append(line)
             }
         }
-        var byName: [String: [String]] = [:]
-        for b in blocks where byName[b.heading] == nil { byName[b.heading] = b.body }
+        // Bodies queued per heading name, so a template with two sections of
+        // the same name keeps both bodies in order rather than emitting the
+        // first twice.
+        var byName: [String: [[String]]] = [:]
+        for b in blocks { byName[b.heading, default: []].append(b.body) }
         // Preamble keeps its own trailing blank line at most once.
         while preamble.count > 1, preamble.last == "", preamble[preamble.count - 2] == "" { preamble.removeLast() }
         if preamble.last != "" { preamble.append("") }
         var out = preamble
         for section in sections.map({ $0.trimmingCharacters(in: .whitespaces) }) where !section.isEmpty {
             out.append("## \(section)")
-            if let body = byName[section] {
+            if var queue = byName[section], !queue.isEmpty {
+                let body = queue.removeFirst()
+                byName[section] = queue
                 var kept = body
                 while kept.count > 1, kept.last == "", kept[kept.count - 2] == "" { kept.removeLast() }
                 if kept.last != "" { kept.append("") }

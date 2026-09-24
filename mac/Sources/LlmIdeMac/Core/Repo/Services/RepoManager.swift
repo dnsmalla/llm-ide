@@ -11,11 +11,16 @@ enum RepoError: LocalizedError {
     /// The remote this authenticated op would contact is not the host the
     /// token belongs to (or is plaintext http) — the token is withheld.
     case credentialHostMismatch(remote: String, expected: String)
+    /// The remote is plain `http://` on a non-loopback host: the token would
+    /// travel in clear text, so it is withheld.
+    case plaintextRemote(remote: String)
 
     var errorDescription: String? {
         switch self {
         case .credentialHostMismatch(let remote, let expected):
             return "Refusing to send the \(expected) token to \(remote): this repo's remote points somewhere else. Check `git remote -v`."
+        case .plaintextRemote(let remote):
+            return "Refusing to send a token over plain http to \(remote): use an https:// remote (only localhost may use http)."
         case .gitNotFound:             return "git not found — install Xcode Command Line Tools."
         case .cloneFailed(let msg):    return "Clone failed: \(msg)"
         case .commandFailed(let msg):  return msg
@@ -433,7 +438,7 @@ final class RepoManager {
         }
         let loopback = host == "localhost" || host == "127.0.0.1" || host == "::1"
         if scheme == "http" && !loopback {
-            throw RepoError.credentialHostMismatch(remote: "\(scheme)://\(host) (plaintext)", expected: backend.expectedHostLabel(gitLabHost: gitLabHost))
+            throw RepoError.plaintextRemote(remote: host)
         }
         let expected: String
         switch backend {

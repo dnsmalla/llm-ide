@@ -59,4 +59,22 @@ struct DocTemplateRewriteTests {
         #expect(DocTemplate.sections(from: out) == DocTemplate.sections(from: raw))
         #expect(out.contains("Dated, owned."))
     }
+
+    @Test("A CRLF file keeps its bodies too")
+    func crlf() {
+        let crlf = raw.replacingOccurrences(of: "\n", with: "\r\n")
+        let out = DocTemplate.rewriting(raw: crlf, name: "Meeting Summary", sections: ["Risks", "Decisions", "Next Steps"])
+        #expect(out.contains("Only risks with a mitigation."))
+        #expect(out.contains("List each decision with its owner."))
+        #expect(DocTemplate.sections(from: out) == ["Risks", "Decisions", "Next Steps"])
+    }
+
+    @Test("Two sections with the same name keep both bodies in order")
+    func duplicateHeadings() {
+        let dup = "# T\n\n## Notes\nfirst\n\n## Notes\nsecond\n"
+        let out = DocTemplate.rewriting(raw: dup, name: "T", sections: ["Notes", "Notes"])
+        let first = out.range(of: "first")!, second = out.range(of: "second")!
+        #expect(first.lowerBound < second.lowerBound)
+        #expect(out.components(separatedBy: "## Notes").count == 3)
+    }
 }
