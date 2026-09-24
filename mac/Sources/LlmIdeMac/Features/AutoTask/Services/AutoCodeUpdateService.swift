@@ -165,7 +165,21 @@ final class AutoCodeUpdateService: ObservableObject {
                 self.isEnabled = value
                 if value { self.start() } else { self.stop() }
             }
+        // Same idiom as `LoopEngineRunner.init`: kill the in-flight CLI on
+        // Cmd-Q/logout instead of orphaning it. `[weak self]` makes a
+        // deallocated service a no-op.
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handleAppTerminating()
+            }
+        }
     }
+
+    private var terminationObserver: NSObjectProtocol?
 
     // MARK: - Lifecycle
 
@@ -652,9 +666,67 @@ final class AutoCodeUpdateService: ObservableObject {
     /// Stop the in-flight run: cancel the run Task (so it bails at the next
     /// task boundary) and terminate the currently-executing subprocess (so
     /// we don't wait out its 10-minute timeout).
+    ///
+    /// SIGTERM alone was not enough: a CLI that ignores it never exits,
+    /// `runCLI`'s continuation never resumes, and `isRunning` stayed true
+    /// until relaunch — Stop looked like it did nothing. Whatever is still
+    /// alive after `cancelKillGrace` is SIGKILLed.
     func cancel() {
         runTask?.cancel()
-        activeProcess?.terminate()
+        if let activeProcess {
+            Self.terminateWithKillFallback(activeProcess, grace: Self.cancelKillGrace)
+        }
+    }
+
+    /// Grace between SIGTERM and SIGKILL for a user-initiated Stop.
+    nonisolated static let cancelKillGrace: TimeInterval = 5
+    /// Grace on app quit — `willTerminate` blocks the main thread, so short.
+    nonisolated static let quitKillGrace: TimeInterval = 1
+
+    /// SIGTERM `process` and every descendant it spawned (the CLI runs node,
+    /// which runs tools), then SIGKILL whatever survived `grace` seconds
+    /// later. Returns immediately; the kill runs off the main actor.
+    /// Descendants are snapshotted at SIGTERM time: once the CLI dies they are
+    /// re-parented to launchd and a later walk can't find them (same reason
+    /// as `BashService`'s forceKill).
+    nonisolated static func terminateWithKillFallback(_ process: Process, grace: TimeInterval) {
+        guard process.isRunning else { return }
+        let pid = process.processIdentifier
+        guard pid > 0 else { return }
+        let tree = ProcessTree.descendants(of: pid)
+        for child in tree { kill(child, SIGTERM) }
+        process.terminate()
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + grace) {
+            // `isRunning` turns false only once the child is reaped, so the
+            // pid can't have been recycled for an unrelated process yet.
+            if process.isRunning { kill(pid, SIGKILL) }
+            for child in tree { kill(child, SIGKILL) }
+        }
+    }
+
+    /// Synchronous variant for app termination: there is no later tick to run
+    /// the fallback on. Polls up to `grace` seconds, then SIGKILLs survivors.
+    nonisolated static func terminateBlocking(_ process: Process, grace: TimeInterval) {
+        guard process.isRunning else { return }
+        let pid = process.processIdentifier
+        guard pid > 0 else { return }
+        let tree = ProcessTree.descendants(of: pid)
+        for child in tree { kill(child, SIGTERM) }
+        process.terminate()
+        let deadline = Date().addingTimeInterval(grace)
+        while process.isRunning && Date() < deadline { usleep(20_000) }
+        if process.isRunning { kill(pid, SIGKILL) }
+        for child in tree { kill(child, SIGKILL) }
+    }
+
+    /// Cmd-Q / logout. Without this an in-flight auto-task CLI outlived the
+    /// app and kept editing with no one left to record its result — the
+    /// Shell's willTerminate hook stops only the backend and mobile.
+    func handleAppTerminating() {
+        runTask?.cancel()
+        if let activeProcess {
+            Self.terminateBlocking(activeProcess, grace: Self.quitKillGrace)
+        }
     }
 
     func stop() {
@@ -682,6 +754,9 @@ final class AutoCodeUpdateService: ObservableObject {
 
     deinit {
         timer?.invalidate()
+        if let terminationObserver {
+            NotificationCenter.default.removeObserver(terminationObserver)
+        }
     }
 
     // MARK: - Main run loop
