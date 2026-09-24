@@ -49,4 +49,24 @@ final class MeetingFileStoreRawDirTests: XCTestCase {
         try again.close()
         XCTAssertNotEqual(again.url, first.url)
     }
+
+    /// A Stop with no captions discards the partial (and CaptionOrchestrator
+    /// drops its recovery record) so the next launch has nothing to recover.
+    func testDiscardPartialClosesAndDeletesTheFile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mfs-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = MeetingFileStore(root: root)
+        let handle = try store.createPartial(id: "empty-session", startedAt: Date(),
+                                             platform: "teams", language: "")
+        let recovery = PartialRecovery(notesFolder: root)
+        try recovery.record(id: handle.id, path: handle.url, pid: 999_999, startedAt: Date())
+
+        store.discardPartial(handle: handle)
+        try recovery.cleanup(id: handle.id)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: handle.url.path))
+        XCTAssertTrue(try recovery.scanOrphans().isEmpty)
+        XCTAssertNoThrow(try handle.close(), "close stays idempotent after a discard")
+    }
 }

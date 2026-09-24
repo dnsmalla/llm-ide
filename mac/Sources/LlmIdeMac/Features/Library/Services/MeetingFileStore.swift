@@ -110,6 +110,20 @@ final class MeetingFileStore {
         return Handle(id: id, url: url, fileHandle: handle, frontmatter: fm)
     }
 
+    /// Abandon an in-flight partial: close its handle and delete the
+    /// `.partial.md`. For a recording that captured nothing — there is no
+    /// transcript to keep, and a leftover partial would surface as an empty
+    /// meeting in the launch-time recovery prompt. Best-effort; failures are
+    /// logged.
+    func discardPartial(handle: Handle) {
+        try? handle.close()
+        do {
+            try FileManager.default.removeItem(at: handle.url)
+        } catch {
+            Self.log.error("discard partial failed \(handle.url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Recovery entry point.  Opens the .partial.md at `url`, reads its
     /// frontmatter, and finalizes it as if it were the orchestrator's
     /// in-memory handle.  Used by the launch-time recovery prompt for
