@@ -179,7 +179,16 @@ enum KeychainStore {
         for account in accounts where blob[account] == nil {
             if let v = loadLegacy(account: account) { blob[account] = v; copied.append(account) }
         }
-        persistBlobLocked()
+        // The blob write can fail (errSecInteractionNotAllowed mid-run, disk).
+        // Deleting the legacy items then would destroy the only copy of the
+        // refresh / GitLab / GitHub tokens — the exact loss this file exists
+        // to prevent. Leave them in place; the next launch migrates again.
+        guard persistBlobLocked() else {
+            for account in copied { blob[account] = nil }
+            lock.unlock()
+            log.error("Keychain migration: blob write failed — legacy items kept for the next attempt")
+            return
+        }
         lock.unlock()
         for account in copied {
             deleteRaw(account: account, service: service)
@@ -236,7 +245,10 @@ enum KeychainStore {
 
     // MARK: - GitLab PAT
 
-    static func saveGitLabToken(_ token: String, host: String) {
+    /// Returns whether the token was actually stored (false while the
+    /// keychain is unreadable — see `set`).
+    @discardableResult
+    static func saveGitLabToken(_ token: String, host: String) -> Bool {
         set("gitlab::\(host)::token", token)
     }
 
