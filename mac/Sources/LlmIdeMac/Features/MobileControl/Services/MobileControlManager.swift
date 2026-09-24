@@ -141,7 +141,15 @@ final class MobileControlManager {
     /// and redraws the QR.
     private(set) var pinGeneration = 0
     private var mobilePushCancellables = Set<AnyCancellable>()
-    private var mobileInflightTasks: [String: Task<Void, Never>] = [:]
+    /// One phone command's running task, tagged with a per-registration token
+    /// so a finishing task can tell whether the slot is still its own.
+    private struct MobileInflightTask {
+        let token: UUID
+        let task: Task<Void, Never>
+    }
+    private var mobileInflightTasks: [String: MobileInflightTask] = [:]
+    /// Command ids with a registered, not-yet-finished task (tests).
+    var mobileInflightCommandIds: Set<String> { Set(mobileInflightTasks.keys) }
     /// Commands the iPhone cancelled — late HTTP replies must not persist or stream.
     private var mobileCancelledCommandIds = Set<String>()
 
@@ -1138,7 +1146,7 @@ final class MobileControlManager {
         // mark them cancelled so their catch paths send nothing
         // (`notifyStoppedOnMac`) to a phone that reconnects quickly.
         mobileCancelledCommandIds = Set(mobileInflightTasks.keys)
-        for task in mobileInflightTasks.values { task.cancel() }
+        for entry in mobileInflightTasks.values { entry.task.cancel() }
         mobileInflightTasks.removeAll()
     }
 
@@ -1310,21 +1318,37 @@ final class MobileControlManager {
         }
     }
 
-    private func registerMobileInflightTask(commandId: String,
+    // internal: pinned by MobileInflightTaskTests
+    func registerMobileInflightTask(commandId: String,
                                           operation: @escaping @MainActor () async -> Void) {
-        mobileInflightTasks[commandId]?.cancel()
+        mobileInflightTasks[commandId]?.task.cancel()
         mobileCancelledCommandIds.remove(commandId)
         let cid = commandId
-        mobileInflightTasks[cid] = Task.detached(priority: .userInitiated) { @MainActor [weak self] in
+        let token = UUID()
+        let task = Task.detached(priority: .userInitiated) { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.mobileInflightTasks.removeValue(forKey: cid) }
+            defer { self.mobileInflightTaskFinished(commandId: cid, token: token) }
             await operation()
         }
+        mobileInflightTasks[cid] = MobileInflightTask(token: token, task: task)
     }
 
-    private func cancelMobileInflightTask(commandId: String) {
+    /// Bookkeeping when a registered task ends. A re-registration of the same
+    /// commandId cancels the old task, whose `defer` runs AFTER the new one is
+    /// stored — so it may only clear the slot if the token is still its own,
+    /// or it would orphan the new task (no longer cancellable from the phone).
+    private func mobileInflightTaskFinished(commandId: String, token: UUID) {
+        if let current = mobileInflightTasks[commandId], current.token != token {
+            // A newer task owns this commandId; its own finish cleans up.
+            return
+        }
+        mobileInflightTasks.removeValue(forKey: commandId)
+    }
+
+    // internal: pinned by MobileInflightTaskTests
+    func cancelMobileInflightTask(commandId: String) {
         mobileCancelledCommandIds.insert(commandId)
-        mobileInflightTasks[commandId]?.cancel()
+        mobileInflightTasks[commandId]?.task.cancel()
         mobileInflightTasks.removeValue(forKey: commandId)
         reply(CommandError(commandId: commandId, message: "Cancelled"))
     }
