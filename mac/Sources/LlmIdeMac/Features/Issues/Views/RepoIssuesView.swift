@@ -36,6 +36,15 @@ struct RepoIssuesView: View {
     @State private var milestones: [RepoMilestone] = []
     @State private var issuesLoading = false
     @State private var issuesError: String?
+    /// Which issue load is current. Every load bumps it and only writes
+    /// `issues`/`labels`/`milestones`/`issuesError` while it still holds the
+    /// latest number AND `selectedProject` is still the project it loaded
+    /// for. Without this, a slow load for project A (up to 20 pages) landed
+    /// AFTER a fast one for project B the user had switched to, so the board
+    /// showed A's issues under B — and dragging a card then wrote to B's
+    /// issue with A's number.
+    @State private var issuesLoadGeneration = 0
+    @State private var issuesLoadTask: Task<Void, Never>?
 
     // ── Filter
     @State private var filter = RepoIssueFilter()
@@ -588,13 +597,37 @@ struct RepoIssuesView: View {
 
     private func reloadIssues() async {
         guard let project = selectedProject else { return }
+        issuesLoadGeneration += 1
+        let generation = issuesLoadGeneration
+        // A superseded load stops paging; its results would be dropped anyway.
+        issuesLoadTask?.cancel()
         issuesLoading = true
         issuesError = nil
-        defer { issuesLoading = false }
+        let task = Task { await performIssuesLoad(project: project, generation: generation) }
+        issuesLoadTask = task
+        await task.value
+    }
+
+    /// Whether a load started at `generation` for `loadedProject` may still
+    /// write its results. Pure so the rule is testable.
+    static func shouldApply(loadGeneration: Int, currentGeneration: Int,
+                            loadedProject: String, selectedProject: String?) -> Bool {
+        loadGeneration == currentGeneration && loadedProject == selectedProject
+    }
+
+    private func performIssuesLoad(project: RepoProject, generation: Int) async {
+        func isCurrent() -> Bool {
+            Self.shouldApply(loadGeneration: generation, currentGeneration: issuesLoadGeneration,
+                             loadedProject: project.id, selectedProject: selectedProject?.id)
+        }
         // Refresh labels for the board's column colors and milestones for the
         // milestone filter (best-effort — failures only affect the filter UI).
-        labels = (try? await currentClient.listLabels(projectId: project.id)) ?? []
-        milestones = (try? await currentClient.listMilestones(projectId: project.id)) ?? []
+        let fetchedLabels = (try? await currentClient.listLabels(projectId: project.id)) ?? []
+        guard isCurrent() else { return }
+        labels = fetchedLabels
+        let fetchedMilestones = (try? await currentClient.listMilestones(projectId: project.id)) ?? []
+        guard isCurrent() else { return }
+        milestones = fetchedMilestones
         do {
             // Page through results instead of stopping at page 1 — large
             // repos were silently truncated to a single backend page
@@ -604,11 +637,13 @@ struct RepoIssuesView: View {
             var seen = Set<String>()
             let maxPages = 20
             for page in 1...maxPages {
+                try Task.checkCancellation()
                 let batch = try await currentClient.listIssues(projectId: project.id, filter: filter, page: page)
                 let fresh = batch.filter { seen.insert($0.id).inserted }
                 if fresh.isEmpty { break }   // empty page or repeated content → done
                 all.append(contentsOf: fresh)
             }
+            guard isCurrent() else { return }
             // Narrow AFTER paging for backends whose issues endpoint has no
             // search parameter (GitHub) — filtering per page would end the
             // loop at the first page with no match. Without this the board's
@@ -616,8 +651,16 @@ struct RepoIssuesView: View {
             issues = currentClient.filtersSearchServerSide
                 ? all
                 : all.filter { filter.matchesLocally($0) }
+            issuesLoading = false
+        } catch is CancellationError {
+            // Superseded — the newer load owns the UI.
         } catch {
+            guard isCurrent() else { return }
+            // A cancelled request from a superseded load is not an error to show.
+            if (error as? URLError)?.code == .cancelled { return }
             issuesError = error.localizedDescription
+            issuesLoading = false
         }
     }
+
 }
