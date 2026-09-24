@@ -191,7 +191,8 @@ final class RepairScopeGuardTests: XCTestCase {
             paths: ["mac/Tests/A.swift", "Makefile"], gitRoot: gitRoot)
         XCTAssertNil(revertError)
 
-        XCTAssertEqual(verifier.commands, ["git checkout -- 'mac/Tests/A.swift' 'Makefile'"])
+        XCTAssertEqual(verifier.commands.filter { !$0.hasPrefix("git status") },
+                       ["git checkout -- 'mac/Tests/A.swift' 'Makefile'"])
     }
 
     /// `--` and quoting matter: without them a path that looks like a revision
@@ -201,7 +202,66 @@ final class RepairScopeGuardTests: XCTestCase {
         let guardUnderTest = GitRepairScopeGuard(verifier: verifier)
         _ = await guardUnderTest.revert(paths: ["weird dir/it's.swift"], gitRoot: gitRoot)
 
-        XCTAssertEqual(verifier.commands, [#"git checkout -- 'weird dir/it'\''s.swift'"#])
+        XCTAssertEqual(verifier.commands, [
+            #"git status --porcelain --untracked-files=all -- 'weird dir/it'\''s.swift'"#,
+            #"git checkout -- 'weird dir/it'\''s.swift'"#
+        ])
+    }
+
+    /// `git checkout --` fails on an untracked path (and aborts the tracked
+    /// ones beside it), so a test file the repair ADDED must go through
+    /// `git clean` instead.
+    func testRevertCleansUntrackedViolationsAndChecksOutTrackedOnes() async {
+        let verifier = ScriptedVerifier(statusOutputs: [
+            status(["?? tests/conftest.py", " M Makefile"])
+        ])
+        let revertError = await GitRepairScopeGuard(verifier: verifier)
+            .revert(paths: ["tests/conftest.py", "Makefile"], gitRoot: gitRoot)
+        XCTAssertNil(revertError)
+        XCTAssertEqual(verifier.commands.filter { !$0.hasPrefix("git status") }, [
+            "git checkout -- 'Makefile'",
+            "git clean -f -- 'tests/conftest.py'"
+        ])
+    }
+
+    /// End to end against a real repository: an added test file and an edited
+    /// tracked one are both reverted.
+    func testRevertAgainstARealRepoRemovesAddedAndRestoresEditedFiles() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scope-guard-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("tests"),
+                                                withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func git(_ args: String...) throws {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.arguments = ["-C", root.path] + args
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            try p.run()
+            p.waitUntilExit()
+            XCTAssertEqual(p.terminationStatus, 0, "git \(args)")
+        }
+        let makefile = root.appendingPathComponent("Makefile")
+        try "test:\n\ttrue\n".write(to: makefile, atomically: true, encoding: .utf8)
+        try git("init", "-q")
+        try git("add", "Makefile")
+        try git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init")
+
+        let guardUnderTest = GitRepairScopeGuard()
+        let before = await guardUnderTest.snapshot(gitRoot: root)
+        try "rigged\n".write(to: makefile, atomically: true, encoding: .utf8)
+        let conftest = root.appendingPathComponent("tests/conftest.py")
+        try "import pytest\n".write(to: conftest, atomically: true, encoding: .utf8)
+
+        let check = await guardUnderTest.check(since: before, gitRoot: root, protectedGlobs: globs)
+        guard case .violated(let paths, _) = check else {
+            return XCTFail("expected a violation, got \(check)")
+        }
+        let revertError = await guardUnderTest.revert(paths: paths, gitRoot: root)
+        XCTAssertNil(revertError)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: conftest.path))
+        XCTAssertEqual(try String(contentsOf: makefile, encoding: .utf8), "test:\n\ttrue\n")
     }
 
     func testRevertWithNoPathsRunsNothing() async {
