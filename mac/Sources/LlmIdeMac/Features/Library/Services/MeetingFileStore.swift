@@ -110,6 +110,20 @@ final class MeetingFileStore {
         return Handle(id: id, url: url, fileHandle: handle, frontmatter: fm)
     }
 
+    /// Abandon an in-flight partial: close its handle and delete the
+    /// `.partial.md`. For a recording that captured nothing — there is no
+    /// transcript to keep, and a leftover partial would surface as an empty
+    /// meeting in the launch-time recovery prompt. Best-effort; failures are
+    /// logged.
+    func discardPartial(handle: Handle) {
+        try? handle.close()
+        do {
+            try FileManager.default.removeItem(at: handle.url)
+        } catch {
+            Self.log.error("discard partial failed \(handle.url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Recovery entry point.  Opens the .partial.md at `url`, reads its
     /// frontmatter, and finalizes it as if it were the orchestrator's
     /// in-memory handle.  Used by the launch-time recovery prompt for
@@ -213,11 +227,30 @@ final class MeetingFileStore {
 
     private func finalFilename(startedAt: Date, title: String, id: String) -> String {
         let slug = slugify(title.isEmpty ? "untitled" : title)
-        // Append the first 8 chars of the session id to prevent collisions
-        // when two meetings on the same day share the same title.
-        // e.g. 2026-05-28-standup-m1a2b3c4.md
-        let idSuffix = String(id.prefix(8))
-        return "\(AppDateFormatter.dateOnlyLocal(startedAt))-\(slug)-\(idSuffix).md"
+        // Append an 8-char id disambiguator to prevent collisions when two
+        // meetings on the same day share the same title.
+        // e.g. 2026-05-28-standup-1a2b3c4d.md
+        return "\(AppDateFormatter.dateOnlyLocal(startedAt))-\(slug)-\(Self.idDisambiguator(id)).md"
+    }
+
+    /// 8-char filename disambiguator for a meeting id. A UUID keeps its first
+    /// 8 chars (existing filenames are unchanged). Any other id shape gets an
+    /// 8-hex stable hash of the WHOLE id instead: prefixes are shared by
+    /// construction there — every Slack id is `slack-<channel>-<ts>`, so its
+    /// prefix was always `slack-C0`, and the capture ids `m-<time>-<rand>`
+    /// share their leading time digits — which made the guard inert and let
+    /// `finalize`'s replace overwrite another meeting's file.
+    static func idDisambiguator(_ id: String) -> String {
+        if UUID(uuidString: id) != nil { return String(id.prefix(8)) }
+        // FNV-1a (64-bit), folded to 32 bits: stable across launches, unlike
+        // `Hasher`, so a re-finalized meeting keeps its filename.
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in id.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        let folded = UInt32(truncatingIfNeeded: hash ^ (hash >> 32))
+        return String(format: "%08x", folded)
     }
 
     private func slugify(_ s: String) -> String {

@@ -357,18 +357,11 @@ struct AppShell: View {
         // layouts.
         .environment(shell)
         .environment(itemStore)
-        .task {
-            guard let env = appEnv else { return }
-            env.startWatching {
-                // startWatching already ran fullScan() to update the SQLite index
-                // (don't scan again here — that was a double scan per fs event).
-                // Just post the notification on the main thread so SwiftUI observers
-                // (LibraryView etc.) receive it on the right queue.
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
-                }
-            }
-        }
+        // The folder watcher is started by initEnv() for EVERY AppEnvironment
+        // it creates (see startWatching(_:)). It used to start here, in a
+        // one-shot .task that ran once on appear — often before initEnv had
+        // built the env, and never for the env rebuilt on a project switch —
+        // so the Library index stopped live-updating.
         // Sync the NOTES section from AppShell so every view that reads
         // LibraryItemStore (LibraryView, FileTreePanel in ReviewView, etc.)
         // always reflects the current llm-doc/ folder — not just the tab
@@ -783,7 +776,11 @@ struct AppShell: View {
             // unscaffolded and harder to gitignore.
             let indexRoot = projectStore.activeProject
                 .map { URL(fileURLWithPath: $0.localPath) }
-            self.appEnv = try AppEnvironment(indexRootURL: indexRoot)
+            let env = try AppEnvironment(indexRootURL: indexRoot)
+            // Never leave a replaced env's kqueue watcher running.
+            appEnv?.indexer.stopWatching()
+            self.appEnv = env
+            startWatching(env)
             FeatureCatalog.setAutoCodeEnvironment(self.appEnv)
             FeatureCatalog.setAutoCodeProjectNotes(itemStore)
             // Populate the NOTES and MEETINGS sections from the bound project's
@@ -794,6 +791,21 @@ struct AppShell: View {
             Task { await itemStore.rescanAsync() }
         } catch {
             self.envInitError = error.localizedDescription
+        }
+    }
+
+    /// Start `env`'s folder watcher. Called for every env `initEnv()` builds —
+    /// first open, Retry, and the rebuild after a project switch — so the
+    /// Library index keeps live-updating whichever project is open.
+    private func startWatching(_ env: AppEnvironment) {
+        env.startWatching {
+            // startWatching already ran fullScan() to update the SQLite index
+            // (don't scan again here — that was a double scan per fs event).
+            // Just post the notification on the main thread so SwiftUI observers
+            // (LibraryView etc.) receive it on the right queue.
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
+            }
         }
     }
 
