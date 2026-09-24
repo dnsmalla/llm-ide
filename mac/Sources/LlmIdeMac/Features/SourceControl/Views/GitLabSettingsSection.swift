@@ -487,18 +487,20 @@ struct GitLabSettingsSection: View {
         if raw.hasPrefix("http"), let parsedURL = URL(string: raw),
            let scheme = parsedURL.scheme, let host = parsedURL.host {
             let candidateBase = "\(scheme)://\(host)"
-            // Validate BEFORE persisting — writing first and checking later
-            // meant a pasted http:// URL corrupted the stored Instance URL
-            // even though the request that follows correctly refuses to
-            // send it, leaving every other GitLab feature broken until the
-            // user manually repairs the field.
+            // The PAT is for the configured instance only: a pasted link
+            // must be on that host. This used to REPOINT Instance URL to the
+            // link's host (before the request even succeeded), so a typo'd
+            // or foreign URL both received the PAT and broke every other
+            // GitLab call until the field was repaired by hand.
+            guard let configuredHost = URL(string: apiBase)?.host,
+                  host.lowercased() == configuredHost.lowercased() else {
+                resolveErrors[p.id] = "This link is on \(host); the Instance URL is \(apiBase). Change Instance URL first if that is the right server."
+                return
+            }
             guard GitLabClient.isSafeBaseURL(candidateBase) else {
                 resolveErrors[p.id] = "GitLab host must use https (or be loopback)."
                 return
             }
-            apiBase = candidateBase
-            // Also update the stored base URL to match the project's host
-            config.gitLabBaseURL = apiBase
             path = parsedURL.path
         }
 

@@ -124,12 +124,18 @@ final class GitLabClient {
             return try await getProject(id: numId)
         }
 
-        var apiBase = config.gitLabBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiBase = config.gitLabBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         var path = raw
 
-        if raw.hasPrefix("http"), let u = URL(string: raw),
-           let scheme = u.scheme, let host = u.host {
-            apiBase = "\(scheme)://\(host)"
+        if raw.hasPrefix("http"), let u = URL(string: raw), let host = u.host {
+            // The PAT belongs to the configured instance ONLY. A pasted URL
+            // used to redirect the whole request (PAT included) to whatever
+            // https host it named; now it may only point at the configured
+            // instance, and the path is taken from it.
+            guard let configuredHost = URL(string: apiBase)?.host,
+                  host.lowercased() == configuredHost.lowercased() else {
+                throw GitLabError.badURL("\(raw) is not on the configured GitLab instance (\(apiBase)). Change Instance URL first.")
+            }
             path = u.path
         }
 
