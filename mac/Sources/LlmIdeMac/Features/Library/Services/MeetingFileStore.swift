@@ -206,6 +206,27 @@ final class MeetingFileStore {
         try utf8Data(final).write(to: url, options: .atomic)
     }
 
+    /// Record a failed summary in the frontmatter ONLY — the body (and its
+    /// transcript) is left byte-for-byte. The Library row then shows the
+    /// failure instead of a silently summary-less meeting; Re-summarize
+    /// overwrites it through `writeSummary`.
+    func markSummaryFailed(in url: URL, at date: Date = Date()) throws {
+        let contents = try String(contentsOf: url, encoding: .utf8)
+        guard let split = FrontmatterCoder.split(file: contents) else {
+            throw NSError(domain: "MeetingFileStore", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Missing frontmatter"])
+        }
+        var fm = try FrontmatterCoder.decode(split.yaml)
+        fm.gist = Self.summaryFailedGist
+        fm.summaryModel = "failed"
+        fm.summaryGeneratedAt = date
+        let body = String(contents[split.bodyStart...])
+        let newYaml = try FrontmatterCoder.encode(fm)
+        try utf8Data("---\n\(newYaml)---\n\(body)").write(to: url, options: .atomic)
+    }
+
+    static let summaryFailedGist = "⚠︎ Summary failed — open the meeting and use Re-summarize"
+
     // MARK: helpers
 
     private func monthFolder(for date: Date) -> URL {

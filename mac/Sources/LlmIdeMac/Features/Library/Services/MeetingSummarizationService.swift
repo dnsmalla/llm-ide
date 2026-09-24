@@ -58,14 +58,20 @@ enum MeetingSummarizationService {
             }
             summary = s
         } catch {
-            // Write NOTHING on failure. This path used to store the whole
+            // Write no NOTE on failure. This path used to store the whole
             // transcript as the "summary" (into the raw file and as the .docx
             // and .md notes), and the note it left behind made `hasNote`
-            // suppress every later auto-summary — the meeting was stuck with
-            // a transcript-as-summary until a manual Re-summarize. With no
-            // note written, the next run retries; the raw transcript is
-            // untouched and Re-summarize still works.
-            sumLog.error("summarize failed — no note written, will retry: \(error.localizedDescription, privacy: .public)")
+            // suppress every later summary — the meeting was stuck with a
+            // transcript-as-summary. Nothing retries automatically, so the
+            // failure is recorded in the raw file's frontmatter (body and
+            // transcript untouched) where the Library row shows it, and
+            // Re-summarize replaces it.
+            sumLog.error("summarize failed — no note written: \(error.localizedDescription, privacy: .public)")
+            do {
+                try MeetingFileStore(root: root).markSummaryFailed(in: transcriptFileURL)
+            } catch {
+                sumLog.error("markSummaryFailed failed: \(error.localizedDescription, privacy: .public)")
+            }
             return MeetingSummary(
                 gist: title,
                 tldr: [],

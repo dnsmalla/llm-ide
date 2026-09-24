@@ -33,7 +33,15 @@ final class MeetingSummarizationFallbackTests: XCTestCase {
         XCTAssertEqual(summary.model, "unavailable")
         let hasNote = await MeetingNoteWriter(repoRoot: projectRoot).hasNote(forRawFile: rawFile)
         XCTAssertFalse(hasNote, "no note, so the next auto-summary still runs")
-        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), before,
+        // The body (transcript) is byte-for-byte unchanged; only the
+        // frontmatter records the failure so the Library row can show it.
+        let after = try String(contentsOf: url, encoding: .utf8)
+        let bodyBefore = try XCTUnwrap(FrontmatterCoder.split(file: before)).bodyStart
+        let bodyAfter = try XCTUnwrap(FrontmatterCoder.split(file: after)).bodyStart
+        XCTAssertEqual(String(after[bodyAfter...]), String(before[bodyBefore...]),
                        "the transcript file gains no transcript-as-summary section")
+        let fm = try FrontmatterCoder.decode(try XCTUnwrap(FrontmatterCoder.split(file: after)).yaml)
+        XCTAssertEqual(fm.summaryModel, "failed")
+        XCTAssertEqual(fm.gist, MeetingFileStore.summaryFailedGist)
     }
 }
