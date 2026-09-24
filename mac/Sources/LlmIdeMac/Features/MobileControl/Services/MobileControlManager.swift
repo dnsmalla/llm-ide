@@ -439,6 +439,7 @@ final class MobileControlManager {
             } else {
                 let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
                 append(.stderr, "llmide_chat decode failed: \(preview)")
+                replyDecodeFailure(data, what: "chat request")
             }
         case MobileProtocol.Tag.llmIdeCancel:
             handleLlmIdeCancel(data: data)
@@ -447,6 +448,7 @@ final class MobileControlManager {
                 Task { await handleApprovalAnswer(answer) }
             } else {
                 append(.stderr, "approval_answer decode failed")
+                replyDecodeFailure(data, what: "approval answer")
             }
         case MobileProtocol.Tag.llmIdeChatHistoryList:
             Task { await handleLlmIdeChatHistoryList(data: data) }
@@ -596,6 +598,7 @@ final class MobileControlManager {
             } else {
                 let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
                 append(.stderr, "explore_chat decode failed: \(preview)")
+                replyDecodeFailure(data, what: "explorer chat request")
             }
         case MobileProtocol.Tag.exploreCancel:
             handleExploreCancel(data: data)
@@ -1044,6 +1047,18 @@ final class MobileControlManager {
     /// (Auto Task CLI, code-assist streams) — heartbeats bypass MainActor and
     /// were the only reliable round-trip when the main queue was busy.
     // internal: shared with the Mobile*Bridge classes (feature folders)
+    /// A frame that names a command but does not decode (a version skew
+    /// between phone and Mac, a field this build does not know) used to be
+    /// logged and dropped — and the phone, which has no per-command timeout,
+    /// showed its placeholder spinning until the connection died. Answer the
+    /// command with an error so it resolves.
+    private func replyDecodeFailure(_ data: Data, what: String) {
+        struct Envelope: Decodable { let commandId: String? }
+        guard let id = (try? decoder.decode(Envelope.self, from: data))?.commandId, !id.isEmpty else { return }
+        reply(CommandError(commandId: id,
+                           message: "The Mac could not read this \(what). Update LLM-IDE on both devices to matching versions and try again."))
+    }
+
     func reply(_ message: some Encodable) {
         guard let server else {
             append(.stderr, "Mobile reply dropped — WebSocket server not running")
