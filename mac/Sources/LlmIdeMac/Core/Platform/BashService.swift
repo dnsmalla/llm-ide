@@ -463,13 +463,16 @@ private final class ProcessBox: @unchecked Sendable {
     /// the shell itself already exited — the grandchildren are the point.
     func forceKill() {
         lock.lock(); defer { lock.unlock() }
-        if let p = process, p.isRunning {
-            let pid = p.processIdentifier
-            if pid > 0 {
-                tree.formUnion(ProcessTree.descendants(of: pid))
-                kill(pid, SIGKILL)
-            }
+        var roots = tree
+        if let p = process, p.isRunning, p.processIdentifier > 0 {
+            roots.insert(p.processIdentifier)
+            kill(p.processIdentifier, SIGKILL)
         }
+        // Re-walk from EVERY known member, not just the shell: a grandchild
+        // that survived SIGTERM (re-parented to launchd once the shell died)
+        // may have spawned more processes during the grace period, and those
+        // are only reachable through it.
+        tree.formUnion(ProcessTree.descendants(ofAny: roots))
         for child in tree { kill(child, SIGKILL) }
     }
 }
@@ -480,6 +483,12 @@ enum ProcessTree {
     /// `sysctl(KERN_PROC_ALL)` snapshot. Empty on any sysctl failure — the
     /// caller still signals `root` itself.
     static func descendants(of root: pid_t) -> Set<pid_t> {
+        descendants(ofAny: [root])
+    }
+
+    /// Descendants of any of `roots` (excluding the roots), from one snapshot.
+    static func descendants(ofAny roots: Set<pid_t>) -> Set<pid_t> {
+        guard !roots.isEmpty else { return [] }
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
         var size = 0
         guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return [] }
@@ -493,9 +502,9 @@ enum ProcessTree {
             children[proc.kp_eproc.e_ppid, default: []].append(proc.kp_proc.p_pid)
         }
         var found: Set<pid_t> = []
-        var frontier = [root]
+        var frontier = Array(roots)
         while let next = frontier.popLast() {
-            for child in children[next] ?? [] where child != root && found.insert(child).inserted {
+            for child in children[next] ?? [] where !roots.contains(child) && found.insert(child).inserted {
                 frontier.append(child)
             }
         }
