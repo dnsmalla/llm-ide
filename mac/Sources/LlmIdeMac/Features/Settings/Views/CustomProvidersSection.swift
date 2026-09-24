@@ -6,6 +6,7 @@ struct CustomProvidersSection: View {
     @State private var providers = CustomProvider.loadAll()
     @State private var showAddSheet = false
     @State private var editingProvider: CustomProvider?
+    @State private var pendingDelete: CustomProvider?
 
     var body: some View {
         SettingsSectionCard(icon: "atom", title: "Custom Providers") {
@@ -32,7 +33,7 @@ struct CustomProvidersSection: View {
                             ProviderRow(
                                 provider: provider,
                                 onEdit: { editingProvider = $0 },
-                                onDelete: { deleteProvider($0) },
+                                onDelete: { pendingDelete = $0 },
                                 onToggle: { toggleProvider($0) }
                             )
                         }
@@ -43,6 +44,20 @@ struct CustomProvidersSection: View {
                         .controlSize(.small)
                 }
             }
+        }
+        .confirmationDialog(
+            "Delete \(pendingDelete?.name ?? "provider")?",
+            isPresented: Binding(get: { pendingDelete != nil },
+                                 set: { if !$0 { pendingDelete = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let p = pendingDelete { deleteProvider(p) }
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text("Its stored API key is removed from the server vault too.")
         }
         .sheet(isPresented: $showAddSheet) {
             AddProviderSheet(
@@ -83,6 +98,12 @@ struct CustomProvidersSection: View {
         provider.delete()
         providers = CustomProvider.loadAll()
         syncAll()
+        // The vault key outlived the provider before — an orphaned secret
+        // nothing listed and nothing could clear.
+        let vaultKey = provider.apiKey
+        if !vaultKey.isEmpty {
+            Task { try? await api.setSecret(key: vaultKey, value: "") }
+        }
     }
 
     private func toggleProvider(_ provider: CustomProvider) {
@@ -344,10 +365,21 @@ private struct AddProviderSheet: View {
     private func save() async {
         isSaving = true
         defer { isSaving = false }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAnthropicURL = anthropicBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { error = "Enter a name."; return }
+        guard Self.isHTTPURL(trimmedBaseURL) else {
+            error = "API Base URL must be an http(s) URL, e.g. https://api.example.com/v1"
+            return
+        }
+        guard trimmedAnthropicURL.isEmpty || Self.isHTTPURL(trimmedAnthropicURL) else {
+            error = "Anthropic base URL must be an http(s) URL."
+            return
+        }
         var newProvider = CustomProvider(
-            name: name,
-            baseURL: baseURL,
+            name: trimmedName,
+            baseURL: trimmedBaseURL,
             apiKey: "",   // set below from the stable id
             models: models,
             isOpenAICompatible: isOpenAICompatible,
@@ -361,13 +393,26 @@ private struct AddProviderSheet: View {
         // survives renames, avoids charset/collision bugs, and matches the
         // backend allowlist regex /^custom\.[a-z0-9-]+\.apiKey$/.
         newProvider.apiKey = "custom.\(newProvider.id.lowercased()).apiKey"
-        // Store the key in the server vault first (best-effort — a network
-        // failure must not block persisting the provider itself).
+        // Store the key in the server vault first. A failure keeps the sheet
+        // open with the key still typed in: `try?` here closed the sheet as
+        // if saved, and the provider then failed every request with no key.
         let trimmedKey = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedKey.isEmpty {
-            try? await api.setSecret(key: newProvider.apiKey, value: trimmedKey)
+            do {
+                try await api.setSecret(key: newProvider.apiKey, value: trimmedKey)
+            } catch {
+                self.error = "Couldn't store the API key: \(error.localizedDescription)"
+                return
+            }
         }
         onSave(newProvider)
+    }
+
+    static func isHTTPURL(_ s: String) -> Bool {
+        guard let u = URL(string: s), let scheme = u.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = u.host, !host.isEmpty else { return false }
+        return true
     }
 }
 
