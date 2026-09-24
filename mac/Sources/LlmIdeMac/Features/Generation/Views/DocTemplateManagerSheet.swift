@@ -191,7 +191,12 @@ struct DocTemplateManagerSheet: View {
                 Button("Save") {
                     if var t = editingTemplate {
                         t.sections = t.sections.filter { !$0.isEmpty }
-                        t.rawContent = nil
+                        // Edit the headings INSIDE the existing markdown. Nulling
+                        // `rawContent` here regenerated a bare skeleton over the
+                        // user's template.md and wiped every instruction in it.
+                        if let raw = t.rawContent, !raw.isEmpty {
+                            t.rawContent = DocTemplate.rewriting(raw: raw, name: t.name, sections: t.sections)
+                        }
                         store.update(t)
                         editingTemplate = nil
                     }
