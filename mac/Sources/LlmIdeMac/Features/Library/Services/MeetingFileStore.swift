@@ -84,7 +84,19 @@ final class MeetingFileStore {
                        platform: String, language: String) throws -> Handle {
         let folder = monthFolder(for: startedAt)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(partialFilename(startedAt: startedAt, slug: "untitled"))
+        // Named with the session id: the old `<date-HHmm>-untitled.partial.md`
+        // was unique only per MINUTE, and the `.atomic` write below truncates
+        // an existing file — so a second capture started within the same
+        // minute (Accessibility re-granted after a stop, a Chrome session
+        // finalizing while a desktop capture starts) silently overwrote the
+        // first one's transcript and left its recovery record pointing at the
+        // second session's file.
+        var url = folder.appendingPathComponent(partialFilename(startedAt: startedAt, slug: "untitled", id: id))
+        var n = 2
+        while FileManager.default.fileExists(atPath: url.path) {
+            url = folder.appendingPathComponent(partialFilename(startedAt: startedAt, slug: "untitled-\(n)", id: id))
+            n += 1
+        }
 
         let fm = MeetingFrontmatter(
             id: id, title: "", startedAt: startedAt,
@@ -194,8 +206,9 @@ final class MeetingFileStore {
             .appendingPathComponent(String(format: "%02d", comps.month ?? 0), isDirectory: true)
     }
 
-    private func partialFilename(startedAt: Date, slug: String) -> String {
-        return "\(AppDateFormatter.dateHourMinuteLocal(startedAt))-\(slug).partial.md"
+    private func partialFilename(startedAt: Date, slug: String, id: String) -> String {
+        let idSuffix = String(id.prefix(8))
+        return "\(AppDateFormatter.dateHourMinuteLocal(startedAt))-\(slug)-\(idSuffix).partial.md"
     }
 
     private func finalFilename(startedAt: Date, title: String, id: String) -> String {
