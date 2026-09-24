@@ -153,9 +153,6 @@ enum LoopEngineConfigStore {
             case let .updated(from, to):
                 NSLog("LoopEngineConfigStore: [%@ / %@] test command re-detected, updating \"%@\" -> \"%@\"",
                       change.loopName, change.stageName, from, to)
-            case let .removed(command):
-                NSLog("LoopEngineConfigStore: [%@ / %@] test command \"%@\" no longer detected — stage removed",
-                      change.loopName, change.stageName, command)
             }
         }
         // Only where there is a file to write the result to — see the helper.

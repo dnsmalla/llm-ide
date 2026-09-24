@@ -333,4 +333,35 @@ final class LoopStageDetectorTests: XCTestCase {
         XCTAssertEqual(skills?.enabled, false)
         XCTAssertEqual(skills?.isDefault, true)
     }
+
+    // MARK: - Revalidation on a nil detection
+
+    /// A transient nil detection (package.json mid-edit, another branch
+    /// checked out) must not drop a pinned test stage — the caller persists
+    /// the result, so a removal lost the user's settings on that stage for
+    /// good. `tempDir` has no test markers, so detection is nil here.
+    func testRevalidationKeepsPinnedTestStageWhenDetectionFindsNothing() {
+        var stage = LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "npm test",
+                              order: 0, isDefault: true, defaultKey: "test", detectedCommand: "npm test")
+        stage.enabled = false   // a user setting that removal used to lose
+        let loop = LoopDefinition(name: "Test", defaultKey: LoopDefaultLoopKey.test,
+                                  config: LoopEngineConfig(stages: [stage]))
+        let (loops, changes) = LoopStageDetector.revalidatingTestStages(
+            in: [loop], gitRoot: tempDir, eligibleStageIDs: ["t1"])
+        XCTAssertEqual(loops, [loop])
+        XCTAssertTrue(changes.isEmpty)
+    }
+
+    /// A DIFFERENT detected command still updates a provably untouched stage.
+    func testRevalidationStillUpdatesWhenDetectionDiffers() throws {
+        try write("Package.swift")   // detection → "swift test"
+        let stage = LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "npm test",
+                              order: 0, isDefault: true, defaultKey: "test", detectedCommand: "npm test")
+        let loop = LoopDefinition(name: "Test", defaultKey: LoopDefaultLoopKey.test,
+                                  config: LoopEngineConfig(stages: [stage]))
+        let (loops, changes) = LoopStageDetector.revalidatingTestStages(
+            in: [loop], gitRoot: tempDir, eligibleStageIDs: ["t1"])
+        XCTAssertEqual(loops.first?.config.stages.first?.command, "swift test")
+        XCTAssertEqual(changes.count, 1)
+    }
 }

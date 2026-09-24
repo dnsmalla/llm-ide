@@ -227,7 +227,7 @@ public enum LoopStageDetector {
             // `detectedCommand == nil` forever — and nil is exactly what
             // `revalidatingTestStages` reads as "unknown, not disproven",
             // which falls through to its rewrite path and, when the repo has
-            // no detectable tooling at all, to its REMOVE path. The guard
+            // no detectable tooling at all, to what was then its REMOVE path. The guard
             // therefore protected nobody in the population that exists on disk.
             var backfillProvenance = false
             if stages.contains(where: { $0.defaultKey == def.defaultKey }) {
@@ -917,8 +917,8 @@ public enum LoopStageDetector {
         public enum Kind: Equatable {
             /// The command changed because detection found a different one.
             case updated(from: String, to: String)
-            /// The stage was dropped because detection found nothing at all.
-            case removed(command: String)
+            // There is deliberately no `removed` case: a nil detection never
+            // drops a stage (see `revalidatingTestStages`).
         }
         public var loopName: String
         public var stageName: String
@@ -938,15 +938,15 @@ public enum LoopStageDetector {
     /// - a stage whose command no longer matches detection is UPDATED to the
     ///   freshly detected command (`detectedCommand` updated alongside it, so
     ///   the two stay in sync for the next pass's provenance check below);
-    /// - a stage whose tooling detection no longer finds ANYTHING is REMOVED.
-    ///   **Only the stage** — never the loop it lived in. A `LoopDefinition`
-    ///   carries its own goal, acceptance criteria, budgets, `scopeGlobs`,
-    ///   `runsOnSchedule`, and an id that `LoopRunService` keys run history by
-    ///   (`projectId::loopId`); deleting it loses all of that, and if
-    ///   detection later returns, step 3 would recreate the loop from a
-    ///   template with fresh default budgets, silently discarding whatever
-    ///   the user had tuned. `ensureDefaultLoops` step 6 already drops Primary
-    ///   from a stage-less loop, so nothing dead runs from leaving it be.
+    /// - a stage for which detection finds NOTHING is left exactly as it is.
+    ///   Nil is not evidence the tooling is gone: `package.json` mid-edit, a
+    ///   checkout of another branch, or a half-finished clone all read as nil
+    ///   for a moment. This pass used to REMOVE the stage on nil, and the
+    ///   caller persisted that to `system/loop.json` — so one transient miss
+    ///   permanently lost every setting on the stage (enabled flag, order,
+    ///   anything else the user tuned). A stage whose command really is dead
+    ///   now fails visibly when it runs, which the user can act on; a silent
+    ///   deletion they could not.
     ///
     /// **Eligibility, not just shape.** `isEligible` requires BOTH `isDefault`
     /// scoping AND stage-id membership in `eligibleStageIDs` — the set of
@@ -972,7 +972,7 @@ public enum LoopStageDetector {
     /// leaves the stage alone from then on — permanently, with no
     /// "detach from default" UI action needed. A `detectedCommand == nil`
     /// stage (saved before this field existed) has no such proof either way;
-    /// it is still eligible for update/removal, but the caller in
+    /// it is still eligible for update, but the caller in
     /// `LoopEngineConfigStore` MUST log it — an unprovable, unannounced
     /// rewrite of a committed file is the failure mode this whole
     /// mechanism exists to end.
@@ -1009,13 +1009,9 @@ public enum LoopStageDetector {
                     continue
                 }
                 guard let command = stage.command else { kept.append(stage); continue }
-                guard let detected else {
-                    changes.append(RevalidationChange(loopName: loop.name, stageName: stage.name,
-                                                       kind: .removed(command: command)))
-                    mutated = true
-                    continue   // drop the stage — loop itself is never removed
-                }
-                guard detected != command else { kept.append(stage); continue }
+                // Nil detection is never a reason to drop or change a stage —
+                // see the doc comment. Only a DIFFERENT detected command acts.
+                guard let detected, detected != command else { kept.append(stage); continue }
                 var updatedStage = stage
                 updatedStage.command = detected
                 updatedStage.detectedCommand = detected
