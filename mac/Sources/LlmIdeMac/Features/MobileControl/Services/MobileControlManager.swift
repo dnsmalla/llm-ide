@@ -151,7 +151,8 @@ final class MobileControlManager {
     /// Command ids with a registered, not-yet-finished task (tests).
     var mobileInflightCommandIds: Set<String> { Set(mobileInflightTasks.keys) }
     /// Commands the iPhone cancelled — late HTTP replies must not persist or stream.
-    private var mobileCancelledCommandIds = Set<String>()
+    // private(set), not private: pinned by MobileInflightTaskTests
+    private(set) var mobileCancelledCommandIds = Set<String>()
 
     /// Shared decoder reused across every `handleInbound` case. `JSONDecoder`
     /// is thread-safe for independent `decode(_:)` calls and this manager is
@@ -1145,7 +1146,10 @@ final class MobileControlManager {
         // The phone is gone, so these turns end for it, not "on the Mac":
         // mark them cancelled so their catch paths send nothing
         // (`notifyStoppedOnMac`) to a phone that reconnects quickly.
-        mobileCancelledCommandIds = Set(mobileInflightTasks.keys)
+        // Union, not assignment: a command the phone already cancelled is out
+        // of `mobileInflightTasks` but its task may still be finishing, and
+        // it must keep its flag until that task's own finish prunes it.
+        mobileCancelledCommandIds.formUnion(mobileInflightTasks.keys)
         for entry in mobileInflightTasks.values { entry.task.cancel() }
         mobileInflightTasks.removeAll()
     }
@@ -1343,13 +1347,27 @@ final class MobileControlManager {
             return
         }
         mobileInflightTasks.removeValue(forKey: commandId)
+        // The command is over, so its cancelled flag has served its purpose
+        // (the catch paths already consulted it). Without this the set grew
+        // by one id per phone-side cancel / disconnect for the whole session.
+        // Pruned on a later main-actor turn so progress hops the turn already
+        // queued still see the flag and stay silent.
+        Task { @MainActor [weak self] in
+            guard let self, self.mobileInflightTasks[commandId] == nil else { return }
+            self.mobileCancelledCommandIds.remove(commandId)
+        }
     }
 
     // internal: pinned by MobileInflightTaskTests
     func cancelMobileInflightTask(commandId: String) {
-        mobileCancelledCommandIds.insert(commandId)
-        mobileInflightTasks[commandId]?.task.cancel()
-        mobileInflightTasks.removeValue(forKey: commandId)
+        // Flag only a command that is actually running: its task's finish
+        // prunes the flag again. An id with no task (already finished, or not
+        // yet registered — registration clears the flag anyway) would never be
+        // pruned and only grow the set.
+        if let entry = mobileInflightTasks.removeValue(forKey: commandId) {
+            mobileCancelledCommandIds.insert(commandId)
+            entry.task.cancel()
+        }
         reply(CommandError(commandId: commandId, message: "Cancelled"))
     }
 
