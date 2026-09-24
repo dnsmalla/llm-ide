@@ -175,6 +175,17 @@ const CUSTOM_PROVIDER_KEY_RE = /^custom\.[a-z0-9-]+\.apiKey$/;
 // registry's own SLUG_RE shape.
 const MCP_CREDENTIAL_KEY_RE = /^mcp\.[a-z][a-z0-9-]{1,40}\.[a-zA-Z]{1,32}$/;
 
+/**
+ * Keys a user may set through the generic `POST /auth/me/secrets`: the fixed
+ * list plus the per-provider `custom.<id>.apiKey` pattern (the Mac's custom
+ * provider sheet). The route checked the fixed list alone, so every custom
+ * provider key was refused. MCP credentials stay out: their own connect flow
+ * writes them.
+ */
+export function isUserSettableVaultKey(key) {
+  return typeof key === 'string' && (ALLOWED_KEYS.has(key) || CUSTOM_PROVIDER_KEY_RE.test(key));
+}
+
 function ensureAllowed(key) {
   // This one stays in the open: callers (auth-routes) already enumerate
   // the allowed keys in the same response when this fires, so the name
