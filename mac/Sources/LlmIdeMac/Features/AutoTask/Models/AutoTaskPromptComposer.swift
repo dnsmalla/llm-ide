@@ -36,13 +36,14 @@ enum AutoTaskPromptComposer {
     ///   - projectRoot: absolute project root, used to resolve the relative
     ///     paths in `config`. When nil the paths are passed through as written.
     ///   - writesFiles: whether this task's file changes are kept. False for
-    ///     every review task — `runCLI(persistChanges: false)` reverts the
-    ///     working tree afterwards — and the output path is then reported as a
-    ///     destination to describe, never one to write to. Telling a model to
-    ///     write files that are deleted seconds later wastes the whole run, and
-    ///     for an output path outside the git root (the clone-into-project
-    ///     layout, where `projectRoot != gitRoot`) the revert would not even
-    ///     reach them, quietly breaking the read-only contract.
+    ///     every review task — `runCLI(persistChanges: false)` runs it in a
+    ///     throwaway worktree that is dropped afterwards — and the output path
+    ///     is then reported as a destination to describe, never one to write
+    ///     to. Telling a model to write files that vanish seconds later wastes
+    ///     the whole run, and for an output path outside the git root (the
+    ///     clone-into-project layout, where `projectRoot != gitRoot`) the
+    ///     worktree would not even contain them, quietly breaking the
+    ///     read-only contract.
     /// - Returns: the prompt to run. Never empty when `body` is non-empty.
     static func compose(body: String, config: AutoTaskConfig, projectRoot: URL?,
                         writesFiles: Bool) -> String {

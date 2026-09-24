@@ -328,8 +328,8 @@ final class AutoCodeUpdateService: ObservableObject {
     /// no-op the user only discovers in the log.
     ///
     /// `writesFiles` must match the `persistChanges:` the caller passes to
-    /// `runCLI` — it is what stops a review task being told to write files its
-    /// own post-run revert will delete.
+    /// `runCLI` — it is what stops a review task being told to write files
+    /// that vanish with its throwaway worktree.
     func composedPrompt(taskId: String, ownPrompt: String, projectRoot: String?,
                         writesFiles: Bool) -> String {
         let taskConfig = taskConfigs.config(for: taskId)
