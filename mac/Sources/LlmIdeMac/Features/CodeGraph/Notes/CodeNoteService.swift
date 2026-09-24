@@ -40,10 +40,15 @@ public final class CodeNoteService: ObservableObject {
     /// skeleton and no agent is invoked.
     private let cliExecutable: URL?
 
-    /// Guards against overlapping runs (a manual click racing the auto-updater,
-    /// or two rapid clicks). Both would write the same scan-cache / notes
-    /// concurrently. @MainActor-isolated, so the check + set is atomic.
-    private var isRunning = false
+    /// The newest run on this instance and the repo it scans. Guards against
+    /// overlapping runs of the SAME repo (two rapid clicks) — a different repo
+    /// may start while an older, cancelled scan is still unwinding: a Bool
+    /// "running" flag made Generate on the newly-switched project return
+    /// `.busy` (and do nothing) until the previous project's scan finished.
+    /// Only the newest run writes `progress` / `graph`. @MainActor-isolated,
+    /// so the check + set is atomic.
+    private var currentRun: UUID?
+    private var runningPath: String?
 
     /// Cross-INSTANCE guard keyed by repo path. UAGraphView owns its own
     /// CodeNoteService and GraphAutoUpdater owns another, so the per-instance
@@ -73,7 +78,7 @@ public final class CodeNoteService: ObservableObject {
         // double-click) — returning the current graph avoids a concurrent write
         // to the same scan-cache / notes dir.
         let pathKey = repoRoot.standardizedFileURL.path
-        if isRunning || Self.inFlightPaths.contains(pathKey) {
+        if runningPath == pathKey || Self.inFlightPaths.contains(pathKey) {
             // Report contention rather than success. Returning `.success` with
             // the current (often empty) graph made every caller believe it had
             // a real scan: `KnowledgeGraphService` then wrote an all-zero
@@ -81,36 +86,43 @@ public final class CodeNoteService: ObservableObject {
             // because `$graph` never republished.
             return .failure(.busy)
         }
-        isRunning = true
+        let run = UUID()
+        currentRun = run
+        runningPath = pathKey
         Self.inFlightPaths.insert(pathKey)
-        defer { isRunning = false; Self.inFlightPaths.remove(pathKey) }
+        defer {
+            if currentRun == run { currentRun = nil; runningPath = nil }
+            Self.inFlightPaths.remove(pathKey)
+        }
+        /// A superseded run (a newer one started on another repo) stays silent.
+        func report(_ state: Progress) { if currentRun == run { progress = state } }
         guard FileManager.default.fileExists(atPath: repoRoot.path) else {
-            progress = .failed("folder not found")
+            report(.failed("folder not found"))
             return .failure(.folderNotWritable(path: repoRoot.path))
         }
         let launcher = self.launcher
         guard let engine else {
-            progress = .failed("no graph engine installed")
+            report(.failed("no graph engine installed"))
             return .failure(.noEngine)
         }
 
         // Phase 1 — scan. The engine already runs this off the main actor and
         // already excludes markdown from the graph it returns.
-        progress = .scanning
+        report(.scanning)
         let scanned: CodeScan
         do {
             scanned = try await engine.scanCode(repoRoot: repoRoot)
         } catch {
-            progress = .failed(error.localizedDescription)
+            report(.failed(error.localizedDescription))
             return .failure(.engineFailed(error.localizedDescription))
         }
-        if Task.isCancelled { progress = .idle; return .failure(.cancelled) }
+        if Task.isCancelled { report(.idle); return .failure(.cancelled) }
 
         // Phase 2 — write the deterministic notes (off the main actor).
         //
         // An engine that reports no symbol scan (a plugin may emit only a
         // graph) writes no notes rather than writing empty ones.
-        progress = .buildingGraph
+        report(.buildingGraph)
         let result = scanned.scan
         let graph = scanned.graph
         // Write notes and prune orphans ONLY from an authoritative scan.
@@ -134,13 +146,14 @@ public final class CodeNoteService: ObservableObject {
         } else {
             Self.log.info("engine reports no symbol scan — keeping existing notes rather than pruning")
         }
-        if Task.isCancelled { progress = .idle; return .failure(.cancelled) }
+        if Task.isCancelled { report(.idle); return .failure(.cancelled) }
 
-        // Publish on the main actor.
+        // Publish on the main actor — unless a newer run superseded this one.
+        guard currentRun == run else { return .failure(.cancelled) }
         self.graph = graph
-        progress = .complete(files: result.files.count,
-                             edges: graph.edges.count,
-                             reused: scanned.reusedFiles)
+        report(.complete(files: result.files.count,
+                         edges: graph.edges.count,
+                         reused: scanned.reusedFiles))
 
         // Background enrichment: only when a CLI is configured and files changed.
         // Fire-and-forget — the skeleton above is already the returned result.
