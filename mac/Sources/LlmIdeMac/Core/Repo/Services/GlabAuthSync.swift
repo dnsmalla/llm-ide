@@ -16,12 +16,15 @@ enum GlabAuthSync {
             return
         }
 
+        // `--stdin`: the token used to ride in argv (`--token <PAT>`), where
+        // `ps` shows it to every local user for the duration of the call.
         runGlab([
             "auth", "login",
             "--hostname", hostname,
-            "--token", token,
+            "--stdin",
             "--api-protocol", "https",
-        ], successMessage: "Synced GitLab token to glab for \(hostname)")
+        ], stdin: Data((token + "\n").utf8),
+        successMessage: "Synced GitLab token to glab for \(hostname)")
     }
 
     private static func logout(hostname: String) {
@@ -49,17 +52,22 @@ enum GlabAuthSync {
         return false
     }
 
-    private static func runGlab(_ args: [String], successMessage: String) {
+    private static func runGlab(_ args: [String], stdin: Data? = nil, successMessage: String) {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         proc.arguments = ["glab"] + args
-        proc.standardInput = FileHandle.nullDevice
+        let inPipe = Pipe()
+        proc.standardInput = stdin == nil ? FileHandle.nullDevice : inPipe
         let errPipe = Pipe()
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = errPipe
 
         do {
             try proc.run()
+            if let stdin {
+                inPipe.fileHandleForWriting.write(stdin)
+                try? inPipe.fileHandleForWriting.close()
+            }
             proc.waitUntilExit()
             if proc.terminationStatus == 0 {
                 log.info("\(successMessage, privacy: .public)")
