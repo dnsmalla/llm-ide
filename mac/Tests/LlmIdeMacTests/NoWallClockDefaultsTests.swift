@@ -104,15 +104,16 @@ final class NoWallClockDefaultsTests: XCTestCase {
         // git reads exactly GIT_CONFIG_COUNT pairs. The old code hardcoded COUNT=1
         // inside the credential helper, so adding the stall guard would either
         // lose the guard or hide the credential header — a silent auth failure.
-        let authed = RepoManager.gitEnv(token: "tok", backend: .github)
+        let authed = RepoManager.gitEnv(token: "tok", backend: .github, scope: "https://github.com/")
         XCTAssertEqual(authed["GIT_CONFIG_COUNT"], "3")
         let keys = (0..<3).compactMap { authed["GIT_CONFIG_KEY_\($0)"] }
-        XCTAssertEqual(Set(keys), ["http.lowSpeedLimit", "http.lowSpeedTime", "http.extraHeader"])
+        // The credential header is SCOPED to the remote's origin, never global.
+        XCTAssertEqual(Set(keys), ["http.lowSpeedLimit", "http.lowSpeedTime", "http.https://github.com/.extraHeader"])
         XCTAssertEqual(authed["GIT_TERMINAL_PROMPT"], "0")
 
         // Unauthenticated: still gets the stall guard AND prompt suppression —
         // that path used to get neither, so a private remote could hang forever.
-        let anon = RepoManager.gitEnv(token: nil, backend: .gitlab)
+        let anon = RepoManager.gitEnv(token: nil, backend: .gitlab, scope: nil)
         XCTAssertEqual(anon["GIT_CONFIG_COUNT"], "2")
         XCTAssertEqual(anon["GIT_TERMINAL_PROMPT"], "0")
         XCTAssertNil(anon.first { $0.value.contains("PRIVATE-TOKEN") }?.key,
@@ -122,7 +123,7 @@ final class NoWallClockDefaultsTests: XCTestCase {
     func testGitStallGuardIsAStallDetectorNotADeadline() {
         // ~1 KB/s sustained for 5 min. The point is that a slow-but-progressing
         // transfer is never aborted, however long it takes.
-        let env = RepoManager.gitEnv(token: nil, backend: .github)
+        let env = RepoManager.gitEnv(token: nil, backend: .github, scope: nil)
         let pairs = (0..<2).compactMap { i -> (String, String)? in
             guard let k = env["GIT_CONFIG_KEY_\(i)"], let v = env["GIT_CONFIG_VALUE_\(i)"] else { return nil }
             return (k, v)
@@ -133,10 +134,10 @@ final class NoWallClockDefaultsTests: XCTestCase {
     }
 
     func testAuthConfigPairShapePerBackend() {
-        let gitlab = RepoManager.authConfigPair(token: "t", backend: .gitlab)
-        XCTAssertEqual(gitlab.0, "http.extraHeader")
+        let gitlab = RepoManager.authConfigPair(token: "t", backend: .gitlab, scope: "https://gitlab.example.com/")
+        XCTAssertEqual(gitlab.0, "http.https://gitlab.example.com/.extraHeader")
         XCTAssertEqual(gitlab.1, "PRIVATE-TOKEN: t")
-        let github = RepoManager.authConfigPair(token: "t", backend: .github)
+        let github = RepoManager.authConfigPair(token: "t", backend: .github, scope: "https://github.com/")
         XCTAssertTrue(github.1.hasPrefix("Authorization: Basic "))
     }
 
