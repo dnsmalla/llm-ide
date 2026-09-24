@@ -70,7 +70,12 @@ final class DocGenOutputStore: ObservableObject {
         do {
             byProject = try JSONDecoder().decode([String: DocGenOutputConfig].self, from: data)
         } catch {
-            logger.error("load failed: \(error.localizedDescription, privacy: .public)")
+            // Move the unreadable file aside instead of letting the next
+            // `update()` overwrite it with only the current project — that
+            // silently deleted every other project's output settings.
+            let aside = storeURL.appendingPathExtension("corrupt-\(Int(Date().timeIntervalSince1970))")
+            try? FileManager.default.moveItem(at: storeURL, to: aside)
+            logger.error("load failed (moved to \(aside.lastPathComponent, privacy: .public)): \(error.localizedDescription, privacy: .public)")
         }
     }
 
