@@ -52,7 +52,9 @@ final class FolderIndexer: @unchecked Sendable {
             // Index existing rows by path so we can skip unchanged files: a full
             // scan otherwise re-reads + re-parses every .md on every event. With
             // mtime+size matching, an unchanged file costs one stat, not a read.
-            let existingRows = try index.list()
+            // ALL rows, tombstones included: a hidden meeting whose file is
+            // unchanged must be skipped here, not re-added as visible.
+            let existingRows = try index.listAll()
             var byPath: [String: MeetingIndex.Row] = [:]
             for r in existingRows { byPath[r.path] = r }
 
