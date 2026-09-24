@@ -104,13 +104,6 @@ extension AutoCodeUpdateService {
         return git(["checkout", branch], at: localPath).code == 0
     }
 
-    /// Create and check out a new branch in one step (`git checkout -b`).
-    /// Returns true on success. Used by `.implement` custom tasks to isolate
-    /// their commits on a branch off the (clean) base HEAD.
-    nonisolated static func checkoutNew(_ branch: String, at localPath: String) -> Bool {
-        git(["checkout", "-b", branch], at: localPath).code == 0
-    }
-
     /// Branch name for a `.implement` custom auto-task: `fix/custom-<slug>-<token>`.
     /// `token` disambiguates same-named tasks across runs (caller passes a short id/timestamp).
     nonisolated static func customImplementBranch(slug: String, token: String) -> String {
@@ -140,24 +133,99 @@ extension AutoCodeUpdateService {
         return commit.code == 0
     }
 
-    /// Restore the working tree to pristine (revert tracked edits + remove
-    /// untracked files). Only safe to call when the tree was verified clean
-    /// beforehand, so the only thing discarded is work produced since. Used to
-    /// enforce the read-only contract of review tasks — their findings go to
-    /// the log via stdout, never to the repo. `clean -fd` (no `-x`) leaves
-    /// gitignored files alone.
-    nonisolated static func discardWorkingTreeChanges(at localPath: String) {
-        let co = git(["checkout", "--", "."], at: localPath)
-        // `git clean -fd` prints "Removing <path>" for each entry it deletes.
-        let cl = git(["clean", "-fd"], at: localPath)
-        let log = Logger(subsystem: "com.llmide.macapp", category: "AutoCodeUpdateService")
-        if co.code != 0 || cl.code != 0 {
-            log.error("discardWorkingTreeChanges: revert failed (checkout=\(co.code) clean=\(cl.code)) at \(localPath, privacy: .public) — tree may remain dirty and skip later tasks")
+    // MARK: - Isolated worktrees
+    //
+    // Every prompt-based task used to run IN the user's checkout: a review
+    // task checked the tree was clean once, ran for as long as the CLI took,
+    // then `git checkout -- . && git clean -fd` to "revert its own output" —
+    // which also reverted every edit the user had made meanwhile and deleted
+    // their new files. An `.implement` task `git checkout -b`'d in the user's
+    // checkout, swept their concurrent edits into its commit with `add -A`,
+    // and left the repo on `fix/custom-…`. The CLI now runs in a temporary
+    // `git worktree` of HEAD: a review's output goes away with the worktree,
+    // an implement task commits on its branch INSIDE the worktree, and the
+    // user's working tree and current branch are never touched.
+
+    /// Where a task's worktree lives — outside the repo (a nested checkout
+    /// inside the main one would show up as untracked files) and per run.
+    nonisolated static func taskWorktreePath(token: String) -> String {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("llmide-autotask", isDirectory: true)
+            .appendingPathComponent(token, isDirectory: true).path
+    }
+
+    /// `git worktree add` at HEAD: detached for a review task, on a new
+    /// `branch` for an implement task. Returns false when git refuses (path in
+    /// use, branch exists, not a repo).
+    nonisolated static func worktreeAdd(at localPath: String, path: String, branch: String?) -> Bool {
+        try? FileManager.default.createDirectory(at: URL(fileURLWithPath: path).deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        let args = branch.map { ["worktree", "add", "-b", $0, path, "HEAD"] }
+            ?? ["worktree", "add", "--detach", path, "HEAD"]
+        guard git(args, at: localPath).code == 0 else { return false }
+        // A fresh worktree has empty submodule directories; a task that builds
+        // or reads through one (this repo's `.skills`, graph-kit) would see
+        // nothing. Best-effort — a missing/unreachable submodule must not fail
+        // the run, the CLI just works without it.
+        _ = git(["-C", path, "submodule", "update", "--init", "--recursive"], at: localPath)
+        return true
+    }
+
+    /// Why `worktreeAdd` would refuse, for the skip message: the one case a
+    /// user can hit on a working repo is a checkout with no commits yet.
+    nonisolated static func worktreeBlocker(at localPath: String) -> String? {
+        if git(["rev-parse", "--verify", "HEAD"], at: localPath).code != 0 {
+            return "the repository has no commits yet"
         }
-        let removed = cl.out.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !removed.isEmpty {
-            log.info("discardWorkingTreeChanges discarded review-task output:\n\(removed, privacy: .public)")
+        return nil
+    }
+
+    /// Drop a task's worktree and everything uncommitted in it. Tracked and
+    /// untracked output alike — that is the review task's read-only contract,
+    /// enforced without touching the main checkout. Best-effort; a leftover
+    /// directory is pruned on the next `git worktree prune`.
+    nonisolated static func worktreeRemove(at localPath: String, path: String) {
+        let r = git(["worktree", "remove", "--force", path], at: localPath)
+        if r.code != 0 {
+            try? FileManager.default.removeItem(atPath: path)
+            _ = git(["worktree", "prune"], at: localPath)
         }
+    }
+
+    /// Delete a local branch (an implement run that produced no commit leaves
+    /// an empty one behind otherwise).
+    nonisolated static func branchDelete(_ branch: String, at localPath: String) -> Bool {
+        git(["branch", "-D", branch], at: localPath).code == 0
+    }
+
+    /// `HEAD` as a commit hash, for the tests' "user's HEAD unchanged" check.
+    nonisolated static func headCommit(at localPath: String) -> String? {
+        let r = git(["rev-parse", "HEAD"], at: localPath)
+        let h = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return r.code == 0 && !h.isEmpty ? h : nil
+    }
+
+    /// Point a composed prompt at the worktree: any absolute path under the
+    /// main checkout (input/output settings, {{root}}) is rewritten, and the
+    /// CLI is told where it is, so its edits land in the isolated checkout
+    /// rather than in the user's.
+    nonisolated static func retargetPrompt(_ prompt: String, from localPath: String, to worktree: String) -> String {
+        let main = URL(fileURLWithPath: localPath).standardizedFileURL.path
+        var out = prompt
+        for variant in Set([localPath, main]) where !variant.isEmpty {
+            // Only the path itself or a path beneath it — never a sibling
+            // that merely starts with the same characters (`proj-docs/`,
+            // `proj.bak/`), which a plain prefix replace would rewrite too.
+            // A trailing "." counts only as sentence punctuation (followed by
+            // whitespace or the end), not as the start of `.bak`.
+            let pattern = NSRegularExpression.escapedPattern(for: variant) + #"(?=/|\s|$|[)"'`,;:]|\.(?:\s|$))"#
+            if let re = try? NSRegularExpression(pattern: pattern) {
+                out = re.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out),
+                                                  withTemplate: NSRegularExpression.escapedTemplate(for: worktree))
+            }
+        }
+        return "You are working in an isolated checkout of the repository at \(worktree). "
+            + "Make every change there; do not touch other copies of this repository.\n\n" + out
     }
 
     /// Stash uncommitted changes (incl. untracked) so auto-tasks can run on a
@@ -473,15 +541,9 @@ extension AutoCodeUpdateService {
         let components = cliCommand.split(separator: " ").map(String.init)
         guard let executable = components.first else { return false }
 
-        // Refuse to run on a dirty tree (would sweep the user's WIP into the commit).
-        let clean = await Task.detached { Self.isWorkingTreeClean(at: localPath) }.value
-        guard clean else {
-            let msg = "Skipped auto-task \(logSuffix): working tree has uncommitted changes. Commit or stash them first."
-            lastError = msg
-            taskErrors[logSuffix] = msg
-            log.error("auto_task_skip_dirty suffix=\(logSuffix, privacy: .public)")
-            return false
-        }
+        // No dirty-tree guard any more: the CLI runs in its own worktree of
+        // HEAD (see "Isolated worktrees"), so the user's uncommitted work is
+        // neither swept into a commit nor reverted — it is simply not there.
 
         // Auto-fallback: pick the model with remaining budget, or skip the task
         // if the whole provider chain is paused.
@@ -518,33 +580,45 @@ extension AutoCodeUpdateService {
         args += cliTool.unattendedPermissionArgs
         args += modelArgs(for: cliTool, resolvedModel: resolvedModel)
         // Per-tool prompt + unattended-approval args (claude: -p; codex: exec --yolo;
-        // gemini: --yolo -p). nil ⇒ this CLI can't run unattended (interactive editors).
-        guard let promptArgs = cliTool.nonInteractivePromptArgs(prompt) else { return false }
+        // gemini: --yolo -p). nil ⇒ this CLI can't run unattended (interactive
+        // editors). Probed on the raw prompt first so an unsupported CLI skips
+        // before any worktree exists; the worktree-targeted prompt is built below.
+        guard cliTool.nonInteractivePromptArgs(prompt) != nil else { return false }
+
+        // The isolated checkout the CLI runs in — created here, AFTER every
+        // skip guard (model paused, unsupported CLI), so a skipped run leaves
+        // nothing behind. `.implement` gets a new branch off HEAD so its
+        // commit is recoverable and reviewable; `.review` is detached and its
+        // worktree is dropped whole afterwards. Either way the user's checkout
+        // and current branch are untouched.
+        let token = Self.shortToken()
+        let worktree = Self.taskWorktreePath(token: token)
+        let implementBranch = persistChanges
+            ? Self.customImplementBranch(slug: Self.customTaskSlug(from: logSuffix), token: token)
+            : nil
+        let created = await Task.detached { Self.worktreeAdd(at: localPath, path: worktree, branch: implementBranch) }.value
+        guard created else {
+            let why = await Task.detached { Self.worktreeBlocker(at: localPath) }.value
+            let msg = "Skipped auto-task \(logSuffix): could not create an isolated worktree of \(localPath)"
+                + (why.map { " — \($0)." } ?? ".")
+            lastError = msg
+            taskErrors[logSuffix] = msg
+            log.error("auto_task_skip_worktree suffix=\(logSuffix, privacy: .public)")
+            return false
+        }
+        logStore.append(logStoreId, "Running in an isolated checkout (\(worktree)); your working tree is not touched.")
+        // Re-point the prompt at the worktree — an absolute input/output path
+        // under the main checkout would otherwise send the CLI's edits there.
+        let promptForWorktree = Self.retargetPrompt(prompt, from: localPath, to: worktree)
+        guard let promptArgs = cliTool.nonInteractivePromptArgs(promptForWorktree) else {
+            await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
+            if let implementBranch { _ = await Task.detached { Self.branchDelete(implementBranch, at: localPath) }.value }
+            return false
+        }
         args += promptArgs
 
-        // For `.implement` custom tasks (persistChanges), run on an isolated
-        // branch so the CLI's edits land somewhere recoverable and reviewable
-        // instead of being discarded. Created here — AFTER every skip guard
-        // (dirty tree, model paused, unsupported CLI) — so a skipped run never
-        // leaves a stray `fix/custom-…` branch checked out. The tree was
-        // verified clean above, so we never branch off a dirty HEAD, and the
-        // result is guarded so the CLI never runs on the un-isolated branch if
-        // branch creation failed (collision, lock, permission).
-        if persistChanges {
-            let slug = Self.customTaskSlug(from: logSuffix)
-            let branch = Self.customImplementBranch(slug: slug, token: Self.shortToken())
-            let created = await Task.detached { Self.checkoutNew(branch, at: localPath) }.value
-            guard created else {
-                let msg = "Skipped auto-task \(logSuffix): could not create branch \(branch)."
-                lastError = msg
-                taskErrors[logSuffix] = msg
-                log.error("auto_task_skip_branch suffix=\(logSuffix, privacy: .public) branch=\(branch, privacy: .public)")
-                return false
-            }
-        }
-
         process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: localPath)
+        process.currentDirectoryURL = URL(fileURLWithPath: worktree)
 
         // Stream stdout+stderr LIVE: tee each decoded line to the log file
         // AND append it to the task's in-memory buffer so the Auto Task page
@@ -636,27 +710,28 @@ extension AutoCodeUpdateService {
         guardToken = nil
 
         activeProcess = nil
-        if persistChanges {
-            // `.implement` custom task: persist the CLI's edits as a commit on
-            // the isolated branch created earlier. The tree was clean before
-            // the run, so the only changes are this task's output. If the CLI
-            // made no edits `git commit` exits non-zero ("nothing to commit")
-            // and we leave the branch sitting at base HEAD — no harm done.
-            let committed = await Task.detached { Self.commitAll(at: localPath, message: "Auto task: \(logSuffix)") }.value
-            if !committed {
-                // Nothing to commit (the CLI made no edits — benign) or a real
-                // git failure. Either way the run still "ran"; surface it so a
-                // silent no-op or broken commit doesn't go unnoticed.
+        var emptyImplementBranch: String?
+        if let implementBranch {
+            // `.implement`: persist the CLI's edits as a commit on its branch,
+            // inside the worktree — the only changes there are this task's.
+            // "Nothing to commit" (the CLI made no edits) exits non-zero; then
+            // the empty branch is deleted rather than left behind.
+            let committed = await Task.detached { Self.commitAll(at: worktree, message: "Auto task: \(logSuffix)") }.value
+            if committed {
+                logStore.append(logStoreId, "Committed on branch \(implementBranch) (your checkout is unchanged).")
+            } else {
                 logStore.append(logStoreId, "No commit produced (nothing to commit, or commit failed).", level: .error)
+                emptyImplementBranch = implementBranch
             }
-        } else {
-            // Read-only enforcement. The tree was verified clean before this
-            // review task ran, so anything it touched is its own output. Reviews
-            // must not mutate the repo — their findings are captured in the log
-            // via stdout. Revert any edits deterministically rather than trusting
-            // the prompt: an uncommitted edit left behind would trip the
-            // dirty-tree guard for every later task AND every subsequent run.
-            await Task.detached { Self.discardWorkingTreeChanges(at: localPath) }.value
+        }
+        // Review: everything the CLI wrote goes away with the worktree —
+        // findings live in the log via stdout. Implement: the commit is on
+        // its branch; the checkout itself is no longer needed.
+        await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
+        // Only now: `git branch -D` refuses a branch that a worktree still
+        // has checked out, so the delete must follow the removal.
+        if let empty = emptyImplementBranch {
+            _ = await Task.detached { Self.branchDelete(empty, at: localPath) }.value
         }
         await recordRun(model: resolvedModel, endpoint: "auto-task:\(logSuffix)")
         return result

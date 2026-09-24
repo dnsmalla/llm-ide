@@ -129,12 +129,19 @@ useful for an output folder that does not exist yet. They are stored relative
 to the project, so moving the project on disk does not break them, and a path
 that points outside the project is rejected.
 
-Review tasks are read-only by design: their working-tree changes are reverted
-after the run and their findings go to the log. For those tasks the output path
-is passed as the *intended destination* — the run describes what it would write
-there rather than creating files that would be deleted seconds later. Only a
-custom task in **Implement** mode actually writes, on its own `fix/custom-*`
-branch.
+Prompt-based tasks run in a temporary `git worktree` of the current commit, not
+in your checkout, so your uncommitted work is never swept into a commit or
+reverted. Review tasks are read-only by design: the worktree is discarded after
+the run and their findings go to the log. For those tasks the output path is
+passed as the *intended destination* — the run describes what it would write
+there rather than creating files that would vanish seconds later. Only a custom
+task in **Implement** mode actually writes: it commits on its own `fix/custom-*`
+branch inside the worktree, and your checkout stays on its current branch.
+
+The worktree is a fresh checkout of the current commit: it has no untracked or
+ignored files (build products, `.env`, local settings), and submodules are
+initialised best-effort. A task that depends on such files sees them missing;
+commit what the task needs, or reference it from outside the repository.
 
 Settings are per project. The same task in two projects keeps two independent
 sets of paths, skills, and template choices.

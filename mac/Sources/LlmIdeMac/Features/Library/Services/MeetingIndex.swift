@@ -25,6 +25,12 @@ final class MeetingIndex: @unchecked Sendable {
         /// "meet" | "teams" | "zoom" | "mic" — mirrors `MeetingFrontmatter.platform`.
         /// Optional/nullable since rows indexed before schema v2 have none.
         let platform: String?
+        /// "Remove from List" tombstone (schema v3). The `.md` stays on disk;
+        /// the row stays too, so the next folder scan sees the file as already
+        /// indexed and does NOT re-add it. Deleting the row used to be the
+        /// removal — and `FolderIndexer.fullScan` re-upserted every `.md`
+        /// without a row, so a removed meeting came back on the next scan.
+        var hidden: Bool = false
     }
 
     private var db: OpaquePointer?
@@ -69,7 +75,7 @@ final class MeetingIndex: @unchecked Sendable {
     /// migration step below. `PRAGMA user_version` gives us a real migration
     /// seam so a future schema change can `ALTER TABLE` instead of silently
     /// diverging from an old database.
-    private static let schemaVersion = 2
+    private static let schemaVersion = 3
 
     private func migrate() throws {
         let current = try userVersion()
@@ -104,6 +110,11 @@ final class MeetingIndex: @unchecked Sendable {
             try exec("ALTER TABLE meetings_index ADD COLUMN platform TEXT;")
         }
 
+        // v3 — "Remove from List" is a tombstone, not a row delete (see Row.hidden).
+        if current < 3 {
+            try exec("ALTER TABLE meetings_index ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;")
+        }
+
         if current < Self.schemaVersion {
             try exec("PRAGMA user_version=\(Self.schemaVersion);")
         }
@@ -136,6 +147,8 @@ final class MeetingIndex: @unchecked Sendable {
           file_mtime=excluded.file_mtime, file_size=excluded.file_size,
           indexed_at=excluded.indexed_at, platform=excluded.platform;
         """
+        // `hidden` is not in the SET list on purpose: a rescan that re-reads a
+        // changed file must not un-hide a meeting the user removed.
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { throw err("prepare upsert") }
         defer { sqlite3_finalize(stmt) }
@@ -155,6 +168,17 @@ final class MeetingIndex: @unchecked Sendable {
         sqlite3_bind_int64(stmt, 14, r.indexedAt)
         bindOpt(stmt, 15, r.platform)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw err("step upsert") }
+    }
+
+    /// "Remove from List": tombstone the row (see `Row.hidden`). The file is
+    /// untouched and the row survives, so scans keep it out of the list.
+    func hide(id: String) throws {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "UPDATE meetings_index SET hidden = 1 WHERE id = ?", -1, &stmt, nil) == SQLITE_OK
+        else { throw err("prepare hide") }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, id, -1, Self.transient)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw err("step hide") }
     }
 
     func delete(id: String) throws {
@@ -181,13 +205,26 @@ final class MeetingIndex: @unchecked Sendable {
         }
     }
 
+    /// Every VISIBLE meeting, newest first. Rows the user removed from the
+    /// list (`hidden`) are left out; `listAll()` is for the indexer, which
+    /// must see them to keep them from being re-added.
     func list() throws -> [Row] {
+        try list(includeHidden: false)
+    }
+
+    /// Every row including tombstones — the folder indexer's view.
+    func listAll() throws -> [Row] {
+        try list(includeHidden: true)
+    }
+
+    private func list(includeHidden: Bool) throws -> [Row] {
         var stmt: OpaquePointer?
+        let filter = includeHidden ? "" : "WHERE hidden = 0 "
         guard sqlite3_prepare_v2(db, """
             SELECT id,path,title,started_at,ended_at,duration_sec,gist,tldr_json,
                    actions_count,decisions_count,blockers_count,
-                   file_mtime,file_size,indexed_at,platform
-            FROM meetings_index ORDER BY started_at DESC;
+                   file_mtime,file_size,indexed_at,platform,hidden
+            FROM meetings_index \(filter)ORDER BY started_at DESC;
             """, -1, &stmt, nil) == SQLITE_OK else { throw err("prepare list") }
         defer { sqlite3_finalize(stmt) }
         var out: [Row] = []
@@ -199,7 +236,7 @@ final class MeetingIndex: @unchecked Sendable {
 
     func count() throws -> Int {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM meetings_index", -1, &stmt, nil) == SQLITE_OK
+        guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM meetings_index WHERE hidden = 0", -1, &stmt, nil) == SQLITE_OK
         else { throw err("prepare count") }
         defer { sqlite3_finalize(stmt) }
         guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
@@ -211,7 +248,7 @@ final class MeetingIndex: @unchecked Sendable {
         guard sqlite3_prepare_v2(db, """
             SELECT id,path,title,started_at,ended_at,duration_sec,gist,tldr_json,
                    actions_count,decisions_count,blockers_count,
-                   file_mtime,file_size,indexed_at,platform
+                   file_mtime,file_size,indexed_at,platform,hidden
             FROM meetings_index WHERE id = ?
             """, -1, &stmt, nil) == SQLITE_OK else { throw err("prepare get") }
         defer { sqlite3_finalize(stmt) }
@@ -237,7 +274,8 @@ final class MeetingIndex: @unchecked Sendable {
             fileMtime: sqlite3_column_int64(stmt, 11),
             fileSize: sqlite3_column_int64(stmt, 12),
             indexedAt: sqlite3_column_int64(stmt, 13),
-            platform: textCol(stmt, 14)
+            platform: textCol(stmt, 14),
+            hidden: sqlite3_column_int(stmt, 15) != 0
         )
     }
 

@@ -113,12 +113,20 @@ LLM-IDE enforces that **only one provider is active at a time** because:
 
 **Q: What happens if my repository working tree is dirty (has uncommitted changes)?**
 
-A: Auto Tasks has two modes:
+A: It depends on the kind of task.
 
-- **Auto-stash OFF (default):** Auto Tasks skip if there are uncommitted changes (safe)
-- **Auto-stash ON:** Auto Tasks stash your changes, run, then restore (riskier but thorough)
+- **Prompt-based tasks** (the built-in review tasks and your custom tasks) run in a
+  temporary `git worktree` of the current commit, so they never see your uncommitted
+  changes and never touch them. A review's output is discarded with the worktree; an
+  Implement task commits on its own `fix/custom-*` branch without switching your
+  checkout. These tasks run whether or not your tree is dirty.
+- **Issue tasks** (which work an issue in your checkout) still need a clean tree:
+  - **Auto-stash OFF (default):** they skip if there are uncommitted changes (safe)
+  - **Auto-stash ON:** they stash your changes, run, then restore (riskier but thorough).
+    The stash happens at the start of any run while Auto-stash is on, including
+    runs that contain only prompt-based tasks.
 
-Choose based on your workflow. If you work with uncommitted changes frequently, keep it OFF.
+If you work with uncommitted changes frequently, keep Auto-stash OFF.
 
 **Q: How often should Auto Tasks run?**
 

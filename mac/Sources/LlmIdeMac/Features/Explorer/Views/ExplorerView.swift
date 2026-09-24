@@ -682,6 +682,9 @@ struct ExplorerView: View {
     /// FILE, which is the common case.
     @discardableResult
     private func remap(from old: URL, to new: URL) -> [URL] {
+        // Unsaved edits follow the file (the editor is recreated by the
+        // remapped tab URL and restores from the store).
+        EditorDraftStore.shared.rename(from: old, to: new)
         tabs = tabs.map { rebase($0, from: old, to: new) ?? $0 }
         if let active = activeTab, let moved = rebase(active, from: old, to: new) {
             activeTab = moved
@@ -1026,6 +1029,7 @@ struct ExplorerView: View {
                 continue
             }
             parents.insert(ExplorerPaths.key(url.deletingLastPathComponent()))
+            EditorDraftStore.shared.discardAll(under: url)
             tabs.removeAll { $0 == url || ExplorerPaths.isDescendant($0, of: url) }
             if let active = activeTab, active == url || ExplorerPaths.isDescendant(active, of: url) {
                 activeTab = tabs.last

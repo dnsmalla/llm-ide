@@ -98,13 +98,19 @@ struct CronExpression: Sendable, Equatable {
                     let range = String(part[..<dash.lowerBound])
                     let step = Int(part[dash.upperBound...]) ?? 1
                     guard step > 0 else { return nil }
-                    let (lo, hi) = bounds(range, min: min, max: max) ?? (min, max)
+                    // `*/n` is handled above; a range must parse, or the
+                    // term is invalid — `abc/2` used to be read as `*/2`.
+                    guard let (lo, hi) = range == "*" ? (min, max) : bounds(range, min: min, max: max) else { return nil }
                     if lo > hi || lo < min || hi > max { return nil }
                     out.formUnion(stride(from: lo, through: hi, by: step))
                 } else {
                     let (lo, hi) = bounds(part, min: min, max: max) ?? (Int(part) ?? -1, Int(part) ?? -1)
                     if part.contains("-") {
-                        guard lo...hi ~= lo, lo >= min, hi <= max, lo <= hi else { return nil }
+                        // Order matters: `lo...hi` traps when lo > hi, and
+                        // this runs on every keystroke of the schedule field
+                        // (CronField.isValid) — typing `10-5` used to crash
+                        // the app. Validate the pair before forming the range.
+                        guard lo <= hi, lo >= min, hi <= max else { return nil }
                         out.formUnion(Array(lo...hi))
                     } else {
                         guard lo >= min, lo <= max, lo == hi else { return nil }

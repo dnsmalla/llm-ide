@@ -72,22 +72,28 @@ extension CodeAssistantPanel {
             await engine.acknowledge(payload, followUp: .forceUnblock)
             return
         }
-        // Resolve auth token: prefer the active GitLab project's token, fall back to GitHub.
-        // For read/local ops the token may be nil; push/pull/merge_to_main use it for the remote.
+        // Pick the token by the REPO'S remote host, not by which project is
+        // active: `activeRepoLocalURL` falls back to the GitHub clone when the
+        // active GitLab project is not cloned, and choosing by activity then
+        // sent the GitLab PAT to github.com. RepoManager refuses a mismatch
+        // anyway (credentialScope); this just picks the right one first. Read/
+        // local ops need no token and `nil` is fine for them.
+        let manager = RepoManager()
+        let host = await manager.remoteHost(at: repoURL)
+        let gitLabHost = URL(string: config.gitLabBaseURL.trimmingCharacters(in: .whitespacesAndNewlines))?
+            .host?.lowercased() ?? "gitlab.com"
         let token: String?
         var backend: RepoManager.Backend = .gitlab
-        if !config.gitLabToken.isEmpty,
-           config.gitLabSavedProjects.first(where: { $0.isActive }) != nil {
-            token = config.gitLabToken
-        } else if !config.gitHubToken.isEmpty,
-                  config.gitHubSavedRepos.first(where: { $0.isActive }) != nil {
+        if host == "github.com", !config.gitHubToken.isEmpty {
             token = config.gitHubToken
             backend = .github
+        } else if host == gitLabHost, !config.gitLabToken.isEmpty {
+            token = config.gitLabToken
         } else {
             token = nil
         }
         do {
-            let out = try await RepoManager().runGitOp(args, at: repoURL, token: token, backend: backend)
+            let out = try await manager.runGitOp(args, at: repoURL, token: token, backend: backend)
             let payload = ChatMessage.ToolResultPayload(
                 kind: .git, summary: "(git \(args.op.rawValue) result)",
                 exitCode: nil, command: nil, output: String(out.prefix(4000)), url: nil, isFailure: false)

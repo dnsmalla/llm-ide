@@ -5,10 +5,16 @@ import SwiftUI
 /// Horizontal editor tab strip shared by Review Code, the Explorer, and Search.
 /// Operates purely on the two bindings: closing a tab removes it and
 /// re-selects a neighbor so the caller never has to special-case the
-/// close behavior.
+/// close behavior. A tab whose file has unsaved edits (`EditorDraftStore`)
+/// shows a dot and asks before it is closed — closing used to discard the
+/// edits silently, because the editor's buffer lived in the view the close
+/// destroyed.
 struct EditorTabBar: View {
     @Binding var tabs: [URL]
     @Binding var activeTab: URL?
+
+    @ObservedObject private var drafts = EditorDraftStore.shared
+    @State private var pendingClose: URL?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -17,14 +23,39 @@ struct EditorTabBar: View {
                     EditorTab(
                         url: url,
                         isActive: activeTab == url,
+                        isDirty: drafts.hasDraft(url),
                         onSelect: { activeTab = url },
-                        onClose: { close(url) }
+                        onClose: { requestClose(url) }
                     )
                 }
             }
         }
         .frame(height: 35)
         .background(Color(NSColor.windowBackgroundColor))
+        .confirmationDialog(
+            "Close “\(pendingClose?.lastPathComponent ?? "")” without saving?",
+            isPresented: Binding(get: { pendingClose != nil }, set: { if !$0 { pendingClose = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Discard Changes", role: .destructive) {
+                if let url = pendingClose {
+                    drafts.discard(url)
+                    close(url)
+                }
+                pendingClose = nil
+            }
+            Button("Cancel", role: .cancel) { pendingClose = nil }
+        } message: {
+            Text("This file has unsaved changes. Cancel and press ⌘S to keep them.")
+        }
+    }
+
+    private func requestClose(_ url: URL) {
+        if drafts.hasDraft(url) {
+            pendingClose = url
+        } else {
+            close(url)
+        }
     }
 
     private func close(_ url: URL) {
@@ -42,6 +73,7 @@ struct EditorTabBar: View {
 private struct EditorTab: View {
     let url: URL
     let isActive: Bool
+    let isDirty: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
 
@@ -63,6 +95,13 @@ private struct EditorTab: View {
                         .font(Typography.filename)
                         .foregroundStyle(isActive ? .primary : .secondary)
                         .lineLimit(1)
+                    if isDirty {
+                        Circle()
+                            .fill(theme.current.accent)
+                            .frame(width: 6, height: 6)
+                            .help("Unsaved changes")
+                            .accessibilityLabel("Unsaved changes")
+                    }
                 }
                 .padding(.leading, 12)
                 .padding(.trailing, 6)

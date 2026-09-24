@@ -1633,11 +1633,13 @@ struct LibraryView: View {
 
     private func deleteMeeting(id: String?) {
         guard let id else { return }
-        // Remove ONLY from the SQLite index — the .md file stays on disk
-        // and remains visible in the MEETINGS transcript section.
-        // To delete the physical file, use "Delete Transcript" in the
-        // MEETINGS file tree section.
-        try? env.index.delete(id: id)
+        // Hide from the list ONLY — the .md file stays on disk and remains
+        // visible in the MEETINGS transcript section. To delete the physical
+        // file, use "Delete Transcript" in the MEETINGS file tree section.
+        // A tombstone, not a row delete: the folder indexer re-adds every
+        // .md without a row, so deleting the row brought the meeting back on
+        // the next scan.
+        try? env.index.hide(id: id)
         // Clear the detail selection if this meeting was open.
         if case .meeting(let sel) = shell.librarySelection, sel == id {
             shell.librarySelection = nil

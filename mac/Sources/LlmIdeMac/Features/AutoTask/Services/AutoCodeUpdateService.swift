@@ -328,8 +328,8 @@ final class AutoCodeUpdateService: ObservableObject {
     /// no-op the user only discovers in the log.
     ///
     /// `writesFiles` must match the `persistChanges:` the caller passes to
-    /// `runCLI` — it is what stops a review task being told to write files its
-    /// own post-run revert will delete.
+    /// `runCLI` — it is what stops a review task being told to write files
+    /// that vanish with its throwaway worktree.
     func composedPrompt(taskId: String, ownPrompt: String, projectRoot: String?,
                         writesFiles: Bool) -> String {
         let taskConfig = taskConfigs.config(for: taskId)
@@ -747,8 +747,10 @@ final class AutoCodeUpdateService: ObservableObject {
             setError(reason)
         }
 
-        // Opt-in: stash uncommitted changes so the dirty-tree guard doesn't
-        // skip implement/review tasks. Restored in the defer above.
+        // Opt-in: stash uncommitted changes for the ISSUE tasks, which still
+        // work in the user's checkout and need a clean tree. Prompt tasks run
+        // in their own worktree and never needed this. Restored in the defer
+        // above.
         if autoTaskSettings.autoStash, let gitRoot = resolved?.gitRoot {
             let stashResult: (didStash: Bool, branch: String?) = await Task.detached {
                 guard !Self.isWorkingTreeClean(at: gitRoot) else { return (false, nil) }

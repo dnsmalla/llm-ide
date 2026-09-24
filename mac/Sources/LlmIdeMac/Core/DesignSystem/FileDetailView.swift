@@ -490,6 +490,13 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
             }
         }
         .task(id: url) { await load() }
+        // Mirror the live buffer so a destroyed view (tab switch, rename,
+        // project switch) loses nothing, and so the tab bar can mark and
+        // guard a dirty tab.
+        .onChange(of: content) { _, new in
+            guard loadError == nil else { return }
+            EditorDraftStore.shared.stash(url, content: new, base: savedContent)
+        }
         .onChange(of: revealTarget) { _, new in
             // THE same-file fix. `.task(id: url)` does not re-run when only
             // the line changes — clicking a second result in a file that is
@@ -606,6 +613,17 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
             }.value
             content = raw
             savedContent = raw
+            // An unsaved buffer from a previous life of this view (the host
+            // recreates it on every tab switch / rename / project switch —
+            // see EditorDraftStore). Restored only while the file on disk is
+            // still what that buffer was edited from.
+            if let draft = EditorDraftStore.shared.draft(for: fileURL) {
+                if draft.base == raw {
+                    content = draft.content
+                } else {
+                    EditorDraftStore.shared.discard(fileURL)
+                }
+            }
             // Applied here, after `content` is set, because a reveal against
             // an empty buffer scrolls nothing AND burns the request (see
             // MonacoRevealGate). This covers opening a NEW file at a line;
@@ -629,6 +647,7 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
         do {
             try content.write(to: url, atomically: true, encoding: .utf8)
             savedContent = content
+            EditorDraftStore.shared.discard(url)
             await onSaved?()
         } catch {
             saveError = "Save failed: \(error.localizedDescription)"
@@ -639,6 +658,7 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     private func revert() async {
         content = savedContent
         saveError = nil
+        EditorDraftStore.shared.discard(url)
     }
 
     /// Wrapper around save() that flashes a toast on success so the

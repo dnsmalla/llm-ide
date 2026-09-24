@@ -34,6 +34,13 @@ final class SessionStore: ObservableObject {
     private let log = Logger(subsystem: "com.llmide.macapp", category: "Session")
     private var refreshTask: Task<Bool, Never>?
     private var refreshSlot: UInt64 = 0
+    /// The launch/reconnect refresh in flight, so a second caller joins it
+    /// instead of presenting the same refresh token again. The Reconnect
+    /// screen's auto-retry (backend back up) and its Retry button can fire
+    /// within the same second; two presentations of one refresh token lose
+    /// the server's revoked-at race and are treated as token theft — which
+    /// logs the user out on EVERY device.
+    private var launchRefreshTask: Task<Void, Never>?
     private let host: String
     /// Snapshot taken once at init so launch gating doesn't re-query Keychain.
     private let storedSessionAtLaunch: Bool
@@ -69,6 +76,20 @@ final class SessionStore: ObservableObject {
     /// every slow cold start. Now: keep the token and surface a retry screen
     /// unless the server *definitively* rejected the token (401/403).
     private func performLaunchRefresh(api: LlmIdeAPIClient) async {
+        if let inFlight = launchRefreshTask {
+            await inFlight.value
+            return
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performLaunchRefreshUncoalesced(api: api)
+        }
+        launchRefreshTask = task
+        await task.value
+        launchRefreshTask = nil
+    }
+
+    private func performLaunchRefreshUncoalesced(api: LlmIdeAPIClient) async {
         guard let stored = KeychainStore.loadToken(host: host) else {
             // No saved login → login screen (via `!isAuthenticated`). Never
             // set `unreachable`: there is nothing to reconnect with.

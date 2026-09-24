@@ -8,9 +8,19 @@ enum RepoError: LocalizedError {
     case commandFailed(String)
     case notARepo(URL)
     case dirtyWorkingTree
+    /// The remote this authenticated op would contact is not the host the
+    /// token belongs to (or is plaintext http) — the token is withheld.
+    case credentialHostMismatch(remote: String, expected: String)
+    /// The remote is plain `http://` on a non-loopback host: the token would
+    /// travel in clear text, so it is withheld.
+    case plaintextRemote(remote: String)
 
     var errorDescription: String? {
         switch self {
+        case .credentialHostMismatch(let remote, let expected):
+            return "Refusing to send the \(expected) token to \(remote): this repo's remote points somewhere else. Check `git remote -v`."
+        case .plaintextRemote(let remote):
+            return "Refusing to send a token over plain http to \(remote): use an https:// remote (only localhost may use http)."
         case .gitNotFound:             return "git not found — install Xcode Command Line Tools."
         case .cloneFailed(let msg):    return "Clone failed: \(msg)"
         case .commandFailed(let msg):  return msg
@@ -26,6 +36,16 @@ enum RepoError: LocalizedError {
 final class RepoManager {
     private let log = Logger(subsystem: "com.llmide.macapp", category: "RepoManager")
 
+    /// Host of the configured GitLab instance — the only host a GitLab token
+    /// may be sent to. Read from settings by default; injectable for tests.
+    private let gitLabHost: String
+
+    init(gitLabHost: String? = nil) {
+        let configured = gitLabHost
+            ?? URL(string: AppConfig.shared.gitLabBaseURL.trimmingCharacters(in: .whitespacesAndNewlines))?.host
+        self.gitLabHost = (configured ?? "").lowercased()
+    }
+
     /// Which provider we're authenticating against — drives the auth
     /// strategy used by `configureTokenAuth` and `embedToken`. GitLab
     /// accepts the `PRIVATE-TOKEN` header; GitHub doesn't and needs
@@ -35,6 +55,14 @@ final class RepoManager {
     enum Backend {
         case gitlab
         case github
+
+        /// For error text: which host the token of this backend belongs to.
+        func expectedHostLabel(gitLabHost: String) -> String {
+            switch self {
+            case .github: return "GitHub (github.com)"
+            case .gitlab: return "GitLab (\(gitLabHost.isEmpty ? "gitlab.com" : gitLabHost))"
+            }
+        }
     }
 
     // MARK: - Clone
@@ -51,7 +79,7 @@ final class RepoManager {
         // `--` terminates option parsing so a remoteURL beginning with `-`
         // can't be interpreted as a git flag (arg-injection guard).
         _ = try await git(["clone", "--depth", "1", "--", remoteURL, destination.path],
-                          cwd: parent, token: token, backend: backend)
+                          cwd: parent, token: token, backend: backend, remoteURL: remoteURL)
         log.info("repo_cloned path=\(destination.path, privacy: .public)")
 
         // Detect default branch from HEAD symbolic ref.
@@ -65,7 +93,8 @@ final class RepoManager {
         // Defensively strip any credentials a previous app version may have
         // baked into the origin URL, then authenticate via the environment.
         try await stripRemoteCredentials(at: repoURL, remote: remote)
-        _ = try await git(["pull", "--ff-only", remote], cwd: repoURL, token: token, backend: backend)
+        let url = try await remoteURL(at: repoURL, remote: remote)
+        _ = try await git(["pull", "--ff-only", remote], cwd: repoURL, token: token, backend: backend, remoteURL: url)
         log.info("repo_pulled path=\(repoURL.path, privacy: .public)")
     }
 
@@ -74,7 +103,8 @@ final class RepoManager {
     func fetch(at repoURL: URL, token: String, backend: Backend = .gitlab, remote: String = "origin") async throws {
         // Defensively strip any baked-in credentials, then authenticate via env.
         try await stripRemoteCredentials(at: repoURL, remote: remote)
-        _ = try await git(["fetch", remote], cwd: repoURL, token: token, backend: backend)
+        let url = try await remoteURL(at: repoURL, remote: remote)
+        _ = try await git(["fetch", remote], cwd: repoURL, token: token, backend: backend, remoteURL: url)
         log.info("repo_fetched path=\(repoURL.path, privacy: .public)")
     }
 
@@ -184,7 +214,8 @@ final class RepoManager {
 
     func push(at repoURL: URL, branch: String, token: String, backend: Backend = .gitlab, remote: String = "origin") async throws {
         try await stripRemoteCredentials(at: repoURL, remote: remote)
-        _ = try await git(["push", "--set-upstream", remote, branch], cwd: repoURL, token: token, backend: backend)
+        let url = try await remoteURL(at: repoURL, remote: remote)
+        _ = try await git(["push", "--set-upstream", remote, branch], cwd: repoURL, token: token, backend: backend, remoteURL: url)
         log.info("pushed branch=\(branch, privacy: .public)")
     }
 
@@ -259,7 +290,10 @@ final class RepoManager {
         let detached = branch == "HEAD" || branch.isEmpty
 
         func run(_ argv: [String], tok: String? = nil) async throws -> String {
-            let (out, err) = try await git(argv, cwd: repoURL, token: tok, backend: backend)
+            // A token only ever travels to `origin` here (pull_ff / push), and
+            // only when origin is the host that token belongs to.
+            let origin = tok == nil ? nil : try await remoteURL(at: repoURL, remote: "origin")
+            let (out, err) = try await git(argv, cwd: repoURL, token: tok, backend: backend, remoteURL: origin)
             return [out, err].filter { !$0.isEmpty }.joined(separator: "\n")
         }
 
@@ -362,6 +396,62 @@ final class RepoManager {
     /// If a previous app version baked credentials into the `origin` URL
     /// (`https://user:token@host/…`), rewrite it to a clean, credential-free
     /// URL. This scrubs leaked secrets out of `.git/config` on disk.
+    /// `git remote get-url <remote>`, trimmed. Throws when the remote is not
+    /// configured — an authenticated op with nowhere to send the token to.
+    func remoteURL(at repoURL: URL, remote: String = "origin") async throws -> String {
+        let out = try await gitOutput(["remote", "get-url", remote], cwd: repoURL)
+        let trimmed = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw RepoError.commandFailed("Remote \(remote) has no URL.") }
+        return trimmed
+    }
+
+    /// Host of `remote`, lowercased, or nil for a non-URL remote (ssh
+    /// `git@host:path`, a local path) or none configured. Callers use it to
+    /// pick WHICH token fits this repo instead of guessing from the active
+    /// project.
+    func remoteHost(at repoURL: URL, remote: String = "origin") async -> String? {
+        guard let url = try? await remoteURL(at: repoURL, remote: remote) else { return nil }
+        return URL(string: url)?.host?.lowercased()
+    }
+
+    /// The `http.<url>.extraHeader` scope a token may be attached under for
+    /// `remoteURL`, or nil when git will not speak HTTP to it (ssh, local
+    /// path) and no header is needed.
+    ///
+    /// The header used to be the GLOBAL `http.extraHeader`, so git sent it to
+    /// whatever `origin` (or a redirect) pointed at — and the caller chose
+    /// the token by which project was ACTIVE, not by the repo's remote, so a
+    /// GitLab PAT went to github.com whenever the GitLab project was not the
+    /// one cloned. A `git remote set-url origin https://attacker/…` from the
+    /// model followed by an auto-approved push would have exfiltrated it.
+    /// Now the header is scoped to `scheme://host[:port]/` and the host must
+    /// be the token's own: github.com for GitHub, the configured instance
+    /// for GitLab. Plaintext http is refused except on loopback.
+    nonisolated static func credentialScope(remoteURL: String, backend: Backend, gitLabHost: String) throws -> String? {
+        let trimmed = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return nil   // ssh / scp-like / local path — no HTTP header can leak
+        }
+        guard let host = url.host?.lowercased(), !host.isEmpty else {
+            throw RepoError.credentialHostMismatch(remote: trimmed, expected: backend.expectedHostLabel(gitLabHost: gitLabHost))
+        }
+        let loopback = host == "localhost" || host == "127.0.0.1" || host == "::1"
+        if scheme == "http" && !loopback {
+            throw RepoError.plaintextRemote(remote: host)
+        }
+        let expected: String
+        switch backend {
+        case .github: expected = "github.com"
+        case .gitlab: expected = gitLabHost.isEmpty ? "gitlab.com" : gitLabHost
+        }
+        guard host == expected else {
+            throw RepoError.credentialHostMismatch(remote: host, expected: backend.expectedHostLabel(gitLabHost: gitLabHost))
+        }
+        let port = url.port.map { ":\($0)" } ?? ""
+        return "\(scheme)://\(host)\(port)/"
+    }
+
     private func stripRemoteCredentials(at repoURL: URL, remote: String) async throws {
         guard let current = try? await gitOutput(["remote", "get-url", remote], cwd: repoURL) else { return }
         let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -388,15 +478,18 @@ final class RepoManager {
     /// the count (git reads exactly COUNT pairs, so a second writer either loses
     /// its own pair or hides the credential header). `gitEnv` below owns the
     /// numbering now, so config can be composed.
-    nonisolated static func authConfigPair(token: String, backend: Backend) -> (String, String) {
+    nonisolated static func authConfigPair(token: String, backend: Backend, scope: String) -> (String, String) {
+        // `http.<url>.extraHeader`: git applies it only to requests whose URL
+        // starts with <url> — see credentialScope for why it is not global.
+        let key = "http.\(scope).extraHeader"
         switch backend {
         case .gitlab:
             // GitLab accepts the PRIVATE-TOKEN header for HTTPS git ops.
-            return ("http.extraHeader", "PRIVATE-TOKEN: \(token)")
+            return (key, "PRIVATE-TOKEN: \(token)")
         case .github:
             // GitHub uses HTTP Basic with x-access-token as the username.
             let basic = Data("x-access-token:\(token)".utf8).base64EncodedString()
-            return ("http.extraHeader", "Authorization: Basic \(basic)")
+            return (key, "Authorization: Basic \(basic)")
         }
     }
 
@@ -412,13 +505,14 @@ final class RepoManager {
     /// remote (the case the old 120 s cap really guarded) fails with a real error
     /// instead of wedging the auto-task pipeline forever. `GIT_TERMINAL_PROMPT=0`
     /// covers the other hang: waiting on credentials nobody can type.
-    nonisolated static func gitEnv(token: String?, backend: Backend) -> [String: String] {
+    nonisolated static func gitEnv(token: String?, backend: Backend, scope: String?) -> [String: String] {
         var pairs: [(String, String)] = [
             ("http.lowSpeedLimit", "1000"),   // bytes/sec
             ("http.lowSpeedTime", "300"),     // sustained for 5 min → abort
         ]
-        if let token, !token.isEmpty {
-            pairs.append(authConfigPair(token: token, backend: backend))
+        // No scope (ssh / local remote) → no header: nothing HTTP to attach it to.
+        if let token, !token.isEmpty, let scope {
+            pairs.append(authConfigPair(token: token, backend: backend, scope: scope))
         }
         var env = ProcessInfo.processInfo.environment
         // Never let git launch an interactive credential prompt; fail fast. Set
@@ -475,7 +569,18 @@ final class RepoManager {
     /// Run git. When `token` is supplied, credentials are injected via the
     /// process environment (see `authEnv`) and redacted from any error text.
     @discardableResult
-    private func git(_ args: [String], cwd: URL, token: String? = nil, backend: Backend = .gitlab, timeout: TimeInterval? = nil, stdin: Data? = nil) async throws -> (String, String) {
+    private func git(_ args: [String], cwd: URL, token: String? = nil, backend: Backend = .gitlab,
+                     remoteURL: String? = nil, timeout: TimeInterval? = nil, stdin: Data? = nil) async throws -> (String, String) {
+        // A token needs the remote it is for: scope the header to it and
+        // refuse a remote that is not the token's host (credentialScope).
+        var scope: String?
+        if let token, !token.isEmpty {
+            guard let remoteURL else {
+                throw RepoError.commandFailed("Internal: authenticated git op without a remote URL.")
+            }
+            scope = try Self.credentialScope(remoteURL: remoteURL, backend: backend, gitLabHost: gitLabHost)
+        }
+        let headerScope = scope
         // No wall clock unless the caller asks for one. The old caps (120 s for
         // clone/fetch/pull/push, 30 s for local plumbing) failed the operations
         // that need time most: cloning or fetching a large repo on an ordinary
@@ -499,7 +604,7 @@ final class RepoManager {
                 // suppression, the transfer-stall guard, and credentials when
                 // authenticating — see gitEnv. Detaching stdin closes the
                 // credential-prompt hole from the other side.
-                proc.environment = Self.gitEnv(token: token, backend: backend)
+                proc.environment = Self.gitEnv(token: token, backend: backend, scope: headerScope)
                 let stdinPipe = Pipe()
                 if stdin != nil {
                     proc.standardInput = stdinPipe
