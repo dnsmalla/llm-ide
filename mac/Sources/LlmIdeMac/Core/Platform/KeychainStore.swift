@@ -143,7 +143,10 @@ enum KeychainStore {
             log.error("Refusing to persist secrets: the last keychain load failed, so writing the in-memory map would destroy the stored secrets")
             return false
         }
-        if blob[migratedKey] == nil { blob[migratedKey] = "1" }
+        // No sentinel stamping here: only a SUCCESSFUL migration may set it
+        // (see migrateIfNeeded). Stamping on every write meant the first
+        // ordinary set() after a failed migration marked it done for good,
+        // and the legacy tokens were never read again.
         guard let data = try? JSONEncoder().encode(blob) else { return false }
         let ok = writeRaw(account: blobAccount, service: service, data: data)
         if !ok { lastFailureStatus = errSecIO }
@@ -183,8 +186,10 @@ enum KeychainStore {
         // Deleting the legacy items then would destroy the only copy of the
         // refresh / GitLab / GitHub tokens — the exact loss this file exists
         // to prevent. Leave them in place; the next launch migrates again.
+        blob[migratedKey] = "1"
         guard persistBlobLocked() else {
             for account in copied { blob[account] = nil }
+            blob[migratedKey] = nil
             lock.unlock()
             log.error("Keychain migration: blob write failed — legacy items kept for the next attempt")
             return
