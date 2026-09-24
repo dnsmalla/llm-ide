@@ -42,7 +42,8 @@ struct GitLabSettingsSection: View {
             }
         }
         .onAppear {
-            gitLabTokenDraft = config.gitLabToken
+            // Not prefilled with the saved PAT (see GitHubSettingsSection).
+            gitLabTokenDraft = ""
         }
     }
 
@@ -102,25 +103,29 @@ struct GitLabSettingsSection: View {
                         .foregroundStyle(theme.current.textMuted)
                         .frame(width: 110, alignment: .leading)
                     ZStack(alignment: .trailing) {
+                        // The eye only ever shows a token being typed — the saved
+                        // one is never loaded into this field.
                         if gitLabTokenVisible {
-                            TextField("glpat-xxxxxxxxxxxxxxxxxxxx", text: $gitLabTokenDraft)
+                            TextField(config.gitLabToken.isEmpty ? "glpat-xxxxxxxxxxxxxxxxxxxx" : "Saved — paste a new token to replace it", text: $gitLabTokenDraft)
                                 .textFieldStyle(.roundedBorder)
                                 .font(Typography.mono)
                                 .disableAutocorrection(true)
                         } else {
-                            SecureField("glpat-xxxxxxxxxxxxxxxxxxxx", text: $gitLabTokenDraft)
+                            SecureField(config.gitLabToken.isEmpty ? "glpat-xxxxxxxxxxxxxxxxxxxx" : "Saved — paste a new token to replace it", text: $gitLabTokenDraft)
                                 .textFieldStyle(.roundedBorder)
                                 .font(Typography.mono)
                         }
-                        Button { gitLabTokenVisible.toggle() } label: {
-                            Image(systemName: gitLabTokenVisible ? "eye.slash" : "eye")
-                                .font(.system(size: 11))
-                                .foregroundStyle(theme.current.textMuted)
+                        if !gitLabTokenDraft.isEmpty {
+                            Button { gitLabTokenVisible.toggle() } label: {
+                                Image(systemName: gitLabTokenVisible ? "eye.slash" : "eye")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(theme.current.textMuted)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, 8)
+                            .help(gitLabTokenVisible ? "Hide token" : "Show token")
+                            .accessibilityLabel(gitLabTokenVisible ? "Hide token" : "Show token")
                         }
-                        .buttonStyle(.plain)
-                        .padding(.trailing, 8)
-                        .help(gitLabTokenVisible ? "Hide token" : "Show token")
-                        .accessibilityLabel(gitLabTokenVisible ? "Hide token" : "Show token")
                     }
                 }
 
@@ -131,7 +136,7 @@ struct GitLabSettingsSection: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .disabled(gitLabBusy || gitLabTokenDraft.isEmpty)
+                    .disabled(gitLabBusy || (gitLabTokenDraft.isEmpty && config.gitLabToken.isEmpty))
 
                     if !config.gitLabToken.isEmpty {
                         // Clears the CREDENTIAL only — see the matching note in
@@ -558,7 +563,9 @@ struct GitLabSettingsSection: View {
     // MARK: - Save & verify token
 
     private func saveGitLab() async {
-        let token = gitLabTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Empty draft = re-verify the saved token.
+        let typed = gitLabTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = typed.isEmpty ? config.gitLabToken : typed
         guard !token.isEmpty else { return }
 
         // Derive base from project URLs or fall back to stored base
