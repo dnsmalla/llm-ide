@@ -128,4 +128,21 @@ final class SearchReplaceTests: XCTestCase {
         let perms = try FileManager.default.attributesOfItem(atPath: script.path)[.posixPermissions] as? NSNumber
         XCTAssertEqual(perms?.intValue, 0o755)
     }
+
+    func testAtomicWriteRefusesReadOnlyAndKeepsHardLinks() throws {
+        let dir = try tempDir()
+        let ro = dir.appendingPathComponent("ro.txt")
+        try "old\n".write(to: ro, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: ro.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: ro.path) }
+        XCTAssertFalse(SearchService.writeAtomically("new\n", to: ro), "a read-only file is not replaced")
+        XCTAssertEqual(try String(contentsOf: ro, encoding: .utf8), "old\n")
+
+        let a = dir.appendingPathComponent("a.txt")
+        let b = dir.appendingPathComponent("b.txt")
+        try "old\n".write(to: a, atomically: true, encoding: .utf8)
+        try FileManager.default.linkItem(at: a, to: b)
+        XCTAssertTrue(SearchService.writeAtomically("new\n", to: a))
+        XCTAssertEqual(try String(contentsOf: b, encoding: .utf8), "new\n", "the hard link still shares the contents")
+    }
 }

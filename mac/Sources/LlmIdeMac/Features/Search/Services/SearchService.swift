@@ -240,9 +240,17 @@ final class SearchService {
         guard let data = text.data(using: .utf8) else { return false }
         let target = url.resolvingSymlinksInPath()
         let fm = FileManager.default
-        let permissions = (try? fm.attributesOfItem(atPath: target.path))?[.posixPermissions]
+        // A file the user cannot write stays unwritten, as the in-place write
+        // left it: a rename only needs the FOLDER writable, so it silently
+        // rewrote read-only (0444) files.
+        guard fm.isWritableFile(atPath: target.path) else { return false }
+        let attrs = try? fm.attributesOfItem(atPath: target.path)
+        let permissions = attrs?[.posixPermissions]
+        // A hard-linked file is written in place: a rename would split the
+        // link, leaving the other names on the old contents.
+        let linkCount = (attrs?[.referenceCount] as? NSNumber)?.intValue ?? 1
         do {
-            try data.write(to: target, options: .atomic)
+            try data.write(to: target, options: linkCount > 1 ? [] : .atomic)
         } catch {
             return false
         }
