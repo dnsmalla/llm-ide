@@ -588,7 +588,7 @@ final class MobileControlManager {
                 reply(CommandError(commandId: "explore_load", message: "Invalid session id"))
                 return
             }
-            guard let s = ChatSessionStore.load(id: sid) else {
+            guard let s = Self.loadExplorerSession(id: sid) else {
                 append(.info, "Explore load: session \(sid.uuidString.prefix(8)) not found")
                 reply(CommandError(commandId: "explore_load",
                                    message: "Session not found on Mac — it may have been deleted."))
@@ -899,7 +899,7 @@ final class MobileControlManager {
         // run a turn against whatever session happens to be active. Surface
         // it as a CommandError so the phone can reload its explorer session
         // list.
-        guard ChatSessionStore.load(id: sid) != nil else {
+        guard Self.loadExplorerSession(id: sid) != nil else {
             append(.info, "explore_chat: session \(chat.sessionId.prefix(8)) not found")
             await server?.send(CommandError(commandId: chat.commandId, message: "Session not found on Mac — it may have been deleted. Reload your explorer sessions."))
             return
@@ -1007,9 +1007,17 @@ final class MobileControlManager {
     /// path used to skip, which is also re-issued unconditionally because
     /// off-screen engines never get a panel to wire their
     /// `forgetSessionMemory` hook (a duplicate server DELETE is idempotent).
-    @MainActor
-
-    private func handleExploreDelete(_ uid: UUID) async {
+    ///
+    /// Refuses a session that exists but is not an Explorer chat: the phone
+    /// sends a bare UUID, and without this a paired phone could delete any
+    /// ChatSession on the Mac (the quick chat, a conflicts/visual/docGen
+    /// chat). An id that no longer exists still runs the engine cleanup.
+    // internal: pinned by MobileExploreScopeTests
+    func handleExploreDelete(_ uid: UUID) async {
+        if let existing = ChatSessionStore.load(id: uid), existing.scope != .explorer {
+            append(.info, "Explore delete: \(uid.uuidString.prefix(8)) is not an Explorer chat — refused")
+            return
+        }
         // `api` is optional only so the network forget at the tail degrades
         // gracefully — the local file delete and engine routing above it
         // must not be skipped when it's nil, or the phone silently keeps a
@@ -1474,11 +1482,21 @@ final class MobileControlManager {
         cancelMobileInflightTask(commandId: m.commandId)
     }
 
+    /// The Explorer chat with this id, or nil when there is none — including
+    /// when the id names a session of another scope (quick chat, conflicts,
+    /// visual, docGen). Every `explore_*` handler that takes a phone-supplied
+    /// session id goes through this, so the phone can reach Explorer chats
+    /// only.
+    // internal: pinned by MobileExploreScopeTests
+    static func loadExplorerSession(id: UUID) -> ChatSession? {
+        guard let session = ChatSessionStore.load(id: id), session.scope == .explorer else { return nil }
+        return session
+    }
+
     private func handleExploreRenameSession(data: Data) {
         guard let m = try? decoder.decode(ExploreRenameSession.self, from: data),
               let sid = UUID(uuidString: m.sessionId),
-              var session = ChatSessionStore.load(id: sid),
-              session.scope == .explorer else {
+              var session = Self.loadExplorerSession(id: sid) else {
             reply(CommandError(commandId: "explore_rename", message: "Session not found on Mac"))
             return
         }
