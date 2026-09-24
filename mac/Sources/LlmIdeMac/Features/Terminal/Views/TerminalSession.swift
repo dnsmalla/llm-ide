@@ -36,7 +36,17 @@ final class TerminalSession: NSObject {
 
     // MARK: - Lifecycle
 
-    /// Spawn the PTY. Called once from `TerminalSessionView.makeNSView`.
+    /// Spawn the PTY unless this session already has (or already failed to
+    /// get) one. `TerminalSessionView` calls this AFTER its view update, never
+    /// from inside `makeNSView`; the guard makes a second call — a rebuilt
+    /// view whose deferred start lands after the first — a no-op instead of a
+    /// second shell.
+    func startIfNeeded() {
+        guard termView == nil, spawnError == nil else { return }
+        start()
+    }
+
+    /// Spawn the PTY. Use `startIfNeeded()`; this one always spawns.
     func start() {
         let shellPath: String
         if FileManager.default.fileExists(atPath: "/bin/zsh") {

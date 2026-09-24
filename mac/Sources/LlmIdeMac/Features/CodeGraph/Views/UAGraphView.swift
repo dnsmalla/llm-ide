@@ -541,6 +541,40 @@ struct UAGraphView: View {
             // Manual tab switch — clear any state from the previous mode.
             resetDerivedState()
         }
+        // Keyed on the active project, not on `graphRepoRoot` itself: that
+        // getter lists `code/` on disk, which is too costly to re-run on every
+        // body evaluation, and a Library-selection change (its other input)
+        // already resets through `onChange(of: selectedURL)`.
+        .onChange(of: projectStore.activeProject?.localPath) { _, _ in repoChanged() }
+    }
+
+    /// The graph repo moved (project switch while this page is open). Nothing
+    /// else reacted to it: `resetDerivedState` only ran on a mode or selection
+    /// change, and `hydrateFromStore` is a no-op while `fullData` is
+    /// non-empty — so the previous project's graph stayed on screen under the
+    /// new project indefinitely.
+    ///
+    /// In-flight work belongs to the OLD repo and is stopped first: a
+    /// generate or layout finishing after the switch would otherwise display
+    /// the old graph AND `cacheGraph` it under the new repo's key (that key is
+    /// read from `graphRepoRoot` when the result lands). Bumping
+    /// `layoutGeneration` also discards an `adoptLayout` signal pass still
+    /// running. Then the new repo's cached graph, if any, is shown.
+    private func repoChanged() {
+        runTask?.cancel()
+        runTask = nil
+        layoutTask?.cancel()
+        layoutTask = nil
+        layoutGeneration += 1
+        hydrating = false
+        focusedNode = nil
+        positions3DByMode = [:]
+        layout = .empty
+        // Blank first so `resetDerivedState` → `hydrateFromStore` (which only
+        // fills an EMPTY page) runs for the new repo instead of keeping the
+        // old graph when the new repo has no laid-out entry.
+        fullData = .empty
+        resetDerivedState()
     }
 
     private func resetDerivedState() {

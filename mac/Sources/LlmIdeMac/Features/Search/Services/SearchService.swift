@@ -3,7 +3,21 @@ import Observation
 
 struct SearchOptions: Equatable { var caseSensitive = false; var wholeWord = false; var regex = false }
 struct Match: Hashable { let nsRange: NSRange; let fileIndex: Int }   // utf16 range within lineText
-struct LineMatch: Hashable { let line: Int; let lineText: String; let matches: [Match] }
+/// One matching line. `lineText` is a PREVIEW: for a long line (a minified
+/// bundle is one 900 KB line) it is a window around the first match, not the
+/// whole line — see `SearchEngine.maxPreviewUTF16`. `previewOffset` is where
+/// that window starts in the real line, so `rangeInLine(_:)` recovers the
+/// position replace needs.
+struct LineMatch: Hashable {
+    let line: Int
+    let lineText: String
+    let matches: [Match]
+    var previewOffset: Int = 0
+    /// `m`'s UTF-16 range within the FULL line (what replace locates by).
+    func rangeInLine(_ m: Match) -> NSRange {
+        NSRange(location: m.nsRange.location + previewOffset, length: m.nsRange.length)
+    }
+}
 struct FileMatch: Identifiable, Hashable { let url: URL; let displayPath: String; let lineMatches: [LineMatch]; var id: String { url.path } }
 struct SearchResults: Equatable {
     var files: [FileMatch] = []
@@ -59,11 +73,9 @@ final class SearchService {
         // Group before adding word boundaries so alternation in a regex query
         // (e.g. `foo|bar`) binds inside the \b…\b, not as `\bfoo|bar\b`.
         if options.wholeWord { pattern = "\\b(?:" + pattern + ")\\b" }
-        // `.anchorsMatchLines` makes ^/$ match at every line boundary. This is
-        // required for consistency: search matches per-line (so ^/$ are line
-        // anchors), but replace matches the full file string — without this,
-        // anchored regex would diverge and replaceOne could hit the wrong
-        // occurrence. With it, both sides see the same match ordering.
+        // Search and replace both match one line at a time, so ^/$ are line
+        // anchors either way; `.anchorsMatchLines` keeps them so for any
+        // caller that hands this regex a multi-line string.
         var opts: NSRegularExpression.Options = [.anchorsMatchLines]
         if !options.caseSensitive { opts.insert(.caseInsensitive) }
         return try? NSRegularExpression(pattern: pattern, options: opts)
@@ -154,74 +166,89 @@ final class SearchService {
         return replacement
     }
 
+    // Every replace entry point below does its file IO and regex work on a
+    // DETACHED task, like `stream` does, never on the main actor: a Replace
+    // All over hundreds of files (or one 1 MB file with a slow regex) used to
+    // freeze the whole app until it finished.
+
     /// Replace every match of `query` in `file` with `replacement`, writing the
-    /// file back as UTF-8. Returns false if the file can't be read or the regex
-    /// is invalid. With `preserveCase` (non-regex only) each match is spliced
-    /// individually — in REVERSE order so earlier NSRanges stay valid — applying
-    /// `preserveCaseReplacement`. Otherwise a single
-    /// `stringByReplacingMatches` pass is used: in non-regex mode the replacement
-    /// is escaped as a literal template (so `$`/`\` are literal); in regex mode it
-    /// is passed through as a template (so `$1` etc. work).
+    /// file back as UTF-8. Returns false if the file can't be read, the regex
+    /// is invalid, or nothing matched. Matching is per line, exactly as the
+    /// search matches (see `SearchEngine.replacingAll`). In non-regex mode the
+    /// replacement is literal (`$`/`\` included); in regex mode it is a
+    /// template (so `$1` etc. work); `preserveCase` applies to non-regex only.
     func replaceInFile(file: URL, query: String, options: SearchOptions, replacement: String, preserveCase: Bool) async -> Bool {
-        guard let text = readText(file), let regex = Self.makeRegex(query: query, options: options) else { return false }
-        let ns = text as NSString
-        let full = NSRange(location: 0, length: ns.length)
-        let out: String
-        if preserveCase && !options.regex {
-            let matches = regex.matches(in: text, options: [], range: full)
-            let mutable = NSMutableString(string: ns)
-            for h in matches.reversed() {
-                let matched = ns.substring(with: h.range)
-                mutable.replaceCharacters(in: h.range, with: Self.preserveCaseReplacement(matched: matched, replacement: replacement))
-            }
-            out = mutable as String
-        } else {
-            let template = options.regex ? replacement : NSRegularExpression.escapedTemplate(for: replacement)
-            out = regex.stringByReplacingMatches(in: text, options: [], range: full, withTemplate: template)
-        }
-        return write(out, to: file)
+        await Task.detached(priority: .userInitiated) {
+            Self.replaceAllOnDisk(file: file, query: query, options: options,
+                                  replacement: replacement, preserveCase: preserveCase)
+        }.value
     }
 
-    /// Replace only the `fileIndex`-th match (0-based, document order) of `query`
-    /// in `file`. A single splice, so ordering is moot. Returns false if the file
-    /// can't be read, the regex is invalid, or there's no such match.
-    func replaceOne(file: URL, fileIndex: Int, query: String, options: SearchOptions, replacement: String, preserveCase: Bool) async -> Bool {
-        guard let text = readText(file), let regex = Self.makeRegex(query: query, options: options) else { return false }
-        let ns = text as NSString
-        let full = NSRange(location: 0, length: ns.length)
-        let matches = regex.matches(in: text, options: [], range: full)
-        guard fileIndex >= 0, fileIndex < matches.count else { return false }
-        let h = matches[fileIndex]
-        let replText: String
-        if preserveCase && !options.regex {
-            replText = Self.preserveCaseReplacement(matched: ns.substring(with: h.range), replacement: replacement)
-        } else if options.regex {
-            replText = regex.replacementString(for: h, in: text, offset: 0, template: replacement)
-        } else {
-            replText = replacement
-        }
-        let out = ns.replacingCharacters(in: h.range, with: replText)
-        return write(out, to: file)
+    /// Replace only the match the results list showed at 1-based `line`,
+    /// UTF-16 `rangeInLine` within that line (see `SearchEngine.replacingOne`
+    /// for why it is located by position, not by ordinal). Returns false if
+    /// the file can't be read, the regex is invalid, or that match is gone.
+    func replaceOne(file: URL, line: Int, rangeInLine: NSRange, query: String, options: SearchOptions, replacement: String, preserveCase: Bool) async -> Bool {
+        await Task.detached(priority: .userInitiated) {
+            guard let text = Self.readText(file),
+                  let regex = Self.makeRegex(query: query, options: options),
+                  let out = SearchEngine.replacingOne(in: text, line: line, rangeInLine: rangeInLine,
+                                                      regex: regex, replacement: replacement,
+                                                      options: options, preserveCase: preserveCase)
+            else { return false }
+            return Self.writeAtomically(out, to: file)
+        }.value
     }
 
     /// Replace all matches in each file. Returns the count of files changed.
+    /// One detached task walks every file, rather than one hop per file.
     func replaceAll(in files: [FileMatch], query: String, options: SearchOptions, replacement: String, preserveCase: Bool) async -> Int {
-        var changed = 0
-        for fm in files {
-            if await replaceInFile(file: fm.url, query: query, options: options, replacement: replacement, preserveCase: preserveCase) {
-                changed += 1
+        let urls = files.map(\.url)
+        return await Task.detached(priority: .userInitiated) {
+            urls.reduce(0) { changed, url in
+                Self.replaceAllOnDisk(file: url, query: query, options: options,
+                                      replacement: replacement, preserveCase: preserveCase)
+                    ? changed + 1 : changed
             }
-        }
-        return changed
+        }.value
     }
 
-    private func readText(_ url: URL) -> String? {
+    nonisolated private static func replaceAllOnDisk(file: URL, query: String, options: SearchOptions,
+                                                     replacement: String, preserveCase: Bool) -> Bool {
+        guard let text = readText(file),
+              let regex = makeRegex(query: query, options: options),
+              let out = SearchEngine.replacingAll(in: text, regex: regex, replacement: replacement,
+                                                  options: options, preserveCase: preserveCase)
+        else { return false }
+        return writeAtomically(out.text, to: file)
+    }
+
+    nonisolated private static func readText(_ url: URL) -> String? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    private func write(_ text: String, to url: URL) -> Bool {
+    /// Write `text` as UTF-8 via a temp file + rename, so a crash, a full
+    /// disk or a concurrent reader never sees a half-written source file —
+    /// the old plain `Data.write` truncated in place first.
+    ///
+    /// A rename replaces the inode, so two things a plain in-place write kept
+    /// for free are kept explicitly: a symlink is written THROUGH (its target
+    /// is replaced, the link survives), and the file's POSIX permissions are
+    /// restored (a replaced script must stay executable).
+    nonisolated static func writeAtomically(_ text: String, to url: URL) -> Bool {
         guard let data = text.data(using: .utf8) else { return false }
-        do { try data.write(to: url); return true } catch { return false }
+        let target = url.resolvingSymlinksInPath()
+        let fm = FileManager.default
+        let permissions = (try? fm.attributesOfItem(atPath: target.path))?[.posixPermissions]
+        do {
+            try data.write(to: target, options: .atomic)
+        } catch {
+            return false
+        }
+        if let permissions {
+            try? fm.setAttributes([.posixPermissions: permissions], ofItemAtPath: target.path)
+        }
+        return true
     }
 }
