@@ -223,7 +223,12 @@ final class GenerationViewModel: ObservableObject {
                             skippedSources.append(title)
                         }
                     case .file(let url, let name):
-                        if let content = try? String(contentsOf: url, encoding: .utf8) {
+                        // Off the main actor: forty large sources read here in
+                        // sequence used to hitch the UI for the whole batch.
+                        let read = await Task.detached(priority: .userInitiated) {
+                            try? String(contentsOf: url, encoding: .utf8)
+                        }.value
+                        if let content = read {
                             sources.append((name: name, content: content))
                         } else {
                             skippedSources.append(name)
