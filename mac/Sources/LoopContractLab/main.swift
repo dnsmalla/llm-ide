@@ -73,7 +73,7 @@ func provenancedStage(command: String, defaultKey: String? = "test") -> LoopStag
 }
 
 /// A LEGACY stage — saved before `detectedCommand` existed, so it decodes
-/// with `detectedCommand == nil`. Eligible for update/removal, but only with
+/// with `detectedCommand == nil`. Eligible for update, but only with
 /// a mandatory log line (asserted separately at the `ensureDefaultLoops`
 /// level is out of scope for a pure-function lab; the log call itself lives
 /// in `LoopEngineConfigStore.loops`, which this lab does not exercise, since
@@ -111,40 +111,30 @@ do {
            "the change is reported so the caller can log it")
 }
 
-// MARK: 2. Stage REMOVED when detection now yields nothing — the LOOP itself
-// is NEVER removed (it owns goal/acceptance/budgets/scopeGlobs/id that a
-// recreated template loop would not have).
+// MARK: 2. Detection yielding NOTHING leaves the stage untouched. Nil is not
+// evidence the tooling is gone (package.json mid-edit, another branch checked
+// out); removing on nil used to persist a transient miss to loop.json and lose
+// every setting on the stage.
 
 do {
-    // The reported bug precisely: `pytest` pinned, but the real project has
-    // none of the markers `detectTestCommand` looks for.
     let stage = provenancedStage(command: "pytest")
     let loop = testLoop(stages: [stage])
     let (result, changes) = LoopStageDetector.revalidatingTestStages(
         in: [loop], gitRoot: bareRoot, eligibleStageIDs: [stage.id])
-    expect(result.count == 1, "a loop is NEVER removed by this pass, even when it ends up with no stages")
-    expect(result.first?.id == loop.id, "the surviving loop keeps its original id (LoopRunService keys history by it)")
-    expect(result.first?.config.stages.isEmpty == true, "only the undetectable stage is dropped")
-    expect(changes == [LoopStageDetector.RevalidationChange(
-        loopName: "Test", stageName: "Test", kind: .removed(command: "pytest"))],
-           "the removal is reported so the caller can log it")
+    expect(result == [loop], "a nil detection changes nothing — the stage is kept exactly as saved")
+    expect(changes.isEmpty, "nothing is reported when detection finds nothing")
 }
 
 do {
-    // The Regression loop keeps its regressionSweep stage even when its OWN
-    // `regression-test` verify stage goes undetectable — only the stale
-    // stage is dropped, never the whole loop, because the sweep stage is
-    // untouched by this pass.
+    // Same for the Regression loop's own `regression-test` verify stage.
     let sweep = LoopStage(name: "Regression", kind: .regressionSweep, order: 0,
                           isDefault: true, defaultKey: "regression")
-    let verify = provenancedStage(command: "pytest", defaultKey: "regression-test")
+    var verify = provenancedStage(command: "pytest", defaultKey: "regression-test")
+    verify.order = 1
     let loop = testLoop(stages: [sweep, verify], defaultKey: LoopDefaultLoopKey.regression)
     let (result, _) = LoopStageDetector.revalidatingTestStages(
         in: [loop], gitRoot: bareRoot, eligibleStageIDs: [verify.id])
-    expect(result.count == 1, "the Regression loop is not removed")
-    expect(result.first?.config.stages.count == 1, "only the stale regression-test stage is dropped")
-    expect(result.first?.config.stages.first?.kind == .regressionSweep,
-           "the untouched Regression sweep stage remains")
+    expect(result == [loop], "the Regression loop keeps both stages when detection finds nothing")
 }
 
 // MARK: 3. A user-authored stage (isDefault == false) is NEVER touched.
@@ -228,8 +218,8 @@ do {
     let bareOnceIDs = Set(bareOnce.flatMap { $0.config.stages.map(\.id) })
     let (bareTwice, bareTwiceChanges) = LoopStageDetector.revalidatingTestStages(
         in: bareOnce, gitRoot: bareRoot, eligibleStageIDs: bareOnceIDs)
-    expect(bareOnce == bareTwice, "re-running the pass after a removal is also a no-op")
-    expect(bareTwiceChanges.isEmpty, "nothing left to remove the second time")
+    expect(bareOnce == bareTwice, "re-running the pass after a nil detection is also a no-op")
+    expect(bareTwiceChanges.isEmpty, "nothing to report the second time either")
 }
 
 // MARK: 7. Integration — `ensureDefaultLoops` end-to-end, driving the exact
@@ -247,7 +237,7 @@ do {
 
 do {
     // The Test default loop already exists, but its one stage is the user's
-    // own (`defaultKey == nil`) — e.g. right after a previous run's removal
+    // own (`defaultKey == nil`) — e.g. right after an older build's removal
     // path deleted the keyed stage and the user added their own before the
     // next load. Round 3's fix to `pinning()` means this stage's command
     // ("npm run e2e") does not match what detection produces ("swift test"),

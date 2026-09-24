@@ -165,7 +165,21 @@ final class AutoCodeUpdateService: ObservableObject {
                 self.isEnabled = value
                 if value { self.start() } else { self.stop() }
             }
+        // Same idiom as `LoopEngineRunner.init`: kill the in-flight CLI on
+        // Cmd-Q/logout instead of orphaning it. `[weak self]` makes a
+        // deallocated service a no-op.
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.handleAppTerminating()
+            }
+        }
     }
+
+    private var terminationObserver: NSObjectProtocol?
 
     // MARK: - Lifecycle
 
@@ -280,6 +294,9 @@ final class AutoCodeUpdateService: ObservableObject {
         isRunning = true
         let startedAt = Date()
         let loopLabel = AutoTask.loopEngineering.label
+        // Captured with `resolveBackendAndProject()` below (same main-actor
+        // turn), not re-read when the run finishes — see `appendRunRecord`.
+        let projectId = projectStore?.activeProject?.bundle.id
         // Set once the sweep reports back; read by the defer below.
         var didStart = true
         defer {
@@ -289,7 +306,7 @@ final class AutoCodeUpdateService: ObservableObject {
             lastRunDate = Date()
             appendRunRecord(taskId: AutoTask.loopEngineering.rawValue, label: loopLabel,
                             logSuffix: AutoTask.loopEngineering.logSuffix, startedAt: startedAt,
-                            trigger: trigger,
+                            trigger: trigger, projectId: projectId,
                             status: runStatus(forTaskId: AutoTask.loopEngineering.rawValue,
                                               didStart: didStart),
                             summary: statusMessage)
@@ -307,7 +324,7 @@ final class AutoCodeUpdateService: ObservableObject {
                         stageId != nil ? "Running Loop (single stage)…" : "Running Loop (one loop)…")
         didStart = await runLoopEngineeringSweep(projectRoot: resolved.projectRoot,
                                                 gitRoot: resolved.gitRoot,
-                                                projectId: projectStore?.activeProject?.bundle.id,
+                                                projectId: projectId,
                                                 onlyStageId: stageId, onlyLoopId: loopId,
                                                 journalTrigger: Self.loopTrigger(for: trigger))
         statusMessage = "\(AutoTask.loopEngineering.label) — done"
@@ -363,13 +380,15 @@ final class AutoCodeUpdateService: ObservableObject {
         isRunning = true
         currentCustomTaskId = task.id
         let startedAt = Date()
+        // Resolve-time project id — see `appendRunRecord`.
+        let projectId = projectStore?.activeProject?.bundle.id
         defer {
             isRunning = false
             currentCustomTaskId = nil
             currentStep = nil
             lastRunDate = Date()
             appendRunRecord(taskId: task.id, label: task.name, logSuffix: task.id,
-                            startedAt: startedAt, trigger: trigger,
+                            startedAt: startedAt, trigger: trigger, projectId: projectId,
                             status: runStatus(forTaskId: task.id),
                             summary: statusMessage)
         }
@@ -494,6 +513,8 @@ final class AutoCodeUpdateService: ObservableObject {
         guard !isRunning else { return }
         isRunning = true
         let startedAt = Date()
+        // Resolve-time project id — see `appendRunRecord`.
+        let projectId = projectStore?.activeProject?.bundle.id
         defer {
             isRunning = false
             currentTask = nil
@@ -504,7 +525,7 @@ final class AutoCodeUpdateService: ObservableObject {
             statusMessage = "Logs directory unavailable"
             appendRunRecord(taskId: task.rawValue, label: task.label,
                             logSuffix: task.logSuffix, startedAt: startedAt,
-                            trigger: trigger, status: .failed,
+                            trigger: trigger, projectId: projectId, status: .failed,
                             summary: "Logs directory unavailable")
             return
         }
@@ -516,13 +537,14 @@ final class AutoCodeUpdateService: ObservableObject {
                 taskErrors[task.rawValue] = reason
                 appendRunRecord(taskId: task.rawValue, label: task.label,
                                 logSuffix: task.logSuffix, startedAt: startedAt,
-                                trigger: trigger, status: .failed, summary: reason)
+                                trigger: trigger, projectId: projectId, status: .failed,
+                                summary: reason)
                 return
             }
-            await runTaskBody(task, resolved: resolved, projectId: projectStore?.activeProject?.bundle.id,
+            await runTaskBody(task, resolved: resolved, projectId: projectId,
                               logDir: logDir, startedAt: startedAt, trigger: trigger)
         } else {
-            await runTaskBody(task, resolved: nil, projectId: projectStore?.activeProject?.bundle.id,
+            await runTaskBody(task, resolved: nil, projectId: projectId,
                               logDir: logDir, startedAt: startedAt, trigger: trigger)
         }
         statusMessage = "\(task.label) — done"
@@ -547,7 +569,7 @@ final class AutoCodeUpdateService: ObservableObject {
         defer {
             appendRunRecord(taskId: task.rawValue, label: task.label,
                             logSuffix: task.logSuffix, startedAt: startedAt,
-                            trigger: trigger,
+                            trigger: trigger, projectId: projectId,
                             status: runStatus(forTaskId: task.rawValue, didStart: didStart),
                             summary: taskErrors[task.rawValue])
         }
@@ -652,9 +674,67 @@ final class AutoCodeUpdateService: ObservableObject {
     /// Stop the in-flight run: cancel the run Task (so it bails at the next
     /// task boundary) and terminate the currently-executing subprocess (so
     /// we don't wait out its 10-minute timeout).
+    ///
+    /// SIGTERM alone was not enough: a CLI that ignores it never exits,
+    /// `runCLI`'s continuation never resumes, and `isRunning` stayed true
+    /// until relaunch — Stop looked like it did nothing. Whatever is still
+    /// alive after `cancelKillGrace` is SIGKILLed.
     func cancel() {
         runTask?.cancel()
-        activeProcess?.terminate()
+        if let activeProcess {
+            Self.terminateWithKillFallback(activeProcess, grace: Self.cancelKillGrace)
+        }
+    }
+
+    /// Grace between SIGTERM and SIGKILL for a user-initiated Stop.
+    nonisolated static let cancelKillGrace: TimeInterval = 5
+    /// Grace on app quit — `willTerminate` blocks the main thread, so short.
+    nonisolated static let quitKillGrace: TimeInterval = 1
+
+    /// SIGTERM `process` and every descendant it spawned (the CLI runs node,
+    /// which runs tools), then SIGKILL whatever survived `grace` seconds
+    /// later. Returns immediately; the kill runs off the main actor.
+    /// Descendants are snapshotted at SIGTERM time: once the CLI dies they are
+    /// re-parented to launchd and a later walk can't find them (same reason
+    /// as `BashService`'s forceKill).
+    nonisolated static func terminateWithKillFallback(_ process: Process, grace: TimeInterval) {
+        guard process.isRunning else { return }
+        let pid = process.processIdentifier
+        guard pid > 0 else { return }
+        let tree = ProcessTree.descendants(of: pid)
+        for child in tree { kill(child, SIGTERM) }
+        process.terminate()
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + grace) {
+            // `isRunning` turns false only once the child is reaped, so the
+            // pid can't have been recycled for an unrelated process yet.
+            if process.isRunning { kill(pid, SIGKILL) }
+            for child in tree { kill(child, SIGKILL) }
+        }
+    }
+
+    /// Synchronous variant for app termination: there is no later tick to run
+    /// the fallback on. Polls up to `grace` seconds, then SIGKILLs survivors.
+    nonisolated static func terminateBlocking(_ process: Process, grace: TimeInterval) {
+        guard process.isRunning else { return }
+        let pid = process.processIdentifier
+        guard pid > 0 else { return }
+        let tree = ProcessTree.descendants(of: pid)
+        for child in tree { kill(child, SIGTERM) }
+        process.terminate()
+        let deadline = Date().addingTimeInterval(grace)
+        while process.isRunning && Date() < deadline { usleep(20_000) }
+        if process.isRunning { kill(pid, SIGKILL) }
+        for child in tree { kill(child, SIGKILL) }
+    }
+
+    /// Cmd-Q / logout. Without this an in-flight auto-task CLI outlived the
+    /// app and kept editing with no one left to record its result — the
+    /// Shell's willTerminate hook stops only the backend and mobile.
+    func handleAppTerminating() {
+        runTask?.cancel()
+        if let activeProcess {
+            Self.terminateBlocking(activeProcess, grace: Self.quitKillGrace)
+        }
     }
 
     func stop() {
@@ -682,6 +762,9 @@ final class AutoCodeUpdateService: ObservableObject {
 
     deinit {
         timer?.invalidate()
+        if let terminationObserver {
+            NotificationCenter.default.removeObserver(terminationObserver)
+        }
     }
 
     // MARK: - Main run loop
@@ -894,8 +977,13 @@ final class AutoCodeUpdateService: ObservableObject {
         return .success
     }
 
+    /// `projectId` is the project the run was resolved against, captured by
+    /// the caller when the run STARTED. It used to be read here, at finish
+    /// time — so switching projects during a long run filed the record under
+    /// the project that happened to be active when it ended.
     private func appendRunRecord(taskId: String, label: String, logSuffix: String?,
                                  startedAt: Date, trigger: AutoTaskRunTrigger,
+                                 projectId: String?,
                                  status: AutoTaskRunStatus, summary: String?) {
         runHistory.record(AutoTaskRunRecord(
             id: UUID().uuidString,
@@ -907,7 +995,7 @@ final class AutoCodeUpdateService: ObservableObject {
             status: status,
             summary: summary,
             logFileName: logSuffix.map { "auto-task-\($0).log" },
-            projectId: projectStore?.activeProject?.bundle.id
+            projectId: projectId
         ))
         refreshRunHistory()
     }
