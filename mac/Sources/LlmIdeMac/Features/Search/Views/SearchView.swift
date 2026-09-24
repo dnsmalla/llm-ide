@@ -156,8 +156,13 @@ struct SearchView: View {
         }
     }
 
+    /// Replace All acts on `results.files`, which stops at
+    /// `SearchEngine.maxMatches`. On a truncated run that list is only a
+    /// prefix of the files that match, so "Replace All" would silently leave
+    /// every file past the cap untouched while claiming to have replaced all
+    /// matches. Refuse instead and ask for a narrower search.
     private var replaceAllDisabled: Bool {
-        replaceText.isEmpty || results.files.isEmpty || searching
+        replaceText.isEmpty || results.files.isEmpty || searching || results.truncated
     }
 
     private var replaceRow: some View {
@@ -174,12 +179,18 @@ struct SearchView: View {
                 .font(Typography.caption)
                 .foregroundStyle(replaceAllDisabled ? theme.current.textMuted : theme.current.accent)
                 .disabled(replaceAllDisabled)
-                .help("Replace all matches")
+                .help(results.truncated
+                      ? "Too many matches (limit \(SearchEngine.maxMatches)) — narrow the search to Replace All"
+                      : "Replace all matches")
                 .confirmationDialog(
                     "Replace all matches in \(results.files.count) files?",
                     isPresented: $confirmReplaceAll, titleVisibility: .visible
                 ) {
-                    Button("Replace All", role: .destructive) { replaceAllAction() }
+                    Button("Replace All", role: .destructive) {
+                        // The dialog can outlive the state it was opened on (a
+                        // re-search can finish truncated while it is up).
+                        if !replaceAllDisabled { replaceAllAction() }
+                    }
                     Button("Cancel", role: .cancel) {}
                 }
         }
@@ -234,7 +245,17 @@ struct SearchView: View {
         if results.invalidPattern { return "Invalid pattern" }
         if !query.isEmpty && results.files.isEmpty && !searching { return "No results" }
         if results.files.isEmpty { return "" }
-        return "\(results.totalMatches) results in \(results.files.count) files"
+        return Self.headerSummary(totalMatches: results.totalMatches,
+                                  fileCount: results.files.count,
+                                  truncated: results.truncated)
+    }
+
+    /// The results-header summary. A truncated run must not read as complete:
+    /// `results` then holds only the first `SearchEngine.maxMatches` matches.
+    static func headerSummary(totalMatches: Int, fileCount: Int, truncated: Bool) -> String {
+        truncated
+            ? "Showing first \(totalMatches) matches in \(fileCount) files — narrow the search to see more"
+            : "\(totalMatches) results in \(fileCount) files"
     }
 
     // MARK: File group
