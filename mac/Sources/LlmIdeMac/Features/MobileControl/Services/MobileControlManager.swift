@@ -113,6 +113,11 @@ final class MobileControlManager {
     /// `explore_chat` on whichever the resolver picked (shared or off-screen).
     /// Looking the engine up again at answer time would find the wrong one.
     private var pendingPhoneApprovals: [String: (engine: ChatEngine, requestId: String)] = [:]
+    /// Which phone command installed each engine's `onExternalApproval` hook.
+    /// The hook is a single slot per engine, so `endPhoneApprovals` may only
+    /// clear it when it still belongs to the command that is ending — see
+    /// `beginPhoneApprovals`.
+    private var phoneApprovalOwners: [ObjectIdentifier: String] = [:]
 
     private var server: MobileWebSocketServer?
     private var advertiser: MobileBonjourAdvertiser?
@@ -1147,7 +1152,15 @@ final class MobileControlManager {
     /// of this channel was added to `llmide_chat` only, so the Explorer chat —
     /// the arm actually bound to a project, where the planning questions come
     /// from — still showed nothing but "Question pending on Mac".
-    private func beginPhoneApprovals(engine: ChatEngine, commandId: String) {
+    ///
+    /// Skipped when the engine is already busy: `runExternalTurn` is about to
+    /// throw `.busy` without running anything, and installing here would
+    /// overwrite the single-slot hook of the turn that IS running (and whose
+    /// questions must keep reaching its own phone command).
+    // internal: pinned by MobilePhoneApprovalHookTests
+    func beginPhoneApprovals(engine: ChatEngine, commandId: String) {
+        guard !engine.busy else { return }
+        phoneApprovalOwners[ObjectIdentifier(engine)] = commandId
         engine.hooks.onExternalApproval = { [weak self] approval in
             guard let self else { return }
             Task { await self.sendApprovalToPhone(approval, commandId: commandId, engine: engine) }
@@ -1157,8 +1170,17 @@ final class MobileControlManager {
     /// Stop forwarding, and take down any card still on the phone: once the
     /// turn is over the requestId is dead server-side, and a question that
     /// can no longer be answered is worse than no question.
-    private func endPhoneApprovals(engine: ChatEngine, commandId: String) {
-        engine.hooks.onExternalApproval = nil
+    ///
+    /// The hook is cleared only if this command still owns it: a command
+    /// that was rejected as busy never installed one, and clearing anyway
+    /// would silence the running turn's questions on the phone.
+    // internal: pinned by MobilePhoneApprovalHookTests
+    func endPhoneApprovals(engine: ChatEngine, commandId: String) {
+        let key = ObjectIdentifier(engine)
+        if phoneApprovalOwners[key] == commandId {
+            phoneApprovalOwners.removeValue(forKey: key)
+            engine.hooks.onExternalApproval = nil
+        }
         guard let entry = pendingPhoneApprovals.removeValue(forKey: commandId) else { return }
         Task { [weak self] in
             await self?.server?.send(ApprovalCleared(
