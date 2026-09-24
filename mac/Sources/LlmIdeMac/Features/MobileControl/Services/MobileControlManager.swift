@@ -185,13 +185,34 @@ final class MobileControlManager {
 
     // MARK: - Start / stop
 
+    /// The pairing-PIN check behind `validatePin`.
+    ///
+    /// Fails CLOSED when the current PIN can't be read: falling back to the
+    /// PIN captured at start could resurrect one that has since been retired
+    /// (rotated in memory while its Keychain persist failed, then the session
+    /// cache cleared). Compared in constant time, like device tokens.
+    nonisolated static func pinMatches(candidate: String, current: String?) -> Bool {
+        guard let current, !current.isEmpty else { return false }
+        // The PIN is always 6 digits (`%06d`), but a user typing on a phone
+        // number pad often omits leading zeros (e.g. "42" for "000042").
+        // Left-zero-pad an all-ASCII-digit candidate of ≤6 chars before
+        // comparing so that omission still matches, without weakening the
+        // check for any other input.
+        let isAllDigits = !candidate.isEmpty
+            && candidate.allSatisfy { ("0"..."9").contains($0) }
+        let normalized = (candidate.count <= 6 && isAllDigits)
+            ? String(repeating: "0", count: 6 - candidate.count) + candidate
+            : candidate
+        return MobilePairedDeviceStore.constantTimeEqual(normalized, current)
+    }
+
     func start() {
         if case .running = status { return }
         if case .starting = status { return }
 
         status = .starting
 
-        guard let pin = (try? MobilePin.ensure()) ?? MobilePin.read() else {
+        guard ((try? MobilePin.ensure()) ?? MobilePin.read()) != nil else {
             lastError = "Couldn't read or create the mobile pairing PIN in Keychain. Quit and relaunch LLM-IDE, then try Start again."
             append(.stderr, "ERROR: mobile pairing PIN unavailable in Keychain")
             status = .crashed(exitCode: -1)
@@ -203,21 +224,11 @@ final class MobileControlManager {
             port: Self.configuredPort,
             deviceName: name,
             validatePin: { candidate in
-                // The PIN is always 6 digits (`%06d`), but a user typing on a
-                // phone number pad often omits leading zeros (e.g. "42" for
-                // "000042"). Left-zero-pad an all-ASCII-digit candidate of
-                // ≤6 chars before comparing so that omission still matches,
-                // without weakening the check for any other input.
-                let isAllDigits = !candidate.isEmpty
-                    && candidate.allSatisfy { ("0"..."9").contains($0) }
-                let normalized = (candidate.count <= 6 && isAllDigits)
-                    ? String(repeating: "0", count: 6 - candidate.count) + candidate
-                    : candidate
                 // Read the PIN at validation time, not the one captured when
                 // the server started: it rotates after every token-issuing
                 // pairing (`onPinConsumed`), and the stale capture would keep
                 // accepting the retired PIN. `read()` is the session cache.
-                return normalized == (MobilePin.read() ?? pin)
+                Self.pinMatches(candidate: candidate, current: MobilePin.read())
             },
             authenticateToken: { [pairedDeviceStore] deviceId, token in
                 pairedDeviceStore.authenticate(deviceId: deviceId, token: token)
