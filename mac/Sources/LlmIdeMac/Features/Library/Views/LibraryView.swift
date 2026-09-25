@@ -65,6 +65,9 @@ struct LibraryView: View {
     /// appear and refreshed after any add/toggle/update/remove — same
     /// pattern as `plugins`.
     @State private var llmSources: [LlmIdeAPIClient.LlmSourceInfo] = []
+    /// Upstream status per source id (`GET …/updates`) — drives the sidebar's
+    /// "update" badge. Empty until the first check returns; never an error.
+    @State private var llmSourceUpdates: [String: LlmIdeAPIClient.LlmSourceUpdateStatus] = [:]
     @State private var refreshingAll = false
     @State private var showingLlmSourceAddSheet = false
     @State private var llmSourceMessage: String?
@@ -122,7 +125,10 @@ struct LibraryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { await load() }
         .task { await loadPlugins() }
-        .task { await loadLlmSources() }
+        .task {
+            await loadLlmSources()
+            await loadLlmSourceUpdates(force: false)
+        }
         .task { await loadMcpPlugins() }
         .task { await loadConnectors() }
         .task { await loadPluginUpdates() }
@@ -133,6 +139,8 @@ struct LibraryView: View {
             Task {
                 await loadMcpPlugins()
                 await loadPlugins()
+                await refreshLlmSources()
+                await loadLlmSourceUpdates(force: false)
             }
         }
         .task { await scanClaudeSources() }
@@ -1137,7 +1145,7 @@ struct LibraryView: View {
                     emptyRow("No LLM sources registered yet.", icon: "books.vertical")
                 } else {
                     ForEach(llmSources) { s in
-                        LlmSourceRow(source: s) { enabled in
+                        LlmSourceRow(source: s, updateAvailable: llmSourceUpdates[s.id]?.updateAvailable == true) { enabled in
                             Task { await toggleSource(s.id, enabled: enabled) }
                         }
                         .tag(ShellState.LibrarySelection.llmSource(s.id))
@@ -1167,6 +1175,9 @@ struct LibraryView: View {
                 Button {
                     showingLlmSourceAddSheet = true
                 } label: { Label("Add LLM source…", systemImage: "plus.circle") }
+                Button {
+                    Task { await loadLlmSourceUpdates(force: true) }
+                } label: { Label("Check for updates", systemImage: "arrow.triangle.2.circlepath") }
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 10, weight: .semibold))
@@ -1207,6 +1218,17 @@ struct LibraryView: View {
         } catch {
             llmSources = []
             llmSourcesError = error.localizedDescription
+        }
+    }
+
+    /// Best-effort: a failed check leaves the previous badges in place.
+    private func loadLlmSourceUpdates(force: Bool) async {
+        guard let statuses = try? await api.llmSourceUpdates(force: force) else { return }
+        llmSourceUpdates = Dictionary(statuses.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        if force {
+            let n = statuses.filter(\.updateAvailable).count
+            llmSourceMessage = n == 0 ? "All LLM sources are up to date."
+                : "\(n) LLM source\(n == 1 ? " has an update" : "s have updates") — open it and press Update."
         }
     }
 

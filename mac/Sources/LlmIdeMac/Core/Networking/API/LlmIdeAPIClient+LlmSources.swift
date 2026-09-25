@@ -124,12 +124,12 @@ extension LlmIdeAPIClient {
     struct LlmSourceDiscoveryDetail: Decodable {
         /// Optional so a Mac build ahead of its server still decodes the
         /// pre-skills response shape (the field shipped later than the rest).
-        let skills: [LlmSourceSkill]?
-        let agents: [LlmSourceAgent]
+        var skills: [LlmSourceSkill]?
+        var agents: [LlmSourceAgent]
         /// Optional for the same reason as `skills`: these two families were
         /// added to the discovery response after agents/hooks/mcpServers.
-        let commands: [LlmSourceCommand]?
-        let templates: [LlmSourceTemplate]?
+        var commands: [LlmSourceCommand]?
+        var templates: [LlmSourceTemplate]?
         let hooks: [LlmSourceHook]
         let mcpServers: [LlmSourceMcpServer]
     }
