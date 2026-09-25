@@ -481,16 +481,16 @@ test('runNativeAgentLoop forwards the turn signal into every tool ctx', async ()
 
 test('registry.mjs hands the loop\'s signal to run-bash (legacy engine ctx shape)', async () => {
   const { get } = await import('../llm_agent/tools/registry.mjs');
-  const { setAlwaysAllow } = await import('../kb/tool-approvals.mjs');
+  const { addRule } = await import('../kb/tool-permissions.mjs');
   const { registerUser } = await import('../server/users.mjs');
   const { getDb } = await import('../kb/db.mjs');
   const user = registerUser(getDb(), {
     email: `run-bash-signal-${Date.now()}@example.com`,
     password: 'CorrectHorseBattery', displayName: 't',
   });
-  // `sleep 30` is prompt-tier; always-allow is how a legacy turn reaches the
-  // handler without a live approval channel in a unit test.
-  setAlwaysAllow(user.id, 'run-bash');
+  // `sleep 30` is prompt-tier; a project rule for `sleep` is how a legacy
+  // turn reaches the handler without a live approval channel in a unit test.
+  addRule(user.id, workspace, 'run-bash', 'sleep');
 
   const ac = new AbortController();
   const started = Date.now();

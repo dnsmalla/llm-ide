@@ -671,6 +671,7 @@ export async function handleAIRoutes(req, res) {
       sdkSessionId: body.sdkSessionId,
       userId: req.user?.id,
       action: body.action,
+      feedback: body.feedback,
       answers: body.answers,
     });
     if (out.ok) {

@@ -34,7 +34,8 @@ import { handleProjectMemory } from '../runtime/handlers/project-memory.mjs';
 import { handleLoadSkill } from '../runtime/handlers/load-skill.mjs';
 import { runBashGate, autoGate } from './gates.mjs';
 import { registerDecision, abortDecisionsForSession } from '../sdk/decisions.mjs';
-import { hasAlwaysAllow, setAlwaysAllow } from '../../kb/tool-approvals.mjs';
+import { isAllowedByRule, suggestRule, addRule } from '../../kb/tool-permissions.mjs';
+import { neutralizePromptFences } from '../../core/utils.mjs';
 
 // The turn's abort signal, wherever the driving engine puts it. v2
 // (sdk/tools.mjs) sets `signal` on its flat toolCtx; the legacy loop nests its
@@ -189,8 +190,8 @@ const ENTRIES = [
       });
       if (decision === 'blocked') return { error: 'Command blocked for safety. Confirm destructive operations with the user before running.' };
       if (decision === 'auto') return handleRunBash(args, bashCtx);
-      // decision === 'prompt' — always-allow only matters here.
-      if (hasAlwaysAllow(ctx.userId, 'run-bash')) {
+      // decision === 'prompt' — a saved project rule only matters here.
+      if (isAllowedByRule(ctx.userId, bashCtx.workspaceRoot, 'run-bash', args)) {
         return handleRunBash(args, bashCtx);
       }
       // No live emit channel => no human can ever see this approval. That is
@@ -205,6 +206,10 @@ const ENTRIES = [
       // Same park-and-await pattern as v2's canUseTool, reusing the SAME
       // dependency-free decisions.mjs registry (spec §7).
       const sessionKey = ctx.agentContext?.sessionId;
+      // Same "always allow" offer as v2: a project-scoped command-prefix rule,
+      // or none for a compound command (then the answer is only "once").
+      const rule = bashCtx.workspaceRoot ? suggestRule('run-bash', args) : null;
+      const suggestion = rule ? { ...rule, scope: 'project' } : null;
       const { requestId, promise } = registerDecision({ sdkSessionId: sessionKey, userId: ctx.userId, kind: 'ToolApproval' });
       try {
         // buildDispatch's dispatch function is `(args, loopCtx) =>
@@ -213,15 +218,23 @@ const ENTRIES = [
         // `ctx.loopCtx`, not spread onto `ctx` itself (same convention
         // ask-internal/ask-subagent already rely on for `ctx.loopCtx?.depth`).
         // `emit` therefore lives at `ctx.loopCtx.emit`, never `ctx.emit`.
-        ctx.loopCtx?.emit?.({ phase: 'approval_request', requestId, kind: 'ToolApproval', toolName: 'run-bash', argsSummary: args.command });
+        ctx.loopCtx?.emit?.({
+          phase: 'approval_request', requestId, kind: 'ToolApproval', toolName: 'run-bash', argsSummary: args.command,
+          ...(suggestion ? { suggestion } : {}),
+        });
       } catch {
         abortDecisionsForSession(sessionKey);
         return { error: 'Failed to surface the approval request.' };
       }
       const outcome = await promise;
-      if (outcome.action === 'always-allow') { setAlwaysAllow(ctx.userId, 'run-bash'); return handleRunBash(args, bashCtx); }
+      if (outcome.action === 'always-allow') {
+        if (suggestion) addRule(ctx.userId, bashCtx.workspaceRoot, suggestion.toolName, suggestion.pattern);
+        return handleRunBash(args, bashCtx);
+      }
       if (outcome.action === 'allow') return handleRunBash(args, bashCtx);
-      return { error: 'Command not approved by the user.' };
+      return { error: outcome.feedback
+        ? `Command not approved by the user. They said: ${neutralizePromptFences(String(outcome.feedback))}`
+        : 'Command not approved by the user.' };
     },
   },
   {

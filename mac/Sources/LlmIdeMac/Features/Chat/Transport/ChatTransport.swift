@@ -74,8 +74,8 @@ struct ChatTransportInput: Sendable {
     /// existing call sites are unchanged.
     var planWrite: Bool = false
 
-    /// The chat's permission chip for this turn: `"bypass"` (allow all) or
-    /// `"manual"` (ask every time), from `EditAcceptanceMode`.
+    /// The chat's permission chip for this turn — `"ask"`, `"accept-edits"`
+    /// or `"bypass"` (Claude Code's modes), from `EditAcceptanceMode`.
     ///
     /// The legacy loop has always applied this setting CLIENT-side, in
     /// `ChatAutoChainPolicy`. The Agent engine decides tool approvals

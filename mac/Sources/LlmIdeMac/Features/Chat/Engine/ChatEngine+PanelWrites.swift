@@ -167,15 +167,15 @@ extension ChatEngine {
                                           sdkSessionId: sdkSessionId,
                                           answers: answers)
         }
-        postToolDecision = { requestId, sdkSessionId, action in
+        postToolDecision = { requestId, sdkSessionId, action, feedback in
             try await api.agentV2ToolDecision(requestId: requestId,
                                               sdkSessionId: sdkSessionId,
-                                              action: action)
+                                              action: action, feedback: feedback)
         }
-        postLegacyToolDecision = { requestId, sessionId, action in
+        postLegacyToolDecision = { requestId, sessionId, action, feedback in
             try await api.codeAssistDecision(requestId: requestId,
                                              sessionId: sessionId,
-                                             action: action)
+                                             action: action, feedback: feedback)
         }
     }
 }

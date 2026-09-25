@@ -50,6 +50,7 @@ const { getDb } = await import('../kb/db.mjs');
 const { persistTurnMemory } = await import('../llm_agent/runtime/memory-persist.mjs');
 const { listSessionMemory } = await import('../kb/session-memory.mjs');
 const { hasAlwaysAllow, setAlwaysAllow } = await import('../kb/tool-approvals.mjs');
+const { addRule, listRules } = await import('../kb/tool-permissions.mjs');
 const { syncCustomProviders } = await import('../server/custom-providers.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 
@@ -947,7 +948,7 @@ test('an unknown native tool is denied with the not-enabled message', withAnthro
 
 test('native Bash: blocked command is denied even with always-allow set', withAnthropicKey('sk-ant-v2-test', async () => {
   const user = registerUser(getDb(), { email: 'v2native-blocked@example.com', password: 'CorrectHorseBattery', displayName: 't' });
-  setAlwaysAllow(user.id, 'Bash');
+  addRule(user.id, WS, 'Bash', 'sudo rm');
   const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
   await runAgentV2Turn({
     message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: WS },
@@ -989,7 +990,7 @@ test('native Bash: prompt-tier command parks a ToolApproval carrying args.comman
   assert.equal(d.behavior, 'allow');
 }));
 
-test('native Edit: in-workspace target parks with diff args; always-allow persists per tool', withAnthropicKey('sk-ant-v2-test', async () => {
+test('native Edit: in-workspace target parks with diff args; always-allow grants edits for this chat', withAnthropicKey('sk-ant-v2-test', async () => {
   const user = registerUser(getDb(), { email: 'v2native-edit@example.com', password: 'CorrectHorseBattery', displayName: 't' });
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'v2edit-'));
   fs.writeFileSync(path.join(workspace, 'a.txt'), 'old');
@@ -1001,7 +1002,7 @@ test('native Edit: in-workspace target parks with diff args; always-allow persis
   // => []` (used by the containment-failure tests) would wrongly block
   // every write here.
   await runAgentV2Turn({
-    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: workspace },
+    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: workspace, sessionId: 'chat-ed1' },
     resumeSdkSessionId: 'sdk-ed1', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
   }, { ...turnInjectable, roots: () => [workspace] });
   const input = { file_path: path.join(workspace, 'a.txt'), old_string: 'old', new_string: 'new' };
@@ -1012,8 +1013,8 @@ test('native Edit: in-workspace target parks with diff args; always-allow persis
   answerDecision({ requestId: req.requestId, sdkSessionId: 'sdk-ed1', userId: user.id, action: 'always-allow' });
   const d = await decision;
   assert.equal(d.behavior, 'allow');
-  assert.equal(hasAlwaysAllow(user.id, 'Edit'), true);
-  // The always-allow row now shortcuts the prompt tier for the next Edit.
+  assert.equal(req.suggestion.scope, 'session', "Claude Code's \"allow all edits during this session\"");
+  // The chat's edit grant now shortcuts the prompt tier for the next Edit.
   const d2 = await script.options.canUseTool('Edit', input);
   assert.equal(d2.behavior, 'allow');
 }));
@@ -1142,7 +1143,7 @@ test('approvalArgsFor(Write): exists reports whether the target already exists o
 test('act tool: run-bash with a blocked command is denied even with always-allow set',
   withAnthropicKey('sk-ant-v2-test', async () => {
     const user = registerUser(getDb(), { email: 'v2eng-blocked@example.com', password: 'CorrectHorseBattery', displayName: 't' });
-    setAlwaysAllow(user.id, 'run-bash'); // must NOT override a blocked classification
+    addRule(user.id, WS, 'run-bash', 'sudo rm'); // must NOT override a blocked classification
     const script = { messages: [{ type: 'result', subtype: 'success', session_id: 's' }] };
     await runAgentV2Turn({
       message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: WS },
@@ -1236,7 +1237,7 @@ test('act tool: run-bash prompt decision answered "deny" denies the tool',
     assert.equal(hasAlwaysAllow(user.id, 'run-bash'), false);
   }));
 
-test('act tool: run-bash prompt decision answered "always-allow" persists the approval and allows',
+test('act tool: run-bash prompt decision answered "always-allow" saves a project prefix rule and allows',
   withAnthropicKey('sk-ant-v2-test', async () => {
     const user = registerUser(getDb(), { email: 'v2eng-alwaysallow@example.com', password: 'CorrectHorseBattery', displayName: 't' });
     const script = { messages: [
@@ -1249,20 +1250,25 @@ test('act tool: run-bash prompt decision answered "always-allow" persists the ap
       resumeSdkSessionId: 'sdk-rb3', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
     }, turnInjectable);
     assert.equal(hasAlwaysAllow(user.id, 'run-bash'), false);
-    const decision = script.options.canUseTool('mcp__llmide__run-bash', { command: 'yet-another-unknown-cli' });
+    const decision = script.options.canUseTool('mcp__llmide__run-bash', { command: 'make lint' });
     const req = events.find((e) => e.type === 'approval_request');
     answerDecision({ requestId: req.requestId, sdkSessionId: 'sdk-rb3', userId: user.id, action: 'always-allow' });
     const d = await decision;
     assert.equal(d.behavior, 'allow');
-    assert.equal(hasAlwaysAllow(user.id, 'run-bash'), true);
+    const rules = listRules(user.id);
+    assert.equal(rules.length, 1);
+    assert.equal(rules[0].toolName, 'run-bash');
+    assert.equal(rules[0].pattern, 'make lint');
 
-    // A SECOND call, even with a fresh unrecognized command, now allows
-    // immediately with no new approval parked — always-allow short-circuits
-    // the gate on the next call.
+    // The same command prefix now runs with no new approval parked…
     const before = events.length;
-    const d2 = await script.options.canUseTool('mcp__llmide__run-bash', { command: 'brand-new-unknown-cli' });
+    const d2 = await script.options.canUseTool('mcp__llmide__run-bash', { command: 'make lint V=1' });
     assert.equal(d2.behavior, 'allow');
-    assert.equal(events.length, before, 'no new approval_request for an always-allowed tool');
+    assert.equal(events.length, before, 'no new approval_request for a command the rule covers');
+    // …but a different command still asks: the rule is a prefix, not the tool.
+    void script.options.canUseTool('mcp__llmide__run-bash', { command: 'make deploy' });
+    await new Promise((r) => setImmediate(r));
+    assert.equal(events.filter((e) => e.type === 'approval_request').length, 2);
   }));
 
 test('resume failure maps to SESSION_UNRESUMABLE',

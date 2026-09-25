@@ -1312,7 +1312,14 @@ paths:
                 action:
                   type: string
                   enum: [allow, deny, always-allow]
-                  description: "'always-allow' also persists a per-(user, tool) row so later prompt-tier calls skip the approval"
+                  description: >
+                    'always-allow' saves the rule the approval_request's `suggestion` offered —
+                    a project-scoped command-prefix rule for shell commands (`npm test`), a
+                    project-scoped tool rule for act tools — so later prompt-tier calls it covers
+                    skip the approval. No `suggestion` (a compound command) means it allows once.
+                feedback:
+                  type: string
+                  description: "With `deny` only: the user's instruction (\"No, and do this instead\"), handed to the model as the denial reason. Max 2000 chars."
       responses:
         '200':
           description: Decision delivered; the parked tool call resumes (or is denied) and the stream continues
@@ -2770,37 +2777,48 @@ paths:
 
   /kb/agent/tool-approvals:
     get:
-      summary: The caller's standing "Always Allow" tool grants
+      summary: The caller's "always allow" permission rules
       description: >
-        Lists the per-(user, tool) grants made from the act-tool approval card, newest
-        first. An empty array is the expected, healthy case — nothing has been
-        permanently allowed. Not repo-scoped (a grant is per-user, per-tool), so no
-        allow-list resolution is involved. A grant only ever skips the interactive
-        approval a `prompt`-tier command would park; it can never promote a `blocked`
-        command, because the gate runs first and unconditionally.
+        Claude-style rules made from the approval card's "always allow" button:
+        per user, per project (the resolved workspace root), per tool, and for
+        shell tools per command PREFIX (`npm test`, `git status`). A compound
+        command never matches a prefix rule. A rule only ever skips the
+        interactive approval a `prompt`-tier call would park; it can never
+        promote a `blocked` command or a write outside the workspace, because
+        those checks run first and unconditionally. `approvals` are the pre-v55
+        global per-tool grants: no longer honoured by either engine, still
+        listed so they can be seen and revoked.
       responses:
         '200':
-          description: The caller's grants
+          description: The caller's rules
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  approvals:
+                  rules:
                     type: array
                     items:
                       type: object
                       properties:
-                        toolName:  { type: string, description: 'Registry tool name, e.g. `run-bash`' }
-                        grantedAt: { type: string, description: ISO-8601 timestamp the grant was made }
+                        projectRoot: { type: string, description: Absolute workspace root the rule applies to }
+                        toolName:    { type: string, description: "`Bash`, `run-bash`, or an act tool name" }
+                        pattern:     { type: string, description: "Command prefix for shell tools; empty = the whole tool" }
+                        grantedAt:   { type: string, description: ISO-8601 timestamp }
+                  approvals:
+                    type: array
+                    description: Legacy global grants (not honoured)
+                    items:
+                      type: object
+                      properties:
+                        toolName:  { type: string }
+                        grantedAt: { type: string }
     delete:
-      summary: Revoke one standing grant, or all of them
+      summary: Revoke one rule, one legacy grant, or everything
       description: >
-        Revocation only ever removes permission — the tool is not blocked, it simply has
-        to ask for approval again — so unlike the grant path there is nothing to gate.
-        Returns the remaining set so a caller re-renders from the server's own view
-        instead of issuing a follow-up GET that could interleave with another surface's
-        revoke.
+        Revocation only ever removes permission — the tool simply asks again —
+        so there is nothing to gate. Returns the remaining set so a caller
+        re-renders from the server's own view.
       requestBody:
         required: true
         content:
@@ -2808,25 +2826,22 @@ paths:
             schema:
               type: object
               properties:
-                toolName: { type: string, description: The single grant to revoke }
-                all:      { type: boolean, description: Revoke every grant for the caller }
+                projectRoot: { type: string, description: "With toolName (+ pattern): one project rule" }
+                toolName:    { type: string, description: "Alone: one legacy global grant" }
+                pattern:     { type: string }
+                all:         { type: boolean, description: Revoke every rule and legacy grant }
       responses:
         '200':
-          description: The remaining grants, and how many rows were removed
+          description: The remaining rules and grants, and how many were removed
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  approvals:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        toolName:  { type: string }
-                        grantedAt: { type: string }
+                  rules: { type: array, items: { type: object } }
+                  approvals: { type: array, items: { type: object } }
                   removed: { type: integer }
-        '400': { description: Neither toolName nor all:true supplied, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '400': { description: Nothing to revoke was named, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/agent/session-memory:
     delete:
@@ -3147,6 +3162,15 @@ paths:
                       path:    { type: string }
                       content: { type: string }
                 fresh:    { type: boolean, description: 'Skip the recorded SDK session id and start a new one' }
+                permissionMode:
+                  type: string
+                  enum: [ask, accept-edits, bypass, manual]
+                  description: >
+                    Claude Code's modes. `ask` (default; `manual` is its old spelling):
+                    prompt-tier calls park an approval unless a saved project rule covers
+                    them. `accept-edits`: in-workspace Edit/Write run unasked, shell still
+                    asks. `bypass`: nothing that would park asks. No mode lifts the
+                    blocklist or write containment.
       responses:
         '200':
           description: >
@@ -3165,20 +3189,31 @@ paths:
 
   /agent/v2/decision:
     post:
-      summary: Answer a parked AskUserQuestion approval from a v2 stream
+      summary: Answer a parked approval (AskUserQuestion or ToolApproval) from a v2 stream
       description: >
         Tenancy-checked: the deciding user must own the session the approval was
-        parked under; foreign decisions are 403 and logged.
+        parked under; foreign decisions are 403 and logged. An AskUserQuestion is
+        answered with `answers`; a ToolApproval with `action`. A ToolApproval's
+        approval_request carries an optional `suggestion` { toolName, pattern?,
+        scope: project|session, label } — what `always-allow` would save: a
+        project command-prefix / tool rule, or (edits) a grant for this chat.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [requestId, sdkSessionId, answers]
+              required: [requestId, sdkSessionId]
               properties:
                 requestId:    { type: string, description: 'Id from the approval_request event' }
                 sdkSessionId: { type: string }
+                action:
+                  type: string
+                  enum: [allow, deny, always-allow]
+                  description: ToolApproval answer
+                feedback:
+                  type: string
+                  description: "With `deny`: the user's instruction, handed to the model as the denial reason (max 2000 chars)"
                 answers:
                   type: object
                   description: 'Question text → chosen label; multi-select answers arrive comma-joined'

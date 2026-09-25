@@ -277,7 +277,7 @@ struct AgentV2ApprovalTests {
         let stream = ScriptedAgentV2Stream()
         let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
         let poster = ScriptedToolDecisionPoster()
-        engine.postToolDecision = { requestId, sdkSessionId, action in
+        engine.postToolDecision = { requestId, sdkSessionId, action, _ in
             try await poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
         }
         stream.events = toolApprovalTurnEvents(requestId: "req-tool-1", sdkSessionId: "sdk-99")
@@ -298,7 +298,7 @@ struct AgentV2ApprovalTests {
         let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
         var actions: [String] = []
         var release: CheckedContinuation<Void, Never>?
-        engine.postToolDecision = { _, _, action in
+        engine.postToolDecision = { _, _, action, _ in
             actions.append(action)
             await withCheckedContinuation { release = $0 }   // the POST is slow
             return true
@@ -344,7 +344,7 @@ struct AgentV2ApprovalTests {
         let stream = ScriptedAgentV2Stream()
         let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
         let poster = ScriptedToolDecisionPoster()
-        engine.postToolDecision = { requestId, sdkSessionId, action in
+        engine.postToolDecision = { requestId, sdkSessionId, action, _ in
             try await poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
         }
         stream.events = toolApprovalTurnEvents(requestId: "req-tool-1", sdkSessionId: "sdk-99")
@@ -371,7 +371,7 @@ struct AgentV2ApprovalTests {
         let stream = ScriptedAgentV2Stream()
         let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
         let poster = ScriptedToolDecisionPoster()
-        engine.postToolDecision = { requestId, sdkSessionId, action in
+        engine.postToolDecision = { requestId, sdkSessionId, action, _ in
             try await poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
         }
         stream.events = toolApprovalTurnEvents(requestId: "req-tool-1", sdkSessionId: "sdk-99")
@@ -389,7 +389,7 @@ struct AgentV2ApprovalTests {
         let stream = ScriptedAgentV2Stream()
         let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
         let poster = ScriptedToolDecisionPoster()
-        engine.postToolDecision = { requestId, sdkSessionId, action in
+        engine.postToolDecision = { requestId, sdkSessionId, action, _ in
             try await poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
         }
         stream.events = toolApprovalTurnEvents(requestId: "req-tool-1", sdkSessionId: "sdk-99")
@@ -416,7 +416,7 @@ struct AgentV2ApprovalTests {
         let stream = ScriptedAgentV2Stream()
         let engine = ChatEngine(scope: .explorer, transport: AgentV2Transport(streamer: stream))
         let poster = ScriptedToolDecisionPoster()
-        engine.postToolDecision = { requestId, sdkSessionId, action in
+        engine.postToolDecision = { requestId, sdkSessionId, action, _ in
             try await poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
         }
         stream.events = toolApprovalTurnEvents(requestId: "req-tool-1", sdkSessionId: nil)
@@ -457,10 +457,10 @@ struct AgentV2ApprovalTests {
         }
         let v2Poster = ScriptedToolDecisionPoster()
         let legacyPoster = ScriptedToolDecisionPoster()
-        engine.postToolDecision = { requestId, sdkSessionId, action in
+        engine.postToolDecision = { requestId, sdkSessionId, action, _ in
             try await v2Poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
         }
-        engine.postLegacyToolDecision = { requestId, sessionId, action in
+        engine.postLegacyToolDecision = { requestId, sessionId, action, _ in
             try await legacyPoster.post(requestId: requestId, sessionId: sessionId, action: action)
         }
 
@@ -534,10 +534,10 @@ struct AgentV2ApprovalTests {
         let (engine, stream, legacy, engineSwitch) = makeMixedEngineChat()
         let v2Poster = ScriptedToolDecisionPoster()
         let legacyPoster = ScriptedToolDecisionPoster()
-        engine.postToolDecision = { requestId, sdkSessionId, action in
+        engine.postToolDecision = { requestId, sdkSessionId, action, _ in
             try await v2Poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
         }
-        engine.postLegacyToolDecision = { requestId, sessionId, action in
+        engine.postLegacyToolDecision = { requestId, sessionId, action, _ in
             try await legacyPoster.post(requestId: requestId, sessionId: sessionId, action: action)
         }
 
@@ -567,10 +567,10 @@ struct AgentV2ApprovalTests {
         let (engine, stream, _, _) = makeMixedEngineChat()
         let v2Poster = ScriptedToolDecisionPoster()
         let legacyPoster = ScriptedToolDecisionPoster()
-        engine.postToolDecision = { requestId, sdkSessionId, action in
+        engine.postToolDecision = { requestId, sdkSessionId, action, _ in
             try await v2Poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
         }
-        engine.postLegacyToolDecision = { requestId, sessionId, action in
+        engine.postLegacyToolDecision = { requestId, sessionId, action, _ in
             try await legacyPoster.post(requestId: requestId, sessionId: sessionId, action: action)
         }
 

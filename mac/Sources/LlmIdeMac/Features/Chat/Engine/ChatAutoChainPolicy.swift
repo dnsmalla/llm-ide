@@ -52,7 +52,7 @@ enum ChatAutoChainPolicy {
         // gate; within it, a whole-file rewrite over a truncated attachment
         // falls back to manual review so the diff makes the data-loss risk
         // visible instead of silently overwriting the file's unseen tail.
-        if editMode == .auto, autoOpsUsed < maxAutoOpsPerTurn,
+        if editMode.autoAppliesEdits, autoOpsUsed < maxAutoOpsPerTurn,
            pendingTool?.updateFileArgs != nil {
             if isWholeFileRewrite, let matchPath, truncatedPaths.contains(matchPath) {
                 decisions.append(.requireManualReview(reason: "truncated"))
@@ -71,7 +71,7 @@ enum ChatAutoChainPolicy {
         }
 
         // Branch 3: bash. Same gate shape as update-file.
-        if editMode == .auto, autoOpsUsed < maxAutoOpsPerTurn,
+        if editMode.autoRunsCommands, autoOpsUsed < maxAutoOpsPerTurn,
            pendingTool?.bashArgs != nil {
             decisions.append(.autoRunBash)
         }

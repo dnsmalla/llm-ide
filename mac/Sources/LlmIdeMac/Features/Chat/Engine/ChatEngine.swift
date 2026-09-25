@@ -447,7 +447,9 @@ final class ChatEngine {
     /// to `postApprovalDecision`, which answers an `AskUserQuestion`. Default
     /// reports failure, same convention as every other network collaborator
     /// here; the panel wires the real `LlmIdeAPIClient.agentV2ToolDecision`.
-    var postToolDecision: (String, String, String) async throws -> Bool = { _, _, _ in false }
+    /// `(requestId, sdkSessionId, action, feedback)` — `feedback` only with
+    /// "deny" (the user's "do this instead", server API v55).
+    var postToolDecision: (String, String, String, String?) async throws -> Bool = { _, _, _, _ in false }
 
     /// Posts a `ToolApproval` decision on the LEGACY engine via
     /// `POST /code-assist/decision` (Task 8) — the legacy-engine counterpart
@@ -455,7 +457,7 @@ final class ChatEngine {
     /// `agentContext.sessionId` (`AgentV2ApprovalState.legacySessionId`), not
     /// an SDK session id. The panel wires the real
     /// `LlmIdeAPIClient.codeAssistDecision`.
-    var postLegacyToolDecision: (String, String, String) async throws -> Bool = { _, _, _ in false }
+    var postLegacyToolDecision: (String, String, String, String?) async throws -> Bool = { _, _, _, _ in false }
 
     init(scope: ChatScope, transport: ChatTransport) {
         self.scope = scope

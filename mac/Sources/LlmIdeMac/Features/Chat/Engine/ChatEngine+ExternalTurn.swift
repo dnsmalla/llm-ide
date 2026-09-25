@@ -82,8 +82,8 @@ extension ChatEngine {
     /// can act on it. A phone-side confirmation channel is the future work
     /// that would lift this.
     /// - Parameter permissionMode: Forwarded to
-    ///   `ChatTransportInput.permissionMode` — `"bypass"` (apply edits and run
-    ///   commands without a card) or `"manual"`. Nil leaves the server's
+    ///   `ChatTransportInput.permissionMode` — `"ask"`, `"accept-edits"` or
+    ///   `"bypass"` (see `EditAcceptanceMode`). Nil leaves the server's
     ///   default, which asks: every write then parks on a ToolApproval card,
     ///   and a client with no way to answer one (the phone) simply hangs until
     ///   the 15-minute expiry. That is what "execution doesn't work from the

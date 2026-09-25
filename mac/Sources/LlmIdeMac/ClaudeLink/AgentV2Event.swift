@@ -172,6 +172,19 @@ struct AgentV2ApprovalArgs: Sendable, Equatable, Codable {
     let exists: Bool?
 }
 
+/// What an "always allow" answer would save (server API v55) — Claude Code's
+/// "Yes, and don't ask again for …". `scope` "project": a rule for this tool
+/// (and, for shell commands, this command `pattern` such as `npm test`) in
+/// the current project; "session": all edits in this chat. Absent on the
+/// approval when nothing can be generalised (a compound command) — the card
+/// then offers "Allow once" only.
+struct AgentV2ApprovalSuggestion: Sendable, Equatable, Codable {
+    let toolName: String?
+    let pattern: String?
+    let scope: String?
+    let label: String?
+}
+
 /// A parked approval the engine is blocking on. `kind` distinguishes the two
 /// P2 shapes: "AskUserQuestion" (questions/options, P1) and "ToolApproval"
 /// (a gated act tool asking allow/deny/always-allow, P2) — see
@@ -189,18 +202,21 @@ struct AgentV2Approval: Sendable, Equatable, Codable {
     let toolName: String?
     let argsSummary: String?
     let args: AgentV2ApprovalArgs?
+    let suggestion: AgentV2ApprovalSuggestion?
 
     init(requestId: String, kind: String = "AskUserQuestion", questions: [AgentV2ApprovalQuestion] = [],
-         toolName: String? = nil, argsSummary: String? = nil, args: AgentV2ApprovalArgs? = nil) {
+         toolName: String? = nil, argsSummary: String? = nil, args: AgentV2ApprovalArgs? = nil,
+         suggestion: AgentV2ApprovalSuggestion? = nil) {
         self.requestId = requestId
         self.kind = kind
         self.questions = questions
         self.toolName = toolName
         self.argsSummary = argsSummary
         self.args = args
+        self.suggestion = suggestion
     }
 
-    enum CodingKeys: String, CodingKey { case requestId, kind, questions, toolName, argsSummary, args }
+    enum CodingKeys: String, CodingKey { case requestId, kind, questions, toolName, argsSummary, args, suggestion }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -210,6 +226,8 @@ struct AgentV2Approval: Sendable, Equatable, Codable {
         toolName = try c.decodeIfPresent(String.self, forKey: .toolName)
         argsSummary = try c.decodeIfPresent(String.self, forKey: .argsSummary)
         args = try c.decodeIfPresent(AgentV2ApprovalArgs.self, forKey: .args)
+        // Lossy: a malformed suggestion must never cost the whole card.
+        suggestion = try? c.decodeIfPresent(AgentV2ApprovalSuggestion.self, forKey: .suggestion)
     }
 }
 

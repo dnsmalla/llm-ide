@@ -39,7 +39,7 @@ extension CodeAssistantPanel {
             args: args,
             attachments: editableAttachments,
             projectRoot: activeRepoRoot,
-            allowBasenameFallback: editMode != .auto
+            allowBasenameFallback: !editMode.autoAppliesEdits
         )
     }
 

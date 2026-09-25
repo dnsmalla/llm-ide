@@ -640,7 +640,7 @@ extension CodeAssistantPanel {
         .fixedSize()
     }
 
-    /// Edit-acceptance mode selector (Manual / Bypass).
+    /// Permission mode selector (Ask / Accept Edits / Bypass).
     var editModeChip: some View {
         chipMenu(Binding(
             get: { editMode },

@@ -185,40 +185,64 @@ struct ToolApprovalCard: View {
         state.submitted || state.isExpired || state.isSubmitting
     }
 
+    /// Claude Code's three answers: "Yes", "Yes, and don't ask again for
+    /// <rule>", "No, and tell it what to do instead". The middle one appears
+    /// only when the server offered a rule (`suggestion`) — a compound
+    /// command can't be generalised safely, so it is "once" or nothing.
+    @ViewBuilder
     private var actionRow: some View {
-        HStack(spacing: 8) {
-            Button(state.submitted ? "Denied" : "Deny") { Task { await onDecide("deny") } }
-                .controlSize(.small)
-                .disabled(actionsDisabled)
-            Button(state.submitted ? "Allowed" : "Allow Once") { Task { await onDecide("allow") } }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(actionsDisabled)
-            Button(Self.alwaysAllowLabel(toolName: state.approval.toolName)) { Task { await onDecide("always-allow") } }
-                .controlSize(.small)
-                .disabled(actionsDisabled)
-                // The card shows ONE call, but the grant is per tool, for
-                // every project and chat — say so before it's given.
-                .help(Self.alwaysAllowHelp(toolName: state.approval.toolName))
-            if state.isExpired {
-                Text("Expired")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+        @Bindable var state = state
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Button(state.submitted ? "Allowed" : "Allow Once") { Task { await onDecide("allow") } }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(actionsDisabled)
+                if let label = Self.alwaysAllowLabel(suggestion: state.approval.suggestion) {
+                    // LocalizedStringKey so the `pattern` renders as code,
+                    // not as literal backticks (a plain String is shown verbatim).
+                    Button(LocalizedStringKey(label)) { Task { await onDecide("always-allow") } }
+                        .controlSize(.small)
+                        .disabled(actionsDisabled)
+                        .help(Self.alwaysAllowHelp(suggestion: state.approval.suggestion))
+                }
+                Button(state.submitted ? "Denied" : "Deny") { Task { await onDecide("deny") } }
+                    .controlSize(.small)
+                    .disabled(actionsDisabled)
+                if state.isExpired {
+                    Text("Expired")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            TextField("Or tell it what to do instead, then Deny (optional)", text: $state.denyFeedback)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11))
+                .disabled(actionsDisabled)
+                .onSubmit {
+                    guard !state.denyFeedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                    Task { await onDecide("deny") }
+                }
         }
     }
 
-    /// Delegating shim, same reasoning as `title`/`icon` above — a
-    /// permanent grant must name the tool it always-allows, and which tools
-    /// exist is linker knowledge.
-    static func alwaysAllowHelp(toolName: String?) -> String {
-        let tool = (toolName?.isEmpty == false) ? toolName! : "this tool"
-        return "Stop asking for \(tool) — in every project and chat, not just this call. "
-            + "Revoke it in Settings → Tool permissions."
+    /// The "don't ask again" button's title, from the rule the server
+    /// offered; nil hides the button.
+    static func alwaysAllowLabel(suggestion: AgentV2ApprovalSuggestion?) -> String? {
+        ClaudeToolPresentation.alwaysAllowLabel(suggestion: suggestion)
     }
 
-    static func alwaysAllowLabel(toolName: String?) -> String {
-        ClaudeToolPresentation.alwaysAllowLabel(toolName: toolName)
+    /// Says exactly what is being granted, and where — the card shows ONE
+    /// call, the rule covers more.
+    static func alwaysAllowHelp(suggestion: AgentV2ApprovalSuggestion?) -> String {
+        guard let s = suggestion else { return "" }
+        if s.scope == "session" {
+            return "Stop asking about file edits for the rest of this chat. Other chats still ask."
+        }
+        let what = (s.pattern?.isEmpty == false) ? "`\(s.pattern!)` commands" : (s.toolName ?? "this tool")
+        return "Stop asking for \(what) in this project. Other projects still ask. "
+            + "Revoke it in Settings → Tool permissions."
     }
 }

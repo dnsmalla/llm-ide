@@ -24,6 +24,7 @@ import {
 import { deleteSessionMemory, listSessionMemory } from '../kb/session-memory.mjs';
 import { listGenerationLibrary } from '../llm_agent/skills/generation-library.mjs';
 import { listAlwaysAllow, clearAlwaysAllow, clearAllAlwaysAllow } from '../kb/tool-approvals.mjs';
+import { listRules, removeRule, removeAllRules } from '../kb/tool-permissions.mjs';
 
 // Vision input for /kb/agent/ask. Accepts a data URL string
 // ("data:image/jpeg;base64,…") or { mediaType, data } objects, one or many.
@@ -432,27 +433,37 @@ export async function handleAgentRoutes(req, res, ctx) {
   }
 
   // GET /kb/agent/tool-approvals
-  //   The user's standing "Always Allow" tool grants, newest first, so a
-  //   settings surface can show what has been permanently permitted.
-  //   { approvals: [{ toolName, grantedAt }] }
-  //
-  //   Not repo-scoped (the grant is per-user, per-tool — see
-  //   kb/tool-approvals.mjs), so no allow-list resolution applies here.
+  //   The user's "always allow" permission rules, grouped by project on the
+  //   client: { rules: [{ projectRoot, toolName, pattern, grantedAt }],
+  //             approvals: [{ toolName, grantedAt }] }
+  //   `approvals` are the pre-0034 global grants — no longer honoured by
+  //   either engine, still listed (and revocable) so nothing is invisible.
   if (req.method === 'GET' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/tool-approvals') {
-    sendJSON(res, 200, { approvals: listAlwaysAllow(userId) });
+    sendJSON(res, 200, { rules: listRules(userId), approvals: listAlwaysAllow(userId) });
     return true;
   }
 
-  // DELETE /kb/agent/tool-approvals   body: { toolName } | { all: true }
-  //   Revoke one standing grant, or all of them. Revocation only ever removes
-  //   permission, so unlike the grant path there is nothing to gate: the worst
-  //   case is the user is asked to approve a tool again.
-  //   { approvals: [...remaining], removed: number }
+  // DELETE /kb/agent/tool-approvals
+  //   body: { projectRoot, toolName, pattern } — one project rule
+  //       | { toolName }                      — one legacy global grant
+  //       | { all: true }                     — everything
+  //   Revocation only ever removes permission, so there is nothing to gate:
+  //   the worst case is the user is asked again.
+  //   { rules: [...], approvals: [...remaining], removed: number }
   if (req.method === 'DELETE' && new URL(url, 'http://127.0.0.1').pathname === '/kb/agent/tool-approvals') {
     const body = parseJSON(await readBody(req, 8 * 1024)) || {};
+    const listing = () => ({ rules: listRules(userId), approvals: listAlwaysAllow(userId) });
     if (body.all === true) {
-      const removed = clearAllAlwaysAllow(userId);
-      sendJSON(res, 200, { approvals: listAlwaysAllow(userId), removed });
+      const removed = removeAllRules(userId) + clearAllAlwaysAllow(userId);
+      sendJSON(res, 200, { ...listing(), removed });
+      return true;
+    }
+    if (typeof body.projectRoot === 'string' && body.projectRoot && typeof body.toolName === 'string' && body.toolName) {
+      const removed = removeRule(userId, {
+        projectRoot: body.projectRoot, toolName: body.toolName,
+        pattern: typeof body.pattern === 'string' ? body.pattern : '',
+      }) ? 1 : 0;
+      sendJSON(res, 200, { ...listing(), removed });
       return true;
     }
     if (typeof body.toolName !== 'string' || !body.toolName) {
@@ -463,7 +474,7 @@ export async function handleAgentRoutes(req, res, ctx) {
       return true;
     }
     const removed = clearAlwaysAllow(userId, body.toolName) ? 1 : 0;
-    sendJSON(res, 200, { approvals: listAlwaysAllow(userId), removed });
+    sendJSON(res, 200, { ...listing(), removed });
     return true;
   }
 
