@@ -258,17 +258,32 @@ extension CodeAssistantPanel {
         return String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
     }
 
-    /// Plan body for execute-message parsing: card fallback, then attached file.
+    /// Plan body for execute-message parsing: the card's own text, then the
+    /// attached copy of the card's plan file. Never a guess: the old last
+    /// resort took the first attached `.md` (or any path containing "plan"),
+    /// so an unrelated `README.md` became the step list. A card that names
+    /// its file uses that file or nothing; only a card that names none may
+    /// fall back, and only to a single unambiguous plan-like markdown file.
     static func planContentForExecute(
         payload: ChatMessage.ToolResultPayload,
         attachments: [LlmIdeAPIClient.CodeAttachment]
     ) -> String {
         if let content = payload.planContent, !content.isEmpty { return content }
-        if let path = payload.url {
-            let match = attachments.first { $0.path == path || $0.path.hasSuffix((path as NSString).lastPathComponent) }
-            if let content = match?.content, !content.isEmpty { return content }
+        if let path = payload.url, !path.isEmpty {
+            let name = (path as NSString).lastPathComponent
+            // Exact path, else the same FILE NAME (the attachment may carry a
+            // project-relative spelling) — not a suffix match, which let
+            // `plan.md` pick up `myplan.md`.
+            let match = attachments.first { $0.path == path }
+                ?? attachments.first { ($0.path as NSString).lastPathComponent == name }
+            return match?.content ?? ""
         }
-        return attachments.first(where: { $0.path.hasSuffix(".md") || $0.path.contains("plan") })?.content ?? ""
+        let planLike = attachments.filter { a in
+            let lower = a.path.lowercased()
+            let file = (lower as NSString).lastPathComponent
+            return lower.hasSuffix(".md") && (lower.contains("/plans/") || file.contains("plan"))
+        }
+        return planLike.count == 1 ? planLike[0].content : ""
     }
 
     /// Whether the Execute action may fire the turn: the plan file attached,
