@@ -691,13 +691,16 @@ final class RepoManager {
                             // write ends, so SIGTERM to git alone could leave the
                             // reads — and this worker thread — blocked forever.
                             let pid = proc.processIdentifier
-                            let tree = ProcessTree.descendants(of: pid)
-                            for child in tree { kill(child, SIGTERM) }
+                            let tree = ProcessTree.snapshot(descendantsOfAny: [pid])
+                            ProcessTree.signal(tree, SIGTERM)
                             proc.terminate()
                             DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
-                                let rest = tree.union(ProcessTree.descendants(ofAny: tree.union([pid])))
-                                if proc.isRunning { kill(pid, SIGKILL) }
-                                for child in rest { kill(child, SIGKILL) }
+                                // Verified members only (see ProcessTree.Snapshot).
+                                var rest = ProcessTree.stillAlive(tree)
+                                var roots = Set(rest.keys)
+                                if proc.isRunning { roots.insert(pid); kill(pid, SIGKILL) }
+                                rest.merge(ProcessTree.snapshot(descendantsOfAny: roots)) { old, _ in old }
+                                ProcessTree.signal(rest, SIGKILL)
                             }
                             finish(.failure(RepoError.commandFailed("git \(args.first ?? "command") timed out after \(Int(cap))s")))
                         }

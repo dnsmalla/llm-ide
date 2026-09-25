@@ -158,6 +158,27 @@ final class BashServiceTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(ProcessTree.descendants(of: shell.processIdentifier).count, 2)
     }
 
+    /// A kill that lands after the grace period re-checks each pid's start
+    /// time: a recycled pid (same number, different process) is skipped.
+    func testProcessTreeSignalSkipsARecycledPid() throws {
+        let sleeper = Process()
+        sleeper.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        sleeper.arguments = ["20"]
+        try sleeper.run()
+        defer { if sleeper.isRunning { kill(sleeper.processIdentifier, SIGKILL) } }
+        let pid = sleeper.processIdentifier
+        let start = try XCTUnwrap(ProcessTree.startTime(of: pid))
+
+        ProcessTree.signal([pid: start &+ 1], SIGKILL)   // "a different process"
+        usleep(100_000)
+        XCTAssertTrue(sleeper.isRunning, "a pid whose start time changed must not be signalled")
+
+        ProcessTree.signal([pid: start], SIGKILL)
+        sleeper.waitUntilExit()
+        XCTAssertFalse(sleeper.isRunning)
+        XCTAssertNil(ProcessTree.startTime(of: pid), "a reaped pid has no start time")
+    }
+
     func testValidateCommandBlocksObviouslyDestructiveCommands() {
         XCTAssertFalse(service.validateCommand("rm -rf /"))
         XCTAssertFalse(service.validateCommand("sudo mkfs /dev/disk2"))

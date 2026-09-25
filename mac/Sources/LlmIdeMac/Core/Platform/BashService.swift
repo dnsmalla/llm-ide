@@ -441,7 +441,7 @@ private final class ProcessBox: @unchecked Sendable {
     /// Descendants seen by `terminate()`, remembered for `forceKill()`:
     /// once the shell dies its children are re-parented to launchd, so a
     /// fresh process-table walk from the shell's pid can no longer find them.
-    private var tree: Set<pid_t> = []
+    private var tree: ProcessTree.Snapshot = [:]
 
     /// SIGTERM the shell AND every process it spawned. `zsh -c "npm test"`
     /// runs `node` as a grandchild that holds the pipes' write ends; the
@@ -454,8 +454,8 @@ private final class ProcessBox: @unchecked Sendable {
         guard let p = process, p.isRunning else { return }
         let pid = p.processIdentifier
         guard pid > 0 else { return }
-        tree.formUnion(ProcessTree.descendants(of: pid))
-        for child in tree { kill(child, SIGTERM) }
+        tree.merge(ProcessTree.snapshot(descendantsOfAny: [pid])) { old, _ in old }
+        ProcessTree.signal(tree, SIGTERM)
         p.terminate()
     }
 
@@ -463,7 +463,11 @@ private final class ProcessBox: @unchecked Sendable {
     /// the shell itself already exited — the grandchildren are the point.
     func forceKill() {
         lock.lock(); defer { lock.unlock() }
-        var roots = tree
+        // Only members that are still the SAME processes: by now the shell
+        // may have exited and a pid been recycled, and walking (or killing)
+        // from a recycled pid would hit an unrelated process.
+        tree = ProcessTree.stillAlive(tree)
+        var roots = Set(tree.keys)
         if let p = process, p.isRunning, p.processIdentifier > 0 {
             roots.insert(p.processIdentifier)
             kill(p.processIdentifier, SIGKILL)
@@ -472,42 +476,82 @@ private final class ProcessBox: @unchecked Sendable {
         // that survived SIGTERM (re-parented to launchd once the shell died)
         // may have spawned more processes during the grace period, and those
         // are only reachable through it.
-        tree.formUnion(ProcessTree.descendants(ofAny: roots))
-        for child in tree { kill(child, SIGKILL) }
+        tree.merge(ProcessTree.snapshot(descendantsOfAny: roots)) { old, _ in old }
+        ProcessTree.signal(tree, SIGKILL)
     }
 }
 
 /// Process-table walk for tearing down a command's whole tree.
 enum ProcessTree {
+    /// A process as seen at snapshot time: pid → start time (µs since the
+    /// epoch). A kill that lands seconds after the snapshot re-checks the
+    /// start time first, so a pid the kernel recycled for an unrelated
+    /// process in the meantime is skipped instead of SIGKILLed.
+    typealias Snapshot = [pid_t: UInt64]
+
     /// Every live descendant of `root` (children, grandchildren, …) from one
     /// `sysctl(KERN_PROC_ALL)` snapshot. Empty on any sysctl failure — the
     /// caller still signals `root` itself.
     static func descendants(of root: pid_t) -> Set<pid_t> {
-        descendants(ofAny: [root])
+        Set(snapshot(descendantsOfAny: [root]).keys)
     }
 
     /// Descendants of any of `roots` (excluding the roots), from one snapshot.
     static func descendants(ofAny roots: Set<pid_t>) -> Set<pid_t> {
-        guard !roots.isEmpty else { return [] }
+        Set(snapshot(descendantsOfAny: roots).keys)
+    }
+
+    /// Descendants of any of `roots` (excluding the roots) with their start
+    /// times, from one `sysctl(KERN_PROC_ALL)` snapshot.
+    static func snapshot(descendantsOfAny roots: Set<pid_t>) -> Snapshot {
+        guard !roots.isEmpty else { return [:] }
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
         var size = 0
-        guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return [] }
+        guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return [:] }
         // Headroom for processes spawned between the size probe and the read.
         let stride = MemoryLayout<kinfo_proc>.stride
         var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / stride + 32)
         size = procs.count * stride
-        guard sysctl(&mib, u_int(mib.count), &procs, &size, nil, 0) == 0 else { return [] }
+        guard sysctl(&mib, u_int(mib.count), &procs, &size, nil, 0) == 0 else { return [:] }
         var children: [pid_t: [pid_t]] = [:]
+        var starts: [pid_t: UInt64] = [:]
         for proc in procs.prefix(size / stride) {
             children[proc.kp_eproc.e_ppid, default: []].append(proc.kp_proc.p_pid)
+            starts[proc.kp_proc.p_pid] = Self.micros(proc)
         }
-        var found: Set<pid_t> = []
+        var found: Snapshot = [:]
         var frontier = Array(roots)
         while let next = frontier.popLast() {
-            for child in children[next] ?? [] where !roots.contains(child) && found.insert(child).inserted {
+            for child in children[next] ?? [] where !roots.contains(child) && found[child] == nil {
+                found[child] = starts[child] ?? 0
                 frontier.append(child)
             }
         }
         return found
+    }
+
+    /// Start time of a live `pid`, or nil when no such process exists.
+    static func startTime(of pid: pid_t) -> UInt64? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0,
+              size > 0, info.kp_proc.p_pid == pid else { return nil }
+        return micros(info)
+    }
+
+    /// The members of `snapshot` that are still the same processes.
+    static func stillAlive(_ snapshot: Snapshot) -> Snapshot {
+        snapshot.filter { startTime(of: $0.key) == $0.value }
+    }
+
+    /// Signal every member of `snapshot` that is still the process it was.
+    static func signal(_ snapshot: Snapshot, _ sig: Int32) {
+        for (pid, _) in stillAlive(snapshot) { kill(pid, sig) }
+    }
+
+    private static func micros(_ p: kinfo_proc) -> UInt64 {
+        let t = p.kp_proc.p_un.__p_starttime
+        return UInt64(max(t.tv_sec, 0)) * 1_000_000 + UInt64(max(t.tv_usec, 0))
     }
 }

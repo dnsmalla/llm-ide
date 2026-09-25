@@ -701,14 +701,15 @@ final class AutoCodeUpdateService: ObservableObject {
         guard process.isRunning else { return }
         let pid = process.processIdentifier
         guard pid > 0 else { return }
-        let tree = ProcessTree.descendants(of: pid)
-        for child in tree { kill(child, SIGTERM) }
+        let tree = ProcessTree.snapshot(descendantsOfAny: [pid])
+        ProcessTree.signal(tree, SIGTERM)
         process.terminate()
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + grace) {
             // `isRunning` turns false only once the child is reaped, so the
-            // pid can't have been recycled for an unrelated process yet.
+            // CLI's own pid can't have been recycled yet. Its descendants are
+            // not our children, so each is re-verified by start time.
             if process.isRunning { kill(pid, SIGKILL) }
-            for child in tree { kill(child, SIGKILL) }
+            ProcessTree.signal(tree, SIGKILL)
         }
     }
 
@@ -718,13 +719,13 @@ final class AutoCodeUpdateService: ObservableObject {
         guard process.isRunning else { return }
         let pid = process.processIdentifier
         guard pid > 0 else { return }
-        let tree = ProcessTree.descendants(of: pid)
-        for child in tree { kill(child, SIGTERM) }
+        let tree = ProcessTree.snapshot(descendantsOfAny: [pid])
+        ProcessTree.signal(tree, SIGTERM)
         process.terminate()
         let deadline = Date().addingTimeInterval(grace)
         while process.isRunning && Date() < deadline { usleep(20_000) }
         if process.isRunning { kill(pid, SIGKILL) }
-        for child in tree { kill(child, SIGKILL) }
+        ProcessTree.signal(tree, SIGKILL)
     }
 
     /// Cmd-Q / logout. Without this an in-flight auto-task CLI outlived the
