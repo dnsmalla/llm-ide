@@ -91,4 +91,69 @@ final class LlmSourceDTOTests: XCTestCase {
         XCTAssertEqual(decoded.templates?.count, 1)
         XCTAssertEqual(decoded.templates?[0].name, "incident-report")
     }
+
+    // MARK: - Per-item selection + update (server v56)
+
+    func testDiscoveryItemsDecodeSelectionAndDefaultWhenAbsent() throws {
+        let json = """
+        {"skills":[{"name":"alpha","description":"a","path":"/k/skills/alpha/SKILL.md","enabled":false,"isNew":true},
+                   {"name":"beta","description":"b","path":"/k/skills/beta/SKILL.md"}],
+         "agents":[],"hooks":[],"mcpServers":[]}
+        """.data(using: .utf8)!
+        let d = try JSONDecoder().decode(LlmIdeAPIClient.LlmSourceDiscoveryDetail.self, from: json)
+        XCTAssertEqual(d.skills?[0].enabled, false)
+        XCTAssertEqual(d.skills?[0].isNew, true)
+        // A pre-v56 server sends neither field: checked, not new.
+        XCTAssertEqual(d.skills?[1].enabled, true)
+        XCTAssertEqual(d.skills?[1].isNew, false)
+    }
+
+    func testListRowDisabledItemCountDefaultsToZero() throws {
+        let json = """
+        {"sources":[{"id":"builtin","name":"Central Skills","origin":"builtin","builtin":true,
+        "installed":true,"skillCount":3,"enabled":true}]}
+        """.data(using: .utf8)!
+        struct Wrap: Decodable { let sources: [LlmIdeAPIClient.LlmSourceInfo] }
+        let decoded = try JSONDecoder().decode(Wrap.self, from: json)
+        XCTAssertEqual(decoded.sources[0].disabledItemCount, 0)
+    }
+
+    func testDecodesUpdateStatuses() throws {
+        let json = """
+        {"sources":[{"id":"builtin","status":"update-available","localRev":"a","remoteRev":"b","checkedAt":"2026-09-25T00:00:00Z"},
+                    {"id":"mine","status":"local"},
+                    {"id":"team","status":"something-new"}]}
+        """.data(using: .utf8)!
+        struct Wrap: Decodable { let sources: [LlmIdeAPIClient.LlmSourceUpdateStatus] }
+        let s = try JSONDecoder().decode(Wrap.self, from: json).sources
+        XCTAssertTrue(s[0].updateAvailable)
+        XCTAssertFalse(s[1].updateAvailable)
+        XCTAssertTrue(s[1].isLocal)
+        XCTAssertFalse(s[2].updateAvailable, "an unknown status never shows the badge")
+    }
+
+    func testUpdateResultDecodesAndSummarises() throws {
+        let json = """
+        {"ok":true,"fromRev":"a","toRev":"b",
+         "added":[{"kind":"skill","name":"app-forge"},{"kind":"command","name":"app-forge"}],
+         "removed":[{"kind":"skill","name":"old"}],
+         "corrected":[".skills-lock","agent-tool definitions"]}
+        """.data(using: .utf8)!
+        let r = try JSONDecoder().decode(LlmIdeAPIClient.LlmSourceUpdateResult.self, from: json)
+        XCTAssertEqual(r.added.count, 2)
+        let text = r.summary(sourceName: "Central Skills", projectSkills: "llm-ide")
+        XCTAssertTrue(text.contains("Central Skills updated"), text)
+        XCTAssertTrue(text.contains("2 added (app-forge skill, /app-forge command)"), text)
+        XCTAssertTrue(text.contains("1 removed (old skill)"), text)
+        XCTAssertTrue(text.contains(".skills-lock"), text)
+        XCTAssertTrue(text.contains("project skills (llm-ide)"), text)
+    }
+
+    func testUpdateResultFromOldServerAndNoChanges() throws {
+        // A pre-v56 server answers { ok, installed } only.
+        let r = try JSONDecoder().decode(LlmIdeAPIClient.LlmSourceUpdateResult.self,
+                                         from: #"{"ok":true,"installed":true}"#.data(using: .utf8)!)
+        XCTAssertTrue(r.added.isEmpty && r.removed.isEmpty && r.corrected.isEmpty)
+        XCTAssertEqual(r.summary(sourceName: "team", projectSkills: nil), "team is up to date — nothing changed.")
+    }
 }

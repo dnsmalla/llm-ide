@@ -26,10 +26,14 @@ extension LlmIdeAPIClient {
         let hookCount: Int
         let mcpCount: Int
         let enabled: Bool
+        /// How many skills/agents/commands/templates this user unchecked inside
+        /// the source (server v56+; 0 from an older server).
+        let disabledItemCount: Int
 
         enum CodingKeys: String, CodingKey {
             case id, name, origin, location, builtin, version, ref, installed
             case skillCount, agentCount, commandCount, templateCount, hookCount, mcpCount, enabled
+            case disabledItemCount
         }
         /// `agentCount`/`hookCount`/`mcpCount` arrived with the v28 MCP bump
         /// (v27 renamed the endpoints but didn't carry them), and
@@ -55,6 +59,7 @@ extension LlmIdeAPIClient {
             self.hookCount  = try c.decodeIfPresent(Int.self, forKey: .hookCount) ?? 0
             self.mcpCount   = try c.decodeIfPresent(Int.self, forKey: .mcpCount) ?? 0
             self.enabled    = try c.decode(Bool.self, forKey: .enabled)
+            self.disabledItemCount = try c.decodeIfPresent(Int.self, forKey: .disabledItemCount) ?? 0
         }
     }
     private struct LlmSourcesListResponse: Decodable { let sources: [LlmSourceInfo] }
@@ -70,36 +75,40 @@ extension LlmIdeAPIClient {
     }
     private struct AddLlmSourceResponse: Decodable { let source: LlmSourceSummary }
 
-    /// One catalogued skill, agent (subagent definition), hook, or MCP server
-    /// found in a source. Display-only — never invoked/executed/spawned from
-    /// the Mac client either.
-    struct LlmSourceSkill: Decodable, Identifiable, Equatable {
+    /// The four kinds a user can check/uncheck inside a source. Hooks and MCP
+    /// servers stay whole-source (their own trust/consent gates apply).
+    enum LlmSourceItemKind: String, Encodable, CaseIterable {
+        case skill, agent, command, template
+    }
+
+    /// One catalogued skill, agent (subagent definition), command
+    /// (`commands/*.md`, invoked by name), or template (`templates/*.md`, a
+    /// fill-in document) found in a source — all four share this shape.
+    /// `enabled` is this user's checkbox and `isNew` marks an item the last
+    /// update added; both arrived in server v56 and default to checked /
+    /// not-new so an older server still decodes.
+    struct LlmSourceItem: Decodable, Identifiable, Equatable {
         let name: String
         let description: String
         let path: String
+        var enabled: Bool
+        let isNew: Bool
         var id: String { path }
+
+        enum CodingKeys: String, CodingKey { case name, description, path, enabled, isNew }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = try c.decode(String.self, forKey: .name)
+            description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
+            path = try c.decode(String.self, forKey: .path)
+            enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+            isNew = try c.decodeIfPresent(Bool.self, forKey: .isNew) ?? false
+        }
     }
-    struct LlmSourceAgent: Decodable, Identifiable, Equatable {
-        let name: String
-        let description: String
-        let path: String
-        var id: String { path }
-    }
-    /// `commands/*.md` — a prompt template the user invokes by name. Same
-    /// frontmatter shape as an agent; catalogued, never auto-run.
-    struct LlmSourceCommand: Decodable, Identifiable, Equatable {
-        let name: String
-        let description: String
-        let path: String
-        var id: String { path }
-    }
-    /// `templates/*.md` — a fill-in document the user pastes/adapts.
-    struct LlmSourceTemplate: Decodable, Identifiable, Equatable {
-        let name: String
-        let description: String
-        let path: String
-        var id: String { path }
-    }
+    typealias LlmSourceSkill = LlmSourceItem
+    typealias LlmSourceAgent = LlmSourceItem
+    typealias LlmSourceCommand = LlmSourceItem
+    typealias LlmSourceTemplate = LlmSourceItem
     struct LlmSourceHook: Decodable, Identifiable, Equatable {
         let event: String
         let matcher: String?
@@ -125,8 +134,67 @@ extension LlmIdeAPIClient {
         let mcpServers: [LlmSourceMcpServer]
     }
 
+    /// Whether a source changed upstream — `GET /auth/me/llm-sources/updates`.
+    /// `status` is kept as the raw string (update-available | up-to-date |
+    /// local | diverged | unknown) so a new server status can't break decode.
+    struct LlmSourceUpdateStatus: Decodable, Equatable {
+        let id: String
+        let status: String
+        let localRev: String?
+        let remoteRev: String?
+        let checkedAt: String?
+        let message: String?
+        var updateAvailable: Bool { status == "update-available" }
+        /// A local folder: no remote to compare, so the action is Rescan.
+        var isLocal: Bool { status == "local" }
+    }
+    private struct UpdateStatusesResponse: Decodable { let sources: [LlmSourceUpdateStatus] }
+
+    /// What `POST …/update` did. Every field past `ok` is server v56+ and
+    /// defaults to empty, so an older server's `{ ok, installed }` decodes.
+    struct LlmSourceUpdateResult: Decodable, Equatable {
+        struct ItemRef: Decodable, Equatable { let kind: String; let name: String }
+        let ok: Bool
+        let installed: Bool?
+        let fromRev: String?
+        let toRev: String?
+        let added: [ItemRef]
+        let removed: [ItemRef]
+        let corrected: [String]
+
+        enum CodingKeys: String, CodingKey { case ok, installed, fromRev, toRev, added, removed, corrected }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            ok = try c.decodeIfPresent(Bool.self, forKey: .ok) ?? true
+            installed = try c.decodeIfPresent(Bool.self, forKey: .installed)
+            fromRev = try c.decodeIfPresent(String.self, forKey: .fromRev)
+            toRev = try c.decodeIfPresent(String.self, forKey: .toRev)
+            added = try c.decodeIfPresent([ItemRef].self, forKey: .added) ?? []
+            removed = try c.decodeIfPresent([ItemRef].self, forKey: .removed) ?? []
+            corrected = try c.decodeIfPresent([String].self, forKey: .corrected) ?? []
+        }
+
+        var changed: Bool {
+            !added.isEmpty || !removed.isEmpty || (fromRev != nil && toRev != nil && fromRev != toRev)
+        }
+
+        /// One human sentence for the post-update alert. `projectSkills` names
+        /// the project whose installed skills were re-linked afterwards.
+        func summary(sourceName: String, projectSkills: String?) -> String {
+            guard changed || !corrected.isEmpty else { return "\(sourceName) is up to date — nothing changed." }
+            func label(_ i: ItemRef) -> String { i.kind == "command" ? "/\(i.name) command" : "\(i.name) \(i.kind)" }
+            var parts: [String] = []
+            if !added.isEmpty { parts.append("\(added.count) added (\(added.map(label).joined(separator: ", ")))") }
+            if !removed.isEmpty { parts.append("\(removed.count) removed (\(removed.map(label).joined(separator: ", ")))") }
+            var text = "\(sourceName) updated" + (parts.isEmpty ? "." : ": " + parts.joined(separator: "; ") + ".")
+            let fixed = corrected + (projectSkills.map { ["project skills (\($0))"] } ?? [])
+            if !fixed.isEmpty { text += " Corrected: " + fixed.joined(separator: ", ") + "." }
+            return text
+        }
+    }
+
     private struct ToggleAck: Decodable { let ok: Bool; let enabled: Bool }
-    private struct UpdateAck: Decodable { let ok: Bool; let installed: Bool? }
+    private struct ItemsAck: Decodable { let ok: Bool; let disabled: [String] }
     private struct RemoveAck: Decodable { let ok: Bool }
 
     /// All registered LLM sources with this user's per-source enable state.
@@ -157,18 +225,33 @@ extension LlmIdeAPIClient {
         return resp.source
     }
 
-    /// Re-sync a source (git: fetch + checkout tracked ref; local: refresh
-    /// version; builtin: `git submodule update --init .skills`). Returns
-    /// whether the builtin submodule ended up checked out — irrelevant for
-    /// non-builtin sources (nil in the response, defaults false).
-    /// Admin-gated server-side.
+    /// Pull a source to its latest upstream and repair what depends on it
+    /// (git: fetch + move to FETCH_HEAD; Central Skills: fast-forward only,
+    /// then `.skills-lock` + synced tool definitions; local: rescan). Refuses
+    /// (409, surfaced as `APIError.http`) rather than discard uncommitted
+    /// edits or local-only commits. Admin-gated server-side.
     @discardableResult
-    func updateLlmSource(id: String) async throws -> Bool {
+    func updateLlmSource(id: String) async throws -> LlmSourceUpdateResult {
         struct Req: Encodable { let id: String }
-        let ack: UpdateAck = try await post("/auth/me/llm-sources/update",
-                                            body: Req(id: id),
-                                            authenticated: true)
-        return ack.installed ?? false
+        return try await post("/auth/me/llm-sources/update", body: Req(id: id), authenticated: true)
+    }
+
+    /// Upstream status for every source. `force` skips the server's 30-minute cache.
+    func llmSourceUpdates(force: Bool = false) async throws -> [LlmSourceUpdateStatus] {
+        let resp: UpdateStatusesResponse = try await get(
+            "/auth/me/llm-sources/updates\(force ? "?force=1" : "")", authenticated: true)
+        return resp.sources
+    }
+
+    /// Check or uncheck items inside a source (per user). Returns the source's
+    /// full unchecked set as `<kind>:<name>` keys.
+    @discardableResult
+    func setLlmSourceItems(sourceId: String, kind: LlmSourceItemKind, names: [String], enabled: Bool) async throws -> [String] {
+        struct Req: Encodable { let sourceId: String; let kind: LlmSourceItemKind; let names: [String]; let enabled: Bool }
+        let ack: ItemsAck = try await post("/auth/me/llm-sources/items",
+                                           body: Req(sourceId: sourceId, kind: kind, names: names, enabled: enabled),
+                                           authenticated: true)
+        return ack.disabled
     }
 
     /// Remove a registered source (and its clone dir, if any). The server
