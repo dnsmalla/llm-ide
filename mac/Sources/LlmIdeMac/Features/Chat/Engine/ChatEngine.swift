@@ -158,6 +158,18 @@ final class ChatEngine {
     /// history.
     var sessionEpoch: UInt = 0
 
+    /// Bumped by `resetActiveTurnState`, which releases the turn slot at
+    /// once instead of waiting for the cancelled turn to unwind. Each turn
+    /// task records the epoch it claimed the slot under (`slotClaim`); a
+    /// tail whose claim predates a reset no longer owns the slot. Without
+    /// this, a cancelled turn's late `drainQueueOrRelease` cleared the
+    /// `busy`/`runTask` of a NEWER turn that had claimed the slot in the
+    /// meantime (a phone turn cancelled by a project switch, then a Mac send):
+    /// that turn ran with `busy` false, Stop could not reach it, and a second
+    /// send ran alongside it.
+    var slotEpoch: UInt = 0
+    @TaskLocal static var slotClaim: UInt?
+
     /// Whether this engine still has work of its own to do: a turn in
     /// flight, OR an autonomous chain between rounds — the 0.8 s
     /// auto-continue gap, when `busy` is false but a "Continue working…" turn
@@ -543,9 +555,14 @@ final class ChatEngine {
         // Callers that must not start a second turn check `busy` themselves,
         // immediately before calling (see both quick-chat composers).
         busy = true
-        runTask = Task { await runTurn(message, skillIds: skillIds, userMetadata: userMetadata,
-                                       planExecute: planExecute, planWrite: planWrite,
-                                       attachments: attachments, planTracker: planTracker) }
+        let claim = slotEpoch
+        runTask = Task {
+            await Self.$slotClaim.withValue(claim) {
+                await runTurn(message, skillIds: skillIds, userMetadata: userMetadata,
+                              planExecute: planExecute, planWrite: planWrite,
+                              attachments: attachments, planTracker: planTracker)
+            }
+        }
     }
 
     /// Cancel the in-flight turn — panel-driven (`runTask`) or phone-driven
@@ -771,6 +788,9 @@ final class ChatEngine {
     /// Also called by the panel at the end of a run it drives itself through
     /// this same slot — see `beginPanelRun`.
     func drainQueueOrRelease() {
+        // A tail from before a reset: the reset already released the slot
+        // (and dropped the queue), and whoever holds it now is a newer turn.
+        if let claim = Self.slotClaim, claim != slotEpoch { return }
         if !queued.isEmpty {
             let next = queued.removeFirst()
             startTurn(next.text, skillIds: next.skillIds, userMetadata: next.userMetadata,
@@ -876,9 +896,12 @@ final class ChatEngine {
         // stale ack's follow-up ran for real against the NEW chat's history.
         guard !busy, !Task.isCancelled else { return }
         busy = true
+        let claim = slotEpoch
         let task = Task { [self] in
-            await followUpRoundTrip()
-            drainQueueOrRelease()
+            await Self.$slotClaim.withValue(claim) {
+                await followUpRoundTrip()
+                drainQueueOrRelease()
+            }
         }
         runTask = task
         await task.value

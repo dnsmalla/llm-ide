@@ -356,6 +356,9 @@ extension ChatEngine {
         externalRunTask?.cancel()
         externalRunTask = nil
         busy = false
+        // The cancelled turn's own tail must not release the slot again
+        // once a newer turn has claimed it — see `slotEpoch`.
+        slotEpoch &+= 1
         queued.removeAll()
         hooks.onResetActiveTurnExtra()
         // runTask?.cancel() above is fire-and-forget — the actual
