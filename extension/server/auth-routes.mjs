@@ -1273,6 +1273,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   // GET  /auth/me/llm-sources          → list sources + per-user enable
   // POST /auth/me/llm-sources/toggle   → { id, enabled }
   // POST /auth/me/llm-sources/items    → { sourceId, kind, names[], enabled }  (per-item checkboxes)
+  // GET  /auth/me/llm-sources/updates[?force=1] → per-source upstream status
   // POST /auth/me/llm-sources/add      → { url|path, ref?, name? }  (admin)
   // POST /auth/me/llm-sources/update   → { id }                     (admin)
   // DELETE /auth/me/llm-sources/<id>                                (admin)
@@ -1281,6 +1282,17 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     const { listSourcesWithState, seedBuiltinOnce } = await import('../llm-sources/registry.mjs');
     seedBuiltinOnce();
     send(res, 200, listSourcesWithState(req.user.id));
+    return;
+  }
+
+  // Upstream-change check for every source (Mac "Update available" badge).
+  // Never an error response: a source whose check fails is status 'unknown'.
+  // Cached 30 min per source; ?force=1 re-checks now.
+  if (method === 'GET' && url.split('?')[0] === '/auth/me/llm-sources/updates') {
+    const { checkAllUpdates, seedBuiltinOnce } = await import('../llm-sources/registry.mjs');
+    seedBuiltinOnce();
+    const force = /[?&]force=1(?:&|$)/.test(url);
+    send(res, 200, { sources: await checkAllUpdates({ force }) });
     return;
   }
 

@@ -902,6 +902,16 @@ test('POST /auth/me/llm-sources/items checks and unchecks items per user and val
   assert.deepEqual(back.json().disabled, ['skill:beta']);
 });
 
+test('GET /auth/me/llm-sources/updates reports a status per source and never errors', async () => {
+  const { user } = await registerAndLogin();
+  const r = await callAuth({ method: 'GET', url: '/auth/me/llm-sources/updates?force=1', user: { id: user.id } });
+  assert.equal(r.statusCode, 200, r._body);
+  const builtin = r.json().sources.find((s) => s.id === 'builtin');
+  assert.ok(builtin, 'builtin listed');
+  // The fixture kit is a plain directory, not a git checkout.
+  assert.equal(builtin.status, 'local');
+});
+
 test('llm-sources management routes are open to every authenticated user (no admin concept)', async () => {
   const { user } = await registerAndLogin();
   const u = { id: user.id }; // no role claim — previously rejected as non-admin
