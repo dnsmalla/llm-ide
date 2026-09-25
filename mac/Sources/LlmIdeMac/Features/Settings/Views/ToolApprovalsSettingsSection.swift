@@ -110,11 +110,11 @@ struct ToolApprovalsSettingsSection: View {
         .task { await load() }
     }
 
-    /// "`npm test` commands" / "deploy-app".
+    /// "`npm test` commands" / "network access to `registry.npmjs.org`" / "deploy-app".
     static func ruleTitle(_ rule: LlmIdeAPIClient.ToolRule) -> String {
         rule.pattern.isEmpty
             ? ClaudeToolPresentation.approvalTitle(toolName: rule.toolName)
-            : "`\(rule.pattern)` commands"
+            : ClaudeToolPresentation.ruleSubject(toolName: rule.toolName, pattern: rule.pattern)
     }
 
     private func ruleRow(_ rule: LlmIdeAPIClient.ToolRule) -> some View {

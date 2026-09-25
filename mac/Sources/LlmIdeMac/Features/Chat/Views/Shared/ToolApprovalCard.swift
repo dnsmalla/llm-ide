@@ -241,7 +241,9 @@ struct ToolApprovalCard: View {
         if s.scope == "session" {
             return "Stop asking about file edits for the rest of this chat. Other chats still ask."
         }
-        let what = (s.pattern?.isEmpty == false) ? "`\(s.pattern!)` commands" : (s.toolName ?? "this tool")
+        let what = (s.pattern?.isEmpty == false)
+            ? ClaudeToolPresentation.ruleSubject(toolName: s.toolName, pattern: s.pattern!)
+            : (s.toolName ?? "this tool")
         return "Stop asking for \(what) in this project. Other projects still ask. "
             + "Revoke it in Settings → Tool permissions."
     }
