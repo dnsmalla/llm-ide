@@ -869,7 +869,7 @@ struct ChatMessageList: View {
                                 isStreaming: turn.status == .streaming,
                                 contentHeight: Binding(
                                     get: { engine.bubbleHeights[turn.id] ?? 24 },
-                                    set: { engine.bubbleHeights[turn.id] = $0 }))
+                                    set: { engine.setBubbleHeight($0, for: turn.id) }))
                             .frame(maxWidth: 720, alignment: .leading)
                             // Older expanded replies can be collapsed again; the
                             // latest stays open and shows no collapse control.

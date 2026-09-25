@@ -105,3 +105,19 @@ struct ChatEngineSlotOwnershipTests {
         #expect(engine.busy == false)
     }
 }
+
+@MainActor
+@Suite("ChatEngine bubble height cache")
+struct ChatEngineBubbleHeightTests {
+    /// F10 #8: the per-reply height cache only ever grew.
+    @Test("the height cache is pruned to the loaded transcript once oversized")
+    func prunes() {
+        let engine = ChatEngine(scope: .explorer, transport: GatedChatTransport())
+        let keep = ChatMessage(role: .assistant, content: "hi", status: .done, createdAt: Date())
+        engine.messages = [keep]
+        for _ in 0..<(ChatEngine.bubbleHeightSlack + 5) { engine.setBubbleHeight(10, for: UUID()) }
+        engine.setBubbleHeight(42, for: keep.id)
+        #expect(engine.bubbleHeights.count <= ChatEngine.bubbleHeightSlack + 1)
+        #expect(engine.bubbleHeights[keep.id] == 42)
+    }
+}

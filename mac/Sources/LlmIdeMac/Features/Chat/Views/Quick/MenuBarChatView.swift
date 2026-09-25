@@ -530,7 +530,7 @@ struct MenuBarChatView: View {
                         isStreaming: msg.status == .streaming,
                         contentHeight: Binding(
                             get: { engine.bubbleHeights[msg.id] ?? 24 },
-                            set: { engine.bubbleHeights[msg.id] = $0 }))
+                            set: { engine.setBubbleHeight($0, for: msg.id) }))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)

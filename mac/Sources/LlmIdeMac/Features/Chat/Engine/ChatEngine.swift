@@ -231,6 +231,18 @@ final class ChatEngine {
     /// across a save/reload, where `CodeAssistTurn.id` was minted fresh on
     /// every decode.)
     var bubbleHeights: [UUID: CGFloat] = [:]
+
+    /// Record a measured bubble height. The cache used to keep an entry for
+    /// every reply ever shown — across every session this engine loaded — and
+    /// nothing removed them. Pruned to the loaded transcript once it is
+    /// clearly oversized, so the common path stays a single insert.
+    func setBubbleHeight(_ height: CGFloat, for id: UUID) {
+        bubbleHeights[id] = height
+        guard bubbleHeights.count > messages.count + Self.bubbleHeightSlack else { return }
+        let live = Set(messages.map(\.id))
+        bubbleHeights = bubbleHeights.filter { live.contains($0.key) }
+    }
+    static let bubbleHeightSlack = 64
     /// While `true`, the panel's `handleHistoryChange` persists but skips the
     /// VoiceOver announcement. Set around bulk history loads and around the
     /// streaming placeholder append so an empty turn isn't read aloud.
