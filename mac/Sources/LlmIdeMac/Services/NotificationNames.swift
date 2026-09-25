@@ -104,6 +104,10 @@ extension Notification.Name {
     /// close, switch). Observers: code-assist context refresh, code
     /// graph rebuilds, etc.
     static let activeProjectChanged = Notification.Name("activeProjectChanged")
+    /// An LLM source's enable state, item selection, or contents changed
+    /// (Library → LLM Sources). The sidebar list and the chat "/" menu cache
+    /// both refresh on it.
+    static let llmSourcesChanged = Notification.Name("llmSourcesChanged")
 
     /// Posted by `GenerationLibraryStore` when a refresh brings the kit's
     /// templates/commands in. AppShell re-seeds and re-scans the open project

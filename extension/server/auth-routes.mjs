@@ -1272,6 +1272,8 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   // Safety note atop llm-sources/registry.mjs).
   // GET  /auth/me/llm-sources          → list sources + per-user enable
   // POST /auth/me/llm-sources/toggle   → { id, enabled }
+  // POST /auth/me/llm-sources/items    → { sourceId, kind, names[], enabled }  (per-item checkboxes)
+  // GET  /auth/me/llm-sources/updates[?force=1] → per-source upstream status
   // POST /auth/me/llm-sources/add      → { url|path, ref?, name? }  (admin)
   // POST /auth/me/llm-sources/update   → { id }                     (admin)
   // DELETE /auth/me/llm-sources/<id>                                (admin)
@@ -1280,6 +1282,17 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     const { listSourcesWithState, seedBuiltinOnce } = await import('../llm-sources/registry.mjs');
     seedBuiltinOnce();
     send(res, 200, listSourcesWithState(req.user.id));
+    return;
+  }
+
+  // Upstream-change check for every source (Mac "Update available" badge).
+  // Never an error response: a source whose check fails is status 'unknown'.
+  // Cached 30 min per source; ?force=1 re-checks now.
+  if (method === 'GET' && url.split('?')[0] === '/auth/me/llm-sources/updates') {
+    const { checkAllUpdates, seedBuiltinOnce } = await import('../llm-sources/registry.mjs');
+    seedBuiltinOnce();
+    const force = /[?&]force=1(?:&|$)/.test(url);
+    send(res, 200, { sources: await checkAllUpdates({ force }) });
     return;
   }
 
@@ -1304,6 +1317,42 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         resource: body.id, outcome: 'success',
       });
       send(res, 200, { ok: true, enabled: body.enabled });
+    } catch (err) {
+      send(res, err.status || 400, { error: { code: err.code || 'VALIDATION_FAILED', message: err.message } });
+    }
+    return;
+  }
+
+  // Per-item checkboxes inside a source (skills, agents, commands, templates).
+  // Per user and not admin-gated, exactly like /toggle. Stored as the
+  // UNCHECKED set — see llm-sources/state.mjs.
+  if (method === 'POST' && url === '/auth/me/llm-sources/items') {
+    let body;
+    try { body = await readJson(req, bodyLimit); }
+    catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
+    try {
+      const { ITEM_KINDS, isValidItemName, setItemsEnabled } = await import('../llm-sources/state.mjs');
+      if (!body || typeof body.sourceId !== 'string' || !/^[a-z][a-z0-9-]{1,40}$/.test(body.sourceId)) {
+        throw errValidation('sourceId must be a valid source slug');
+      }
+      if (!ITEM_KINDS.includes(body.kind)) throw errValidation(`kind must be one of ${ITEM_KINDS.join(', ')}`);
+      if (!Array.isArray(body.names) || body.names.length === 0 || body.names.length > 1000
+          || !body.names.every(isValidItemName)) {
+        throw errValidation('names must be a non-empty array of item names');
+      }
+      if (typeof body.enabled !== 'boolean') throw errValidation('enabled must be a boolean');
+      const { getSource } = await import('../llm-sources/registry.mjs');
+      if (!getSource(body.sourceId)) throw errValidation(`source '${body.sourceId}' is not registered`);
+      const disabled = setItemsEnabled(req.user.id, body.sourceId, body.kind, body.names, body.enabled);
+      const { _resetSkillLibraryCache } = await import('../llm_agent/skills/skill-library.mjs');
+      _resetSkillLibraryCache();
+      safeAudit(db, {
+        userId: req.user.id, requestId, ip, userAgent: ua,
+        action: body.enabled ? 'llm-source.items.enable' : 'llm-source.items.disable',
+        resource: body.sourceId, outcome: 'success',
+        detail: { kind: body.kind, count: body.names.length },
+      });
+      send(res, 200, { ok: true, disabled: [...disabled].sort() });
     } catch (err) {
       send(res, err.status || 400, { error: { code: err.code || 'VALIDATION_FAILED', message: err.message } });
     }
@@ -1385,7 +1434,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid source id' } }); return;
     }
     const { sourceDiscoveryDetail } = await import('../llm-sources/registry.mjs');
-    const detail = sourceDiscoveryDetail(id);
+    const detail = sourceDiscoveryDetail(id, req.user.id);
     if (!detail) { send(res, 404, { error: { code: 'NOT_FOUND', message: 'source not found or not installed' } }); return; }
     send(res, 200, detail);
     return;

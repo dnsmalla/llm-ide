@@ -18,6 +18,34 @@ import { resolveCentralSkillsRepo } from '../core/skills-repo.mjs';
 const TOOLS = ['claude', 'cursor', 'codex', 'agents', 'gemini'];
 const DEFAULT_STACKS = 'typescript,swift';
 const INSTALL_TIMEOUT_MS = 60_000;
+// An --exclude entry is `<kind>:<name>` — skill:<id>, command:<stem>, or
+// agent:<stem>. Kinds are explicit because a skill and a command can share a
+// name (app-forge, code-review) and unchecking one must not drop the other.
+// Entries are handed to install.sh as one comma-joined argument, so a comma,
+// a path separator, or a leading dash/dot in a name would change its meaning.
+const EXCLUDE_ENTRY_RE = /^(skill|command|agent):[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+
+/** True for an entry install.sh can take; callers filter with it. */
+export function isInstallableExclude(entry) {
+  return typeof entry === 'string' && EXCLUDE_ENTRY_RE.test(entry) && !entry.includes('..');
+}
+
+function validExcludeList(exclude) {
+  if (exclude == null) return [];
+  if (!Array.isArray(exclude)) {
+    const err = new Error('invalid exclude: must be an array of names');
+    err.code = 'INVALID_EXCLUDE';
+    throw err;
+  }
+  for (const n of exclude) {
+    if (!isInstallableExclude(n)) {
+      const err = new Error(`invalid exclude name: ${String(n).slice(0, 80)}`);
+      err.code = 'INVALID_EXCLUDE';
+      throw err;
+    }
+  }
+  return [...new Set(exclude)].sort();
+}
 
 /**
  * Map a project language code to install.sh --stacks.
@@ -99,11 +127,15 @@ export function assertInstallableProjectPath(projectPath) {
 /**
  * Run the central kit installer into `projectPath`.
  *
- * @param {{ path: string, stacks?: string, language?: string }} opts
+ * `exclude` names the items the user unchecked in Library → LLM Sources
+ * (Central Skills): they are not linked, and `--prune` removes their old links.
+ *
+ * @param {{ path: string, stacks?: string, language?: string, exclude?: string[] }} opts
  * @returns {{ ok: true, path: string, kit: string, stacks: string, tools: string[], stdout: string }}
  */
 export function installProjectSkills(opts = {}) {
   const projectPath = assertInstallableProjectPath(opts.path);
+  const exclude = validExcludeList(opts.exclude);
   const kit = resolveCentralSkillsRepo();
   if (!kit) {
     const err = new Error(
@@ -128,6 +160,7 @@ export function installProjectSkills(opts = {}) {
   for (const t of TOOLS) {
     args.push('--tool', t);
   }
+  if (exclude.length) args.push('--exclude', exclude.join(','));
 
   const result = spawnSync('bash', args, {
     encoding: 'utf8',
@@ -154,6 +187,7 @@ export function installProjectSkills(opts = {}) {
     kit,
     stacks,
     tools: TOOLS,
+    exclude,
     stdout: (result.stdout || '').trim().slice(0, 2000),
   };
 }

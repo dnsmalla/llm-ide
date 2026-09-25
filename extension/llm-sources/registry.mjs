@@ -24,15 +24,15 @@
 // Registry file: <sourcesDir>/../llm-sources.json  (atomic writes)
 // Cloned sources: <sourcesDir>/<id>/  (siblings to plugins/)
 
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, rmSync, statSync, realpathSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as yaml from 'js-yaml';
 import { resolveCentralSkillsRepo } from '../core/skills-repo.mjs';
-import { listEnabled, pruneOrphans, migrateLegacyDefaultSources } from './state.mjs';
+import { listEnabled, pruneOrphans, migrateLegacyDefaultSources, listDisabledItems, itemKey, pruneMissingItems } from './state.mjs';
 
 // Git operations (clone/fetch/checkout/submodule-update) run async — the
 // server is single-threaded Node, so a *Sync spawn here would freeze every
@@ -600,7 +600,8 @@ export async function addSource({ url, path, ref, name } = {}) {
     if (!existsSync(path)) return { error: 'path does not exist', status: 400 };
     if (!isValidLlmSource(path)) return { error: 'not a valid LLM source (needs registry.yaml, .claude-plugin/plugin.json + skills/, agents/, commands/, templates/, a hooks manifest, or an .mcp.json manifest)', status: 400 };
     const id = slugify(name || path.split('/').pop(), existing);
-    const src = { id, name: name || id, origin: 'local', location: path, builtin: false, version: readVersion(path) };
+    const src = { id, name: name || id, origin: 'local', location: path, builtin: false, version: readVersion(path),
+      knownItems: [...itemKeysOf(path)].sort() };
     list.push(src); writeRegistry(list);
     return { source: src };
   }
@@ -636,42 +637,204 @@ export async function addSource({ url, path, ref, name } = {}) {
   return { error: 'provide either url or path', status: 400 };
 }
 
-export async function updateSource(id) {
-  const list = readRegistry();
-  const idx = list.findIndex((s) => s.id === id);
-  if (idx < 0) return { error: 'source not found', status: 404 };
-  const src = list[idx];
-  if (src.origin === 'builtin') return syncBuiltin();
-  if (!src.location || !existsSync(src.location)) return { error: 'source directory missing', status: 400 };
-  if (src.origin === 'local') {
-    // Read in place — just refresh version.
-    list[idx].version = readVersion(src.location);
-    writeRegistry(list);
-    return { ok: true };
+// ── Update detection + update-and-repair ─────────────────────────────
+//
+// Central Skills tracks this branch of its origin. An env override exists for
+// a kit fork that publishes from another branch.
+const BUILTIN_REMOTE_REF = process.env.LLMIDE_SKILLS_REF || 'main';
+const UPDATE_CHECK_TTL_MS = 30 * 60 * 1000;
+const _updateChecks = new Map(); // sourceId -> { at, result }
+const GIT_ENV = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0' });
+
+async function gitOut(cwd, args, timeout = 30_000) {
+  const { stdout } = await _runGit('git', args, { cwd, env: GIT_ENV(), timeout });
+  return String(stdout ?? '').trim();
+}
+async function isAncestor(cwd, a, b) {
+  try { await _runGit('git', ['merge-base', '--is-ancestor', a, b], { cwd, env: GIT_ENV(), timeout: 30_000 }); return true; }
+  catch { return false; }
+}
+function isGitCheckout(dir) { return !!dir && existsSync(join(dir, '.git')); }
+async function isDirty(dir) { return (await gitOut(dir, ['status', '--porcelain'])).length > 0; }
+
+// Where a source's files live right now. Builtin re-resolves every time (the
+// kit can be the .skills submodule, ~/skills, or a cache clone).
+function sourceLocation(src) {
+  return src.origin === 'builtin' ? (resolveCentralSkillsRepo() || src.location) : src.location;
+}
+// Central Skills is THIS checkout's .skills submodule — the one case where an
+// update has files outside the kit to repair (.skills-lock, synced tool defs).
+// Compared by REAL path: SKILLS_REPO or the repo root may reach the same
+// .skills through a symlink (or /tmp vs /private/tmp), and a miss here would
+// silently skip the lock + tool-def sync.
+function isRepoSkillsSubmodule(location) {
+  const root = process.env.LLMIDE_REPO_ROOT || repoRootFallback();
+  const real = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
+  return !!location && real(location) === real(join(root, '.skills'));
+}
+
+/**
+ * Has this source changed upstream? Never throws: any git/network failure is
+ * `status: 'unknown'` with a message, so a flaky network can't break the
+ * Library. Statuses: update-available | up-to-date | local | diverged | unknown.
+ */
+export async function checkSourceUpdate(src) {
+  const base = { id: src?.id, checkedAt: new Date().toISOString() };
+  try {
+    const loc = src ? sourceLocation(src) : null;
+    if (!loc || !existsSync(loc)) return { ...base, status: 'unknown', message: 'source directory missing' };
+    if (src.origin === 'local' || !isGitCheckout(loc)) return { ...base, status: 'local' };
+    const localRev = await gitOut(loc, ['rev-parse', 'HEAD']);
+    if (src.origin === 'builtin') {
+      // Central Skills is a full clone that may carry the developer's own
+      // commits, so a remote sha alone can't tell "behind" from "ahead": fetch,
+      // then only a fast-forward counts as an update.
+      await _runGit('git', ['fetch', '--quiet', 'origin', BUILTIN_REMOTE_REF], { cwd: loc, env: GIT_ENV(), timeout: 60_000 });
+      const remoteRev = await gitOut(loc, ['rev-parse', 'FETCH_HEAD']);
+      if (remoteRev === localRev) return { ...base, status: 'up-to-date', localRev, remoteRev };
+      if (await isAncestor(loc, localRev, remoteRev)) return { ...base, status: 'update-available', localRev, remoteRev };
+      return { ...base, status: 'diverged', localRev, remoteRev,
+        message: `Central Skills has commits that are not on origin/${BUILTIN_REMOTE_REF}; update it with git.` };
+    }
+    const ref = src.ref || 'main';
+    if (!isValidRef(ref)) return { ...base, status: 'unknown', message: 'invalid ref' };
+    const out = await gitOut(loc, ['ls-remote', 'origin', ref, `${ref}^{}`], 60_000);
+    const rows = out.split('\n').map((l) => l.split('\t'));
+    const sha = (name) => rows.find(([, r]) => r === name)?.[0];
+    // An annotated tag lists the tag OBJECT first and the commit it points at
+    // as `^{}` — HEAD is that commit, so the peeled line wins.
+    const remoteRev = sha(`refs/heads/${ref}`) || sha(`refs/tags/${ref}^{}`) || sha(`refs/tags/${ref}`) || sha(ref);
+    if (!remoteRev) return { ...base, status: 'unknown', localRev, message: `ref '${ref}' not found on origin` };
+    return { ...base, status: remoteRev === localRev ? 'up-to-date' : 'update-available', localRev, remoteRev };
+  } catch (err) {
+    const msg = (err?.stderr ? String(err.stderr) : err?.message || 'git failed').trim().slice(0, 200);
+    return { ...base, status: 'unknown', message: msg || 'git failed' };
   }
-  // git: fetch + checkout tracked ref.
-  const ref = src.ref || 'main';
-  if (!isValidRef(ref)) return { error: 'invalid ref', status: 400 };
+}
+
+// Even a forced check reuses a result younger than this — so a user clicking
+// "Check for updates" repeatedly can't queue up network fetches.
+const UPDATE_CHECK_FORCE_FLOOR_MS = 60 * 1000;
+
+/**
+ * Every registered source's update status, cached per source for 30 min
+ * (1 min when `force`). Sources are checked in parallel — each works in its
+ * own directory — so one slow remote doesn't hold up the rest.
+ */
+export async function checkAllUpdates({ force = false } = {}) {
+  const maxAge = force ? UPDATE_CHECK_FORCE_FLOOR_MS : UPDATE_CHECK_TTL_MS;
+  return Promise.all(listSources().map(async (src) => {
+    const hit = _updateChecks.get(src.id);
+    if (hit && Date.now() - hit.at < maxAge) return hit.result;
+    const result = await checkSourceUpdate(src);
+    _updateChecks.set(src.id, { at: Date.now(), result });
+    return result;
+  }));
+}
+
+const keyToItem = (key) => { const i = key.indexOf(':'); return { kind: key.slice(0, i), name: key.slice(i + 1) }; };
+
+// Re-run the checkout's skills sync after Central Skills moved: it writes
+// .skills-lock and re-syncs the agent-tool / agent-global definitions the
+// server loads (scripts/sync-skills.sh). Best-effort: failure is reported in
+// `corrected`, not fatal — the kit itself already updated.
+async function syncCheckoutAfterKitUpdate(kitDir) {
+  const root = process.env.LLMIDE_REPO_ROOT || repoRootFallback();
+  const script = join(root, 'scripts', 'sync-skills.sh');
+  if (!existsSync(script)) return { corrected: [], warnings: ['.skills-lock not refreshed (scripts/sync-skills.sh missing)'] };
   try {
-    await _runGit('git', ['fetch', '--depth', '1', 'origin', ref], {
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, cwd: src.location, timeout: 60_000,
+    await execFileAsync('bash', [script], {
+      cwd: root, env: { ...process.env, SKILLS_REPO: kitDir }, timeout: 120_000,
     });
-  } catch { return { error: 'git fetch failed', status: 400 }; }
-  try {
-    await _runGit('git', ['checkout', ref], {
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, cwd: src.location, timeout: 30_000,
-    });
-  } catch { return { error: 'git checkout failed', status: 400 }; }
+    return { corrected: ['.skills-lock', 'agent-tool definitions', '.skills pointer (commit it in llm-ide)'], warnings: [] };
+  } catch (err) {
+    return { corrected: [], warnings: [`sync-skills.sh failed: ${String(err?.stderr || err?.message || '').trim().slice(0, 160)}`] };
+  }
+}
+
+/**
+ * Pull a source to its latest upstream and repair what depends on it.
+ *
+ * Never discards local work: uncommitted edits refuse (409), and Central
+ * Skills only fast-forwards (a clone with its own commits refuses, 409).
+ * A managed git clone is moved with `reset --hard FETCH_HEAD` — the old
+ * `fetch --depth 1` + `checkout <ref>` left a shallow clone's branch on its
+ * previous commit. Returns the item diff (for the Mac summary and the New
+ * badge), records it as `lastUpdate`, and prunes unchecks of vanished items.
+ */
+export async function updateSource(id) {
+  const src = getSource(id);
+  if (!src) return { error: 'source not found', status: 404 };
+  const loc = sourceLocation(src);
+  if (src.origin === 'builtin' && (!loc || !existsSync(loc))) return syncBuiltin();
+  if (!loc || !existsSync(loc)) return { error: 'source directory missing', status: 400 };
+
+  // A git source is diffed against its own tree before the pull. A local
+  // folder has no "before" on disk — its files already changed — so it is
+  // diffed against the item set recorded by the previous update/add.
+  const beforeKeys = src.origin === 'local' && Array.isArray(src.knownItems)
+    ? new Set(src.knownItems)
+    : itemKeysOf(loc);
+  const corrected = [];
+  const warnings = [];
+  let fromRev = null;
+  let toRev = null;
+  if (isGitCheckout(loc) && src.origin !== 'local') {
+    try {
+      fromRev = await gitOut(loc, ['rev-parse', 'HEAD']);
+      if (await isDirty(loc)) {
+        return { error: `${src.name} has uncommitted changes in ${loc}; commit or discard them first`, status: 409 };
+      }
+      if (src.origin === 'builtin') {
+        await _runGit('git', ['fetch', '--quiet', 'origin', BUILTIN_REMOTE_REF], { cwd: loc, env: GIT_ENV(), timeout: 120_000 });
+        const remote = await gitOut(loc, ['rev-parse', 'FETCH_HEAD']);
+        if (remote !== fromRev && !(await isAncestor(loc, fromRev, remote))) {
+          return { error: `Central Skills has commits that are not on origin/${BUILTIN_REMOTE_REF}; update it with git`, status: 409 };
+        }
+        await _runGit('git', ['merge', '--ff-only', '--quiet', 'FETCH_HEAD'], { cwd: loc, env: GIT_ENV(), timeout: 60_000 });
+      } else {
+        const ref = src.ref || 'main';
+        if (!isValidRef(ref)) return { error: 'invalid ref', status: 400 };
+        await _runGit('git', ['fetch', '--quiet', '--depth', '1', 'origin', ref], { cwd: loc, env: GIT_ENV(), timeout: 60_000 });
+        await _runGit('git', ['reset', '--quiet', '--hard', 'FETCH_HEAD'], { cwd: loc, env: GIT_ENV(), timeout: 30_000 });
+      }
+      toRev = await gitOut(loc, ['rev-parse', 'HEAD']);
+    } catch (err) {
+      const msg = (err?.stderr ? String(err.stderr) : err?.message || '').trim().slice(0, 200);
+      return { error: `git update failed${msg ? `: ${msg}` : ''}`, status: 400 };
+    }
+    if (src.origin === 'builtin' && toRev !== fromRev && isRepoSkillsSubmodule(loc)) {
+      const sync = await syncCheckoutAfterKitUpdate(loc);
+      corrected.push(...sync.corrected);
+      warnings.push(...sync.warnings);
+    }
+  }
+
+  const afterKeys = itemKeysOf(loc);
+  const added = [...afterKeys].filter((k) => !beforeKeys.has(k)).sort();
+  const removed = [...beforeKeys].filter((k) => !afterKeys.has(k)).sort();
+  pruneMissingItems(id, afterKeys);
   // Re-read immediately before writing (no await below): an add/remove that
-  // landed during fetch+checkout must not be clobbered by the snapshot
-  // captured at the top of updateSource.
+  // landed during the git work must not be clobbered by an older snapshot.
   const fresh = readRegistry();
   const fidx = fresh.findIndex((s) => s.id === id);
   if (fidx >= 0) {
-    fresh[fidx].version = readVersion(src.location);
+    fresh[fidx].location = loc;
+    fresh[fidx].version = readVersion(loc);
+    fresh[fidx].lastUpdate = { at: new Date().toISOString(), fromRev, toRev, added, removed };
+    fresh[fidx].knownItems = [...afterKeys].sort();
     writeRegistry(fresh);
   }
-  return { ok: true };
+  _updateChecks.delete(id);
+  return {
+    ok: true,
+    fromRev,
+    toRev,
+    added: added.map(keyToItem),
+    removed: removed.map(keyToItem),
+    corrected,
+    warnings,
+  };
 }
 
 export function removeSource(id) {
@@ -722,7 +885,7 @@ export function listSourcesWithState(userId) {
   return {
     sources: listSources().map((s) => {
       const snap = snapshotSource(s);
-      return { ...snap, enabled: enabled.has(s.id) };
+      return { ...snap, enabled: enabled.has(s.id), disabledItemCount: listDisabledItems(userId, s.id).size };
     }),
   };
 }
@@ -730,15 +893,47 @@ export function listSourcesWithState(userId) {
 // Full discovery detail for one source — used by the Mac detail view to
 // actually list what a source contributes, not just show counts. Discovery
 // only: agents/hooks are informational, never invoked/executed from here.
-export function sourceDiscoveryDetail(id) {
+//
+// The four selectable kinds carry `enabled` (this user's checkbox — absent
+// from the unchecked set means on) and `isNew` (added by the source's last
+// update). Hooks and MCP servers stay whole-source and carry neither.
+export function sourceDiscoveryDetail(id, userId) {
   const src = getSource(id);
   if (!src || !src.location || !existsSync(src.location)) return null;
+  const disabled = listDisabledItems(userId, id);
+  const added = new Set(Array.isArray(src.lastUpdate?.added) ? src.lastUpdate.added : []);
+  const mark = (kind) => (item) => {
+    const key = itemKey(kind, item.name);
+    return { ...item, enabled: !disabled.has(key), isNew: added.has(key) };
+  };
+  const items = listSelectableItems(src.location);
   return {
-    skills: listDiscoverySkills(src.location),
-    agents: listDiscoveryAgents(src.location),
-    commands: listDiscoveryCommands(src.location),
-    templates: listDiscoveryTemplates(src.location),
+    skills: items.skill.map(mark('skill')),
+    agents: items.agent.map(mark('agent')),
+    commands: items.command.map(mark('command')),
+    templates: items.template.map(mark('template')),
     hooks: listDiscoveryHooks(src.location),
     mcpServers: listDiscoveryMcpServers(src.location),
   };
+}
+
+// The per-item-selectable contents of a source directory, by kind.
+function listSelectableItems(location) {
+  return {
+    skill: listDiscoverySkills(location),
+    agent: listDiscoveryAgents(location),
+    command: listDiscoveryCommands(location),
+    template: listDiscoveryTemplates(location),
+  };
+}
+
+// Every `<kind>:<name>` key a source directory currently offers — what an
+// update diffs before/after, and what pruneMissingItems keeps.
+export function itemKeysOf(location) {
+  const keys = new Set();
+  if (!location || !existsSync(location)) return keys;
+  for (const [kind, list] of Object.entries(listSelectableItems(location))) {
+    for (const item of list) keys.add(itemKey(kind, item.name));
+  }
+  return keys;
 }

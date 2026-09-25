@@ -224,7 +224,14 @@ const HOST = config.host;
 //     shell tools) or, for edits, a grant for this chat; the old global
 //     per-tool grants are no longer honoured. GET/DELETE
 //     /kb/agent/tool-approvals gain `rules`.
-const SERVER_API_VERSION = 55;
+//   v56 — LLM-source item selection + update-and-repair. /auth/* only (not in
+//     ENDPOINTS): POST /auth/me/llm-sources/items { sourceId, kind, names,
+//     enabled }; GET /auth/me/llm-sources/updates[?force=1]; list rows gain
+//     `disabledItemCount`; discovery items gain `enabled` / `isNew`; POST
+//     …/update returns { fromRev, toRev, added, removed, corrected }.
+//     /kb/project/install-skills leaves the user's unchecked Central Skills
+//     items out of the project.
+const SERVER_API_VERSION = 56;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

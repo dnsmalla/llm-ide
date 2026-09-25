@@ -6,6 +6,8 @@ import SwiftUI
 /// most common action (it directly gates what shows up in the chat "/" menu).
 struct LlmSourceRow: View {
     let source: LlmIdeAPIClient.LlmSourceInfo
+    /// Upstream has a newer version (`GET …/updates`).
+    var updateAvailable = false
     let onToggle: (Bool) -> Void
 
     var body: some View {
@@ -17,6 +19,15 @@ struct LlmSourceRow: View {
                 HStack(spacing: 6) {
                     Text(source.name).font(.callout).lineLimit(1)
                     originBadge
+                    if updateAvailable {
+                        Text("update")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color.orange)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Color.orange.opacity(0.15))
+                            .clipShape(Capsule())
+                            .help("A newer version is available — open the source and press Update")
+                    }
                     if !source.installed {
                         Text("not installed")
                             .font(.caption2)
@@ -67,6 +78,7 @@ struct LlmSourceRow: View {
         if source.templateCount > 0 { parts.append("\(source.templateCount) template\(source.templateCount == 1 ? "" : "s")") }
         if source.hookCount > 0 { parts.append("\(source.hookCount) hook\(source.hookCount == 1 ? "" : "s")") }
         if source.mcpCount > 0 { parts.append("\(source.mcpCount) MCP server\(source.mcpCount == 1 ? "" : "s")") }
+        if source.disabledItemCount > 0 { parts.append("\(source.disabledItemCount) off") }
         if let v = source.version, !v.isEmpty { parts.append("v\(v)") }
         return parts.isEmpty ? "—" : parts.joined(separator: " · ")
     }

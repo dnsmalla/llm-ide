@@ -18,7 +18,7 @@ import * as yaml from 'js-yaml';
 // kb/install-project-skills.mjs need the same resolution, and importing it
 // from here made registry.mjs ↔ skill-library.mjs a real import cycle.
 import { listSources, snapshotSource, BUILTIN_ID, seedBuiltinOnce } from '../../llm-sources/registry.mjs';
-import { listEnabled } from '../../llm-sources/state.mjs';
+import { listEnabled, listDisabledItems, itemKey } from '../../llm-sources/state.mjs';
 
 // Families NOT already surfaced via /kb/agent/catalog (which covers
 // agent-globals + agent-tools). These are the "all the other skills".
@@ -76,6 +76,10 @@ export function listSkillLibrary(userId) {
     const snap = snapshotSource(src);
     if (src.id === BUILTIN_ID) builtinRepo = src.location || null;
     if (!snap.installed) continue;
+    // Items this user unchecked inside the source (Library → LLM Sources).
+    // Skipped BEFORE the first-wins dedupe, so a same-id skill in a later
+    // enabled source can stand in for the one the user turned off.
+    const disabled = userId ? listDisabledItems(userId, src.id) : new Set();
     for (const family of LIBRARY_FAMILIES) {
       let entries;
       try { entries = readdirSync(join(src.location, family), { withFileTypes: true }); }
@@ -87,6 +91,7 @@ export function listSkillLibrary(userId) {
         if (seenIds.has(id)) continue; // duplicate across enabled sources — first enabled source wins
         const fm = readNameDesc(skillMd);
         if (!fm) continue;
+        if (disabled.has(itemKey('skill', fm.name))) continue;
         seenIds.add(id);
         skills.push({
           id,

@@ -121,6 +121,21 @@ final class CompletionController: ObservableObject {
 
     private weak var api: LlmIdeAPIClient?
     private var repoRoot: URL?
+    private var sourcesObserver: NSObjectProtocol?
+
+    init() {
+        // A source's items were checked/unchecked or it was updated: the next
+        // "/" open must refetch instead of trusting the freshness stamp.
+        sourcesObserver = NotificationCenter.default.addObserver(
+            forName: .llmSourcesChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.lastMetaLoad = nil }
+        }
+    }
+
+    deinit {
+        if let sourcesObserver { NotificationCenter.default.removeObserver(sourcesObserver) }
+    }
 
     /// "@" file menu cap — one flat list, 50 is plenty to scan visually. The
     /// "/" menu is deliberately uncapped: its whole point is that EVERYTHING
