@@ -887,7 +887,7 @@ test('POST /auth/me/llm-sources/items checks and unchecks items per user and val
   assert.equal((await call({ sourceId: 'never-registered', kind: 'skill', names: ['a'], enabled: false })).statusCode, 400);
   assert.equal((await call({ sourceId: 'builtin', kind: 'hook', names: ['a'], enabled: false })).statusCode, 400,
     'hooks stay whole-source');
-  assert.equal((await call({ sourceId: 'builtin', kind: 'skill', names: ['../x'], enabled: false })).statusCode, 400);
+  assert.equal((await call({ sourceId: 'builtin', kind: 'skill', names: ['bad\nname'], enabled: false })).statusCode, 400);
   assert.equal((await call({ sourceId: 'builtin', kind: 'skill', names: 'a', enabled: false })).statusCode, 400);
   assert.equal((await call({ sourceId: 'builtin', kind: 'skill', names: ['a'], enabled: 'no' })).statusCode, 400);
 

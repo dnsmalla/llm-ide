@@ -73,13 +73,15 @@ export function setEnabled(userId, sourceId, enabled) {
 // are deliberately absent: they stay whole-source, behind their own
 // trust/consent gates.
 export const ITEM_KINDS = Object.freeze(['skill', 'agent', 'command', 'template']);
-// A name is a frontmatter `name` / directory name. The same names are handed
-// to the kit installer's --exclude, so anything that could be read as a path
-// or an option is refused here rather than there.
-const ITEM_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+// A name is whatever the source's frontmatter says — a third-party source may
+// use "Code Reviewer", Japanese, or a colon, and each still needs a working
+// checkbox. It is only ever a key here, so all that's refused is what can't be
+// a sane key: empty, control characters, or overlong. The installer gets a far
+// stricter subset (see install-project-skills.mjs's EXCLUDE_ENTRY_RE).
+const CONTROL_RE = /[\u0000-\u001f\u007f]/;
 
 export function isValidItemName(name) {
-  return typeof name === 'string' && ITEM_NAME_RE.test(name) && !name.includes('..');
+  return typeof name === 'string' && name.length > 0 && name.length <= 120 && !CONTROL_RE.test(name);
 }
 
 export function itemKey(kind, name) { return `${kind}:${name}`; }

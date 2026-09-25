@@ -18,10 +18,17 @@ import { resolveCentralSkillsRepo } from '../core/skills-repo.mjs';
 const TOOLS = ['claude', 'cursor', 'codex', 'agents', 'gemini'];
 const DEFAULT_STACKS = 'typescript,swift';
 const INSTALL_TIMEOUT_MS = 60_000;
-// An --exclude name is a skill id or a command/agent file stem. It is handed
-// to install.sh as one comma-joined argument, so a comma, a path separator,
-// or a leading dash/dot would change what it means there.
-const EXCLUDE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+// An --exclude entry is `<kind>:<name>` — skill:<id>, command:<stem>, or
+// agent:<stem>. Kinds are explicit because a skill and a command can share a
+// name (app-forge, code-review) and unchecking one must not drop the other.
+// Entries are handed to install.sh as one comma-joined argument, so a comma,
+// a path separator, or a leading dash/dot in a name would change its meaning.
+const EXCLUDE_ENTRY_RE = /^(skill|command|agent):[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+
+/** True for an entry install.sh can take; callers filter with it. */
+export function isInstallableExclude(entry) {
+  return typeof entry === 'string' && EXCLUDE_ENTRY_RE.test(entry) && !entry.includes('..');
+}
 
 function validExcludeList(exclude) {
   if (exclude == null) return [];
@@ -31,7 +38,7 @@ function validExcludeList(exclude) {
     throw err;
   }
   for (const n of exclude) {
-    if (typeof n !== 'string' || !EXCLUDE_NAME_RE.test(n) || n.includes('..')) {
+    if (!isInstallableExclude(n)) {
       const err = new Error(`invalid exclude name: ${String(n).slice(0, 80)}`);
       err.code = 'INVALID_EXCLUDE';
       throw err;

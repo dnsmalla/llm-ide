@@ -100,10 +100,15 @@ test('unchecking an item on a brand-new user keeps the builtin source on', () =>
   assert.deepEqual([...listEnabled('fresh-user')], ['builtin']);
 });
 
-test('invalid kinds and unsafe names are ignored', () => {
+test('invalid kinds and unstorable names are ignored; any display name is storable', () => {
   setItemsEnabled('item-d', 'builtin', 'hook', ['x'], false);
-  setItemsEnabled('item-d', 'builtin', 'skill', ['../evil', '', 'ok-name'], false);
-  assert.deepEqual([...listDisabledItems('item-d', 'builtin')], ['skill:ok-name']);
+  // A third-party source's frontmatter name can be anything readable —
+  // "Code Reviewer", Japanese, a colon. Only empty, control-char, or
+  // overlong names are refused. (The installer gets a stricter subset.)
+  setItemsEnabled('item-d', 'builtin', 'skill',
+    ['', 'a\nb', 'x'.repeat(200), 'Code Reviewer', 'レビュー', 'ns:tool', 'ok-name'], false);
+  assert.deepEqual([...listDisabledItems('item-d', 'builtin')].sort(),
+    ['skill:Code Reviewer', 'skill:ns:tool', 'skill:ok-name', 'skill:レビュー']);
 });
 
 test('pruneMissingItems drops keys for items that no longer exist', () => {

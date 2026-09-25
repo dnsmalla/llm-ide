@@ -49,6 +49,12 @@ git(work, 'add', '-A'); git(work, 'commit', '-qm', 'v1');
 git(tmp, 'clone', '-q', '--bare', work, origin);
 git(work, 'remote', 'add', 'origin', origin);
 
+function pushNewVersion2() {
+  skill(work, 'delta');
+  git(work, 'add', '-A'); git(work, 'commit', '-qm', 'v3');
+  git(work, 'push', '-q', 'origin', 'main');
+}
+
 function pushNewVersion() {
   fs.rmSync(path.join(work, 'skills', 'beta'), { recursive: true });
   skill(work, 'gamma');
@@ -130,6 +136,7 @@ test('Central Skills fast-forwards and re-runs the sync script when it is the .s
   assert.equal(git(kit, 'rev-parse', 'HEAD'), git(work, 'rev-parse', 'HEAD'));
   assert.equal(fs.readFileSync(path.join(repoRoot, '.skills-lock'), 'utf8').trim(), r.toRev, 'lock written');
   assert.ok(r.corrected.some((c) => /skills-lock/.test(c)), `corrected lists the lock: ${r.corrected}`);
+  assert.deepEqual(r.warnings, [], 'a successful sync reports no warnings');
 });
 
 test('Central Skills with a local-only commit is diverged, and update refuses instead of dropping it', async () => {
@@ -150,6 +157,33 @@ test('a local folder update is a rescan that reports what changed since the last
   const r = await updateSource('mine');
   assert.equal(r.ok, true, r.error);
   assert.deepEqual(r.added, [{ kind: 'skill', name: 'solo2' }]);
+});
+
+test('a source pinned to an annotated tag is up to date when at that tag', async () => {
+  git(work, 'tag', '-a', 'v2', '-m', 'release 2');
+  git(work, 'push', '-q', 'origin', 'v2');
+  const tagged = path.join(tmp, 'plugins-sources', 'tagged');
+  git(tmp, 'clone', '-q', '--depth', '1', '--branch', 'v2', `file://${origin}`, tagged);
+  const r = await checkSourceUpdate({ id: 'tagged', origin: 'git', location: tagged, ref: 'v2' });
+  assert.equal(r.status, 'up-to-date', `peeled tag commit must match HEAD: ${JSON.stringify(r)}`);
+});
+
+test('the kit is recognised as the .skills submodule through a symlinked path', async () => {
+  const alias = path.join(tmp, 'kit-alias');
+  fs.symlinkSync(kit, alias);
+  const prev = process.env.SKILLS_REPO;
+  process.env.SKILLS_REPO = alias;
+  try {
+    pushNewVersion2();
+    // Local commit from the earlier test would make this diverged; reset it.
+    git(kit, 'reset', '-q', '--hard', 'origin/main');
+    git(kit, 'fetch', '-q', 'origin');
+    const r = await updateSource(BUILTIN_ID);
+    assert.equal(r.ok, true, r.error);
+    assert.ok(r.corrected.some((c) => /skills-lock/.test(c)), `sync ran via the alias: ${r.corrected}`);
+  } finally {
+    process.env.SKILLS_REPO = prev;
+  }
 });
 
 test('a broken remote is "unknown", never an error', async () => {

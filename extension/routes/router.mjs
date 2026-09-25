@@ -43,7 +43,7 @@ import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { recordActivity, listActivity, unreadCount, markSeen, ACTIVITY_KINDS } from '../kb/activity.mjs';
 import { getLimits, setLimits, usageSummary, resolveModel, recordUsage, getRateLimits, PROVIDERS as USAGE_PROVIDERS } from '../kb/usage.mjs';
-import { installProjectSkills } from '../kb/install-project-skills.mjs';
+import { installProjectSkills, isInstallableExclude } from '../kb/install-project-skills.mjs';
 import { listDisabledItems } from '../llm-sources/state.mjs';
 import { BUILTIN_ID } from '../llm-sources/registry.mjs';
 
@@ -304,11 +304,11 @@ export async function handleKB(req, res) {
       const body = parseJSON(await readBody(req)) || {};
       try {
         // Items this user unchecked in Central Skills (Library → LLM Sources)
-        // stay out of the project too — "unchecked" means everywhere.
-        const exclude = [...listDisabledItems(userId, BUILTIN_ID)]
-          .map((key) => key.split(':'))
-          .filter(([kind]) => kind === 'skill' || kind === 'command' || kind === 'agent')
-          .map(([, name]) => name);
+        // stay out of the project too — "unchecked" means everywhere. The
+        // `<kind>:<name>` keys go through as-is; a key install.sh couldn't
+        // name (templates never install; a name with spaces is no kit id) is
+        // dropped rather than failing the whole install.
+        const exclude = [...listDisabledItems(userId, BUILTIN_ID)].filter(isInstallableExclude);
         const result = installProjectSkills({
           path: body.path,
           language: body.language,

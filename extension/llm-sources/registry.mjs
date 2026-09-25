@@ -24,7 +24,7 @@
 // Registry file: <sourcesDir>/../llm-sources.json  (atomic writes)
 // Cloned sources: <sourcesDir>/<id>/  (siblings to plugins/)
 
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, rmSync, statSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -664,9 +664,13 @@ function sourceLocation(src) {
 }
 // Central Skills is THIS checkout's .skills submodule — the one case where an
 // update has files outside the kit to repair (.skills-lock, synced tool defs).
+// Compared by REAL path: SKILLS_REPO or the repo root may reach the same
+// .skills through a symlink (or /tmp vs /private/tmp), and a miss here would
+// silently skip the lock + tool-def sync.
 function isRepoSkillsSubmodule(location) {
   const root = process.env.LLMIDE_REPO_ROOT || repoRootFallback();
-  return !!location && resolve(location) === resolve(root, '.skills');
+  const real = (p) => { try { return realpathSync(p); } catch { return resolve(p); } };
+  return !!location && real(location) === real(join(root, '.skills'));
 }
 
 /**
@@ -694,9 +698,12 @@ export async function checkSourceUpdate(src) {
     }
     const ref = src.ref || 'main';
     if (!isValidRef(ref)) return { ...base, status: 'unknown', message: 'invalid ref' };
-    const out = await gitOut(loc, ['ls-remote', 'origin', ref], 60_000);
-    const remoteRev = out.split('\n').map((l) => l.split('\t')).find(([, r]) =>
-      r === `refs/heads/${ref}` || r === `refs/tags/${ref}` || r === ref)?.[0];
+    const out = await gitOut(loc, ['ls-remote', 'origin', ref, `${ref}^{}`], 60_000);
+    const rows = out.split('\n').map((l) => l.split('\t'));
+    const sha = (name) => rows.find(([, r]) => r === name)?.[0];
+    // An annotated tag lists the tag OBJECT first and the commit it points at
+    // as `^{}` — HEAD is that commit, so the peeled line wins.
+    const remoteRev = sha(`refs/heads/${ref}`) || sha(`refs/tags/${ref}^{}`) || sha(`refs/tags/${ref}`) || sha(ref);
     if (!remoteRev) return { ...base, status: 'unknown', localRev, message: `ref '${ref}' not found on origin` };
     return { ...base, status: remoteRev === localRev ? 'up-to-date' : 'update-available', localRev, remoteRev };
   } catch (err) {
@@ -705,17 +712,24 @@ export async function checkSourceUpdate(src) {
   }
 }
 
-/** Every registered source's update status, cached per source for 30 min. */
+// Even a forced check reuses a result younger than this — so a user clicking
+// "Check for updates" repeatedly can't queue up network fetches.
+const UPDATE_CHECK_FORCE_FLOOR_MS = 60 * 1000;
+
+/**
+ * Every registered source's update status, cached per source for 30 min
+ * (1 min when `force`). Sources are checked in parallel — each works in its
+ * own directory — so one slow remote doesn't hold up the rest.
+ */
 export async function checkAllUpdates({ force = false } = {}) {
-  const out = [];
-  for (const src of listSources()) {
+  const maxAge = force ? UPDATE_CHECK_FORCE_FLOOR_MS : UPDATE_CHECK_TTL_MS;
+  return Promise.all(listSources().map(async (src) => {
     const hit = _updateChecks.get(src.id);
-    if (!force && hit && Date.now() - hit.at < UPDATE_CHECK_TTL_MS) { out.push(hit.result); continue; }
+    if (hit && Date.now() - hit.at < maxAge) return hit.result;
     const result = await checkSourceUpdate(src);
     _updateChecks.set(src.id, { at: Date.now(), result });
-    out.push(result);
-  }
-  return out;
+    return result;
+  }));
 }
 
 const keyToItem = (key) => { const i = key.indexOf(':'); return { kind: key.slice(0, i), name: key.slice(i + 1) }; };
@@ -727,14 +741,14 @@ const keyToItem = (key) => { const i = key.indexOf(':'); return { kind: key.slic
 async function syncCheckoutAfterKitUpdate(kitDir) {
   const root = process.env.LLMIDE_REPO_ROOT || repoRootFallback();
   const script = join(root, 'scripts', 'sync-skills.sh');
-  if (!existsSync(script)) return ['.skills-lock not refreshed (scripts/sync-skills.sh missing)'];
+  if (!existsSync(script)) return { corrected: [], warnings: ['.skills-lock not refreshed (scripts/sync-skills.sh missing)'] };
   try {
     await execFileAsync('bash', [script], {
       cwd: root, env: { ...process.env, SKILLS_REPO: kitDir }, timeout: 120_000,
     });
-    return ['.skills-lock', 'agent-tool definitions', '.skills pointer (commit it in llm-ide)'];
+    return { corrected: ['.skills-lock', 'agent-tool definitions', '.skills pointer (commit it in llm-ide)'], warnings: [] };
   } catch (err) {
-    return [`sync-skills.sh failed: ${String(err?.stderr || err?.message || '').trim().slice(0, 160)}`];
+    return { corrected: [], warnings: [`sync-skills.sh failed: ${String(err?.stderr || err?.message || '').trim().slice(0, 160)}`] };
   }
 }
 
@@ -762,6 +776,7 @@ export async function updateSource(id) {
     ? new Set(src.knownItems)
     : itemKeysOf(loc);
   const corrected = [];
+  const warnings = [];
   let fromRev = null;
   let toRev = null;
   if (isGitCheckout(loc) && src.origin !== 'local') {
@@ -789,7 +804,9 @@ export async function updateSource(id) {
       return { error: `git update failed${msg ? `: ${msg}` : ''}`, status: 400 };
     }
     if (src.origin === 'builtin' && toRev !== fromRev && isRepoSkillsSubmodule(loc)) {
-      corrected.push(...await syncCheckoutAfterKitUpdate(loc));
+      const sync = await syncCheckoutAfterKitUpdate(loc);
+      corrected.push(...sync.corrected);
+      warnings.push(...sync.warnings);
     }
   }
 
@@ -816,6 +833,7 @@ export async function updateSource(id) {
     added: added.map(keyToItem),
     removed: removed.map(keyToItem),
     corrected,
+    warnings,
   };
 }
 

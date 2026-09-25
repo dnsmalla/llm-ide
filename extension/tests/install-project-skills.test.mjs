@@ -119,7 +119,7 @@ test('installProjectSkills leaves --exclude\'d items out of the project', {
   try {
     installProjectSkills({ path: dir, language: 'en' });
     assert.ok(fs.existsSync(path.join(dir, '.claude', 'skills', 'brainstorming')), 'setup: linked');
-    installProjectSkills({ path: dir, language: 'en', exclude: ['brainstorming'] });
+    installProjectSkills({ path: dir, language: 'en', exclude: ['skill:brainstorming'] });
     assert.ok(!fs.existsSync(path.join(dir, '.claude', 'skills', 'brainstorming')),
       'an excluded skill is pruned from the project');
     assert.ok(fs.existsSync(path.join(dir, '.claude', 'skills', 'writing-plans')), 'siblings stay');
@@ -134,8 +134,11 @@ test('installProjectSkills refuses unsafe exclude names', () => {
   const dir = tempProject();
   try {
     assert.throws(() => installProjectSkills({ path: dir, exclude: ['--force'] }), /invalid exclude/);
-    assert.throws(() => installProjectSkills({ path: dir, exclude: ['a,b'] }), /invalid exclude/);
-    assert.throws(() => installProjectSkills({ path: dir, exclude: ['../x'] }), /invalid exclude/);
+    assert.throws(() => installProjectSkills({ path: dir, exclude: ['skill:a,b'] }), /invalid exclude/);
+    assert.throws(() => installProjectSkills({ path: dir, exclude: ['skill:../x'] }), /invalid exclude/);
+    assert.throws(() => installProjectSkills({ path: dir, exclude: ['template:x'] }), /invalid exclude/);
+    assert.throws(() => installProjectSkills({ path: dir, exclude: ['brainstorming'] }), /invalid exclude/,
+      'a bare name is ambiguous across kinds and is refused');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
