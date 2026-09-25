@@ -606,7 +606,10 @@ extension CodeAssistantPanel {
             let unbolded = line.replacingOccurrences(of: "**", with: "")
             guard unbolded.lowercased().hasPrefix("goal:") else { continue }
             let goal = unbolded.dropFirst("goal:".count).trimmingCharacters(in: .whitespaces)
-            let sentence = goal.split(separator: ".", maxSplits: 1).first.map(String.init) ?? goal
+            // A period ENDS the sentence only before a space or the line's
+            // end — "Upgrade to Node.js 22" and "Bump to v1.2" keep their dots.
+            let sentence = goal.range(of: #"\.(\s|$)"#, options: .regularExpression)
+                .map { String(goal[..<$0.lowerBound]) } ?? goal
             let trimmed = sentence.trimmingCharacters(in: .whitespaces)
             if !trimmed.isEmpty { return trimmed }
         }

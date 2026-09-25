@@ -873,6 +873,9 @@ struct AgentV2SelectionTests {
         // A ```bash inside a ````markdown block does not close it (CommonMark).
         #expect(CodeAssistantPanel.planTitle(from: "````markdown\n```bash\n# inner\n```\n# Still Inside\n````\n## Real Heading")
                 == "Real Heading")
+        // A dot inside a word is not the end of the Goal's sentence.
+        #expect(CodeAssistantPanel.planTitle(from: "**Goal:** Upgrade to Node.js 22 and v1.2 of the SDK. Then more.")
+                == "Upgrade to Node.js 22 and v1.2 of the SDK")
         // The 60-char cap never leaves a trailing space.
         #expect(!CodeAssistantPanel.planTitle(from: "**Goal:** " + String(repeating: "word ", count: 20)).hasSuffix(" "))
         // Only generic headings: fall back to the first one rather than nothing.

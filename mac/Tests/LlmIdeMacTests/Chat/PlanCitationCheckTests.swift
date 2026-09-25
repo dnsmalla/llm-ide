@@ -102,6 +102,17 @@ struct PlanCitationCheckTests {
         #expect(missing.isEmpty)
     }
 
+    @Test("branches, remote refs, repo slugs and MIME types are not path claims — unless on a Files line")
+    func slashWordsAreNotPaths() {
+        let plan = """
+        Create branch `fix/chat-token-overhead` off `origin/main`, bump `dnsmalla/graph-kit`, serve `text/plain`.
+        Hidden folder `.githooks/pre-commit` and folder `apps/gone/` are still paths.
+        - Modify: `apps/web`
+        """
+        #expect(PlanCitationCheck.missingPaths(in: plan, root: "/repo", fileExists: Self.exists([]))
+                == [".githooks/pre-commit", "apps/gone", "apps/web"])
+    }
+
     @Test("a directory path with a trailing slash counts when the directory exists")
     func directories() {
         #expect(PlanCitationCheck.missingPaths(

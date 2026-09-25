@@ -59,16 +59,19 @@ enum PlanCitationCheck {
                 .trimmingCharacters(in: CharacterSet(charactersIn: " \t-"))
                 .lowercased()
             if label.hasPrefix("create:") || label.hasPrefix("test:") {
-                created.formUnion(codeSpans(in: line).compactMap(normalizedPath))
+                created.formUnion(codeSpans(in: line).compactMap { normalizedPath($0, fileLine: true) })
                 continue
             }
             // Per sentence, not per line: "`a/old.ts` was deleted. `a/new.ts`
             // is used by the build." reports the first and claims the second.
+            // "Modify: `apps/web`" asserts a path exists even without an
+            // extension; elsewhere such a span may be a branch or a slug.
+            let fileLine = fileLineLabels.contains { label.hasPrefix($0) }
             for sentence in sentences(in: line) {
                 // "`apps/shared/validation/` … none of which still exist" —
                 // the plan is REPORTING that it is missing, correctly.
                 guard !saysGone(sentence.lowercased()) else { continue }
-                cited.append(contentsOf: codeSpans(in: sentence).compactMap(normalizedPath))
+                cited.append(contentsOf: codeSpans(in: sentence).compactMap { normalizedPath($0, fileLine: fileLine) })
             }
         }
 
@@ -139,20 +142,37 @@ enum PlanCitationCheck {
 
     /// The span as a path claim, or nil when it is a command, URL, glob,
     /// placeholder, package spec, bare file name or scratch path.
-    private static func normalizedPath(_ span: String) -> String? {
+    /// Lines whose spans are path claims by construction (writing-plans'
+    /// **Files:** list).
+    private static let fileLineLabels = ["modify:", "delete:", "remove:", "move:", "rename:", "edit:", "update:"]
+
+    /// The span as a path claim, or nil when it is a command, URL, glob,
+    /// placeholder, package spec, bare file name or scratch path — or a
+    /// slash-bearing word that is not a path at all: a branch
+    /// (`fix/chat-token-overhead`), a remote ref (`origin/main`), a repo
+    /// slug (`dnsmalla/graph-kit`), a MIME type (`text/plain`). Those look
+    /// like relative paths, so outside a Files line a span must also LOOK
+    /// like a file: an extension, a trailing `/`, or a dot-folder.
+    private static func normalizedPath(_ span: String, fileLine: Bool) -> String? {
         var s = span.trimmingCharacters(in: .whitespaces)
         while let last = s.last, ".,;:)".contains(last) { s.removeLast() }
         if let range = s.range(of: #":\d+(-\d+)?$"#, options: .regularExpression) {
             s.removeSubrange(range)
         }
         if s.hasPrefix("./") { s.removeFirst(2) }
+        let namedAsFolder = s.count > 1 && s.hasSuffix("/")
         while s.count > 1, s.hasSuffix("/") { s.removeLast() }
         guard s.contains("/"), !s.contains("://"), !s.hasPrefix("-"),
               !s.contains("node_modules"),
               !ignoredPrefixes.contains(where: { s.hasPrefix($0) || s + "/" == $0 }),
               pathShape.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
         else { return nil }
-        return s
+        let components = s.split(separator: "/")
+        let ext = (s as NSString).pathExtension
+        let looksLikeFile = s.hasPrefix("/") || s.hasPrefix("~/") || namedAsFolder
+            || (ext.contains(where: \.isLetter) && ext.count <= 10)
+            || components.contains { $0.hasPrefix(".") && $0 != "." && $0 != ".." }
+        return (fileLine || looksLikeFile) ? s : nil
     }
 
     private static let absolutePathRegex = try! NSRegularExpression(
