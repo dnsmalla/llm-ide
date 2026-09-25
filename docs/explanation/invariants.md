@@ -422,12 +422,14 @@ Run through this against a real meeting before merging:
 ## Tool permissions — "always allow" rules (`extension/kb/tool-permissions.mjs`, `llm_agent/sdk/engine.mjs` canUseTool, `llm_agent/tools/registry.mjs` run-bash)
 
 ### ✅ MUST preserve
+
 - **The safety gate runs FIRST, a rule only skips the prompt tier.** `blocked` and write containment are decided before any rule, session grant or mode is consulted — in every mode, `bypass` included.
 - **Rules are per user × project × tool, and shell rules are command PREFIXES** (`npm test`, `git status`), matched at a word boundary. A compound command (`;`, `&&`, `|`, redirects, `$(…)`, backticks, `${…}`, newlines) never matches a rule and is never offered one.
 - **Every mode honours saved rules.** `manual` (the pre-v55 spelling of `ask`) used to ignore them — which is why "Always Allow" was saved and then never took effect.
 - **"Allow all edits in this chat" is in memory only** (per user + chat session), never persisted.
 
 ### ❌ DO NOT do these
+
 - **Do NOT reintroduce a tool-wide grant for shell tools** — one "Always Allow Bash" letting every command in every repo run unasked is the defect the prefix rules replaced.
 - **Do NOT honour the pre-0034 `tool_approvals` rows** — they are global and listed only so they can be removed.
 
