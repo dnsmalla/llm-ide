@@ -85,3 +85,21 @@ test('suggestRule offers a prefix for simple commands, nothing for compound ones
   assert.equal(P.suggestRule('Bash', { command: 'git status; rm x' }), null);
   assert.deepEqual(P.suggestRule('deploy-app', {}), { toolName: 'deploy-app', pattern: '', label: 'deploy-app' });
 });
+
+// The sandbox's network ask (SandboxNetworkAccess {host, port}) is scoped to
+// ONE host — never a tool-wide grant that would open every host.
+test('network rules are per host, never tool-wide', () => {
+  const u = registerUser(getDb(), { email: 'perm-net@example.com', password: 'CorrectHorseBattery', displayName: 'n' });
+  assert.deepEqual(P.suggestRule('SandboxNetworkAccess', { host: 'registry.npmjs.org', port: 443 }),
+    { toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org', label: 'network access to registry.npmjs.org' });
+  for (const bad of [{}, { host: '' }, { host: 'a b' }, { host: 'x;rm' }, { host: 42 }]) {
+    assert.equal(P.suggestRule('SandboxNetworkAccess', bad), null, JSON.stringify(bad));
+  }
+  P.addRule(u.id, '~/repo', 'SandboxNetworkAccess', 'registry.npmjs.org');
+  assert.ok(P.isAllowedByRule(u.id, '~/repo', 'SandboxNetworkAccess', { host: 'Registry.NPMJS.org', port: 443 }));
+  assert.ok(!P.isAllowedByRule(u.id, '~/repo', 'SandboxNetworkAccess', { host: 'evil.example', port: 443 }));
+  P.addRule(u.id, '~/repo', 'SandboxNetworkAccess', '');
+  assert.ok(!P.isAllowedByRule(u.id, '~/repo', 'SandboxNetworkAccess', { host: 'evil.example', port: 443 }),
+    'a tool-wide network row (hand-inserted) never matches');
+  P.removeAllRules(u.id);
+});

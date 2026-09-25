@@ -67,6 +67,7 @@ import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
 import { get as registryGet, entries as registryEntries } from '../tools/registry.mjs';
 import {
   isAllowedByRule, suggestRule, addRule, grantSessionEdits, hasSessionEdits,
+  NETWORK_TOOL, networkHost,
 } from '../../kb/tool-permissions.mjs';
 import { runBashGate, writePathGate } from '../tools/gates.mjs';
 import { effectiveMcpServers } from '../../mcp/mcp-config.mjs';
@@ -1031,6 +1032,27 @@ export async function runAgentV2Turn(
   const canUseTool = async (toolName, input, callOpts) => {
     const registryName = toolName.startsWith('mcp__llmide__') ? toolName.slice('mcp__llmide__'.length) : null;
     const entry = registryName ? registryGet(registryName) : null;
+    // The sandbox asking to let a running command reach a host. The sandbox
+    // is on whenever the operator's managed Claude Code settings enable it
+    // (settingSources: [] does not remove the policy tier), and this ask used
+    // to fall into the unknown-tool deny below: npm got a 403 "(user denied)"
+    // and plan execution stopped with the user never asked. It is decided
+    // like a shell command, whose network it is: a saved host rule or Bypass
+    // allows, anything else asks. A restricted mode has no shell to make the
+    // request; it is refused there anyway, like the shell itself.
+    if (toolName === NETWORK_TOOL) {
+      const requestedMode = typeof mode === 'string' && mode ? mode : 'execute';
+      if (restrictsTools(requestedMode)) {
+        return { behavior: 'deny', message: `Network access is not available in ${requestedMode} mode.` };
+      }
+      const host = networkHost(input);
+      if (!host) return { behavior: 'deny', message: 'Network access refused: not a plain hostname.' };
+      if (allowAll || ruleAllows(NETWORK_TOOL, input)) return { behavior: 'allow', updatedInput: input };
+      const port = Number.isInteger(input?.port) ? `:${input.port}` : '';
+      return awaitToolApproval({
+        toolName: NETWORK_TOOL, argsSummary: `${host}${port}`, input, callSignal: callOpts?.signal,
+      });
+    }
     if (toolName !== 'AskUserQuestion' && !(entry && entry.kind === 'act') && !NATIVE_GATED.has(toolName)) {
       return { behavior: 'deny', message: DENY_UNKNOWN_TOOL };
     }
