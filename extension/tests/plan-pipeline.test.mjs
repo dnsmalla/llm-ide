@@ -19,6 +19,7 @@ import {
   buildPlanBinding, buildExecuteBinding,
 } from '../llm_agent/runtime/plan-pipeline.mjs';
 import { buildModeSkillsText } from '../core/prompt-framing.mjs';
+import { V2_EXECUTE_GUIDANCE } from '../llm_agent/runtime/execute-guidance.mjs';
 
 // --- stage resolution -------------------------------------------------------
 
@@ -370,4 +371,29 @@ test('plan bindings say the saved plan ends the mode and Execute starts the work
   }
   assert.match(buildPlanBinding('plan', { engine: 'legacy' }), /Calling `save-plan` ends/);
   assert.match(buildPlanBinding('plan', { engine: 'agent' }), /Delivering the plan document ends/);
+});
+
+// A request with nothing to change — a question, an investigation whose output
+// is findings, a change already in place — used to be planned anyway ("If a
+// skill says a small task skips the plan, write the plan anyway"), and the
+// plan then failed at Execute with no step that had anything to do.
+test('plan bindings decide first whether anything needs executing, on both engines', () => {
+  for (const engine of ['agent', 'legacy']) {
+    for (const mode of ['plan', 'assist_plan']) {
+      const b = buildPlanBinding(mode, { skillName: 'x', engine });
+      assert.match(b, /anything to execute/i, `${engine}/${mode}: the triage clause`);
+      assert.match(b, /already in place/i, `${engine}/${mode}: an already-done change counts as nothing to do`);
+      assert.match(b, /\*\*Nothing to execute\.\*\*/, `${engine}/${mode}: the marker the Mac keys off`);
+      assert.match(b, /small change still gets a plan/i, `${engine}/${mode}: triage is not a shortcut past planning`);
+    }
+  }
+});
+
+test('execute binding: a step with nothing to do is skipped, not failed', () => {
+  for (const engine of ['agent', 'legacy']) {
+    const b = buildExecuteBinding({ skillName: 'x', hasSubagents: false, engine });
+    assert.match(b, /`skipped`/);
+    assert.match(b, /never `failed`/);
+  }
+  assert.match(V2_EXECUTE_GUIDANCE, /`skipped`/, 'the v2 execute guidance says so too');
 });

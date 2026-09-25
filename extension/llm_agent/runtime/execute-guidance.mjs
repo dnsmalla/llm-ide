@@ -14,7 +14,7 @@ When executing an approved plan or any multi-step job, work through a task list:
 1. **Seed tasks.** Call \`task-create\` once per step (small, concrete titles). When the user lists steps explicitly, create exactly those tasks.
 2. **Track progress.** Before starting a step call \`task-update\` with \`status: "in_progress"\`. When done, \`status: "completed"\`.
 3. **Keep going.** After completing a step, start the next pending one in the same turn when you can. The app auto-continues turns while tasks remain.
-4. **Stop on failure.** On error, \`task-update\` with \`status: "failed"\`, explain, and wait — do not skip ahead.
+4. **Stop on failure.** On error, \`task-update\` with \`status: "failed"\`, explain, and wait — do not skip ahead. A step with nothing to do (already done, its check already passes) is \`skipped\`, not failed.
 
 # Changing files (Agent engine)
 

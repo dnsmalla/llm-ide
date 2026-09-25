@@ -231,6 +231,23 @@ const QUESTION_CLAUSE_LEGACY =
   + '`ask-user` is not in your tool list, or the answer is open-ended, ask in '
   + 'your reply the way the skill says to.';
 
+// Nothing decided whether a request needed a plan at all. The stop clause
+// below (rightly) says a small task still gets one, and the only exit from a
+// plan is the card's Execute — so a question, an investigation, or a change
+// that was already in place was planned anyway, and the plan then failed at
+// Execute with no step that had anything to do. The check comes FIRST, before
+// the skill's process, and it is not a shortcut: any change still gets a plan.
+// The bold marker is a contract with the Mac, which never offers Save/Execute
+// on a reply that opens with it (PlanEditPolicy.looksLikePlan).
+const TRIAGE_CLAUSE =
+  '- **First decide whether there is anything to execute.** A plan exists to '
+  + 'change the project (code, config, docs, dependencies, repo operations), and '
+  + 'its only exit is Execute. If the request needs an answer rather than a '
+  + 'change — a question, an explanation, an investigation or review whose output '
+  + 'is findings — or the change it asks for is already in place (check before '
+  + 'deciding), do not plan: reply with the answer and what you found, opening '
+  + 'with the line **Nothing to execute.** A small change still gets a plan.';
+
 // Nothing used to say where this mode ENDS, and two things pushed past it:
 // writing-plans' own ending ("offer execution choice") is removed by the
 // clauses above with no stop in its place, and brainstorming's bounded path
@@ -332,8 +349,10 @@ export function buildPlanBinding(mode, { skillName, engine = 'legacy', planWrite
     + 'cannot know about; where they and the skill disagree, these win.\n\n'
     + '- **Where you are in the process.** There is no separate stage tracker — '
     + 're-read the conversation to work out which step you are on, and pick up '
-    + 'from there. A fresh request starts at that skill\'s beginning; do not '
-    + 'skip ahead to a finished plan because the request sounds simple.\n'
+    + 'from there. A fresh request starts with the check below, then at that '
+    + 'skill\'s beginning; do not skip ahead to a finished plan because the '
+    + 'request sounds simple.\n'
+    + `${TRIAGE_CLAUSE}\n`
     + writingClause(mode, planWrite)
     + `${questionClause}\n`
     + `${stopClause(engine)}\n`
@@ -363,7 +382,16 @@ export function buildExecuteBinding({ skillName, hasSubagents, engine = 'legacy'
         + 'instruction to switch to subagent-driven execution.'}\n`
     + '- **The plan is the attached document.** Do not re-plan it, re-open '
     + 'settled decisions, or expand its scope; if a task turns out to be '
-    + 'wrong, say so and stop rather than substituting your own plan.\n'
+    + 'wrong, say so and stop rather than substituting your own plan.\n'    // An approved plan can hold a step that is already done by the time it
+    // runs, or that only gathers information. Told only to stop when a task
+    // is "wrong", the model marked those `failed`, and the run ended as
+    // "Plan execution stopped" with nothing actually broken.
+    + '- **Nothing to change is not a failure.** A step that is already done, '
+    + 'whose check already passes, or that only gathers information is '
+    + '`skipped` (say why in one line) — never `failed`, which is for a step you '
+    + 'tried and could not do. If every step needs nothing, say "This plan needed '
+    + 'no changes" and what you checked.\n'
+
     + '- **Tracking.** Use `task-create` once per plan step up front and '
     + '`task-update` as each completes, in place of whatever todo/ledger '
     + 'mechanism the skill names. This is not optional bookkeeping: the '
