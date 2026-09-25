@@ -87,7 +87,7 @@ export function registerDecision({ sdkSessionId, userId, kind = 'AskUserQuestion
  * with the original AskUserQuestion-only call site, which never passed
  * `action` at all.
  */
-export function answerDecision({ requestId, sdkSessionId, userId, action, answers } = {}) {
+export function answerDecision({ requestId, sdkSessionId, userId, action, answers, feedback } = {}) {
   const entry = pending.get(requestId);
   if (!entry) {
     return expiredAt.has(requestId)
@@ -101,7 +101,14 @@ export function answerDecision({ requestId, sdkSessionId, userId, action, answer
   if (!['answer', 'allow', 'deny', 'always-allow'].includes(resolvedAction)) {
     return { ok: false, reason: 'invalid_action' };
   }
-  settle(requestId, entry, resolvedAction === 'answer' ? { action: 'answer', answers } : { action: resolvedAction });
+  // `feedback` — Claude Code's "No, and tell Claude what to do differently":
+  // a deny may carry the user's instruction, which the engine hands the
+  // model as the denial reason. Ignored on any other action; capped.
+  const note = resolvedAction === 'deny' && typeof feedback === 'string' && feedback.trim()
+    ? feedback.trim().slice(0, 2000) : undefined;
+  settle(requestId, entry, resolvedAction === 'answer'
+    ? { action: 'answer', answers }
+    : { action: resolvedAction, ...(note ? { feedback: note } : {}) });
   return { ok: true };
 }
 

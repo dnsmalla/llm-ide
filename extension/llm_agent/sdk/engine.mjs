@@ -65,7 +65,9 @@ import { mapSdkMessage } from './events.mjs';
 import { buildLlmIdeServer } from './tools.mjs';
 import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
 import { get as registryGet, entries as registryEntries } from '../tools/registry.mjs';
-import { hasAlwaysAllow, setAlwaysAllow } from '../../kb/tool-approvals.mjs';
+import {
+  isAllowedByRule, suggestRule, addRule, grantSessionEdits, hasSessionEdits,
+} from '../../kb/tool-permissions.mjs';
 import { runBashGate, writePathGate } from '../tools/gates.mjs';
 import { effectiveMcpServers } from '../../mcp/mcp-config.mjs';
 
@@ -737,6 +739,10 @@ const DENY_UNKNOWN_TOOL = 'This tool is not enabled in the LLM-IDE chat engine. 
   + 'that work is under way or that a result will arrive later. Either do the task with the '
   + 'tools you have, or say plainly that you cannot and why.';
 const DENY_NO_ANSWER = 'The user did not answer the question.';
+// A deny that carries the user's instruction ("No, and tell Claude what to do
+// differently") — neutralised so it reads as data, not as a new system turn.
+const denyWithFeedback = (feedback) =>
+  `The user denied this action and said: ${neutralizePromptFences(String(feedback))}`;
 
 // Cap for every string carried in approval_request.args — the payload is a
 // UI preview, not the transport for the edit itself (the SDK already holds
@@ -835,20 +841,20 @@ export async function runAgentV2Turn(
     // subprocess — deliberately not bridged, because synthesising a
     // controller here would add a second listener to the caller's signal for
     // the whole turn.
-    // The chat's own permission setting, forwarded per turn by the client:
-    //   'bypass' — the user asked for allow-all. Every tool that would park
-    //              an approval runs instead. The hard safety rails are NOT
-    //              part of this: a 'blocked' gate decision and the
-    //              write-containment check still refuse, because those are
-    //              about what may happen to the machine, not about how much
-    //              confirming the user wants to do.
-    //   'manual' — ask every time. Stored always-allow rows (kb/
-    //              tool-approvals.mjs) stop short-circuiting the prompt, so
-    //              the setting means what it says. The 'auto' tier is
-    //              untouched: those are the read-only/safe operations, and
-    //              prompting for them would make the mode unusable.
-    //   absent   — an older client that sends no setting; the server's own
-    //              policy applies exactly as before.
+    // The chat's own permission setting, forwarded per turn by the client —
+    // Claude Code's modes:
+    //   'ask'          — (default; 'manual' is its old spelling) ask for
+    //                    anything the gate puts in the prompt tier, unless
+    //                    the user already approved it with "always allow"
+    //                    in THIS project (kb/tool-permissions.mjs) or chose
+    //                    "allow all edits" in this chat.
+    //   'accept-edits' — file edits inside the workspace run unasked; shell
+    //                    commands still ask (or match a rule).
+    //   'bypass'       — nothing that would park an approval asks.
+    // None of these lifts the hard rails: a 'blocked' gate decision and the
+    // write-containment check refuse in every mode, because those are about
+    // what may happen to the machine, not how much confirming the user wants
+    // to do. The 'auto' tier (read-only/safe operations) never asks.
     permissionMode = null,
     resumeSdkSessionId, onEvent, signal, abortController, allowAmbientAuth = false,
     queryFactory = sdkQueryFactory,
@@ -962,6 +968,7 @@ export async function runAgentV2Turn(
   // clients ignore it and keep reading argsSummary.
   const awaitToolApproval = async ({ toolName, argsSummary, args = null, input, callSignal }) => {
     const sessionId = currentSdkSessionId;
+    const suggestion = suggestionFor(toolName, input);
     const { requestId, promise } = registerDecision({ sdkSessionId: sessionId, userId, kind: 'ToolApproval' });
     const onAbort = () => { abortDecisionsForSession(sessionId); };
     const signals = [callSignal, signal].filter(Boolean);
@@ -971,15 +978,25 @@ export async function runAgentV2Turn(
     }
     const detach = () => { for (const s of signals) s.removeEventListener('abort', onAbort); };
     try {
-      onEvent?.({ type: 'approval_request', requestId, kind: 'ToolApproval', toolName, argsSummary, ...(args ? { args } : {}) });
+      onEvent?.({
+        type: 'approval_request', requestId, kind: 'ToolApproval', toolName, argsSummary,
+        ...(args ? { args } : {}),
+        // What "always allow" would save, for the card's button label.
+        // Absent → the card offers "Allow once" only.
+        ...(suggestion ? { suggestion } : {}),
+      });
       const outcome = await promise;
       onEvent?.({ type: 'approval_resolved', requestId, outcome: outcome.action });
       if (outcome.action === 'always-allow') {
-        setAlwaysAllow(userId, toolName);
+        // Save exactly the rule the card offered (see `suggestionFor`) — an
+        // edit grant for this chat, or a project-scoped tool/prefix rule.
+        // No suggestion (a compound command) → it was only ever "once".
+        if (suggestion?.scope === 'session') grantSessionEdits(userId, chatSessionId);
+        else if (suggestion) addRule(userId, workspaceRoot, suggestion.toolName, suggestion.pattern);
         return { behavior: 'allow', updatedInput: input };
       }
       if (outcome.action === 'allow') return { behavior: 'allow', updatedInput: input };
-      return { behavior: 'deny', message: DENY_NO_ANSWER };
+      return { behavior: 'deny', message: outcome.feedback ? denyWithFeedback(outcome.feedback) : DENY_NO_ANSWER };
     } finally {
       detach();
     }
@@ -992,10 +1009,25 @@ export async function runAgentV2Turn(
   // approval PROMPT only — every caller below still runs its gate first, and
   // a 'blocked' decision is final in both modes.
   const allowAll = permissionMode === 'bypass';
-  const askEveryTime = permissionMode === 'manual';
-  // Always-allow rows short-circuit the prompt tier — unless this turn asked
-  // to be asked every time.
-  const alwaysAllowed = (name) => !askEveryTime && hasAlwaysAllow(userId, name);
+  const acceptEdits = permissionMode === 'accept-edits';
+  const chatSessionId = resolveChatSessionId(agentContext);
+  // A saved project rule short-circuits the prompt tier in every mode. (It
+  // used to be ignored in 'manual' — the Mac's only asking mode — so
+  // "Always Allow" was saved and then never honoured.)
+  const ruleAllows = (name, input) => isAllowedByRule(userId, workspaceRoot, name, input);
+  const editsAllowed = () => allowAll || acceptEdits || hasSessionEdits(userId, chatSessionId);
+  // What an "always allow" answer saves for this call. Edits are a CHAT
+  // grant (Claude Code's "allow all edits during this session"); shell
+  // commands a project prefix rule; act tools a project tool rule. A rule
+  // needs a project to be scoped to — with none, only "once" is offered.
+  const suggestionFor = (name, input) => {
+    if (name === 'Edit' || name === 'Write') {
+      return chatSessionId ? { toolName: name, scope: 'session', label: 'all edits in this chat' } : null;
+    }
+    if (!workspaceRoot) return null;
+    const rule = suggestRule(name, input);
+    return rule ? { ...rule, scope: 'project' } : null;
+  };
   const canUseTool = async (toolName, input, callOpts) => {
     const registryName = toolName.startsWith('mcp__llmide__') ? toolName.slice('mcp__llmide__'.length) : null;
     const entry = registryName ? registryGet(registryName) : null;
@@ -1014,7 +1046,7 @@ export async function runAgentV2Turn(
         if (decision === 'blocked') return { behavior: 'deny', message: 'Command blocked for safety.' };
         // `allowAll` is checked AFTER the blocklist, never before it: the
         // user asked not to be interrupted, not to disable the safety rail.
-        if (decision === 'auto' || allowAll || alwaysAllowed('Bash')) {
+        if (decision === 'auto' || allowAll || ruleAllows('Bash', input)) {
           return { behavior: 'allow', updatedInput: input };
         }
         return awaitToolApproval({
@@ -1028,7 +1060,7 @@ export async function runAgentV2Turn(
       }
       // Containment first, then the user's setting: allow-all means "don't
       // ask me about edits", never "write outside the workspace".
-      if (allowAll || alwaysAllowed(toolName)) return { behavior: 'allow', updatedInput: input };
+      if (editsAllowed()) return { behavior: 'allow', updatedInput: input };
       return awaitToolApproval({
         toolName, argsSummary: String(input?.file_path ?? ''),
         args: approvalArgsFor(toolName, input), input, callSignal: callOpts?.signal,
@@ -1047,7 +1079,7 @@ export async function runAgentV2Turn(
       }
       // The gate runs FIRST and unconditionally — 'blocked' is a hard safety
       // rail: a blocked command stays blocked even if the tool was
-      // always-allowed, so hasAlwaysAllow must never be consulted before
+      // always-allowed, so a permission rule must never be consulted before
       // it. Doing so would let a user who once always-allowed e.g. run-bash
       // bypass the blocklist entirely for every later command under that
       // same tool name. always-allow only ever shortcuts the PROMPT tier
@@ -1061,7 +1093,7 @@ export async function runAgentV2Turn(
       // tool-approvals.mjs), skips straight to auto-run here, exactly as it
       // would after a live 'always-allow' answer below; a fresh 'prompt'
       // decision genuinely blocks on a human when neither applies.
-      if (allowAll || alwaysAllowed(entry.name)) return { behavior: 'allow', updatedInput: input };
+      if (allowAll || ruleAllows(entry.name, input)) return { behavior: 'allow', updatedInput: input };
       // Genuinely block on a human decision, parked
       // the same way an AskUserQuestion is (requestId, approval_request/
       // approval_resolved events, abort-on-disconnect).

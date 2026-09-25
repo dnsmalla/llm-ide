@@ -40,7 +40,9 @@ const DEFAULT_MODE = 'execute';
 // Permission settings a client may send (the Mac chat's Manual / Bypass
 // chip). Validated here rather than in the engine so an unknown string can
 // never be mistaken for one of them — it degrades to the server's own policy.
-const PERMISSION_MODES = new Set(['bypass', 'manual']);
+// 'ask' / 'accept-edits' / 'bypass' mirror Claude Code's modes; 'manual' is
+// the pre-rename spelling of 'ask', still sent by older Mac builds.
+const PERMISSION_MODES = new Set(['ask', 'accept-edits', 'bypass', 'manual']);
 
 // Leading-slash plugin commands expand exactly like the legacy loop
 // (llm_agent/runtime/route.mjs): the enabled command set for THIS user,
@@ -464,6 +466,7 @@ async function handleV2Decision(req, res, userId) {
     userId,
     action: body.action,
     answers: body.answers,
+    feedback: body.feedback,
   });
   if (out.ok) {
     sendJSON(res, 200, { ok: true });

@@ -100,12 +100,12 @@ test('a blocked command is denied even with always-allow set (gate runs before h
   assert.ok(result.error, 'a blocked command must not run');
 });
 
-test('an always-allowed prompt-tier command runs immediately with no approval event', async () => {
+test('a prompt-tier command covered by a project rule runs immediately with no approval event', async () => {
   const { get } = await import('../llm_agent/tools/registry.mjs');
-  const { setAlwaysAllow } = await import('../kb/tool-approvals.mjs');
+  const { addRule } = await import('../kb/tool-permissions.mjs');
   const entry = get('run-bash');
   const user = registerUser(getDb(), { email: 'code-assist-decision-4@example.com', password: 'CorrectHorseBattery', displayName: 't' });
-  setAlwaysAllow(user.id, 'run-bash');
+  addRule(user.id, process.cwd(), 'run-bash', 'echo');
   const events = [];
   // 'echo' is a prompt-tier command (not in AUTO_SAFE_PATTERNS) that is
   // harmless to actually execute — unlike e.g. `npm install`, which would

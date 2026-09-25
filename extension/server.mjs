@@ -215,7 +215,16 @@ const HOST = config.host;
 //     in-flight Agent-engine turn for that chat. The Mac calls it when a send
 //     keeps getting TURN_IN_PROGRESS while its own chat is idle — a turn it
 //     lost track of that would otherwise hold the chat's lock until done.
-const SERVER_API_VERSION = 54;
+//   v55 — Claude-style permissions. Agent-engine `permissionMode` accepts
+//     'ask' | 'accept-edits' | 'bypass' ('manual' = old spelling of 'ask').
+//     ToolApproval `approval_request` events carry an optional `suggestion`
+//     { toolName, pattern?, scope: 'project'|'session', label } — what
+//     "always allow" would save. Decisions accept `feedback` with `deny`.
+//     "Always allow" now saves a PROJECT-scoped rule (command prefix for
+//     shell tools) or, for edits, a grant for this chat; the old global
+//     per-tool grants are no longer honoured. GET/DELETE
+//     /kb/agent/tool-approvals gain `rules`.
+const SERVER_API_VERSION = 55;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
