@@ -736,6 +736,33 @@ test('per-user CLAUDE_CONFIG_DIR: composed for every KEYED turn',
       'a keyed turn keeps its per-user home even when ambient auth is allowed');
   }));
 
+// The operator's claude.ai connectors (Drive, Claude Docs, …) ride their
+// login, not settings, so settingSources: [] never kept them out: they cost
+// 6.6k tokens a turn and handed the chat agent the operator's Drive. The flag
+// must be on for ambient turns too — those are the ones that inherit the login.
+test('every turn disables claude.ai connectors in the SDK env, ambient and keyed', async () => {
+  const envOf = async (opts) => {
+    let env;
+    await runAgentV2Turn({
+      message: 'hello', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
+      onEvent: () => {}, queryFactory: (p, o) => { env = o.env; return (async function* () {})(); },
+      ...opts,
+    }, turnInjectable);
+    return env;
+  };
+  await withAnthropicKey(undefined, async () => {
+    const env = await envOf({ allowAmbientAuth: true });
+    assert.equal(env?.ENABLE_CLAUDEAI_MCP_SERVERS, 'false');
+    assert.equal(env.ANTHROPIC_API_KEY, undefined, 'an ambient turn still carries no key');
+    assert.equal(env.PATH, process.env.PATH, 'env REPLACES the subprocess env — process.env must be spread');
+  })();
+  await withAnthropicKey('sk-ant-v2-test', async () => {
+    const env = await envOf({});
+    assert.equal(env.ENABLE_CLAUDEAI_MCP_SERVERS, 'false');
+    assert.equal(env.ANTHROPIC_API_KEY, 'sk-ant-v2-test');
+  })();
+});
+
 // --- Anthropic-compatible custom providers (gateway turns) ---------------------
 //
 // The Agent SDK only speaks the Anthropic Messages API, so a non-Anthropic

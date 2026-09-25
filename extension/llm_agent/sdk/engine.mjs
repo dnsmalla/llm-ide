@@ -1263,10 +1263,20 @@ export async function runAgentV2Turn(
     // sandboxed. A user who later adds or removes their vault key changes
     // homes and their next resume misses — SESSION_UNRESUMABLE, which the
     // client recovers from with a fresh-session retry.
-    ...(key
-      ? {
-          env: {
-            ...process.env,
+    //
+    // env is composed on EVERY turn, ambient included, for one flag:
+    // ENABLE_CLAUDEAI_MCP_SERVERS=false. Without it the subprocess pulls the
+    // operator's claude.ai connectors (Google Drive, Claude Docs, …) off
+    // their login into every turn — measured at 6.6k tokens of tool schemas
+    // on a bare "hello", and a chat agent that can read/share/trash the
+    // operator's Drive. settingSources: [] does not cover them (they are not
+    // settings); this is the SDK-engine twin of the CLI path's
+    // --strict-mcp-config (providers/providers.mjs).
+    env: {
+      ...process.env,
+      ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
+      ...(key
+        ? {
             ANTHROPIC_API_KEY: key,
             // Gateway turn (Anthropic-compatible custom provider): aim the
             // SDK's CLI at the provider's Anthropic door. The key rides in
@@ -1277,9 +1287,9 @@ export async function runAgentV2Turn(
             // exactly as before.
             ...(gatewayBaseUrl ? { ANTHROPIC_BASE_URL: gatewayBaseUrl, ANTHROPIC_AUTH_TOKEN: key } : {}),
             ...(sdkHome ? { CLAUDE_CONFIG_DIR: sdkHome } : {}),
-          },
-        }
-      : {}),
+          }
+        : {}),
+    },
     ...(resume ? { resume } : {}),
     // The SDK's Options takes an `abortController`, NOT a `signal`: its
     // Options type has no `signal` member, so a `signal` key (what this
