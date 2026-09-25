@@ -327,7 +327,24 @@ test('bypass allows a sandbox network request without asking',
     assert.equal(events.filter((e) => e.type === 'approval_request').length, 0);
   }));
 
-test('a malformed sandbox network request is denied, not shown',
+test('an unusual host (IPv6, underscore, trailing dot): Bypass allows, Ask asks once with no rule offered',
+  withAnthropicKey('sk-ant-perm-net-5', async () => {
+    const user = newUser('net-odd');
+    const bypass = await gateFor({ permissionMode: 'bypass', userId: user.id });
+    for (const host of ['::1', 'my_svc.internal', 'registry.npmjs.org.']) {
+      const v = await settledOrParked(bypass('SandboxNetworkAccess', { host, port: 443 }, {}));
+      assert.notEqual(v, PARKED, host);
+      assert.equal(v.behavior, 'allow', `${host}: bypass must not silently deny`);
+    }
+    const events = [];
+    const ask = await gateFor({ permissionMode: 'ask', userId: user.id, events });
+    assert.equal(await settledOrParked(ask('SandboxNetworkAccess', { host: '::1', port: 8080 }, {})), PARKED);
+    const req = events.find((e) => e.type === 'approval_request');
+    assert.equal(req.argsSummary, '::1:8080');
+    assert.equal(req.suggestion, undefined, 'no host rule can be saved for a non-plain host');
+  }));
+
+test('a sandbox network request with no host is denied, not shown',
   withAnthropicKey('sk-ant-perm-net-3', async () => {
     const user = newUser('net-bad');
     const canUseTool = await gateFor({ permissionMode: 'bypass', userId: user.id });

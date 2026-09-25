@@ -1045,12 +1045,18 @@ export async function runAgentV2Turn(
       if (restrictsTools(requestedMode)) {
         return { behavior: 'deny', message: `Network access is not available in ${requestedMode} mode.` };
       }
-      const host = networkHost(input);
-      if (!host) return { behavior: 'deny', message: 'Network access refused: not a plain hostname.' };
+      const rawHost = typeof input?.host === 'string' ? input.host.trim().slice(0, 255) : '';
+      if (!rawHost) return { behavior: 'deny', message: 'Network access refused: the request named no host.' };
+      // Bypass before the hostname check: an IPv6 literal, an underscore or
+      // a trailing dot is still a host the user said not to be asked about,
+      // and refusing it would bring back the silent "(user denied)".
       if (allowAll || ruleAllows(NETWORK_TOOL, input)) return { behavior: 'allow', updatedInput: input };
+      // A host that is not a plain name still asks — it just cannot be
+      // saved as a rule (suggestRule offers none), so the card says once.
       const port = Number.isInteger(input?.port) ? `:${input.port}` : '';
       return awaitToolApproval({
-        toolName: NETWORK_TOOL, argsSummary: `${host}${port}`, input, callSignal: callOpts?.signal,
+        toolName: NETWORK_TOOL, argsSummary: `${networkHost(input) ?? rawHost}${port}`, input,
+        callSignal: callOpts?.signal,
       });
     }
     if (toolName !== 'AskUserQuestion' && !(entry && entry.kind === 'act') && !NATIVE_GATED.has(toolName)) {
