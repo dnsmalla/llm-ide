@@ -32,7 +32,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as yaml from 'js-yaml';
 import { resolveCentralSkillsRepo } from '../core/skills-repo.mjs';
-import { listEnabled, pruneOrphans, migrateLegacyDefaultSources } from './state.mjs';
+import { listEnabled, pruneOrphans, migrateLegacyDefaultSources, listDisabledItems, itemKey } from './state.mjs';
 
 // Git operations (clone/fetch/checkout/submodule-update) run async — the
 // server is single-threaded Node, so a *Sync spawn here would freeze every
@@ -722,7 +722,7 @@ export function listSourcesWithState(userId) {
   return {
     sources: listSources().map((s) => {
       const snap = snapshotSource(s);
-      return { ...snap, enabled: enabled.has(s.id) };
+      return { ...snap, enabled: enabled.has(s.id), disabledItemCount: listDisabledItems(userId, s.id).size };
     }),
   };
 }
@@ -730,15 +730,47 @@ export function listSourcesWithState(userId) {
 // Full discovery detail for one source — used by the Mac detail view to
 // actually list what a source contributes, not just show counts. Discovery
 // only: agents/hooks are informational, never invoked/executed from here.
-export function sourceDiscoveryDetail(id) {
+//
+// The four selectable kinds carry `enabled` (this user's checkbox — absent
+// from the unchecked set means on) and `isNew` (added by the source's last
+// update). Hooks and MCP servers stay whole-source and carry neither.
+export function sourceDiscoveryDetail(id, userId) {
   const src = getSource(id);
   if (!src || !src.location || !existsSync(src.location)) return null;
+  const disabled = listDisabledItems(userId, id);
+  const added = new Set(Array.isArray(src.lastUpdate?.added) ? src.lastUpdate.added : []);
+  const mark = (kind) => (item) => {
+    const key = itemKey(kind, item.name);
+    return { ...item, enabled: !disabled.has(key), isNew: added.has(key) };
+  };
+  const items = listSelectableItems(src.location);
   return {
-    skills: listDiscoverySkills(src.location),
-    agents: listDiscoveryAgents(src.location),
-    commands: listDiscoveryCommands(src.location),
-    templates: listDiscoveryTemplates(src.location),
+    skills: items.skill.map(mark('skill')),
+    agents: items.agent.map(mark('agent')),
+    commands: items.command.map(mark('command')),
+    templates: items.template.map(mark('template')),
     hooks: listDiscoveryHooks(src.location),
     mcpServers: listDiscoveryMcpServers(src.location),
   };
+}
+
+// The per-item-selectable contents of a source directory, by kind.
+function listSelectableItems(location) {
+  return {
+    skill: listDiscoverySkills(location),
+    agent: listDiscoveryAgents(location),
+    command: listDiscoveryCommands(location),
+    template: listDiscoveryTemplates(location),
+  };
+}
+
+// Every `<kind>:<name>` key a source directory currently offers — what an
+// update diffs before/after, and what pruneMissingItems keeps.
+export function itemKeysOf(location) {
+  const keys = new Set();
+  if (!location || !existsSync(location)) return keys;
+  for (const [kind, list] of Object.entries(listSelectableItems(location))) {
+    for (const item of list) keys.add(itemKey(kind, item.name));
+  }
+  return keys;
 }

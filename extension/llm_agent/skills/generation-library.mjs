@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 
 import { listSources, snapshotSource, BUILTIN_ID, seedBuiltinOnce } from '../../llm-sources/registry.mjs';
-import { listEnabled } from '../../llm-sources/state.mjs';
+import { listEnabled, listDisabledItems, itemKey } from '../../llm-sources/state.mjs';
 
 /** The `.md` families this module surfaces, and the wire key each lands under. */
 const GENERATION_FAMILIES = { templates: 'templates', commands: 'commands' };
@@ -187,8 +187,13 @@ export function listGenerationLibrary(userId) {
     if (!snap?.location) continue;
     if (src.id === BUILTIN_ID) out.repo = snap.location;
     const found = readGenerationFamilies(snap.location);
+    // Items this user unchecked in the Library. `templates` → `template`,
+    // `commands` → `command`: the per-item kinds are singular.
+    const disabled = userId ? listDisabledItems(userId, src.id) : new Set();
     for (const key of Object.values(GENERATION_FAMILIES)) {
+      const kind = key.slice(0, -1);
       for (const e of found[key]) {
+        if (disabled.has(itemKey(kind, e.name))) continue;
         if (seen.has(e.id)) continue;
         seen.add(e.id);
         out[key].push({ ...e, sourceId: src.id, sourceName: src.name ?? src.id });
