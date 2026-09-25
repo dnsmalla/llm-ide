@@ -701,6 +701,88 @@ struct AgentV2SelectionTests {
         ])
     }
 
+    // The writing-plans skill's shape, seen for real: no H1 (the model put the
+    // title in a Write call Plan mode refused), a "## Global Constraints"
+    // section, `# 1. Builds` comments inside a bash fence, then one
+    // "### Task N:" heading per step whose body carries Files/Interfaces
+    // bullets and "- [ ] **Step 1:**" checklists. It executed as
+    // 'Plan title: "Global Constraints"' with Task 1's bullets as the steps
+    // ("Modify: `package.json`", "Consumes: nothing.", …).
+    static let writingPlansShape = """
+    I'll investigate the repo structure before proposing anything.
+
+    > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans.
+
+    **Goal:** Use knip to find genuinely-dead TypeScript files in the monorepo, delete the empty folders, and keep the guard green.
+
+    ## Global Constraints
+
+    - **Scope is TypeScript/JavaScript dead code only.**
+
+    ## Design decisions
+
+    ### Verification recipe
+
+    ```bash
+    # 1. Builds
+    npm run web:build
+    # 2. Static guards
+    npm run check:types
+    ```
+
+    ### Task 1: Install knip and capture a green baseline
+
+    **Files:**
+    - Modify: `package.json`
+    - Create: `/tmp/knip-baseline.txt`
+
+    **Interfaces:**
+    - Consumes: nothing.
+
+    - [ ] **Step 1: Confirm knip is genuinely absent**
+
+    ```bash
+    # 1. check the lockfile
+    grep knip package-lock.json
+    ```
+
+    ### Task 2: Widen knip coverage
+
+    - [ ] **Step 1: Edit knip.json**
+
+    ### Task 3: Triage every reported file
+
+    ## Risks
+
+    - knip misses dynamic imports.
+    """
+
+    @Test("Plan step parsing: writing-plans \"### Task N:\" headings are the steps, not one task's bullets")
+    func planStepParsingTaskHeadings() {
+        #expect(CodeAssistantPanel.parsePlanSteps(from: Self.writingPlansShape) == [
+            "Install knip and capture a green baseline",
+            "Widen knip coverage",
+            "Triage every reported file",
+        ])
+    }
+
+    @Test("Plan step parsing: numbered comments inside a code fence are not steps")
+    func planStepParsingSkipsCodeFences() {
+        let md = """
+        ## Steps
+
+        1. Run the build
+
+        ```bash
+        # 2. not a step
+        3. not a step either
+        ```
+
+        2. Ship it
+        """
+        #expect(CodeAssistantPanel.parsePlanSteps(from: md) == ["Run the build", "Ship it"])
+    }
+
     @Test("Plan step parsing: checklist markers are stripped from task titles")
     func planStepParsingStripsCheckboxes() {
         let md = """
@@ -774,6 +856,27 @@ struct AgentV2SelectionTests {
         #expect(CodeAssistantPanel.planTitle(from: "Preamble:\n\n\t# Real Title\n") == "Real Title")
         #expect(CodeAssistantPanel.planTitle(from: "Run this:\n\n#!/bin/bash\necho hi") == "Run this:")
         #expect(CodeAssistantPanel.planTitle(from: "Here is the plan:\n\n###\n\n# Real Title") == "Real Title")
+    }
+
+    @Test("Plan title derivation: no H1 → the Goal line, never a generic section or a fenced comment")
+    func planTitleDerivationWithoutH1() {
+        #expect(CodeAssistantPanel.planTitle(from: Self.writingPlansShape)
+                == "Use knip to find genuinely-dead TypeScript files in the mono")
+        // An H1 still wins over everything — even one that comes after sections.
+        #expect(CodeAssistantPanel.planTitle(from: "## Context\n\nx\n\n# Add dark mode\n") == "Add dark mode")
+        // No H1 and no Goal: the first heading that names the work.
+        #expect(CodeAssistantPanel.planTitle(from: "## Global Constraints\n\n- a\n\n## Migrate the auth layer\n\n### Task 1: x")
+                == "Migrate the auth layer")
+        // A heading inside a code fence is a shell comment, not a title.
+        #expect(CodeAssistantPanel.planTitle(from: "Run:\n\n```bash\n# 1. Builds\n```\n\n## Ship the release")
+                == "Ship the release")
+        // A ```bash inside a ````markdown block does not close it (CommonMark).
+        #expect(CodeAssistantPanel.planTitle(from: "````markdown\n```bash\n# inner\n```\n# Still Inside\n````\n## Real Heading")
+                == "Real Heading")
+        // The 60-char cap never leaves a trailing space.
+        #expect(!CodeAssistantPanel.planTitle(from: "**Goal:** " + String(repeating: "word ", count: 20)).hasSuffix(" "))
+        // Only generic headings: fall back to the first one rather than nothing.
+        #expect(CodeAssistantPanel.planTitle(from: "## Context\n\nprose") == "Context")
     }
 
     // MARK: - deleteSession cleanup

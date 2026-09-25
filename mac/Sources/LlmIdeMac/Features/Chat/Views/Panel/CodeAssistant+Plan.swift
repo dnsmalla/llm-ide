@@ -173,7 +173,20 @@ extension CodeAssistantPanel {
     /// a 3-step plan into a task list that also contains its Context prose,
     /// its "Files to change" paths, every sub-bullet, and its Risks section.
     static func parsePlanSteps(from content: String) -> [String] {
-        let scoped = stepsSection(in: content) ?? content
+        // Code first: a `# 1. Builds` comment in a bash fence is not a
+        // heading, and it both ended the Steps section early and became a
+        // "step" of its own.
+        let prose = blankingCodeFences(content)
+        let scoped = stepsSection(in: prose) ?? prose
+        // The writing-plans skill's own shape: one "### Task N: …" heading
+        // per step, each body full of Files/Interfaces bullets and "Step 1"
+        // checklists. When a plan is built that way the headings ARE the
+        // steps; mixing in anything from their bodies turned Task 1's file
+        // list into the whole execution ("Consumes: nothing.").
+        let taskHeadings = stepLines(in: scoped, patterns: [
+            #"^(#{1,4}\s*(?:Task|Phase)\s*\d+[.:)]?)\s*(.+)$"#,
+        ])
+        if !taskHeadings.isEmpty { return taskHeadings }
         let numbered = stepLines(in: scoped, patterns: [
             #"^(\d+[.)])\s+(.+)$"#,
             #"^(#{1,4}\s*Step\s*\d*[.:)]?)\s*(.+)$"#,
@@ -188,7 +201,9 @@ extension CodeAssistantPanel {
     /// such section (then the whole document is scanned).
     private static func stepsSection(in content: String) -> String? {
         guard let headingRegex = try? NSRegularExpression(
-            pattern: #"^(#{1,6})\s*(?:\d+[.:)]\s*)?(steps?|implementation|implementation plan|tasks?|work items?)\b.*$"#,
+            // `(?!\s*\d)`: "### Task 1: Install knip" is ONE item, not the
+            // list — matching it scoped the steps to Task 1's body.
+            pattern: #"^(#{1,6})\s*(?:\d+[.:)]\s*)?(steps?|implementation|implementation plan|tasks?|work items?)\b(?!\s*\d).*$"#,
             options: [.caseInsensitive]),
               let anyHeading = try? NSRegularExpression(pattern: #"^(#{1,6})\s"#)
         else { return nil }
@@ -556,22 +571,84 @@ extension CodeAssistantPanel {
     /// heading at all. An empty result is fine — the resolver's slugify
     /// falls back to "untitled-plan".
     static func planTitle(from content: String) -> String {
-        let lines = content.components(separatedBy: .newlines)
+        let lines = blankingCodeFences(content).components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
         let firstLine = lines.first { !$0.isEmpty } ?? ""
-        // A title-bearing heading: 1–6 '#'s, a space, then real content
-        // (the CommonMark ATX shape). The shape check keeps shebangs
-        // ("#!/bin/bash") and marks-only lines ("###") from outranking
-        // the first line.
-        let headingLine = lines.first { line in
+        // Title-bearing headings: 1–6 '#'s, a space, then real content (the
+        // CommonMark ATX shape). The shape check keeps shebangs ("#!/bin/bash")
+        // and marks-only lines ("###") out; fenced code is already blank, so a
+        // `# 1. Builds` shell comment is not a heading either.
+        let headings: [(level: Int, body: String)] = lines.compactMap { line in
             let hashes = line.prefix(while: { $0 == "#" })
-            guard (1...6).contains(hashes.count) else { return false }
+            guard (1...6).contains(hashes.count) else { return nil }
             let rest = line.dropFirst(hashes.count)
-            return rest.first == " "
-                && !rest.trimmingCharacters(in: .whitespaces).isEmpty
+            let body = rest.trimmingCharacters(in: .whitespaces)
+            guard rest.first == " ", !body.isEmpty else { return nil }
+            return (hashes.count, body)
         }
-        let source = headingLine ?? firstLine
-        let stripped = source.drop(while: { $0 == "#" || $0 == " " })
-        return String(stripped).trimmingCharacters(in: .whitespaces).prefix(60).description
+        // In order: the H1 (a plan's own title, wherever it sits); the plan's
+        // "**Goal:**" line; the first heading that names the work rather than
+        // a section every plan has. A plan with no H1 — seen when the model put
+        // its title in a Write call Plan mode refused — was saved and executed
+        // as "Global Constraints", its first section.
+        let chosen = headings.first { $0.level == 1 }?.body
+            ?? goalLine(in: lines)
+            ?? headings.first { !isGenericPlanHeading($0.body) }?.body
+            ?? headings.first?.body
+            ?? firstLine
+        // Trim again after the cap: a cut at a word gap left a trailing space.
+        return String(chosen.trimmingCharacters(in: .whitespaces).prefix(60)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// `**Goal:** Use knip to …` → `Use knip to …`, cut at the first sentence.
+    private static func goalLine(in lines: [String]) -> String? {
+        for line in lines {
+            let unbolded = line.replacingOccurrences(of: "**", with: "")
+            guard unbolded.lowercased().hasPrefix("goal:") else { continue }
+            let goal = unbolded.dropFirst("goal:".count).trimmingCharacters(in: .whitespaces)
+            let sentence = goal.split(separator: ".", maxSplits: 1).first.map(String.init) ?? goal
+            let trimmed = sentence.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return nil
+    }
+
+    /// Section names nearly every plan has, and per-step headings — none of
+    /// them says what THIS plan does.
+    private static func isGenericPlanHeading(_ body: String) -> Bool {
+        let lower = body.lowercased()
+        if lower.range(of: #"^(task|step|phase)\s*\d"#, options: .regularExpression) != nil { return true }
+        let name = lower.trimmingCharacters(in: CharacterSet(charactersIn: ": "))
+        return [
+            "global constraints", "constraints", "context", "overview", "summary", "background",
+            "goal", "goals", "design", "design decisions", "decisions", "architecture", "tech stack",
+            "file structure", "files", "files to change", "steps", "tasks", "implementation",
+            "implementation plan", "verification", "testing", "risks", "notes", "open questions",
+            "out of scope", "deliberately out of scope", "spec", "plan",
+        ].contains(name)
+    }
+
+    /// `content` with every fenced code block's lines (``` or ~~~, fences
+    /// included) emptied, line count kept — so what is shell or code in a plan
+    /// is never read as a heading, a numbered step, or a bullet.
+    static func blankingCodeFences(_ content: String) -> String {
+        // The open fence's character and length. Per CommonMark a fence closes
+        // only on a line of the SAME character, at least as long, with no info
+        // string — so a "```bash" inside a "````markdown" block stays inside.
+        var open: (char: Character, length: Int)?
+        return content.components(separatedBy: "\n").map { line -> String in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let char = trimmed.first
+            let run = trimmed.prefix(while: { $0 == char }).count
+            if let fence = open {
+                if char == fence.char, run >= fence.length, run == trimmed.count { open = nil }
+                return ""
+            }
+            if let char, char == "`" || char == "~", run >= 3 {
+                open = (char, run)
+                return ""
+            }
+            return line
+        }.joined(separator: "\n")
     }
 }
