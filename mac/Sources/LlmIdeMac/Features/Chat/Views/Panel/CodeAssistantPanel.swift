@@ -19,37 +19,67 @@ protocol ChipMenuOption: CaseIterable, Identifiable, Hashable {
     var help: String { get }
 }
 
-/// How the agent's file-edit tool calls are accepted in the chat panel.
+/// The chat's permission mode — Claude Code's three: Ask, Accept Edits,
+/// Bypass. (Plan is the separate task-mode picker.) Raw values are the
+/// stored preference: `review`/`auto` predate the rename and are kept so an
+/// existing setting survives the upgrade.
 enum EditAcceptanceMode: String, CaseIterable, Identifiable, ChipMenuOption {
-    /// Show the confirmation card + `UpdateFileSheet` for every edit.
+    /// Ask before edits and commands — unless you already chose "always
+    /// allow" for that command in this project, or "allow all edits" in
+    /// this chat.
     case review
-    /// Apply `update-file` edits immediately (to any file `resolveEdit`
-    /// accepts — attached, or inside the open project), auto-run write-tier
-    /// git ops, and auto-run proposed shell commands (still gated by
-    /// `BashService.validateCommand`); GitLab/GitHub actions always confirm.
+    /// Apply file edits inside the project without asking; still ask before
+    /// shell commands and write-tier git operations.
+    case acceptEdits
+    /// Apply edits and run proposed commands without asking (still gated by
+    /// the server's blocklist and write containment, and
+    /// `BashService.validateCommand` locally); GitLab/GitHub actions always
+    /// confirm.
     case auto
 
     var id: String { rawValue }
-    // "Bypass"/"Manual" rather than "Auto"/"Review" — the adjacent modePicker
-    // already has its own unrelated "Auto" task-mode option; a bare "Auto"
-    // here reads as the same control (see CodeAssistMode.label comment).
-    var label: String { self == .auto ? "Bypass" : "Manual" }
-    var icon: String { self == .auto ? "bolt.fill" : "checklist" }
-    var help: String {
-        self == .auto
-            ? "Bypass review — apply file edits (attached files, or anything in the open project) and run proposed shell commands immediately, no popup"
-            : "Manual review — Apply / Review diff / Skip each file edit in the chat, and tap to run each proposed command"
+    var label: String {
+        switch self {
+        case .review: return "Ask"
+        case .acceptEdits: return "Accept Edits"
+        case .auto: return "Bypass"
+        }
     }
+    var icon: String {
+        switch self {
+        case .review: return "hand.raised"
+        case .acceptEdits: return "pencil.and.list.clipboard"
+        case .auto: return "bolt.fill"
+        }
+    }
+    var help: String {
+        switch self {
+        case .review:
+            return "Ask before each file edit and shell command. \"Always allow\" on a card remembers that command for this project."
+        case .acceptEdits:
+            return "Apply file edits in the project without asking; still ask before shell commands."
+        case .auto:
+            return "Apply edits and run commands without asking. Blocked commands and writes outside the project are still refused."
+        }
+    }
+
+    /// Edits are applied without a confirmation card.
+    var autoAppliesEdits: Bool { self != .review }
+    /// Shell commands and write-tier git ops run without a confirmation card.
+    var autoRunsCommands: Bool { self == .auto }
 
     /// What this setting means to the Agent engine, which approves tools
     /// server-side and so has to be TOLD (the legacy loop applies the same
-    /// setting client-side, in `ChatAutoChainPolicy`).
-    ///
-    /// `bypass` skips the approval prompt for anything that would park one;
-    /// it does not lift the server's hard rails — a blocklisted command and
-    /// a write outside the workspace are still refused. `manual` asks every
-    /// time, including for tools previously marked "always allow".
-    var agentPermissionMode: String { self == .auto ? "bypass" : "manual" }
+    /// setting client-side, in `ChatAutoChainPolicy`). Server API v55;
+    /// an older server ignores `ask`/`accept-edits` and applies its own
+    /// policy (it asks).
+    var agentPermissionMode: String {
+        switch self {
+        case .review: return "ask"
+        case .acceptEdits: return "accept-edits"
+        case .auto: return "bypass"
+        }
+    }
 
     /// The preference the chip is stored in. A constant because it has two
     /// readers now — the panel's own `@AppStorage` and the phone bridge,

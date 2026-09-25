@@ -30,11 +30,15 @@ struct ToolApprovalCardTests {
         #expect(ToolApprovalCard.icon(toolName: nil) == "terminal.fill")
     }
 
-    @Test("alwaysAllowLabel(toolName:) names the tool it always-allows")
-    func alwaysAllowLabelPerTool() {
-        #expect(ToolApprovalCard.alwaysAllowLabel(toolName: "Edit") == "Always Allow Edit")
-        #expect(ToolApprovalCard.alwaysAllowLabel(toolName: "Write") == "Always Allow Write")
-        #expect(ToolApprovalCard.alwaysAllowLabel(toolName: "Bash") == "Always Allow Bash")
-        #expect(ToolApprovalCard.alwaysAllowLabel(toolName: nil) == "Always Allow")
+    @Test("the always-allow button names the rule it saves — and hides without one")
+    func alwaysAllowLabelPerRule() {
+        typealias S = AgentV2ApprovalSuggestion
+        #expect(ToolApprovalCard.alwaysAllowLabel(suggestion: S(toolName: "Bash", pattern: "npm test", scope: "project", label: nil))
+                == "Always Allow `npm test` Here")
+        #expect(ToolApprovalCard.alwaysAllowLabel(suggestion: S(toolName: "Edit", pattern: nil, scope: "session", label: nil))
+                == "Allow All Edits in This Chat")
+        #expect(ToolApprovalCard.alwaysAllowLabel(suggestion: S(toolName: "deploy-app", pattern: "", scope: "project", label: nil))
+                == "Always Allow deploy-app Here")
+        #expect(ToolApprovalCard.alwaysAllowLabel(suggestion: nil) == nil, "a compound command offers once-only")
     }
 }

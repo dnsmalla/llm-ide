@@ -124,13 +124,17 @@ enum ClaudeToolPresentation {
         }
     }
 
-    /// "Always Allow Edit" / "Always Allow Write" / "Always Allow Bash" —
-    /// a permanent grant must say which tool it always-allows rather than a
-    /// bare "Always Allow". Falls back to the bare label (no trailing space)
-    /// when the server didn't send a `toolName`.
-    static func alwaysAllowLabel(toolName: String?) -> String {
-        guard let name = toolName, !name.isEmpty else { return "Always Allow" }
-        return "Always Allow \(name)"
+    /// Claude Code's "Yes, and don't ask again for …", named after the rule
+    /// the server offered (API v55): "Allow all edits in this chat",
+    /// "Always allow `npm test` here", "Always allow deploy-app here". nil —
+    /// no button — when there is no suggestion: a compound command, or an
+    /// older server whose grant was global.
+    static func alwaysAllowLabel(suggestion: AgentV2ApprovalSuggestion?) -> String? {
+        guard let s = suggestion else { return nil }
+        if s.scope == "session" { return "Allow All Edits in This Chat" }
+        if let pattern = s.pattern, !pattern.isEmpty { return "Always Allow `\(pattern)` Here" }
+        guard let name = s.toolName, !name.isEmpty else { return nil }
+        return "Always Allow \(name) Here"
     }
 }
 

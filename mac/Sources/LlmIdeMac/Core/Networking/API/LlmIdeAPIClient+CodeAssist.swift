@@ -168,6 +168,8 @@ extension LlmIdeAPIClient {
         let kind: String?
         let toolName: String?
         let argsSummary: String?
+        /// v55: what "always allow" would save (a project command-prefix rule).
+        let suggestion: AgentV2ApprovalSuggestion?
     }
 
     /// One live progress update. Carries the structured fields alongside the
@@ -379,7 +381,8 @@ extension LlmIdeAPIClient {
                 // to the buffered endpoint and re-runs the parked command.
                 if evt.phase == "approval_request", let requestId = evt.requestId, let kind = evt.kind {
                     await onApproval?(AgentV2Approval(requestId: requestId, kind: kind,
-                                                       toolName: evt.toolName, argsSummary: evt.argsSummary))
+                                                       toolName: evt.toolName, argsSummary: evt.argsSummary,
+                                                       suggestion: evt.suggestion))
                     continue
                 }
                 let label = Self.progressLabel(phase: evt.phase, tool: evt.tool, detail: evt.detail)
@@ -650,6 +653,8 @@ extension LlmIdeAPIClient {
         let requestId: String
         let sdkSessionId: String
         let action: String
+        /// With "deny" only — omitted from the JSON when nil.
+        let feedback: String?
     }
 
     /// Answers a parked `ToolApproval` (act-tool gate) on the V2 engine via
@@ -658,10 +663,12 @@ extension LlmIdeAPIClient {
     /// instead (no `answers` field), matching Task 7's `answerDecision`
     /// action vocabulary ("allow" | "deny" | "always-allow"). Same
     /// house-error-convention as `agentV2Decision`: a 403/404 throws.
-    func agentV2ToolDecision(requestId: String, sdkSessionId: String, action: String) async throws -> Bool {
+    func agentV2ToolDecision(requestId: String, sdkSessionId: String, action: String,
+                             feedback: String? = nil) async throws -> Bool {
         let resp: AgentV2DecisionResponse = try await post(
             "/agent/v2/decision",
-            body: AgentV2ToolDecisionRequest(requestId: requestId, sdkSessionId: sdkSessionId, action: action),
+            body: AgentV2ToolDecisionRequest(requestId: requestId, sdkSessionId: sdkSessionId,
+                                             action: action, feedback: feedback),
             authenticated: true,
         )
         return resp.ok
@@ -671,6 +678,7 @@ extension LlmIdeAPIClient {
         let requestId: String
         let sdkSessionId: String
         let action: String
+        let feedback: String?
     }
 
     /// Answers a parked `ToolApproval` on the LEGACY engine via
@@ -681,10 +689,12 @@ extension LlmIdeAPIClient {
     /// that's the field name `ai-routes.mjs`'s `/code-assist/decision`
     /// handler reads (`body.sdkSessionId`) into the same `answerDecision`
     /// call the v2 route uses.
-    func codeAssistDecision(requestId: String, sessionId: String, action: String) async throws -> Bool {
+    func codeAssistDecision(requestId: String, sessionId: String, action: String,
+                            feedback: String? = nil) async throws -> Bool {
         let resp: AgentV2DecisionResponse = try await post(
             "/code-assist/decision",
-            body: CodeAssistDecisionRequest(requestId: requestId, sdkSessionId: sessionId, action: action),
+            body: CodeAssistDecisionRequest(requestId: requestId, sdkSessionId: sessionId,
+                                            action: action, feedback: feedback),
             authenticated: true,
         )
         return resp.ok

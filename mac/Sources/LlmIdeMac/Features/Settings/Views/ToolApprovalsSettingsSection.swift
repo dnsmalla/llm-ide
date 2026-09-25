@@ -1,59 +1,77 @@
 import SwiftUI
 
-/// App-scoped Settings card listing the standing "Always Allow" tool grants
-/// made from the chat approval card, with a per-row Revoke and a confirmed
-/// Revoke All.
+/// App-scoped Settings card listing the "always allow" permission rules made
+/// from the chat approval card — Claude Code's "don't ask again for …" —
+/// grouped by project, with a per-row Revoke and a confirmed Revoke All.
 ///
-/// This card exists because the grant used to be a one-way door: it is stored
-/// per-(user, tool) in `tool_approvals` and outlives the chat, the project and
-/// the app, so without a list there was no surface anywhere that even showed
-/// what had been permanently permitted — let alone withdrew it. Not
-/// project-scoped (the grant isn't either), which is why it sits in the App
-/// group rather than next to the project cards.
+/// A rule is per project and, for shell commands, per command prefix
+/// (`npm test`), so a row reads as exactly what runs without asking and where.
+/// Pre-v55 global grants (no longer honoured) are listed at the bottom so
+/// nothing permitted is ever invisible.
 ///
-/// Mirrors `ProjectMemoryView`'s shape: read + delete only, rows are written
-/// elsewhere (by the approval card), and every mutation re-renders from the
-/// server's returned remainder rather than mutating local state optimistically.
+/// Read + delete only; rows are written by the approval card, and every
+/// mutation re-renders from the server's returned remainder.
 struct ToolApprovalsSettingsSection: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
 
-    @State private var approvals: [LlmIdeAPIClient.ToolApproval] = []
-    @State private var loading = true
+    @State private var permissions = LlmIdeAPIClient.ToolPermissions()
+    /// Whether the first load has finished. `loading` used to START true and
+    /// `load()` bailed out while it was true, so the first load never ran and
+    /// the card showed "Loading…" forever.
+    @State private var loaded = false
     @State private var error: String?
     @State private var busy = false
     @State private var showRevokeAllConfirmation = false
+
+    private var isEmpty: Bool { permissions.rules.isEmpty && permissions.legacy.isEmpty }
+
+    /// Rules grouped by project, projects in name order.
+    private var groups: [(project: String, rules: [LlmIdeAPIClient.ToolRule])] {
+        Dictionary(grouping: permissions.rules, by: \.projectRoot)
+            .map { ($0.key, $0.value) }
+            .sorted { $0.project.localizedStandardCompare($1.project) == .orderedAscending }
+    }
 
     var body: some View {
         SettingsSectionCard(icon: "hand.raised", title: "Tool permissions") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 SettingsHint(
-                    "Tools you chose \"Always Allow\" for in chat. Revoking one doesn't block the tool — the assistant can still use it, it just has to ask you for approval again."
+                    "Commands and tools you chose \"Always allow\" for, per project. Revoking one doesn't block it — the assistant just asks you again. File edits allowed \"in this chat\" last only for that chat and aren't listed."
                 )
 
-                if loading {
+                if !loaded {
                     HStack(spacing: Spacing.sm) {
                         ProgressView().controlSize(.small)
                         Text("Loading…")
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                     }
-                } else if approvals.isEmpty {
-                    // Deliberately not styled as a problem: no standing grants
-                    // is the default and the safest state, not an error.
-                    Text("No tools have been permanently allowed. Every tool that needs approval will ask you each time.")
+                } else if isEmpty {
+                    Text("Nothing is always allowed. Anything that needs approval asks you each time.")
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    ForEach(approvals) { approval in
-                        approvalRow(approval)
+                    ForEach(groups, id: \.project) { group in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label((group.project as NSString).lastPathComponent, systemImage: "folder")
+                                .font(Typography.captionStrong)
+                                .foregroundStyle(theme.current.textMuted)
+                                .help(group.project)
+                            ForEach(group.rules) { rule in ruleRow(rule) }
+                        }
+                    }
+                    if !permissions.legacy.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Older grants (no longer used)")
+                                .font(Typography.captionStrong)
+                                .foregroundStyle(theme.current.textMuted)
+                            ForEach(permissions.legacy) { legacyRow($0) }
+                        }
                     }
                 }
 
-                // Failures render as their own row and the list is left
-                // untouched, so a revoke that didn't land never looks like it
-                // did — the tool stays visible until the server drops it.
                 if let error {
                     HStack(spacing: Spacing.xs) {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -72,7 +90,7 @@ struct ToolApprovalsSettingsSection: View {
                         .controlSize(.small)
                         .disabled(busy)
                     Spacer()
-                    if !approvals.isEmpty {
+                    if !isEmpty {
                         Button(role: .destructive) { showRevokeAllConfirmation = true } label: {
                             Text("Revoke all").font(Typography.caption)
                         }
@@ -84,71 +102,86 @@ struct ToolApprovalsSettingsSection: View {
                 .padding(.top, 2)
             }
         }
-        .confirmationDialog(
-            "Revoke all standing tool approvals?",
-            isPresented: $showRevokeAllConfirmation
-        ) {
+        .confirmationDialog("Revoke every tool permission?", isPresented: $showRevokeAllConfirmation) {
             Button("Revoke All", role: .destructive) { Task { await revokeAll() } }
         } message: {
-            Text("All \(approvals.count) always-allowed tool\(approvals.count == 1 ? "" : "s") will ask for your approval again the next time the assistant uses them. Nothing is blocked and no work is lost.")
+            Text("The assistant will ask for your approval again the next time. Nothing is blocked and no work is lost.")
         }
         .task { await load() }
     }
 
-    private func approvalRow(_ approval: LlmIdeAPIClient.ToolApproval) -> some View {
+    /// "`npm test` commands" / "deploy-app".
+    static func ruleTitle(_ rule: LlmIdeAPIClient.ToolRule) -> String {
+        rule.pattern.isEmpty
+            ? ClaudeToolPresentation.approvalTitle(toolName: rule.toolName)
+            : "`\(rule.pattern)` commands"
+    }
+
+    private func ruleRow(_ rule: LlmIdeAPIClient.ToolRule) -> some View {
         HStack(spacing: Spacing.sm) {
-            // Same icon/wording table the approval card uses, so a row here
-            // reads as the grant the user made there.
-            Image(systemName: ClaudeToolPresentation.approvalIcon(toolName: approval.toolName))
+            Image(systemName: ClaudeToolPresentation.approvalIcon(toolName: rule.toolName))
                 .font(.system(size: 11))
                 .foregroundStyle(theme.current.accent4)
             VStack(alignment: .leading, spacing: 1) {
-                Text(ClaudeToolPresentation.approvalTitle(toolName: approval.toolName))
+                Text(LocalizedStringKey(Self.ruleTitle(rule)))
                     .font(Typography.body)
                     .foregroundStyle(theme.current.text)
-                Text("Allowed \(AppDateFormatter.absoluteMedium(approval.grantedAt))")
+                Text("Allowed \(AppDateFormatter.absoluteMedium(rule.grantedAt))")
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
             }
             Spacer(minLength: Spacing.sm)
-            Button { Task { await revoke(approval.toolName) } } label: {
-                Text("Revoke").font(Typography.caption)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(busy)
-            .help("Ask for approval again before running \(approval.toolName)")
+            Button { Task { await revoke(rule) } } label: { Text("Revoke").font(Typography.caption) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(busy)
+        }
+    }
+
+    private func legacyRow(_ approval: LlmIdeAPIClient.ToolApproval) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Text(ClaudeToolPresentation.approvalTitle(toolName: approval.toolName))
+                .font(Typography.caption)
+                .foregroundStyle(theme.current.textMuted)
+            Spacer(minLength: Spacing.sm)
+            Button { Task { await removeLegacy(approval.toolName) } } label: { Text("Remove").font(Typography.caption) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(busy)
         }
     }
 
     // MARK: Data
 
     private func load() async {
-        // Inside the same interlock as revoke/revokeAll, which `load` sat
-        // outside of. Two entry points can fire it (the `.task` on appear and
-        // the Refresh button), so overlapping loads could both assign
-        // `approvals` — last to finish wins, which after a revoke means the
-        // stale pre-revoke list can land on top of the fresh one.
-        guard !busy, !loading else { return }
-        loading = true; error = nil
-        defer { loading = false }
-        do { approvals = try await api.toolApprovals() }
+        guard !busy else { return }
+        busy = true; defer { busy = false; loaded = true }
+        error = nil
+        do { permissions = try await api.toolPermissions() }
         catch { self.error = "Couldn't load tool permissions." }
     }
 
-    private func revoke(_ toolName: String) async {
+    private func revoke(_ rule: LlmIdeAPIClient.ToolRule) async {
         guard !busy else { return }
         busy = true; defer { busy = false }
         error = nil
-        do { approvals = try await api.revokeToolApproval(toolName: toolName) }
-        catch { self.error = "Couldn't revoke \(toolName) — it is still always-allowed." }
+        do { permissions = try await api.revokeToolRule(rule) }
+        catch { self.error = "Couldn't revoke it — it is still allowed." }
+    }
+
+    private func removeLegacy(_ toolName: String) async {
+        guard !busy else { return }
+        busy = true; defer { busy = false }
+        error = nil
+        do { permissions = try await api.revokeToolApproval(toolName: toolName) }
+        catch { self.error = "Couldn't remove \(toolName)." }
     }
 
     private func revokeAll() async {
         guard !busy else { return }
         busy = true; defer { busy = false }
         error = nil
-        do { approvals = try await api.revokeAllToolApprovals() }
+        do { permissions = try await api.revokeAllToolPermissions() }
         catch { self.error = "Couldn't revoke tool permissions — they are unchanged." }
     }
 }

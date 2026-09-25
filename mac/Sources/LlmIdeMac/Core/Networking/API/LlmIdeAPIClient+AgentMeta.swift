@@ -151,45 +151,68 @@ extension LlmIdeAPIClient {
         return resp.facts
     }
 
-    // MARK: Standing "Always Allow" tool grants
+    // MARK: "Always allow" permission rules (server API v55)
 
-    /// One standing per-(user, tool) grant from the act-tool approval card.
-    /// `grantedAt` is kept as the server's raw ISO-8601 string rather than a
-    /// `Date`: the display format belongs to the view, and the untouched
-    /// string is what a later revoke is matched against server-side.
+    /// One Claude-style rule from the approval card's "always allow": this
+    /// tool — and, for shell commands, this command prefix (`npm test`) — in
+    /// this project. `pattern` empty = the whole tool.
+    struct ToolRule: Decodable, Identifiable, Equatable, Hashable {
+        let projectRoot: String
+        let toolName: String
+        let pattern: String
+        let grantedAt: String
+        var id: String { "\(projectRoot)\u{0}\(toolName)\u{0}\(pattern)" }
+    }
+    /// A pre-v55 global per-tool grant — no longer honoured by the server,
+    /// listed so it can still be seen and removed.
     struct ToolApproval: Decodable, Identifiable, Equatable {
         let toolName: String
         let grantedAt: String
-        /// The grant is keyed per-(user, tool), so the tool name IS the identity.
         var id: String { toolName }
     }
-    private struct ToolApprovalsResponse: Decodable { let approvals: [ToolApproval] }
-    private struct RevokeToolApprovalBody: Encodable { let toolName: String?; let all: Bool? }
-
-    /// The user's standing "Always Allow" grants, newest first. An empty array
-    /// is the expected, healthy case — nothing has been permanently allowed.
-    func toolApprovals() async throws -> [ToolApproval] {
-        let resp: ToolApprovalsResponse = try await get("/kb/agent/tool-approvals", authenticated: true)
-        return resp.approvals
+    struct ToolPermissions: Decodable, Equatable {
+        var rules: [ToolRule]
+        var legacy: [ToolApproval]
+        enum CodingKeys: String, CodingKey { case rules, legacy = "approvals" }
+        init(rules: [ToolRule] = [], legacy: [ToolApproval] = []) { self.rules = rules; self.legacy = legacy }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            // `rules` is absent on a pre-v55 server.
+            rules = try c.decodeIfPresent([ToolRule].self, forKey: .rules) ?? []
+            legacy = try c.decodeIfPresent([ToolApproval].self, forKey: .legacy) ?? []
+        }
+    }
+    private struct RevokeToolPermissionBody: Encodable {
+        let projectRoot: String?; let toolName: String?; let pattern: String?; let all: Bool?
     }
 
-    /// Revoke one standing grant. Returns the remaining grants so the caller
-    /// re-renders from the server's own view instead of a follow-up GET (which
-    /// could interleave with another surface's revoke and show a stale list).
-    func revokeToolApproval(toolName: String) async throws -> [ToolApproval] {
-        let resp: ToolApprovalsResponse = try await send(
-            path: "/kb/agent/tool-approvals", method: "DELETE",
-            body: RevokeToolApprovalBody(toolName: toolName, all: nil), authenticated: true)
-        return resp.approvals
+    /// Every saved rule (and legacy grant). Empty is the healthy default.
+    func toolPermissions() async throws -> ToolPermissions {
+        try await get("/kb/agent/tool-approvals", authenticated: true)
     }
 
-    /// Revoke every standing grant; returns [] (the remaining grants).
+    /// Revoke one rule; returns what remains, so the caller re-renders from
+    /// the server's own view instead of a follow-up GET that could interleave.
+    func revokeToolRule(_ rule: ToolRule) async throws -> ToolPermissions {
+        try await send(path: "/kb/agent/tool-approvals", method: "DELETE",
+                       body: RevokeToolPermissionBody(projectRoot: rule.projectRoot, toolName: rule.toolName,
+                                                      pattern: rule.pattern, all: nil),
+                       authenticated: true)
+    }
+
+    /// Remove one legacy global grant.
+    func revokeToolApproval(toolName: String) async throws -> ToolPermissions {
+        try await send(path: "/kb/agent/tool-approvals", method: "DELETE",
+                       body: RevokeToolPermissionBody(projectRoot: nil, toolName: toolName, pattern: nil, all: nil),
+                       authenticated: true)
+    }
+
+    /// Revoke every rule and legacy grant.
     @discardableResult
-    func revokeAllToolApprovals() async throws -> [ToolApproval] {
-        let resp: ToolApprovalsResponse = try await send(
-            path: "/kb/agent/tool-approvals", method: "DELETE",
-            body: RevokeToolApprovalBody(toolName: nil, all: true), authenticated: true)
-        return resp.approvals
+    func revokeAllToolPermissions() async throws -> ToolPermissions {
+        try await send(path: "/kb/agent/tool-approvals", method: "DELETE",
+                       body: RevokeToolPermissionBody(projectRoot: nil, toolName: nil, pattern: nil, all: true),
+                       authenticated: true)
     }
 
     private struct ForgetSessionMemoryBody: Encodable {

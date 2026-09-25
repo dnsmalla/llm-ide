@@ -49,7 +49,7 @@ extension CodeAssistantPanel {
         guard autoGitOpsThisTurn < Self.maxAutoGitOpsPerTurn else { return false }
         switch args.op.tier {
         case .read:        return true
-        case .write:       return editMode == .auto
+        case .write:       return editMode.autoRunsCommands
         case .destructive: return false
         }
     }

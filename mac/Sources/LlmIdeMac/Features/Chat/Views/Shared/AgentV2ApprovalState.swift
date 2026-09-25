@@ -26,6 +26,9 @@ final class AgentV2ApprovalState {
     /// `agentV2SessionId` — which can linger from an earlier v2 turn in the
     /// same chat and would route the answer to the wrong endpoint.
     let legacySessionId: String?
+    /// What the user typed into the card's "tell it what to do instead" field;
+    /// sent with a Deny as the reason the model sees (server API v55).
+    var denyFeedback: String = ""
     /// True only after the server ACCEPTED a decision for this approval.
     /// Stays false through retries — a failed POST is not a submission.
     private(set) var submitted = false
@@ -297,10 +300,14 @@ extension ChatEngine {
         defer { state.endSubmit() }
         do {
             let ok: Bool
+            // Claude Code's "No, and tell it what to do instead": the typed
+            // instruction rides a deny only.
+            let trimmed = state.denyFeedback.trimmingCharacters(in: .whitespacesAndNewlines)
+            let feedback = action == "deny" && !trimmed.isEmpty ? trimmed : nil
             if let legacySessionId = state.legacySessionId {
-                ok = try await postLegacyToolDecision(state.approval.requestId, legacySessionId, action)
+                ok = try await postLegacyToolDecision(state.approval.requestId, legacySessionId, action, feedback)
             } else if let sdkSessionId = agentV2SessionId {
-                ok = try await postToolDecision(state.approval.requestId, sdkSessionId, action)
+                ok = try await postToolDecision(state.approval.requestId, sdkSessionId, action, feedback)
             } else {
                 state.recordSubmitFailure("No session id for this engine — cannot post the decision. Try a new turn.")
                 return
