@@ -286,3 +286,83 @@ function answerDecisionFor(requestId, userId, action, feedback) {
   }
   return { ok: false };
 }
+
+// --- Sandbox network asks ---------------------------------------------------
+//
+// With the sandbox on (an org's managed settings can force it), a command that
+// needs a new host makes the CLI call canUseTool('SandboxNetworkAccess',
+// {host, port}). It used to fall into the unknown-tool deny: npm got a 403
+// "(user denied)" and plan execution stopped with the user never asked.
+
+test('ask: a sandbox network request shows an approval card; always-allow saves that host only',
+  withAnthropicKey('sk-ant-perm-net-1', async () => {
+    const user = newUser('net-ask');
+    const events = [];
+    const canUseTool = await gateFor({ permissionMode: 'ask', userId: user.id, events });
+    const pending = canUseTool('SandboxNetworkAccess', { host: 'registry.npmjs.org', port: 443 }, {});
+    await new Promise((r) => setImmediate(r));
+    const req = events.find((e) => e.type === 'approval_request');
+    assert.ok(req, 'the user is asked instead of a silent deny');
+    assert.equal(req.toolName, 'SandboxNetworkAccess');
+    assert.equal(req.argsSummary, 'registry.npmjs.org:443');
+    assert.equal(req.suggestion?.pattern, 'registry.npmjs.org');
+    answerDecisionFor(req.requestId, user.id, 'always-allow');
+    assert.equal((await pending).behavior, 'allow');
+
+    const again = await settledOrParked(canUseTool('SandboxNetworkAccess', { host: 'registry.npmjs.org', port: 443 }, {}));
+    assert.notEqual(again, PARKED, 'the saved host rule skips the prompt');
+    assert.equal(again.behavior, 'allow');
+    assert.equal(await settledOrParked(canUseTool('SandboxNetworkAccess', { host: 'evil.example', port: 443 }, {})),
+      PARKED, 'another host still asks');
+  }));
+
+test('bypass allows a sandbox network request without asking',
+  withAnthropicKey('sk-ant-perm-net-2', async () => {
+    const user = newUser('net-bypass');
+    const events = [];
+    const canUseTool = await gateFor({ permissionMode: 'bypass', userId: user.id, events });
+    const v = await settledOrParked(canUseTool('SandboxNetworkAccess', { host: 'registry.npmjs.org', port: 443 }, {}));
+    assert.notEqual(v, PARKED);
+    assert.equal(v.behavior, 'allow');
+    assert.equal(events.filter((e) => e.type === 'approval_request').length, 0);
+  }));
+
+test('an unusual host (IPv6, underscore, trailing dot): Bypass allows, Ask asks once with no rule offered',
+  withAnthropicKey('sk-ant-perm-net-5', async () => {
+    const user = newUser('net-odd');
+    const bypass = await gateFor({ permissionMode: 'bypass', userId: user.id });
+    for (const host of ['::1', 'my_svc.internal', 'registry.npmjs.org.']) {
+      const v = await settledOrParked(bypass('SandboxNetworkAccess', { host, port: 443 }, {}));
+      assert.notEqual(v, PARKED, host);
+      assert.equal(v.behavior, 'allow', `${host}: bypass must not silently deny`);
+    }
+    const events = [];
+    const ask = await gateFor({ permissionMode: 'ask', userId: user.id, events });
+    assert.equal(await settledOrParked(ask('SandboxNetworkAccess', { host: '::1', port: 8080 }, {})), PARKED);
+    const req = events.find((e) => e.type === 'approval_request');
+    assert.equal(req.argsSummary, '::1:8080');
+    assert.equal(req.suggestion, undefined, 'no host rule can be saved for a non-plain host');
+  }));
+
+test('a sandbox network request with no host is denied, not shown',
+  withAnthropicKey('sk-ant-perm-net-3', async () => {
+    const user = newUser('net-bad');
+    const canUseTool = await gateFor({ permissionMode: 'bypass', userId: user.id });
+    const v = await settledOrParked(canUseTool('SandboxNetworkAccess', { port: 443 }, {}));
+    assert.notEqual(v, PARKED);
+    assert.equal(v.behavior, 'deny');
+  }));
+
+test('a restricted mode refuses a sandbox network request, even in bypass',
+  withAnthropicKey('sk-ant-perm-net-4', async () => {
+    const user = newUser('net-plan');
+    const capture = { sessionId: 'sdk-perm-net-plan' };
+    await runAgentV2Turn({
+      message: 'plan it', userId: user.id, mode: 'plan', permissionMode: 'bypass',
+      agentContext: { workspaceRoot: process.cwd() }, resumeSdkSessionId: capture.sessionId,
+      onEvent: () => {}, queryFactory: capturingQuery(capture),
+    }, { ...turnInjectable, roots: () => [process.cwd()] });
+    const v = await settledOrParked(capture.options.canUseTool('SandboxNetworkAccess', { host: 'registry.npmjs.org', port: 443 }, {}));
+    assert.notEqual(v, PARKED);
+    assert.equal(v.behavior, 'deny');
+  }));

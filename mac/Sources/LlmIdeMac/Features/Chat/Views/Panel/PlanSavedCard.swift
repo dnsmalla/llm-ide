@@ -76,6 +76,9 @@ struct PlanSavedCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
+            if !isExecuting, let missing = payload.planMissingPaths, !missing.isEmpty {
+                missingPathsWarning(missing)
+            }
             if !content.isEmpty, !isExecuting { preview }
             actions
             if effectiveAction == nil, !isExecuting {
@@ -156,6 +159,30 @@ struct PlanSavedCard: View {
                 .help("Open the saved plan file")
             }
         }
+    }
+
+    /// "2 paths this plan cites weren't found…" — the plan names files that
+    /// were not on disk when it was saved (and that it does not create).
+    private func missingPathsWarning(_ missing: [String]) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(theme.current.warning)
+            Text(Self.missingPathsMessage(missing))
+                .font(.system(size: 11))
+                .foregroundStyle(theme.current.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+    }
+
+    /// Up to five paths by name, the rest as a count.
+    static func missingPathsMessage(_ missing: [String]) -> String {
+        let shown = missing.prefix(5).map { "`\($0)`" }.joined(separator: ", ")
+        let more = missing.count > 5 ? " and \(missing.count - 5) more" : ""
+        let noun = missing.count == 1 ? "path this plan cites wasn't" : "paths this plan cites weren't"
+        return "\(missing.count) \(noun) found in the project when it was saved: \(shown)\(more). "
+            + "Check \(missing.count == 1 ? "it" : "them") before you execute — the plan may rest on a wrong or stale assumption."
     }
 
     @ViewBuilder

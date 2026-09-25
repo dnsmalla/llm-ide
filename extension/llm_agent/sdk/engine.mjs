@@ -67,6 +67,7 @@ import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
 import { get as registryGet, entries as registryEntries } from '../tools/registry.mjs';
 import {
   isAllowedByRule, suggestRule, addRule, grantSessionEdits, hasSessionEdits,
+  NETWORK_TOOL, networkHost,
 } from '../../kb/tool-permissions.mjs';
 import { runBashGate, writePathGate } from '../tools/gates.mjs';
 import { effectiveMcpServers } from '../../mcp/mcp-config.mjs';
@@ -1031,6 +1032,33 @@ export async function runAgentV2Turn(
   const canUseTool = async (toolName, input, callOpts) => {
     const registryName = toolName.startsWith('mcp__llmide__') ? toolName.slice('mcp__llmide__'.length) : null;
     const entry = registryName ? registryGet(registryName) : null;
+    // The sandbox asking to let a running command reach a host. The sandbox
+    // is on whenever the operator's managed Claude Code settings enable it
+    // (settingSources: [] does not remove the policy tier), and this ask used
+    // to fall into the unknown-tool deny below: npm got a 403 "(user denied)"
+    // and plan execution stopped with the user never asked. It is decided
+    // like a shell command, whose network it is: a saved host rule or Bypass
+    // allows, anything else asks. A restricted mode has no shell to make the
+    // request; it is refused there anyway, like the shell itself.
+    if (toolName === NETWORK_TOOL) {
+      const requestedMode = typeof mode === 'string' && mode ? mode : 'execute';
+      if (restrictsTools(requestedMode)) {
+        return { behavior: 'deny', message: `Network access is not available in ${requestedMode} mode.` };
+      }
+      const rawHost = typeof input?.host === 'string' ? input.host.trim().slice(0, 255) : '';
+      if (!rawHost) return { behavior: 'deny', message: 'Network access refused: the request named no host.' };
+      // Bypass before the hostname check: an IPv6 literal, an underscore or
+      // a trailing dot is still a host the user said not to be asked about,
+      // and refusing it would bring back the silent "(user denied)".
+      if (allowAll || ruleAllows(NETWORK_TOOL, input)) return { behavior: 'allow', updatedInput: input };
+      // A host that is not a plain name still asks — it just cannot be
+      // saved as a rule (suggestRule offers none), so the card says once.
+      const port = Number.isInteger(input?.port) ? `:${input.port}` : '';
+      return awaitToolApproval({
+        toolName: NETWORK_TOOL, argsSummary: `${networkHost(input) ?? rawHost}${port}`, input,
+        callSignal: callOpts?.signal,
+      });
+    }
     if (toolName !== 'AskUserQuestion' && !(entry && entry.kind === 'act') && !NATIVE_GATED.has(toolName)) {
       return { behavior: 'deny', message: DENY_UNKNOWN_TOOL };
     }
@@ -1263,10 +1291,20 @@ export async function runAgentV2Turn(
     // sandboxed. A user who later adds or removes their vault key changes
     // homes and their next resume misses — SESSION_UNRESUMABLE, which the
     // client recovers from with a fresh-session retry.
-    ...(key
-      ? {
-          env: {
-            ...process.env,
+    //
+    // env is composed on EVERY turn, ambient included, for one flag:
+    // ENABLE_CLAUDEAI_MCP_SERVERS=false. Without it the subprocess pulls the
+    // operator's claude.ai connectors (Google Drive, Claude Docs, …) off
+    // their login into every turn — measured at 6.6k tokens of tool schemas
+    // on a bare "hello", and a chat agent that can read/share/trash the
+    // operator's Drive. settingSources: [] does not cover them (they are not
+    // settings); this is the SDK-engine twin of the CLI path's
+    // --strict-mcp-config (providers/providers.mjs).
+    env: {
+      ...process.env,
+      ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
+      ...(key
+        ? {
             ANTHROPIC_API_KEY: key,
             // Gateway turn (Anthropic-compatible custom provider): aim the
             // SDK's CLI at the provider's Anthropic door. The key rides in
@@ -1277,9 +1315,9 @@ export async function runAgentV2Turn(
             // exactly as before.
             ...(gatewayBaseUrl ? { ANTHROPIC_BASE_URL: gatewayBaseUrl, ANTHROPIC_AUTH_TOKEN: key } : {}),
             ...(sdkHome ? { CLAUDE_CONFIG_DIR: sdkHome } : {}),
-          },
-        }
-      : {}),
+          }
+        : {}),
+    },
     ...(resume ? { resume } : {}),
     // The SDK's Options takes an `abortController`, NOT a `signal`: its
     // Options type has no `signal` member, so a `signal` key (what this

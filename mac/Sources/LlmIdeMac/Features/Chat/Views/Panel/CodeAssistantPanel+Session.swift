@@ -324,7 +324,8 @@ extension CodeAssistantPanel {
         let payload = ChatMessage.ToolResultPayload(
             kind: .plan, summary: "(saved plan to \(plan.displayPath))",
             exitCode: nil, command: nil, output: nil, url: plan.absolutePath,
-            isFailure: false, planTitle: plan.title, planContent: finalContent)
+            isFailure: false, planTitle: plan.title, planContent: finalContent,
+            planMissingPaths: Self.missingPlanPaths(in: finalContent, root: activeRepoRoot?.path))
         await engine.acknowledge(payload, followUp: followUp)
         // The picker deliberately STAYS on Plan / Assist Plan. It used to go
         // back to Auto here, and Auto classifies the next message on its own
@@ -336,6 +337,13 @@ extension CodeAssistantPanel {
         // itself — or picks another mode; the finished run then releases
         // the picker (`ModePolicy.runStages`).
         return .success
+    }
+
+    /// `PlanCitationCheck` for a plan being saved, nil when nothing is
+    /// missing so an all-clear plan persists no field at all.
+    static func missingPlanPaths(in content: String, root: String?) -> [String]? {
+        let missing = PlanCitationCheck.missingPaths(in: content, root: root)
+        return missing.isEmpty ? nil : missing
     }
 
     /// Auto-chain the next pending action (file edit or git op) when the

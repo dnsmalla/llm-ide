@@ -108,6 +108,7 @@ enum ClaudeToolPresentation {
         switch toolName {
         case "Edit": return "Edit file"
         case "Write": return "Write file"
+        case networkToolName: return "Allow network access"
         case .some(let name): return "Run \(name)"
         case nil: return "Run tool"
         }
@@ -120,6 +121,7 @@ enum ClaudeToolPresentation {
         switch toolName {
         case "Edit": return "pencil"
         case "Write": return "square.and.pencil"
+        case networkToolName: return "network"
         default: return "terminal.fill"
         }
     }
@@ -129,6 +131,17 @@ enum ClaudeToolPresentation {
     /// "Always allow `npm test` here", "Always allow deploy-app here". nil —
     /// no button — when there is no suggestion: a compound command, or an
     /// older server whose grant was global.
+    /// The sandbox's "let this command reach a host" ask (server
+    /// kb/tool-permissions.mjs `NETWORK_TOOL`); its rule pattern is a host,
+    /// not a command prefix.
+    static let networkToolName = "SandboxNetworkAccess"
+
+    /// What a patterned rule covers, in words: "`npm test` commands" for a
+    /// shell prefix, "network access to `registry.npmjs.org`" for a host.
+    static func ruleSubject(toolName: String?, pattern: String) -> String {
+        toolName == networkToolName ? "network access to `\(pattern)`" : "`\(pattern)` commands"
+    }
+
     static func alwaysAllowLabel(suggestion: AgentV2ApprovalSuggestion?) -> String? {
         guard let s = suggestion else { return nil }
         if s.scope == "session" { return "Allow All Edits in This Chat" }

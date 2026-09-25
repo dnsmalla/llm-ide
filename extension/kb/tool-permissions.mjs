@@ -98,6 +98,19 @@ export function commandMatches(pattern, command) {
 
 const isShellTool = (toolName) => toolName === 'Bash' || toolName === 'run-bash';
 
+// The sandbox's network ask: with the sandbox on, a command reaching a host
+// that is not allow-listed makes the CLI call canUseTool with this pseudo-tool
+// and `{ host, port }`. Its rules are per HOST — a tool-wide network rule
+// would open every host, so none is ever offered or honoured.
+export const NETWORK_TOOL = 'SandboxNetworkAccess';
+const HOST_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+
+/** The request's host, lowercased, or null when it is not a plain hostname. */
+export function networkHost(input) {
+  const host = typeof input?.host === 'string' ? input.host.trim().toLowerCase() : '';
+  return host.length <= 253 && HOST_RE.test(host) ? host : null;
+}
+
 /**
  * Does a stored rule cover this call? `input` is the tool input — for a shell
  * tool its `command` is matched against prefix rules; any other tool matches a
@@ -115,6 +128,10 @@ export function isAllowedByRule(userId, projectRoot, toolName, input) {
   if (isShellTool(toolName)) {
     return rows.some((r) => r.pattern && commandMatches(r.pattern, input?.command));
   }
+  if (toolName === NETWORK_TOOL) {
+    const host = networkHost(input);
+    return Boolean(host) && rows.some((r) => r.pattern === host);
+  }
   return rows.some((r) => r.pattern === '');
 }
 
@@ -126,6 +143,10 @@ export function suggestRule(toolName, input) {
   if (isShellTool(toolName)) {
     const prefix = commandPrefix(input?.command);
     return prefix ? { toolName, pattern: prefix, label: `\`${prefix}\` commands` } : null;
+  }
+  if (toolName === NETWORK_TOOL) {
+    const host = networkHost(input);
+    return host ? { toolName, pattern: host, label: `network access to ${host}` } : null;
   }
   return { toolName, pattern: '', label: toolName };
 }

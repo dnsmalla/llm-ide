@@ -199,8 +199,23 @@ const ACK_PHRASES = [
   'great', 'perfect', 'nice', 'cool', 'awesome', 'lgtm', 'yep', 'yes',
   'nope', 'no', 'done', 'works', 'understood', 'good', 'fine', 'sure', 'k',
 ];
-// `^(phrase)\b[\s!.,]*` — a leading ack phrase plus trailing separators.
-const ACK_LEAD_RE = new RegExp(`^(?:${ACK_PHRASES.join('|')})\\b[\\s!.,]*`, 'i');
+// Bare greetings — a "hello" turn carries no fact either, and it is the most
+// common opener. Regex FRAGMENTS, unlike ACK_PHRASES: `h+e*l+o+w*` takes the
+// typos people actually send (helo, hllo, hllow). Joined BEFORE the acks so
+// "good morning" is not cut down to the ack "good" + a leftover "morning".
+const GREETING_PATTERNS = [
+  'good morning', 'good afternoon', 'good evening', 'hello there', 'hi there', 'hey there',
+  'h+e*l+o+w*', 'hiya', 'howdy', 'hey+', 'hi+',
+  'こんにちは', 'こんばんは', 'おはようございます', 'おはよう',
+];
+// Separators that may trail a phrase: ASCII plus Japanese/full-width.
+const SEP = '\\s!.,。、！？?~〜';
+// `^(phrase)(?!letter)[separators]*` — a leading ack/greeting plus trailing
+// separators. A Unicode lookahead instead of `\b`: `\b` only knows ASCII word
+// characters, so it never matched after a Japanese phrase.
+const ACK_LEAD_RE = new RegExp(
+  `^(?:${[...GREETING_PATTERNS, ...ACK_PHRASES].join('|')})(?![\\p{L}\\p{N}_])[${SEP}]*`, 'iu');
+const ONLY_SEPARATORS_RE = new RegExp(`^[${SEP}]*$`, 'u');
 
 // True when the whole (short) message is nothing but chained ack phrases —
 // "thanks", "ok great, that works!", "perfect thank you". Strips leading acks
@@ -213,7 +228,7 @@ function isPureAck(msg) {
     if (next === rest) break;                              // nothing stripped this round
     rest = next;
   }
-  return /^[\s!.,]*$/.test(rest);                          // only separators left → pure ack
+  return ONLY_SEPARATORS_RE.test(rest);                     // only separators left → pure ack
 }
 
 // Cheap, local pre-filter run BEFORE the extraction model call. Returns false

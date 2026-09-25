@@ -427,10 +427,12 @@ Run through this against a real meeting before merging:
 - **Rules are per user × project × tool, and shell rules are command PREFIXES** (`npm test`, `git status`), matched at a word boundary. A compound command (`;`, `&&`, `|`, redirects, `$(…)`, backticks, `${…}`, newlines) never matches a rule and is never offered one.
 - **Every mode honours saved rules.** `manual` (the pre-v55 spelling of `ask`) used to ignore them — which is why "Always Allow" was saved and then never took effect.
 - **"Allow all edits in this chat" is in memory only** (per user + chat session), never persisted.
+- **The sandbox's network ask (`SandboxNetworkAccess {host, port}`) is a real approval, and its rules are per HOST.** An org's managed Claude Code settings can force the sandbox on (`settingSources: []` does not drop the policy tier); a command reaching a non-allow-listed host then calls `canUseTool` with this pseudo-tool. It used to hit the unknown-tool deny — npm got a 403 "(user denied)" and plan execution stopped with the user never asked. Bypass or a saved host rule allows, restricted modes deny, anything else shows the card.
 
 ### ❌ DO NOT do these
 
 - **Do NOT reintroduce a tool-wide grant for shell tools** — one "Always Allow Bash" letting every command in every repo run unasked is the defect the prefix rules replaced.
+- **Do NOT offer or honour a tool-wide `SandboxNetworkAccess` rule** — it would open every host to every sandboxed command.
 - **Do NOT honour the pre-0034 `tool_approvals` rows** — they are global and listed only so they can be removed.
 
 ## Shell execution (`mac/Sources/LlmIdeMac/Core/Platform/BashService.swift`)
