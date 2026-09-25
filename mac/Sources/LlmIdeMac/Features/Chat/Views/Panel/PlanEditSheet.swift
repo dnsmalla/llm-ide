@@ -108,12 +108,15 @@ public enum PlanEditPolicy {
         return isPlanShaped(hasHeading: hasHeading, stepCount: stepCount)
     }
 
-    /// "**Nothing to execute.**", "Nothing to execute:" … as the first line.
+    /// "**Nothing to execute.**", "Nothing to execute:", "# Nothing to
+    /// execute" or "> Nothing to execute" as the first line. Heading and quote
+    /// marks count because the Agent engine is also told to open a document
+    /// with a `#` title, and a model mixing the two rules writes exactly that.
     static func opensWithNothingToExecute(_ content: String) -> Bool {
         let first = content.prefix { $0 != "\n" }
             .replacingOccurrences(of: "*", with: "")
             .replacingOccurrences(of: "_", with: "")
-            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "#> \t"))
             .lowercased()
         return first.hasPrefix("nothing to execute")
     }

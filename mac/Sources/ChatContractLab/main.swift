@@ -635,6 +635,10 @@ do {
            "a reply that opens with the triage marker is an answer, never a plan")
     expect(PlanEditPolicy.looksLikePlan(content: "Nothing to execute: already done.\n\n" + nothingToExecute) == false,
            "the marker counts without bold and with a colon too")
+    expect(PlanEditPolicy.looksLikePlan(content: "# Nothing to execute.\n\n" + nothingToExecute) == false,
+           "the marker counts as a heading too — the Agent engine opens documents with a # title")
+    expect(PlanEditPolicy.looksLikePlan(content: "> **Nothing to execute**\n\n" + nothingToExecute) == false,
+           "and as a quote")
 
     let stepsNoHeading = """
     1. Rebuild the code index so it stops reporting files that do not exist.
