@@ -71,6 +71,12 @@ public enum PlanEditPolicy {
     public static func looksLikePlan(content: String) -> Bool {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.utf8.count >= minimumPlanBytes else { return false }
+        // The plan bindings' triage contract (plan-pipeline.mjs TRIAGE_CLAUSE):
+        // a request with nothing to change is answered, opening with
+        // "**Nothing to execute.**". Its findings are sectioned and numbered —
+        // plan-shaped — and offering Save/Execute on them produced a plan that
+        // failed at Execute with no step that had anything to do.
+        if opensWithNothingToExecute(trimmed) { return false }
         var hasHeading = false
         var stepCount = 0
         var lastContentLine = ""
@@ -100,6 +106,19 @@ public enum PlanEditPolicy {
         // executed, and reviewed, with nothing to implement at any step.
         if asksSomething(lastContentLine) { return false }
         return isPlanShaped(hasHeading: hasHeading, stepCount: stepCount)
+    }
+
+    /// "**Nothing to execute.**", "Nothing to execute:", "# Nothing to
+    /// execute" or "> Nothing to execute" as the first line. Heading and quote
+    /// marks count because the Agent engine is also told to open a document
+    /// with a `#` title, and a model mixing the two rules writes exactly that.
+    static func opensWithNothingToExecute(_ content: String) -> Bool {
+        let first = content.prefix { $0 != "\n" }
+            .replacingOccurrences(of: "*", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "#> \t"))
+            .lowercased()
+        return first.hasPrefix("nothing to execute")
     }
 
     /// Enumerated work is the signal that matters; sections are the usual

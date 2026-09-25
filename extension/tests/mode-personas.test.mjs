@@ -56,7 +56,12 @@ for (const mode of ['plan', 'assist_plan']) {
     // (where this mode ENDS — the plan card's Execute starts the work) and
     // the classic engine's ask-user clause are both facts about this app a
     // skill cannot know. Neither re-describes the skill's process.
-    assert.ok(persona.length < 4100, `binding should stay short, was ${persona.length} chars`);
+    //
+    // Raised 4100 → 4700 for the triage clause: whether a request needs a plan
+    // at all, given that the plan card's Execute is the mode's only exit, and
+    // the "Nothing to execute." marker the Mac keys off. An app fact again —
+    // nothing in it re-describes brainstorming or grilling.
+    assert.ok(persona.length < 4700, `binding should stay short, was ${persona.length} chars`);
   });
 }
 
