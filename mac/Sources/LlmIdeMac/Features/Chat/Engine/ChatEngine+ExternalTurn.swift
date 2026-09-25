@@ -133,12 +133,15 @@ extension ChatEngine {
         // in that window — an unconditional clear here would orphan it and
         // re-break Stop for the newer turn. The clear lives where completion
         // is actually known: drainQueueOrRelease's idle branch.
+        let claim = slotEpoch
         let task = Task { [self] in
-            try await performExternalTurn(
-                message: message, skillIds: skillIds, attachments: attachments,
-                agentContext: agentContext, model: model, provider: provider, mode: mode,
-                permissionMode: permissionMode,
-                expectedSessionID: expectedSessionID, onProgress: onProgress)
+            try await Self.$slotClaim.withValue(claim) {
+                try await performExternalTurn(
+                    message: message, skillIds: skillIds, attachments: attachments,
+                    agentContext: agentContext, model: model, provider: provider, mode: mode,
+                    permissionMode: permissionMode,
+                    expectedSessionID: expectedSessionID, onProgress: onProgress)
+            }
         }
         externalRunTask = task
         do {
