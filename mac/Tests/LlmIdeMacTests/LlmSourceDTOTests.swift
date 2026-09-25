@@ -156,4 +156,23 @@ final class LlmSourceDTOTests: XCTestCase {
         XCTAssertTrue(r.added.isEmpty && r.removed.isEmpty && r.corrected.isEmpty)
         XCTAssertEqual(r.summary(sourceName: "team", projectSkills: nil), "team is up to date — nothing changed.")
     }
+
+    func testUpdateResultReportsInstallOutcomeForMissingBuiltin() throws {
+        let ok = try JSONDecoder().decode(LlmIdeAPIClient.LlmSourceUpdateResult.self,
+                                          from: #"{"ok":true,"installed":true}"#.data(using: .utf8)!)
+        XCTAssertEqual(ok.summary(sourceName: "Central Skills", projectSkills: nil, wasInstall: true),
+                       "Central Skills installed.")
+        let failed = try JSONDecoder().decode(LlmIdeAPIClient.LlmSourceUpdateResult.self,
+                                              from: #"{"ok":true,"installed":false}"#.data(using: .utf8)!)
+        XCTAssertTrue(failed.summary(sourceName: "Central Skills", projectSkills: nil, wasInstall: true)
+            .hasPrefix("Central Skills couldn't be installed"))
+    }
+
+    func testUpdateResultKeepsWarningsOutOfCorrected() throws {
+        let json = #"{"ok":true,"fromRev":"a","toRev":"b","added":[],"removed":[],"corrected":[],"warnings":["sync-skills.sh failed: boom"]}"#
+        let r = try JSONDecoder().decode(LlmIdeAPIClient.LlmSourceUpdateResult.self, from: json.data(using: .utf8)!)
+        let text = r.summary(sourceName: "Central Skills", projectSkills: nil)
+        XCTAssertFalse(text.contains("Corrected: sync-skills"), text)
+        XCTAssertTrue(text.contains("Warning: sync-skills.sh failed: boom"), text)
+    }
 }

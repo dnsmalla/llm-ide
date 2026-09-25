@@ -41,6 +41,9 @@ struct LlmSourceDetailView: View {
     /// Debounces the project re-install a Central Skills checkbox triggers, so
     /// clicking through several boxes runs install.sh once, not per click.
     @State private var reinstallTask: Task<Void, Never>?
+    /// A checkbox write is on the wire. Boxes are disabled until it lands, so
+    /// two quick clicks can't reach the server out of order.
+    @State private var itemWriteInFlight = false
 
     var body: some View {
         ScrollView {
@@ -76,6 +79,7 @@ struct LlmSourceDetailView: View {
             await load()
             await checkForUpdate(force: false)
         }
+        .onDisappear { reinstallTask?.cancel() }
         .alert("LLM source", isPresented: Binding(
             get: { resultMessage != nil },
             set: { if !$0 { resultMessage = nil } }
@@ -144,9 +148,9 @@ struct LlmSourceDetailView: View {
                     Text("\(title) (\(items.filter(\.enabled).count) of \(items.count) on)").font(.headline)
                     Spacer()
                     Button("All") { Task { await setItems(kind, names: items.filter { !$0.enabled }.map(\.name), enabled: true) } }
-                        .disabled(busy || items.allSatisfy(\.enabled))
+                        .disabled(busy || itemWriteInFlight || items.allSatisfy(\.enabled))
                     Button("None") { Task { await setItems(kind, names: items.filter(\.enabled).map(\.name), enabled: false) } }
-                        .disabled(busy || items.allSatisfy { !$0.enabled })
+                        .disabled(busy || itemWriteInFlight || items.allSatisfy { !$0.enabled })
                 }
                 .buttonStyle(.link)
                 .controlSize(.small)
@@ -176,7 +180,7 @@ struct LlmSourceDetailView: View {
                         .opacity(item.enabled ? 1 : 0.55)
                     }
                     .toggleStyle(.checkbox)
-                    .disabled(busy)
+                    .disabled(busy || itemWriteInFlight)
                 }
             }
         }
@@ -316,17 +320,25 @@ struct LlmSourceDetailView: View {
         checkingUpdates = true
         defer { checkingUpdates = false }
         // Never an error surface: an unreachable server just leaves no status.
-        updateStatus = (try? await api.llmSourceUpdates(force: force))?.first { $0.id == sourceId }
+        let statuses = try? await api.llmSourceUpdates(force: force)
+        // A superseded task (the view moved on) must not overwrite what the
+        // current one found.
+        guard !Task.isCancelled else { return }
+        updateStatus = statuses?.first { $0.id == sourceId }
     }
 
     /// Check/uncheck items. Applied to local state first so the box flips
     /// immediately; a server refusal reloads the truth and says why.
     private func setItems(_ kind: LlmIdeAPIClient.LlmSourceItemKind, names: [String], enabled: Bool) async {
-        guard !names.isEmpty else { return }
+        guard !names.isEmpty, !itemWriteInFlight else { return }
+        itemWriteInFlight = true
+        defer { itemWriteInFlight = false }
         applyLocally(kind, names: Set(names), enabled: enabled)
         do {
             try await api.setLlmSourceItems(sourceId: sourceId, kind: kind, names: names, enabled: enabled)
+            // Re-read what the server stored, so the boxes show the truth.
             if let list = try? await api.listLlmSources() { source = list.first { $0.id == sourceId } }
+            if let fresh = try? await api.llmSourceDiscovery(id: sourceId) { discovery = fresh }
             announceChange()
             // Central Skills feeds project installs; templates never install.
             if source?.builtin == true, kind != .template { scheduleProjectReinstall() }
@@ -381,6 +393,10 @@ struct LlmSourceDetailView: View {
     private func update() async {
         busy = true
         defer { busy = false }
+        // This run re-links the project itself; a pending checkbox re-install
+        // would only repeat it.
+        reinstallTask?.cancel()
+        let wasInstall = source?.builtin == true && source?.installed == false
         do {
             let result = try await api.updateLlmSource(id: sourceId)
             var projectName: String?
@@ -394,8 +410,11 @@ struct LlmSourceDetailView: View {
             }
             await load()
             announceChange()
-            await checkForUpdate(force: true)
-            resultMessage = result.summary(sourceName: source?.name ?? sourceId, projectSkills: projectName) + note
+            // Not forced: the server already dropped this source's cached
+            // status, and forcing would re-check every other source too.
+            await checkForUpdate(force: false)
+            resultMessage = result.summary(sourceName: source?.name ?? sourceId, projectSkills: projectName,
+                                           wasInstall: wasInstall) + note
         } catch {
             resultMessage = "Update failed: \(error.localizedDescription)"
         }

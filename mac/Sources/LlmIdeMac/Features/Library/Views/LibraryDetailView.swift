@@ -27,7 +27,11 @@ struct LibraryDetailView: View {
             PluginDetailView(api: api, pluginName: name)
 
         case .llmSource(let id):
+            // `.id` gives each source its own view state: without it SwiftUI
+            // reuses one instance across sources, and an Update still running
+            // for source A would land its results in B's pane.
             LlmSourceDetailView(api: api, sourceId: id)
+                .id(id)
 
         case .mcpPlugin(let id):
             McpPluginDetailView(api: api, pluginId: id)

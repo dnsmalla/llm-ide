@@ -161,8 +161,11 @@ extension LlmIdeAPIClient {
         let added: [ItemRef]
         let removed: [ItemRef]
         let corrected: [String]
+        /// What went wrong on the way (e.g. the checkout's sync script failed)
+        /// — reported separately so it never reads as something "corrected".
+        let warnings: [String]
 
-        enum CodingKeys: String, CodingKey { case ok, installed, fromRev, toRev, added, removed, corrected }
+        enum CodingKeys: String, CodingKey { case ok, installed, fromRev, toRev, added, removed, corrected, warnings }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             ok = try c.decodeIfPresent(Bool.self, forKey: .ok) ?? true
@@ -172,6 +175,7 @@ extension LlmIdeAPIClient {
             added = try c.decodeIfPresent([ItemRef].self, forKey: .added) ?? []
             removed = try c.decodeIfPresent([ItemRef].self, forKey: .removed) ?? []
             corrected = try c.decodeIfPresent([String].self, forKey: .corrected) ?? []
+            warnings = try c.decodeIfPresent([String].self, forKey: .warnings) ?? []
         }
 
         var changed: Bool {
@@ -180,8 +184,17 @@ extension LlmIdeAPIClient {
 
         /// One human sentence for the post-update alert. `projectSkills` names
         /// the project whose installed skills were re-linked afterwards.
-        func summary(sourceName: String, projectSkills: String?) -> String {
-            guard changed || !corrected.isEmpty else { return "\(sourceName) is up to date — nothing changed." }
+        /// `wasInstall` is the builtin-not-checked-out case, whose server
+        /// answer is only `{ ok, installed }`.
+        func summary(sourceName: String, projectSkills: String?, wasInstall: Bool = false) -> String {
+            if wasInstall, let installed {
+                return installed ? "\(sourceName) installed."
+                    : "\(sourceName) couldn't be installed — check that the .skills submodule can be fetched (git submodule update --init .skills)."
+            }
+            let warningText = warnings.isEmpty ? "" : " Warning: " + warnings.joined(separator: "; ") + "."
+            guard changed || !corrected.isEmpty else {
+                return "\(sourceName) is up to date — nothing changed." + warningText
+            }
             func label(_ i: ItemRef) -> String { i.kind == "command" ? "/\(i.name) command" : "\(i.name) \(i.kind)" }
             var parts: [String] = []
             if !added.isEmpty { parts.append("\(added.count) added (\(added.map(label).joined(separator: ", ")))") }
@@ -189,7 +202,7 @@ extension LlmIdeAPIClient {
             var text = "\(sourceName) updated" + (parts.isEmpty ? "." : ": " + parts.joined(separator: "; ") + ".")
             let fixed = corrected + (projectSkills.map { ["project skills (\($0))"] } ?? [])
             if !fixed.isEmpty { text += " Corrected: " + fixed.joined(separator: ", ") + "." }
-            return text
+            return text + warningText
         }
     }
 
