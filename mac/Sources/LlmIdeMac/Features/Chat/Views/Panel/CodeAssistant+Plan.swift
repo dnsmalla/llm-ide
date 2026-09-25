@@ -628,27 +628,9 @@ extension CodeAssistantPanel {
         ].contains(name)
     }
 
-    /// `content` with every fenced code block's lines (``` or ~~~, fences
-    /// included) emptied, line count kept — so what is shell or code in a plan
-    /// is never read as a heading, a numbered step, or a bullet.
+    /// Kept as the panel's spelling for callers and tests; the one
+    /// implementation is `PlanMarkdown.blankingCodeFences`.
     static func blankingCodeFences(_ content: String) -> String {
-        // The open fence's character and length. Per CommonMark a fence closes
-        // only on a line of the SAME character, at least as long, with no info
-        // string — so a "```bash" inside a "````markdown" block stays inside.
-        var open: (char: Character, length: Int)?
-        return content.components(separatedBy: "\n").map { line -> String in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            let char = trimmed.first
-            let run = trimmed.prefix(while: { $0 == char }).count
-            if let fence = open {
-                if char == fence.char, run >= fence.length, run == trimmed.count { open = nil }
-                return ""
-            }
-            if let char, char == "`" || char == "~", run >= 3 {
-                open = (char, run)
-                return ""
-            }
-            return line
-        }.joined(separator: "\n")
+        PlanMarkdown.blankingCodeFences(content)
     }
 }

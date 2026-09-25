@@ -122,16 +122,24 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         /// persisted before these fields existed decode with them nil.
         var planTitle: String? = nil
         var planContent: String? = nil
+        /// save-plan only: paths the plan cites that were not on disk when it
+        /// was saved (`PlanCitationCheck`), for the card's warning line.
+        /// Recorded at save time on purpose — executing the plan creates
+        /// files, and the warning is about the plan as written. Display
+        /// only, like the two fields above.
+        var planMissingPaths: [String]? = nil
 
         enum CodingKeys: String, CodingKey {
-            case kind, summary, exitCode, command, output, url, isFailure, planTitle, planContent
+            case kind, summary, exitCode, command, output, url, isFailure, planTitle, planContent, planMissingPaths
         }
 
         init(kind: Kind, summary: String, exitCode: Int?, command: String?, output: String?,
-             url: String?, isFailure: Bool = false, planTitle: String? = nil, planContent: String? = nil) {
+             url: String?, isFailure: Bool = false, planTitle: String? = nil, planContent: String? = nil,
+             planMissingPaths: [String]? = nil) {
             self.kind = kind; self.summary = summary; self.exitCode = exitCode
             self.command = command; self.output = output; self.url = url
             self.isFailure = isFailure; self.planTitle = planTitle; self.planContent = planContent
+            self.planMissingPaths = planMissingPaths
         }
 
         /// Hand-written so a missing field falls back to its default: a
@@ -150,6 +158,7 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
             isFailure = (try? c.decodeIfPresent(Bool.self, forKey: .isFailure)) ?? false
             planTitle = try? c.decodeIfPresent(String.self, forKey: .planTitle)
             planContent = try? c.decodeIfPresent(String.self, forKey: .planContent)
+            planMissingPaths = try? c.decodeIfPresent([String].self, forKey: .planMissingPaths)
         }
 
         /// Parses the `"(bash result - exit code: N)\n$ <command>\n<output>"`
