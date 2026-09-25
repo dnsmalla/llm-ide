@@ -26,16 +26,38 @@ export function projectKey(root) {
   return path.resolve(r);
 }
 
-// Tools whose first argument is a subcommand worth keeping in the prefix:
-// `git status` and `git push` are different permissions, `ls -la` and
-// `ls src` are not.
+// Which commands may be generalised at all. Safe by default: a rule is only
+// ever offered for a shape known not to widen into "run anything".
+//
+// 1. Tools whose first argument is a subcommand: the rule is ALWAYS
+//    "<tool> <subcommand>" (`git status` and `git push` are different
+//    permissions). No subcommand, or a flag where it should be
+//    (`git -C x …`, `npm -v`), and nothing is offered — the tool alone would
+//    cover every subcommand, `git push --force` and `npm publish` included.
 const SUBCOMMAND_TOOLS = new Set([
-  'git', 'npm', 'pnpm', 'yarn', 'bun', 'npx', 'swift', 'cargo', 'go', 'make', 'docker',
-  'kubectl', 'gh', 'glab', 'brew', 'pip', 'pip3', 'python', 'python3', 'node', 'deno',
-  'xcodebuild', 'dotnet', 'mvn', 'gradle', 'bundle', 'rake', 'poetry', 'uv',
+  'git', 'npm', 'pnpm', 'yarn', 'bun', 'swift', 'cargo', 'go', 'make', 'docker',
+  'kubectl', 'gh', 'glab', 'brew', 'pip', 'pip3', 'xcodebuild', 'dotnet', 'mvn',
+  'gradle', 'bundle', 'rake', 'poetry', 'uv',
 ]);
 // `npm run <script>` — the script is the permission, not "run".
 const RUN_SCRIPT_TOOLS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+// Subcommands that run arbitrary packages, containers, API calls or config
+// (which can install hooks): once-only, never a rule.
+const RUNNER_SUBCOMMANDS = new Set([
+  'npm exec', 'npm x', 'pnpm exec', 'pnpm dlx', 'yarn exec', 'yarn dlx', 'bun x',
+  'docker run', 'docker exec', 'kubectl exec', 'gh api', 'glab api', 'git config',
+  'go run', 'uv run', 'poetry run', 'bundle exec',
+]);
+// 2. Single commands whose name alone may be the rule: read-only inspection
+//    and test/lint tools. Anything else — wrappers (`timeout`, `env`,
+//    `xargs`, `sudo`), shells and interpreters (`bash`, `node`, `python`),
+//    `find`, `rm`, `curl`, runners like `npx` — would let one approval cover
+//    arbitrary code, so it is "Allow once" only.
+const SINGLE_WORD_RULES = new Set([
+  'ls', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 'pwd', 'which', 'tree', 'du', 'df',
+  'diff', 'echo', 'jq', 'stat', 'file', 'tsc', 'eslint', 'jest', 'vitest', 'pytest',
+  'mocha', 'swiftlint', 'shellcheck', 'true', 'false',
+]);
 
 // Shell syntax that chains, substitutes or redirects: a prefix rule must
 // never match a command that does more than the prefix says
@@ -55,11 +77,16 @@ export function commandPrefix(command) {
   if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) return null;
   const head = tokens[0];
   const sub = tokens[1];
-  if (!sub || sub.startsWith('-') || !SUBCOMMAND_TOOLS.has(head)) return head;
-  if (RUN_SCRIPT_TOOLS.has(head) && sub === 'run' && tokens[2] && !tokens[2].startsWith('-')) {
-    return `${head} run ${tokens[2]}`;
+  if (SUBCOMMAND_TOOLS.has(head)) {
+    if (!sub || sub.startsWith('-')) return null;
+    if (RUN_SCRIPT_TOOLS.has(head) && sub === 'run') {
+      const script = tokens[2];
+      return script && !script.startsWith('-') ? `${head} run ${script}` : null;
+    }
+    const prefix = `${head} ${sub}`;
+    return RUNNER_SUBCOMMANDS.has(prefix) ? null : prefix;
   }
-  return `${head} ${sub}`;
+  return SINGLE_WORD_RULES.has(head) ? head : null;
 }
 
 /** Whether `command` is covered by a prefix rule `pattern`. */

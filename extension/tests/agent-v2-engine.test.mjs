@@ -1250,7 +1250,7 @@ test('act tool: run-bash prompt decision answered "always-allow" saves a project
       resumeSdkSessionId: 'sdk-rb3', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
     }, turnInjectable);
     assert.equal(hasAlwaysAllow(user.id, 'run-bash'), false);
-    const decision = script.options.canUseTool('mcp__llmide__run-bash', { command: 'yet-another-unknown-cli' });
+    const decision = script.options.canUseTool('mcp__llmide__run-bash', { command: 'make lint' });
     const req = events.find((e) => e.type === 'approval_request');
     answerDecision({ requestId: req.requestId, sdkSessionId: 'sdk-rb3', userId: user.id, action: 'always-allow' });
     const d = await decision;
@@ -1258,15 +1258,15 @@ test('act tool: run-bash prompt decision answered "always-allow" saves a project
     const rules = listRules(user.id);
     assert.equal(rules.length, 1);
     assert.equal(rules[0].toolName, 'run-bash');
-    assert.equal(rules[0].pattern, 'yet-another-unknown-cli');
+    assert.equal(rules[0].pattern, 'make lint');
 
     // The same command prefix now runs with no new approval parked…
     const before = events.length;
-    const d2 = await script.options.canUseTool('mcp__llmide__run-bash', { command: 'yet-another-unknown-cli --verbose' });
+    const d2 = await script.options.canUseTool('mcp__llmide__run-bash', { command: 'make lint V=1' });
     assert.equal(d2.behavior, 'allow');
     assert.equal(events.length, before, 'no new approval_request for a command the rule covers');
     // …but a different command still asks: the rule is a prefix, not the tool.
-    void script.options.canUseTool('mcp__llmide__run-bash', { command: 'brand-new-unknown-cli' });
+    void script.options.canUseTool('mcp__llmide__run-bash', { command: 'make deploy' });
     await new Promise((r) => setImmediate(r));
     assert.equal(events.filter((e) => e.type === 'approval_request').length, 2);
   }));

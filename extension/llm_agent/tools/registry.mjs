@@ -35,6 +35,7 @@ import { handleLoadSkill } from '../runtime/handlers/load-skill.mjs';
 import { runBashGate, autoGate } from './gates.mjs';
 import { registerDecision, abortDecisionsForSession } from '../sdk/decisions.mjs';
 import { isAllowedByRule, suggestRule, addRule } from '../../kb/tool-permissions.mjs';
+import { neutralizePromptFences } from '../../core/utils.mjs';
 
 // The turn's abort signal, wherever the driving engine puts it. v2
 // (sdk/tools.mjs) sets `signal` on its flat toolCtx; the legacy loop nests its
@@ -232,7 +233,7 @@ const ENTRIES = [
       }
       if (outcome.action === 'allow') return handleRunBash(args, bashCtx);
       return { error: outcome.feedback
-        ? `Command not approved by the user. They said: ${outcome.feedback}`
+        ? `Command not approved by the user. They said: ${neutralizePromptFences(String(outcome.feedback))}`
         : 'Command not approved by the user.' };
     },
   },

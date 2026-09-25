@@ -25,7 +25,6 @@ test('commandPrefix keeps the subcommand for tools that have one', () => {
   assert.equal(P.commandPrefix('git push origin main'), 'git push');
   assert.equal(P.commandPrefix('swift test --filter X'), 'swift test');
   assert.equal(P.commandPrefix('ls -la src'), 'ls');
-  assert.equal(P.commandPrefix('git --no-pager log'), 'git', 'a flag is not a subcommand');
 });
 
 test('commandPrefix refuses anything it cannot safely generalise', () => {
@@ -33,6 +32,19 @@ test('commandPrefix refuses anything it cannot safely generalise', () => {
     'echo `id`', 'FOO=1 npm test', '', '   ', 'a\nb', 'echo ${HOME}']) {
     assert.equal(P.commandPrefix(cmd), null, JSON.stringify(cmd));
   }
+});
+
+test('never generalises a command whose rule would cover arbitrary code (review finding)', () => {
+  for (const cmd of ['timeout 60 npm test', 'bash scripts/test.sh', 'sh x.sh', 'env npm test',
+    'git -C sub log', 'git --version', 'node -e "1"', 'node scripts/a.js', 'python3 manage.py test',
+    'npm -v', 'npm run', 'make', 'npm exec foo', 'npx -y x', 'npx jest', 'find . -name "*.log"',
+    'rm build.log', 'xargs echo', 'sudo ls', 'eval ls', 'curl https://x', 'docker run alpine',
+    'gh api repos/x', 'git config core.hooksPath x', 'go run .', 'unknown-tool --flag']) {
+    assert.equal(P.commandPrefix(cmd), null, cmd);
+  }
+  assert.equal(P.commandPrefix('make test'), 'make test', 'a named make target is fine');
+  assert.equal(P.commandPrefix('docker ps'), 'docker ps');
+  assert.equal(P.commandPrefix('pytest -q'), 'pytest');
 });
 
 test('commandMatches: prefix at a word boundary, never a compound command', () => {

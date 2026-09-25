@@ -200,7 +200,9 @@ struct ToolApprovalCard: View {
                     .keyboardShortcut(.defaultAction)
                     .disabled(actionsDisabled)
                 if let label = Self.alwaysAllowLabel(suggestion: state.approval.suggestion) {
-                    Button(label) { Task { await onDecide("always-allow") } }
+                    // LocalizedStringKey so the `pattern` renders as code,
+                    // not as literal backticks (a plain String is shown verbatim).
+                    Button(LocalizedStringKey(label)) { Task { await onDecide("always-allow") } }
                         .controlSize(.small)
                         .disabled(actionsDisabled)
                         .help(Self.alwaysAllowHelp(suggestion: state.approval.suggestion))
