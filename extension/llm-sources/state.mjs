@@ -6,7 +6,14 @@
 // different enabled sets. Writes are atomic (tmp + rename).
 //
 // File: <sourcesDir>/../llm-sources-state.json
-// Shape: { [userId]: { enabled: string[] } }
+// Shape: { [userId]: { enabled: string[], disabledItems?: { [sourceId]: string[] } } }
+//
+// `disabledItems` holds the items a user UNCHECKED inside a source, keyed
+// `<kind>:<name>` (see itemKey). Storing the unchecked set rather than the
+// checked one is deliberate: an item nobody has touched — including one that
+// only arrived with the latest update — is on, and an uncheck survives
+// updates. Every writer below keeps both fields; rewriting an entry as
+// `{ enabled }` alone would silently re-check everything the user turned off.
 
 import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -56,9 +63,80 @@ export function setEnabled(userId, sourceId, enabled) {
   const cur = listEnabled(userId);
   if (enabled) cur.add(sourceId);
   else cur.delete(sourceId);
-  all[userId] = { enabled: [...cur].sort() };
+  all[userId] = { ...all[userId], enabled: [...cur].sort() };
   writeAll(all);
   return cur;
+}
+
+// ── Per-item selection ──────────────────────────────────────────────
+// The kinds a user can check/uncheck inside a source. Hooks and MCP servers
+// are deliberately absent: they stay whole-source, behind their own
+// trust/consent gates.
+export const ITEM_KINDS = Object.freeze(['skill', 'agent', 'command', 'template']);
+// A name is a frontmatter `name` / directory name. The same names are handed
+// to the kit installer's --exclude, so anything that could be read as a path
+// or an option is refused here rather than there.
+const ITEM_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+
+export function isValidItemName(name) {
+  return typeof name === 'string' && ITEM_NAME_RE.test(name) && !name.includes('..');
+}
+
+export function itemKey(kind, name) { return `${kind}:${name}`; }
+
+export function listDisabledItems(userId, sourceId) {
+  if (!userId || typeof sourceId !== 'string') return new Set();
+  const arr = readAll()[userId]?.disabledItems?.[sourceId];
+  return new Set(Array.isArray(arr) ? arr.filter((k) => typeof k === 'string') : []);
+}
+
+export function isItemEnabled(userId, sourceId, kind, name) {
+  return !listDisabledItems(userId, sourceId).has(itemKey(kind, name));
+}
+
+export function setItemsEnabled(userId, sourceId, kind, names, enabled) {
+  if (!userId || typeof sourceId !== 'string' || !ITEM_KINDS.includes(kind)) {
+    return listDisabledItems(userId, sourceId);
+  }
+  const valid = (Array.isArray(names) ? names : []).filter(isValidItemName);
+  const all = readAll();
+  const cur = listDisabledItems(userId, sourceId);
+  for (const n of valid) {
+    if (enabled) cur.delete(itemKey(kind, n));
+    else cur.add(itemKey(kind, n));
+  }
+  // Materialize the enabled set from listEnabled's view, for the same reason
+  // setEnabled does: a first-ever write must not drop the implicit builtin.
+  const entry = { ...all[userId], enabled: [...listEnabled(userId)].sort() };
+  const items = { ...entry.disabledItems };
+  if (cur.size) items[sourceId] = [...cur].sort();
+  else delete items[sourceId];
+  if (Object.keys(items).length) entry.disabledItems = items;
+  else delete entry.disabledItems;
+  all[userId] = entry;
+  writeAll(all);
+  return cur;
+}
+
+// After a source update: forget unchecked keys whose item no longer exists,
+// so a later item that reuses the name isn't born unchecked. `presentKeys`
+// is the source's full `<kind>:<name>` set after the update.
+export function pruneMissingItems(sourceId, presentKeys) {
+  const all = readAll();
+  let touched = false;
+  for (const [userId, entry] of Object.entries(all)) {
+    const arr = entry?.disabledItems?.[sourceId];
+    if (userId.startsWith('__') || !Array.isArray(arr)) continue;
+    const kept = arr.filter((k) => presentKeys.has(k));
+    if (kept.length === arr.length) continue;
+    const items = { ...entry.disabledItems };
+    if (kept.length) items[sourceId] = kept;
+    else delete items[sourceId];
+    all[userId] = { ...entry, disabledItems: items };
+    if (!Object.keys(items).length) delete all[userId].disabledItems;
+    touched = true;
+  }
+  if (touched) writeAll(all);
 }
 
 // One-shot repair for state persisted before v44. `default-sources` no longer
@@ -78,7 +156,7 @@ export function migrateLegacyDefaultSources() {
     if (!entry.enabled.includes(LEGACY_DEFAULT_SOURCES_ID)) continue;
     const next = new Set(entry.enabled.filter((s) => s !== LEGACY_DEFAULT_SOURCES_ID));
     next.add(BUILTIN_ID);
-    all[userId] = { enabled: [...next].sort() };
+    all[userId] = { ...entry, enabled: [...next].sort() };
     touched = true;
   }
   if (touched) writeAll(all);
@@ -91,11 +169,28 @@ export function pruneOrphans(installedIds) {
   for (const [userId, entry] of Object.entries(all)) {
     if (!entry || !Array.isArray(entry.enabled)) continue;
     const filtered = entry.enabled.filter((n) => installedIds.has(n));
-    if (filtered.length !== entry.enabled.length) {
-      all[userId] = { enabled: filtered };
+    let items = entry.disabledItems;
+    if (items && typeof items === 'object') {
+      const keptItems = Object.fromEntries(
+        Object.entries(items).filter(([sid]) => installedIds.has(sid)));
+      if (Object.keys(keptItems).length !== Object.keys(items).length) {
+        items = Object.keys(keptItems).length ? keptItems : undefined;
+        touched = true;
+      }
+    }
+    if (filtered.length !== entry.enabled.length || items !== entry.disabledItems) {
+      all[userId] = items ? { ...entry, enabled: filtered, disabledItems: items } : { ...entry, enabled: filtered };
+      if (!items) delete all[userId].disabledItems;
       touched = true;
     }
-    if (filtered.length === 0) { delete all[userId]; touched = true; }
+    // An entry left with no sources reverts to the first-time default
+    // (builtin on). One that still records unchecked items is kept — with that
+    // same default spelled out — or those unchecks would be lost.
+    if (filtered.length === 0) {
+      if (items) all[userId] = { ...all[userId], enabled: [BUILTIN_ID] };
+      else delete all[userId];
+      touched = true;
+    }
   }
   if (touched) writeAll(all);
 }
