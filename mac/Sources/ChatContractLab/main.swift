@@ -614,6 +614,28 @@ do {
     expect(PlanEditPolicy.looksLikePlan(content: "# Summary\n\n" + proseOnly) == false,
            "a long sectioned answer with nothing enumerated is not a plan")
 
+    // The plan bindings' triage contract (extension/llm_agent/runtime/
+    // plan-pipeline.mjs TRIAGE_CLAUSE): a plan-mode reply to a request with
+    // nothing to change opens with "**Nothing to execute.**". Its findings are
+    // naturally a sectioned, numbered list — plan-shaped — and it used to get
+    // Save/Execute, then fail at Execute with no step that had anything to do.
+    let nothingToExecute = """
+    **Nothing to execute.** The CSV export this asks for is already wired end to end.
+
+    ## What I checked
+
+    1. The export button in ReportView calls ExportService.csv(for:) with the current filter applied.
+    2. ExportService writes UTF-8 with a BOM, so Excel opens Japanese text correctly.
+    3. The test suite covers both the empty and the filtered case in ExportServiceTests.
+    4. The Settings toggle that hides the button defaults to on, so every user already sees it today.
+    """
+    expect(nothingToExecute.utf8.count >= PlanEditPolicy.minimumPlanBytes,
+           "the triage fixture is long enough to fail on the marker, not on length")
+    expect(PlanEditPolicy.looksLikePlan(content: nothingToExecute) == false,
+           "a reply that opens with the triage marker is an answer, never a plan")
+    expect(PlanEditPolicy.looksLikePlan(content: "Nothing to execute: already done.\n\n" + nothingToExecute) == false,
+           "the marker counts without bold and with a colon too")
+
     let stepsNoHeading = """
     1. Rebuild the code index so it stops reporting files that do not exist.
     2. Collapse the duplicated .gitignore blocks into their unique lines.
