@@ -486,6 +486,21 @@ test('isWorthExtracting skips pure acknowledgments / contentless turns', async (
   assert.equal(isWorthExtracting({ userMessage: 'we use pnpm workspaces', reply: '' }), false);
 });
 
+test('isWorthExtracting skips bare greetings, typos included', async () => {
+  const { isWorthExtracting } = await import('../llm_agent/runtime/memory-extract.mjs');
+  const reply = 'Hello! What would you like to work on?';
+  for (const greeting of ['hello', 'hllow', 'Helo!', 'hi', 'hii', 'hey there', 'Hiya', 'good morning', 'hello, thanks',
+    'こんにちは', 'おはようございます。']) {
+    assert.equal(isWorthExtracting({ userMessage: greeting, reply }), false, `${greeting} must skip`);
+  }
+  // A greeting that leads into real content still goes to the extractor.
+  assert.equal(isWorthExtracting({ userMessage: 'hi, we deploy via Fly.io now', reply: 'Noted.' }), true);
+  // Words that merely start like a greeting are not greetings.
+  for (const msg of ['hollow', 'help', 'hint', 'yolo']) {
+    assert.equal(isWorthExtracting({ userMessage: msg, reply }), true, `${msg} is not a greeting`);
+  }
+});
+
 test('isWorthExtracting keeps substantive turns (low false-negative)', async () => {
   const { isWorthExtracting } = await import('../llm_agent/runtime/memory-extract.mjs');
   // A short but substantive user statement carrying a durable fact must NOT be skipped.
