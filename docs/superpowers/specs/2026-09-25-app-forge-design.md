@@ -160,6 +160,9 @@ Launch checks run the server in the background, poll, then stop it.
 - No web search → research `UNVERIFIED`. No subagents → executing-plans. Missing toolchain → surfaced pre-Gate 1.
 - Verify: ≤ 3 fix attempts per failing check (systematic-debugging); then stop and write real failure output to `verify.md`. Never claim success without command evidence.
 - Blast radius: writes only inside the confirmed target directory; `git init` there; never pushes, never installs global packages, never writes to the invoking repo.
+- Target directory: new or empty only — never the current repository when it holds code. LLM-IDE chat writes only inside open workspace roots, so the recommended flow there is **New Project** for an empty folder, then `/app-forge` inside it; if the host can't write to the target, the skill writes nothing and asks the user to open that folder (resume continues from `state.json`).
+- Build needs write access: in a plan or read-only chat mode the skill stops before stage 5 and asks the user to switch modes.
+- "Just build it / skip the questions": intake questions are skipped by adopting the recommended answers (recorded under *Assumed* in `seed.md`); the gates are never skipped.
 
 ## Testing (writing-skills TDD)
 
