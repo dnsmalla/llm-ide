@@ -44,6 +44,8 @@ import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { recordActivity, listActivity, unreadCount, markSeen, ACTIVITY_KINDS } from '../kb/activity.mjs';
 import { getLimits, setLimits, usageSummary, resolveModel, recordUsage, getRateLimits, PROVIDERS as USAGE_PROVIDERS } from '../kb/usage.mjs';
 import { installProjectSkills } from '../kb/install-project-skills.mjs';
+import { listDisabledItems } from '../llm-sources/state.mjs';
+import { BUILTIN_ID } from '../llm-sources/registry.mjs';
 
 // SSE concurrency tracking now lives in routes/live.mjs alongside
 // the stream route itself.
@@ -301,16 +303,23 @@ export async function handleKB(req, res) {
     if (req.method === 'POST' && url === '/kb/project/install-skills') {
       const body = parseJSON(await readBody(req)) || {};
       try {
+        // Items this user unchecked in Central Skills (Library → LLM Sources)
+        // stay out of the project too — "unchecked" means everywhere.
+        const exclude = [...listDisabledItems(userId, BUILTIN_ID)]
+          .map((key) => key.split(':'))
+          .filter(([kind]) => kind === 'skill' || kind === 'command' || kind === 'agent')
+          .map(([, name]) => name);
         const result = installProjectSkills({
           path: body.path,
           language: body.language,
           stacks: body.stacks,
+          exclude,
         });
         sendJSON(res, 200, result);
       } catch (err) {
         const code = err?.code || 'INSTALL_FAILED';
         const status =
-          code === 'INVALID_PATH' || code === 'NOT_A_PROJECT' ? 400
+          code === 'INVALID_PATH' || code === 'NOT_A_PROJECT' || code === 'INVALID_EXCLUDE' ? 400
           : code === 'PATH_NOT_FOUND' || code === 'KIT_MISSING' ? 404
           : 500;
         sendJSON(res, status, { error: { code, message: err.message } });

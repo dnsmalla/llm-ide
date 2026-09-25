@@ -109,3 +109,34 @@ test('installProjectSkills preserves a real .claude/settings.json (no --force)',
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('installProjectSkills leaves --exclude\'d items out of the project', {
+  skip: !fs.existsSync(path.join(KIT, 'scripts', 'install.sh')),
+}, () => {
+  const dir = tempProject();
+  const prev = process.env.SKILLS_REPO;
+  process.env.SKILLS_REPO = KIT;
+  try {
+    installProjectSkills({ path: dir, language: 'en' });
+    assert.ok(fs.existsSync(path.join(dir, '.claude', 'skills', 'brainstorming')), 'setup: linked');
+    installProjectSkills({ path: dir, language: 'en', exclude: ['brainstorming'] });
+    assert.ok(!fs.existsSync(path.join(dir, '.claude', 'skills', 'brainstorming')),
+      'an excluded skill is pruned from the project');
+    assert.ok(fs.existsSync(path.join(dir, '.claude', 'skills', 'writing-plans')), 'siblings stay');
+  } finally {
+    if (prev === undefined) delete process.env.SKILLS_REPO;
+    else process.env.SKILLS_REPO = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('installProjectSkills refuses unsafe exclude names', () => {
+  const dir = tempProject();
+  try {
+    assert.throws(() => installProjectSkills({ path: dir, exclude: ['--force'] }), /invalid exclude/);
+    assert.throws(() => installProjectSkills({ path: dir, exclude: ['a,b'] }), /invalid exclude/);
+    assert.throws(() => installProjectSkills({ path: dir, exclude: ['../x'] }), /invalid exclude/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

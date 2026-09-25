@@ -878,6 +878,30 @@ test('POST /auth/me/llm-sources/toggle is per-user, not admin-gated, and validat
   assert.equal(list.json().sources.find((s) => s.id === 'builtin').enabled, true);
 });
 
+test('POST /auth/me/llm-sources/items checks and unchecks items per user and validates input', async () => {
+  const { user } = await registerAndLogin();
+  const u = { id: user.id };
+  const call = (body) => callAuth({ method: 'POST', url: '/auth/me/llm-sources/items', user: u, body });
+
+  assert.equal((await call({ sourceId: '../evil', kind: 'skill', names: ['a'], enabled: false })).statusCode, 400);
+  assert.equal((await call({ sourceId: 'never-registered', kind: 'skill', names: ['a'], enabled: false })).statusCode, 400);
+  assert.equal((await call({ sourceId: 'builtin', kind: 'hook', names: ['a'], enabled: false })).statusCode, 400,
+    'hooks stay whole-source');
+  assert.equal((await call({ sourceId: 'builtin', kind: 'skill', names: ['../x'], enabled: false })).statusCode, 400);
+  assert.equal((await call({ sourceId: 'builtin', kind: 'skill', names: 'a', enabled: false })).statusCode, 400);
+  assert.equal((await call({ sourceId: 'builtin', kind: 'skill', names: ['a'], enabled: 'no' })).statusCode, 400);
+
+  const ok = await call({ sourceId: 'builtin', kind: 'skill', names: ['alpha', 'beta'], enabled: false });
+  assert.equal(ok.statusCode, 200, ok._body);
+  assert.deepEqual(ok.json().disabled.sort(), ['skill:alpha', 'skill:beta']);
+
+  const list = await callAuth({ method: 'GET', url: '/auth/me/llm-sources', user: u });
+  assert.equal(list.json().sources.find((s) => s.id === 'builtin').disabledItemCount, 2);
+
+  const back = await call({ sourceId: 'builtin', kind: 'skill', names: ['alpha'], enabled: true });
+  assert.deepEqual(back.json().disabled, ['skill:beta']);
+});
+
 test('llm-sources management routes are open to every authenticated user (no admin concept)', async () => {
   const { user } = await registerAndLogin();
   const u = { id: user.id }; // no role claim — previously rejected as non-admin
