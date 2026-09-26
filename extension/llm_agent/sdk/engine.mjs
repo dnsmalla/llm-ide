@@ -709,6 +709,23 @@ const sdkQueryFactory = (prompt, options) => query({ prompt, options });
 
 const MAX_TURNS = 40;
 
+// `result.modelUsage` ({ [model]: ModelUsage }, sdk.d.ts) → a list with the
+// ledger's field names. Anything malformed is dropped rather than metered as 0.
+export function normalizeModelUsage(modelUsage) {
+  if (!modelUsage || typeof modelUsage !== 'object') return [];
+  const n = (v) => (Number.isFinite(v) && v >= 0 ? v : 0);
+  return Object.entries(modelUsage)
+    .filter(([name, u]) => name && u && typeof u === 'object')
+    .map(([name, u]) => ({
+      model: name,
+      inputTokens: n(u.inputTokens),
+      outputTokens: n(u.outputTokens),
+      cacheReadTokens: n(u.cacheReadInputTokens),
+      cacheCreationTokens: n(u.cacheCreationInputTokens),
+      costUsd: n(u.costUSD),
+    }));
+}
+
 // --- Turn budget (spec §7: "maxBudgetUsd from the user's model-limits
 // config when set") ------------------------------------------------------------
 //
@@ -1354,6 +1371,21 @@ export async function runAgentV2Turn(
           usageTotals.cacheCreationTokens += ev.cacheCreationTokens ?? 0;
         } else if (ev.type === 'result') {
           result = ev;
+          // The result's per-model totals are the SDK's own accounting for
+          // the whole query (main loop, subagents, compaction). The per-
+          // assistant-message sums above are only the fallback: streamed, each
+          // content block arrives as its own message carrying the SAME usage
+          // snapshot, so summing them counted cache reads ~3× over and caught
+          // only the partial output count (a real turn: ledger 126 output
+          // tokens, transcript 21,029).
+          const byModel = normalizeModelUsage(ev.modelUsage);
+          if (byModel.length) {
+            usageTotals.byModel = byModel;
+            usageTotals.inputTokens = byModel.reduce((n, m) => n + m.inputTokens, 0);
+            usageTotals.outputTokens = byModel.reduce((n, m) => n + m.outputTokens, 0);
+            usageTotals.cacheReadTokens = byModel.reduce((n, m) => n + m.cacheReadTokens, 0);
+            usageTotals.cacheCreationTokens = byModel.reduce((n, m) => n + m.cacheCreationTokens, 0);
+          }
           usageTotals.costUsd += ev.costUsd ?? 0;
           usageTotals.numTurns += ev.numTurns ?? 0;
           usageTotals.durationMs += ev.durationMs ?? 0;

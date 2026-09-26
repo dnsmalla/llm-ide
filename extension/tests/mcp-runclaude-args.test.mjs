@@ -23,6 +23,9 @@ test('runClaude threads mcpConfig + resolvedModel into the spawnCli argsOverride
   const src = readFileSync(join(__dirname, '..', 'providers', 'runtime.mjs'), 'utf8');
   assert.match(src, /buildAnthropicCliArgs/, 'runtime.mjs must import + use buildAnthropicCliArgs');
   assert.match(src, /mcpConfig/, 'runClaude must accept an mcpConfig option');
-  assert.match(src, /args:\s*buildAnthropicCliArgs\(prompt,\s*mcpConfig,\s*resolvedModel\)/,
-    'the spawnCli CLI-fallback call must pass args: buildAnthropicCliArgs(prompt, mcpConfig, resolvedModel)');
+  assert.match(src, /args:\s*\[[^\]]*\.\.\.buildAnthropicCliArgs\(prompt,\s*mcpConfig,\s*resolvedModel\)\]/,
+    'the spawnCli CLI-fallback call must pass buildAnthropicCliArgs(prompt, mcpConfig, resolvedModel)');
+  // JSON output is what lets these calls report their token usage.
+  assert.match(src, /'--output-format',\s*'json',\s*\.\.\.buildAnthropicCliArgs/,
+    'the CLI fallback must ask for JSON output so its usage can be metered');
 });

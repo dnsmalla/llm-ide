@@ -122,6 +122,9 @@ export function mapSdkMessage(msg) {
       durationMs: msg.duration_ms ?? null,
       sessionId: msg.session_id ?? null,
       stopReason: msg.stop_reason ?? null,
+      // Per-model token totals for the whole query — the SDK's documented
+      // field for accounting (see the runner's usage handling).
+      modelUsage: msg.modelUsage ?? null,
     }];
   }
 

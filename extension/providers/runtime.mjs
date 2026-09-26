@@ -81,6 +81,40 @@ function resolveModel(model) {
 // (providers/backoff.mjs) before bubbling up. Other errors (auth, 4xx, malformed
 // JSON) throw on first attempt — masking those would hide real bugs.
 // `jittered` is re-exported so the dispatcher keeps importing it from here.
+
+// `claude -p --output-format json` prints one result object:
+// { type: 'result', result: '<text>', is_error, usage, modelUsage, ... }.
+// Returns { text, usage: [{ model, inputTokens, outputTokens, cacheReadTokens,
+// cacheCreationTokens }] } — or null for anything else (an older CLI, a test
+// fake printing plain text), so the caller keeps the raw stdout.
+export function parseCliJsonResult(stdout) {
+  const raw = String(stdout ?? '').trim();
+  if (!raw.startsWith('{')) return null;
+  let obj;
+  try { obj = JSON.parse(raw); } catch { return null; }
+  if (!obj || obj.type !== 'result' || typeof obj.result !== 'string') return null;
+  const n = (v) => (Number.isFinite(v) && v >= 0 ? v : 0);
+  let usage = Object.entries(obj.modelUsage && typeof obj.modelUsage === 'object' ? obj.modelUsage : {})
+    .filter(([, u]) => u && typeof u === 'object')
+    .map(([model, u]) => ({
+      model,
+      inputTokens: n(u.inputTokens),
+      outputTokens: n(u.outputTokens),
+      cacheReadTokens: n(u.cacheReadInputTokens),
+      cacheCreationTokens: n(u.cacheCreationInputTokens),
+    }));
+  if (!usage.length && obj.usage && typeof obj.usage === 'object') {
+    usage = [{
+      model: null,
+      inputTokens: n(obj.usage.input_tokens),
+      outputTokens: n(obj.usage.output_tokens),
+      cacheReadTokens: n(obj.usage.cache_read_input_tokens),
+      cacheCreationTokens: n(obj.usage.cache_creation_input_tokens),
+    }];
+  }
+  return { text: obj.result, usage };
+}
+
 export { jittered };
 
 function isCliOverloaded(stderr) {
@@ -440,12 +474,24 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
         // common no-MCP case. SP1: MCP reaches the CLI fallback only; the
         // Anthropic HTTP API (the fetch branch above) cannot carry
         // --mcp-config, so this argsOverride is deliberately NOT applied there.
-        args: buildAnthropicCliArgs(prompt, mcpConfig, resolvedModel),
+        // `--output-format json` makes the CLI report its own token usage
+        // (these calls — the mode classifier, memory extraction, nested
+        // agent hops — used to land in the ledger as runs with no tokens at
+        // all). parseCliJsonResult falls back to the raw text for anything
+        // that isn't the JSON result object.
+        args: ['--output-format', 'json', ...buildAnthropicCliArgs(prompt, mcpConfig, resolvedModel)],
       });
-      // Subscription/CLI mode can't report tokens — record one run so it still
-      // counts toward run-based limits and the dashboard.
-      meterUsage({ userId, provider: 'anthropic', model: resolvedModel, source: 'cli', endpoint });
-      return stdout;
+      const parsed = parseCliJsonResult(stdout);
+      meterUsage({
+        userId, provider: 'anthropic', model: resolvedModel, source: 'cli', endpoint,
+        ...(parsed?.usage?.length ? {
+          inputTokens: parsed.usage.reduce((n, u) => n + u.inputTokens, 0),
+          outputTokens: parsed.usage.reduce((n, u) => n + u.outputTokens, 0),
+          cacheReadTokens: parsed.usage.reduce((n, u) => n + u.cacheReadTokens, 0),
+          cacheCreationTokens: parsed.usage.reduce((n, u) => n + u.cacheCreationTokens, 0),
+        } : {}),
+      });
+      return parsed ? parsed.text : stdout;
     } catch (err) {
       if (err.code === 'ENOENT') {
         throw new Error('Claude CLI not found. Install: npm install -g @anthropic-ai/claude-code');
