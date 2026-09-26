@@ -40,7 +40,14 @@ struct LiveModelCacheTests {
         }
         standard.removeObject(forKey: LiveModelCache.defaultsKey)
         LiveModelCache.resetMemoryForTesting()
-        #expect(AICliTool.claudeCode.models == ClaudeCLI.fallbackModels, "before any fetch: the first-run list")
+        // No hardcoded Claude list: before any fetch there are no models and
+        // no default id — none is sent, and the SDK runs the account's default.
+        #expect(AICliTool.claudeCode.models.isEmpty)
+        #expect(AICliTool.claudeCode.defaultModelId == "")
+        // A saved Claude pick is kept while there is nothing to judge it by.
+        let before = Set(AICliTool.selectable.flatMap { $0.models.map(\.id) })
+        #expect(AppConfig.startupModelId(stored: "claude-opus-5", activeCLI: "claude_code",
+                                         knownModelIds: before, liveClaudeModels: []) == "claude-opus-5")
 
         LiveModelCache.store(live, for: ClaudeCLI.provider)
         #expect(AICliTool.claudeCode.models == live)
@@ -51,12 +58,14 @@ struct LiveModelCacheTests {
 
         // A pick only the live list offers survives a relaunch…
         let known = Set(AICliTool.selectable.flatMap { $0.models.map(\.id) })
-            .union(ClaudeCLI.fallbackModels.map(\.id))
         #expect(AppConfig.startupModelId(stored: "claude-fable-5-1", activeCLI: "claude_code",
-                                         knownModelIds: known) == "claude-fable-5-1")
-        // …and so does a first-run id the live list no longer offers.
+                                         knownModelIds: known, liveClaudeModels: live) == "claude-fable-5-1")
+        // …as does a pick the live list carries under another id…
+        #expect(AppConfig.startupModelId(stored: "claude-opus-5", activeCLI: "claude_code",
+                                         knownModelIds: known, liveClaudeModels: live) == "claude-opus-5")
+        // …while one the account does not offer at all goes to its live default.
         #expect(AppConfig.startupModelId(stored: "claude-opus-4-8", activeCLI: "claude_code",
-                                         knownModelIds: known) == "claude-opus-4-8")
+                                         knownModelIds: known, liveClaudeModels: live) == "claude-opus-5[1m]")
     }
 
     @Test("A saved pick missing from the live list keeps its own name, never the first model's")

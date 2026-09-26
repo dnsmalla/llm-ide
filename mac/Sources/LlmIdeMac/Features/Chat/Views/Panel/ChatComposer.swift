@@ -664,7 +664,9 @@ extension CodeAssistantPanel {
         // name, else the id itself; the first model only when nothing is
         // selected (it is then the default that will be sent).
         if !selected.isEmpty { return AIModel.knownName(for: selected, in: models) ?? selected }
-        return models.first?.displayName ?? selected
+        // Nothing chosen and no list yet: no id is sent, so the account's
+        // default runs — say so rather than show a blank chip.
+        return models.first?.displayName ?? "Default"
     }
 
     /// Single source of truth for composer text-area height.  Caps

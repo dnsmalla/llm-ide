@@ -85,12 +85,21 @@ final class AICliToolTests: XCTestCase {
     // These static lists are fallbacks, but the FIRST entry is defaultModelId
     // — the id sent before anything is chosen — so a retired id here was the
     // default, not a harmless extra.
-    func testClaudeIdsCarryNoDateSuffix() {
-        for model in AICliTool.claudeCode.models {
-            XCTAssertNil(model.id.range(of: "-20[0-9]{6}$", options: .regularExpression),
-                         "\(model.id): the undated id tracks the current snapshot")
+    func testClaudeHasNoHardcodedModels() {
+        // Claude's models come only from the account's live list
+        // (LiveModelCache). With none cached there is no built-in list and no
+        // default id: nothing is sent, and the SDK runs the account's default.
+        let standard = UserDefaults.standard
+        let saved = standard.data(forKey: LiveModelCache.defaultsKey)
+        defer {
+            if let saved { standard.set(saved, forKey: LiveModelCache.defaultsKey) }
+            else { standard.removeObject(forKey: LiveModelCache.defaultsKey) }
+            LiveModelCache.resetMemoryForTesting()
         }
-        XCTAssertEqual(AICliTool.claudeCode.defaultModelId, "claude-opus-5")
+        standard.removeObject(forKey: LiveModelCache.defaultsKey)
+        LiveModelCache.resetMemoryForTesting()
+        XCTAssertTrue(AICliTool.claudeCode.models.isEmpty)
+        XCTAssertEqual(AICliTool.claudeCode.defaultModelId, "")
     }
 
     func testNoRetiredModelIdsAreStillOffered() {

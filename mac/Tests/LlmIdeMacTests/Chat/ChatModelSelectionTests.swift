@@ -34,9 +34,14 @@ struct ChatModelSelectionTests {
             #expect(AppConfig.startupModelId(stored: knownClaude, activeCLI: "custom",
                                              knownModelIds: known) == knownClaude)
         }
-        // Claude keeps its stricter rule: an unknown, unmapped id resets.
+        // Claude keeps its stricter rule — judged against the account's live
+        // list: an id it does not carry resets to the live default…
+        let live = [AIModel(id: "claude-sonnet-5", displayName: "Sonnet 5")]
         #expect(AppConfig.startupModelId(stored: "claude-not-a-model", activeCLI: "claude_code",
-                                         knownModelIds: known) == AICliTool.claudeCode.defaultModelId)
+                                         knownModelIds: known, liveClaudeModels: live) == "claude-sonnet-5")
+        // …while with no live list yet there is nothing to judge it by.
+        #expect(AppConfig.startupModelId(stored: "claude-not-a-model", activeCLI: "claude_code",
+                                         knownModelIds: known, liveClaudeModels: []) == "claude-not-a-model")
     }
 
     @Test("Known and retired ids behave as before")
