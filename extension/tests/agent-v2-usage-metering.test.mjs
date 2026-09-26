@@ -39,12 +39,12 @@ function scriptedQuery({ sessionId, modelUsage }) {
   })();
 }
 
-function turn({ resume = null, ...script }) {
+function turn({ resume = null, events = [], ...script }) {
   return runAgentV2Turn({
     message: 'hi', userId: 'u-meter', mode: 'execute',
     agentContext: { workspaceRoot: process.cwd() },
     resumeSdkSessionId: resume,
-    allowAmbientAuth: true, onEvent: () => {},
+    allowAmbientAuth: true, onEvent: (e) => events.push(e),
     queryFactory: scriptedQuery(script),
   }, { readSkill: () => null, roots: () => [], sessionMemory: () => [], persistMemory: async () => null });
 }
@@ -132,4 +132,18 @@ test('parseCliJsonResult reads the CLI result object and falls back on anything 
   assert.equal(parseCliJsonResult('plain text reply'), null);
   assert.equal(parseCliJsonResult('{"not":"a result"}'), null);
   assert.equal(parseCliJsonResult('{broken'), null);
+});
+
+// The Mac sums every usage event of a turn into the chat's token footnote.
+// The SDK's per-content-block snapshots (two here, for one API response)
+// made it count each response ~3×; the turn now emits ONE usage event with
+// the metered totals, before its result.
+test('a turn emits exactly one usage event, with the metered totals, before the result', async () => {
+  const events = [];
+  const { usageTotals } = await turn({ sessionId: 'sdk-one', events });
+  const usage = events.filter((e) => e.type === 'usage');
+  assert.equal(usage.length, 1);
+  assert.equal(usage[0].cacheReadTokens, usageTotals.cacheReadTokens);
+  assert.equal(usage[0].cacheReadTokens, 1000, 'one API response, counted once');
+  assert.ok(events.findIndex((e) => e.type === 'usage') < events.findIndex((e) => e.type === 'result'));
 });

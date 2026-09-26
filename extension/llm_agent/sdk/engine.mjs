@@ -1536,8 +1536,21 @@ export async function runAgentV2Turn(
           }
           usageTotals.numTurns += ev.numTurns ?? 0;
           usageTotals.durationMs += ev.durationMs ?? 0;
+          // ONE usage event per turn, with the metered totals, ahead of the
+          // result. The client sums every usage event it receives; forwarding
+          // the SDK's per-content-block snapshots made the chat's token
+          // footnote count each API response ~3× (and, since SDK 0.3.277,
+          // nothing on the wire said what this turn alone cost).
+          onEvent?.({
+            type: 'usage',
+            inputTokens: usageTotals.inputTokens,
+            outputTokens: usageTotals.outputTokens,
+            cacheReadTokens: usageTotals.cacheReadTokens,
+            cacheCreationTokens: usageTotals.cacheCreationTokens,
+          });
         }
-        onEvent?.(ev);
+        // Per-block usage snapshots stay server-side (see the result branch).
+        if (ev.type !== 'usage') onEvent?.(ev);
       }
     }
   } catch (err) {
