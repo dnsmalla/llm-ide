@@ -1286,6 +1286,66 @@ test('persistTurnMemory with a root writes project facts to disk and BOTH bucket
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// --- Session facts are revisable ----------------------------------------------
+//
+// The extractor never saw the chat's own session facts, so a changed decision
+// could not replace the old one: "User chose the phased approach" stayed next
+// to its reversal, and every later fresh session was handed both.
+
+test('sanitizeSessionFacts: a keyed sentence renders under a session- key; strings still work', () => {
+  const out = extract.sanitizeSessionFacts([
+    { key: 'Chosen Approach', fact: 'User chose the phased approach' },
+    { key: 'chosen-approach', fact: 'User switched to a single sweep' },  // same subject → last wins
+    { key: 'test-command', fact: 'Tests for this task run with --filter Loop' },
+    'An unkeyed sentence',
+  ]);
+  assert.deepEqual(out, [
+    '[state|session-chosen-approach] User switched to a single sweep',
+    '[state|session-test-command] Tests for this task run with --filter Loop',
+    'An unkeyed sentence',
+  ]);
+});
+
+test('the extractor is shown the chat so far, and may retire only what it was shown', async () => {
+  let prompt = '';
+  const shown = ['[state|session-chosen-approach] User chose the phased approach', 'Plan title is Dead Code Removal'];
+  const runClaude = async (p) => {
+    prompt = p;
+    return JSON.stringify({
+      facts: [], superseded: [],
+      session: [{ key: 'chosen-approach', fact: 'User switched to a single sweep' }],
+      session_superseded: ['Plan title is Dead Code Removal', 'A fact it was never shown'],
+    });
+  };
+  const out = await extract.extractMemories({
+    userMessage: 'actually do it in one sweep, and drop the plan title', reply: 'ok',
+    existingFacts: [], existingSessionFacts: shown, runClaude, userId: 'u',
+  });
+  assert.match(prompt, /THIS CHAT SO FAR[\s\S]*session-chosen-approach\] User chose the phased approach/);
+  assert.deepEqual(out.sessionFacts, ['[state|session-chosen-approach] User switched to a single sweep']);
+  assert.deepEqual(out.sessionSuperseded, ['Plan title is Dead Code Removal'], 'an unshown fact cannot be retired');
+});
+
+test('persistTurnMemory replaces a revised session fact and drops a retired one', async () => {
+  reset();
+  const u = provision();
+  sessionMemory.appendSessionMemory(u, 'CHAT-REVISE', [
+    '[state|session-chosen-approach] User chose the phased approach',
+    'Plan title is Dead Code Removal',
+  ]);
+  const runClaude = async () => JSON.stringify({
+    facts: [], superseded: [],
+    session: [{ key: 'chosen-approach', fact: 'User switched to a single sweep' }],
+    session_superseded: ['Plan title is Dead Code Removal'],
+  });
+  await persist.persistTurnMemory({
+    agentContext: { chatSessionId: 'CHAT-REVISE' },
+    userId: u, userMessage: 'one sweep instead; forget the title', reply: 'Done.', runClaude,
+  });
+  assert.deepEqual(sessionMemory.listSessionMemory(u, 'CHAT-REVISE'),
+    ['[state|session-chosen-approach] User switched to a single sweep']);
+});
+
 test('persistTurnMemory still skips entirely with neither a root nor a chat session', async () => {
   reset();
   const u = provision();

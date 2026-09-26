@@ -9,7 +9,7 @@
 import { buildAllowedRoots, resolveAllowedRepoRoot } from '../../graphkit/index.mjs';
 import { readChatMemoryFacts, appendChatMemory } from '../../graphkit/index.mjs';
 import { extractMemories } from './memory-extract.mjs';
-import { appendSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
+import { appendSessionMemory, listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { logger } from '../../core/logger.mjs';
 
 // Observability: every turn logs ONE `project_memory` line with `outcome` so
@@ -75,17 +75,24 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
     // call — spent whether or not it yields facts, so it's logged on both the
     // no_facts and captured outcomes.
     const extractMeta = {};
-    const { facts, sessionFacts, superseded } = await extractMemories({
+    // This chat's own session facts, so the extractor can revise or retire
+    // them (memory-extract.mjs MAX_SESSION_LISTED). Best-effort.
+    let existingSessionFacts = [];
+    if (sessionId) {
+      try { existingSessionFacts = listSessionMemory(userId, sessionId); } catch { /* best-effort */ }
+    }
+    const { facts, sessionFacts, superseded, sessionSuperseded = [] } = await extractMemories({
       userMessage,
       reply,
       existingFacts: existing,
+      existingSessionFacts,
       runClaude,
       userId,
       meta: extractMeta,
       model,
     });
     const extractTokens = extractMeta.approxTokens ?? 0;
-    if (!facts.length && !superseded.length && !sessionFacts.length) {
+    if (!facts.length && !superseded.length && !sessionFacts.length && !sessionSuperseded.length) {
       const reason = extractMeta.skipped
         ? 'gated: contentless turn, extraction skipped (no model call)'
         : 'extractor found nothing durable or session-worthy';
@@ -108,9 +115,11 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
     // Best-effort: a failure here must never take down project-memory
     // capture, which already succeeded.
     let sessionWritten = 0;
-    if (sessionId && (facts.length || sessionFacts.length || superseded.length)) {
+    if (sessionId && (facts.length || sessionFacts.length || superseded.length || sessionSuperseded.length)) {
       try {
-        sessionWritten = appendSessionMemory(userId, sessionId, [...facts, ...sessionFacts], { remove: superseded });
+        sessionWritten = appendSessionMemory(userId, sessionId, [...facts, ...sessionFacts], {
+          remove: [...superseded, ...sessionSuperseded],
+        });
       } catch { /* best-effort */ }
     }
     const savedCount = Array.isArray(saved) ? saved.length : 0;
@@ -122,7 +131,7 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
       updated: meta.updated ?? 0,
       removedCount: meta.removed ?? 0, removedFacts: superseded,
       evicted: meta.evicted ?? 0,
-      sessionFacts: sessionFacts.length, sessionWritten,
+      sessionFacts: sessionFacts.length, sessionRemoved: sessionSuperseded.length, sessionWritten,
       extractTokens, total: savedCount, root,
     });
     return saved;
