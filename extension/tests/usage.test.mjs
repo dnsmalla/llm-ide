@@ -143,6 +143,15 @@ test('recordUsage feeds run- and token-based aggregation', async () => {
   assert.equal(usedForModel(db, userId, 'anthropic', 'claude-opus-4-8', 'tokens', 'daily'), 150);
 });
 
+test('a chat turn\'s internal helper-model rows never count toward that model\'s cap', async () => {
+  const { db, userId } = await setup();
+  const { recordUsage, usedForModel } = await import('../kb/usage.mjs');
+  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-haiku-4-5', endpoint: '/agent/v2/stream:internal', inputTokens: 900, outputTokens: 9 });
+  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-haiku-4-5', endpoint: '/agent/v2/stream', inputTokens: 10, outputTokens: 5 });
+  assert.equal(usedForModel(db, userId, 'anthropic', 'claude-haiku-4-5', 'runs', 'daily'), 1);
+  assert.equal(usedForModel(db, userId, 'anthropic', 'claude-haiku-4-5', 'tokens', 'daily'), 15);
+});
+
 test('recordUsage sanity-clamps self-reported token counts (no ledger poisoning)', async () => {
   const { db, userId } = await setup();
   const { recordUsage, usedForModel } = await import('../kb/usage.mjs');
