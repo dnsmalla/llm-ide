@@ -231,7 +231,12 @@ const HOST = config.host;
 //     …/update returns { fromRev, toRev, added, removed, corrected }.
 //     /kb/project/install-skills leaves the user's unchecked Central Skills
 //     items out of the project.
-const SERVER_API_VERSION = 56;
+//   v57 — Claude Agent SDK version + update: GET /kb/agent-sdk[?force=1]
+//     { running, installed, declared, latest, updateAvailable, restartNeeded,
+//     updating, canUpdate, error }; POST /kb/agent-sdk/update { ok, from, to,
+//     rolledBack, restartNeeded, log } (always 200; `ok` says whether it updated).
+//     /kb/providers/models (anthropic) gains `entries` + `source: 'sdk'`.
+const SERVER_API_VERSION = 57;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -287,6 +292,8 @@ const ENDPOINTS = [
   '/kb/conflict-questions',
   '/kb/providers/verify',
   '/kb/providers/models',
+  '/kb/agent-sdk',
+  '/kb/agent-sdk/update',
   '/kb/custom-providers',
   '/kb/code-sync',
   '/kb/plans',

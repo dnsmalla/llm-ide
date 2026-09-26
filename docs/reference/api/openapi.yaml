@@ -1925,6 +1925,54 @@ paths:
         '400': { description: Unknown provider, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { description: Rate limited }
 
+  /kb/agent-sdk:
+    get:
+      summary: The backend's Claude Agent SDK version against the npm registry's latest
+      parameters:
+        - { name: force, in: query, required: false, schema: { type: string, enum: ['1'] }, description: 'Bypass the 1 h latest-version cache' }
+      responses:
+        '200':
+          description: >
+            `running` is what this process loaded at startup, `installed` what is on disk (they differ after an
+            update until the backend restarts — `restartNeeded`). `canUpdate` is false while remote access is on.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  package: { type: string }
+                  running: { type: string, nullable: true }
+                  installed: { type: string, nullable: true }
+                  declared: { type: string, nullable: true }
+                  latest: { type: string, nullable: true }
+                  updateAvailable: { type: boolean }
+                  restartNeeded: { type: boolean }
+                  updating: { type: boolean }
+                  canUpdate: { type: boolean }
+                  error: { type: string, nullable: true, description: 'Why the registry could not be checked' }
+
+  /kb/agent-sdk/update:
+    post:
+      summary: Install the registry's latest Claude Agent SDK in this backend's checkout
+      description: >
+        Runs `npm install @anthropic-ai/claude-agent-sdk@<latest> --save-exact`, then loads the new package in a
+        separate process; if either fails the previous version is reinstalled. Never restarts the backend — the client
+        does. One update at a time; refused while remote access is on unless LLMIDE_ALLOW_SDK_UPDATE=1.
+      responses:
+        '200':
+          description: Always 200; `ok` says whether it updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  from: { type: string, nullable: true }
+                  to: { type: string, nullable: true }
+                  rolledBack: { type: boolean }
+                  restartNeeded: { type: boolean }
+                  log: { type: string }
+
   # ── KB code-sync ─────────────────────────────────────────────────────────
 
   /kb/code-sync:
