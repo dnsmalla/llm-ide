@@ -31,6 +31,7 @@ import { classifyEmail } from '../agents/email-classify.mjs';
 import { runClaude } from '../providers/runtime.mjs';
 import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels, customBaseUrl } from '../providers/providers.mjs';
 import { handleCustomProvidersSync } from '../server/custom-providers.mjs';
+import { listSdkModels } from '../llm_agent/sdk/models.mjs';
 import { iterateUserMeetings } from '../kb/exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../connectors/email-source.mjs';
@@ -136,8 +137,23 @@ export async function handleKB(req, res) {
       const body = parseJSON(await readBody(req, 16 * 1024)) || {};
       const provider = String(body.provider || '');
       if (rejectUnknownProvider(res, provider)) return true;
+      // Claude: the account's own list from the Agent SDK — works for a
+      // `claude login` user with no API key, which is the case that used to
+      // get [] here and a stale hardcoded list in the picker. `entries` adds
+      // display names; `models` stays the plain id list older clients read.
+      // Falls through to the key-based /v1/models listing if the SDK fails.
+      let sdkDetail = '';
+      if (provider === 'anthropic') {
+        try {
+          const entries = await listSdkModels(userId);
+          sendJSON(res, 200, { models: entries.map((m) => m.id), entries, source: 'sdk' });
+          return true;
+        } catch (err) {
+          sdkDetail = String(err?.message || err).slice(0, 200);
+        }
+      }
       const key = providerApiKey(userId, provider);
-      if (!key) { sendJSON(res, 200, { models: [], detail: 'no API key configured' }); return true; }
+      if (!key) { sendJSON(res, 200, { models: [], detail: sdkDetail || 'no API key configured' }); return true; }
       const baseUrl = provider === 'custom' ? customBaseUrl(userId) : undefined;
       if (provider === 'custom' && !baseUrl) {
         sendJSON(res, 200, { models: [], detail: 'no base URL configured' }); return true;

@@ -73,7 +73,11 @@ const ANTHROPIC_VERSION = process.env.LLMIDE_ANTHROPIC_VERSION || '2023-06-01';
 // keeps new Claude models working without a code change here.
 const CLAUDE_MODEL_RE = /^claude-[a-z0-9.-]+$/;
 function resolveModel(model) {
-  return (typeof model === 'string' && CLAUDE_MODEL_RE.test(model)) ? model : DEFAULT_MODEL;
+  // The picker can carry the SDK's 1M-context id ("claude-opus-5[1m]"); that
+  // suffix is a Claude Code convention, not a Messages API model id, so the
+  // direct-API path sends the base model.
+  const base = typeof model === 'string' ? model.replace(/\[1m\]$/, '') : model;
+  return (typeof base === 'string' && CLAUDE_MODEL_RE.test(base)) ? base : DEFAULT_MODEL;
 }
 
 // Anthropic 529 "overloaded" responses usually clear within 5-30s. Retry
