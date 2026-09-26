@@ -74,8 +74,25 @@ test('listSdkModels: asks an idle session with no tools or settings, closes it, 
 test('listSdkModels: an SDK failure or an empty answer throws (the route falls back), and is not cached', async () => {
   const calls = [];
   await assert.rejects(listSdkModels('u2', { queryFn: fakeQuery(() => { throw new Error('Not logged in'); }, calls) }), /Not logged in/);
-  await assert.rejects(listSdkModels('u2', { queryFn: fakeQuery([], calls) }), /no Claude models/);
-  assert.equal(calls.closed, 2, 'closed on failure too');
-  const ok = await listSdkModels('u2', { queryFn: fakeQuery(REAL, calls) });
+  assert.equal(calls.closed, 1, 'closed on failure too');
+  // Remembered for a minute: no second CLI spawn, the same error at once.
+  await assert.rejects(listSdkModels('u2', { queryFn: fakeQuery(REAL, calls) }), /Not logged in/);
+  assert.equal(calls.length, 1);
+  const later = () => Date.now() + 61 * 1000;
+  await assert.rejects(listSdkModels('u2', { queryFn: fakeQuery([], calls), now: later }), /no Claude models/);
+  const ok = await listSdkModels('u2', { queryFn: fakeQuery(REAL, calls), now: () => Date.now() + 2 * 61 * 1000 });
   assert.equal(ok.length, 4);
+});
+
+test('listSdkModels: concurrent requests share one SDK call', async () => {
+  const calls = [];
+  let answer;
+  const queryFn = fakeQuery(() => new Promise((r) => { answer = r; }), calls);
+  const a = listSdkModels('u3', { queryFn });
+  const b = listSdkModels('u3', { queryFn });
+  await new Promise((r) => setImmediate(r));
+  answer(REAL);
+  const [ra, rb] = await Promise.all([a, b]);
+  assert.equal(calls.length, 1, 'one CLI for both');
+  assert.deepEqual(ra, rb);
 });

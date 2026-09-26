@@ -16,8 +16,14 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { resolveAnthropicKey, agentSdkHomeFor } from './engine.mjs';
 
 const CACHE_MS = 30 * 60 * 1000;
+// A failure (not logged in, a hung CLI) is remembered briefly, so each picker
+// load does not spawn a fresh CLI and wait out TIMEOUT_MS again before the
+// route falls back to the key listing.
+const FAILURE_CACHE_MS = 60 * 1000;
 const TIMEOUT_MS = 20_000;
 const cache = new Map();
+// One SDK call per auth identity at a time: concurrent picker loads share it.
+const inFlight = new Map();
 
 // ModelInfo (sdk.d.ts) → { id, displayName, description }.
 //
@@ -58,8 +64,19 @@ export async function listSdkModels(userId, { queryFn = query, now = Date.now } 
   const { key } = resolveAnthropicKey(userId);
   const cacheKey = key ? `key:${userId || ''}` : 'ambient';
   const hit = cache.get(cacheKey);
-  if (hit && now() - hit.at < CACHE_MS) return hit.models;
+  if (hit?.models && now() - hit.at < CACHE_MS) return hit.models;
+  if (hit?.error && now() - hit.at < FAILURE_CACHE_MS) throw hit.error;
+  const pending = inFlight.get(cacheKey);
+  if (pending) return pending;
+  const call = askSdk(userId, key, queryFn)
+    .then((models) => { cache.set(cacheKey, { at: now(), models }); return models; })
+    .catch((error) => { cache.set(cacheKey, { at: now(), error }); throw error; })
+    .finally(() => inFlight.delete(cacheKey));
+  inFlight.set(cacheKey, call);
+  return call;
+}
 
+async function askSdk(userId, key, queryFn) {
   let release;
   // A streaming-input prompt that never yields a message: the session starts,
   // answers control requests, and sends nothing to the model.
@@ -87,7 +104,6 @@ export async function listSdkModels(userId, { queryFn = query, now = Date.now } 
     ]);
     const models = mapSupportedModels(rows);
     if (!models.length) throw new Error('the SDK reported no Claude models');
-    cache.set(cacheKey, { at: now(), models });
     return models;
   } finally {
     clearTimeout(timer);
@@ -98,4 +114,5 @@ export async function listSdkModels(userId, { queryFn = query, now = Date.now } 
 
 export function __clearSdkModelsCacheForTest() {
   cache.clear();
+  inFlight.clear();
 }
