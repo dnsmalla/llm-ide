@@ -243,6 +243,18 @@ const SEP = '\\s!.,。、！？?~〜';
 const ACK_LEAD_RE = new RegExp(
   `^(?:${[...GREETING_PATTERNS, ...ACK_PHRASES].join('|')})(?![\\p{L}\\p{N}_])[${SEP}]*`, 'iu');
 const ONLY_SEPARATORS_RE = new RegExp(`^[${SEP}]*$`, 'u');
+const BARE_GREETING_RE = new RegExp(
+  `^(?:${GREETING_PATTERNS.join('|')})(?![\\p{L}\\p{N}_])[${SEP}]*$`, 'iu');
+
+/**
+ * A message that is ONLY a greeting ("hello", "hi there!", "こんにちは").
+ * Acknowledgements are deliberately NOT included: in a running task "ok" or
+ * "yes" can mean "go ahead", which is real work.
+ */
+export function isBareGreeting(message) {
+  const text = typeof message === 'string' ? message.trim() : '';
+  return text.length > 0 && text.length <= 40 && BARE_GREETING_RE.test(text);
+}
 
 // True when the whole (short) message is nothing but chained ack phrases —
 // "thanks", "ok great, that works!", "perfect thank you". Strips leading acks

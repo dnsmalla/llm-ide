@@ -51,6 +51,7 @@ import { buildReadableRoots, buildTrustedRoots, isTooBroadRoot } from '../runtim
 import { expandTilde } from '../../graphkit/memory.mjs';
 import { redactFence } from '../runtime/redaction.mjs';
 import { persistTurnMemory } from '../runtime/memory-persist.mjs';
+import { isBareGreeting } from '../runtime/memory-extract.mjs';
 import { config } from '../../core/config.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';
 import { selectAttachments, splitImageAttachments, buildSkillsText, buildModeSkillsText } from '../../core/prompt-framing.mjs';
@@ -409,6 +410,23 @@ export function buildUserMcpServers(userId, mode, {
 // these are the window-aware ones. Revisit if this engine is ever pointed at
 // a 1M-token model — and prefer real token counting to bigger char numbers.
 const V2_TURN_INPUT_CHAR_BUDGET = 150_000;
+
+// Reasoning effort per turn. Left unset, every turn ran at the SDK default
+// ('high') — a "hello" or a quick question paid for the same depth of
+// thinking as a plan. The modes that design or change things keep 'high';
+// answering, reviewing and documenting run at 'medium'; a bare greeting too.
+// The user's MODEL is never changed. `LLMIDE_CHAT_EFFORT` pins one level for
+// every turn ('default' = send none, the SDK's own default).
+const HIGH_EFFORT_MODES = new Set(['plan', 'assist_plan', 'execute']);
+const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+
+export function effortForTurn(mode, message, { env = process.env.LLMIDE_CHAT_EFFORT } = {}) {
+  const pinned = typeof env === 'string' ? env.trim().toLowerCase() : '';
+  if (pinned === 'default') return null;
+  if (EFFORT_LEVELS.has(pinned)) return pinned;
+  if (isBareGreeting(message)) return 'medium';
+  return HIGH_EFFORT_MODES.has(mode) ? 'high' : 'medium';
+}
 const MAX_PROMPT_CHARS = 120_000;
 
 /**
@@ -650,6 +668,7 @@ export function buildEngineOptions(
   }
   // Bounded: a very long chat must not carry an ever-growing hash list.
   for (const key of ['attachments', 'images']) next[key] = next[key].slice(-400);
+  const effort = effortForTurn(resolvedMode, message);
   const queryOptions = {
     // Live token + tool-args deltas — the stream a chat UI needs.
     includePartialMessages: true,
@@ -678,6 +697,8 @@ export function buildEngineOptions(
     // one resumed session must reach the model, which a snapshot would freeze.
     systemPrompt: { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n'), snapshot: false },
     ...(typeof model === 'string' && model ? { model } : {}),
+    // See effortForTurn. The runner drops it on a gateway turn.
+    ...(effort ? { effort } : {}),
   };
 
   return {
@@ -1337,6 +1358,9 @@ export async function runAgentV2Turn(
   });
   const q = queryFactory(buildPromptInput(prompt, images), {
     ...queryOptions,
+    // A gateway (Anthropic-compatible custom provider) may not accept the
+    // effort parameter; leave that turn at its backend's own default.
+    ...(gatewayBaseUrl && queryOptions.effort ? { effort: undefined } : {}),
     ...(userMcp.allowedTools.length
       ? { allowedTools: [...(queryOptions.allowedTools || []), ...userMcp.allowedTools] }
       : {}),

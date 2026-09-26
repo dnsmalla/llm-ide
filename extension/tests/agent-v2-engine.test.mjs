@@ -840,6 +840,8 @@ test('gateway turn: ANTHROPIC_BASE_URL + the provider key ride the SDK env; the 
       assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'glm-key-1', 'Z.AI/Ollama shape');
       assert.equal(env.ANTHROPIC_API_KEY, 'glm-key-1', 'DeepSeek shape');
       assert.equal(capture.options.model, 'glm-4.7');
+      // A gateway may not accept the effort parameter: none is sent.
+      assert.equal(capture.options.effort, undefined);
       // The engine home follows the USER's first-party auth, not the turn's
       // key: this user has no Claude key, so their Claude turns run ambient
       // in the operator home — and their gateway turn must live there too,
@@ -1765,3 +1767,27 @@ test('session memory end-to-end: a fact captured from turn 1 is recalled by turn
       fs.rmSync(workspaceRoot, { recursive: true, force: true });
     }
   }));
+
+// --- reasoning effort per mode --------------------------------------------------
+//
+// Unset, every turn ran at the SDK default ('high'): a "hello" paid for the
+// same depth of thinking as a plan. The user's model is never changed.
+test('effort: high for plan/assist_plan/execute, medium for ask/review/document and bare greetings', async () => {
+  const { effortForTurn } = await import('../llm_agent/sdk/engine.mjs');
+  for (const m of ['plan', 'assist_plan', 'execute']) assert.equal(effortForTurn(m, 'fix the build', { env: '' }), 'high', m);
+  for (const m of ['ask', 'review', 'document']) assert.equal(effortForTurn(m, 'what does this do?', { env: '' }), 'medium', m);
+  assert.equal(effortForTurn('execute', 'hello!', { env: '' }), 'medium', 'a bare greeting');
+  assert.equal(effortForTurn('execute', 'こんにちは', { env: '' }), 'medium');
+  // An acknowledgement can mean "go ahead" in a running task — real work.
+  assert.equal(effortForTurn('execute', 'ok', { env: '' }), 'high');
+  assert.equal(effortForTurn('execute', 'hello, please fix the failing test in Loop', { env: '' }), 'high');
+  // Operator pin.
+  assert.equal(effortForTurn('ask', 'q', { env: 'max' }), 'max');
+  assert.equal(effortForTurn('plan', 'q', { env: 'default' }), null);
+  assert.equal(effortForTurn('plan', 'q', { env: 'bogus' }), 'high', 'an unknown pin is ignored');
+
+  const { queryOptions } = buildEngineOptions({ userId: 'u', mode: 'review', message: 'check this', agentContext: {} },
+    { readSkill: () => null, roots: () => [] });
+  assert.equal(queryOptions.effort, 'medium');
+  assert.equal(queryOptions.model, undefined, 'the model is never chosen here');
+});

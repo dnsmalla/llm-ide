@@ -97,6 +97,7 @@ two starred entries are required in production.
 | `LLMIDE_CORS_ORIGINS` | `""` | Extra comma-separated allowed origins. |
 | `LLMIDE_MODEL` | `claude-sonnet-4-6` | Default Claude model id. |
 | `LLMIDE_SUMMARIZE_MODEL` | `claude-opus-4-8` | Override for meeting summaries. |
+| `LLMIDE_CHAT_EFFORT` | unset | Pin the Agent-engine chat's reasoning effort for every turn (`low`/`medium`/`high`/`xhigh`/`max`, or `default` to send none). Unset: `high` for Plan/Assist Plan/Execute, `medium` for Ask/Review/Document and bare greetings. Never sent on a gateway turn. |
 | `BIND_HOST` | `127.0.0.1` | Used by `start.sh` only; container deployments set `0.0.0.0`. |
 
 ## Agent skills

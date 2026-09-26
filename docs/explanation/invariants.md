@@ -447,6 +447,8 @@ Run through this against a real meeting before merging:
 - **The `claude -p` fallback asks for `--output-format json`** so its calls (mode classifier, memory extraction, nested hops) are metered with tokens, not as bare runs.
 
 - **The mode classifier sees at most ~2k chars** (head + tail, fence-neutralised — `clipForClassifier`), and an auto-continue round (`AUTO_CONTINUE_MESSAGE` + pending tasks) skips it and runs execute, in both engines.
+- **v2 does not mount `ask-internal`** — its nested loop only had `search-kb` + project memory, which a v2 turn has itself; mounted descriptions naming it are rewritten (`v2Description`).
+- **Reasoning effort follows the mode, never the model** (`effortForTurn`): `high` for plan/assist_plan/execute, `medium` otherwise and for bare greetings (not acknowledgements — "ok" can mean "go ahead"); none on a gateway turn.
 - **`project_memory` results are tool-sized** (`PROJECT_MEMORY_TOOL_CHARS`, 10k) and a `{ text }`-only tool result goes out as plain text — it stays in the transcript for the rest of the chat.
 
 ### ❌ DO NOT do these
