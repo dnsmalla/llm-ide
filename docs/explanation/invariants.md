@@ -446,6 +446,8 @@ Run through this against a real meeting before merging:
 - **Token totals come from `result.modelUsage`.** Streamed, each content block is its own `assistant` message carrying the same usage snapshot; summing them counted cache reads ~3× over and output only partially (a real turn: 126 metered vs 21,029 actual output tokens). One ledger row per model; non-main models are `/agent/v2/stream:internal`.
 - **The `claude -p` fallback asks for `--output-format json`** so its calls (mode classifier, memory extraction, nested hops) are metered with tokens, not as bare runs.
 
+- **The mode classifier sees at most ~2k chars** (head + tail, fence-neutralised — `clipForClassifier`), and an auto-continue round (`AUTO_CONTINUE_MESSAGE` + pending tasks) skips it and runs execute, in both engines.
+
 ### ❌ DO NOT do these
 
 - **Do NOT append anything that changes between turns to `systemPrompt.append`** — not session memory, tasks, issues, attachments or timestamps. Put it in the turn's context block.

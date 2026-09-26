@@ -20,7 +20,7 @@ import { runAgentV2Turn, AGENT_SDK_PROVIDER } from '../llm_agent/sdk/engine.mjs'
 import { deleteSdkTranscripts } from '../llm_agent/sdk/transcripts.mjs';
 import { taskTurnResponse, makeTaskProgressEmitter } from '../llm_agent/runtime/task-session-context.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
-import { classifyCodeAssistMode, MODES, AUTO_READ_ONLY, clampToReadOnly } from '../llm_agent/runtime/mode-classify.mjs';
+import { classifyCodeAssistMode, MODES, AUTO_READ_ONLY, clampToReadOnly, isAutoContinueTurn } from '../llm_agent/runtime/mode-classify.mjs';
 import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
 import { expandSlashCommand } from '../plugins/loader.mjs';
 import { getDb } from '../kb/db.mjs';
@@ -218,7 +218,10 @@ async function handleV2Stream(req, res, userId, deps) {
   // classifier had a bad day.
   const readOnly = requestedMode === AUTO_READ_ONLY;
   let mode;
-  if (requestedMode === 'auto' || readOnly) {
+  if ((requestedMode === 'auto' || readOnly) && isAutoContinueTurn(message, userId, chatSessionId)) {
+    // An auto-continue round of a task run: execute, without a classifier call.
+    mode = readOnly ? clampToReadOnly('execute') : 'execute';
+  } else if (requestedMode === 'auto' || readOnly) {
     try {
       const classified = (await deps.classifyMode(message, { userId }))?.mode;
       const resolved = typeof classified === 'string' && MODES.has(classified)

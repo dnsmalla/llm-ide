@@ -10,6 +10,8 @@ import { runClaude as defaultRunClaude, tryParseJSON } from '../../providers/run
 import { fastModelFor } from '../../kb/usage.mjs';
 import { logger } from '../../core/logger.mjs';
 import { restrictsTools } from './mode-personas.mjs';
+import { tasks } from './handlers/session-tasks.mjs';
+import { neutralizePromptFences } from '../../core/utils.mjs';
 
 const log = logger.child({ component: 'mode-classify' });
 
@@ -74,6 +76,39 @@ export const MODEL = process.env.LLMIDE_MODE_CLASSIFY_MODEL
            || process.env.LLMIDE_MODEL
            || fastModelFor('anthropic');
 
+// The classifier sees at most this much of the message. It decides between
+// five modes from what the user is ASKING, which is in the opening lines (and
+// sometimes a closing instruction), never in the middle of a pasted log or
+// file. Sending all of it made a 100k-char paste cost a second 100k-char call
+// before the turn even started.
+const MAX_CLASSIFY_HEAD = 1_500;
+const MAX_CLASSIFY_TAIL = 500;
+
+export function clipForClassifier(message) {
+  const text = neutralizePromptFences(typeof message === 'string' ? message : '');
+  if (text.length <= MAX_CLASSIFY_HEAD + MAX_CLASSIFY_TAIL) return text;
+  const omitted = text.length - MAX_CLASSIFY_HEAD - MAX_CLASSIFY_TAIL;
+  return `${text.slice(0, MAX_CLASSIFY_HEAD)}\n…[${omitted} characters omitted]…\n${text.slice(-MAX_CLASSIFY_TAIL)}`;
+}
+
+// What the Mac sends on each auto-continue round of a task run
+// (ChatEngine.swift). Up to 8 rounds per run, each one classified as
+// "execute" at the cost of a model call — the only answer possible, since a
+// continuation is only offered after a turn in a tool-capable mode, and the
+// only such mode the classifier can return is execute.
+export const AUTO_CONTINUE_MESSAGE = 'Continue working on your pending tasks.';
+
+/**
+ * True when this 'auto' turn is an auto-continue round: the sentinel message
+ * AND the chat really has pending tasks (a user typing the same words into a
+ * chat with nothing pending is classified as usual).
+ */
+export function isAutoContinueTurn(message, userId, chatSessionId) {
+  if (typeof message !== 'string' || message.trim() !== AUTO_CONTINUE_MESSAGE) return false;
+  if (!userId || !chatSessionId) return false;
+  try { return tasks.hasPendingWork(userId, chatSessionId); } catch { return false; }
+}
+
 // Exported so a test can assert on the disambiguating language directly —
 // mocking `_runClaude` can only verify the JSON-plumbing round-trip, not
 // whether the prompt text actually tells `plan` and `assist_plan` apart.
@@ -91,7 +126,7 @@ Categories:
 
 Request:
 <<<BEGIN>>>
-${message}
+${clipForClassifier(message)}
 <<<END>>>`;
 }
 
