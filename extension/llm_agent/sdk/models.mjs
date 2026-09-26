@@ -46,7 +46,8 @@ export function mapSupportedModels(rows) {
     if (!/^claude-/i.test(id) || seen.has(id)) continue;
     seen.add(id);
     const description = typeof r.description === 'string' ? r.description : '';
-    const lead = description.split('·')[0].trim();
+    // "Opus 5 with 1M context" is a sentence, not a picker label.
+    const lead = description.split('·')[0].trim().replace(/\s+with\s+1M\s+context$/i, ' (1M)');
     out.push({ id, displayName: lead || (typeof r.displayName === 'string' && r.displayName) || id, description });
   }
   if (defaultId) {

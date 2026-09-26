@@ -658,9 +658,13 @@ extension CodeAssistantPanel {
 
     func currentModelDisplayName(for cli: AICliTool) -> String {
         let models = modelState.models(for: cli)
-        return models.first(where: { $0.id == modelState.selectedModel })?.displayName
-            ?? models.first?.displayName
-            ?? modelState.selectedModel
+        let selected = modelState.selectedModel
+        // Never the FIRST model's name for a selection the list lacks: that
+        // labelled one model while the chat sent another. The live-derived
+        // name, else the id itself; the first model only when nothing is
+        // selected (it is then the default that will be sent).
+        if !selected.isEmpty { return AIModel.knownName(for: selected, in: models) ?? selected }
+        return models.first?.displayName ?? selected
     }
 
     /// Single source of truth for composer text-area height.  Caps

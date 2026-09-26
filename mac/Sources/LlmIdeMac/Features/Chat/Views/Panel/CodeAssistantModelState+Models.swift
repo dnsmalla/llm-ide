@@ -37,7 +37,8 @@ extension CodeAssistantModelState {
         let custom = customModelIds(for: cli.provider)
             .filter { !baseIds.contains($0) }
             .map { AIModel(id: $0, displayName: $0) }
-        return base + custom
+        let all = base + custom
+        return cli == .claudeCode ? AIModel.including(selected: selectedModel, in: all) : all
     }
 
     /// Models for the currently selected provider, built-in or custom.

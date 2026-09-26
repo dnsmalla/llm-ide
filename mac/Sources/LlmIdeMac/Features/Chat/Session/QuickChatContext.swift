@@ -164,7 +164,11 @@ struct QuickChatContext {
         if let explicit, !explicit.isEmpty {
             // An empty list means "this provider's models aren't enumerated
             // here" — no opinion, so keep the pick.
-            if models.isEmpty || models.contains(where: { $0.id == explicit }) { return explicit }
+            // `including(selected:)`: a Claude id the account's live list no
+            // longer carries (a first-run id such as "claude-opus-5") is still
+            // this provider's and still valid — without it the live list
+            // silently swapped the pick for the default.
+            if models.isEmpty || AIModel.including(selected: explicit, in: models).contains(where: { $0.id == explicit }) { return explicit }
             // Named a model THIS provider doesn't offer (the pick outlived a
             // provider switch): fall back to the configured default rather
             // than send an id the provider will reject.
@@ -240,7 +244,7 @@ struct QuickChatContext {
         // A live `/models` id (or a custom provider's) won't be in the static
         // list — show the id itself rather than claim "Auto", which would be
         // a label describing a different model than the one being sent.
-        return models.first(where: { $0.id == effective })?.displayName ?? effective
+        return AIModel.knownName(for: effective, in: models) ?? effective
     }
 
     /// Point the shared `.quick` engine at `projectId`. ONE answer for all

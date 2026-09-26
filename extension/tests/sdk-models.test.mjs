@@ -32,7 +32,7 @@ const REAL = [
 test('mapSupportedModels: canonical ids, generation-bearing names, the SDK default first, no "default" row', () => {
   const out = mapSupportedModels(REAL);
   assert.deepEqual(out.map((m) => [m.id, m.displayName]), [
-    ['claude-opus-5[1m]', 'Opus 5 with 1M context'],
+    ['claude-opus-5[1m]', 'Opus 5 (1M)'],
     ['claude-fable-5-1', 'Fable 5.1'],
     ['claude-sonnet-5', 'Sonnet 5'],
     ['claude-haiku-4-5-20251001', 'Haiku 4.5'],

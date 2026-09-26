@@ -9,7 +9,7 @@ import Foundation
 @Suite("Live model cache", .serialized)
 struct LiveModelCacheTests {
     private let live = [
-        AIModel(id: "claude-opus-5[1m]", displayName: "Opus 5 with 1M context"),
+        AIModel(id: "claude-opus-5[1m]", displayName: "Opus 5 (1M)"),
         AIModel(id: "claude-fable-5-1", displayName: "Fable 5.1"),
         AIModel(id: "claude-sonnet-5", displayName: "Sonnet 5"),
     ]
@@ -57,5 +57,29 @@ struct LiveModelCacheTests {
         // …and so does a first-run id the live list no longer offers.
         #expect(AppConfig.startupModelId(stored: "claude-opus-4-8", activeCLI: "claude_code",
                                          knownModelIds: known) == "claude-opus-4-8")
+    }
+
+    @Test("A saved pick missing from the live list keeps its own name, never the first model's")
+    func selectedModelKeepsItsName() {
+        // Regression: the chip showed the FIRST live model's name ("Opus 5
+        // (1M)") while the chat sent "claude-opus-5", which the account's live
+        // list does not carry.
+        // Named from the LIVE entry for the same model, not a hardcoded table.
+        #expect(AIModel.knownName(for: "claude-opus-5", in: live) == "Opus 5")
+        #expect(AIModel.knownName(for: "claude-opus-5[1m]", in: live) == "Opus 5 (1M)")
+        #expect(AIModel.knownName(for: "claude-sonnet-5-20260101", in: live) == "Sonnet 5", "date snapshot")
+        #expect(AIModel.knownName(for: "claude-opus-4-8", in: live) == nil, "no live match: no guessed name")
+        let withPick = AIModel.including(selected: "claude-opus-5", in: live)
+        #expect(withPick.last == AIModel(id: "claude-opus-5", displayName: "Opus 5"))
+        #expect(AIModel.including(selected: "claude-sonnet-5", in: live) == live, "already listed")
+        #expect(AIModel.including(selected: "gpt-5.5", in: live) == live, "not a Claude id")
+        // …and the quick chat SENDS that pick rather than swapping in the default.
+        #expect(QuickChatContext.effectiveModelId(explicit: "claude-opus-5", defaultModelId: "claude-opus-5[1m]",
+                                                  models: live) == "claude-opus-5")
+        #expect(QuickChatContext.modelLabel(modelId: "claude-opus-5", defaultModelId: "claude-opus-5[1m]",
+                                            models: live) == "Opus 5")
+        // A non-Claude id under Claude is still not offered: the default wins.
+        #expect(QuickChatContext.effectiveModelId(explicit: "gpt-5.5", defaultModelId: "claude-opus-5[1m]",
+                                                  models: live) == "claude-opus-5[1m]")
     }
 }
