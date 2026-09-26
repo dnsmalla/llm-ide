@@ -97,9 +97,13 @@ enum AICliTool: String, CaseIterable, Identifiable {
         // when nothing has been chosen. That is why retired ids here were not
         // harmless: they were the default.
         case .claudeCode:
-            // Claude model ids live in the linker (ClaudeLink/ClaudeCLI.swift)
-            // so a model-line refresh is a linker-only edit.
-            return ClaudeCLI.fallbackModels
+            // The account's live list (the Agent SDK's own, via the backend —
+            // see LiveModelCache) once one has been fetched; the linker's
+            // hardcoded ids (ClaudeLink/ClaudeCLI.swift) only before that.
+            // Claude only: its live list is curated and ordered with the
+            // default first, whereas other providers' /models listings are
+            // long and unordered and would silently change their default.
+            return LiveModelCache.models(for: ClaudeCLI.provider) ?? ClaudeCLI.fallbackModels
         case .openai:
             return [
                 AIModel(id: "gpt-5.6-sol",                displayName: "GPT-5.6 Sol"),

@@ -25,16 +25,23 @@ extension LlmIdeAPIClient {
                               authenticated: true)
     }
 
-    /// Live chat-model ids for a provider (from its models endpoint, filtered
-    /// server-side). Returns [] when no key is configured or the fetch fails,
-    /// so callers fall back to a built-in static list rather than an empty UI.
-    func listProviderModels(_ provider: String) async throws -> [String] {
+    /// Live chat models for a provider. For Claude the backend asks the Agent
+    /// SDK for the account's own list (works with a `claude login` and no API
+    /// key) and sends display names in `entries`; other providers return ids
+    /// from their models endpoint, filtered server-side, shown as-is. Returns
+    /// [] when nothing could be listed, so callers keep a fallback list
+    /// rather than an empty UI.
+    func listProviderModels(_ provider: String) async throws -> [AIModel] {
         struct Req: Encodable { let provider: String }
-        struct Resp: Decodable { let models: [String] }
+        struct Entry: Decodable { let id: String; let displayName: String? }
+        struct Resp: Decodable { let models: [String]; let entries: [Entry]? }
         let r: Resp = try await post("/kb/providers/models",
                                      body: Req(provider: provider),
                                      authenticated: true)
-        return r.models
+        if let entries = r.entries, !entries.isEmpty {
+            return entries.map { AIModel(id: $0.id, displayName: ($0.displayName?.isEmpty == false) ? $0.displayName! : $0.id) }
+        }
+        return r.models.map { AIModel(id: $0, displayName: $0) }
     }
 
     /// Vault keys the user currently has set (names only — values never leave

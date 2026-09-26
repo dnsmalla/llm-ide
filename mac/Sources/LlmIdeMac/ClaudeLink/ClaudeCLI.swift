@@ -28,16 +28,17 @@ enum ClaudeCLI {
     /// narrower than other CLIs' `--yolo`-style modes.
     static let unattendedPermissionArgs = ["--permission-mode", "acceptEdits"]
 
-    /// Fallback model list shown before a key exists. Once a provider has a
-    /// key, the composer replaces this with the live `/models` result — so it
-    /// only has to be right enough to pick from, and critically the FIRST
-    /// entry is the default id sent when nothing has been chosen. Ids carry
-    /// no date suffix — the undated id tracks the current snapshot.
+    /// First-run model list, used only until the backend has reported the
+    /// account's live list once (`LiveModelCache` — the Agent SDK's own list,
+    /// with or without an API key). It only has to be right enough to pick
+    /// from, and critically the FIRST entry is the default id sent when
+    /// nothing has been chosen. Ids carry no date suffix — the undated id
+    /// tracks the current snapshot.
     static let fallbackModels: [AIModel] = [
         AIModel(id: "claude-opus-5",    displayName: "Opus 5"),
         AIModel(id: "claude-sonnet-5",  displayName: "Sonnet 5"),
         AIModel(id: "claude-haiku-4-5", displayName: "Haiku 4.5"),
-        AIModel(id: "claude-fable-5",   displayName: "Fable 5"),
+        AIModel(id: "claude-fable-5-1", displayName: "Fable 5.1"),
         AIModel(id: "claude-opus-4-8",  displayName: "Opus 4.8"),
     ]
 
@@ -46,6 +47,7 @@ enum ClaudeCLI {
     /// the retiring id here in the SAME edit — otherwise a user's persisted
     /// choice coerces to the Claude default instead of its family successor.
     static let retiredModelIds: [String: String] = [
+        "claude-fable-5": "claude-fable-5-1",
         "claude-opus-4-7": "claude-opus-4-8",
         "claude-sonnet-4-6": "claude-sonnet-5",
         "claude-haiku-4-5-20251001": "claude-haiku-4-5",   // date-suffixed form
