@@ -65,8 +65,16 @@ export const __zodSchemaForTest = zodSchemaFor;
 
 function metaFor(entry) {
   const skill = globalSkills.skills.get(entry.name);
-  if (skill) return { description: skill.description || entry.name, schema: skill.schema || {} };
+  if (skill) return { description: v2Description(skill.description || entry.name), schema: skill.schema || {} };
   return entry.inlineMeta || { description: entry.name, schema: {} };
+}
+
+// The tool docs are shared with the legacy engine (and synced from the
+// central kit), where `ask-internal` is the way to reach app state. v2 does
+// not mount it (V2_NATIVE_DUPLICATES), so a description pointing there would
+// send the model to a tool that is not in its list; name the ones it has.
+function v2Description(text) {
+  return String(text).replace(/`ask-internal`/g, '`search-kb` or `project_memory`');
 }
 
 // Registry entries the v2 engine does NOT mount, because an SDK built-in in
@@ -86,9 +94,17 @@ function metaFor(entry) {
 //   backend that may not implement Anthropic's server-side web tools, while
 //   the handlers still reach Anthropic on the user's own key/login.
 //
+// - ask-internal → nothing to delegate. It runs a nested agent loop whose
+//   only tool is search-kb, grounded in the system context plus the Graphify
+//   project memory — for the LEGACY global agent, which has neither. A v2
+//   turn has the system context in its own prompt and search-kb,
+//   project_memory and find-code as its own tools, so the delegation was a
+//   whole extra loop of model calls (up to 10, uncached, ~40k chars of memory
+//   each) for an answer the turn could get directly.
+//
 // find-code is NOT a duplicate: it searches the symbol index + code graph,
 // which Grep cannot.
-const V2_NATIVE_DUPLICATES = new Set(['list-files', 'read-file']);
+const V2_NATIVE_DUPLICATES = new Set(['list-files', 'read-file', 'ask-internal']);
 const V2_NATIVE_WEB_DUPLICATES = new Set(['web-search', 'fetch-url']);
 
 /** The registry entries mounted on a v2 turn (see V2_NATIVE_DUPLICATES). */

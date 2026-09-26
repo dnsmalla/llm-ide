@@ -132,7 +132,7 @@ test('legacy dispatch and registry.names() match; v2 mounts the registry minus i
   // v2 skips the entries an SDK built-in already covers (sdk/tools.mjs
   // V2_NATIVE_DUPLICATES) — spelled out here so a new skip is a deliberate
   // edit, not a silent drift. A gateway turn keeps the web pair.
-  const firstPartySkipped = ['fetch-url', 'list-files', 'read-file', 'web-search'];
+  const firstPartySkipped = ['ask-internal', 'fetch-url', 'list-files', 'read-file', 'web-search'];
   assert.deepEqual(
     [...v2Names].sort(),
     [...registryNames].filter((n) => !firstPartySkipped.includes(n)).sort(),

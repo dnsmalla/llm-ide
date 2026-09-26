@@ -207,11 +207,15 @@ test('the llmide MCP server mounts the domain tools and skips native duplicates'
   const tools = await client.listTools();
   const names = tools.tools.map((t) => t.name);
   // Glob/Read/WebSearch/WebFetch built-ins cover these on a first-party turn.
-  for (const dup of ['list-files', 'read-file', 'web-search', 'fetch-url']) {
+  for (const dup of ['list-files', 'read-file', 'web-search', 'fetch-url', 'ask-internal']) {
     assert.ok(!names.includes(dup), `${dup} duplicates a built-in and must not be mounted (got ${names.join(', ')})`);
   }
   assert.ok(names.includes('find-code'));
-  assert.ok(names.includes('ask-internal'));
+  // ask-internal's nested loop only had search-kb + project memory, which a
+  // v2 turn has itself — and no mounted description may point at it.
+  for (const t of tools.tools) {
+    assert.ok(!(t.description || '').includes('ask-internal'), `${t.name} description names an unmounted tool`);
+  }
   assert.ok(names.includes('search-kb'));
   assert.ok(!names.includes('kb_search'), 'kb_search should no longer exist as a separate tool name');
   assert.ok(names.includes('project_memory'));
