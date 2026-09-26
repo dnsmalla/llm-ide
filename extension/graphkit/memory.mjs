@@ -289,7 +289,13 @@ export function selectChatMemoryFacts(content, { userMessage = '', room = 0 } = 
  * two callers — the alternative was a second scoring implementation that
  * would drift.
  */
-export function rankFactsByRelevance(facts, { userMessage = '' } = {}) {
+export function rankFactsByRelevance(facts, opts = {}) {
+  return scoreFactsByRelevance(facts, opts).map((e) => e.fact);
+}
+
+// Same ranking with each fact's score (0 = no query-token overlap), for a
+// caller that needs to tell "relevant" from "merely next in line".
+export function scoreFactsByRelevance(facts, { userMessage = '' } = {}) {
   if (!Array.isArray(facts) || facts.length === 0) return [];
   const q = queryTokens(userMessage);
   // IDF weighting: a query token carried by few facts is far more
@@ -338,7 +344,7 @@ export function rankFactsByRelevance(facts, { userMessage = '' } = {}) {
   // previous within-day ordering.
   scored.sort((a, b) => (b.score - a.score)
     || (a.stamp === b.stamp ? b.index - a.index : String(b.stamp).localeCompare(String(a.stamp))));
-  return scored.map((e) => e.fact);
+  return scored;
 }
 
 export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) {

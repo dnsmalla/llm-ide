@@ -66,7 +66,9 @@ test('a task update, a new fact, new issues and an attachment leave the system p
   // …and every change still reaches the model, in the message.
   assert.match(second.prompt, /## Your current task list/);
   assert.match(second.prompt, /#2 New issue/);
-  assert.match(second.prompt, /Plan title is Dead Code Removal/);
+  // Session memory is for a session WITHOUT a transcript: this one holds the
+  // turns the new fact was distilled from, so it is not repeated.
+  assert.doesNotMatch(second.prompt, /This session's memory/);
   assert.match(second.prompt, /A{500}/);
   assert.ok(second.prompt.endsWith('go on'), "the user's words come last, after the fenced context");
 });
@@ -99,12 +101,14 @@ test('what the SDK session already has is not sent again', async () => {
   assert.ok(!second.prompt.includes('Fix the summarizer'), 'an unchanged issue list is not re-sent');
   assert.equal(second.meta.sessionMemory.facts, 0, 'the memory footnote counts what was actually sent');
 
-  // A new fact is sent alone.
+  // A fact learned since is not sent to a session that has a transcript…
   facts.push('Repo uses pnpm, not npm');
   const third = turn(second.meta.delivered);
-  assert.match(third.prompt, /new since last turn[\s\S]*Repo uses pnpm/);
-  assert.ok(!third.prompt.includes('User chose the phased approach'));
-  assert.equal(third.meta.sessionMemory.facts, 1);
+  assert.doesNotMatch(third.prompt, /This session's memory/);
+  assert.equal(third.meta.sessionMemory.facts, 0);
+  // …but a session without one (new, unresumable, compacted) gets them all.
+  const fresh = turn(null);
+  assert.match(fresh.prompt, /User chose the phased approach[\s\S]*Repo uses pnpm/);
 });
 
 test('a task list that became empty is said once, not left stale in the transcript', async () => {

@@ -57,7 +57,8 @@ import { selectAttachments, splitImageAttachments, buildSkillsText, buildModeSki
 import { getDb } from '../../kb/db.mjs';
 import { usdCapForModel } from '../../kb/usage.mjs';
 import { nativePluginsEnabled } from '../../kb/user.mjs';
-import { listSessionMemory, resolveChatSessionId, capSessionMemory } from '../../kb/session-memory.mjs';
+import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
+import { selectSessionMemory } from '../runtime/session-memory-select.mjs';
 import { getAgentPersona } from '../../kb/personas.mjs';
 import { getSecret, makeSecretReader } from '../../server/vault.mjs';
 import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
@@ -558,7 +559,7 @@ export function buildEngineOptions(
   // transcript already carries the rest.
   const prev = delivered ?? null;
   const next = prev
-    ? { ...prev, facts: [...prev.facts], attachments: [...prev.attachments], images: [...prev.images] }
+    ? { ...prev, attachments: [...prev.attachments], images: [...prev.images] }
     : emptyDelivered();
   const contextParts = [];
   // A user-invoked skill applies to THIS message — the transcript keeps it for
@@ -575,27 +576,27 @@ export function buildEngineOptions(
   // Session memory (kb/session-memory.mjs): facts extracted from THIS chat's
   // own prior turns — a real DB-backed record, not the SDK's own resumed-
   // session continuity (which only covers turn text, not distilled facts,
-  // and disappears if the SDK session is ever unresumable/reset). Only facts
-  // this SDK session has not been given yet are sent; on a fresh session
-  // (new chat, or one that could not be resumed) that is all of them, which
-  // is exactly when they matter. redactFence for the same reason legacy
+  // and disappears if the SDK session is ever unresumable/reset).
+  //
+  // Sent ONLY when the SDK session has no transcript of this chat: a new
+  // chat, one that could not be resumed, a server restart, or after a
+  // compaction (turn-context.mjs forgets the session then). A resumed
+  // session already holds the very turns these facts were distilled from, so
+  // re-sending them — even just the new ones — repeated what the model had
+  // just read. Chosen by recency plus relevance to this message
+  // (session-memory-select.mjs). redactFence for the same reason legacy
   // applies it: the facts come from prior turns, which can carry untrusted
   // text. Counted for the client's memory footnote (the Mac's brain button).
   let sessionMemoryFacts = 0;
   let sessionMemoryChars = 0;
   try {
     const chatSessionId = resolveChatSessionId(agentContext);
-    if (chatSessionId && userId) {
-      const allFacts = sessionMemory(userId, chatSessionId);
-      const sessionFacts = capSessionMemory(allFacts);
-      const seen = new Set(next.facts);
-      const fresh = sessionFacts.filter((f) => !seen.has(contentHash(f)));
-      if (fresh.length > 0) {
-        const heading = prev?.facts.length ? "## This session's memory (new since last turn)" : "## This session's memory";
-        const block = redactFence(`${heading}\n${fresh.map((f) => `- ${f}`).join('\n')}`);
+    if (!prev && chatSessionId && userId) {
+      const sessionFacts = selectSessionMemory(sessionMemory(userId, chatSessionId), message);
+      if (sessionFacts.length > 0) {
+        const block = redactFence(`## This session's memory\n${sessionFacts.map((f) => `- ${f}`).join('\n')}`);
         contextParts.push(block);
-        for (const f of fresh) next.facts.push(contentHash(f));
-        sessionMemoryFacts = fresh.length;
+        sessionMemoryFacts = sessionFacts.length;
         sessionMemoryChars = block.length;
       }
     }
@@ -648,7 +649,7 @@ export function buildEngineOptions(
     contextParts.push(`# Attached images already sent earlier in this chat (unchanged)\n${repeatedImages.map((p) => `- ${p}`).join('\n')}`);
   }
   // Bounded: a very long chat must not carry an ever-growing hash list.
-  for (const key of ['facts', 'attachments', 'images']) next[key] = next[key].slice(-400);
+  for (const key of ['attachments', 'images']) next[key] = next[key].slice(-400);
   const queryOptions = {
     // Live token + tool-args deltas — the stream a chat UI needs.
     includePartialMessages: true,
