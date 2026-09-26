@@ -24,7 +24,7 @@ Use **Bash** for installs, builds, and tests. Locate code with **Read**, **Grep*
 # Delegating
 
 - **ask-subagent** — plugin subagents for specialised read/research steps (names from the user's enabled plugins).
-- **ask-internal** — LLM-IDE app state only (issues, meetings, library), not attached file edits.
+- LLM-IDE app state (issues, meetings, the Library) is yours to query directly: \`search-kb\`, and \`project_memory\` for what was recorded about this project.
 
 For small single-step requests, skip task management.`;
 

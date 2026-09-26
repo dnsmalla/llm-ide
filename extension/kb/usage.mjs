@@ -155,9 +155,16 @@ export function usedForModel(db, userId, provider, model, unit, windowKind, now 
     // visible even though the cap counts the expensive tokens only.
     ? 'COALESCE(SUM(COALESCE(input_tokens,0)+COALESCE(output_tokens,0)+COALESCE(cache_creation_tokens,0)),0)'
     : 'COALESCE(SUM(runs),0)';
+  // `…:internal` rows are a chat turn's OTHER models — the ones the Agent SDK
+  // called on its own (subagents, Claude Code's helper calls), metered under
+  // their real name so their tokens are visible (routes/agent-v2.mjs
+  // ledgerRowsForTurn). They are part of the main model's turn, not a use of
+  // that model the user chose, so a cap the user set on it must not fill up
+  // — or pause the model — because of them.
   const row = db.prepare(
     `SELECT ${col} AS n FROM usage_ledger
-      WHERE user_id=? AND provider=? AND model=? AND ts>=?`
+      WHERE user_id=? AND provider=? AND model=? AND ts>=?
+        AND (endpoint IS NULL OR endpoint NOT LIKE '%:internal')`
   ).get(userId, provider, model, startStr);
   return row ? Number(row.n) : 0;
 }

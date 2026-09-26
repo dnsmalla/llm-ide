@@ -59,7 +59,7 @@ const { setSecret } = await import('../server/vault.mjs');
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUg==';
 
 test('an attached image leaves the text path and is returned as an image', () => {
-  const { queryOptions, images, meta } = buildEngineOptions(
+  const { queryOptions, prompt, images, meta } = buildEngineOptions(
     {
       userId: 'u',
       message: 'what is wrong with this screen?',
@@ -71,15 +71,17 @@ test('an attached image leaves the text path and is returned as an image', () =>
     },
     { readSkill: () => null, roots: () => [WS] },
   );
-  const append = queryOptions.systemPrompt.append;
+  // Attachments are this turn's context: they ride in the message, not the
+  // system prompt (whose changes would invalidate the cached transcript).
+  assert.ok(!queryOptions.systemPrompt.append.includes('plain text'), 'attachments stay out of the system prompt');
   // The base64 must not reach the text block: capAttachments clamps each
   // attachment to 80k chars, so a real screenshot arrived there CORRUPT — and
   // cost five figures in tokens to say nothing.
-  assert.ok(!append.includes(PNG_B64), 'image bytes must not be framed as text');
-  assert.ok(append.includes('plain text'), 'the text attachment still is');
+  assert.ok(!prompt.includes(PNG_B64), 'image bytes must not be framed as text');
+  assert.ok(prompt.includes('plain text'), 'the text attachment still is');
   // But the model has to know which image is which, since blocks carry no name.
-  assert.match(append, /# Attached images \(1\)/);
-  assert.match(append, /Pasted image 1\.png/);
+  assert.match(prompt, /# Attached images \(1\)/);
+  assert.match(prompt, /Pasted image 1\.png/);
   assert.equal(images.length, 1);
   assert.equal(images[0].mediaType, 'image/png');
   assert.equal(images[0].data, PNG_B64);
@@ -87,7 +89,7 @@ test('an attached image leaves the text path and is returned as an image', () =>
 });
 
 test('an image too large to send is named, not silently dropped', () => {
-  const { queryOptions, images, meta } = buildEngineOptions(
+  const { prompt, images, meta } = buildEngineOptions(
     {
       userId: 'u',
       message: 'look',
@@ -100,7 +102,7 @@ test('an image too large to send is named, not silently dropped', () => {
   assert.deepEqual(meta.droppedImages, ['huge.png']);
   // The user can see the chip in the chat, so a model that never mentions it
   // reads as having looked and found nothing.
-  assert.match(queryOptions.systemPrompt.append, /NOT sent \(too large/);
+  assert.match(prompt, /NOT sent \(too large/);
 });
 
 test('buildPromptInput: text stays a string, images become one user message', async () => {
@@ -154,8 +156,8 @@ test('non-plan modes are told to ask fixed-choice questions with AskUserQuestion
   const plan = buildEngineOptions({ userId: 'u', mode: 'plan', agentContext: {} }, base).queryOptions.systemPrompt.append;
   assert.doesNotMatch(plan, /# Asking the user/, 'plan mode is not told twice');
 });
-test('allowlist is read-only + llmide; skills inject via append; cwd + dirs from workspace', () => {
-  const { queryOptions } = buildEngineOptions({
+test('allowlist is read-only + llmide; skills ride in the message; cwd + dirs from workspace', () => {
+  const { queryOptions, prompt } = buildEngineOptions({
     userId: 'u', mode: 'execute', language: 'Japanese',
     skills: ['family/one'], agentContext: { workspaceRoot: WS, indexedRepos: ['/tmp/r'] },
   }, { readSkill: () => ({ name: 'one', content: '# One\ninstructions' }), roots: () => [WS, '/tmp/r'] });
@@ -199,7 +201,9 @@ test('allowlist is read-only + llmide; skills inject via append; cwd + dirs from
   }
   assert.equal(queryOptions.cwd, WS);
   assert.deepEqual(queryOptions.additionalDirectories, ['/tmp/r']);
-  assert.match(queryOptions.systemPrompt.append, /One/);
+  // A user-invoked skill applies to this message; the language is stable.
+  assert.match(prompt, /One/);
+  assert.ok(!queryOptions.systemPrompt.append.includes('instructions'), 'invoked skills stay out of the system prompt');
   assert.match(queryOptions.systemPrompt.append, /Japanese/);
   assert.deepEqual(queryOptions.settingSources, []);
   assert.equal(queryOptions.systemPrompt.type, 'preset');
@@ -304,7 +308,8 @@ test('prompt: a huge message shrinks the attachment budget rather than adding to
   const huge = buildEngineOptions(
     { userId: 'u', mode: 'review', message: 'm'.repeat(V2_PROMPT_CAP), attachments: files, agentContext: {} }, base);
 
-  const attachChars = (r) => r.queryOptions.systemPrompt.append.length;
+  // Attachments ride in the message now; count their content ('q') there.
+  const attachChars = (r) => (r.prompt.match(/q/g) || []).length;
   assert.ok(attachChars(huge) < attachChars(small),
     'a message that eats the budget must leave less room for attachments');
   // The floor: cap 120k against a 150k budget always leaves attachments 30k,
@@ -349,14 +354,14 @@ test('skills: ≤5, deduped, unknown silently ignored, TRUSTED INSTRUCTIONS fram
     return id === 'known/unknown-id' ? null : { name: id.split('/')[1], content: `body of ${id}` };
   };
   const ids = ['a/one', 'a/one', 'b/two', 'known/unknown-id', 'c/three', 'd/four', 'e/five', 'f/six'];
-  const { queryOptions } = buildEngineOptions(
+  const { prompt } = buildEngineOptions(
     { userId: 'u', mode: 'execute', skills: ids, agentContext: {} },
     { readSkill, roots: () => [] },
   );
   // ai-routes semantics: cap the RAW ids at 5 (dup included), then dedup at
   // the loop (before the read) and drop unknowns after it.
   assert.deepEqual(seen, ['a/one', 'b/two', 'known/unknown-id', 'c/three'], 'readSkill sees the slice-5 ids minus the dup');
-  const append = queryOptions.systemPrompt.append;
+  const append = prompt;
   assert.match(append, /TRUSTED INSTRUCTIONS/);
   for (const name of ['one', 'two', 'three']) assert.match(append, new RegExp(`## Skill: ${name}\\nbody of \\w+/${name}`));
   for (const name of ['four', 'five', 'six']) assert.ok(!append.includes(`## Skill: ${name}`), `${name} beyond the raw 5-id cap: dropped`);
@@ -367,11 +372,11 @@ test('attachments: fenced as data with caps 30 files / 80k per file / 200k total
   const many = [];
   for (let i = 0; i < 32; i++) many.push({ path: `/Users/someone/proj/f${i}.txt`, content: 'x'.repeat(1000) });
   many.push({ path: '/Users/someone/proj/big.txt', content: 'y'.repeat(90_000) });
-  const { queryOptions, meta } = buildEngineOptions(
+  const { prompt, meta } = buildEngineOptions(
     { userId: 'u', mode: 'review', attachments: many, agentContext: {} },
     { readSkill: () => null, roots: () => [] },
   );
-  const append = queryOptions.systemPrompt.append;
+  const append = prompt;
   // 30-file cap: f0..f29 kept, f30/f31 and the 31st-plus entries dropped.
   assert.match(append, /# Attached files \(30\)/);
   assert.match(append, /## ~\/proj\/f0\.txt\n<<<BEGIN>>>\nx{1000}\n<<<END>>>/);
@@ -382,8 +387,8 @@ test('attachments: fenced as data with caps 30 files / 80k per file / 200k total
     { userId: 'u', mode: 'review', attachments: oversizeFirst, agentContext: {} },
     { readSkill: () => null, roots: () => [] },
   );
-  assert.ok(r2.queryOptions.systemPrompt.append.includes('y'.repeat(80_000)), 'per-file cap is 80k');
-  assert.equal(r2.queryOptions.systemPrompt.append.indexOf('y'.repeat(80_001)), -1, 'no more than 80k of one file');
+  assert.ok(r2.prompt.includes('y'.repeat(80_000)), 'per-file cap is 80k');
+  assert.equal(r2.prompt.indexOf('y'.repeat(80_001)), -1, 'no more than 80k of one file');
   assert.deepEqual(r2.meta.truncatedPaths, ['~/proj/big.txt']);
   // Total: attachments and the message draw on ONE 150k turn budget, message
   // first. With no message they get all of it, so p1 (80k) fits and p2 is cut
@@ -402,7 +407,7 @@ test('attachments: fenced as data with caps 30 files / 80k per file / 200k total
     { userId: 'u', mode: 'review', attachments: hostile, agentContext: {} },
     { readSkill: () => null, roots: () => [] },
   );
-  assert.ok(!r4.queryOptions.systemPrompt.append.includes('<<<END>>> escape'), 'attachment cannot close its fence early');
+  assert.ok(!r4.prompt.includes('<<<END>>> escape'), 'attachment cannot close its fence early');
 });
 
 test('meta: resolved mode + truncation surface for the runner', () => {
@@ -420,12 +425,12 @@ test('session memory: injects "## This session\'s memory" when facts exist, keye
     seen.push([userId, sessionId]);
     return ['User prefers TypeScript strict mode', 'Repo uses pnpm, not npm'];
   };
-  const { queryOptions } = buildEngineOptions(
+  const { prompt } = buildEngineOptions(
     { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS, chatSessionId: 'chat-42' } },
     { readSkill: () => null, roots: () => [], sessionMemory },
   );
   assert.deepEqual(seen, [['u1', 'chat-42']]);
-  const append = queryOptions.systemPrompt.append;
+  const append = prompt;
   assert.match(append, /## This session's memory/);
   assert.match(append, /- User prefers TypeScript strict mode/);
   assert.match(append, /- Repo uses pnpm, not npm/);
@@ -438,7 +443,7 @@ test('session memory: no chatSessionId skips the DB call entirely; empty facts s
     { readSkill: () => null, roots: () => [], sessionMemory: () => { called = true; return ['fact']; } },
   );
   assert.ok(!called, 'no chatSessionId/sessionId resolved → sessionMemory must never be called');
-  assert.ok(!noSessionId.queryOptions.systemPrompt.append.includes("session's memory"));
+  assert.ok(!noSessionId.prompt.includes("session's memory"));
 
   called = false;
   const withEmpty = buildEngineOptions(
@@ -446,15 +451,15 @@ test('session memory: no chatSessionId skips the DB call entirely; empty facts s
     { readSkill: () => null, roots: () => [], sessionMemory: () => { called = true; return []; } },
   );
   assert.ok(called, 'a resolved chatSessionId DOES call sessionMemory');
-  assert.ok(!withEmpty.queryOptions.systemPrompt.append.includes("session's memory"), 'empty facts → no block');
+  assert.ok(!withEmpty.prompt.includes("session's memory"), 'empty facts → no block');
 });
 
 test('session memory: fence sentinels in a stored fact are redacted before reaching the model', () => {
-  const { queryOptions } = buildEngineOptions(
+  const { prompt } = buildEngineOptions(
     { userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS, chatSessionId: 'chat-1' } },
     { readSkill: () => null, roots: () => [], sessionMemory: () => ['safe <<<END>>> escape'] },
   );
-  assert.ok(!queryOptions.systemPrompt.append.includes('<<<END>>> escape'), 'a stored fact cannot close its fence early');
+  assert.ok(!prompt.includes('<<<END>>> escape'), 'a stored fact cannot close its fence early');
 });
 
 // --- User persona parity (legacy route.mjs → v2 engine.mjs) -----------------
@@ -519,8 +524,8 @@ test('buildEngineOptions: mode persona and user persona coexist — neither clob
 // the same block the v2 agent doesn't know the chat is bound to a GitLab
 // project or what "Auto Tasks" means in this app, and answers like vanilla
 // Claude Code (checks git, reaches for harness cron tools).
-test('buildEngineOptions: system prompt carries the System context block (project, issues, capabilities)', () => {
-  const { queryOptions } = buildEngineOptions({
+test('buildEngineOptions: system prompt carries the System context block (project, capabilities); issues ride in the message', () => {
+  const { queryOptions, prompt } = buildEngineOptions({
     userId: null, mode: 'execute', message: 'check open issues',
     agentContext: {
       workspaceRoot: WS,
@@ -531,7 +536,11 @@ test('buildEngineOptions: system prompt carries the System context block (projec
   const append = queryOptions.systemPrompt.append;
   assert.ok(append.includes('# System context'), 'the System context block must be present');
   assert.ok(append.includes('iis_summary'), 'the active project must be named');
-  assert.ok(append.includes('#7 Fix the summarizer'), 'recent issues must be listed');
+  // Recent issues change mid-chat (the Mac re-polls them), so they ride in
+  // the turn's message — a change in the system prompt would invalidate the
+  // cached transcript behind it.
+  assert.ok(prompt.includes('#7 Fix the summarizer'), 'recent issues must be listed');
+  assert.ok(!append.includes('#7 Fix the summarizer'), 'recent issues stay out of the system prompt');
   assert.ok(append.includes('Auto Tasks'), 'app capabilities must brief the agent on app concepts');
   // Graphify project memory stays tool-driven on v2 (project_memory tool) —
   // its block must NOT be inlined into every turn.
@@ -831,6 +840,8 @@ test('gateway turn: ANTHROPIC_BASE_URL + the provider key ride the SDK env; the 
       assert.equal(env.ANTHROPIC_AUTH_TOKEN, 'glm-key-1', 'Z.AI/Ollama shape');
       assert.equal(env.ANTHROPIC_API_KEY, 'glm-key-1', 'DeepSeek shape');
       assert.equal(capture.options.model, 'glm-4.7');
+      // A gateway may not accept the effort parameter: none is sent.
+      assert.equal(capture.options.effort, undefined);
       // The engine home follows the USER's first-party auth, not the turn's
       // key: this user has no Claude key, so their Claude turns run ambient
       // in the operator home — and their gateway turn must live there too,
@@ -1646,19 +1657,19 @@ test('llmide tool server receives agentContext + message so project_memory can u
 // ask-subagent's runClaude/userSkills/userSubagents/internalSkills wiring)
 // lives in tests/agent-v2-tools.test.mjs — this test only pins that the v2
 // engine's allowlist + mcpServers composition actually reach a working tool.
-test('stream: a turn that calls mcp__llmide__list-files succeeds (v2 read-tool parity)',
+test('stream: a turn that calls mcp__llmide__find-code succeeds (v2 read-tool parity)',
   withAnthropicKey('sk-ant-v2-test', async () => {
     const script = { messages: [
-      { type: 'system', subtype: 'init', session_id: 's1', tools: ['mcp__llmide__list-files'], mcp_servers: [] },
+      { type: 'system', subtype: 'init', session_id: 's1', tools: ['mcp__llmide__find-code'], mcp_servers: [] },
       {
         type: 'assistant',
-        message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__llmide__list-files', input: {} }] },
+        message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__llmide__find-code', input: { query: 'server' } }] },
       },
       { type: 'result', subtype: 'success', total_cost_usd: 0, num_turns: 1, duration_ms: 1, session_id: 's1' },
     ] };
     const events = [];
     const { result } = await runAgentV2Turn({
-      message: 'list the files here', userId: 'u1', mode: 'execute',
+      message: 'where is the server', userId: 'u1', mode: 'execute',
       agentContext: { workspaceRoot: __dirname },
       onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
     }, turnInjectable);
@@ -1666,8 +1677,8 @@ test('stream: a turn that calls mcp__llmide__list-files succeeds (v2 read-tool p
     // The scripted tool_use name must actually be in the allowlist the SDK
     // enforces — this is the concrete regression the wildcard removal risks.
     assert.ok(
-      script.options.allowedTools.includes('mcp__llmide__list-files'),
-      'mcp__llmide__list-files must be explicitly named in V2_ALLOWED_TOOLS',
+      script.options.allowedTools.includes('mcp__llmide__find-code'),
+      'mcp__llmide__find-code must be explicitly named in V2_ALLOWED_TOOLS',
     );
     // Mounting doesn't throw and the scripted 'result' terminates the stream.
     assert.equal(result.subtype, 'success');
@@ -1680,10 +1691,10 @@ test('stream: a turn that calls mcp__llmide__list-files succeeds (v2 read-tool p
     const client = new Client({ name: 'test-client', version: '0.0.0' });
     await client.connect(clientTransport);
     try {
-      const out = await client.callTool({ name: 'list-files', arguments: {} });
-      assert.ok(!out.isError, `list-files call failed: ${JSON.stringify(out)}`);
+      const out = await client.callTool({ name: 'find-code', arguments: { query: 'server' } });
+      assert.ok(!out.isError, `find-code call failed: ${JSON.stringify(out)}`);
       const parsed = JSON.parse(out.content[0].text);
-      assert.ok(Array.isArray(parsed.files), 'list-files actually ran against the workspace root');
+      assert.equal(typeof parsed, 'object', 'find-code actually ran and returned a result');
     } finally {
       await client.close();
       await server.instance.close();
@@ -1745,14 +1756,38 @@ test('session memory end-to-end: a fact captured from turn 1 is recalled by turn
 
       // Turn 2, same chat: buildEngineOptions (real sessionMemory, no fake)
       // must surface the fact turn 1 captured.
-      const { queryOptions } = buildEngineOptions(
+      const { prompt } = buildEngineOptions(
         { userId: user.id, mode: 'execute', message: 'anything else I should know?', agentContext },
         { readSkill: () => null, roots: () => [], sessionMemory: listSessionMemory },
       );
-      const append = queryOptions.systemPrompt.append;
+      const append = prompt;
       assert.match(append, /## This session's memory/);
       assert.match(append, /This repo runs tests with node --test\./);
     } finally {
       fs.rmSync(workspaceRoot, { recursive: true, force: true });
     }
   }));
+
+// --- reasoning effort per mode --------------------------------------------------
+//
+// Unset, every turn ran at the SDK default ('high'): a "hello" paid for the
+// same depth of thinking as a plan. The user's model is never changed.
+test('effort: high for plan/assist_plan/execute, medium for ask/review/document and bare greetings', async () => {
+  const { effortForTurn } = await import('../llm_agent/sdk/engine.mjs');
+  for (const m of ['plan', 'assist_plan', 'execute']) assert.equal(effortForTurn(m, 'fix the build', { env: '' }), 'high', m);
+  for (const m of ['ask', 'review', 'document']) assert.equal(effortForTurn(m, 'what does this do?', { env: '' }), 'medium', m);
+  assert.equal(effortForTurn('execute', 'hello!', { env: '' }), 'medium', 'a bare greeting');
+  assert.equal(effortForTurn('execute', 'こんにちは', { env: '' }), 'medium');
+  // An acknowledgement can mean "go ahead" in a running task — real work.
+  assert.equal(effortForTurn('execute', 'ok', { env: '' }), 'high');
+  assert.equal(effortForTurn('execute', 'hello, please fix the failing test in Loop', { env: '' }), 'high');
+  // Operator pin.
+  assert.equal(effortForTurn('ask', 'q', { env: 'max' }), 'max');
+  assert.equal(effortForTurn('plan', 'q', { env: 'default' }), null);
+  assert.equal(effortForTurn('plan', 'q', { env: 'bogus' }), 'high', 'an unknown pin is ignored');
+
+  const { queryOptions } = buildEngineOptions({ userId: 'u', mode: 'review', message: 'check this', agentContext: {} },
+    { readSkill: () => null, roots: () => [] });
+  assert.equal(queryOptions.effort, 'medium');
+  assert.equal(queryOptions.model, undefined, 'the model is never chosen here');
+});

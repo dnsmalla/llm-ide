@@ -727,6 +727,10 @@ final class AppConfig: ObservableObject {
         // default — silently dropping the user's pick, so the iPhone chat
         // proxy then forwarded an empty/wrong model on the next launch.
         var knownModelIds = Set(AICliTool.selectable.flatMap { $0.models.map(\.id) })
+        // The hardcoded Claude ids stay known even once a live list replaces
+        // them in the picker: a saved pick the account's list no longer
+        // offers is still a valid API id, and must not be reset to the default.
+        knownModelIds.formUnion(ClaudeCLI.fallbackModels.map(\.id))
         if let raw = defaults.string(forKey: "MEETNOTES_CUSTOM_MODELS"),
            let custom = try? JSONDecoder().decode([String: [String]].self, from: Data(raw.utf8)) {
             knownModelIds.formUnion(custom.values.flatMap { $0 })

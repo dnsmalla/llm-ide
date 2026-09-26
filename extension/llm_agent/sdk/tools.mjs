@@ -65,12 +65,59 @@ export const __zodSchemaForTest = zodSchemaFor;
 
 function metaFor(entry) {
   const skill = globalSkills.skills.get(entry.name);
-  if (skill) return { description: skill.description || entry.name, schema: skill.schema || {} };
+  if (skill) return { description: v2Description(skill.description || entry.name), schema: skill.schema || {} };
   return entry.inlineMeta || { description: entry.name, schema: {} };
+}
+
+// The tool docs are shared with the legacy engine (and synced from the
+// central kit), where `ask-internal` is the way to reach app state. v2 does
+// not mount it (V2_NATIVE_DUPLICATES), so a description pointing there would
+// send the model to a tool that is not in its list; name the ones it has.
+function v2Description(text) {
+  return String(text).replace(/`ask-internal`/g, '`search-kb` or `project_memory`');
+}
+
+// Registry entries the v2 engine does NOT mount, because an SDK built-in in
+// V2_BUILTIN_TOOLS (sdk/engine.mjs) already does the same job. Each mounted
+// tool's description + schema rides in the prompt on every turn, so a
+// duplicate is pure overhead — and two tools for one job also make the model
+// pick between them. The legacy engine has no built-ins and keeps all of
+// these via the registry.
+//
+// - list-files / read-file → Glob / Read. Same reach: the SDK's cwd +
+//   additionalDirectories are built from the same readable roots
+//   (buildReadableRoots) these handlers check against.
+// - web-search / fetch-url → WebSearch / WebFetch. The handlers themselves
+//   call Anthropic's web_search / web_fetch (or the claude CLI's built-ins)
+//   one level down. Skipped only on FIRST-PARTY turns: a gateway turn
+//   (Anthropic-compatible custom provider, e.g. GLM) sends the built-ins to a
+//   backend that may not implement Anthropic's server-side web tools, while
+//   the handlers still reach Anthropic on the user's own key/login.
+//
+// - ask-internal → nothing to delegate. It runs a nested agent loop whose
+//   only tool is search-kb, grounded in the system context plus the Graphify
+//   project memory — for the LEGACY global agent, which has neither. A v2
+//   turn has the system context in its own prompt and search-kb,
+//   project_memory and find-code as its own tools, so the delegation was a
+//   whole extra loop of model calls (up to 10, uncached, ~40k chars of memory
+//   each) for an answer the turn could get directly.
+//
+// find-code is NOT a duplicate: it searches the symbol index + code graph,
+// which Grep cannot.
+const V2_NATIVE_DUPLICATES = new Set(['list-files', 'read-file', 'ask-internal']);
+const V2_NATIVE_WEB_DUPLICATES = new Set(['web-search', 'fetch-url']);
+
+/** The registry entries mounted on a v2 turn (see V2_NATIVE_DUPLICATES). */
+export function v2MountedEntries({ gateway = false } = {}) {
+  return entries().filter((e) => !V2_NATIVE_DUPLICATES.has(e.name)
+    && (gateway || !V2_NATIVE_WEB_DUPLICATES.has(e.name)));
 }
 
 export function buildLlmIdeServer(userId, agentContext, currentMessage, {
   renderMemory, runClaude, userSkills, userSubagents, internalSkills,
+  // True on an Anthropic-compatible gateway turn — keeps the llmide web tools
+  // mounted (see V2_NATIVE_WEB_DUPLICATES).
+  gateway = false,
   // The TURN's cancellation (runAgentV2Turn's `abortController.signal`).
   // The SDK's own abortController only kills the CLI SUBPROCESS — every tool
   // mounted here runs in the SERVER process, so without this signal a Stop
@@ -87,10 +134,10 @@ export function buildLlmIdeServer(userId, agentContext, currentMessage, {
     // session id across both engines, not a raw agentContext.sessionId.
     sessionId: resolveChatSessionId(agentContext),
   };
-  // ALL registry entries mount now, read AND act — canUseTool (sdk/
-  // engine.mjs) is what actually restricts act tools (always-allow → gate
-  // → allow/deny/prompt), not this mount list.
-  const sdkTools = entries().map((entry) => {
+  // Every registry entry except the native duplicates mounts, read AND act —
+  // canUseTool (sdk/engine.mjs) is what actually restricts act tools
+  // (always-allow → gate → allow/deny/prompt), not this mount list.
+  const sdkTools = v2MountedEntries({ gateway }).map((entry) => {
     const meta = metaFor(entry);
     return tool(
       entry.name,
@@ -160,7 +207,13 @@ export function buildLlmIdeServer(userId, agentContext, currentMessage, {
             outcome,
           });
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        // A result that is only `{ text }` goes out as that text: JSON-
+        // escaping a prose block (newlines → \n, quotes → \") made it longer
+        // and harder to read, and it stays in the transcript. Structured
+        // results keep their JSON.
+        const onlyText = result && typeof result === 'object' && !Array.isArray(result)
+          && typeof result.text === 'string' && Object.keys(result).length === 1;
+        return { content: [{ type: 'text', text: onlyText ? result.text : JSON.stringify(result) }] };
       },
       // readOnlyHint must tell the TRUTH per entry: MCP hosts use it to decide
       // whether a call needs approval at all, so hardcoding `true` for

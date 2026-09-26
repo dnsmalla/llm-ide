@@ -20,7 +20,7 @@ import { runAgentV2Turn, AGENT_SDK_PROVIDER } from '../llm_agent/sdk/engine.mjs'
 import { deleteSdkTranscripts } from '../llm_agent/sdk/transcripts.mjs';
 import { taskTurnResponse, makeTaskProgressEmitter } from '../llm_agent/runtime/task-session-context.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
-import { classifyCodeAssistMode, MODES, AUTO_READ_ONLY, clampToReadOnly } from '../llm_agent/runtime/mode-classify.mjs';
+import { classifyCodeAssistMode, MODES, AUTO_READ_ONLY, clampToReadOnly, isAutoContinueTurn } from '../llm_agent/runtime/mode-classify.mjs';
 import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
 import { expandSlashCommand } from '../plugins/loader.mjs';
 import { getDb } from '../kb/db.mjs';
@@ -90,6 +90,33 @@ function sendTurnInProgress(req, res) {
   sendJSON(res, 409, {
     error: { code: 'TURN_IN_PROGRESS', message: 'A turn is already in progress for this chat session' },
   });
+}
+
+
+// The ledger rows one v2 turn writes. With the SDK's per-model totals
+// (`usageTotals.byModel`, from result.modelUsage) each model gets its own row
+// under its own name — the main model carries the turn; any other model the
+// query used (a subagent, the CLI's internal helper calls) is metered as
+// '/agent/v2/stream:internal' so its tokens are neither lost nor priced as
+// the main model's. Without byModel (older SDK, a crashed result) it is the
+// single summed row it always was.
+export function ledgerRowsForTurn(meteredModel, usageTotals) {
+  const byModel = Array.isArray(usageTotals?.byModel) ? usageTotals.byModel : [];
+  const row = (u, m, endpoint) => ({
+    model: m, endpoint,
+    inputTokens: u?.inputTokens, outputTokens: u?.outputTokens,
+    cacheReadTokens: u?.cacheReadTokens, cacheCreationTokens: u?.cacheCreationTokens,
+  });
+  if (!byModel.length) return [row(usageTotals, meteredModel, '/agent/v2/stream')];
+  // The main entry: the metered model by name (the SDK may add a suffix such
+  // as "[1m]"), else the entry that produced the most output.
+  const main = byModel.find((m) => m.model === meteredModel)
+    ?? byModel.find((m) => meteredModel && m.model.startsWith(meteredModel))
+    ?? [...byModel].sort((a, b) => b.outputTokens - a.outputTokens)[0];
+  return [
+    row(main, meteredModel ?? main.model, '/agent/v2/stream'),
+    ...byModel.filter((m) => m !== main).map((m) => row(m, m.model, '/agent/v2/stream:internal')),
+  ];
 }
 
 export async function handleAgentV2Routes(
@@ -191,7 +218,10 @@ async function handleV2Stream(req, res, userId, deps) {
   // classifier had a bad day.
   const readOnly = requestedMode === AUTO_READ_ONLY;
   let mode;
-  if (requestedMode === 'auto' || readOnly) {
+  if ((requestedMode === 'auto' || readOnly) && isAutoContinueTurn(message, userId, chatSessionId)) {
+    // An auto-continue round of a task run: execute, without a classifier call.
+    mode = readOnly ? clampToReadOnly('execute') : 'execute';
+  } else if (requestedMode === 'auto' || readOnly) {
     try {
       const classified = (await deps.classifyMode(message, { userId }))?.mode;
       const resolved = typeof classified === 'string' && MODES.has(classified)
@@ -376,18 +406,9 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     // is not passed.)
     const meteredModel = resolvedModel ?? model;
     bindSdkSession();
-    recordUsage(db, {
-      userId,
-      provider,
-      model: meteredModel,
-      endpoint: '/agent/v2/stream',
-      inputTokens: usageTotals?.inputTokens,
-      outputTokens: usageTotals?.outputTokens,
-      // Summed all along, dropped here until now — which is why the ledger
-      // read ~60 input tokens for a turn carrying a multi-KB system prompt.
-      cacheReadTokens: usageTotals?.cacheReadTokens,
-      cacheCreationTokens: usageTotals?.cacheCreationTokens,
-    });
+    for (const row of ledgerRowsForTurn(meteredModel, usageTotals)) {
+      recordUsage(db, { userId, provider, ...row });
+    }
     // Task parity with legacy /code-assist: emit after the SDK result so the
     // Mac can populate PlanTimelineCard and auto-continue when work remains.
     const { tasks: currentTasks, continueNeeded } = taskTurnResponse(userId, agentContext, mode);

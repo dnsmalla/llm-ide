@@ -289,7 +289,13 @@ export function selectChatMemoryFacts(content, { userMessage = '', room = 0 } = 
  * two callers — the alternative was a second scoring implementation that
  * would drift.
  */
-export function rankFactsByRelevance(facts, { userMessage = '' } = {}) {
+export function rankFactsByRelevance(facts, opts = {}) {
+  return scoreFactsByRelevance(facts, opts).map((e) => e.fact);
+}
+
+// Same ranking with each fact's score (0 = no query-token overlap), for a
+// caller that needs to tell "relevant" from "merely next in line".
+export function scoreFactsByRelevance(facts, { userMessage = '' } = {}) {
   if (!Array.isArray(facts) || facts.length === 0) return [];
   const q = queryTokens(userMessage);
   // IDF weighting: a query token carried by few facts is far more
@@ -338,7 +344,7 @@ export function rankFactsByRelevance(facts, { userMessage = '' } = {}) {
   // previous within-day ordering.
   scored.sort((a, b) => (b.score - a.score)
     || (a.stamp === b.stamp ? b.index - a.index : String(b.stamp).localeCompare(String(a.stamp))));
-  return scored.map((e) => e.fact);
+  return scored;
 }
 
 export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) {
@@ -457,7 +463,12 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) 
   return `${header}\n\n${parts.join('\n\n')}`;
 }
 
-export function renderGraphifyMemory(agentContext, userId, stats, userMessage = '') {
+// `totalChars` (optional) lowers the overall budget for one call — the
+// project_memory TOOL passes a smaller one than the always-on injection,
+// because its result stays in the chat transcript for every later turn.
+// The per-repo blocks fill by priority, so a smaller budget keeps the
+// highest-signal parts (hand-authored repo facts, relevant chat facts).
+export function renderGraphifyMemory(agentContext, userId, stats, userMessage = '', { totalChars = TOTAL_CHARS } = {}) {
   if (!userId) return '';   // no anonymous reads
   const indexed = Array.isArray(agentContext?.indexedRepos) ? agentContext.indexedRepos : [];
   const wsRoot = agentContext?.workspaceRoot;
@@ -489,7 +500,7 @@ export function renderGraphifyMemory(agentContext, userId, stats, userMessage = 
   const blocks = [];
   let totalUsed = 0;
   for (const repo of candidates) {
-    const remaining = TOTAL_CHARS - totalUsed;
+    const remaining = Math.min(TOTAL_CHARS, totalChars) - totalUsed;
     if (remaining <= 500) break;
     const block = repoMemoryBlock(repo, remaining, allowedRoots, stats, userMessage);
     if (block) {

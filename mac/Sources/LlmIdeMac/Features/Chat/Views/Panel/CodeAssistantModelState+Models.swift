@@ -70,8 +70,11 @@ extension CodeAssistantModelState {
     /// Fetch the provider's live chat models. Best-effort: silent on failure,
     /// leaving `models(for:)` on the built-in fallback list.
     func loadModels(for cli: AICliTool, api: LlmIdeAPIClient) async {
-        guard let ids = try? await api.listProviderModels(cli.provider), !ids.isEmpty else { return }
-        liveModels[cli.provider] = ids.map { AIModel(id: $0, displayName: $0) }
+        guard let models = try? await api.listProviderModels(cli.provider), !models.isEmpty else { return }
+        liveModels[cli.provider] = models
+        // Persist Claude's list so every other surface (menu-bar chat,
+        // Settings, the startup id migration) follows it — see LiveModelCache.
+        if cli == .claudeCode { LiveModelCache.store(models, for: cli.provider) }
     }
 
     /// Switch the active model provider and reset the selected model.

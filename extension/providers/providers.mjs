@@ -485,7 +485,9 @@ export function buildAnthropicCliArgs(prompt, mcpConfig, model) {
   // (foreign id, dash-prefixed junk) omits the flag, keeping the CLI
   // default those turns always ran on. Note CLAUDE_MODEL_RE (runtime.mjs)
   // is NOT reusable here — it rejects the bare aliases.
-  const CLI_MODEL_OK = /^(claude-[a-z0-9.-]+|sonnet|haiku|opus)$/;
+  // The optional `[1m]` suffix is the 1M-context variant the model picker
+  // now offers straight from the SDK's own list (llm_agent/sdk/models.mjs).
+  const CLI_MODEL_OK = /^(claude-[a-z0-9.-]+|sonnet|haiku|opus)(\[1m\])?$/;
   const modelArgs = typeof model === 'string' && CLI_MODEL_OK.test(model) ? ['--model', model] : [];
   const tail = [...modelArgs, '--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', ANTHROPIC_DEFAULT_PROMPT, '-p', prompt];
   if (typeof mcpConfigJson === 'string' && mcpConfigJson.length > 0) {

@@ -1132,3 +1132,44 @@ test('cancel: stops the caller\'s in-flight turn so the chat accepts a new one; 
   await handleAgentV2Routes(makeReq({ method: 'POST', url: '/agent/v2/cancel', user, body: {} }), bad);
   assert.equal(bad.statusCode, 400);
 });
+
+// --- auto-continue skips the classifier ---------------------------------------
+//
+// The Mac sends "Continue working on your pending tasks." up to 8 times per
+// task run, each with mode:"auto". Only execute can offer a continuation, so
+// classifying each round was a model call with one possible answer.
+test('stream: an auto-continue round with pending tasks runs execute without classifying', async () => {
+  const user = newUser('v2route-autocontinue@example.com');
+  const sid = 'chat-autocontinue';
+  sessionTasks.createTask(user.id, sid, 'Task 1: still pending');
+  const run = async (message) => {
+    let classified = 0;
+    let ranMode = null;
+    const res = makeRes();
+    await handleAgentV2Routes(makeReq({
+      method: 'POST', url: '/agent/v2/stream', user,
+      body: { message, mode: 'auto', agentContext: { chatSessionId: sid, workspaceRoot: WS } },
+    }), res, {
+      classifyMode: async () => { classified += 1; return { mode: 'plan' }; },
+      runTurn: async ({ mode }) => { ranMode = mode; return { result: { subtype: 'success' }, usageTotals: {} }; },
+    });
+    return { classified, ranMode };
+  };
+  assert.deepEqual(await run('Continue working on your pending tasks.'), { classified: 0, ranMode: 'execute' });
+  // Anything else is classified as usual.
+  assert.deepEqual(await run('now plan the next phase'), { classified: 1, ranMode: 'plan' });
+});
+
+test('stream: the continue sentinel in a chat with nothing pending is classified as usual', async () => {
+  const user = newUser('v2route-autocontinue-empty@example.com');
+  let classified = 0;
+  await handleAgentV2Routes(makeReq({
+    method: 'POST', url: '/agent/v2/stream', user,
+    body: { message: 'Continue working on your pending tasks.', mode: 'auto',
+      agentContext: { chatSessionId: 'chat-autocontinue-empty', workspaceRoot: WS } },
+  }), makeRes(), {
+    classifyMode: async () => { classified += 1; return { mode: 'execute' }; },
+    runTurn: async () => ({ result: { subtype: 'success' }, usageTotals: {} }),
+  });
+  assert.equal(classified, 1);
+});

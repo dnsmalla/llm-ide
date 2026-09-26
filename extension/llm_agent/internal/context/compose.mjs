@@ -28,15 +28,20 @@ const appCapabilities = readFileSync(APP_CAPABILITIES_PATH, 'utf8').trim();
 // memory as the callable project_memory tool instead of paying its token
 // cost on every turn, but still needs the light sections (project, issues,
 // capabilities) to know what app it lives in.
-export function composeSystemContext(agentContext, userId, userMessage = '', { memory = true } = {}) {
+//
+// `recent: false` (v2 engine) leaves out the recent issues/meetings: they
+// change while a chat is open (the Mac re-polls issues every 60 s), and v2
+// keeps its system prompt stable so the resumed transcript behind it stays
+// cached. v2 sends them in the turn's own message instead — see
+// composeRecentContext and llm_agent/sdk/turn-context.mjs.
+export function composeSystemContext(agentContext, userId, userMessage = '', { memory = true, recent = true } = {}) {
   const sections = [
     '# System context',
     '',
     appCapabilities,
     renderActiveProject(agentContext),
     renderIndexedRepos(agentContext),
-    renderRecentIssues(agentContext),
-    renderRecentMeetings(agentContext),
+    ...(recent ? [renderRecentIssues(agentContext), renderRecentMeetings(agentContext)] : []),
     // Surfaces the Mac app's Graphify-generated memory (repo.md,
     // graph-notes.md, prior fault reports, prior Q&A) so the internal
     // agent benefits from the same context external CLIs already see.
@@ -56,4 +61,13 @@ export function composeSystemContext(agentContext, userId, userMessage = '', { m
   // section headers are unchanged.
   const block = sections.filter((s) => typeof s === 'string' && s.length > 0).join('\n\n');
   return redactFence(block);
+}
+
+// The recent issues + meetings on their own — the part of the system context
+// that changes during a chat. '' when there are none. Fence-neutralised for
+// the same reason the full block is.
+export function composeRecentContext(agentContext) {
+  const block = [renderRecentIssues(agentContext), renderRecentMeetings(agentContext)]
+    .filter((s) => typeof s === 'string' && s.length > 0).join('\n\n');
+  return block ? redactFence(block) : '';
 }

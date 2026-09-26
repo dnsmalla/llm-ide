@@ -109,7 +109,7 @@ test('project_memory is reachable from the legacy loop (parity fix)', async () =
   assert.ok(out.reply, 'expected a reply after project_memory resolved (no "Unknown tool" error)');
 });
 
-test('legacy dispatch, v2 mounted tools, and registry.names() name exactly the same set', async () => {
+test('legacy dispatch and registry.names() match; v2 mounts the registry minus its native duplicates', async () => {
   const { names } = await import('../llm_agent/tools/registry.mjs');
   const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
@@ -129,7 +129,15 @@ test('legacy dispatch, v2 mounted tools, and registry.names() name exactly the s
   const { buildDispatch } = await import('../llm_agent/tools/registry.mjs');
   const legacyNames = new Set(Object.keys(buildDispatch({})));
 
-  assert.deepEqual([...v2Names].sort(), [...registryNames].sort(), 'a v2-mounted tool name diverged from the registry');
+  // v2 skips the entries an SDK built-in already covers (sdk/tools.mjs
+  // V2_NATIVE_DUPLICATES) — spelled out here so a new skip is a deliberate
+  // edit, not a silent drift. A gateway turn keeps the web pair.
+  const firstPartySkipped = ['ask-internal', 'fetch-url', 'list-files', 'read-file', 'web-search'];
+  assert.deepEqual(
+    [...v2Names].sort(),
+    [...registryNames].filter((n) => !firstPartySkipped.includes(n)).sort(),
+    'a v2-mounted tool name diverged from the registry',
+  );
   assert.deepEqual([...legacyNames].sort(), [...registryNames].sort(), 'a legacy-dispatched tool name diverged from the registry');
 
   await client.close();

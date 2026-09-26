@@ -1899,13 +1899,28 @@ paths:
                 provider: { type: string }
       responses:
         '200':
-          description: Sorted model ID list (empty when no key or transient error)
+          description: >
+            Model ID list (empty when nothing could be listed). For `anthropic` the list comes from
+            the Agent SDK — the account's own models, with or without an API key — in the SDK's
+            order (its default first), with display names in `entries`; if the SDK cannot answer it
+            falls back to the key-based `/v1/models` listing. Other providers: sorted ids from
+            their models endpoint.
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   models: { type: array, items: { type: string } }
+                  entries:
+                    type: array
+                    description: 'anthropic via the Agent SDK only'
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, example: 'claude-sonnet-5' }
+                        displayName: { type: string, example: 'Sonnet 5' }
+                        description: { type: string }
+                  source: { type: string, enum: [sdk], description: 'Present when the list came from the Agent SDK' }
                   detail: { type: string, description: 'Human-readable reason when models is empty' }
         '400': { description: Unknown provider, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { description: Rate limited }

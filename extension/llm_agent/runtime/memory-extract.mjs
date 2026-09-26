@@ -61,6 +61,19 @@ const MAX_INPUT_CHARS = 6_000;
 // also cannot be duplicated, because `appendChatMemory` upserts by factIndex
 // against the FULL on-disk list regardless of what was shown.
 const MAX_EXISTING_LISTED = 20;
+// How many of THIS chat's own session facts the model is shown, newest
+// last. It could not see them before, so it had no way to revise a decision
+// the user changed: "User chose the phased approach" stayed next to its
+// reversal forever, and paraphrases of the same state piled up. Shown with
+// their keys, a changed decision reuses the key (the store upserts it in
+// place) and a fact that is simply no longer true is listed to be dropped.
+const MAX_SESSION_LISTED = 12;
+// Session keys live in the same factIndex namespace as project keys
+// (`#<key>`, category ignored) and project facts are copied into session
+// memory too — so a session "test-command" would overwrite the project fact
+// of that name. The prefix keeps the two apart.
+const SESSION_KEY_PREFIX = 'session-';
+const SESSION_TAG_CATEGORY = 'state';
 
 function clip(s, n) {
   s = typeof s === 'string' ? s : '';
@@ -168,24 +181,38 @@ export function sanitizeSuperseded(parsed, existingFacts) {
   return out;
 }
 
-// Session facts are plain sentences — no category/key: they are not upserted
-// by subject the way project facts are, they are appended and later deleted
-// wholesale with the chat. Same hygiene as sanitizeFacts (trim, collapse
-// whitespace, cap length, drop junk, dedupe by factIndex, cap the count).
-// Exported for unit testing.
+// Session facts: `{ key, fact }` objects render as `[state|session-<key>] fact`,
+// so a later turn that reuses the key REPLACES the stored sentence (the store
+// upserts by factIndex) instead of stacking a contradiction next to it. A
+// plain string (older prompt shape, or the model dropping the key) is kept
+// as an unkeyed sentence. Same hygiene as sanitizeFacts (trim, collapse
+// whitespace, cap length with the tag inside the budget, drop junk, dedupe
+// by factIndex — last wins — and cap the count). Exported for unit testing.
 export function sanitizeSessionFacts(parsed) {
   if (!Array.isArray(parsed)) return [];
   const out = [];
-  const seen = new Set();
+  const slotByIndex = new Map();
   for (const item of parsed) {
-    if (typeof item !== 'string') continue;
-    const fact = item.trim().replace(/\s+/g, ' ').slice(0, MAX_FACT_CHARS);
+    let rawFact;
+    let rawKey;
+    if (typeof item === 'string') rawFact = item;
+    else if (item && typeof item === 'object' && typeof item.fact === 'string') {
+      rawFact = item.fact;
+      rawKey = item.key;
+    } else continue;
+    let key = normalizeKey(rawKey);
+    if (key && !key.startsWith(SESSION_KEY_PREFIX)) key = `${SESSION_KEY_PREFIX}${key}`.slice(0, MAX_KEY_CHARS + SESSION_KEY_PREFIX.length);
+    const tag = key ? `${SESSION_TAG_CATEGORY}|${key}` : '';
+    const framing = tag ? tag.length + 3 : 0;
+    const fact = rawFact.trim().replace(/\s+/g, ' ').slice(0, Math.max(0, MAX_FACT_CHARS - framing));
     if (fact.length < 4) continue;
-    const index = factIndex(fact);
-    if (seen.has(index)) continue;
-    if (out.length >= MAX_SESSION_FACTS) break;
-    seen.add(index);
-    out.push(fact);
+    const rendered = tag ? `[${tag}] ${fact}` : fact;
+    const index = factIndex(rendered);
+    const slot = slotByIndex.get(index);
+    if (slot !== undefined) { out[slot] = rendered; continue; }
+    if (out.length >= MAX_SESSION_FACTS) continue;
+    slotByIndex.set(index, out.length);
+    out.push(rendered);
   }
   return out;
 }
@@ -216,6 +243,18 @@ const SEP = '\\s!.,。、！？?~〜';
 const ACK_LEAD_RE = new RegExp(
   `^(?:${[...GREETING_PATTERNS, ...ACK_PHRASES].join('|')})(?![\\p{L}\\p{N}_])[${SEP}]*`, 'iu');
 const ONLY_SEPARATORS_RE = new RegExp(`^[${SEP}]*$`, 'u');
+const BARE_GREETING_RE = new RegExp(
+  `^(?:${GREETING_PATTERNS.join('|')})(?![\\p{L}\\p{N}_])[${SEP}]*$`, 'iu');
+
+/**
+ * A message that is ONLY a greeting ("hello", "hi there!", "こんにちは").
+ * Acknowledgements are deliberately NOT included: in a running task "ok" or
+ * "yes" can mean "go ahead", which is real work.
+ */
+export function isBareGreeting(message) {
+  const text = typeof message === 'string' ? message.trim() : '';
+  return text.length > 0 && text.length <= 40 && BARE_GREETING_RE.test(text);
+}
 
 // True when the whole (short) message is nothing but chained ack phrases —
 // "thanks", "ok great, that works!", "perfect thank you". Strips leading acks
@@ -263,10 +302,11 @@ function selectExistingForPrompt(existingFacts, userMessage) {
   return rankFactsByRelevance(all, { userMessage }).slice(0, MAX_EXISTING_LISTED);
 }
 
-function buildPrompt({ userMessage, reply, existingFacts }) {
+function buildPrompt({ userMessage, reply, existingFacts, sessionFacts = [] }) {
   const existing = (Array.isArray(existingFacts) ? existingFacts : [])
     .map((f) => `- ${f}`)
     .join('\n') || '(none yet)';
+  const sessionSoFar = sessionFacts.map((f) => `- ${f}`).join('\n') || '(none yet)';
   return [
     'You maintain two memories for a coding assistant:',
     '  1. PROJECT memory — DURABLE facts about the software project, recalled',
@@ -287,6 +327,12 @@ function buildPrompt({ userMessage, reply, existingFacts }) {
     'single sweep", "Plan title is Dead Code Removal; design is saved, plan',
     `not yet written"). At most ${MAX_SESSION_FACTS}; empty when the turn`,
     'settled nothing — a question asked and not yet answered settles nothing.',
+    'Give each session sentence a "key": a short kebab-case id for what it is',
+    'ABOUT ("chosen-approach", "plan-status", "open-question"), not its value.',
+    'If it updates something in THIS CHAT SO FAR, reuse that entry\'s key',
+    '(shown as [state|key]) so the new sentence replaces the old one. If a',
+    'THIS CHAT SO FAR entry is simply no longer true, list it VERBATIM in',
+    '"session_superseded". Do not repeat an entry that is unchanged.',
     '',
     'Rules:',
     '- Exclude anything already in ALREADY KNOWN (do not restate or rephrase it).',
@@ -307,12 +353,16 @@ function buildPrompt({ userMessage, reply, existingFacts }) {
     '  VERBATIM (exactly as written above) in "superseded".',
     '- Output ONLY JSON: {"facts": [{"category": "<category>", "key":',
     '  "<kebab-case-subject>", "fact": "<one concise sentence>"}],',
-    '  "session": ["<one sentence>"],',
-    '  "superseded": ["<verbatim known fact>"]}.',
+    '  "session": [{"key": "<kebab-case-subject>", "fact": "<one sentence>"}],',
+    '  "superseded": ["<verbatim known fact>"],',
+    '  "session_superseded": ["<verbatim THIS CHAT SO FAR entry>"]}.',
     '  Use empty arrays when nothing qualifies.',
     '',
     'ALREADY KNOWN:',
     existing,
+    '',
+    'THIS CHAT SO FAR (session memory, oldest first):',
+    sessionSoFar,
     '',
     'USER MESSAGE:',
     clip(userMessage, MAX_INPUT_CHARS),
@@ -331,8 +381,10 @@ function buildPrompt({ userMessage, reply, existingFacts }) {
 // marked outdated, canonicalised via factKey.
 // `model` (optional) lets the caller extract on the TURN's own provider
 // fast tier — a codex/OpenAI chat must not force an Anthropic call.
-export async function extractMemories({ userMessage, reply, existingFacts, runClaude, userId, meta, model }) {
-  const empty = { facts: [], sessionFacts: [], superseded: [] };
+export async function extractMemories({
+  userMessage, reply, existingFacts, existingSessionFacts, runClaude, userId, meta, model,
+}) {
+  const empty = { facts: [], sessionFacts: [], superseded: [], sessionSuperseded: [] };
   if (typeof runClaude !== 'function') return empty;
   // Local pre-filter: skip the paid summarize-tier call on turns that can't
   // carry a durable fact (empty reply, pure acknowledgments). This runs on
@@ -346,8 +398,12 @@ export async function extractMemories({ userMessage, reply, existingFacts, runCl
   // the "only retire what it was shown" guarantee holds by construction
   // rather than by two slices happening to match.
   const shownFacts = selectExistingForPrompt(existingFacts, userMessage);
+  // The chat's own newest session facts — and, by the same rule, the only
+  // session facts it may retire.
+  const shownSession = (Array.isArray(existingSessionFacts) ? existingSessionFacts : [])
+    .filter((f) => typeof f === 'string' && f).slice(-MAX_SESSION_LISTED);
   try {
-    const prompt = buildPrompt({ userMessage, reply, existingFacts: shownFacts });
+    const prompt = buildPrompt({ userMessage, reply, existingFacts: shownFacts, sessionFacts: shownSession });
     const raw = await runClaude(prompt, {
       userId,
       model: model || EXTRACT_MODEL,
@@ -371,10 +427,13 @@ export async function extractMemories({ userMessage, reply, existingFacts, runCl
       ? parsed.superseded : [];
     const sessionArr = (!Array.isArray(parsed) && parsed && Array.isArray(parsed.session))
       ? parsed.session : [];
+    const sessionSupersededArr = (!Array.isArray(parsed) && parsed && Array.isArray(parsed.session_superseded))
+      ? parsed.session_superseded : [];
     return {
       facts: sanitizeFacts(factsArr),
       sessionFacts: sanitizeSessionFacts(sessionArr),
       superseded: sanitizeSuperseded(supersededArr, shownFacts),
+      sessionSuperseded: sanitizeSuperseded(sessionSupersededArr, shownSession),
     };
   } catch {
     return empty;

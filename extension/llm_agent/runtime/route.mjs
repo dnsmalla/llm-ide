@@ -25,7 +25,7 @@ import { buildDispatch } from '../tools/registry.mjs';
 import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved, providerHasCli, DEFAULT_DEEPSEEK_BASE, DEFAULT_GEMINI_OPENAI_BASE } from '../../providers/providers.mjs';
 import { skillsToOpenAITools } from './openai-tools.mjs';
 import { fastModelFor } from '../../kb/usage.mjs';
-import { classifyCodeAssistMode, MODES, AUTO_READ_ONLY, clampToReadOnly } from './mode-classify.mjs';
+import { classifyCodeAssistMode, MODES, AUTO_READ_ONLY, clampToReadOnly, isAutoContinueTurn } from './mode-classify.mjs';
 import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES, QUESTION_TOOL_NAME } from './mode-personas.mjs';
 import { pipelineSkillIdFor, buildExecuteBinding } from './plan-pipeline.mjs';
 import { buildSessionTaskPromptBlock, taskTurnResponse } from './task-session-context.mjs';
@@ -180,7 +180,11 @@ export async function handleCodeAssist({
   const readOnlyAuto = requestedMode === AUTO_READ_ONLY;
   const canAskCard = clientCanAskCard(clientCaps);
   let resolvedMode;
-  if (requestedMode === 'auto' || readOnlyAuto) {
+  if ((requestedMode === 'auto' || readOnlyAuto)
+      && isAutoContinueTurn(message, userId, resolveChatSessionId(agentContext))) {
+    // An auto-continue round of a task run: execute, without a classifier call.
+    resolvedMode = readOnlyAuto ? clampToReadOnly('execute') : 'execute';
+  } else if (requestedMode === 'auto' || readOnlyAuto) {
     const classified = (await _classifyMode(message, { userId, model: utilityModel })).mode;
     resolvedMode = readOnlyAuto ? clampToReadOnly(classified) : classified;
   } else {
