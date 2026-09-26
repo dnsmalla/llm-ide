@@ -21,6 +21,7 @@ struct AgentSdkSettingsSection: View {
     @State private var resultMessage: String?
     @State private var resultIsError = false
     @State private var resultLog: String?
+    @State private var confirmingUpdate = false
 
     var body: some View {
         SettingsSectionCard(icon: "shippingbox", title: "Claude Agent SDK") {
@@ -86,7 +87,7 @@ struct AgentSdkSettingsSection: View {
                             .controlSize(.small)
                     }
                     if let s = status, s.updateAvailable, let latest = s.latest {
-                        Button("Update to \(latest)") { Task { await update() } }
+                        Button("Update to \(latest)") { confirmingUpdate = true }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
                             .disabled(updating || s.updating || !s.canUpdate)
@@ -95,6 +96,12 @@ struct AgentSdkSettingsSection: View {
             }
         }
         .task { await refresh(force: false) }
+        .confirmationDialog("Update the Claude Agent SDK?", isPresented: $confirmingUpdate) {
+            Button("Update and restart the backend") { Task { await update() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The backend restarts when the update is installed, which stops any chat still running. The update is refused while a chat turn is in progress.")
+        }
     }
 
     private func versionRow(_ label: String, _ value: String?) -> some View {
@@ -133,7 +140,7 @@ struct AgentSdkSettingsSection: View {
                 resultIsError = false
                 resultMessage = "Installed \(r.to ?? "the latest version"). Restarting the backend…"
                 restartBackend()
-                await waitForBackend()
+                await waitForBackend(running: r.to)
                 await refresh(force: false)
                 resultMessage = status?.running == r.to
                     ? "Updated to \(r.to ?? "") — the backend is running it."
@@ -159,11 +166,14 @@ struct AgentSdkSettingsSection: View {
         backend.restart(nodePath: config.backendNodePath, workingDirectory: config.backendWorkingDir)
     }
 
-    /// Up to ~30 s for the restarted backend to answer again.
-    private func waitForBackend() async {
+    /// Up to ~30 s for the restarted backend to report `version` as the one
+    /// it RUNS. Any answer is not enough: the old process can still answer
+    /// while it shuts down, and reporting from it would say "restart needed"
+    /// for a restart that is still under way.
+    private func waitForBackend(running version: String?) async {
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         for _ in 0..<30 {
-            if (try? await api.agentSdkStatus()) != nil { return }
+            if let s = try? await api.agentSdkStatus(), version == nil || s.running == version { return }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
     }

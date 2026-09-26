@@ -33,6 +33,7 @@ import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatM
 import { handleCustomProvidersSync } from '../server/custom-providers.mjs';
 import { listSdkModels } from '../llm_agent/sdk/models.mjs';
 import { sdkStatus, updateSdk } from '../llm_agent/sdk/updater.mjs';
+import { activeTurnCount } from './agent-v2.mjs';
 import { iterateUserMeetings } from '../kb/exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../connectors/email-source.mjs';
@@ -143,9 +144,11 @@ export async function handleKB(req, res) {
       return true;
     }
     if (req.method === 'POST' && url === '/kb/agent-sdk/update') {
+      // Every signed-in user may run it — there is no admin role (product
+      // decision, server/auth.mjs).
       // 200 either way: a failed or rolled-back update is a normal answer the
       // client shows (with its log), not a transport error.
-      sendJSON(res, 200, await updateSdk());
+      sendJSON(res, 200, await updateSdk({ activeTurns: activeTurnCount }));
       return true;
     }
 

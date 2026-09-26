@@ -143,12 +143,30 @@ const smoke = (dir) => run(process.execPath, ['--input-type=module', '-e', SMOKE
 
 let inFlight = null;
 
+/** True while an update (install, smoke check or rollback) is running. */
+export function isSdkUpdating() {
+  return Boolean(inFlight);
+}
+
 /**
  * Install the registry's latest SDK. Resolves (never throws) to
  * { ok, from, to, rolledBack, restartNeeded, log }.
  */
-export function updateSdk({ dir = EXTENSION_DIR, fetchFn, installFn = install, smokeFn = smoke } = {}) {
+export function updateSdk({
+  dir = EXTENSION_DIR, fetchFn, installFn = install, smokeFn = smoke, activeTurns = () => 0,
+} = {}) {
   if (inFlight) return inFlight;
+  // Replacing the package under a running turn would swap its CLI mid-turn,
+  // and the restart that follows an update would kill it. Checked BEFORE
+  // `inFlight` is set, so a refusal never blocks new turns.
+  const running = activeTurns();
+  if (running > 0) {
+    const from = readInstalledVersion(dir);
+    return Promise.resolve({
+      ok: false, from, to: from, rolledBack: false, restartNeeded: false,
+      log: `${running} chat turn${running === 1 ? ' is' : 's are'} running — let ${running === 1 ? 'it' : 'them'} finish (or stop ${running === 1 ? 'it' : 'them'}), then update.`,
+    });
+  }
   inFlight = (async () => {
     const from = readInstalledVersion(dir);
     const allowed = updateAllowed();

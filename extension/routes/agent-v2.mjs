@@ -31,6 +31,7 @@ import {
   deleteAgentSession,
 } from '../kb/agent-sessions.mjs';
 import { recordUsage } from '../kb/usage.mjs';
+import { isSdkUpdating } from '../llm_agent/sdk/updater.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
 
 // Mirrors buildEngineOptions' mode default so the mode_set echo reports
@@ -61,6 +62,11 @@ function expandUserSlashCommand(message, userId) {
 // a second request for a key already running is rejected fast, before any
 // session-row or engine work, rather than raced.
 const inFlightChatSessions = new Set();
+
+/** Chat turns running right now — an SDK update refuses to start while any are. */
+export function activeTurnCount() {
+  return inFlightChatSessions.size;
+}
 
 function chatSessionLockKey(userId, chatSessionId) {
   return `${userId}:${chatSessionId}`;
@@ -187,6 +193,14 @@ async function handleV2Stream(req, res, userId, deps) {
   const workspaceRoot = typeof agentContext.workspaceRoot === 'string' ? agentContext.workspaceRoot : '';
   if (!workspaceRoot) {
     sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'agentContext.workspaceRoot is required' } });
+    return true;
+  }
+  // While Settings → Claude Agent SDK is installing a new version, the
+  // package on disk is being replaced: a turn started now would launch its
+  // CLI from a half-installed (or newer) package under this process's old
+  // SDK code. Refused plainly instead; the update is minutes at most.
+  if (isSdkUpdating()) {
+    sendJSON(res, 503, { error: { code: 'SDK_UPDATING', message: 'The Claude Agent SDK is being updated — try again in a moment.' } });
     return true;
   }
 

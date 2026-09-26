@@ -95,3 +95,30 @@ test('the registry answer must be a real version', async () => {
   await assert.rejects(fetchLatestVersion({ force: true, fetchFn: async () => ({ ok: true, json: async () => ({ latest: '1.0.0; rm -rf /' }) }) }), /no usable latest/);
   await assert.rejects(fetchLatestVersion({ force: true, fetchFn: async () => ({ ok: false, status: 503 }) }), /503/);
 });
+
+// Replacing the package under a running turn swaps its CLI mid-turn, and the
+// restart after an update kills it — so an update waits for running turns,
+// and turns are refused while an update runs.
+test('an update refuses to start while chat turns are running, without blocking new turns', async () => {
+  const { isSdkUpdating } = await import('../llm_agent/sdk/updater.mjs');
+  const dir = checkout('0.3.272');
+  const calls = [];
+  const r = await updateSdk({ dir, fetchFn: registry('0.3.283'), installFn: fakeInstall(calls), smokeFn: async () => ({ ok: true }), activeTurns: () => 2 });
+  assert.deepEqual(calls, []);
+  assert.equal(r.ok, false);
+  assert.match(r.log, /2 chat turns are running/);
+  assert.equal(isSdkUpdating(), false, 'a refusal leaves turns free to start');
+});
+
+test('isSdkUpdating is true for exactly the length of an update', async () => {
+  const { isSdkUpdating } = await import('../llm_agent/sdk/updater.mjs');
+  const dir = checkout('0.3.272');
+  let release;
+  const slow = async (v, d) => { await new Promise((r) => { release = r; }); return fakeInstall([])(v, d); };
+  const p = updateSdk({ dir, fetchFn: registry('0.3.283'), installFn: slow, smokeFn: async () => ({ ok: true }) });
+  assert.equal(isSdkUpdating(), true);
+  while (!release) await new Promise((r) => setImmediate(r));
+  release();
+  await p;
+  assert.equal(isSdkUpdating(), false);
+});

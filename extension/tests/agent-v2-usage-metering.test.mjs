@@ -147,3 +147,36 @@ test('a turn emits exactly one usage event, with the metered totals, before the 
   assert.equal(usage[0].cacheReadTokens, 1000, 'one API response, counted once');
   assert.ok(events.findIndex((e) => e.type === 'usage') < events.findIndex((e) => e.type === 'result'));
 });
+
+test('a turn that fails after real work still reports the usage it spent', async () => {
+  const events = [];
+  const failing = () => (async function* () {
+    yield { type: 'system', subtype: 'init', session_id: 'sdk-fail', tools: [], capabilities: [] };
+    yield { type: 'stream_event', session_id: 'sdk-fail', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'working' } } };
+    yield { type: 'assistant', session_id: 'sdk-fail', message: { id: 'msg_f', content: [], usage: { input_tokens: 4, output_tokens: 7, cache_read_input_tokens: 500, cache_creation_input_tokens: 50 } } };
+    throw new Error('boom mid-turn');
+  })();
+  await assert.rejects(runAgentV2Turn({
+    message: 'hi', userId: 'u-meter', mode: 'execute', agentContext: { workspaceRoot: process.cwd() },
+    allowAmbientAuth: true, onEvent: (e) => events.push(e), queryFactory: failing,
+  }, { readSkill: () => null, roots: () => [], sessionMemory: () => [], persistMemory: async () => null }), /boom/);
+  const usage = events.filter((e) => e.type === 'usage');
+  assert.equal(usage.length, 1);
+  assert.equal(usage[0].cacheReadTokens, 500);
+});
+
+test('usage snapshots without a message id count as one response, not one each', async () => {
+  const events = [];
+  const noIds = () => (async function* () {
+    yield { type: 'system', subtype: 'init', session_id: 'sdk-noid', tools: [], capabilities: [] };
+    for (let i = 0; i < 3; i++) {
+      yield { type: 'assistant', session_id: 'sdk-noid', message: { content: [], usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 900, cache_creation_input_tokens: 0 } } };
+    }
+    yield { type: 'result', subtype: 'success', session_id: 'sdk-noid' };
+  })();
+  const { usageTotals } = await runAgentV2Turn({
+    message: 'hi', userId: 'u-meter', mode: 'execute', agentContext: { workspaceRoot: process.cwd() },
+    allowAmbientAuth: true, onEvent: (e) => events.push(e), queryFactory: noIds,
+  }, { readSkill: () => null, roots: () => [], sessionMemory: () => [], persistMemory: async () => null });
+  assert.equal(usageTotals.cacheReadTokens, 900);
+});

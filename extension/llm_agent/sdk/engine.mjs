@@ -1468,6 +1468,21 @@ export async function runAgentV2Turn(
   };
   // messageId → that API response's largest usage snapshot (fallback only).
   const streamedUsage = new Map();
+  // The client gets ONE usage event per turn (see the result branch). A turn
+  // that never reaches its result — the user stopped it, or it failed after
+  // real work — still spent tokens, so it reports what streamed (finally).
+  let usageEmitted = false;
+  const emitTurnUsage = () => {
+    if (usageEmitted) return;
+    usageEmitted = true;
+    onEvent?.({
+      type: 'usage',
+      inputTokens: usageTotals.inputTokens,
+      outputTokens: usageTotals.outputTokens,
+      cacheReadTokens: usageTotals.cacheReadTokens,
+      cacheCreationTokens: usageTotals.cacheCreationTokens,
+    });
+  };
   let result = null;
   let replyText = '';
   // Whether the turn got past resuming into real work (text streamed, a tool
@@ -1496,7 +1511,11 @@ export async function runAgentV2Turn(
           // API response, keeping the largest snapshot of each field — the
           // blocks of one response repeat its usage, and output grows as it
           // streams.
-          const id = ev.messageId || `anon-${streamedUsage.size}`;
+          // A snapshot with no message id cannot be told apart from the other
+          // blocks of its response, so all such snapshots are ONE entry
+          // (largest of each field) — counting each as its own response was
+          // the ~3× over-count this dedupe exists to remove.
+          const id = ev.messageId || 'no-message-id';
           const prev = streamedUsage.get(id);
           streamedUsage.set(id, prev ? {
             inputTokens: Math.max(prev.inputTokens, ev.inputTokens),
@@ -1541,13 +1560,7 @@ export async function runAgentV2Turn(
           // the SDK's per-content-block snapshots made the chat's token
           // footnote count each API response ~3× (and, since SDK 0.3.277,
           // nothing on the wire said what this turn alone cost).
-          onEvent?.({
-            type: 'usage',
-            inputTokens: usageTotals.inputTokens,
-            outputTokens: usageTotals.outputTokens,
-            cacheReadTokens: usageTotals.cacheReadTokens,
-            cacheCreationTokens: usageTotals.cacheCreationTokens,
-          });
+          emitTurnUsage();
         }
         // Per-block usage snapshots stay server-side (see the result branch).
         if (ev.type !== 'usage') onEvent?.(ev);
@@ -1582,6 +1595,9 @@ export async function runAgentV2Turn(
     throw err;
   } finally {
     recordDelivery();
+    if (!usageEmitted && streamedUsage.size > 0) {
+      try { emitTurnUsage(); } catch { /* the stream may already be gone */ }
+    }
   }
   // Auto project/session-memory capture — the v2 parity for the legacy
   // loop's persistTurnMemory call (llm_agent/runtime/route.mjs): distills

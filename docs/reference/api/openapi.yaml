@@ -1957,7 +1957,8 @@ paths:
       description: >
         Runs `npm install @anthropic-ai/claude-agent-sdk@<latest> --save-exact`, then loads the new package in a
         separate process; if either fails the previous version is reinstalled. Never restarts the backend — the client
-        does. One update at a time; refused while remote access is on unless LLMIDE_ALLOW_SDK_UPDATE=1.
+        does. One update at a time; refused while a chat turn is running, and /agent/v2/stream answers 503
+        SDK_UPDATING while it runs; refused while remote access is on unless LLMIDE_ALLOW_SDK_UPDATE=1.
       responses:
         '200':
           description: Always 200; `ok` says whether it updated
