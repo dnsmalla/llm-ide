@@ -191,7 +191,13 @@ export function buildLlmIdeServer(userId, agentContext, currentMessage, {
             outcome,
           });
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+        // A result that is only `{ text }` goes out as that text: JSON-
+        // escaping a prose block (newlines → \n, quotes → \") made it longer
+        // and harder to read, and it stays in the transcript. Structured
+        // results keep their JSON.
+        const onlyText = result && typeof result === 'object' && !Array.isArray(result)
+          && typeof result.text === 'string' && Object.keys(result).length === 1;
+        return { content: [{ type: 'text', text: onlyText ? result.text : JSON.stringify(result) }] };
       },
       // readOnlyHint must tell the TRUTH per entry: MCP hosts use it to decide
       // whether a call needs approval at all, so hardcoding `true` for

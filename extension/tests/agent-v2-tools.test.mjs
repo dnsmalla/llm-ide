@@ -124,6 +124,33 @@ test('project_memory tool: registered, alwaysLoad, wires (agentContext, userId, 
   }
 });
 
+test('project_memory tool: asks the renderer for a tool-sized budget and returns plain text', async () => {
+  const { registerUser } = await import('../server/users.mjs');
+  const { getDb } = await import('../kb/db.mjs');
+  const u = registerUser(getDb(), { email: 'v2tools-mem-budget@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
+  const { PROJECT_MEMORY_TOOL_CHARS } = await import('../llm_agent/runtime/handlers/project-memory.mjs');
+  let opts = null;
+  const server = buildLlmIdeServer(u.id, { workspaceRoot: WS }, 'q', {
+    renderMemory: (ctx, userId, stats, focus, o) => { opts = o; return 'line one\nline "two"'; },
+  });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.instance.connect(serverTransport);
+  const client = new Client({ name: 'test-client', version: '0.0.0' });
+  await client.connect(clientTransport);
+  try {
+    const out = await client.callTool({ name: 'project_memory', arguments: {} });
+    // The result stays in the transcript: a quarter of the always-on budget.
+    assert.deepEqual(opts, { totalChars: PROJECT_MEMORY_TOOL_CHARS });
+    assert.ok(PROJECT_MEMORY_TOOL_CHARS <= 10_000);
+    // Prose goes out as prose, not as a JSON-escaped {"text": "..."} string.
+    assert.equal(out.content[0].text, 'line one\nline "two"');
+  } finally {
+    await client.close();
+    await server.instance.close();
+  }
+});
+
 test('project_memory tool: empty memory returns a plain "not generated yet" note, not an error', async () => {
   const { registerUser } = await import('../server/users.mjs');
   const { getDb } = await import('../kb/db.mjs');

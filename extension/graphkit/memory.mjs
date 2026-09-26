@@ -463,7 +463,12 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) 
   return `${header}\n\n${parts.join('\n\n')}`;
 }
 
-export function renderGraphifyMemory(agentContext, userId, stats, userMessage = '') {
+// `totalChars` (optional) lowers the overall budget for one call — the
+// project_memory TOOL passes a smaller one than the always-on injection,
+// because its result stays in the chat transcript for every later turn.
+// The per-repo blocks fill by priority, so a smaller budget keeps the
+// highest-signal parts (hand-authored repo facts, relevant chat facts).
+export function renderGraphifyMemory(agentContext, userId, stats, userMessage = '', { totalChars = TOTAL_CHARS } = {}) {
   if (!userId) return '';   // no anonymous reads
   const indexed = Array.isArray(agentContext?.indexedRepos) ? agentContext.indexedRepos : [];
   const wsRoot = agentContext?.workspaceRoot;
@@ -495,7 +500,7 @@ export function renderGraphifyMemory(agentContext, userId, stats, userMessage = 
   const blocks = [];
   let totalUsed = 0;
   for (const repo of candidates) {
-    const remaining = TOTAL_CHARS - totalUsed;
+    const remaining = Math.min(TOTAL_CHARS, totalChars) - totalUsed;
     if (remaining <= 500) break;
     const block = repoMemoryBlock(repo, remaining, allowedRoots, stats, userMessage);
     if (block) {
