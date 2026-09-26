@@ -435,6 +435,20 @@ Run through this against a real meeting before merging:
 - **Do NOT offer or honour a tool-wide `SandboxNetworkAccess` rule** — it would open every host to every sandboxed command.
 - **Do NOT honour the pre-0034 `tool_approvals` rows** — they are global and listed only so they can be removed.
 
+## Agent-engine prompt cache + metering (`extension/llm_agent/sdk/{engine,turn-context}.mjs`, `routes/agent-v2.mjs`)
+
+### ✅ MUST preserve
+
+- **The system prompt is stable for a chat's mode.** The cache is a prefix cache in the order tools → system → messages, and a v2 chat resumes one SDK session, so a change anywhere in the system prompt invalidates the whole cached transcript behind it. Only language, system context (without recent issues/meetings), personas, guidance and the pipeline skill live there.
+- **Per-turn context rides in the user message, fenced as `<<<LLMIDE_CONTEXT>>>`**: invoked skills, recent issues/meetings, session-memory facts, the task list, attachments. Each is sent only when the SDK session has not seen it (`turn-context.mjs`); the record is written only after the model received the turn, and forgotten on a compaction.
+- **Token totals come from `result.modelUsage`.** Streamed, each content block is its own `assistant` message carrying the same usage snapshot; summing them counted cache reads ~3× over and output only partially (a real turn: 126 metered vs 21,029 actual output tokens). One ledger row per model; non-main models are `/agent/v2/stream:internal`.
+- **The `claude -p` fallback asks for `--output-format json`** so its calls (mode classifier, memory extraction, nested hops) are metered with tokens, not as bare runs.
+
+### ❌ DO NOT do these
+
+- **Do NOT append anything that changes between turns to `systemPrompt.append`** — not session memory, tasks, issues, attachments or timestamps. Put it in the turn's context block.
+- **Do NOT re-send an already-delivered attachment or fact in the message** — unlike the system prompt, the message stays in the transcript, so repeats stack up (auto-continue re-sends attachments up to 8 times).
+
 ## Shell execution (`mac/Sources/LlmIdeMac/Core/Platform/BashService.swift`)
 
 ### ✅ MUST preserve

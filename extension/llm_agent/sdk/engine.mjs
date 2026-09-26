@@ -22,8 +22,9 @@
 // being hand-copied in two places.
 //
 // Memory parity with the legacy loop: DB-backed session memory
-// (kb/session-memory.mjs) is read into the system prompt here (always-on,
-// same framing as legacy) and written back by runAgentV2Turn via
+// (kb/session-memory.mjs) is read here and delivered in the turn's message
+// (same framing as legacy; only facts the SDK session has not seen — see
+// ./turn-context.mjs) and written back by runAgentV2Turn via
 // persistTurnMemory, fire-and-forget, after each turn. Project memory
 // (Graphify, graphkit/memory.mjs) is deliberately NOT injected the same
 // way — it's exposed as a callable tool (project_memory, ./tools.mjs)
@@ -42,7 +43,8 @@ import {
   readSkillInstructions, buildPerUserSkillSet, internalSkills, pluginEnabledFor,
   buildUserPluginDelivery,
 } from '../skills/index.mjs';
-import { composeSystemContext } from '../internal/context/compose.mjs';
+import { composeSystemContext, composeRecentContext } from '../internal/context/compose.mjs';
+import { contentHash, emptyDelivered, deliveredFor, commitDelivered, forgetDelivered } from './turn-context.mjs';
 import { buildSessionTaskPromptBlock } from '../runtime/task-session-context.mjs';
 import { V2_EXECUTE_GUIDANCE, V2_QUESTION_GUIDANCE } from '../runtime/execute-guidance.mjs';
 import { buildReadableRoots, buildTrustedRoots, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
@@ -418,21 +420,26 @@ const MAX_PROMPT_CHARS = 120_000;
  *   queryOptions.permissionMode     — 'plan' for plan-like modes (with
  *                                     planModeInstructions = the mode
  *                                     persona), else 'default'
- *   queryOptions.systemPrompt       — preset claude_code + append (language
- *                                     directive, mode persona, skill blocks,
- *                                     session-memory facts, fenced
- *                                     attachments). Project memory (Graphify)
- *                                     is deliberately NOT here — it's a v2
- *                                     TOOL (project_memory, tools.mjs), not
- *                                     always-on injection; see that module.
- *   prompt                          — the user message, sanitized, 20k cap
+ *   queryOptions.systemPrompt       — preset claude_code + append: only what
+ *                                     is stable for the chat's mode (language
+ *                                     directive, system context, personas,
+ *                                     pipeline skill). Project memory
+ *                                     (Graphify) is deliberately NOT here —
+ *                                     it's a v2 TOOL (project_memory).
+ *   prompt                          — the user message, sanitized, 120k cap,
+ *                                     preceded by this turn's fenced context
+ *                                     (invoked skills, recent issues, new
+ *                                     session-memory facts, task list,
+ *                                     attachments) — only what `delivered`
+ *                                     says the SDK session lacks
  *   meta                            — { mode, model, truncatedPaths,
- *                                     sessionMemory: { facts, chars } } for the
+ *                                     sessionMemory: { facts, chars },
+ *                                     delivered } for the
  *                                     runner (session bookkeeping + notices +
  *                                     the client's memory footnote)
  */
 export function buildEngineOptions(
-  { userId, mode, model, language, message, skills, agentContext, attachments, planExecute, planWrite } = {},
+  { userId, mode, model, language, message, skills, agentContext, attachments, planExecute, planWrite, delivered } = {},
   {
     readSkill = readSkillInstructions,
     roots = buildReadableRoots,
@@ -513,7 +520,9 @@ export function buildEngineOptions(
   // Without this the agent doesn't know the chat is bound to a GitLab
   // project or what "Auto Tasks" means here, and answers like vanilla
   // Claude Code (checks git, reaches for harness cron tools).
-  appendParts.push(composeSystemContext(agentContext, userId, message, { memory: false }));
+  // Recent issues/meetings are left out here (`recent: false`) — they change
+  // mid-chat and ride in the turn's message instead; see below.
+  appendParts.push(composeSystemContext(agentContext, userId, message, { memory: false, recent: false }));
   if (persona) appendParts.push(persona);
   if (resolvedMode === 'execute') appendParts.push(V2_EXECUTE_GUIDANCE);
   // Plan modes get the same rule from their binding (QUESTION_CLAUSE_AGENT).
@@ -538,22 +547,40 @@ export function buildEngineOptions(
   // skill applies WITHIN that process (same order as the legacy engine's
   // composedUserMessage).
   if (pipelineSkillsText) appendParts.push(pipelineSkillsText);
+  // --- The turn's own context (rides in the user message) ------------------
+  //
+  // Everything below changes between turns. It used to be appended to the
+  // system prompt, which the cache orders BEFORE the resumed transcript — so
+  // any change here invalidated the cached history behind it and a long chat
+  // re-wrote its whole transcript into the cache on most turns. It now goes
+  // at the front of this turn's user message, and only what the SDK session
+  // has not seen yet is sent (see llm_agent/sdk/turn-context.mjs): the
+  // transcript already carries the rest.
+  const prev = delivered ?? null;
+  const next = prev
+    ? { ...prev, facts: [...prev.facts], attachments: [...prev.attachments], images: [...prev.images] }
+    : emptyDelivered();
+  const contextParts = [];
+  // A user-invoked skill applies to THIS message — the transcript keeps it for
+  // later turns. After the pipeline skill (system prompt), as before.
   const skillsText = buildSkillsText(skills, userId, readSkill);
-  if (skillsText) appendParts.push(skillsText);
+  if (skillsText) contextParts.push(skillsText);
+  // Recent issues + meetings: resent only when the list changed.
+  const recentText = composeRecentContext(agentContext);
+  const recentHash = recentText ? contentHash(recentText) : null;
+  if (recentText && recentHash !== next.recentHash) {
+    contextParts.push(prev?.recentHash ? `${recentText}\n\n(Updated since your last view of this list.)` : recentText);
+  }
+  next.recentHash = recentHash;
   // Session memory (kb/session-memory.mjs): facts extracted from THIS chat's
   // own prior turns — a real DB-backed record, not the SDK's own resumed-
   // session continuity (which only covers turn text, not distilled facts,
-  // and disappears if the SDK session is ever unresumable/reset). Mirrors
-  // the legacy loop's exact framing (llm_agent/runtime/route.mjs) so recall
-  // reads identically across engines. redactFence for the same reason
-  // legacy applies it: the facts are extracted from prior user/assistant
-  // turns, which can carry untrusted text.
-  // Counted for the client's memory footnote (the Mac's brain button): the
-  // legacy route reports memoryChars/approxTokens on its result, and until
-  // this engine did too, every Agent-engine turn read as "0 — no memory
-  // injected" even when this block was in the prompt.
-  // Volatile too (it grows as the chat teaches it things), hence its place
-  // below the skills — see the ordering note further down.
+  // and disappears if the SDK session is ever unresumable/reset). Only facts
+  // this SDK session has not been given yet are sent; on a fresh session
+  // (new chat, or one that could not be resumed) that is all of them, which
+  // is exactly when they matter. redactFence for the same reason legacy
+  // applies it: the facts come from prior turns, which can carry untrusted
+  // text. Counted for the client's memory footnote (the Mac's brain button).
   let sessionMemoryFacts = 0;
   let sessionMemoryChars = 0;
   try {
@@ -561,42 +588,67 @@ export function buildEngineOptions(
     if (chatSessionId && userId) {
       const allFacts = sessionMemory(userId, chatSessionId);
       const sessionFacts = capSessionMemory(allFacts);
-      if (sessionFacts.length > 0) {
-        const block = redactFence(`## This session's memory\n${sessionFacts.map((f) => `- ${f}`).join('\n')}`);
-        appendParts.push(block);
-        sessionMemoryFacts = sessionFacts.length;
+      const seen = new Set(next.facts);
+      const fresh = sessionFacts.filter((f) => !seen.has(contentHash(f)));
+      if (fresh.length > 0) {
+        const heading = prev?.facts.length ? "## This session's memory (new since last turn)" : "## This session's memory";
+        const block = redactFence(`${heading}\n${fresh.map((f) => `- ${f}`).join('\n')}`);
+        contextParts.push(block);
+        for (const f of fresh) next.facts.push(contentHash(f));
+        sessionMemoryFacts = fresh.length;
         sessionMemoryChars = block.length;
       }
     }
-  } catch { /* memory is best-effort — keep the base without it */ }
-  // --- Volatile blocks go last -------------------------------------------
-  //
-  // Everything above is stable for the life of a chat in a given mode; from
-  // here down the content changes between turns. The order is not cosmetic:
-  // the system prompt is re-sent every turn and only the identical PREFIX
-  // can be a cache hit, so anything that changes invalidates every byte
-  // after it.
-  //
-  // The task list used to sit immediately BEFORE the pipeline skill, which
-  // is the single largest block in the prompt (up to
-  // MAX_PIPELINE_SKILL_CHARS). Measured on an execute-plan turn: one
-  // `task-update` dropped the identical prefix from 36.1KB to 4.4KB, so
-  // 31.7KB — the whole skill — was re-sent as fresh input on every task
-  // transition. A 7-step plan does that a dozen-plus times per run.
-  // `buildSessionTaskPromptBlock` also embeds a per-task guidance skill
-  // chosen from the ACTIVE task's title, so the block does not merely
-  // change, it swaps a skill in and out as work progresses — all the more
-  // reason for it to sit below anything stable.
-  const taskBlock = buildSessionTaskPromptBlock(userId, agentContext, resolvedMode);
-  if (taskBlock) appendParts.push(taskBlock.trimStart());
-  const attachmentsText = buildAttachmentsText(files);
-  if (attachmentsText) appendParts.push(attachmentsText);
+  } catch { /* memory is best-effort — keep the turn without it */ }
+  // The session task list: resent only when it changed. It also embeds a
+  // per-task guidance skill chosen from the ACTIVE task, so it changes as
+  // work progresses.
+  // Fence-neutralised: task titles come from the model and the user.
+  const taskBlock = redactFence(buildSessionTaskPromptBlock(userId, agentContext, resolvedMode)?.trim() || '');
+  const taskHash = taskBlock ? contentHash(taskBlock) : null;
+  if (taskBlock && taskHash !== next.taskHash) contextParts.push(taskBlock);
+  else if (!taskBlock && next.taskHash) contextParts.push('## Your current task list\n(The task list is now empty.)');
+  next.taskHash = taskHash;
+  // Attachments: each file's content is sent once per SDK session. The Mac
+  // re-sends a turn's attachments on every auto-continue round; in the
+  // system prompt that re-billed them, in the message it would stack copies
+  // in the transcript. A repeat is named, not re-sent.
+  const seenAttachments = new Set(next.attachments);
+  const newFiles = [];
+  const repeatedPaths = [];
+  for (const f of files) {
+    const h = contentHash(`${f.path}\u0000${f.content}`);
+    if (seenAttachments.has(h)) { repeatedPaths.push(f.path); continue; }
+    newFiles.push(f);
+    next.attachments.push(h);
+    seenAttachments.add(h);
+  }
+  const attachmentsText = buildAttachmentsText(newFiles);
+  if (attachmentsText) contextParts.push(attachmentsText.trimEnd());
+  if (repeatedPaths.length) {
+    contextParts.push(`# Attached files already sent earlier in this chat (unchanged)\n${repeatedPaths.map((p) => `- ${p}`).join('\n')}`);
+  }
+  // Images: same rule — a repeat is not sent again as a block.
+  const seenImages = new Set(next.images);
+  const newImages = [];
+  const repeatedImages = [];
+  for (const img of images) {
+    const h = contentHash(img.data);
+    if (seenImages.has(h)) { repeatedImages.push(img.path); continue; }
+    newImages.push(img);
+    next.images.push(h);
+    seenImages.add(h);
+  }
   // Name the images. The blocks themselves carry no filename, so without this
   // the model can describe what it sees but cannot say WHICH attachment it is
   // — and a turn with two screenshots becomes unanswerable ("the first one").
-  const imagesText = buildImagesText(images, droppedImages);
-  if (imagesText) appendParts.push(imagesText);
-
+  const imagesText = buildImagesText(newImages, droppedImages);
+  if (imagesText) contextParts.push(imagesText.trimEnd());
+  if (repeatedImages.length) {
+    contextParts.push(`# Attached images already sent earlier in this chat (unchanged)\n${repeatedImages.map((p) => `- ${p}`).join('\n')}`);
+  }
+  // Bounded: a very long chat must not carry an ever-growing hash list.
+  for (const key of ['facts', 'attachments', 'images']) next[key] = next[key].slice(-400);
   const queryOptions = {
     // Live token + tool-args deltas — the stream a chat UI needs.
     includePartialMessages: true,
@@ -619,10 +671,10 @@ export function buildEngineOptions(
     tools,
     // `snapshot: false` — the SDK's default flipped to `snapshot: true` (record
     // the append on the session's first request, reuse it verbatim on every
-    // later turn until compaction) in 0.3.267+. The "Volatile blocks" comment
-    // above exists precisely because this append is meant to change every
-    // turn within one resumed session (task list, attachments, memory facts);
-    // recording it would silently freeze all of that at turn one.
+    // later turn until compaction) in 0.3.267+. The append no longer carries
+    // per-turn content (that rides in the message), but it still follows the
+    // chat's MODE — persona, pipeline stage skill — and a mode switch within
+    // one resumed session must reach the model, which a snapshot would freeze.
     systemPrompt: { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n'), snapshot: false },
     ...(typeof model === 'string' && model ? { model } : {}),
   };
@@ -646,16 +698,16 @@ export function buildEngineOptions(
     // In-band rather than a wire event
     // because there is no `notice` event on this protocol and the Mac decoder
     // ignores event types it does not know, so a new type would be inert.
-    prompt: promptTruncatedChars
+    prompt: withTurnContext(contextParts, promptTruncatedChars
       ? `${safeMessage.slice(0, MAX_PROMPT_CHARS)}\n\n<<<LLMIDE_NOTICE>>>\n`
         + `The message above was cut off by llm-ide: ${safeMessage.length} characters were sent, `
         + `${MAX_PROMPT_CHARS} kept, ${promptTruncatedChars} missing from the end. `
         + `Tell the user this happened if the missing part could change your answer.\n<<<LLMIDE_NOTICE_END>>>`
-      : safeMessage,
+      : safeMessage),
     // The images this turn carries, for the runner to send as content blocks.
     // Deliberately NOT folded into `prompt`: an image is a block, and the only
     // way to get one to the model is the structured message shape.
-    images,
+    images: newImages,
     meta: {
       mode: resolvedMode,
       model: typeof model === 'string' && model ? model : null,
@@ -664,8 +716,23 @@ export function buildEngineOptions(
       images: images.length,
       droppedImages,
       sessionMemory: { facts: sessionMemoryFacts, chars: sessionMemoryChars },
+      // What the SDK session will have seen once this turn is delivered — the
+      // runner commits it under the session id (turn-context.mjs).
+      delivered: next,
     },
   };
+}
+
+// The turn's context blocks ahead of what the user typed, fenced so the model
+// can tell app-supplied context from the user's words. The user's message
+// went through neutralizePromptFences, so it cannot close this fence; the
+// app-derived blocks (issues, memory, tasks, attachment bodies) are
+// neutralised too.
+function withTurnContext(parts, userText) {
+  if (!parts.length) return userText;
+  return '<<<LLMIDE_CONTEXT>>>\n'
+    + 'Context from the LLM-IDE app for this turn (not typed by the user):\n\n'
+    + `${parts.join('\n\n')}\n<<<LLMIDE_CONTEXT_END>>>\n\n${userText}`;
 }
 
 /**
@@ -1195,7 +1262,12 @@ export async function runAgentV2Turn(
   };
 
   const { queryOptions, prompt, images, meta } = buildEngineOptions(
-    { userId, mode, model, language, message, skills, agentContext, attachments, planExecute, planWrite },
+    {
+      userId, mode, model, language, message, skills, agentContext, attachments, planExecute, planWrite,
+      // What this SDK session already holds; null on a fresh session, so
+      // everything is delivered once.
+      delivered: deliveredFor(resume),
+    },
     { readSkill, roots, sessionMemory },
   );
   // `meta` was computed and dropped on the floor here, so a truncated prompt
@@ -1357,9 +1429,19 @@ export async function runAgentV2Turn(
   // started or returned). Only a failure BEFORE that is a failed resume —
   // see the catch below.
   let progressed = false;
+  // A compaction summarises the transcript, and the context blocks earlier
+  // turns delivered may not survive it — forget them so the next turn
+  // re-delivers (turn-context.mjs).
+  let compacted = false;
+  const recordDelivery = () => {
+    if (!progressed || !currentSdkSessionId) return;
+    if (compacted) { forgetDelivered(currentSdkSessionId); forgetDelivered(resume); return; }
+    commitDelivered(currentSdkSessionId, meta.delivered, { previousSdkSessionId: resume });
+  };
   try {
     for await (const msg of q) {
       if (msg?.session_id) currentSdkSessionId = msg.session_id;
+      if (msg?.type === 'system' && msg?.subtype === 'compact_boundary') compacted = true;
       for (const ev of mapSdkMessage(msg)) {
         if (TURN_PROGRESS_EVENTS.has(ev.type)) progressed = true;
         if (ev.type === 'delta' && typeof ev.text === 'string') {
@@ -1420,6 +1502,8 @@ export async function runAgentV2Turn(
       );
     }
     throw err;
+  } finally {
+    recordDelivery();
   }
   // Auto project/session-memory capture — the v2 parity for the legacy
   // loop's persistTurnMemory call (llm_agent/runtime/route.mjs): distills
