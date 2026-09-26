@@ -1646,19 +1646,19 @@ test('llmide tool server receives agentContext + message so project_memory can u
 // ask-subagent's runClaude/userSkills/userSubagents/internalSkills wiring)
 // lives in tests/agent-v2-tools.test.mjs — this test only pins that the v2
 // engine's allowlist + mcpServers composition actually reach a working tool.
-test('stream: a turn that calls mcp__llmide__list-files succeeds (v2 read-tool parity)',
+test('stream: a turn that calls mcp__llmide__find-code succeeds (v2 read-tool parity)',
   withAnthropicKey('sk-ant-v2-test', async () => {
     const script = { messages: [
-      { type: 'system', subtype: 'init', session_id: 's1', tools: ['mcp__llmide__list-files'], mcp_servers: [] },
+      { type: 'system', subtype: 'init', session_id: 's1', tools: ['mcp__llmide__find-code'], mcp_servers: [] },
       {
         type: 'assistant',
-        message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__llmide__list-files', input: {} }] },
+        message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__llmide__find-code', input: { query: 'server' } }] },
       },
       { type: 'result', subtype: 'success', total_cost_usd: 0, num_turns: 1, duration_ms: 1, session_id: 's1' },
     ] };
     const events = [];
     const { result } = await runAgentV2Turn({
-      message: 'list the files here', userId: 'u1', mode: 'execute',
+      message: 'where is the server', userId: 'u1', mode: 'execute',
       agentContext: { workspaceRoot: __dirname },
       onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
     }, turnInjectable);
@@ -1666,8 +1666,8 @@ test('stream: a turn that calls mcp__llmide__list-files succeeds (v2 read-tool p
     // The scripted tool_use name must actually be in the allowlist the SDK
     // enforces — this is the concrete regression the wildcard removal risks.
     assert.ok(
-      script.options.allowedTools.includes('mcp__llmide__list-files'),
-      'mcp__llmide__list-files must be explicitly named in V2_ALLOWED_TOOLS',
+      script.options.allowedTools.includes('mcp__llmide__find-code'),
+      'mcp__llmide__find-code must be explicitly named in V2_ALLOWED_TOOLS',
     );
     // Mounting doesn't throw and the scripted 'result' terminates the stream.
     assert.equal(result.subtype, 'success');
@@ -1680,10 +1680,10 @@ test('stream: a turn that calls mcp__llmide__list-files succeeds (v2 read-tool p
     const client = new Client({ name: 'test-client', version: '0.0.0' });
     await client.connect(clientTransport);
     try {
-      const out = await client.callTool({ name: 'list-files', arguments: {} });
-      assert.ok(!out.isError, `list-files call failed: ${JSON.stringify(out)}`);
+      const out = await client.callTool({ name: 'find-code', arguments: { query: 'server' } });
+      assert.ok(!out.isError, `find-code call failed: ${JSON.stringify(out)}`);
       const parsed = JSON.parse(out.content[0].text);
-      assert.ok(Array.isArray(parsed.files), 'list-files actually ran against the workspace root');
+      assert.equal(typeof parsed, 'object', 'find-code actually ran and returned a result');
     } finally {
       await client.close();
       await server.instance.close();

@@ -169,7 +169,7 @@ test('project_memory tool: fence sentinels in the rendered memory are redacted b
   }
 });
 
-test('list-files is mounted on the llmide MCP server and enforces readable-roots', async () => {
+test('the llmide MCP server mounts the domain tools and skips native duplicates', async () => {
   const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
   const server = buildLlmIdeServer('some-user-id', { workspaceRoot: __dirname });
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
@@ -179,7 +179,10 @@ test('list-files is mounted on the llmide MCP server and enforces readable-roots
   await Promise.all([client.connect(clientTransport), server.instance.connect(serverTransport)]);
   const tools = await client.listTools();
   const names = tools.tools.map((t) => t.name);
-  assert.ok(names.includes('list-files'), `expected list-files among ${names.join(', ')}`);
+  // Glob/Read/WebSearch/WebFetch built-ins cover these on a first-party turn.
+  for (const dup of ['list-files', 'read-file', 'web-search', 'fetch-url']) {
+    assert.ok(!names.includes(dup), `${dup} duplicates a built-in and must not be mounted (got ${names.join(', ')})`);
+  }
   assert.ok(names.includes('find-code'));
   assert.ok(names.includes('ask-internal'));
   assert.ok(names.includes('search-kb'));
@@ -187,6 +190,26 @@ test('list-files is mounted on the llmide MCP server and enforces readable-roots
   assert.ok(names.includes('project_memory'));
   await client.close();
   await server.instance.close();
+});
+
+test('a gateway turn keeps the llmide web tools; read/list duplicates stay unmounted', async () => {
+  const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
+  const server = buildLlmIdeServer('gw-user', { workspaceRoot: __dirname }, '', { gateway: true });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'gw-test', version: '1.0.0' });
+  await Promise.all([client.connect(clientTransport), server.instance.connect(serverTransport)]);
+  try {
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    // A gateway backend may not implement Anthropic's server-side web tools,
+    // so the llmide handlers (which reach Anthropic themselves) stay.
+    assert.ok(names.includes('web-search'));
+    assert.ok(names.includes('fetch-url'));
+    assert.ok(!names.includes('list-files'));
+    assert.ok(!names.includes('read-file'));
+  } finally {
+    await client.close();
+    await server.instance.close();
+  }
 });
 
 // --- I10: readOnlyHint must tell the truth per entry ------------------------
@@ -198,7 +221,7 @@ test('list-files is mounted on the llmide MCP server and enforces readable-roots
 // those three tools.
 test('readOnlyHint mirrors each registry entry kind, not a blanket true', async () => {
   const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
-  const { entries } = await import('../llm_agent/tools/registry.mjs');
+  const { v2MountedEntries } = await import('../llm_agent/sdk/tools.mjs');
   const server = buildLlmIdeServer('hint-user', { workspaceRoot: __dirname });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'hint-test', version: '1.0.0' });
@@ -206,7 +229,7 @@ test('readOnlyHint mirrors each registry entry kind, not a blanket true', async 
   try {
     const { tools } = await client.listTools();
     const byName = new Map(tools.map((t) => [t.name, t]));
-    for (const entry of entries()) {
+    for (const entry of v2MountedEntries()) {
       const mounted = byName.get(entry.name);
       assert.ok(mounted, `${entry.name} should be mounted`);
       assert.equal(
@@ -218,7 +241,7 @@ test('readOnlyHint mirrors each registry entry kind, not a blanket true', async 
     assert.equal(byName.get('run-bash').annotations.readOnlyHint, false);
     assert.equal(byName.get('task-create').annotations.readOnlyHint, false);
     assert.equal(byName.get('task-update').annotations.readOnlyHint, false);
-    assert.equal(byName.get('read-file').annotations.readOnlyHint, true);
+    assert.equal(byName.get('find-code').annotations.readOnlyHint, true);
   } finally {
     await client.close();
     await server.instance.close();
@@ -286,15 +309,16 @@ test('tool descriptions: every registered tool ships complete, useful guidance',
   const u = registerUser(getDb(), {
     email: 'v2tools-desc@example.com', password: 'CorrectHorseBattery', displayName: 't',
   });
-  const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
-  const server = buildLlmIdeServer(u.id, { workspaceRoot: process.cwd() }, 'hi', {});
+  const { buildLlmIdeServer, v2MountedEntries } = await import('../llm_agent/sdk/tools.mjs');
+  // gateway: true — the widest v2 surface (web tools included).
+  const server = buildLlmIdeServer(u.id, { workspaceRoot: process.cwd() }, 'hi', { gateway: true });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.instance.connect(serverTransport);
   const client = new Client({ name: 'test-client', version: '0.0.0' });
   await client.connect(clientTransport);
   try {
     const { tools } = await client.listTools();
-    assert.ok(tools.length >= 14, `expected the full tool surface, got ${tools.length}`);
+    assert.equal(tools.length, v2MountedEntries({ gateway: true }).length, `expected the full v2 tool surface, got ${tools.length}`);
 
     for (const t of tools) {
       const d = (t.description || '').trim();
@@ -392,10 +416,10 @@ test('telemetry: arguments and results are NEVER logged', async () => {
 });
 
 test('telemetry: a failing tool records outcome error, not ok', async () => {
-  const logs = await captureInfo(() => callV2Tool('read-file', { path: 'definitely-not-here.txt' }));
+  const logs = await captureInfo(() => callV2Tool('load-skill', { id: 'definitely-not-a-skill' }));
   const f = logs.find((l) => l.event === 'skill_invoked')?.fields;
   assert.ok(f, 'a failed call is still an invocation and must be recorded');
-  assert.equal(f.skill, 'read-file');
+  assert.equal(f.skill, 'load-skill');
   assert.equal(f.outcome, 'error', 'a tool that returns {error} is not "ok"');
 });
 

@@ -1258,6 +1258,7 @@ export async function runAgentV2Turn(
         userSkills,
         userSubagents,
         internalSkills: { base: internalSkills.base },
+        gateway: Boolean(gatewayBaseUrl),
         // The turn's cancellation, in the shape in-process tools consume.
         // These MCP tools run in the SERVER process, which the SDK's
         // abortController does not kill — it only terminates the CLI

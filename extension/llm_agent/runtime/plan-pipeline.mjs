@@ -125,8 +125,8 @@ const FACTS_CLAUSE =
   + 'for a fact you could find, and never open with a repo-wide `grep`/`find`. '
   + 'Start with `find-code`: one call returns the definition site, its callers/'
   + 'callees/importers from the code graph, and full-text hits. Then read '
-  + 'narrowly from the line it gave you (`read-file`, or `run-bash` with a '
-  + 'bounded `sed -n`) rather than pulling whole files into context. '
+  + 'narrowly from the line it gave you (your file-read tool with a line '
+  + 'range, or a bounded `sed -n`) rather than pulling whole files into context. '
   + '`search-kb` covers the Library, meetings and notes; `project-memory` '
   + 'covers what was recorded about this project before. Those four are the '
   + 'cheap path — use them before you consider anything broader.';
