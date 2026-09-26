@@ -104,7 +104,11 @@ export function mapSdkMessage(msg) {
       // the expensive one: tokens written INTO the cache bill at ~1.25x, and
       // they are created by exactly the prompt-prefix churn this app wants to
       // see. Without it the ledger reported a turn's fresh input only.
-      return [{ type: 'usage', inputTokens: u.input_tokens ?? 0, outputTokens: u.output_tokens ?? 0,
+      // `messageId`: streamed, each content block of ONE API response is its
+      // own assistant message carrying that response's usage snapshot — the
+      // runner counts each response once, not once per block.
+      return [{ type: 'usage', messageId: msg.message.id ?? null,
+        inputTokens: u.input_tokens ?? 0, outputTokens: u.output_tokens ?? 0,
         cacheReadTokens: u.cache_read_input_tokens ?? 0,
         cacheCreationTokens: u.cache_creation_input_tokens ?? 0 }];
     }

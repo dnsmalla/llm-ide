@@ -955,7 +955,9 @@ test('AskUserQuestion round-trip: request event → answer → allow with update
     // input was invisible. Summed here like the rest.
     assert.deepEqual(usageTotals,
       { inputTokens: 10, outputTokens: 5, cacheReadTokens: 2, cacheCreationTokens: 7,
-        costUsd: 0.25, numTurns: 2, durationMs: 1200 });
+        // total_cost_usd is the SDK session's RUNNING total since 0.3.277, and
+        // this turn is resumed — so it is not this turn's cost.
+        costUsd: 0, numTurns: 2, durationMs: 1200 });
     // Simulate the SDK asking mid-turn: canUseTool parks a decision under a
     // requestId and only resolves once the registry hears from the client.
     const questions = [{ question: 'Pick one?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }];

@@ -45,6 +45,7 @@ import {
 } from '../skills/index.mjs';
 import { composeSystemContext, composeRecentContext } from '../internal/context/compose.mjs';
 import { contentHash, emptyDelivered, deliveredFor, commitDelivered, forgetDelivered } from './turn-context.mjs';
+import { usageBaselineFor, recordUsageBaseline, usageDelta } from './usage-baseline.mjs';
 import { buildSessionTaskPromptBlock } from '../runtime/task-session-context.mjs';
 import { V2_EXECUTE_GUIDANCE, V2_QUESTION_GUIDANCE } from '../runtime/execute-guidance.mjs';
 import { buildReadableRoots, buildTrustedRoots, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
@@ -808,6 +809,13 @@ const sdkQueryFactory = (prompt, options) => query({ prompt, options });
 
 const MAX_TURNS = 40;
 
+function sumInto(totals, rows) {
+  totals.inputTokens = rows.reduce((n, m) => n + m.inputTokens, 0);
+  totals.outputTokens = rows.reduce((n, m) => n + m.outputTokens, 0);
+  totals.cacheReadTokens = rows.reduce((n, m) => n + m.cacheReadTokens, 0);
+  totals.cacheCreationTokens = rows.reduce((n, m) => n + m.cacheCreationTokens, 0);
+}
+
 // `result.modelUsage` ({ [model]: ModelUsage }, sdk.d.ts) → a list with the
 // ledger's field names. Anything malformed is dropped rather than metered as 0.
 export function normalizeModelUsage(modelUsage) {
@@ -1458,6 +1466,8 @@ export async function runAgentV2Turn(
     inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
     costUsd: 0, numTurns: 0, durationMs: 0,
   };
+  // messageId → that API response's largest usage snapshot (fallback only).
+  const streamedUsage = new Map();
   let result = null;
   let replyText = '';
   // Whether the turn got past resuming into real work (text streamed, a tool
@@ -1482,28 +1492,48 @@ export async function runAgentV2Turn(
         if (ev.type === 'delta' && typeof ev.text === 'string') {
           replyText += ev.text;
         } else if (ev.type === 'usage') {
-          usageTotals.inputTokens += ev.inputTokens;
-          usageTotals.outputTokens += ev.outputTokens;
-          usageTotals.cacheReadTokens += ev.cacheReadTokens;
-          usageTotals.cacheCreationTokens += ev.cacheCreationTokens ?? 0;
+          // Fallback accounting only (see the result branch): one entry per
+          // API response, keeping the largest snapshot of each field — the
+          // blocks of one response repeat its usage, and output grows as it
+          // streams.
+          const id = ev.messageId || `anon-${streamedUsage.size}`;
+          const prev = streamedUsage.get(id);
+          streamedUsage.set(id, prev ? {
+            inputTokens: Math.max(prev.inputTokens, ev.inputTokens),
+            outputTokens: Math.max(prev.outputTokens, ev.outputTokens),
+            cacheReadTokens: Math.max(prev.cacheReadTokens, ev.cacheReadTokens),
+            cacheCreationTokens: Math.max(prev.cacheCreationTokens, ev.cacheCreationTokens ?? 0),
+          } : {
+            inputTokens: ev.inputTokens, outputTokens: ev.outputTokens,
+            cacheReadTokens: ev.cacheReadTokens, cacheCreationTokens: ev.cacheCreationTokens ?? 0,
+          });
+          sumInto(usageTotals, [...streamedUsage.values()]);
         } else if (ev.type === 'result') {
           result = ev;
-          // The result's per-model totals are the SDK's own accounting for
-          // the whole query (main loop, subagents, compaction). The per-
-          // assistant-message sums above are only the fallback: streamed, each
-          // content block arrives as its own message carrying the SAME usage
-          // snapshot, so summing them counted cache reads ~3× over and caught
-          // only the partial output count (a real turn: ledger 126 output
-          // tokens, transcript 21,029).
-          const byModel = normalizeModelUsage(ev.modelUsage);
-          if (byModel.length) {
-            usageTotals.byModel = byModel;
-            usageTotals.inputTokens = byModel.reduce((n, m) => n + m.inputTokens, 0);
-            usageTotals.outputTokens = byModel.reduce((n, m) => n + m.outputTokens, 0);
-            usageTotals.cacheReadTokens = byModel.reduce((n, m) => n + m.cacheReadTokens, 0);
-            usageTotals.cacheCreationTokens = byModel.reduce((n, m) => n + m.cacheCreationTokens, 0);
+          // The result's per-model totals are the SDK's own accounting (main
+          // loop, subagents, compaction) — but a RUNNING total for the SDK
+          // session since 0.3.277: a resumed session's first result already
+          // carries the earlier turns. This turn's share is the difference
+          // from where the last metered turn of this session ended
+          // (usage-baseline.mjs). A fresh session starts from zero. A resumed
+          // one with no baseline (server restarted since) cannot be split, so
+          // it keeps the streamed per-response sums instead of counting the
+          // whole chat again.
+          const running = normalizeModelUsage(ev.modelUsage);
+          const baseline = running.length ? (resume ? usageBaselineFor(resume) : []) : null;
+          if (baseline) {
+            const turn = usageDelta(running, baseline);
+            usageTotals.byModel = turn;
+            sumInto(usageTotals, turn);
+            usageTotals.costUsd = turn.reduce((n, m) => n + (m.costUsd ?? 0), 0);
+          } else {
+            // total_cost_usd is a running total too; only a fresh session's is
+            // this turn's alone.
+            if (!resume) usageTotals.costUsd += ev.costUsd ?? 0;
           }
-          usageTotals.costUsd += ev.costUsd ?? 0;
+          if (running.length && (ev.sessionId || currentSdkSessionId)) {
+            recordUsageBaseline(ev.sessionId || currentSdkSessionId, running, { previousSdkSessionId: resume });
+          }
           usageTotals.numTurns += ev.numTurns ?? 0;
           usageTotals.durationMs += ev.durationMs ?? 0;
         }

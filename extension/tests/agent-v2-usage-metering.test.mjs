@@ -39,10 +39,11 @@ function scriptedQuery({ sessionId, modelUsage }) {
   })();
 }
 
-function turn(script) {
+function turn({ resume = null, ...script }) {
   return runAgentV2Turn({
     message: 'hi', userId: 'u-meter', mode: 'execute',
     agentContext: { workspaceRoot: process.cwd() },
+    resumeSdkSessionId: resume,
     allowAmbientAuth: true, onEvent: () => {},
     queryFactory: scriptedQuery(script),
   }, { readSkill: () => null, roots: () => [], sessionMemory: () => [], persistMemory: async () => null });
@@ -62,10 +63,40 @@ test('usage totals come from result.modelUsage, not from summing streamed messag
   assert.equal(usageTotals.byModel.length, 2);
 });
 
-test('without modelUsage the summed fallback still meters the turn', async () => {
+test('without modelUsage the streamed fallback counts each API response once', async () => {
   const { usageTotals } = await turn({ sessionId: 'sdk-u2' });
-  assert.equal(usageTotals.cacheReadTokens, 2000);
+  // Two content blocks of one response (msg_1) carry the same snapshot.
+  assert.equal(usageTotals.cacheReadTokens, 1000);
   assert.equal(usageTotals.byModel, undefined);
+});
+
+// Since SDK 0.3.277 a resumed session's modelUsage is the chat's RUNNING
+// total: metering it as-is would count every earlier turn again each turn.
+test('a resumed turn meters the difference from where its session last ended', async () => {
+  const opus = (inp, out, cr, cw) => ({ 'claude-opus-5': { inputTokens: inp, outputTokens: out, cacheReadInputTokens: cr, cacheCreationInputTokens: cw, costUSD: 0 } });
+  const first = await turn({ sessionId: 'sdk-r1', modelUsage: opus(10, 100, 5000, 2000) });
+  assert.equal(first.usageTotals.outputTokens, 100, 'a fresh session starts from zero');
+  const second = await turn({ resume: 'sdk-r1', sessionId: 'sdk-r1', modelUsage: opus(13, 160, 12000, 2300) });
+  assert.deepEqual(
+    [second.usageTotals.inputTokens, second.usageTotals.outputTokens, second.usageTotals.cacheReadTokens, second.usageTotals.cacheCreationTokens],
+    [3, 60, 7000, 300], 'only this turn, not the chat so far');
+});
+
+test('a resumed turn with no baseline (server restarted) falls back to its streamed usage', async () => {
+  const { usageTotals } = await turn({
+    resume: 'sdk-unknown', sessionId: 'sdk-unknown',
+    modelUsage: { 'claude-opus-5': { inputTokens: 999, outputTokens: 99999, cacheReadInputTokens: 9_000_000, cacheCreationInputTokens: 0 } },
+  });
+  assert.equal(usageTotals.cacheReadTokens, 1000, 'the streamed response, not the whole chat');
+  assert.equal(usageTotals.byModel, undefined);
+});
+
+test('usageDelta: a model whose running total went down (a /clear) is taken whole', async () => {
+  const { usageDelta } = await import('../llm_agent/sdk/usage-baseline.mjs');
+  const row = (model, o) => ({ model, inputTokens: 0, outputTokens: o, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 });
+  assert.deepEqual(usageDelta([row('a', 50)], [row('a', 20)]), [{ ...row('a', 30) }]);
+  assert.deepEqual(usageDelta([row('a', 5)], [row('a', 20)]), [row('a', 5)]);
+  assert.deepEqual(usageDelta([row('a', 20), row('b', 7)], [row('a', 20)]), [row('b', 7)], 'unchanged models drop out');
 });
 
 test('normalizeModelUsage drops malformed entries and never meters a negative', () => {
