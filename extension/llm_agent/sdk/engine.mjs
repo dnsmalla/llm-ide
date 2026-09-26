@@ -584,13 +584,23 @@ export function buildEngineOptions(
   // later turns. After the pipeline skill (system prompt), as before.
   const skillsText = buildSkillsText(skills, userId, readSkill);
   if (skillsText) contextParts.push(skillsText);
-  // Recent issues + meetings: resent only when the list changed.
-  const recentText = composeRecentContext(agentContext);
-  const recentHash = recentText ? contentHash(recentText) : null;
-  if (recentText && recentHash !== next.recentHash) {
-    contextParts.push(prev?.recentHash ? `${recentText}\n\n(Updated since your last view of this list.)` : recentText);
+  // Recent issues + meetings: resent only when the list changed. A request
+  // that does not carry the lists at all says nothing about them, so the
+  // record is left as it is — otherwise a client alternating with and
+  // without them would re-send the whole list every other turn. One that
+  // carries them EMPTY after a list was delivered gets a one-line note, or
+  // the model would keep treating the transcript's old list as current.
+  const carriesRecent = Array.isArray(agentContext?.recentIssues) || Array.isArray(agentContext?.recentMeetings);
+  if (carriesRecent) {
+    const recentText = composeRecentContext(agentContext);
+    const recentHash = recentText ? contentHash(recentText) : null;
+    if (recentText && recentHash !== next.recentHash) {
+      contextParts.push(prev?.recentHash ? `${recentText}\n\n(Updated since your last view of this list.)` : recentText);
+    } else if (!recentText && next.recentHash) {
+      contextParts.push('## Recent issues and meetings\n(There are none now — the list shown earlier is out of date.)');
+    }
+    next.recentHash = recentHash;
   }
-  next.recentHash = recentHash;
   // Session memory (kb/session-memory.mjs): facts extracted from THIS chat's
   // own prior turns — a real DB-backed record, not the SDK's own resumed-
   // session continuity (which only covers turn text, not distilled facts,

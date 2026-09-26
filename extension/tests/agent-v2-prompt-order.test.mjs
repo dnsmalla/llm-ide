@@ -127,6 +127,25 @@ test('a task list that became empty is said once, not left stale in the transcri
   assert.doesNotMatch(third.prompt, /task list/, 'said once');
 });
 
+test('recent issues: an emptied list is said once; a request without the list leaves the record alone', async () => {
+  const user = registerUser(getDb(), { email: 'order-recent@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  const turn = (extra, delivered) => buildEngineOptions(
+    { userId: user.id, mode: 'execute', message: 'go', delivered,
+      agentContext: { workspaceRoot: process.cwd(), chatSessionId: 'chat-recent', ...extra } }, deps);
+  const first = turn({ recentIssues: [{ iid: 1, title: 'Old issue' }] }, null);
+  assert.match(first.prompt, /Old issue/);
+  // No list on this request: nothing said, nothing forgotten.
+  const absent = turn({}, first.meta.delivered);
+  assert.doesNotMatch(absent.prompt, /Recent issues|Old issue/);
+  const same = turn({ recentIssues: [{ iid: 1, title: 'Old issue' }] }, absent.meta.delivered);
+  assert.doesNotMatch(same.prompt, /Old issue/, 'unchanged since delivery — not re-sent');
+  // Now empty: said once.
+  const emptied = turn({ recentIssues: [] }, same.meta.delivered);
+  assert.match(emptied.prompt, /There are none now/);
+  const again = turn({ recentIssues: [] }, emptied.meta.delivered);
+  assert.doesNotMatch(again.prompt, /There are none now/);
+});
+
 test('the pipeline stage skill is ALWAYS inlined, however large', async () => {
   // Regression: a size threshold used to defer it, so Plan mode's first turn
   // carried a pointer to brainstorming (15KB) instead of the process, and an
