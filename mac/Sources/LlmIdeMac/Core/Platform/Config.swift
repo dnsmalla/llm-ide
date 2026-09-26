@@ -679,7 +679,8 @@ final class AppConfig: ObservableObject {
     ///   Claude default while the provider stayed OpenAI/GLM, and every turn
     ///   — the phone proxy's included — then sent a Claude model to it.
     /// - Otherwise → the ACTIVE provider's default (was: always Claude's).
-    static func startupModelId(stored: String?, activeCLI: String, knownModelIds: Set<String>) -> String {
+    static func startupModelId(stored: String?, activeCLI: String, knownModelIds: Set<String>,
+                               liveClaudeModels: [AIModel] = AICliTool.claudeCode.models) -> String {
         let tool = AICliTool(rawValue: activeCLI) ?? .claudeCode
         let fallback = tool.defaultModelId.isEmpty ? AICliTool.claudeCode.defaultModelId : tool.defaultModelId
         // A Claude id under a non-Claude BUILT-IN provider can't run there,
@@ -689,19 +690,29 @@ final class AppConfig: ObservableObject {
         let isClaudeId = stored?.lowercased().hasPrefix("claude") == true
         if isClaudeId, tool != .claudeCode, tool != .custom { return fallback }
         if let stored, knownModelIds.contains(stored) { return stored }
+        // Claude: judged against the account's live list only. Kept while
+        // that list is not known yet (nothing to judge against) and when the
+        // list carries the same model under another id ("claude-opus-5" beside
+        // "claude-opus-5[1m]"); otherwise the live default.
+        if let stored, isClaudeId, tool == .claudeCode {
+            if liveClaudeModels.isEmpty || AIModel.knownName(for: stored, in: liveClaudeModels) != nil { return stored }
+            return liveClaudeModels.first?.id ?? fallback
+        }
         if let stored, let mapped = retiredModelIds[stored] { return mapped }
         if let stored, !stored.isEmpty, tool != .claudeCode { return stored }
         return fallback
     }
 
-    static let retiredModelIds: [String: String] = ClaudeCLI.retiredModelIds.merging([
+    /// Non-Claude only: a Claude pick is resolved against the account's live
+    /// list (see `startupModelId` and `LiveModelCache`), never a hardcoded map.
+    static let retiredModelIds: [String: String] = [
         "gpt-4o": "gpt-5.6-sol",
         "gpt-4o-mini": "gpt-5.4-mini",
         "o3-mini": "gpt-5.4-mini",
         "gemini-2.0-flash": "gemini-3.6-flash",            // shut down 2026-06-01
         "gemini-1.5-flash": "gemini-3.6-flash",
         "gemini-1.5-pro": "gemini-3.5-flash",
-    ]) { current, _ in current }
+    ]
 
     init(userDefaults defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -727,10 +738,6 @@ final class AppConfig: ObservableObject {
         // default — silently dropping the user's pick, so the iPhone chat
         // proxy then forwarded an empty/wrong model on the next launch.
         var knownModelIds = Set(AICliTool.selectable.flatMap { $0.models.map(\.id) })
-        // The hardcoded Claude ids stay known even once a live list replaces
-        // them in the picker: a saved pick the account's list no longer
-        // offers is still a valid API id, and must not be reset to the default.
-        knownModelIds.formUnion(ClaudeCLI.fallbackModels.map(\.id))
         if let raw = defaults.string(forKey: "MEETNOTES_CUSTOM_MODELS"),
            let custom = try? JSONDecoder().decode([String: [String]].self, from: Data(raw.utf8)) {
             knownModelIds.formUnion(custom.values.flatMap { $0 })

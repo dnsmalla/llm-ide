@@ -195,7 +195,7 @@ struct ProvidersSettingsSection: View {
         }
         let current = config.defaultModelId
         if !current.isEmpty && seen.insert(current).inserted {
-            out.append(AIModel(id: current, displayName: current))
+            out.append(AIModel(id: current, displayName: AIModel.knownName(for: current, in: out) ?? current))
         }
         return out
     }

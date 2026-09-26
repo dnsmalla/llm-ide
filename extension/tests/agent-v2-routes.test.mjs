@@ -1173,3 +1173,37 @@ test('stream: the continue sentinel in a chat with nothing pending is classified
   });
   assert.equal(classified, 1);
 });
+
+test('stream: a turn is refused with SDK_UPDATING while the SDK is being replaced', async () => {
+  const fsx = await import('node:fs');
+  const osx = await import('node:os');
+  const { updateSdk, __resetUpdaterForTest } = await import('../llm_agent/sdk/updater.mjs');
+  __resetUpdaterForTest();
+  const dir = fsx.mkdtempSync(path.join(osx.tmpdir(), 'v2-sdk-updating-'));
+  const pkgDir = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-agent-sdk');
+  fsx.mkdirSync(pkgDir, { recursive: true });
+  fsx.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ version: '0.3.272' }));
+  let release;
+  const pending = updateSdk({
+    dir, fetchFn: async () => ({ ok: true, json: async () => ({ latest: '0.3.283' }) }),
+    // Only the first install waits; the rollback that follows a failure must not.
+    installFn: async () => { if (!release) await new Promise((r) => { release = r; }); return { ok: false, out: 'stopped' }; },
+    smokeFn: async () => ({ ok: true }),
+  });
+  try {
+    const user = newUser('v2route-sdk-updating@example.com');
+    const res = makeRes();
+    let ran = false;
+    await handleAgentV2Routes(makeReq({
+      method: 'POST', url: '/agent/v2/stream', user,
+      body: { message: 'hi', mode: 'execute', agentContext: { chatSessionId: 'chat-updating', workspaceRoot: WS } },
+    }), res, { runTurn: async () => { ran = true; return { result: null, usageTotals: {} }; } });
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.json().error.code, 'SDK_UPDATING');
+    assert.equal(ran, false);
+  } finally {
+    while (!release) await new Promise((r) => setImmediate(r));
+    release();
+    await pending;
+  }
+});

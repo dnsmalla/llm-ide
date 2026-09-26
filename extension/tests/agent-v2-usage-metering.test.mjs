@@ -39,11 +39,12 @@ function scriptedQuery({ sessionId, modelUsage }) {
   })();
 }
 
-function turn(script) {
+function turn({ resume = null, events = [], ...script }) {
   return runAgentV2Turn({
     message: 'hi', userId: 'u-meter', mode: 'execute',
     agentContext: { workspaceRoot: process.cwd() },
-    allowAmbientAuth: true, onEvent: () => {},
+    resumeSdkSessionId: resume,
+    allowAmbientAuth: true, onEvent: (e) => events.push(e),
     queryFactory: scriptedQuery(script),
   }, { readSkill: () => null, roots: () => [], sessionMemory: () => [], persistMemory: async () => null });
 }
@@ -62,10 +63,40 @@ test('usage totals come from result.modelUsage, not from summing streamed messag
   assert.equal(usageTotals.byModel.length, 2);
 });
 
-test('without modelUsage the summed fallback still meters the turn', async () => {
+test('without modelUsage the streamed fallback counts each API response once', async () => {
   const { usageTotals } = await turn({ sessionId: 'sdk-u2' });
-  assert.equal(usageTotals.cacheReadTokens, 2000);
+  // Two content blocks of one response (msg_1) carry the same snapshot.
+  assert.equal(usageTotals.cacheReadTokens, 1000);
   assert.equal(usageTotals.byModel, undefined);
+});
+
+// Since SDK 0.3.277 a resumed session's modelUsage is the chat's RUNNING
+// total: metering it as-is would count every earlier turn again each turn.
+test('a resumed turn meters the difference from where its session last ended', async () => {
+  const opus = (inp, out, cr, cw) => ({ 'claude-opus-5': { inputTokens: inp, outputTokens: out, cacheReadInputTokens: cr, cacheCreationInputTokens: cw, costUSD: 0 } });
+  const first = await turn({ sessionId: 'sdk-r1', modelUsage: opus(10, 100, 5000, 2000) });
+  assert.equal(first.usageTotals.outputTokens, 100, 'a fresh session starts from zero');
+  const second = await turn({ resume: 'sdk-r1', sessionId: 'sdk-r1', modelUsage: opus(13, 160, 12000, 2300) });
+  assert.deepEqual(
+    [second.usageTotals.inputTokens, second.usageTotals.outputTokens, second.usageTotals.cacheReadTokens, second.usageTotals.cacheCreationTokens],
+    [3, 60, 7000, 300], 'only this turn, not the chat so far');
+});
+
+test('a resumed turn with no baseline (server restarted) falls back to its streamed usage', async () => {
+  const { usageTotals } = await turn({
+    resume: 'sdk-unknown', sessionId: 'sdk-unknown',
+    modelUsage: { 'claude-opus-5': { inputTokens: 999, outputTokens: 99999, cacheReadInputTokens: 9_000_000, cacheCreationInputTokens: 0 } },
+  });
+  assert.equal(usageTotals.cacheReadTokens, 1000, 'the streamed response, not the whole chat');
+  assert.equal(usageTotals.byModel, undefined);
+});
+
+test('usageDelta: a model whose running total went down (a /clear) is taken whole', async () => {
+  const { usageDelta } = await import('../llm_agent/sdk/usage-baseline.mjs');
+  const row = (model, o) => ({ model, inputTokens: 0, outputTokens: o, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 });
+  assert.deepEqual(usageDelta([row('a', 50)], [row('a', 20)]), [{ ...row('a', 30) }]);
+  assert.deepEqual(usageDelta([row('a', 5)], [row('a', 20)]), [row('a', 5)]);
+  assert.deepEqual(usageDelta([row('a', 20), row('b', 7)], [row('a', 20)]), [row('b', 7)], 'unchanged models drop out');
 });
 
 test('normalizeModelUsage drops malformed entries and never meters a negative', () => {
@@ -101,4 +132,51 @@ test('parseCliJsonResult reads the CLI result object and falls back on anything 
   assert.equal(parseCliJsonResult('plain text reply'), null);
   assert.equal(parseCliJsonResult('{"not":"a result"}'), null);
   assert.equal(parseCliJsonResult('{broken'), null);
+});
+
+// The Mac sums every usage event of a turn into the chat's token footnote.
+// The SDK's per-content-block snapshots (two here, for one API response)
+// made it count each response ~3×; the turn now emits ONE usage event with
+// the metered totals, before its result.
+test('a turn emits exactly one usage event, with the metered totals, before the result', async () => {
+  const events = [];
+  const { usageTotals } = await turn({ sessionId: 'sdk-one', events });
+  const usage = events.filter((e) => e.type === 'usage');
+  assert.equal(usage.length, 1);
+  assert.equal(usage[0].cacheReadTokens, usageTotals.cacheReadTokens);
+  assert.equal(usage[0].cacheReadTokens, 1000, 'one API response, counted once');
+  assert.ok(events.findIndex((e) => e.type === 'usage') < events.findIndex((e) => e.type === 'result'));
+});
+
+test('a turn that fails after real work still reports the usage it spent', async () => {
+  const events = [];
+  const failing = () => (async function* () {
+    yield { type: 'system', subtype: 'init', session_id: 'sdk-fail', tools: [], capabilities: [] };
+    yield { type: 'stream_event', session_id: 'sdk-fail', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'working' } } };
+    yield { type: 'assistant', session_id: 'sdk-fail', message: { id: 'msg_f', content: [], usage: { input_tokens: 4, output_tokens: 7, cache_read_input_tokens: 500, cache_creation_input_tokens: 50 } } };
+    throw new Error('boom mid-turn');
+  })();
+  await assert.rejects(runAgentV2Turn({
+    message: 'hi', userId: 'u-meter', mode: 'execute', agentContext: { workspaceRoot: process.cwd() },
+    allowAmbientAuth: true, onEvent: (e) => events.push(e), queryFactory: failing,
+  }, { readSkill: () => null, roots: () => [], sessionMemory: () => [], persistMemory: async () => null }), /boom/);
+  const usage = events.filter((e) => e.type === 'usage');
+  assert.equal(usage.length, 1);
+  assert.equal(usage[0].cacheReadTokens, 500);
+});
+
+test('usage snapshots without a message id count as one response, not one each', async () => {
+  const events = [];
+  const noIds = () => (async function* () {
+    yield { type: 'system', subtype: 'init', session_id: 'sdk-noid', tools: [], capabilities: [] };
+    for (let i = 0; i < 3; i++) {
+      yield { type: 'assistant', session_id: 'sdk-noid', message: { content: [], usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 900, cache_creation_input_tokens: 0 } } };
+    }
+    yield { type: 'result', subtype: 'success', session_id: 'sdk-noid' };
+  })();
+  const { usageTotals } = await runAgentV2Turn({
+    message: 'hi', userId: 'u-meter', mode: 'execute', agentContext: { workspaceRoot: process.cwd() },
+    allowAmbientAuth: true, onEvent: (e) => events.push(e), queryFactory: noIds,
+  }, { readSkill: () => null, roots: () => [], sessionMemory: () => [], persistMemory: async () => null });
+  assert.equal(usageTotals.cacheReadTokens, 900);
 });

@@ -32,6 +32,8 @@ import { runClaude } from '../providers/runtime.mjs';
 import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels, customBaseUrl } from '../providers/providers.mjs';
 import { handleCustomProvidersSync } from '../server/custom-providers.mjs';
 import { listSdkModels } from '../llm_agent/sdk/models.mjs';
+import { sdkStatus, updateSdk } from '../llm_agent/sdk/updater.mjs';
+import { activeTurnCount } from './agent-v2.mjs';
 import { iterateUserMeetings } from '../kb/exporter.mjs';
 import { getSecret } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../connectors/email-source.mjs';
@@ -133,6 +135,23 @@ export async function handleKB(req, res) {
     // and returns the provider's current chat models (filtered). Always 200:
     // an empty list (no key, or a transient error) lets the client fall back
     // to its built-in static list rather than failing the UI.
+    // Claude Agent SDK version + in-place update (Settings → Backend). The
+    // update runs `npm install` in this server's own checkout and never
+    // restarts anything itself — the Mac restarts the backend afterwards.
+    if (req.method === 'GET' && (url === '/kb/agent-sdk' || url.startsWith('/kb/agent-sdk?'))) {
+      const force = new URL(url, 'http://127.0.0.1').searchParams.get('force') === '1';
+      sendJSON(res, 200, await sdkStatus({ force }));
+      return true;
+    }
+    if (req.method === 'POST' && url === '/kb/agent-sdk/update') {
+      // Every signed-in user may run it — there is no admin role (product
+      // decision, server/auth.mjs).
+      // 200 either way: a failed or rolled-back update is a normal answer the
+      // client shows (with its log), not a transport error.
+      sendJSON(res, 200, await updateSdk({ activeTurns: activeTurnCount }));
+      return true;
+    }
+
     if (req.method === 'POST' && url === '/kb/providers/models') {
       const body = parseJSON(await readBody(req, 16 * 1024)) || {};
       const provider = String(body.provider || '');

@@ -39,6 +39,7 @@ struct SettingsView: View {
                         // limit nor this line. Add new App cards inside a
                         // nested Group like this one.
                         Group {
+                            AgentSdkSettingsSection(api: api)
                             ProvidersSettingsSection(api: api)
                             CustomProvidersSection(api: api)
                         }

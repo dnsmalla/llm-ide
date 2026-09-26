@@ -97,13 +97,14 @@ enum AICliTool: String, CaseIterable, Identifiable {
         // when nothing has been chosen. That is why retired ids here were not
         // harmless: they were the default.
         case .claudeCode:
-            // The account's live list (the Agent SDK's own, via the backend —
-            // see LiveModelCache) once one has been fetched; the linker's
-            // hardcoded ids (ClaudeLink/ClaudeCLI.swift) only before that.
-            // Claude only: its live list is curated and ordered with the
-            // default first, whereas other providers' /models listings are
-            // long and unordered and would silently change their default.
-            return LiveModelCache.models(for: ClaudeCLI.provider) ?? ClaudeCLI.fallbackModels
+            // Only the account's live list (the Agent SDK's own, via the
+            // backend — see LiveModelCache); no hardcoded Claude ids. Empty
+            // until the first fetch, so `defaultModelId` is "" and no model is
+            // sent — the SDK then runs the account's default. Claude only:
+            // its live list is curated and ordered with the default first,
+            // whereas other providers' /models listings are long and
+            // unordered and would silently change their default.
+            return LiveModelCache.models(for: ClaudeCLI.provider) ?? []
         case .openai:
             return [
                 AIModel(id: "gpt-5.6-sol",                displayName: "GPT-5.6 Sol"),
@@ -215,4 +216,44 @@ enum AICliTool: String, CaseIterable, Identifiable {
 struct AIModel: Identifiable, Hashable, Codable {
     let id: String
     let displayName: String
+
+    /// A readable name for `id`, taken ONLY from `models` (the account's live
+    /// list, from the Agent SDK) — never from a hardcoded table.
+    ///
+    /// A saved pick can be missing from the live list while still being a
+    /// valid id to send ("claude-opus-5" when the account lists
+    /// "claude-opus-5[1m]"; "claude-haiku-4-5" beside
+    /// "claude-haiku-4-5-20251001"). It is named after the live entry for the
+    /// same model — same id once the 1M-context suffix and a date snapshot are
+    /// set aside — without that entry's "(1M)" when the pick itself is not the
+    /// 1M variant. Nil when nothing matches: the caller shows the id, not a
+    /// guess, and never the first model's name (which labelled one model while
+    /// the chat sent another).
+    static func knownName(for id: String, in models: [AIModel]) -> String? {
+        if let exact = models.first(where: { $0.id == id }) { return exact.displayName }
+        let base = baseId(id)
+        guard let same = models.first(where: { baseId($0.id) == base }) else { return nil }
+        let isOneM = id.hasSuffix("[1m]")
+        return isOneM ? same.displayName
+            : same.displayName.replacingOccurrences(of: " (1M)", with: "")
+    }
+
+    /// "claude-opus-5[1m]" → "claude-opus-5"; "claude-haiku-4-5-20251001" →
+    /// "claude-haiku-4-5".
+    static func baseId(_ id: String) -> String {
+        var s = id.lowercased()
+        if s.hasSuffix("[1m]") { s.removeLast(4) }
+        if let r = s.range(of: #"-\d{8}$"#, options: .regularExpression) { s.removeSubrange(r) }
+        return s
+    }
+
+    /// `models` plus the current selection when it is a Claude id the list
+    /// lacks, so the picker can show it (with a checkmark) and the chip names
+    /// the model that is actually sent.
+    static func including(selected id: String, in models: [AIModel]) -> [AIModel] {
+        guard !id.isEmpty, !models.contains(where: { $0.id == id }),
+              id.lowercased().hasPrefix("claude"),
+              let name = knownName(for: id, in: models) else { return models }
+        return models + [AIModel(id: id, displayName: name)]
+    }
 }
