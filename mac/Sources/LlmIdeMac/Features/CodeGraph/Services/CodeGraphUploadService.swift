@@ -147,6 +147,10 @@ final class CodeGraphUploadService {
         case .classType, .service, .endpoint, .pipeline: score += 90
         case .function, .symbol: score += 70
         case .config, .table, .schemaNode, .resource: score += 50
+        // Deliberately lowest: the doc FILE nodes of the citation overlay
+        // (`.docPage`, see `FileClassifier.citationOverlay`) land here, so over
+        // the node cap docs are dropped first — and their citation edges with
+        // them — before any code node. Code grounding matters more.
         default: score += 30
         }
         let id = node.id.lowercased()
