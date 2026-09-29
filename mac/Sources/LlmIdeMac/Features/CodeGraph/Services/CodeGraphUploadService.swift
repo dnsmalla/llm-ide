@@ -242,6 +242,30 @@ final class CodeGraphUploadService {
         return uploaded
     }
 
+    /// `git rev-parse HEAD` for `repoRoot`, or nil (not a repo, git missing,
+    /// or no answer within 3 s). Runs off the main actor; freshness is
+    /// best-effort and must never block or fail an upload.
+    nonisolated static func headCommit(of repoRoot: URL) async -> String? {
+        await Task.detached(priority: .utility) { () -> String? in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["-C", repoRoot.path, "rev-parse", "HEAD"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            do { try process.run() } catch { return nil }
+            let deadline = Date().addingTimeInterval(3)
+            while process.isRunning {
+                if Date() > deadline { process.terminate(); return nil }
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            guard process.terminationStatus == 0 else { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let sha = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            return sha.isEmpty ? nil : sha
+        }.value
+    }
+
     private func performUpload(graph: CGData, repoRoot: URL) async -> Bool {
         guard let api else { return false }
         // An empty graph is never uploaded: a scan that produced nothing (a
@@ -271,11 +295,17 @@ final class CodeGraphUploadService {
             _ = try await api.addUserRepo(path: repoPath)
             var uploadedNodes = 0
             var uploadedEdges = 0
+            // Which commit this graph describes, so the server can tell the
+            // model when HEAD has moved on. Sent on the replacing batch only.
+            let commitSha = await Self.headCommit(of: repoRoot)
+            let generatedAt = ISO8601DateFormatter().string(from: Date())
             for batch in Self.batches(nodes: nodes, edges: edges) {
                 let result = try await api.ingestCodeGraph(repoPath: repoPath,
                                                            nodes: Array(batch.nodes),
                                                            edges: Array(batch.edges),
-                                                           replace: batch.replace)
+                                                           replace: batch.replace,
+                                                           commitSha: batch.replace ? commitSha : nil,
+                                                           generatedAt: batch.replace ? generatedAt : nil)
                 uploadedNodes += result.nodes
                 uploadedEdges += result.edges
                 if result.droppedNodes > 0 || result.droppedEdges > 0 {

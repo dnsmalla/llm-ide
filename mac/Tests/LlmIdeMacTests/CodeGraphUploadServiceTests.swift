@@ -144,6 +144,35 @@ final class CodeGraphUploadServiceTests: XCTestCase {
         XCTAssertEqual(LlmIdeAPIClient.CodeGraphNodePayload(node).metadata["doc"], "Documented.")
     }
 
+    // MARK: - freshness fields
+
+    private func encodedRequest(replace: Bool, commitSha: String?) throws -> String {
+        let req = LlmIdeAPIClient.CodeGraphIngestRequest(
+            repoPath: "/r", graph: .init(nodes: [], edges: []), replace: replace,
+            commitSha: commitSha, generatedAt: commitSha == nil ? nil : "2026-09-29T00:00:00Z")
+        return String(decoding: try JSONEncoder().encode(req), as: UTF8.self)
+    }
+
+    func testFirstBatchPayloadEncodesCommitSha() throws {
+        let json = try encodedRequest(replace: true, commitSha: "abc1234")
+        XCTAssertTrue(json.contains("\"commitSha\":\"abc1234\""), json)
+        XCTAssertTrue(json.contains("\"generatedAt\""), json)
+    }
+
+    func testLaterBatchPayloadOmitsCommitSha() throws {
+        let json = try encodedRequest(replace: false, commitSha: nil)
+        XCTAssertFalse(json.contains("commitSha"), json)
+        XCTAssertFalse(json.contains("generatedAt"), json)
+    }
+
+    func testHeadCommitReadsThisRepoAndIgnoresNonRepos() async {
+        let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let sha = await CodeGraphUploadService.headCommit(of: here)
+        XCTAssertNotNil(sha)
+        let none = await CodeGraphUploadService.headCommit(of: URL(fileURLWithPath: NSTemporaryDirectory()))
+        XCTAssertNil(none)
+    }
+
     // MARK: - upload guards
 
     @MainActor
