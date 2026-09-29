@@ -6,7 +6,7 @@
 // <graph.json> is a code graph in the Mac upload's wire shape
 // ({ nodes:[{id,title,kind,metadata:{source_file,line,language,doc}}], edges:[{fromId,toId,kind,confidence}] })
 // — produce it with the graph-kit scanner over <repo>. The script builds a
-// throwaway DB in the temp dir (graph + FTS index), runs every question in
+// throwaway DB in the temp dir (graph + FTS index of <repo>, read-only), runs every question in
 // retrieval-bench.questions.json through find-code, and reports:
 //   hit@3        a top-3 symbol's title is an expected symbol, or its file is an expected file
 //   hitAnywhere  an expected file/symbol appears anywhere in the result (symbols, related, files)
@@ -32,6 +32,8 @@ process.env.LLMIDE_DB_PATH = tmpDb;
 process.env.LLMIDE_JWT_SECRET ||= 'b'.repeat(48);
 process.env.LLMIDE_VAULT_KEY ||= 'c'.repeat(48);
 const cleanup = () => { for (const s of ['', '-wal', '-shm']) fs.rmSync(tmpDb + s, { force: true }); };
+// Ctrl-C skips `finally`; still remove the throwaway DB.
+process.once('SIGINT', () => { cleanup(); process.exit(130); });
 
 const db = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');

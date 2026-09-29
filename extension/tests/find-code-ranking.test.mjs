@@ -41,7 +41,8 @@ test.after(() => { db.closeDb(); for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpD
 
 test('stemToken strips inflection but keeps case and a 4-char floor', () => {
   assert.equal(stemToken('rotated'), 'rotat');
-  assert.equal(stemToken('retries'), 'retry');
+  assert.equal(stemToken('retries'), 'retrie');
+  assert.equal(stemToken('entries'), 'entrie', 'a stem must stay a substring of every form (listEntries)');
   assert.equal(stemToken('Handling'), 'Handl');
   assert.equal(stemToken('renderGutter'), 'renderGutter');
   assert.equal(stemToken('bus'), 'bus');
@@ -54,6 +55,7 @@ test('queryTerms drops question and filler words', () => {
 
 test('queryTerms keeps a compound word whole as well as its parts', () => {
   assert.deepEqual(queryTerms('how does find-code scope results'), ['find-code', 'find', 'scope', 'result']);
+  assert.deepEqual(queryTerms('tool-events.mjs rows'), ['tool-events.mjs', 'tool', 'event', 'rows'], 'the extension part names nothing');
 });
 
 test('seedCandidates keeps its contract', () => {

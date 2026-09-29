@@ -96,11 +96,17 @@ const SEED_STOP_WORDS = new Set([
   'code', 'file', 'files', 'function', 'functions', 'method', 'methods', 'thing', 'way',
 ]);
 
-// Inflection suffixes, longest first; a stem keeps at least 4 chars.
-const STEM_SUFFIXES = [['ies', 'y'], ['ing', ''], ['ed', ''], ['es', ''], ['s', '']];
+// Inflection suffixes, longest first; a stem keeps at least 4 chars. Every
+// rule only SHORTENS the word, so the stem stays a substring of every form:
+// `ies`→`ie` keeps `entrie` inside `listEntries` (`entry` would not be).
+const STEM_SUFFIXES = [['ies', 'ie'], ['ing', ''], ['ed', ''], ['es', ''], ['s', '']];
 
-/** Light, case-preserving stemming: `rotated`→`rotat`, `retries`→`retry`, so a
- *  question's inflected word still substring-matches the identifier. */
+// File extensions: the part of a compound word (`tool-events.mjs`) that names
+// nothing — it would spend a term slot matching every file of that language.
+const EXTENSION_PARTS = new Set(['mjs', 'cjs', 'js', 'jsx', 'ts', 'tsx', 'swift', 'py', 'md', 'json', 'sql', 'yml', 'yaml', 'sh']);
+
+/** Light, case-preserving stemming: `rotated`→`rotat`, `retries`→`retrie`, so
+ *  a question's inflected word still substring-matches the identifier. */
 export function stemToken(word) {
   const w = String(word);
   const lower = w.toLowerCase();
@@ -125,9 +131,11 @@ export function queryTerms(query) {
   };
   for (const word of String(query).split(/\s+/)) {
     const trimmed = word.replace(/^[^A-Za-z0-9_]+|[^A-Za-z0-9_]+$/g, '');
-    if (/[-.]/.test(trimmed) && trimmed.length >= 3) add(trimmed);
+    const compound = /[-.]/.test(trimmed);
+    if (compound && trimmed.length >= 3) add(trimmed);
     for (const raw of trimmed.split(/[^A-Za-z0-9_]+/)) {
       if (raw.length < 3 || SEED_STOP_WORDS.has(raw.toLowerCase())) continue;
+      if (compound && EXTENSION_PARTS.has(raw.toLowerCase())) continue;
       add(stemToken(raw));
     }
   }
@@ -145,7 +153,8 @@ const MAX_SEED_CANDIDATES = 6;
 
 /**
  * Query tokens for graph seeding: the whole query first (so an exact symbol
- * name wins), then its useful tokens longest-first, capped at
+ * name wins), then its content terms (queryTerms: filler dropped, stemmed)
+ * longest-first, capped at
  * MAX_SEED_CANDIDATES. findRelatedSymbols probes these one by one;
  * searchCodeIndex scores queryTerms together instead. Exported for unit tests.
  */
@@ -182,7 +191,7 @@ function isFileNode(row) {
 
 // Candidate rows fetched by the multi-term lookup before re-ranking: enough
 // that demoting tests and docs still leaves real code to promote.
-const TERM_PROBE_LIMIT = 60;
+const TERM_PROBE_LIMIT = 100;
 
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec|[A-Za-z]*Tests)\/|\.(test|spec)\.[a-z0-9]+$|Tests?\.swift$/;
 
@@ -238,8 +247,8 @@ export function searchCodeIndex(userId, query, { limit = 8, hops = 1, repoIds = 
   // ── Stage 1: symbol index ────────────────────────────────────────────────
   // Two lookups. The whole query as one string, so an exact symbol name
   // ("graphNeighbors") puts its definition first. Then the question's content
-  // terms scored together — rarity-weighted coverage over title, file path and
-  // doc — so "where is the mobile pairing PIN rotated" finds `rotateInMemory`
+  // terms scored together — rarity-weighted coverage over title and file
+  // path — so "where is the mobile pairing PIN rotated" finds `rotateInMemory`
   // in MobilePin.swift. Probing each word alone (the previous scheme) ranked by
   // match tier and title length, and a short incidental substring hit of a
   // generic word ("server", "report", "runner") beat the symbol that matched
