@@ -76,8 +76,8 @@ export function findRelatedCode(userId, query, limit = 5) {
  * for planners that want more than code refs. Thin passthrough so
  * graph consumers don't import kb/db directly.
  */
-export function findGraphContext(userId, query, limit = 5) {
-  return findContext(userId, query, limit);
+export function findGraphContext(userId, query, limit = 5, opts = {}) {
+  return findContext(userId, query, limit, opts);
 }
 
 // Stop-words filtered from multi-word task-title tokens before graph seeding.
