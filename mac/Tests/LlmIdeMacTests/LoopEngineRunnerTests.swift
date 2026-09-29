@@ -557,6 +557,26 @@ final class LoopEngineRunnerTests: XCTestCase {
         })
     }
 
+    /// Stage paths are relative to the git root, so "." is the repo root —
+    /// not the project root, which sits two levels up in the code/ layout.
+    func testDotPathIsDescribedAsTheRepoRoot() async {
+        let skillExecutor = StubSkillExecutor()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "d1", name: "Doc Index", kind: .skill, order: 0,
+                      skillId: "skills/doc-structure-index", targetPath: ".",
+                      outputPath: "llm-doc/docs/INDEX.md")
+        ], maxIterations: 1, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor, approvals: makeApprovals())
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        let message = skillExecutor.receivedMessages.first ?? ""
+        XCTAssertTrue(message.contains("Input: the repo root."), message)
+        XCTAssertFalse(message.contains("project root"), message)
+    }
+
     /// The predicate itself: order matters, and a verify stage BEFORE the
     /// apply stage does not count.
     func testLacksVerifyAfterOnlyCountsAnEnabledVerifyStageAfterTheApply() {

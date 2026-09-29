@@ -38,7 +38,7 @@ enum ProjectScaffolder {
     static let requiredDirectories = [
         "source",
         "source/meetings", "source/emails", "source/documents",
-        "code", "data", "llm-doc", "llm-doc/plans", "llm-doc/docs", "llm-doc/refactor",
+        "code", "data", "llm-doc", "llm-doc/plans", "llm-doc/refactor",
         "templates", "commands",
         "system", "system/faults", "system/graph", "system/cache",
         ".claude",
@@ -98,9 +98,12 @@ enum ProjectScaffolder {
         // 3. .gitkeep markers so empty directories survive `git add .`
         //    (llm-doc/plans is auto-generated — scaffolded empty so the KB
         //     plans export target exists from day one; see ProjectLayout.plansDir.
-        //     llm-doc/docs and llm-doc/refactor are the Doc Optimization and
-        //     Refactoring loops' output trees, scaffolded for the same reason)
-        for dir in ["llm-doc", "llm-doc/plans", "llm-doc/docs", "llm-doc/refactor", "data", "source/meetings", "source/emails", "source/documents"] {
+        //     llm-doc/refactor is the Refactoring loop's plan tree, scaffolded
+        //     for the same reason. The Doc Optimization loop's llm-doc/docs is
+        //     deliberately NOT scaffolded here: it lives inside the git repo so
+        //     the code graph scans and links it, and the doc skills create it
+        //     there)
+        for dir in ["llm-doc", "llm-doc/plans", "llm-doc/refactor", "data", "source/meetings", "source/emails", "source/documents"] {
             writeIfAbsent(
                 at: folderURL.appendingPathComponent("\(dir)/.gitkeep"),
                 content: "")

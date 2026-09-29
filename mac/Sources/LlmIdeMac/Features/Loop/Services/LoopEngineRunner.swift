@@ -1174,11 +1174,12 @@ final class LoopEngineRunner: ObservableObject {
         return msg
     }
 
-    /// `PathUtils.relative` returns "." for the project root itself — read
+    /// `PathUtils.relative` returns "." for the repo (git) root itself — stage
+    /// paths are relative to the git root, not the project root — read
     /// naturally in a sentence ("Input: .." reads as a typo/ambiguous
-    /// double-dot, not "the project root").
+    /// double-dot, not "the repo root").
     private static func describePath(_ path: String) -> String {
-        path == "." ? "the project root" : path
+        path == "." ? "the repo root" : path
     }
 
     /// Prefixes `goal`/`acceptanceCriteria` (when either is set) onto text the

@@ -231,6 +231,19 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertEqual(LoopTemplate.refactoring.applied(to: repo).protectedPathPolicy, .warn)
     }
 
+    /// The doc tree must live inside the git tree so the code graph scans and
+    /// links it: the doc stages resolve their paths against the repo root only.
+    func testDocPromptsResolveAgainstTheRepoRootOnly() throws {
+        for prompt in [LoopStageDetector.docIndexPrompt, LoopStageDetector.docWriterPrompt] {
+            XCTAssertTrue(prompt.contains(LoopStageDetector.docResolvePathsRule))
+            XCTAssertTrue(prompt.contains("repo root only"))
+            XCTAssertFalse(prompt.contains("then the project root"))
+        }
+        // …so the project-level scaffold no longer creates a doc tree outside the repo.
+        XCTAssertFalse(ProjectScaffolder.requiredDirectories.contains("llm-doc/docs"))
+        XCTAssertTrue(ProjectScaffolder.requiredDirectories.contains("llm-doc/refactor"))
+    }
+
     func testDocLoopIndexesThenWritesTheGeneratedDocTree() throws {
         let docs = try XCTUnwrap(loop(LoopDefaultLoopKey.docs,
                                       in: LoopStageDetector.defaultLoops(gitRoot: repo)))

@@ -669,15 +669,23 @@ public enum LoopStageDetector {
         + "safely. Never touch more than that batch, and never commit. With no todo batch left, change "
         + "nothing."
 
+    /// The doc loops' path rule: the repo root ONLY. A doc tree outside the
+    /// git tree (the project root's `llm-doc/` in the `code/<repo>` layout) is
+    /// never seen by the structure scanner, so its citations could never
+    /// become graph edges.
+    static let docResolvePathsRule = "Resolve the Input and the Output path against the repo root only "
+        + "(never the project root), creating the Output's directory there when missing: the docs must be "
+        + "inside the git tree so the code graph scans and links them."
+
     static let docIndexPrompt = "Write or update the doc index file at the Output path for the code under "
-        + "the Input. " + resolvePathsRule + " The index lists the areas of the codebase, for each area "
+        + "the Input. " + docResolvePathsRule + " The index lists the areas of the codebase, for each area "
         + "the doc page that will describe it (beside the index), and the key files and symbols that page "
         + "must cover. " + docCitationFormat + " Rewrite only the drifted sections, keep the index within "
         + "300 lines, and never edit hand-written docs."
 
     static let docWriterPrompt = "For every page listed in the doc index at the Input, write or update "
         + "that page in the Output directory: purpose, how it works (the logic, step by step), key files "
-        + "and functions, invariants, how to change it safely, and related pages. " + resolvePathsRule
+        + "and functions, invariants, how to change it safely, and related pages. " + docResolvePathsRule
         + " " + docCitationFormat + " Update only drifted sections; never delete a page the index still "
         + "lists; keep each page within 250 lines. Write only inside the Output directory — never edit "
         + "code, hand-written docs, or the index."
