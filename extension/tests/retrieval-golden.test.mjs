@@ -110,9 +110,7 @@ test('parent workspace with sibling repos does not leak a sibling repo', {
 });
 
 // Doc-only seeds must not crowd out a later token's exact title match (fails today: top 3 are doc-only handlers).
-test('doc-only seeds do not crowd out an exact title match', {
-  todo: 'doc-only seeds crowd out title matches (Phase C/D)',
-}, () => {
+test('doc-only seeds do not crowd out an exact title match', () => {
   const R = path.join(WORKSPACE, 'code', 'crowd');
   const LONG = 'authenticationmiddlewareconfiguration';
   const nodes = [file('c/f.ts')];
