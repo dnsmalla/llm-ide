@@ -73,6 +73,16 @@ final class CronExpressionTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(CronExpression.parse("0 9 * * *")).describe, "At 09:00")
         XCTAssertEqual(try XCTUnwrap(CronExpression.parse("*/30 * * * *")).describe, "Every 30 min")
     }
+
+    /// `*/5,10` and `*/5,` start with `*/` and parse as valid, but are not a
+    /// single step: `describe` used to force-unwrap `Int("5,10")` and crash on
+    /// every render of the schedule (including mid-keystroke in CronField).
+    func testDescribeStepListDoesNotCrash() throws {
+        let list = try XCTUnwrap(CronExpression.parse("*/5,10 * * * *"))
+        XCTAssertEqual(list.describe, "*/5,10 * * * *")
+        let trailing = try XCTUnwrap(CronExpression.parse("*/5, * * * *"))
+        XCTAssertEqual(trailing.describe, "*/5, * * * *")
+    }
 }
 
 /// Local helper for the multi-component `Date.setting(hour:minute:second:)` form used
