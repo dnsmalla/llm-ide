@@ -368,7 +368,9 @@ struct UAGraphView: View {
 
     /// Rebuild memory-chunk index after a generate run.
     private func rebuildMemoryIndex() {
-        memoryChunkById = Dictionary(uniqueKeysWithValues: memoryChunks.map { ($0.id, $0) })
+        // First wins, never `uniqueKeysWithValues:` — that traps on a repeated
+        // id, and chunks also arrive from plugin engines and on-disk caches.
+        memoryChunkById = Dictionary(memoryChunks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     /// Rebuild library-folder groupings when LibraryItemStore changes.

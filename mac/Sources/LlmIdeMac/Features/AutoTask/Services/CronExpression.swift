@@ -62,8 +62,8 @@ struct CronExpression: Sendable, Equatable {
     }
 
     var describe: String {
-        if minute.isStep && hour.all && dayOfMonth.all && month.all && dayOfWeek.all {
-            return "Every \(minute.step!) min"
+        if let step = minute.step, hour.all, dayOfMonth.all, month.all, dayOfWeek.all {
+            return "Every \(step) min"
         }
         if minute.containsExactlyOne, hour.containsExactlyOne, dayOfMonth.all, month.all, dayOfWeek.all {
             return String(format: "At %02d:%02d", hour.single!, minute.single!)
@@ -79,8 +79,14 @@ struct CronExpression: Sendable, Equatable {
         let values: Set<Int>      // the literal values this field matches (already expanded)
         let raw: String           // original text, for describe
         var all: Bool { raw == "*" }
-        var isStep: Bool { raw.hasPrefix("*/") }
-        var step: Int? { isStep ? Int(raw.dropFirst(2)) : nil }
+        /// The N of a field that is exactly `*/N`. Nil for a list such as
+        /// `*/5,10`: it starts with `*/` and parses as valid, but is not a
+        /// single step — reading it as one force-unwrapped `Int("5,10")` and
+        /// crashed every render of the schedule (CronField, the task list).
+        var step: Int? {
+            guard raw.hasPrefix("*/"), let n = Int(raw.dropFirst(2)), n > 0 else { return nil }
+            return n
+        }
         var containsExactlyOne: Bool { values.count == 1 }
         var single: Int? { values.sorted().first }
 

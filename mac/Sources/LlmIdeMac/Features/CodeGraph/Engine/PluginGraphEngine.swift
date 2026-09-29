@@ -87,6 +87,7 @@ public struct PluginGraphEngine: GraphEngine {
         var chunks: [MemoryChunk] = []
         var docCount = 0
         var seen = Set<String>()
+        var seenChunks = Set<String>()
         for path in paths {
             let document = try await runProducing(
                 command, substitutions: ["{root}": path.path], label: label)
@@ -95,7 +96,9 @@ public struct PluginGraphEngine: GraphEngine {
                 nodes.append(node)
             }
             edges.append(contentsOf: graph.edges)
-            chunks.append(contentsOf: document.chunks ?? [])
+            // Overlapping roots yield the same doc twice, hence the same
+            // chunk ids — deduped like nodes, or UAGraphView's index traps.
+            chunks.append(contentsOf: (document.chunks ?? []).filter { seenChunks.insert($0.id).inserted })
             docCount += document.docCount ?? 0
         }
         return GeneratedMemory(graph: CGData(nodes: nodes, edges: edges),
@@ -416,6 +419,30 @@ private struct EngineOutput: Decodable {
     let docCount: Int?
     /// Files this run re-read, when the engine tracks that.
     let changedPaths: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case nodes, edges, layers, tour, chunks, docCount, changedPaths
+    }
+
+    /// Drops repeated node and chunk ids (first wins) at the boundary. The app
+    /// indexes both with `Dictionary(uniqueKeysWithValues:)` — CodeGraphCanvas,
+    /// UAGraphView, the 3D simulation — which TRAPS on a duplicate key, so one
+    /// repeated id from a third-party engine used to crash the Graph view. The
+    /// builtin engine already dedupes; plugin output is untrusted input.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        var seenNodes = Set<String>()
+        nodes = try c.decode([CGNode].self, forKey: .nodes)
+            .filter { seenNodes.insert($0.id).inserted }
+        edges = try c.decode([CGEdge].self, forKey: .edges)
+        layers = try c.decodeIfPresent([UALayer].self, forKey: .layers)
+        tour = try c.decodeIfPresent([UATourStep].self, forKey: .tour)
+        var seenChunks = Set<String>()
+        chunks = try c.decodeIfPresent([MemoryChunk].self, forKey: .chunks)?
+            .filter { seenChunks.insert($0.id).inserted }
+        docCount = try c.decodeIfPresent(Int.self, forKey: .docCount)
+        changedPaths = try c.decodeIfPresent([String].self, forKey: .changedPaths)
+    }
 
     var graph: CGData {
         CGData(nodes: nodes, edges: edges, layers: layers ?? [], tour: tour ?? [])

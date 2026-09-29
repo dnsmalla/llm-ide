@@ -106,7 +106,9 @@ final class MobileWebSocketServer: @unchecked Sendable {
          onListening: @escaping (Int) -> Void = { _ in },
          onBindFailed: @escaping (Error) -> Void = { _ in }) {
         self.basePort = port
-        self.portCandidates = max(1, portCandidates)
+        // Never slide past 65535: a base of 65527+ with the port busy used to
+        // reach 65536 and trap in `UInt16(currentPort)` on the listener queue.
+        self.portCandidates = max(1, min(portCandidates, 65_535 - port + 1))
         self.onListening = onListening
         self.deviceName = deviceName
         self.validatePin = validatePin
@@ -147,7 +149,10 @@ final class MobileWebSocketServer: @unchecked Sendable {
         opts.maximumMessageSize = 8_388_608   // 8 MiB — matches the :3456 body cap; paired-LAN only
         let params = NWParameters.tcp
         params.defaultProtocolStack.applicationProtocols.insert(opts, at: 0)
-        let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: UInt16(currentPort))!)
+        guard let rawPort = UInt16(exactly: currentPort), let port = NWEndpoint.Port(rawValue: rawPort) else {
+            throw NWError.posix(.EADDRNOTAVAIL)
+        }
+        let listener = try NWListener(using: params, on: port)
         listener.newConnectionHandler = { [weak self] conn in self?.handle(conn) }
         listener.stateUpdateHandler = { [weak self, weak listener] state in
             guard let self else { return }

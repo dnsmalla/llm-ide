@@ -248,6 +248,11 @@ enum PluginGitInstaller {
                 group.leave()
             }
             group.notify(queue: rq) {
+                // Pipe EOF means the child closed its fds, NOT that Foundation
+                // has reaped it: reading `terminationStatus` while the task is
+                // still marked running raises NSInvalidArgumentException, an
+                // uncatchable ObjC exception that aborted the app. Wait first.
+                proc.waitUntilExit()
                 timeoutItem.cancel()
                 guardToken.cancel()
                 cont.resume(returning: ProcessResult(code: proc.terminationStatus, stdout: outBox.s, stderr: errBox.s))

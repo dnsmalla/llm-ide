@@ -190,7 +190,7 @@ struct RepoKanbanPanel: View {
                     HStack(spacing: -5) {
                         ForEach(issue.assignees.prefix(3)) { a in
                             // RepoUser has a String id; seed the initials color from it.
-                            UserAvatar(name: a.displayName, id: abs(a.id.hashValue),
+                            UserAvatar(name: a.displayName, id: a.id.hashValue & Int.max,   // non-negative; abs(Int.min) traps
                                        avatarUrl: a.avatarUrl, size: 20)
                         }
                     }
@@ -218,7 +218,8 @@ struct RepoKanbanPanel: View {
         case "open", "__open__": return t.textMuted
         default:
             let palette: [Color] = [t.accent, t.accent2, t.accent3, t.accent4, .purple, .orange]
-            return palette[abs(col.id.hashValue) % palette.count]
+            // Not `abs(hash) % n`: abs(Int.min) overflows and traps.
+            return palette[Int(UInt(bitPattern: col.id.hashValue) % UInt(palette.count))]
         }
     }
 

@@ -500,7 +500,7 @@ struct LoopEngineView: View {
                       : "Disabled — the runner skips this stage")
                 stageMenu(stage, position: position, count: stages.count)
             }
-            stageDetail(index: index)
+            stageDetail(stage: stageBinding(id: stage.id, fallback: stage))
                 .opacity(stage.enabled ? 1 : 0.55)
         }
         .padding(Spacing.sm)
@@ -587,15 +587,29 @@ struct LoopEngineView: View {
         .padding(.vertical, Spacing.sm)
     }
 
+    /// A binding to the stage with `id`, looked up on every access. A binding
+    /// through a captured array index (`$stages[index]`) outlives the row: a
+    /// focused field commits on focus loss AFTER `deleteStage` or a config
+    /// reload shrank `stages`, and the indexed write then trapped past the end
+    /// (or landed on the neighbouring stage). Once the stage is gone, reads
+    /// return `fallback` and writes are dropped.
+    private func stageBinding(id: String, fallback: LoopStage) -> Binding<LoopStage> {
+        Binding(
+            get: { stages.first { $0.id == id } ?? fallback },
+            set: { new in
+                if let i = stages.firstIndex(where: { $0.id == id }) { stages[i] = new }
+            })
+    }
+
     @ViewBuilder
-    private func stageDetail(index: Int) -> some View {
+    private func stageDetail(stage: Binding<LoopStage>) -> some View {
         let t = theme.current
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Name").font(Typography.caption).foregroundStyle(t.textMuted)
-            TextField("Stage name", text: $stages[index].name)
+            TextField("Stage name", text: stage.name)
                 .textFieldStyle(.roundedBorder)
 
-            if stages[index].kind == .shellCommand {
+            if stage.wrappedValue.kind == .shellCommand {
                 Text("Command").font(Typography.caption).foregroundStyle(t.textMuted)
                 // SINGLE LINE, deliberately — do not "improve" this to
                 // `axis: .vertical` to make long commands readable. A newline
@@ -609,15 +623,15 @@ struct LoopEngineView: View {
                 // wizard's field is single-line for the same reason.
                 HStack(spacing: 6) {
                     TextField("e.g. swift test && swift build", text: Binding(
-                        get: { stages[index].command ?? "" },
-                        set: { stages[index].command = $0 }
+                        get: { stage.wrappedValue.command ?? "" },
+                        set: { stage.wrappedValue.command = $0 }
                     ))
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 11, design: .monospaced))
 
                     if let gitRoot = activeGitRootURL {
-                        commandSuggestionsMenu(gitRoot: gitRoot, stageName: stages[index].name) { candidate in
-                            stages[index].command = candidate.command
+                        commandSuggestionsMenu(gitRoot: gitRoot, stageName: stage.wrappedValue.name) { candidate in
+                            stage.wrappedValue.command = candidate.command
                             // A NON-primary pick is an unknown quantity: it is
                             // whatever else the Makefile happens to define, so
                             // it could be a dev server or a watcher that never
@@ -631,23 +645,23 @@ struct LoopEngineView: View {
                             // capping those would dispatch an LLM repair
                             // against healthy code — worse than the hang this
                             // guards. Never overrides a value the user chose.
-                            if !candidate.isPrimary, stages[index].timeoutSeconds == nil {
-                                stages[index].timeoutSeconds = 1800
+                            if !candidate.isPrimary, stage.wrappedValue.timeoutSeconds == nil {
+                                stage.wrappedValue.timeoutSeconds = 1800
                             }
                         }
                     }
                 }
 
                 if let gitRoot = activeGitRootURL {
-                    if let command = stages[index].command, !command.isEmpty {
+                    if let command = stage.wrappedValue.command, !command.isEmpty {
                         // "Approve command", not the old "Approve & enable" —
                         // "enable" now means the per-stage enabled toggle, and a
                         // button claiming to enable while only approving would
                         // leave a disabled stage silently skipped.
-                        let approved = approvals.isStageApproved(repo: gitRoot, stageId: stages[index].id, command: command)
+                        let approved = approvals.isStageApproved(repo: gitRoot, stageId: stage.wrappedValue.id, command: command)
                         Button(approved ? "Approved" : "Approve command") {
-                            approvals.approveStage(repo: gitRoot, stageId: stages[index].id, command: command)
-                            selectedStageId = stages[index].id
+                            approvals.approveStage(repo: gitRoot, stageId: stage.wrappedValue.id, command: command)
+                            selectedStageId = stage.wrappedValue.id
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
@@ -660,15 +674,15 @@ struct LoopEngineView: View {
                     Text("Open a project with a cloned repo to approve or run shell-command stages.")
                         .font(Typography.caption).foregroundStyle(t.textMuted)
                 }
-            } else if stages[index].kind == .skill {
+            } else if stage.wrappedValue.kind == .skill {
                 Text("Skill").font(Typography.caption).foregroundStyle(t.textMuted)
                 if skillCatalog.isEmpty {
                     Text(skillsLoaded ? "No library skills found." : "Loading skills…")
                         .font(Typography.caption).foregroundStyle(t.textMuted)
                 } else {
                     Picker("Skill", selection: Binding(
-                        get: { stages[index].skillId ?? "" },
-                        set: { stages[index].skillId = $0.isEmpty ? nil : $0 }
+                        get: { stage.wrappedValue.skillId ?? "" },
+                        set: { stage.wrappedValue.skillId = $0.isEmpty ? nil : $0 }
                     )) {
                         Text("None").tag("")
                         ForEach(skillCatalog) { s in
@@ -684,19 +698,19 @@ struct LoopEngineView: View {
                 // a projectRoot fallback here would silently store paths relative
                 // to the wrong base on a project with no git repo.
                 PathPickerField(root: activeGitRootURL,
-                                path: $stages[index].targetPath)
+                                path: stage.targetPath)
 
                 Text("Output (optional) — where the skill should write its result").font(Typography.caption).foregroundStyle(t.textMuted)
                 PathPickerField(root: activeGitRootURL,
-                                path: $stages[index].outputPath)
+                                path: stage.outputPath)
                 Text("Input and output are hints included in the skill's prompt — the skill decides how to use them via its own tool calls.")
                     .font(Typography.caption).foregroundStyle(t.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Text("Prompt (optional)").font(Typography.caption).foregroundStyle(t.textMuted)
                 TextField("Defaults to: apply this skill", text: Binding(
-                    get: { stages[index].prompt ?? "" },
-                    set: { stages[index].prompt = $0.isEmpty ? nil : $0 }
+                    get: { stage.wrappedValue.prompt ?? "" },
+                    set: { stage.wrappedValue.prompt = $0.isEmpty ? nil : $0 }
                 ), axis: .vertical)
                 .textFieldStyle(.roundedBorder)
 
@@ -711,28 +725,28 @@ struct LoopEngineView: View {
             Divider().background(t.border).padding(.vertical, 4)
 
             Text("Severity").font(Typography.caption).foregroundStyle(t.textMuted)
-            Picker("Severity", selection: $stages[index].severity) {
+            Picker("Severity", selection: stage.severity) {
                 ForEach(LoopStageSeverity.allCases, id: \.self) { severity in
                     Text(severity.label).tag(severity)
                 }
             }
             .pickerStyle(.segmented)
-            Text(stages[index].severity == .blocking
+            Text(stage.wrappedValue.severity == .blocking
                  ? "A failure triggers repair and can end the run."
                  : "A failure is recorded only — no repair, no stall, never fails the run. Use for linters and formatters.")
                 .font(Typography.caption)
                 .foregroundStyle(t.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if stages[index].kind == .shellCommand {
+            if stage.wrappedValue.kind == .shellCommand {
                 Text("Timeout").font(Typography.caption).foregroundStyle(t.textMuted)
                 // 0 means "use the runner default" — a Stepper cannot express nil.
                 // That default is now no limit, so say so rather than naming a
                 // number the runner no longer applies.
-                Stepper(stages[index].timeoutSeconds.map { "\($0)s" } ?? "No limit",
+                Stepper(stage.wrappedValue.timeoutSeconds.map { "\($0)s" } ?? "No limit",
                         value: Binding(
-                            get: { stages[index].timeoutSeconds ?? 0 },
-                            set: { stages[index].timeoutSeconds = $0 == 0 ? nil : $0 }
+                            get: { stage.wrappedValue.timeoutSeconds ?? 0 },
+                            set: { stage.wrappedValue.timeoutSeconds = $0 == 0 ? nil : $0 }
                         ), in: 0...3600, step: 30)
             }
         }

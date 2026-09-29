@@ -157,12 +157,14 @@ final class MeetingIndex: @unchecked Sendable {
         bindOpt(stmt, 3, r.title)
         sqlite3_bind_int64(stmt, 4, r.startedAt)
         if let e = r.endedAt { sqlite3_bind_int64(stmt, 5, e) } else { sqlite3_bind_null(stmt, 5) }
-        if let d = r.durationSec { sqlite3_bind_int(stmt, 6, Int32(d)) } else { sqlite3_bind_null(stmt, 6) }
+        // int64, never `Int32(x)`: these come from a note's frontmatter, and
+        // a value past Int32.max (a hand edit, an import) trapped the indexer.
+        if let d = r.durationSec { sqlite3_bind_int64(stmt, 6, Int64(d)) } else { sqlite3_bind_null(stmt, 6) }
         bindOpt(stmt, 7, r.gist)
         bindOpt(stmt, 8, r.tldrJSON)
-        sqlite3_bind_int(stmt, 9, Int32(r.actionsCount))
-        sqlite3_bind_int(stmt, 10, Int32(r.decisionsCount))
-        sqlite3_bind_int(stmt, 11, Int32(r.blockersCount))
+        sqlite3_bind_int64(stmt, 9, Int64(r.actionsCount))
+        sqlite3_bind_int64(stmt, 10, Int64(r.decisionsCount))
+        sqlite3_bind_int64(stmt, 11, Int64(r.blockersCount))
         sqlite3_bind_int64(stmt, 12, r.fileMtime)
         sqlite3_bind_int64(stmt, 13, r.fileSize)
         sqlite3_bind_int64(stmt, 14, r.indexedAt)

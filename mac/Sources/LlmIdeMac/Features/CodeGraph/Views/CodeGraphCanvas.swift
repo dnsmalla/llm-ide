@@ -307,10 +307,11 @@ struct CodeGraphCanvas: View {
     // MARK: - Caches
 
     private func rebuildCaches() {
+        // First wins, never `uniqueKeysWithValues:` — that traps on a repeated
+        // node id, which a plugin engine or a stale on-disk graph can carry.
         nodePositions = Dictionary(
-            uniqueKeysWithValues: data.nodes.map {
-                ($0.id, positionOverrides[$0.id] ?? $0.position)
-            })
+            data.nodes.map { ($0.id, positionOverrides[$0.id] ?? $0.position) },
+            uniquingKeysWith: { first, _ in first })
         var deg: [String: Int] = [:]
         var adj: [String: Set<String>] = [:]
         for e in data.edges {

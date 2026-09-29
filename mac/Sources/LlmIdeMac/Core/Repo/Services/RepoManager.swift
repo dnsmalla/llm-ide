@@ -662,6 +662,13 @@ final class RepoManager {
                 // exception on SIGPIPE and would crash the process.
                 if let stdin {
                     readGroup.enter()
+                    // F_SETNOSIGPIPE: with the default SIGPIPE action the
+                    // kernel KILLS the app on that broken pipe before the
+                    // write can return EPIPE, so `try?` alone never helped.
+                    // Per-fd, not a process-wide SIG_IGN: an ignored signal
+                    // is inherited across exec by the integrated terminal's
+                    // shells (SwiftTerm forkpty+execve never resets it).
+                    _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
                     DispatchQueue.global(qos: .userInitiated).async {
                         try? stdinPipe.fileHandleForWriting.write(contentsOf: stdin)
                         try? stdinPipe.fileHandleForWriting.close()

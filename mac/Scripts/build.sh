@@ -301,6 +301,21 @@ if [ ! -f "$BUILT_BIN" ]; then
 fi
 cp "$BUILT_BIN" "$APP_DIR/Contents/MacOS/$APP_NAME"
 
+# SwiftPM resource bundles (GraphKit's Python scanners, SwiftTerm's shaders).
+# Without them the app only found these via the absolute .build path baked in
+# at compile time — i.e. only on the machine that built it. Contents/Resources,
+# not the .app root: codesign rejects unsealed files at the bundle root. The
+# code looks them up with Bundle(url:) (never `Bundle.module`, which traps).
+for res_bundle in "$PROJ_DIR"/.build/release/*.bundle; do
+  [ -d "$res_bundle" ] || continue
+  # The app's own bundle is already mirrored loose into Contents/Resources by
+  # the rsync above (and read from Bundle.main first) — copying it would ship
+  # ~8 MB of monaco/mermaid twice.
+  [ "$(basename "$res_bundle")" = "LlmIdeMac_LlmIdeMacLib.bundle" ] && continue
+  rm -rf "$APP_DIR/Contents/Resources/$(basename "$res_bundle")"
+  cp -R "$res_bundle" "$APP_DIR/Contents/Resources/"
+done
+
 # Sparkle ships as a binary framework via SPM. The framework bundle
 # isn't automatically vendored into the .app — we have to copy it
 # into Contents/Frameworks/ ourselves and fix the executable's

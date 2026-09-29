@@ -231,14 +231,31 @@ struct ModelLimitsPanel: View {
 
     // MARK: - Inline editor (expanded)
 
+    /// A binding to one field of the limit for `model`, looked up on every
+    /// access rather than through the row's index. `load()`/`save()` replace
+    /// `limits` wholesale (switching provider can load a shorter chain), and a
+    /// focused field that commits afterwards used to write `limits[i]` past
+    /// the end and trap. Keyed by model, a stale row's write is dropped
+    /// instead of landing on whichever model now sits at that index.
+    private func limitBinding<V>(_ model: String,
+                                 _ field: WritableKeyPath<LlmIdeAPIClient.ModelLimit, V>,
+                                 fallback: V,
+                                 clamp: @escaping (V) -> V = { $0 }) -> Binding<V> {
+        Binding(
+            get: { limits.first { $0.model == model }?[keyPath: field] ?? fallback },
+            set: { new in
+                guard let j = limits.firstIndex(where: { $0.model == model }) else { return }
+                limits[j][keyPath: field] = clamp(new)
+                dirty = true
+            })
+    }
+
     @ViewBuilder
     private func editor(index i: Int) -> some View {
+        let model = limits[i].model
         VStack(alignment: .leading, spacing: Spacing.sm) {
             HStack(spacing: Spacing.md) {
-                Toggle("Enabled", isOn: Binding(
-                    get: { limits[i].enabled },
-                    set: { limits[i].enabled = $0; dirty = true }
-                ))
+                Toggle("Enabled", isOn: limitBinding(model, \.enabled, fallback: false))
                 .toggleStyle(.checkbox)
                 .font(Typography.caption)
 
@@ -253,26 +270,19 @@ struct ModelLimitsPanel: View {
             HStack(spacing: Spacing.md) {
                 HStack(spacing: 4) {
                     Text("Limit").font(Typography.caption).foregroundStyle(theme.current.textMuted)
-                    TextField("0", value: Binding(
-                        get: { limits[i].limitValue },
-                        set: { limits[i].limitValue = max(0, $0); dirty = true }
-                    ), format: .number)
+                    TextField("0", value: limitBinding(model, \.limitValue, fallback: 0) { max(0, $0) },
+                              format: .number)
                     .textFieldStyle(.roundedBorder).frame(width: 90)
                 }
-                Picker("", selection: Binding(
-                    get: { limits[i].unit }, set: { limits[i].unit = $0; dirty = true }
-                )) { Text("Runs").tag("runs"); Text("Tokens").tag("tokens") }
+                Picker("", selection: limitBinding(model, \.unit, fallback: "runs")) { Text("Runs").tag("runs"); Text("Tokens").tag("tokens") }
                     .labelsHidden().pickerStyle(.menu).fixedSize()
-                Picker("", selection: Binding(
-                    get: { limits[i].windowKind }, set: { limits[i].windowKind = $0; dirty = true }
-                )) { Text("Daily").tag("daily"); Text("Monthly").tag("monthly") }
+                Picker("", selection: limitBinding(model, \.windowKind, fallback: "daily")) { Text("Daily").tag("daily"); Text("Monthly").tag("monthly") }
                     .labelsHidden().pickerStyle(.menu).fixedSize()
                 HStack(spacing: 4) {
                     Text("Switch at").font(Typography.caption).foregroundStyle(theme.current.textMuted)
-                    Stepper("\(limits[i].thresholdPct)%", value: Binding(
-                        get: { limits[i].thresholdPct },
-                        set: { limits[i].thresholdPct = min(100, max(1, $0)); dirty = true }
-                    ), in: 1...100, step: 5).font(Typography.caption)
+                    Stepper("\(limits[i].thresholdPct)%",
+                            value: limitBinding(model, \.thresholdPct, fallback: 80) { min(100, max(1, $0)) },
+                            in: 1...100, step: 5).font(Typography.caption)
                 }
                 Spacer()
             }
