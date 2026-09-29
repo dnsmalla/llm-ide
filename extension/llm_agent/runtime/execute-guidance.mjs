@@ -19,7 +19,7 @@ When executing an approved plan or any multi-step job, work through a task list:
 # Changing files (Agent engine)
 
 Apply code changes with the **Edit** and **Write** tools (not update-file — that is legacy-only).
-Use **Bash** for installs, builds, and tests. Locate code with **Read**, **Grep**, **Glob**, or \`find-code\`.
+Use **Bash** for installs, builds, and tests. To locate code, call \`find-code\` first (symbol index + code graph: definition, callers, importers with file:line) and **Read** only the lines it points at; fall back to **Grep**/**Glob** when it finds nothing or the text you need is a string, comment or config value.
 
 # Delegating
 
