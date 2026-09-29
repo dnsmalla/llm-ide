@@ -55,10 +55,11 @@ final class LoopDefaultLoopsTests: XCTestCase {
 
     // MARK: - What each default loop contains
 
-    func testBareRepoGetsTheRegressionAndPlanLoops() {
+    func testBareRepoGetsTheRegressionPlanRefactorAndDocLoops() {
         let loops = LoopStageDetector.defaultLoops(gitRoot: repo)
         XCTAssertEqual(loops.map(\.defaultKey),
-                       [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.plan])
+                       [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.plan,
+                        LoopDefaultLoopKey.refactor, LoopDefaultLoopKey.docs])
         XCTAssertEqual(loops[0].name, "Regression")
         XCTAssertEqual(loops[0].config.stages.map(\.kind), [.regressionSweep])
     }
@@ -118,12 +119,13 @@ final class LoopDefaultLoopsTests: XCTestCase {
             .first { $0.defaultKey == LoopDefaultLoopKey.systemCheck })
     }
 
-    func testLlmIdeLayoutGetsAllFourLoopsWithTheChecksInSystemCheck() throws {
+    func testLlmIdeLayoutGetsEveryLoopWithTheChecksInSystemCheck() throws {
         try writeLlmIdeLayout()
         let loops = LoopStageDetector.defaultLoops(gitRoot: repo)
         XCTAssertEqual(loops.map(\.defaultKey),
                        [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.test,
-                        LoopDefaultLoopKey.systemCheck, LoopDefaultLoopKey.plan])
+                        LoopDefaultLoopKey.systemCheck, LoopDefaultLoopKey.plan,
+                        LoopDefaultLoopKey.refactor, LoopDefaultLoopKey.docs])
         let systemCheck = loops.first { $0.defaultKey == LoopDefaultLoopKey.systemCheck }
         XCTAssertEqual(systemCheck?.name, "System Check")
         XCTAssertEqual(Set(systemCheck?.config.stages.compactMap(\.defaultKey) ?? []),
@@ -160,6 +162,214 @@ final class LoopDefaultLoopsTests: XCTestCase {
             XCTAssertEqual(again.loop(defaultKey: loopKey)?.config.stages.compactMap(\.defaultKey),
                            loop.config.stages.compactMap(\.defaultKey),
                            "\(loopKey) loses or gains stages on a second ensure")
+        }
+    }
+
+    // MARK: - Refactoring + Doc Optimization loops
+
+    private func loop(_ key: String, in loops: [LoopDefinition]) -> LoopDefinition? {
+        loops.first { $0.defaultKey == key }
+    }
+
+    /// Code is never edited without a verify stage: with no detectable test
+    /// command the Refactoring loop only writes the plan.
+    func testRefactorLoopIsPlanOnlyWithoutATestCommand() throws {
+        let refactor = try XCTUnwrap(loop(LoopDefaultLoopKey.refactor,
+                                          in: LoopStageDetector.defaultLoops(gitRoot: repo)))
+        XCTAssertEqual(refactor.name, "Refactoring")
+        XCTAssertEqual(refactor.config.stages.count, 1)
+        let plan = try XCTUnwrap(refactor.config.stages.first)
+        XCTAssertEqual(plan.name, "Refactor Plan")
+        XCTAssertEqual(plan.kind, .skill)
+        XCTAssertEqual(plan.skillId, "skills/refactor-planner")
+        XCTAssertEqual(plan.targetPath, ".")
+        XCTAssertEqual(plan.outputPath, "llm-doc/refactor/REFACTOR.md")
+        XCTAssertEqual(plan.defaultKey, "refactor-plan")
+        XCTAssertTrue(plan.isDefault)
+    }
+
+    /// With a test command: plan, apply ONE batch, then prove behaviour held.
+    func testRefactorLoopPlansAppliesAndTestsWhenATestCommandIsDetected() throws {
+        try write("Package.swift")
+        let refactor = try XCTUnwrap(loop(LoopDefaultLoopKey.refactor,
+                                          in: LoopStageDetector.defaultLoops(gitRoot: repo)))
+        let stages = LoopStage.runOrder(refactor.config.stages)
+        XCTAssertEqual(stages.map(\.name), ["Refactor Plan", "Refactor Apply", "Test"])
+        XCTAssertEqual(stages.map(\.kind), [.skill, .skill, .shellCommand])
+        XCTAssertEqual(stages.compactMap(\.defaultKey), ["refactor-plan", "refactor-apply", "refactor-test"])
+        XCTAssertEqual(stages.map(\.skillId), ["skills/refactor-planner", "skills/refactor-apply", nil])
+        XCTAssertEqual(stages[1].targetPath, "llm-doc/refactor/REFACTOR.md")
+        XCTAssertEqual(stages[1].outputPath, ".")
+        XCTAssertEqual(stages[2].command, "swift test")
+        XCTAssertEqual(stages[2].detectedCommand, "swift test")
+        XCTAssertTrue(stages.allSatisfy(\.isDefault))
+    }
+
+    func testDocLoopIndexesThenWritesTheGeneratedDocTree() throws {
+        let docs = try XCTUnwrap(loop(LoopDefaultLoopKey.docs,
+                                      in: LoopStageDetector.defaultLoops(gitRoot: repo)))
+        XCTAssertEqual(docs.name, "Doc Optimization")
+        let stages = LoopStage.runOrder(docs.config.stages)
+        XCTAssertEqual(stages.map(\.name), ["Doc Index", "Doc Writer"])
+        XCTAssertEqual(stages.map(\.kind), [.skill, .skill])
+        XCTAssertEqual(stages.compactMap(\.defaultKey), ["doc-index", "doc-writer"])
+        XCTAssertEqual(stages.compactMap(\.skillId), ["skills/doc-structure-index", "skills/doc-writer"])
+        XCTAssertEqual(stages.map(\.targetPath), [".", "llm-doc/docs/INDEX.md"])
+        XCTAssertEqual(stages.map(\.outputPath), ["llm-doc/docs/INDEX.md", "llm-doc/docs"])
+    }
+
+    /// Prompts carry the contract but no path — the path lives only in the
+    /// editable Input/Output fields, so editing those redirects the loop. The
+    /// doc stages state the citation format the graph reads.
+    func testRefactorAndDocPromptsArePathAgnosticAndSelfSufficient() throws {
+        try write("Package.swift")
+        let loops = LoopStageDetector.defaultLoops(gitRoot: repo)
+        let stages = [LoopDefaultLoopKey.refactor, LoopDefaultLoopKey.docs]
+            .flatMap { loop($0, in: loops)?.config.stages ?? [] }
+            .filter { $0.kind == .skill }
+        XCTAssertEqual(stages.count, 4)
+        for stage in stages {
+            let prompt = try XCTUnwrap(stage.prompt, "\(stage.name) has no prompt")
+            XCTAssertFalse(prompt.contains("llm-doc"), "\(stage.name) bakes a path into its prompt")
+            XCTAssertTrue(prompt.contains("the Input") && prompt.contains("the Output"),
+                          "\(stage.name) does not defer to the Input/Output fields")
+        }
+        let docPrompts = stages.filter { $0.defaultKey?.hasPrefix("doc-") == true }.compactMap(\.prompt)
+        XCTAssertEqual(docPrompts.count, 2)
+        for prompt in docPrompts {
+            XCTAssertTrue(prompt.contains(LoopStageDetector.docCitationFormat))
+        }
+        XCTAssertTrue(LoopStageDetector.docCitationFormat.contains("path with line"))
+    }
+
+    func testRefactorAndDocLoopsAreAbsentWithoutAGitRoot() {
+        let loops = LoopStageDetector.defaultLoops(gitRoot: nil)
+        XCTAssertNil(loop(LoopDefaultLoopKey.refactor, in: loops))
+        XCTAssertNil(loop(LoopDefaultLoopKey.docs, in: loops))
+    }
+
+    func testRefactorAndDocLoopsShipTheirContracts() {
+        let loops = LoopStageDetector.defaultLoops(gitRoot: repo)
+        XCTAssertEqual(loop(LoopDefaultLoopKey.refactor, in: loops)?.goal,
+                       "Move the codebase toward a professional, AI-friendly structure one safe, "
+                           + "behaviour-preserving batch at a time.")
+        XCTAssertEqual(loop(LoopDefaultLoopKey.refactor, in: loops)?.acceptanceCriteria,
+                       "The refactor plan exists with every batch marked todo/done/skipped, the applied "
+                           + "batch changed no behaviour, and the test command still passes.")
+        XCTAssertEqual(loop(LoopDefaultLoopKey.docs, in: loops)?.goal,
+                       "Keep a generated, code-cited doc tree that explains what the code does and why, so "
+                           + "people, agents and the code graph are pointed at the right code.")
+        XCTAssertEqual(loop(LoopDefaultLoopKey.docs, in: loops)?.acceptanceCriteria,
+                       "llm-doc/docs/INDEX.md lists every area, every listed page exists within 250 lines, "
+                           + "and every code citation resolves to a real file or symbol.")
+    }
+
+    /// `stageKeyOwner` routing: a refactor/doc stage found in the wrong loop
+    /// moves to the loop that owns it, carrying its edits.
+    func testRefactorAndDocStagesAreRoutedToTheLoopsThatOwnThem() throws {
+        try write("Package.swift")
+        var store = LoopStageDetector.ensureDefaultLoops(
+            in: LoopEngineProjectStore(loops: []), gitRoot: repo).store
+        let refactorIndex = try XCTUnwrap(store.loops.firstIndex { $0.defaultKey == LoopDefaultLoopKey.refactor })
+        let docsIndex = try XCTUnwrap(store.loops.firstIndex { $0.defaultKey == LoopDefaultLoopKey.docs })
+        store.loops[refactorIndex].config.stages.removeAll { $0.defaultKey == "refactor-test" }
+        store.loops[docsIndex].config.stages.removeAll { $0.defaultKey == "doc-writer" }
+        let userIndex = try XCTUnwrap(store.loops.firstIndex { $0.defaultKey == nil })
+        store.loops[userIndex].config.stages = [
+            LoopStage(id: "stray-test", name: "My Test", kind: .shellCommand, command: "custom test",
+                      order: 0, isDefault: true, defaultKey: "refactor-test"),
+            LoopStage(id: "stray-writer", name: "Doc Writer", kind: .skill, order: 1,
+                      prompt: "edited", isDefault: true, defaultKey: "doc-writer"),
+        ]
+        let routed = LoopStageDetector.ensureDefaultLoops(in: store, gitRoot: repo).store
+        XCTAssertTrue(routed.loops.first { $0.defaultKey == nil }?.config.stages.isEmpty ?? false)
+        let test = routed.loop(defaultKey: LoopDefaultLoopKey.refactor)?
+            .config.stages.filter { $0.defaultKey == "refactor-test" }
+        XCTAssertEqual(test?.map(\.id), ["stray-test"])
+        XCTAssertEqual(test?.first?.command, "custom test")
+        let writer = routed.loop(defaultKey: LoopDefaultLoopKey.docs)?
+            .config.stages.filter { $0.defaultKey == "doc-writer" }
+        XCTAssertEqual(writer?.map(\.prompt), ["edited"])
+    }
+
+    /// Manual only: the Refactoring loop edits code, so it is created off the
+    /// schedule and the schedule never picks it up.
+    func testRefactorLoopIsManualOnlyAndNeverScheduled() throws {
+        try write("Package.swift")
+        var store = LoopStageDetector.ensureDefaultLoops(
+            in: LoopEngineProjectStore(loops: []), gitRoot: repo).store
+        let index = try XCTUnwrap(store.loops.firstIndex { $0.defaultKey == LoopDefaultLoopKey.refactor })
+        XCTAssertFalse(store.loops[index].runsOnSchedule)
+        XCTAssertTrue(store.loops[index].isManualOnly)
+        XCTAssertFalse(store.loop(defaultKey: LoopDefaultLoopKey.docs)?.isManualOnly ?? true)
+        // Even a hand-edited loop.json that forces the flag on is skipped.
+        store.loops[index].runsOnSchedule = true
+        XCTAssertTrue(store.scheduledLoops.isEmpty)
+        // And the once-per-project schedule migration only ever switches off.
+        let suite = "loop-default-loops-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        _ = LoopEngineConfigStore.normalizeScheduleOptIn(&store, projectId: "p1", defaults: defaults)
+        XCTAssertFalse(store.loop(defaultKey: LoopDefaultLoopKey.refactor)?.runsOnSchedule ?? true)
+    }
+
+    /// An existing project (the four earlier default loops, one tuned) gains
+    /// the two new loops on its next load, and nothing else changes.
+    func testEnsureAddsTheNewLoopsToAnExistingProjectWithoutTouchingOthers() throws {
+        try writeLlmIdeLayout()
+        var store = LoopStageDetector.ensureDefaultLoops(
+            in: LoopEngineProjectStore(loops: []), gitRoot: repo).store
+        store.loops.removeAll {
+            $0.defaultKey == LoopDefaultLoopKey.refactor || $0.defaultKey == LoopDefaultLoopKey.docs
+        }
+        let testIndex = try XCTUnwrap(store.loops.firstIndex { $0.defaultKey == LoopDefaultLoopKey.test })
+        store.loops[testIndex].config.maxIterations = 3
+        store.loops[testIndex].runsOnSchedule = true
+        let before = store.loops
+
+        let ensured = LoopStageDetector.ensureDefaultLoops(in: store, gitRoot: repo).store
+        XCTAssertEqual(Array(ensured.loops.prefix(before.count)), before)
+        XCTAssertEqual(ensured.loops.dropFirst(before.count).compactMap(\.defaultKey),
+                       [LoopDefaultLoopKey.refactor, LoopDefaultLoopKey.docs])
+        // Idempotent from there.
+        XCTAssertEqual(LoopStageDetector.ensureDefaultLoops(in: ensured, gitRoot: repo).store, ensured)
+    }
+
+    /// A bare tree detects only unconditional stages (Regression sweep + the
+    /// Plan/Refactor/Doc skill stages), which prove nothing about the tree —
+    /// so its config must not be persisted. A detected test command does.
+    func testBareTreeDetectionIsNotPersistedButATestCommandIs() throws {
+        let bare = LoopStageDetector.defaultLoops(gitRoot: repo).flatMap(\.config.stages)
+        XCTAssertFalse(LoopEngineConfig.shouldPersist(bare))
+        try write("Package.swift")
+        let refactorOnly = LoopStageDetector.defaultLoops(gitRoot: repo)
+            .filter { $0.defaultKey == LoopDefaultLoopKey.refactor }.flatMap(\.config.stages)
+        XCTAssertTrue(LoopEngineConfig.shouldPersist(refactorOnly),
+                      "refactor-test carries a detected command — real evidence")
+    }
+
+    /// The New Loop wizard offers both recipes, with stable ids and the same
+    /// stages as the default loops.
+    func testRefactorAndDocTemplatesMatchTheirDefaultLoops() throws {
+        let ids = LoopTemplate.builtIns.map(\.id)
+        XCTAssertTrue(ids.contains(UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000AA")!))
+        XCTAssertTrue(ids.contains(UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000AB")!))
+        XCTAssertEqual(LoopTemplate.refactoring.id.uuidString, "1E7B0A00-0000-4000-8000-0000000000AA")
+        XCTAssertEqual(LoopTemplate.docOptimization.id.uuidString, "1E7B0A00-0000-4000-8000-0000000000AB")
+
+        try write("Package.swift")
+        let loops = LoopStageDetector.defaultLoops(gitRoot: repo)
+        for (template, key) in [(LoopTemplate.refactoring, LoopDefaultLoopKey.refactor),
+                                (LoopTemplate.docOptimization, LoopDefaultLoopKey.docs)] {
+            let applied = template.applied(to: repo).stages
+            let defaults = try XCTUnwrap(loop(key, in: loops)).config.stages
+            XCTAssertEqual(applied.map(\.name), defaults.map(\.name), template.name)
+            XCTAssertEqual(applied.map(\.kind), defaults.map(\.kind), template.name)
+            XCTAssertEqual(applied.map(\.skillId), defaults.map(\.skillId), template.name)
+            XCTAssertEqual(applied.map(\.targetPath), defaults.map(\.targetPath), template.name)
+            XCTAssertEqual(applied.map(\.outputPath), defaults.map(\.outputPath), template.name)
+            XCTAssertEqual(applied.map(\.prompt), defaults.map(\.prompt), template.name)
+            XCTAssertEqual(applied.map(\.command), defaults.map(\.command), template.name)
         }
     }
 
@@ -259,10 +469,13 @@ final class LoopDefaultLoopsTests: XCTestCase {
             .config.stages.first { $0.defaultKey == "backend" }
         XCTAssertEqual(backend?.command, "cd extension && npm run test:fast")
         XCTAssertEqual(backend?.enabled, false)
-        // The Plan loop is excluded: no stage of it existed pre-split, so it is
-        // freshly CREATED (with the stock defaults), not migrated — there are
-        // no project budgets its stages "came from".
-        for loop in migrated.loops where loop.defaultKey != LoopDefaultLoopKey.plan {
+        // The Plan, Refactoring and Doc Optimization loops are excluded: no
+        // stage of them existed pre-split, so they are freshly CREATED (with
+        // the stock defaults), not migrated — there are no project budgets
+        // their stages "came from".
+        let freshlyCreated: Set<String> = [LoopDefaultLoopKey.plan, LoopDefaultLoopKey.refactor,
+                                           LoopDefaultLoopKey.docs]
+        for loop in migrated.loops where !freshlyCreated.contains(loop.defaultKey ?? "") {
             XCTAssertEqual(loop.config.maxIterations, 7, "\(loop.name) lost the project's budgets")
             XCTAssertEqual(loop.config.maxRepairsPerStage, 5)
         }
@@ -404,7 +617,10 @@ final class LoopDefaultLoopsTests: XCTestCase {
             copy.runsOnSchedule = true
             return copy
         }
-        XCTAssertEqual(store.scheduledLoops.count, 4)
+        // Five, not six: the Refactoring loop edits code and is manual-only,
+        // so the schedule skips it even with its flag forced on.
+        XCTAssertEqual(store.scheduledLoops.count, 5)
+        XCTAssertFalse(store.scheduledLoops.contains { $0.defaultKey == LoopDefaultLoopKey.refactor })
 
         let testIndex = store.loops.firstIndex { $0.defaultKey == LoopDefaultLoopKey.test }!
         store.loops[testIndex].runsOnSchedule = false
@@ -415,7 +631,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
             return copy
         }
         XCTAssertEqual(store.scheduledLoops.map(\.defaultKey),
-                       [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.plan])
+                       [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.plan, LoopDefaultLoopKey.docs])
     }
 
     /// "Run just this stage" has to find the stage wherever it lives now — the

@@ -61,7 +61,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
     /// `testAndFix` is what a project with no template history should reach for.
     static let builtIns: [LoopTemplate] = [
         testAndFix, fullVerify, regressionOnly, testOnly, skillLoop, docsRefresh,
-        operationDiagnosis, systemCheck, planDirector
+        operationDiagnosis, systemCheck, planDirector, refactoring, docOptimization
     ]
 
     /// The default recipe, and the one that matches what the loop did before
@@ -291,6 +291,59 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                               + "generated plan file within the 250-line limit, splitting oversized areas into an "
                               + "areas/ folder beside the Output file. Preserve existing task IDs and completed "
                               + "ticks; never delete or rewrite the source plans.")
+            ],
+            maxIterations: 2, consecutiveFailureStop: 2),
+        isBuiltIn: true)
+
+    /// The Refactoring default loop's recipe (`LoopDefaultLoopKey.refactor`):
+    /// plan, apply ONE batch, verify. Prompts are shared with the default loop
+    /// (`LoopStageDetector.refactorPlanPrompt` / `refactorApplyPrompt`), so the
+    /// two cannot drift. The Test stage is the detected-command placeholder, so
+    /// applying it to a repo with no detectable tooling drops that stage.
+    static let refactoring = LoopTemplate(
+        id: UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000AA")!,
+        name: "Refactoring",
+        summary: "Plan a professional, AI-friendly restructuring in small batches, apply one batch, "
+            + "then run the tests to prove nothing changed behaviour.",
+        config: LoopEngineConfig(
+            stages: [
+                LoopStage(name: "Refactor Plan", kind: .skill, order: 0,
+                          skillId: "skills/refactor-planner",
+                          targetPath: ".",
+                          outputPath: "llm-doc/refactor/REFACTOR.md",
+                          prompt: LoopStageDetector.refactorPlanPrompt),
+                LoopStage(name: "Refactor Apply", kind: .skill, order: 1,
+                          skillId: "skills/refactor-apply",
+                          targetPath: "llm-doc/refactor/REFACTOR.md",
+                          outputPath: ".",
+                          prompt: LoopStageDetector.refactorApplyPrompt),
+                LoopStage(name: "Test", kind: .shellCommand,
+                          command: detectedTestCommand, order: 2)
+            ],
+            maxIterations: 4, consecutiveFailureStop: 2),
+        isBuiltIn: true)
+
+    /// The Doc Optimization default loop's recipe (`LoopDefaultLoopKey.docs`):
+    /// refresh the doc index, then write the generated, code-cited pages under
+    /// `llm-doc/docs/`. Generate-only like `planDirector`, so `maxIterations`
+    /// is a backstop.
+    static let docOptimization = LoopTemplate(
+        id: UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000AB")!,
+        name: "Doc Optimization",
+        summary: "Index the codebase's areas, then write a generated doc tree under llm-doc/docs/ "
+            + "whose every code claim is cited so the code graph can link it.",
+        config: LoopEngineConfig(
+            stages: [
+                LoopStage(name: "Doc Index", kind: .skill, order: 0,
+                          skillId: "skills/doc-structure-index",
+                          targetPath: ".",
+                          outputPath: "llm-doc/docs/INDEX.md",
+                          prompt: LoopStageDetector.docIndexPrompt),
+                LoopStage(name: "Doc Writer", kind: .skill, order: 1,
+                          skillId: "skills/doc-writer",
+                          targetPath: "llm-doc/docs/INDEX.md",
+                          outputPath: "llm-doc/docs",
+                          prompt: LoopStageDetector.docWriterPrompt)
             ],
             maxIterations: 2, consecutiveFailureStop: 2),
         isBuiltIn: true)

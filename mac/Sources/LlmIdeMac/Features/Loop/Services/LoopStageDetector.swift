@@ -8,7 +8,7 @@ import Foundation
 /// inside a single loop, so one iteration re-ran all of them from the top and
 /// a Mac-app failure dragged the whole suite round again. They are now
 /// independent loops (`LoopDefaultLoopKey`) — Regression, Test, System Check,
-/// Plan — each with its own process, budgets, and run history, each runnable
+/// Plan, Refactoring, Doc Optimization — each with its own process, budgets, and run history, each runnable
 /// on its own. `defaultStages(forLoop:gitRoot:)` is the authority for what
 /// each one contains; `ensureDefaultLoops` creates them, splits a pre-split
 /// project's aggregate loop into them, and is idempotent so it can run on
@@ -549,6 +549,11 @@ public enum LoopStageDetector {
         "mac-app": LoopDefaultLoopKey.systemCheck,
         "plan-structure-index": LoopDefaultLoopKey.plan,
         "plan-director": LoopDefaultLoopKey.plan,
+        "refactor-plan": LoopDefaultLoopKey.refactor,
+        "refactor-apply": LoopDefaultLoopKey.refactor,
+        "refactor-test": LoopDefaultLoopKey.refactor,
+        "doc-index": LoopDefaultLoopKey.docs,
+        "doc-writer": LoopDefaultLoopKey.docs,
     ]
 
     /// The Plan loop's two generate stages: refresh the structure indexes,
@@ -571,13 +576,22 @@ public enum LoopStageDetector {
     /// `system/project.json`), which in the clone-into-code layout is two
     /// levels above the git root — the prompt tells the agent how to find it.
     /// Stage keys of detector defaults that exist on EVERY tree with a
-    /// resolvable git root — the Plan loop's two skill stages. Like the bare
-    /// Regression sweep, their presence proves nothing about the tree's
-    /// contents, so `LoopEngineConfig.shouldPersist` must not read them as
-    /// "real tooling was detected" (an all-unconditional detection can still
-    /// mean "the tree has not finished populating"). Keep in sync with
-    /// `planStages()` below.
-    static let unconditionalStageKeys: Set<String> = ["plan-structure-index", "plan-director"]
+    /// resolvable git root — the Plan loop's two skill stages, the Refactoring
+    /// loop's plan and apply stages, and the Doc Optimization loop's two skill
+    /// stages. Like the bare Regression sweep, their presence proves nothing
+    /// about the tree's contents, so `LoopEngineConfig.shouldPersist` must not
+    /// read them as "real tooling was detected" (an all-unconditional detection
+    /// can still mean "the tree has not finished populating"). Keep in sync
+    /// with `planStages()`, `refactorStages(gitRoot:)` and `docStages()` below.
+    ///
+    /// `refactor-apply` is here although it is only emitted beside a detected
+    /// test command: the evidence is `refactor-test`, which carries the
+    /// detected command and is deliberately NOT listed.
+    static let unconditionalStageKeys: Set<String> = [
+        "plan-structure-index", "plan-director",
+        "refactor-plan", "refactor-apply",
+        "doc-index", "doc-writer",
+    ]
 
     private static func planStages() -> [LoopStage] {
         [
@@ -614,6 +628,108 @@ public enum LoopStageDetector {
         ]
     }
 
+    // MARK: Refactoring + Doc Optimization stage prompts
+    //
+    // Shared by the default loops below and their `LoopTemplate` twins
+    // (`LoopTemplate.refactoring` / `.docOptimization`), so the two copies
+    // cannot drift. Same rules as `planStages()`: each prompt carries the whole
+    // contract on its own (the `skills/…` ids only deepen it when the central
+    // skills kit is installed), and none names a concrete path — they defer to
+    // the stage's editable Input/Output fields.
+
+    private static let resolvePathsRule = "Resolve relative paths against the repo root first, then the "
+        + "project root (the directory containing system/project.json — the repo root itself, or two "
+        + "levels up when the repo is checked out under code/)."
+
+    /// The graph reads doc→code references in exactly this form, so the doc
+    /// stages state it verbatim.
+    static let docCitationFormat = "Code is cited only as a backticked repo-relative path "
+        + "(`extension/graphkit/graph.mjs`), path with line (`extension/graphkit/graph.mjs:165`), or a "
+        + "backticked bare symbol name (`searchCodeIndex`); every citation must exist in the code (verify "
+        + "with the check-citations / find-code tools when available, else by reading the file)."
+
+    static let refactorPlanPrompt = "Write or update the refactor plan at the Output path for the code "
+        + "under the Input (the repo, or a subtree of it). " + resolvePathsRule + " Survey the structure "
+        + "and write batches, each with a stable ID (R1, R2, …), a status (todo, done or skipped), the "
+        + "files it touches, its intent, and its risk. Cover: directory layout by responsibility, files "
+        + "over 500 lines to split, duplicated logic, naming consistency, dead code only when provably "
+        + "unreferenced, and an AI-friendly setup — a root CLAUDE.md/AGENTS.md describing commands, "
+        + "architecture and invariants, per-area READMEs, an index of entry points, and module-boundary "
+        + "rules. Keep each batch small (one concern, at most about 10 files) and behaviour-preserving, "
+        + "ordered safest first. When the plan already exists, update statuses and add new batches; never "
+        + "reorder or renumber existing ones. Never edit code."
+
+    static let refactorApplyPrompt = "Apply exactly one batch of the refactor plan at the Input to the "
+        + "code under the Output path: the FIRST batch whose status is todo. " + resolvePathsRule
+        + " Apply it behaviour-preservingly: a move or rename updates every import and reference, no "
+        + "public API changes unless the batch says so, and no test is weakened or deleted. Then mark the "
+        + "batch done in the plan with a one-line note — or skipped with the reason when it cannot be done "
+        + "safely. Never touch more than that batch, and never commit. With no todo batch left, change "
+        + "nothing."
+
+    static let docIndexPrompt = "Write or update the doc index file at the Output path for the code under "
+        + "the Input. " + resolvePathsRule + " The index lists the areas of the codebase, for each area "
+        + "the doc page that will describe it (beside the index), and the key files and symbols that page "
+        + "must cover. " + docCitationFormat + " Rewrite only the drifted sections, keep the index within "
+        + "300 lines, and never edit hand-written docs."
+
+    static let docWriterPrompt = "For every page listed in the doc index at the Input, write or update "
+        + "that page in the Output directory: purpose, how it works (the logic, step by step), key files "
+        + "and functions, invariants, how to change it safely, and related pages. " + resolvePathsRule
+        + " " + docCitationFormat + " Update only drifted sections; never delete a page the index still "
+        + "lists; keep each page within 250 lines. Write only inside the Output directory — never edit "
+        + "code, hand-written docs, or the index."
+
+    /// The Refactoring loop: *plan, apply, verify.* Stage 1 writes the refactor
+    /// plan; stage 2 applies ONE batch of it; stage 3 runs the project's own
+    /// test command, so a batch that broke something goes through the loop's
+    /// ordinary repair/retry. Code is never edited without that verify stage:
+    /// with no detectable test command the loop is PLAN-ONLY (stages 2 and 3
+    /// are omitted). Nothing is committed — the run's changes land in Run
+    /// Changes for review.
+    private static func refactorStages(gitRoot: URL) -> [LoopStage] {
+        var stages = [
+            LoopStage(name: "Refactor Plan", kind: .skill, order: 0,
+                      skillId: "skills/refactor-planner",
+                      targetPath: ".",
+                      outputPath: "llm-doc/refactor/REFACTOR.md",
+                      prompt: refactorPlanPrompt,
+                      isDefault: true, defaultKey: "refactor-plan"),
+        ]
+        guard let testCommand = detectTestCommand(gitRoot: gitRoot) else { return stages }
+        stages.append(LoopStage(name: "Refactor Apply", kind: .skill, order: 1,
+                                skillId: "skills/refactor-apply",
+                                targetPath: "llm-doc/refactor/REFACTOR.md",
+                                outputPath: ".",
+                                prompt: refactorApplyPrompt,
+                                isDefault: true, defaultKey: "refactor-apply"))
+        stages.append(LoopStage(name: "Test", kind: .shellCommand, command: testCommand, order: 2,
+                                isDefault: true, defaultKey: "refactor-test",
+                                detectedCommand: testCommand))
+        return stages
+    }
+
+    /// The Doc Optimization loop: refresh the doc index, then write the pages
+    /// it lists — a GENERATED tree under `llm-doc/docs/` (hand-written docs are
+    /// never edited) whose every code claim uses `docCitationFormat`, so the
+    /// code graph can link each page to the code it explains.
+    private static func docStages() -> [LoopStage] {
+        [
+            LoopStage(name: "Doc Index", kind: .skill, order: 0,
+                      skillId: "skills/doc-structure-index",
+                      targetPath: ".",
+                      outputPath: "llm-doc/docs/INDEX.md",
+                      prompt: docIndexPrompt,
+                      isDefault: true, defaultKey: "doc-index"),
+            LoopStage(name: "Doc Writer", kind: .skill, order: 1,
+                      skillId: "skills/doc-writer",
+                      targetPath: "llm-doc/docs/INDEX.md",
+                      outputPath: "llm-doc/docs",
+                      prompt: docWriterPrompt,
+                      isDefault: true, defaultKey: "doc-writer"),
+        ]
+    }
+
     /// The default stages of ONE default loop, in run order — the authority for
     /// what each built-in loop contains.
     ///
@@ -626,6 +742,10 @@ public enum LoopStageDetector {
     ///   loop's stage by the split or by pinning.
     /// - `test`: the project's own test command, alone.
     /// - `system-check`: llm-ide's per-subsystem checks, each marker-gated.
+    /// - `plan`: the two plan-generation skill stages (`planStages()`).
+    /// - `refactor`: plan → apply one batch → test (`refactorStages`), plan-only
+    ///   when no test command is detected.
+    /// - `docs`: doc index → doc pages (`docStages()`).
     ///
     /// An empty result means "this loop does not apply to this repo" — nothing
     /// detected, so `defaultLoops` does not create it. Returning `[]` never
@@ -668,6 +788,14 @@ public enum LoopStageDetector {
             // suppress the loop for exactly that layout.
             guard gitRoot != nil else { return [] }
             return planStages()
+        case LoopDefaultLoopKey.refactor:
+            // Gated like Plan — generic, no marker. Plan-only without a
+            // detected test command (see `refactorStages`).
+            guard let gitRoot else { return [] }
+            return refactorStages(gitRoot: gitRoot)
+        case LoopDefaultLoopKey.docs:
+            guard gitRoot != nil else { return [] }
+            return docStages()
         default:
             return []
         }
@@ -680,6 +808,8 @@ public enum LoopStageDetector {
         case LoopDefaultLoopKey.test: return "Test"
         case LoopDefaultLoopKey.systemCheck: return "System Check"
         case LoopDefaultLoopKey.plan: return "Plan"
+        case LoopDefaultLoopKey.refactor: return "Refactoring"
+        case LoopDefaultLoopKey.docs: return "Doc Optimization"
         default: return loopKey
         }
     }
@@ -706,6 +836,16 @@ public enum LoopStageDetector {
                     "llm-doc/plans/INDEX.md and PLAN.md exist, reference every active plan and the files and "
                         + "functions it touches, match the current folder structure, and every plan file stays "
                         + "within the 250-line limit.")
+        case LoopDefaultLoopKey.refactor:
+            return ("Move the codebase toward a professional, AI-friendly structure one safe, "
+                        + "behaviour-preserving batch at a time.",
+                    "The refactor plan exists with every batch marked todo/done/skipped, the applied batch "
+                        + "changed no behaviour, and the test command still passes.")
+        case LoopDefaultLoopKey.docs:
+            return ("Keep a generated, code-cited doc tree that explains what the code does and why, so "
+                        + "people, agents and the code graph are pointed at the right code.",
+                    "llm-doc/docs/INDEX.md lists every area, every listed page exists within 250 lines, and "
+                        + "every code citation resolves to a real file or symbol.")
         default:
             return nil
         }

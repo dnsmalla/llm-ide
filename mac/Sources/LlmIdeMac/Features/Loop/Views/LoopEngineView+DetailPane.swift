@@ -85,7 +85,9 @@ extension LoopEngineView {
                 // up is a property of THIS loop, not of the project. Read-only
                 // here — it is toggled from the loop-list pane's ⋯ menu, the
                 // same place Primary is assigned.
-                overviewFact("Scheduled", runsOnSchedule
+                overviewFact("Scheduled", loopDefaultKey.map(LoopDefaultLoopKey.manualOnly.contains) == true
+                    ? "never — this loop edits code, so it only runs when you start it"
+                    : runsOnSchedule
                     ? "yes — the Loop auto task runs this loop on its own"
                     : "no — run it from here (⋯ in the loop list to schedule it)")
             }

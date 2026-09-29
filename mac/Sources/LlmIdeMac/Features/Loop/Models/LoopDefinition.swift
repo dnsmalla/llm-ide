@@ -64,6 +64,10 @@ public struct LoopDefinition: Codable, Equatable, Identifiable {
     /// Whether this is one of the built-in default loops.
     public var isDefault: Bool { defaultKey != nil }
 
+    /// Whether this loop may only be started by hand
+    /// (`LoopDefaultLoopKey.manualOnly`) — never by the schedule.
+    public var isManualOnly: Bool { defaultKey.map(LoopDefaultLoopKey.manualOnly.contains) ?? false }
+
     public init(id: String = UUID().uuidString, name: String, isPrimary: Bool = false,
          goal: String? = nil, acceptanceCriteria: String? = nil,
          scopeGlobs: [String] = [], defaultKey: String? = nil,
@@ -126,9 +130,24 @@ public enum LoopDefaultLoopKey {
     /// consolidate every plan collected in `llm-doc/plans/` into one
     /// hierarchical master plan (the "plan director").
     public static let plan = "plan"
+    /// The refactoring loop: write a batched, behaviour-preserving refactor
+    /// plan (`llm-doc/refactor/REFACTOR.md`), apply ONE batch of it, then run
+    /// the project's tests. Manual only — see `manualOnly`.
+    public static let refactor = "refactor"
+    /// The doc-optimization loop: index the codebase's areas, then write a
+    /// generated, code-cited doc tree under `llm-doc/docs/`.
+    public static let docs = "docs"
 
     /// Creation/display order.
-    public static let all = [regression, test, systemCheck, plan]
+    public static let all = [regression, test, systemCheck, plan, refactor, docs]
+
+    /// Default loops that are never run by the scheduled `.loopEngineering`
+    /// Auto Task, whatever their `runsOnSchedule` says. The Refactoring loop
+    /// EDITS CODE, so it only ever runs when a person starts it and reviews
+    /// the result — it is created with `runsOnSchedule == false`, the Loop page
+    /// offers no "Run on schedule" for it, and `scheduledLoops` skips it even
+    /// if a hand-edited `system/loop.json` flips the flag on.
+    public static let manualOnly: Set<String> = [refactor]
 }
 
 /// A project's full set of Loops — the schema `system/loop.json` holds. See
@@ -141,12 +160,15 @@ public struct LoopEngineProjectStore: Codable, Equatable {
     }
 
     /// The loops the scheduled `.loopEngineering` Auto Task should run, in list
-    /// order — those opted in AND with at least one enabled stage. A loop whose
+    /// order — those opted in, not manual-only (`LoopDefaultLoopKey.manualOnly`),
+    /// AND with at least one enabled stage. A loop whose
     /// every stage is switched off is PARKED, not broken (the reasoning
     /// `runLoopEngineeringSweep` already documented for the single-loop case),
     /// so it is skipped here rather than reported as an error.
     var scheduledLoops: [LoopDefinition] {
-        loops.filter { $0.runsOnSchedule && $0.config.stages.contains(where: \.enabled) }
+        loops.filter { loop in
+            loop.runsOnSchedule && !loop.isManualOnly && loop.config.stages.contains(where: \.enabled)
+        }
     }
 
     /// The loop containing the stage `stageId`, for "run just this stage" —
