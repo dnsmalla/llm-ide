@@ -4,11 +4,11 @@ import { entries, names, get } from '../llm_agent/tools/registry.mjs';
 
 const EXPECTED_NAMES = [
   'ask-internal', 'ask-subagent', 'web-search', 'fetch-url', 'list-files',
-  'read-file', 'find-code', 'search-kb', 'task-list', 'task-create',
+  'read-file', 'find-code', 'check-citations', 'search-kb', 'task-list', 'task-create',
   'task-update', 'run-bash', 'project_memory', 'load-skill',
 ];
 
-test('names() lists exactly the 14 handler names, frozen', () => {
+test('names() lists exactly the 15 handler names, frozen', () => {
   const list = names();
   assert.deepEqual([...list].sort(), [...EXPECTED_NAMES].sort());
   assert.throws(() => { list.push('x'); }, /Cannot add property|object is not extensible/);
