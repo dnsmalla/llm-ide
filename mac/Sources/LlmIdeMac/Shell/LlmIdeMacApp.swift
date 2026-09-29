@@ -32,6 +32,11 @@ fileprivate func writeCrashReportFile(_ text: String) {
 }
 
 fileprivate func installCrashHandlers() {
+    // A write to a pipe whose reader is gone (a child that exited early — e.g.
+    // `git apply --cached -` fed a large patch) raises SIGPIPE, whose default
+    // action kills the whole app before `try? write(contentsOf:)` can see the
+    // EPIPE it is meant to catch. Ignored, the write fails with EPIPE instead.
+    signal(SIGPIPE, SIG_IGN)
     NSSetUncaughtExceptionHandler { exception in
         crashLog.critical(
             "Uncaught \(exception.name.rawValue, privacy: .public): \(exception.reason ?? "<no reason>", privacy: .public)\nstack: \(exception.callStackSymbols.joined(separator: "\n"), privacy: .public)"
