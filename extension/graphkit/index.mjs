@@ -13,7 +13,7 @@
 
 export {
   findRelatedCode, findGraphContext, rollupCodeRefs, findRelatedSymbols,
-  searchCodeIndex, relationLabel, seedCandidates,
+  searchCodeIndex, relationLabel, seedCandidates, queryTerms, stemToken,
 } from './graph.mjs';
 export { renderGraphifyMemory, buildAllowedRoots, resolveAllowedRepoRoot } from './memory.mjs';
 export {

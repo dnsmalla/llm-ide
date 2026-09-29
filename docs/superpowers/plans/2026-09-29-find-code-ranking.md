@@ -164,6 +164,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task R2: ranking v2
 
+> **Ruling (during execution):** the per-term probe below was replaced. `searchCodeSymbols` never matches `source_file`, and a short term ("pin") fills a 30-row probe with short incidental titles, so per-probe df and path scoring could not work. Shipped instead: `searchCodeSymbolsByTerms` in `kb/code-graph.mjs` (one df scan + one scored scan: per term, IDF weight × title 1 / path 0.6 / doc 0.3), a whole-query `searchCodeSymbols` probe whose exact (tier 0) match skips the term lookup, compound words (`find-code`) kept whole in `queryTerms`, and `seedRank` in `graphkit/graph.mjs` (coverage ×(1+0.25·(matched−1)), tests ×0.5, docs ×0.6). Benchmark: hit@3 4/10 → 7/10, anywhere 9/10 → 10/10, total payload 62,070 → 52,159 chars.
+
 **Files:**
 - Modify: `extension/graphkit/graph.mjs` (`SEED_STOP_WORDS`, `seedCandidates`, new `stemToken`/`queryTerms`/`scoreSeed`, the stage-1 loop of `searchCodeIndex`)
 - Modify: `extension/graphkit/index.mjs` (export `queryTerms`, `stemToken` next to `seedCandidates`)

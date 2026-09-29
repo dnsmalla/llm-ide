@@ -6,7 +6,7 @@
 import path from 'node:path';
 import {
   findContext, userRepoAllowlist, findCodeSymbolIds, expandSymbols, hydrateSymbols,
-  searchCodeSymbols, graphNeighbors, hasCodeGraph, CONTAINS_EDGE_KIND,
+  searchCodeSymbols, searchCodeSymbolsByTerms, graphNeighbors, hasCodeGraph, CONTAINS_EDGE_KIND,
 } from '../kb/db.mjs';
 
 /** Repo allow-list for a user, never throwing — graph queries must not
@@ -80,13 +80,59 @@ export function findGraphContext(userId, query, limit = 5, opts = {}) {
   return findContext(userId, query, limit, opts);
 }
 
-// Stop-words filtered from multi-word task-title tokens before graph seeding.
-// These are common English filler / generic dev words that, if probed first,
-// would fill the seed cap before a meaningful token (e.g. "Button") is tried.
+// Words with no retrieval signal in a question about code: articles, question
+// words, auxiliaries, and generic verbs/nouns that match hundreds of symbols
+// ("handle", "file", "code"). Probed first, they would fill the seed cap before
+// a meaningful token (e.g. "Button") is tried; scored, they drown the question's
+// distinctive words.
 const SEED_STOP_WORDS = new Set([
-  'the', 'a', 'an', 'and', 'or', 'for', 'to', 'of', 'in', 'on', 'at', 'by',
-  'with', 'fix', 'component', 'this', 'that',
+  'the', 'a', 'an', 'and', 'or', 'for', 'to', 'of', 'in', 'on', 'at', 'by', 'with', 'from', 'into',
+  'fix', 'component', 'this', 'that', 'these', 'those', 'it', 'its', 'there', 'here',
+  'where', 'what', 'which', 'who', 'when', 'why', 'how',
+  'is', 'are', 'was', 'were', 'be', 'been', 'do', 'does', 'did', 'can', 'could', 'should', 'would', 'may', 'might',
+  'get', 'gets', 'set', 'sets', 'use', 'used', 'uses', 'using', 'make', 'makes',
+  'call', 'calls', 'called', 'calling', 'handle', 'handles', 'handled', 'handling',
+  'decide', 'decides', 'decided', 'happen', 'happens', 'work', 'works',
+  'code', 'file', 'files', 'function', 'functions', 'method', 'methods', 'thing', 'way',
 ]);
+
+// Inflection suffixes, longest first; a stem keeps at least 4 chars.
+const STEM_SUFFIXES = [['ies', 'y'], ['ing', ''], ['ed', ''], ['es', ''], ['s', '']];
+
+/** Light, case-preserving stemming: `rotated`→`rotat`, `retries`→`retry`, so a
+ *  question's inflected word still substring-matches the identifier. */
+export function stemToken(word) {
+  const w = String(word);
+  const lower = w.toLowerCase();
+  for (const [suffix, replacement] of STEM_SUFFIXES) {
+    if (lower.endsWith(suffix) && w.length - suffix.length + replacement.length >= 4) {
+      return w.slice(0, w.length - suffix.length) + replacement;
+    }
+  }
+  return w;
+}
+
+/** Content terms of a question: filler dropped, stemmed, deduped
+ *  case-insensitively, original order and case kept. A compound word
+ *  (`find-code`, `tool-events.mjs`) is also kept whole, unstemmed — it names a
+ *  file or tool far more precisely than its parts, one of which may be filler. */
+export function queryTerms(query) {
+  const seen = new Set();
+  const out = [];
+  const add = (term) => {
+    const key = term.toLowerCase();
+    if (!seen.has(key)) { seen.add(key); out.push(term); }
+  };
+  for (const word of String(query).split(/\s+/)) {
+    const trimmed = word.replace(/^[^A-Za-z0-9_]+|[^A-Za-z0-9_]+$/g, '');
+    if (/[-.]/.test(trimmed) && trimmed.length >= 3) add(trimmed);
+    for (const raw of trimmed.split(/[^A-Za-z0-9_]+/)) {
+      if (raw.length < 3 || SEED_STOP_WORDS.has(raw.toLowerCase())) continue;
+      add(stemToken(raw));
+    }
+  }
+  return out;
+}
 
 // Hard ceiling on how many probes one query may run. Each candidate is a
 // separate leading-% LIKE over code_graph_nodes, which cannot use the
@@ -100,14 +146,11 @@ const MAX_SEED_CANDIDATES = 6;
 /**
  * Query tokens for graph seeding: the whole query first (so an exact symbol
  * name wins), then its useful tokens longest-first, capped at
- * MAX_SEED_CANDIDATES. Shared by findRelatedSymbols and searchCodeIndex so both
- * seed identically. Exported for unit tests.
+ * MAX_SEED_CANDIDATES. findRelatedSymbols probes these one by one;
+ * searchCodeIndex scores queryTerms together instead. Exported for unit tests.
  */
 export function seedCandidates(query) {
-  const tokens = String(query)
-    .split(/\s+/)
-    .filter((t) => t.length >= 3 && !SEED_STOP_WORDS.has(t.toLowerCase()))
-    .sort((a, b) => b.length - a.length);
+  const tokens = queryTerms(query).sort((a, b) => b.length - a.length);
   return [...new Set([String(query).trim(), ...tokens])]
     .filter(Boolean)
     .slice(0, MAX_SEED_CANDIDATES);
@@ -135,6 +178,28 @@ export function relationLabel(viaKind, direction) {
 function isFileNode(row) {
   return row?.kind === 'file' || row?.kind === 'docPage'
     || String(row?.symbol_id || '').startsWith('file:');
+}
+
+// Candidate rows fetched by the multi-term lookup before re-ranking: enough
+// that demoting tests and docs still leaves real code to promote.
+const TERM_PROBE_LIMIT = 60;
+
+const TEST_PATH = /(^|\/)(tests?|__tests__|spec|[A-Za-z]*Tests)\/|\.(test|spec)\.[a-z0-9]+$|Tests?\.swift$/;
+
+/**
+ * One seed's rank. An exact title match of the whole query is decisive (the
+ * caller typed a symbol name); otherwise the multi-term score, compounded when
+ * several terms agree. Tests and docs are demoted so they never outrank the
+ * code they describe — they still come back when nothing else matches.
+ */
+function seedRank(row) {
+  if (row.tier === 0) return 1e6;
+  let rank = (Number(row.score) || 0) * (1 + 0.25 * Math.max(0, (Number(row.matched) || 0) - 1));
+  if (row.tier === 1) rank += 0.5;
+  const file = String(row.source_file || '');
+  if (TEST_PATH.test(file)) rank *= 0.5;
+  if (row.kind === 'docPage' || row.kind === 'heading' || /\.md$/i.test(file)) rank *= 0.6;
+  return rank;
 }
 
 /**
@@ -171,33 +236,37 @@ export function searchCodeIndex(userId, query, { limit = 8, hops = 1, repoIds = 
   const relatedLimit = Math.max(1, Math.min(24, seedLimit * 3));
 
   // ── Stage 1: symbol index ────────────────────────────────────────────────
-  // Probe the whole query first, then individual tokens — a free-text ask
-  // ("why is FileDetailView line numbering off") must still find the
-  // `FileDetailView` node, which no whole-string LIKE would match.
+  // Two lookups. The whole query as one string, so an exact symbol name
+  // ("graphNeighbors") puts its definition first. Then the question's content
+  // terms scored together — rarity-weighted coverage over title, file path and
+  // doc — so "where is the mobile pairing PIN rotated" finds `rotateInMemory`
+  // in MobilePin.swift. Probing each word alone (the previous scheme) ranked by
+  // match tier and title length, and a short incidental substring hit of a
+  // generic word ("server", "report", "runner") beat the symbol that matched
+  // the question's distinctive words.
   const byId = new Map();
-  for (const cand of seedCandidates(q)) {
-    for (const row of searchCodeSymbols(userId, cand, seedLimit, { repoIds })) {
-      if (!byId.has(row.symbol_id)) byId.set(row.symbol_id, row);
-    }
-    // Only TITLE matches (tier 0-2) may end probing early. `searchCodeSymbols`
-    // also matches `doc LIKE`, and now that declarations are uploaded as `doc`
-    // a common long token fills the cap with tier-3 rows, so a later token's
-    // exact title match was never probed. Probing is still bounded by
-    // MAX_SEED_CANDIDATES; the cross-candidate re-rank below puts titles first.
-    const titleHits = [...byId.values()].filter((r) => r.tier < 3).length;
-    if (titleHits >= seedLimit) break;
+  for (const row of searchCodeSymbols(userId, q, seedLimit, { repoIds })) {
+    byId.set(row.symbol_id, { ...row, score: 0, matched: 0 });
   }
-  // Re-rank ACROSS candidates before truncating. searchCodeSymbols ranks within
-  // one probe, but insertion order across probes is probe order — so on a
-  // multi-word question, an incidental substring hit from the first token
-  // probed (`…LineNumbers…` for "numbers") outranked a clean prefix match from
-  // a later one (`LibraryRow` for "library") purely because it was seen first.
-  // Sort by match tier, then shorter title, and only then cut to seedLimit.
+  // An exact title match means the caller typed a name: answer that name and
+  // leave its neighbourhood to stage 2, rather than seeding every symbol that
+  // shares a word with it (`gutter.ts` would pull in `renderGutter` as a seed
+  // instead of listing it as what the file declares).
+  const exactName = [...byId.values()].some((r) => r.tier === 0);
+  const terms = exactName ? [] : queryTerms(q);
+  const termRows = exactName ? []
+    : searchCodeSymbolsByTerms(userId, terms.length ? terms : [q], TERM_PROBE_LIMIT, { repoIds });
+  for (const row of termRows) {
+    const prev = byId.get(row.symbol_id);
+    byId.set(row.symbol_id, prev ? { ...prev, score: row.score, matched: row.matched } : { ...row, tier: 3 });
+  }
   const seeds = [...byId.values()]
-    .sort((a, b) => (a.tier - b.tier)
-      || ((a.title || '').length - (b.title || '').length)
-      || String(a.title).localeCompare(String(b.title)))
-    .slice(0, seedLimit);
+    .map((row) => ({ row, rank: seedRank(row) }))
+    .sort((a, b) => (b.rank - a.rank)
+      || ((a.row.title || '').length - (b.row.title || '').length)
+      || String(a.row.title).localeCompare(String(b.row.title)))
+    .slice(0, seedLimit)
+    .map((x) => x.row);
 
   // ── Stage 2: graph expansion ─────────────────────────────────────────────
   // File seeds and symbol seeds need different edge sets, so they're traversed

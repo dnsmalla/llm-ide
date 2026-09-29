@@ -343,6 +343,58 @@ export function searchCodeSymbols(userId, query, limit = 10, { repoIds = null } 
   ).all(lower, prefix, contains, userId, ...scope.params, contains, contains, limit);
 }
 
+function likeContains(term) {
+  return `%${String(term).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')}%`;
+}
+
+/**
+ * MULTI-TERM symbol lookup for natural-language questions: the rows that match
+ * the most (and the rarest) of `terms` across title, file path and doc, best
+ * first. searchCodeSymbols ranks one string; a question's answer usually
+ * matches several of its words at once (`rotateInMemory` in `MobilePin.swift`
+ * for "mobile pairing PIN rotated") while each word alone matches hundreds of
+ * short incidental titles.
+ *
+ * Two scans, whatever the term count: one counts each term's matches (its
+ * document frequency, so a term that matches everything weighs almost
+ * nothing), one scores and ranks. Per term a row earns its weight once, for
+ * its best field: title 1, file path 0.6, doc 0.3. Returned rows carry
+ * `score` and `matched` (how many terms hit) so the caller can re-rank.
+ */
+export function searchCodeSymbolsByTerms(userId, terms, limit = 40, { repoIds = null } = {}) {
+  requireUser(userId);
+  const list = (Array.isArray(terms) ? terms : []).map((t) => String(t).trim()).filter(Boolean).slice(0, 8);
+  if (list.length === 0) return [];
+  const likes = list.map(likeContains);
+  const scope = repoScope(repoIds);
+  const anyField = "(title LIKE ? ESCAPE '\\' OR source_file LIKE ? ESCAPE '\\' OR doc LIKE ? ESCAPE '\\')";
+  const dfRow = getDb().prepare(
+    `SELECT COUNT(*) AS total, ${list.map((_, i) => `SUM(CASE WHEN ${anyField} THEN 1 ELSE 0 END) AS d${i}`).join(', ')}
+     FROM code_graph_nodes WHERE user_id=?${scope.sql}`,
+  ).get(...likes.flatMap((l) => [l, l, l]), userId, ...scope.params);
+  const total = Math.max(1, dfRow?.total || 0);
+  // Inverse document frequency, floored so a term present everywhere still
+  // counts a little toward coverage.
+  const weights = list.map((_, i) => Math.max(0.05, Math.log((total + 1) / ((dfRow?.[`d${i}`] || 0) + 1))));
+  const perTerm = list.map(() =>
+    "(CASE WHEN title LIKE ? ESCAPE '\\' THEN 1.0 WHEN source_file LIKE ? ESCAPE '\\' THEN 0.6 WHEN doc LIKE ? ESCAPE '\\' THEN 0.3 ELSE 0 END)");
+  const scoreSql = perTerm.map((expr) => `${expr} * ?`).join(' + ');
+  const matchedSql = perTerm.map((expr) => `(${expr} > 0)`).join(' + ');
+  const scoreParams = likes.flatMap((l, i) => [l, l, l, weights[i]]);
+  const matchedParams = likes.flatMap((l) => [l, l, l]);
+  const whereSql = list.map(() => anyField).join(' OR ');
+  const whereParams = likes.flatMap((l) => [l, l, l]);
+  return getDb().prepare(
+    `SELECT symbol_id, title, kind, repo_id, source_file, line, language, doc,
+            (${scoreSql}) AS score, (${matchedSql}) AS matched
+     FROM code_graph_nodes
+     WHERE user_id=?${scope.sql} AND (${whereSql})
+     ORDER BY score DESC, length(title), title
+     LIMIT ?`,
+    // Bind order is SQL-text order: score, matched, user_id, scope, WHERE, LIMIT.
+  ).all(...scoreParams, ...matchedParams, userId, ...scope.params, ...whereParams, limit);
+}
+
 /**
  * Whether this user has ANY code-graph rows — i.e. whether a graph has ever
  * been generated for them.
