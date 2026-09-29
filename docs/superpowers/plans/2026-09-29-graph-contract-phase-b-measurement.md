@@ -709,3 +709,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ## What Phase B enables (for the Phase C/D plans)
 
 Decide from the report, not by assumption: (1) whether "find-code first" guidance actually changes behaviour (share of find-code-first turns before/after Phase A Task 4); (2) whether the legacy `memory_push` is large enough to justify removing per-message ranking; (3) the payload/recall baseline Phase C's citation validator and Phase D's richer graph must beat.
+
+## Carried from the Phase A final review (must be covered in Phase B)
+
+- **Parent workspace with several child repos is still unscoped.** On the live layout the workspace is `~/Desktop/LLM` and every graphed repo (`code/affiliate`, `code/easylearning`, `code/llm-ide`) sits under it, so `workspaceRepoIds` returns all of them and the affiliate leak persists. Fix needs the client to send the active project's repo (e.g. `agentContext.activeProject` path) and `find-code` to prefer it. Add a golden fixture with a parent workspace and two sibling repos to Task 4 and assert no sibling leak once that lands.
+- **Doc-only seeds can crowd out title matches.** `searchCodeIndex` stops probing once `seedLimit` rows are collected, and `searchCodeSymbols` also matches `doc LIKE`; now that declarations are uploaded as `doc`, a common long token can fill the seed cap with tier-3 rows before a later token's exact title match is probed. Add a golden query where a long common token appears in many declarations and the target is a later token's exact title.
