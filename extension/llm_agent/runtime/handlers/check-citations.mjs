@@ -24,8 +24,17 @@ const KNOWN_EXT = new Set(['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'swift', 'py'
 // A backticked word only counts as a code symbol when it LOOKS like one —
 // camelCase, snake_case, a dotted member or a call — so `the plan` or `npm`
 // are never judged against the graph.
+const BUILTIN_ROOTS = new Set(['JSON', 'Array', 'Object', 'Math', 'Promise', 'Date', 'String',
+  'Number', 'Boolean', 'Symbol', 'Map', 'Set', 'RegExp', 'Error', 'Reflect', 'Intl', 'Buffer',
+  'URL', 'URLSearchParams', 'process', 'console', 'fs', 'path', 'os', 'crypto', 'http', 'https',
+  'child_process', 'window', 'document', 'navigator', 'React', 'Foundation', 'FileManager',
+  'DispatchQueue', 'NSString', 'UserDefaults']);
+
 function looksLikeSymbol(s) {
-  return /\(\)$/.test(s) || s.includes('.') || s.includes('_') || /[a-z][A-Z]/.test(s);
+  const bare = s.replace(/\(\)$/, '');
+  if (/^[A-Z0-9_]+$/.test(bare)) return false;            // env vars, constants
+  if (bare.includes('.') && BUILTIN_ROOTS.has(bare.split('.')[0])) return false;
+  return /\(\)$/.test(s) || bare.includes('.') || /[a-z][A-Z]/.test(bare);
 }
 
 export function extractCitations(text) {
@@ -89,6 +98,9 @@ export function handleCheckCitations(args, ctx) {
   const missingPaths = [];
   const lineOutOfRange = [];
   for (const c of paths) {
+    // Bare filenames (no `/`) are ambiguous — they can live anywhere — so
+    // they are extracted but never judged.
+    if (!c.path.includes('/')) continue;
     const resolved = resolveAgentPath(c.path, roots, workspaceRoot);
     if (!resolved || !resolved.exists) { missingPaths.push(c.path); continue; }
     const want = c.endLine || c.line;

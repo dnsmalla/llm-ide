@@ -79,3 +79,16 @@ test('without a scoped graph, symbols are not judged', () => {
 test('rejects empty text', () => {
   assert.ok(handleCheckCitations({ text: '' }, ctx).error);
 });
+
+test('new-file-safe: bare names, builtins, columns and env vars are not flagged', () => {
+  const out = handleCheckCitations({
+    text: 'Edit `src/pin.ts:1`, bare `pin.ts`, use `JSON.parse`, `user_id`, `LLMIDE_KEYCHAIN_BACKEND` and `rotatePin()`.',
+  }, ctx);
+  assert.equal(out.ok, true);
+  assert.deepEqual([out.missingPaths, out.unknownSymbols], [[], []]);
+});
+
+test('a real invented name is still reported next to builtins', () => {
+  const out = handleCheckCitations({ text: '`JSON.parse` then `inventedHelper()`' }, ctx);
+  assert.deepEqual(out.unknownSymbols, ['inventedHelper']);
+});

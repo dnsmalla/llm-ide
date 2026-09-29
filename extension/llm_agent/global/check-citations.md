@@ -27,8 +27,14 @@ exist.
 
 ## How to use it
 
-Call it once with the whole document before you present it. Fix or remove every
-entry in `missingPaths`, `lineOutOfRange` and `unknownSymbols` — look the right
-name or line up with `find-code` — then present the corrected document. `ok:
-true` means nothing it could check was wrong. It returns only names and
+Call it once with the whole document before you present it.
+
+- `lineOutOfRange`: fix every entry — look the right line up with `find-code`.
+- `missingPaths`: EXPECTED for files the plan will create. Keep those and mark
+  them as new in the plan (e.g. "create `src/x.ts`"); fix only paths that were
+  meant to already exist. Bare filenames without a `/` are not checked.
+- `unknownSymbols`: not found in this repo's code graph — verify with
+  `find-code`; library and builtin names are expected here.
+
+`ok: true` means nothing it could check was wrong. It returns only names and
 numbers, never file contents.
