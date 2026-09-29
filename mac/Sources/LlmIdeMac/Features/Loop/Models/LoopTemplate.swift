@@ -52,6 +52,12 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
             }
             return copy
         }
+        // A code-applying stage whose verify stage was just dropped (no test
+        // tooling) would edit code nothing re-tests — drop it too, the same
+        // rule the runner enforces (`LoopStage.lacksVerifyAfter`). The
+        // Refactoring template then applies as plan-only, like its default loop.
+        let applied = result.stages
+        result.stages = applied.filter { !LoopStage.lacksVerifyAfter($0, in: applied) }
         return result
     }
 

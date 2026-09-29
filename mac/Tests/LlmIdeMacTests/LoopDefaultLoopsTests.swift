@@ -313,6 +313,17 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertFalse(store.loop(defaultKey: LoopDefaultLoopKey.refactor)?.runsOnSchedule ?? true)
     }
 
+    /// The template must never yield code edits without a verify stage: with
+    /// no test tooling the Test placeholder is dropped, so Refactor Apply goes
+    /// too and the template applies plan-only — like its default loop.
+    func testRefactoringTemplateAppliesPlanOnlyWithoutATestCommand() throws {
+        XCTAssertEqual(LoopTemplate.refactoring.applied(to: repo).stages.map(\.name), ["Refactor Plan"])
+        XCTAssertEqual(LoopTemplate.refactoring.applied(to: nil).stages.map(\.name), ["Refactor Plan"])
+        try write("Package.swift")
+        XCTAssertEqual(LoopTemplate.refactoring.applied(to: repo).stages.map(\.name),
+                       ["Refactor Plan", "Refactor Apply", "Test"])
+    }
+
     /// An existing project (the four earlier default loops, one tuned) gains
     /// the two new loops on its next load, and nothing else changes.
     func testEnsureAddsTheNewLoopsToAnExistingProjectWithoutTouchingOthers() throws {
