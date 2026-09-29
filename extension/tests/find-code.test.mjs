@@ -407,3 +407,20 @@ test('handleFindCode hint tells the agent paths are workspace-relative', () => {
   assert.ok(out.symbols.length > 0);
   assert.match(out.hint, /relative to the workspace root/i);
 });
+
+test('an INFERRED calls edge is labelled (inferred); an EXTRACTED one is not', () => {
+  const repo = '/Users/someone/elsewhere/inferred-repo';
+  const n = (name) => ({ id: `function:src/inf.ts:${name}`, title: name, kind: 'function', metadata: { source_file: 'src/inf.ts', line: 'L1' } });
+  db.writeCodeGraph(U, repo, {
+    nodes: [n('infTarget'), n('infGuessCaller'), n('infSureCaller')],
+    edges: [
+      { fromId: 'function:src/inf.ts:infGuessCaller', toId: 'function:src/inf.ts:infTarget', kind: 'calls', confidence: 'INFERRED' },
+      { fromId: 'function:src/inf.ts:infSureCaller', toId: 'function:src/inf.ts:infTarget', kind: 'calls', confidence: 'EXTRACTED' },
+    ],
+  }, { source: 'structure' });
+  const res = searchCodeIndex(U, 'infTarget', { limit: 8, hops: 1 });
+  const guess = res.related.find((r) => r.title === 'infGuessCaller');
+  const sure = res.related.find((r) => r.title === 'infSureCaller');
+  assert.equal(guess.relation, 'called by (inferred)');
+  assert.equal(sure.relation, 'called by');
+});

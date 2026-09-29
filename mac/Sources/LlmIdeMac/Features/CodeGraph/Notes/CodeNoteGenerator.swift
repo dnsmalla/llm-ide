@@ -19,6 +19,13 @@ public enum CodeNoteGenerator {
 
     private static let log = Logger(subsystem: "com.llmide.macapp", category: "CodeNoteGenerator")
 
+    /// Symbol kinds rendered as "types" / "functions" in notes. The regex
+    /// extractor emits struct/enum/protocol/extension/interface and (since
+    /// graph-kit's parent attribution) `method`; filtering on "class" and
+    /// "function" alone dropped all of them from index.md and the file notes.
+    static let typeKinds: Set<String> = ["class", "struct", "enum", "protocol", "extension", "interface"]
+    static let functionKinds: Set<String> = ["function", "method"]
+
     /// Write all artifacts. Returns the number of per-file notes (re)written.
     @discardableResult
     public static func generate(scan: ScanResult, repoRoot: URL,
@@ -99,7 +106,7 @@ public enum CodeNoteGenerator {
             out.append("")
         }
 
-        let types = symbols.filter { $0.kind == "class" }
+        let types = symbols.filter { Self.typeKinds.contains($0.kind) }
         if !types.isEmpty {
             out.append("## Types")
             out.append("")
@@ -112,7 +119,7 @@ public enum CodeNoteGenerator {
             out.append("")
         }
 
-        let funcs = symbols.filter { $0.kind == "function" }
+        let funcs = symbols.filter { Self.functionKinds.contains($0.kind) }
         if !funcs.isEmpty {
             out.append("## Functions")
             out.append("")
@@ -120,7 +127,14 @@ public enum CodeNoteGenerator {
             out.append("|------|------|-----------|")
             for f in funcs {
                 let sig = f.declaration.map { "`\($0)`" } ?? "`\(f.name)`"
-                out.append("| `\(f.name)` | L\(f.line) | \(sig) |")
+                // Only prepend parent if name doesn't already start with it (scanner may emit "Cls.meth")
+                let displayName: String
+                if let p = f.parent, !f.name.hasPrefix("\(p).") {
+                    displayName = "\(p).\(f.name)"
+                } else {
+                    displayName = f.name
+                }
+                out.append("| `\(displayName)` | L\(f.line) | \(sig) |")
             }
             out.append("")
         }
@@ -168,7 +182,7 @@ public enum CodeNoteGenerator {
         out.append("|------|------|---------|-----------|")
         for (f, depCount) in ranked where depCount > 0 {
             let role = inferRole(path: f.path, language: f.language)
-            let fns  = scan.symbols[f.path]?.filter { $0.kind == "function" }.count ?? 0
+            let fns  = scan.symbols[f.path]?.filter { Self.functionKinds.contains($0.kind) }.count ?? 0
             out.append("| `\((f.path as NSString).lastPathComponent)` | \(role) | \(depCount) | \(fns) |")
         }
         out.append("")
@@ -181,7 +195,7 @@ public enum CodeNoteGenerator {
             out.append("### \(role) (\(files.count) files)")
             out.append("")
             for f in files {
-                let fns = scan.symbols[f.path]?.filter { $0.kind == "function" }.count ?? 0
+                let fns = scan.symbols[f.path]?.filter { Self.functionKinds.contains($0.kind) }.count ?? 0
                 out.append("- `\(f.path)` — \(f.loc) lines, \(fns) functions")
             }
             out.append("")
@@ -218,9 +232,9 @@ public enum CodeNoteGenerator {
         let codeFiles = Self.codeFiles(from: scan)
         let nodes: [FileNode] = codeFiles.map { f in
             let syms  = scan.symbols[f.path] ?? []
-            let types = syms.filter { $0.kind == "class" }
+            let types = syms.filter { Self.typeKinds.contains($0.kind) }
                 .map { SymEntry(name: $0.name, line: $0.line, declaration: $0.declaration) }
-            let funcs = syms.filter { $0.kind == "function" }
+            let funcs = syms.filter { Self.functionKinds.contains($0.kind) }
                 .map { SymEntry(name: $0.name, line: $0.line, declaration: $0.declaration) }
             return FileNode(path: f.path, name: (f.path as NSString).lastPathComponent,
                             language: f.language, loc: f.loc,

@@ -238,7 +238,8 @@ export function searchCodeIndex(userId, query, { limit = 8, hops = 1, repoIds = 
       relatedSeen.add(hit.symbolId);
       related.push({
         ...row,
-        relation: relationLabel(hit.viaKind, hit.direction),
+        relation: relationLabel(hit.viaKind, hit.direction)
+          + (hit.confidence === 'INFERRED' ? ' (inferred)' : ''),
         viaKind: hit.viaKind,
         direction: hit.direction,
         hop: hit.hop,
@@ -249,12 +250,11 @@ export function searchCodeIndex(userId, query, { limit = 8, hops = 1, repoIds = 
 
     // Fallback: FILE-level relatedness for symbol seeds that got nothing.
     //
-    // The structural graph currently carries no symbol→symbol `calls` edges for
-    // Swift/JS/TS — only the bundled tree-sitter scanner emits them, and the
-    // regex extractor that handles those languages defaults calls/inherits/
-    // implements to empty (see graph-kit's FileStructureExtractor). So a
-    // function seed's neighbour set comes back empty and the graph looks dead
-    // even though it isn't: the file→file `imports` edges are there.
+    // Symbol→symbol `calls` edges may be absent: the regex extractor that
+    // handles Swift/JS/TS only emits them as INFERRED guesses (graph-kit's
+    // inferred edges), and older graphs have none at all, so a function seed's
+    // neighbour set can still come back empty and the graph looks dead even
+    // though it isn't: the file→file `imports` edges are there.
     //
     // Use them. The seed's containing file, plus the files that IMPORT that
     // file, is the blast radius of changing that symbol at file granularity —

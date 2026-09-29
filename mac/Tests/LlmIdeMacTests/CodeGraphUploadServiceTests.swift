@@ -65,6 +65,20 @@ final class CodeGraphUploadServiceTests: XCTestCase {
         XCTAssertTrue(out[0].edges.isEmpty)
     }
 
+    // MARK: - dedupe key includes the commit
+
+    /// Same graph at a new HEAD must re-upload, or the server keeps the old SHA
+    /// and find-code reports the graph stale until the next structural change.
+    func testDedupeKeyChangesWithCommitButNotWithSameCommit() {
+        let fp = CodeGraphUploadService.fingerprint(CGData(nodes: nodes(2), edges: []))
+        XCTAssertNotEqual(CodeGraphUploadService.dedupeKey(fingerprint: fp, commitSha: "aaa1111"),
+                          CodeGraphUploadService.dedupeKey(fingerprint: fp, commitSha: "bbb2222"))
+        XCTAssertEqual(CodeGraphUploadService.dedupeKey(fingerprint: fp, commitSha: "aaa1111"),
+                       CodeGraphUploadService.dedupeKey(fingerprint: fp, commitSha: "aaa1111"))
+        XCTAssertEqual(CodeGraphUploadService.dedupeKey(fingerprint: fp, commitSha: nil),
+                       CodeGraphUploadService.dedupeKey(fingerprint: fp, commitSha: nil))
+    }
+
     // MARK: - fingerprint
 
     func testIdenticalGraphsShareAFingerprint() {
@@ -142,6 +156,35 @@ final class CodeGraphUploadServiceTests: XCTestCase {
         let node = CGNode(id: "function:a.py:f", title: "f", kind: .function,
                           metadata: ["doc": "Documented.", "declaration": "def f(x):"])
         XCTAssertEqual(LlmIdeAPIClient.CodeGraphNodePayload(node).metadata["doc"], "Documented.")
+    }
+
+    // MARK: - freshness fields
+
+    private func encodedRequest(replace: Bool, commitSha: String?) throws -> String {
+        let req = LlmIdeAPIClient.CodeGraphIngestRequest(
+            repoPath: "/r", graph: .init(nodes: [], edges: []), replace: replace,
+            commitSha: commitSha, generatedAt: commitSha == nil ? nil : "2026-09-29T00:00:00Z")
+        return String(decoding: try JSONEncoder().encode(req), as: UTF8.self)
+    }
+
+    func testFirstBatchPayloadEncodesCommitSha() throws {
+        let json = try encodedRequest(replace: true, commitSha: "abc1234")
+        XCTAssertTrue(json.contains("\"commitSha\":\"abc1234\""), json)
+        XCTAssertTrue(json.contains("\"generatedAt\""), json)
+    }
+
+    func testLaterBatchPayloadOmitsCommitSha() throws {
+        let json = try encodedRequest(replace: false, commitSha: nil)
+        XCTAssertFalse(json.contains("commitSha"), json)
+        XCTAssertFalse(json.contains("generatedAt"), json)
+    }
+
+    func testHeadCommitReadsThisRepoAndIgnoresNonRepos() async {
+        let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let sha = await CodeGraphUploadService.headCommit(of: here)
+        XCTAssertNotNil(sha)
+        let none = await CodeGraphUploadService.headCommit(of: URL(fileURLWithPath: NSTemporaryDirectory()))
+        XCTAssertNil(none)
     }
 
     // MARK: - upload guards

@@ -243,13 +243,13 @@ export function graphNeighbors(userId, seedIds, {
     const rows = [];
     if (wantOut) {
       rows.push(...db.prepare(
-        `SELECT from_id, to_id AS neighbor_id, kind, 'out' AS dir FROM code_graph_edges
+        `SELECT from_id, to_id AS neighbor_id, kind, confidence, 'out' AS dir FROM code_graph_edges
          WHERE user_id=?${scope.sql} AND from_id IN (${place}) AND kind IN (${kindPlace})`,
       ).all(userId, ...scope.params, ...frontier, ...edgeKinds));
     }
     if (wantIn) {
       rows.push(...db.prepare(
-        `SELECT to_id AS from_id, from_id AS neighbor_id, kind, 'in' AS dir FROM code_graph_edges
+        `SELECT to_id AS from_id, from_id AS neighbor_id, kind, confidence, 'in' AS dir FROM code_graph_edges
          WHERE user_id=?${scope.sql} AND to_id IN (${place}) AND kind IN (${kindPlace})`,
       ).all(userId, ...scope.params, ...frontier, ...edgeKinds));
     }
@@ -261,6 +261,7 @@ export function graphNeighbors(userId, seedIds, {
       out.push({
         symbolId: r.neighbor_id,
         viaKind: r.kind,
+        confidence: r.confidence,
         direction: r.dir,
         hop,
         fromId: r.from_id,
@@ -402,4 +403,24 @@ export function getCodeGraphSnapshot(userId, repoId) {
       'SELECT from_id, to_id, kind, confidence FROM code_graph_edges WHERE user_id=? AND repo_id=?',
     ).all(userId, repoId),
   };
+}
+
+/** Upsert which commit a repo's graph was generated from (migration 0036). */
+export function setCodeGraphMeta(userId, repoId, { commitSha = null, generatedAt = null } = {}) {
+  requireUser(userId);
+  const sha = typeof commitSha === 'string' && /^[0-9a-f]{7,64}$/i.test(commitSha) ? commitSha : null;
+  const at = typeof generatedAt === 'string' ? generatedAt.slice(0, 40) : null;
+  getDb().prepare(
+    `INSERT INTO code_graph_meta (user_id, repo_id, commit_sha, generated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id, repo_id) DO UPDATE SET commit_sha=excluded.commit_sha, generated_at=excluded.generated_at`,
+  ).run(userId, repoId, sha, at);
+}
+
+export function getCodeGraphMeta(userId, repoIds) {
+  requireUser(userId);
+  if (!Array.isArray(repoIds) || repoIds.length === 0) return [];
+  return getDb().prepare(
+    `SELECT repo_id, commit_sha, generated_at FROM code_graph_meta
+     WHERE user_id=? AND repo_id IN (${repoIds.map(() => '?').join(',')})`,
+  ).all(userId, ...repoIds);
 }

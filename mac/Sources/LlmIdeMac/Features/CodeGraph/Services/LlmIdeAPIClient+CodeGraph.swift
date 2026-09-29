@@ -59,6 +59,21 @@ extension LlmIdeAPIClient {
         let droppedEdges: Int
     }
 
+    /// Request body for `POST /kb/ingest-code-graph`. `commitSha` / `generatedAt`
+    /// ride on the replacing (first) batch only; nil fields are omitted by
+    /// `JSONEncoder`, so later batches and older servers see the old shape.
+    struct CodeGraphIngestRequest: Encodable {
+        struct Graph: Encodable {
+            let nodes: [CodeGraphNodePayload]
+            let edges: [CodeGraphEdgePayload]
+        }
+        let repoPath: String
+        let graph: Graph
+        let replace: Bool
+        let commitSha: String?
+        let generatedAt: String?
+    }
+
     /// POST one batch of a repo's structural graph.
     ///
     /// `replace` must be set on the FIRST batch only — it clears the previous
@@ -69,20 +84,15 @@ extension LlmIdeAPIClient {
     func ingestCodeGraph(repoPath: String,
                          nodes: [CGNode],
                          edges: [CGEdge],
-                         replace: Bool) async throws -> CodeGraphIngestResult {
-        struct Req: Encodable {
-            struct Graph: Encodable {
-                let nodes: [CodeGraphNodePayload]
-                let edges: [CodeGraphEdgePayload]
-            }
-            let repoPath: String
-            let graph: Graph
-            let replace: Bool
-        }
-        let body = Req(repoPath: repoPath,
+                         replace: Bool,
+                         commitSha: String? = nil,
+                         generatedAt: String? = nil) async throws -> CodeGraphIngestResult {
+        let body = CodeGraphIngestRequest(repoPath: repoPath,
                        graph: .init(nodes: nodes.map(CodeGraphNodePayload.init),
                                     edges: edges.map(CodeGraphEdgePayload.init)),
-                       replace: replace)
+                       replace: replace,
+                       commitSha: commitSha,
+                       generatedAt: generatedAt)
         return try await post("/kb/ingest-code-graph", body: body, authenticated: true)
     }
 }
