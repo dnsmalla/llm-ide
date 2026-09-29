@@ -47,7 +47,8 @@ test('extractCitations finds backticked paths with lines and code symbols', () =
     { path: 'src/a/b.swift', line: null, endLine: null },
     { path: 'README.md', line: null, endLine: null },
   ]);
-  assert.deepEqual(c.symbols.sort(), ['rotatePin', 'save'].sort());
+  // `Store.save` (dotted, no call) is a property-ish name: no longer judged (H4).
+  assert.deepEqual(c.symbols.sort(), ['rotatePin']);
 });
 
 test('a clean plan is ok', () => {
@@ -109,4 +110,11 @@ test('line counting never reads an unvalidated workspaceRoot', () => {
   } finally {
     fs.rmSync(rogue, { recursive: true, force: true });
   }
+});
+
+test('only call-form names and PascalCase types are judged (H4)', () => {
+  const c = extractCitations('`activeProject`, `seedLimit`, `Store.save`, `a.b.c`, `rotatePin()`, `Store.save()`, `InventedType`, `Map`, `HTTP`, `JSON.parse()`');
+  assert.deepEqual(c.symbols.sort(), ['InventedType', 'rotatePin', 'save'].sort());
+  const out = handleCheckCitations({ text: '`activeProject` `seedLimit` `Store.save` then `rotatePin()`, `inventedHelper()`, `InventedType`.' }, ctx);
+  assert.deepEqual(out.unknownSymbols.sort(), ['InventedType', 'inventedHelper'].sort());
 });

@@ -21,8 +21,10 @@ exist.
 - Backticked **paths** (`src/app/view.ts`) — the file must exist in the open
   workspace or an indexed repo.
 - Backticked **`path:line`** or **`path:start-end`** — the line must be inside the file.
-- Backticked **code symbols** (`rotatePin()`, `Store.save`, `snake_case`) — the
-  name must exist in the code graph for the repo you are working in. Skipped
+- Backticked **calls** (`rotatePin()`, `Store.save()`) and **PascalCase type
+  names** (`ChatEngine`) — the name must exist in the code graph for the repo
+  you are working in. Properties, locals and dotted names without `()`
+  (`activeProject`, `Store.save`) are not checked. Skipped
   (`graphChecked: false`) when no repo-scoped graph exists.
 
 ## How to use it
@@ -33,8 +35,9 @@ Call it once with the whole document before you present it.
 - `missingPaths`: EXPECTED for files the plan will create. Keep those and mark
   them as new in the plan (e.g. "create `src/x.ts`"); fix only paths that were
   meant to already exist. Bare filenames without a `/` are not checked.
-- `unknownSymbols`: not found in this repo's code graph — verify with
-  `find-code`; library and builtin names are expected here.
+- `unknownSymbols`: not found in this repo's code graph. The graph may lag
+  recent edits, so an unknown name is a prompt to verify with `find-code`,
+  not proof it is wrong; library and builtin names are expected here.
 
 `ok: true` means nothing it could check was wrong. It returns only names and
 numbers, never file contents.

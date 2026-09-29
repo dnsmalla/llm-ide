@@ -21,20 +21,25 @@ const KNOWN_EXT = new Set(['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'swift', 'py'
   'yml', 'yaml', 'toml', 'sql', 'sh', 'go', 'rs', 'kt', 'java', 'c', 'h', 'cpp', 'm', 'mm',
   'html', 'css', 'txt', 'plist', 'xml']);
 
-// A backticked word only counts as a code symbol when it LOOKS like one —
-// camelCase, snake_case, a dotted member or a call — so `the plan` or `npm`
-// are never judged against the graph.
+// Only two shapes are judged against the graph, because the graph holds just
+// function / class-or-type / file nodes: a CALL (`foo()`, `a.b()`) and a
+// PascalCase TYPE name. Properties, locals and dotted members without a call
+// (`activeProject`, `Store.save`) are never judged — they are not graph nodes.
 const BUILTIN_ROOTS = new Set(['JSON', 'Array', 'Object', 'Math', 'Promise', 'Date', 'String',
   'Number', 'Boolean', 'Symbol', 'Map', 'Set', 'RegExp', 'Error', 'Reflect', 'Intl', 'Buffer',
   'URL', 'URLSearchParams', 'process', 'console', 'fs', 'path', 'os', 'crypto', 'http', 'https',
   'child_process', 'window', 'document', 'navigator', 'React', 'Foundation', 'FileManager',
   'DispatchQueue', 'NSString', 'UserDefaults']);
 
+const PASCAL_RE = /^[A-Z][a-z0-9]+[A-Za-z0-9]*$/;
+
 function looksLikeSymbol(s) {
+  const isCall = /\(\)$/.test(s);
   const bare = s.replace(/\(\)$/, '');
   if (/^[A-Z0-9_]+$/.test(bare)) return false;            // env vars, constants
-  if (bare.includes('.') && BUILTIN_ROOTS.has(bare.split('.')[0])) return false;
-  return /\(\)$/.test(s) || bare.includes('.') || /[a-z][A-Z]/.test(bare);
+  if (BUILTIN_ROOTS.has(bare.split('.')[0])) return false;
+  if (isCall) return true;
+  return PASCAL_RE.test(bare);                            // bare type name, no dots
 }
 
 export function extractCitations(text) {
