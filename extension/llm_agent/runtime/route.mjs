@@ -31,7 +31,9 @@ import { pipelineSkillIdFor, buildExecuteBinding } from './plan-pipeline.mjs';
 import { buildSessionTaskPromptBlock, taskTurnResponse } from './task-session-context.mjs';
 import { buildMcpConfigForUser } from '../../mcp/mcp-config.mjs';
 import { makeSecretReader } from '../../server/vault.mjs';
-import { getDb } from '../../kb/db.mjs';
+import { getDb, recordToolEvents } from '../../kb/db.mjs';
+import { randomUUID } from 'node:crypto';
+import { memoryPushEvent } from './memory-push-event.mjs';
 
 // Re-exported for the HTTP routes that historically imported these
 // from here (server/auth-routes.mjs, routes/agent.mjs import the
@@ -642,6 +644,8 @@ export async function handleCodeAssist({
   // Surface the per-request memory overhead so the client can show it (and the
   // user can judge whether the always-on memory block is worth its tokens).
   const memoryUsage = { chars: memoryChars, approxTokens: Math.round(memoryChars / 4), hasChatMemory: memoryHasChat };
+  // Best-effort; never breaks code-assist (recordToolEvents swallows errors).
+  recordToolEvents(userId, { turnId: randomUUID(), engine: 'legacy', events: memoryPushEvent(memoryChars) });
   // A restricted mode (plan/assist_plan/review/document) can never resolve a pending
   // task — task-create/task-update are excluded from its tool allowlist,
   // and its persona forbids acting on one. Without this gate, a stale task

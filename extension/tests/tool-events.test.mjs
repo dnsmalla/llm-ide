@@ -57,3 +57,9 @@ test('summarizeToolEvents: find-code share, order, and token split via the ledge
   assert.equal(s.tokensWithFindCode.cacheCreation, 1000);
   assert.equal(s.tokensWithoutFindCode.cacheCreation, 9000);
 });
+
+test('legacy memory push becomes one memory_push event, none when empty', async () => {
+  const { memoryPushEvent } = await import('../llm_agent/runtime/memory-push-event.mjs');
+  assert.deepEqual(memoryPushEvent(0), []);
+  assert.deepEqual(memoryPushEvent(1234), [{ tool: 'memory_push', resultChars: 1234 }]);
+});
