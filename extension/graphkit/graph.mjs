@@ -181,6 +181,27 @@ export function relationLabel(viaKind, direction) {
   return RELATION_LABELS[viaKind]?.[direction] || `${viaKind} (${direction})`;
 }
 
+/** A markdown doc page (graph-kit makes `.md` files `docPage` nodes). */
+function isDocRow(row) {
+  return row?.kind === 'docPage' || /\.md$/i.test(String(row?.source_file || ''));
+}
+
+/**
+ * The relation to show for one neighbour. A `references` edge between a doc
+ * and code is a code CITATION in that doc (graph-kit reads backticked paths and
+ * symbol names out of markdown), so it reads "documented by" / "documents" —
+ * the agent should open the doc for intent, not mistake it for a code
+ * reference.
+ */
+function neighbourRelation(hit, row) {
+  let label = relationLabel(hit.viaKind, hit.direction);
+  if (hit.viaKind === 'references') {
+    if (hit.direction === 'in' && isDocRow(row)) label = 'documented by';
+    else if (hit.direction === 'out' && /^file:.*\.md$/i.test(String(hit.fromId || ''))) label = 'documents';
+  }
+  return label + (hit.confidence === 'INFERRED' ? ' (inferred)' : '');
+}
+
 /** A file node's id is `file:<relpath>` (StructureGraphBuilder) — file seeds
  *  want the file→symbol `contains` hop, symbol seeds do not (it would return
  *  every sibling symbol in the same file). */
@@ -301,7 +322,10 @@ export function searchCodeIndex(userId, query, { limit = 8, hops = 1, repoIds = 
         hops,
         limit: fetchLimit,
         repoIds,
-        edgeKinds: [CONTAINS_EDGE_KIND, 'imports'],
+        // `references` too: a doc page's citations, and the docs citing a
+        // code file, are what a file seed is asked about as often as its
+        // outline.
+        edgeKinds: [CONTAINS_EDGE_KIND, 'imports', 'references'],
       }));
     }
     // Hydrate in one query, then re-attach each neighbour's relationship.
@@ -316,8 +340,7 @@ export function searchCodeIndex(userId, query, { limit = 8, hops = 1, repoIds = 
       relatedSeen.add(hit.symbolId);
       related.push({
         ...row,
-        relation: relationLabel(hit.viaKind, hit.direction)
-          + (hit.confidence === 'INFERRED' ? ' (inferred)' : ''),
+        relation: neighbourRelation(hit, row),
         viaKind: hit.viaKind,
         direction: hit.direction,
         hop: hit.hop,
@@ -341,7 +364,9 @@ export function searchCodeIndex(userId, query, { limit = 8, hops = 1, repoIds = 
     // the agent never mistakes it for a real call edge, and only used when the
     // symbol-level pass found nothing, so a repo WITH call edges is never
     // diluted by it.
-    if (related.length === 0 && symbolSeeds.length > 0) {
+    // A doc citing the symbol is not code relatedness: it must not suppress
+    // the file-level blast radius.
+    if (related.every(isDocRow) && symbolSeeds.length > 0) {
       const fileIds = [...new Set(
         seeds.filter((s) => !isFileNode(s) && s.source_file).map((s) => `file:${s.source_file}`),
       )];
