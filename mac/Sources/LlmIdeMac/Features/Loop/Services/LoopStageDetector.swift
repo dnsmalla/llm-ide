@@ -571,10 +571,14 @@ public enum LoopStageDetector {
     /// stage's editable Input/Output fields (`targetPath`/`outputPath`, which
     /// `composeSkillMessage` appends as "Input: …" / "Write output to: …"), so
     /// editing those fields on the Loop page actually REDIRECTS the loop
-    /// instead of contradicting a path baked into the prompt. The defaults
-    /// below are relative to the PROJECT root (the folder holding
-    /// `system/project.json`), which in the clone-into-code layout is two
-    /// levels above the git root — the prompt tells the agent how to find it.
+    /// instead of contradicting a path baked into the prompt. Stage paths are
+    /// stored relative to the GIT root (that is what the path picker is rooted
+    /// at). The Plan stages' prompts let the agent fall back to the PROJECT
+    /// root (the folder holding `system/project.json`, two levels above the git
+    /// root in the clone-into-code layout) when a path does not exist there.
+    /// The Doc Optimization stages do NOT: they resolve against the repo root
+    /// only (`docResolvePathsRule`), because a doc tree outside the git tree is
+    /// never scanned, so its citations could never become graph edges.
     /// Stage keys of detector defaults that exist on EVERY tree with a
     /// resolvable git root — the Plan loop's two skill stages, the Refactoring
     /// loop's plan and apply stages, and the Doc Optimization loop's two skill
