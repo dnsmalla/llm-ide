@@ -503,7 +503,7 @@ export {
 } from './code-graph.mjs';
 
 // Per-turn tool accounting (migration 0035).
-export { recordToolEvents, summarizeToolEvents } from './tool-events.mjs';
+export { recordToolEvents, summarizeToolEvents, summarizeToolEventsOn } from './tool-events.mjs';
 
 // Random id helper. Exported so the extracted helper modules
 // (reviews.mjs, plans.mjs) can mint plan/task/review ids without

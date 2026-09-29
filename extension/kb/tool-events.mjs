@@ -34,10 +34,12 @@ export function recordToolEvents(userId, { turnId, engine, mode = null, events }
   }
 }
 
-/** Aggregate for the report. userId null = every user (operator report only). */
-export function summarizeToolEvents(userId, { days = 7 } = {}) {
+/**
+ * Core query implementation that uses a provided db handle.
+ * userId null = every user (operator report only).
+ */
+export function summarizeToolEventsOn(db, userId, { days = 7 } = {}) {
   if (userId !== null) requireUser(userId);
-  const db = getDb();
   const since = `-${Math.max(1, Math.min(365, Math.trunc(Number(days) || 7)))} days`;
   const userSql = userId === null ? '' : ' AND user_id = ?';
   const binds = userId === null ? [since] : [since, userId];
@@ -90,4 +92,12 @@ export function summarizeToolEvents(userId, { days = 7 } = {}) {
     tokensWithFindCode: tokenAvg(withFc),
     tokensWithoutFindCode: tokenAvg(withoutFc),
   };
+}
+
+/**
+ * Wrapper that fetches the DB connection, calls summarizeToolEventsOn,
+ * and returns the result. Signature and behaviour must not change (Task 1 tests).
+ */
+export function summarizeToolEvents(userId, { days = 7 } = {}) {
+  return summarizeToolEventsOn(getDb(), userId, { days });
 }
