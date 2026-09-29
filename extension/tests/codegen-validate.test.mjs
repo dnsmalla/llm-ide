@@ -3,7 +3,7 @@
 // and committed in the auto-PR flow would be a corruption bug).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validate, selectRelevantFiles, MAX_FILE_BYTES } from '../agents/codegen.mjs';
+import { validate, selectRelevantFiles, MAX_FILE_BYTES, repoRelative } from '../agents/codegen.mjs';
 
 test('validate passes normal file content through untouched', () => {
   const content = 'export const x = 1;\n';
@@ -87,4 +87,38 @@ test('selectRelevantFiles falls back to the full FTS list when symbols confirm n
 test('selectRelevantFiles handles empty/malformed input without throwing', () => {
   assert.deepEqual(selectRelevantFiles(undefined, undefined), []);
   assert.deepEqual(selectRelevantFiles([{ ref: '/a.ts' }], [{ title: 'no repo_id or source_file' }]), [{ ref: '/a.ts' }]);
+});
+
+test('validate drops a modify whose path was not provided, and says so', () => {
+  const out = validate({
+    summary: 's',
+    files: [
+      { path: 'src/given.ts', kind: 'modify', content: 'a' },
+      { path: 'src/invented.ts', kind: 'modify', content: 'b' },
+      { path: 'src/new.ts', kind: 'create', content: 'c' },
+    ],
+    tests: [],
+  }, { modifiable: new Set(['src/given.ts']) });
+  assert.deepEqual(out.files.map((f) => f.path), ['src/given.ts', 'src/new.ts']);
+  assert.deepEqual(out.rejected, ['src/invented.ts']);
+  assert.match(out.notes, /src\/invented\.ts/);
+});
+
+test('validate keeps a result whose only files were rejected (no blind retry)', () => {
+  const out = validate({ summary: 's', files: [{ path: 'x.ts', kind: 'modify', content: 'a' }], tests: [] },
+    { modifiable: new Set() });
+  assert.ok(out, 'a rejected-only result is an answer, not a parse failure');
+  assert.deepEqual(out.files, []);
+  assert.deepEqual(out.rejected, ['x.ts']);
+});
+
+test('validate without a modifiable set keeps the old behaviour', () => {
+  const out = validate({ summary: 's', files: [{ path: 'x.ts', kind: 'modify', content: 'a' }], tests: [] });
+  assert.equal(out.files.length, 1);
+  assert.deepEqual(out.rejected, []);
+});
+
+test('repoRelative strips an allowed root and never escapes it', () => {
+  assert.equal(repoRelative('/r/app/server/src/a.ts', ['/r/app']), 'server/src/a.ts');
+  assert.equal(repoRelative('/elsewhere/a.ts', ['/r/app']), null);
 });
