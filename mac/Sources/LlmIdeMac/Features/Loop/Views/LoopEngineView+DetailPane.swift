@@ -361,9 +361,13 @@ extension LoopEngineView {
             }
             ForEach(Array(scopeGlobs.enumerated()), id: \.offset) { index, glob in
                 HStack(spacing: 4) {
+                    // Bounds-guarded: the minus button removes this row while
+                    // its field may still be focused, and the field's commit
+                    // on focus loss then runs through the captured `index` —
+                    // on the last row that is past the end and trapped.
                     TextField("e.g. src/auth/**", text: Binding(
-                        get: { scopeGlobs[index] },
-                        set: { scopeGlobs[index] = $0 }
+                        get: { scopeGlobs.indices.contains(index) ? scopeGlobs[index] : "" },
+                        set: { if scopeGlobs.indices.contains(index) { scopeGlobs[index] = $0 } }
                     ))
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 11, design: .monospaced))
