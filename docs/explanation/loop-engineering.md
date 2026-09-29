@@ -108,7 +108,7 @@ and reusable stage lists are what templates are for.
 ## Templates
 
 A `LoopTemplate` is a named stage list plus the budgets and policy it expects —
-the knowledge "this is what a docs-refresh loop looks like", made portable. Nine
+the knowledge "this is what a docs-refresh loop looks like", made portable. Eleven
 starters ship:
 
 | Template | Pipeline |
@@ -122,6 +122,8 @@ starters ship:
 | **Operation App Diagnosis** | Server health → extension build → Mac build → Regression (llm-ide-specific) |
 | **System Check** | One stage per llm-ide subsystem (llm-ide-specific) |
 | **Plan Director** | Structure-index skill → plan-director skill: consolidate `llm-doc/plans/` into one indexed master plan |
+| **Refactoring** | Refactor-planner skill → refactor-apply skill → Test: plan the restructuring in batches, apply one, prove behaviour held |
+| **Doc Optimization** | Doc-structure-index skill → doc-writer skill: a generated, code-cited doc tree under `llm-doc/docs/` |
 
 `LoopTemplateStore` holds these plus the user's own saved recipes. It is
 **app-wide, not per-project** — carrying a recipe to the next project is the whole
@@ -153,7 +155,7 @@ scope allowlist and run history, and each is run on its own — from its row in
 the Loop page's LOOPS pane, or by the scheduled Auto Task.
 
 This is the shape the built-in checks take. `LoopStageDetector.defaultLoops`
-seeds four, every one of them gated so a repo that is not this one gets
+seeds six, every one of them gated so a repo that is not this one gets
 only what applies to it:
 
 | Loop | Its process | Created when |
@@ -162,6 +164,8 @@ only what applies to it:
 | **Test** | The project's own test command, alone | test tooling is recognised (`swift test`, `npm test`, `make test`, `pytest`) |
 | **System Check** | One marker-gated stage per subsystem (Skills, Plugins, Connectors, GitHub dispatch, Backend, iOS ↔ Mac shared protocol, Mac app) | that subsystem's own files are present |
 | **Plan** | Two generate-only skill stages: refresh the structure indexes (`llm-doc/plans/INDEX.md` — folder, file, and function indexes), then consolidate every plan collected in `llm-doc/plans/` into the hierarchical, line-limited master plan `PLAN.md` (the `plan-structure-index` and `plan-director` central skills). With no plans collected yet, both stages bootstrap from the code alone — index the codebase and derive a first `proposed` master plan from real signals (oversized files, missing tests, TODOs) — and those indexes ground every plan written later | a git working tree resolves (like Regression — `llm-doc/` lives at the *project* root, which in the clone-into-code layout is not under the git root, so no filesystem marker would be safe) |
+| **Refactoring** | *Plan, apply, verify.* `Refactor Plan` (`refactor-planner` skill) writes `llm-doc/refactor/REFACTOR.md`: small, behaviour-preserving batches `R1`, `R2`, … each `todo`/`done`/`skipped`, toward a professional, AI-friendly structure (CLAUDE.md/AGENTS.md, module boundaries, small focused files, consistent naming, an entry-point index). `Refactor Apply` (`refactor-apply` skill) applies the FIRST `todo` batch only and marks it; `Test` runs the detected test command, so a batch that broke something goes through the ordinary repair/retry. Nothing is committed — the changes land in Run Changes for review. **Manual only**: created off the schedule, offered no *Run on schedule*, and skipped by `scheduledLoops` even if the flag is forced on (`LoopDefaultLoopKey.manualOnly`) | a git working tree resolves; **plan-only** (the apply and test stages are omitted) when no test command is detected — code is never edited without a verify stage |
+| **Doc Optimization** | `Doc Index` (`doc-structure-index` skill) writes `llm-doc/docs/INDEX.md` — each area of the codebase, its page, and the files/symbols it must cover; `Doc Writer` (`doc-writer` skill) writes or updates every listed page (purpose, logic step by step, key files and functions, invariants, how to change it safely). A **generated** tree — hand-written docs are never edited — whose every code claim is cited as a backticked repo-relative path, `path:line`, or bare symbol name, so the code graph can link each page to the code it explains | a git working tree resolves |
 
 They used to be pinned *stages inside one loop*, which meant one iteration
 re-ran all of them from the top: a failing Mac-app check dragged the fault
