@@ -27,6 +27,11 @@ struct AgentContext: Codable, Equatable {
     /// Git status summary for the active repo (if any). Simplified version
     /// of porcelain status with counts of staged/unstaged files.
     var gitStatus: GitStatus?
+    /// Absolute local path of the repo the user works in (the active saved
+    /// GitLab/GitHub clone). The server prefers it as the code-graph scope
+    /// (`resolveRepoScope`), which is what keeps a project folder holding
+    /// several repos from answering with all of them. Optional for back-compat.
+    var activeRepoRoot: String?
 
     struct Project: Codable, Equatable {
         var name: String

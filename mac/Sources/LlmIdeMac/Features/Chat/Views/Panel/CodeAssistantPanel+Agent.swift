@@ -173,7 +173,8 @@ extension CodeAssistantPanel {
             sessionId: engine.agent.agentSessionId,
             chatSessionId: engine.currentSessionIDString.isEmpty ? nil : engine.currentSessionIDString,
             currentBranch: gitBranch,
-            gitStatus: gitStatus
+            gitStatus: gitStatus,
+            activeRepoRoot: config.activeRepoLocalURL?.path
         )
     }
 
