@@ -108,6 +108,10 @@ export function handleCheckCitations(args, ctx) {
     // Bare filenames (no `/`) are ambiguous — they can live anywhere — so
     // they are extracted but never judged.
     if (!c.path.includes('/')) continue;
+    // Directories and branch names (`feat/x`, `llm-doc/plans`) also contain a
+    // `/`; only a last segment with a real source/doc extension is a file.
+    const last = c.path.split('/').pop();
+    if (!KNOWN_EXT.has(last.includes('.') ? last.split('.').pop().toLowerCase() : '')) continue;
     const resolved = resolveAgentPath(c.path, roots, workspaceRoot);
     if (!resolved || !resolved.exists) { missingPaths.push(c.path); continue; }
     const want = c.endLine || c.line;

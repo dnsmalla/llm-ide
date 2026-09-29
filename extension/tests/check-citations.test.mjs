@@ -118,3 +118,8 @@ test('only call-form names and PascalCase types are judged (H4)', () => {
   const out = handleCheckCitations({ text: '`activeProject` `seedLimit` `Store.save` then `rotatePin()`, `inventedHelper()`, `InventedType`.' }, ctx);
   assert.deepEqual(out.unknownSymbols.sort(), ['InventedType', 'inventedHelper'].sort());
 });
+
+test('branch names and directories are not judged as paths (H5)', () => {
+  const out = handleCheckCitations({ text: 'On `feat/some-branch`, plans in `llm-doc/plans`, but `src/gone.ts` is gone.' }, ctx);
+  assert.deepEqual(out.missingPaths, ['src/gone.ts']);
+});
