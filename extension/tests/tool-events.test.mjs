@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Database from 'better-sqlite3';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
@@ -62,4 +63,18 @@ test('legacy memory push becomes one memory_push event, none when empty', async 
   const { memoryPushEvent } = await import('../llm_agent/runtime/memory-push-event.mjs');
   assert.deepEqual(memoryPushEvent(0), []);
   assert.deepEqual(memoryPushEvent(1234), [{ tool: 'memory_push', resultChars: 1234 }]);
+});
+
+test('summarizeToolEventsOn works with a readonly DB handle (proves query is write-free)', () => {
+  // Open the same test DB a second time with readonly handle
+  const roDb = new Database(tmpDb, { readonly: true });
+  try {
+    const result = db.summarizeToolEventsOn(roDb, U, { days: 7 });
+    const expected = db.summarizeToolEvents(U, { days: 7 });
+    assert.equal(result.turns, expected.turns);
+    assert.equal(result.turnsWithFindCode, expected.turnsWithFindCode);
+    assert.equal(result.findCodeFirstTurns, expected.findCodeFirstTurns);
+  } finally {
+    roDb.close();
+  }
 });
