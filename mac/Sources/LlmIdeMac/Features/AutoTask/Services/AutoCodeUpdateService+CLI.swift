@@ -255,7 +255,8 @@ extension AutoCodeUpdateService {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         p.arguments = ["-C", localPath, "status", "--porcelain"]
-        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+        // stderr to /dev/null: an undrained Pipe can fill and block git.
+        let out = Pipe(); p.standardOutput = out; p.standardError = FileHandle.nullDevice
         let log = Logger(subsystem: "com.llmide.macapp", category: "AutoCodeUpdateService")
         // Fail CLOSED: if we cannot verify the tree is clean we must NOT let an
         // auto-commit proceed — it would otherwise sweep the user's WIP into
@@ -265,6 +266,10 @@ extension AutoCodeUpdateService {
             log.error("isWorkingTreeClean: git could not launch at \(localPath, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return false
         }
+        // Drain BEFORE waiting: `git status --porcelain` on a tree with many
+        // untracked files writes more than the ~64 KB pipe buffer, blocks on
+        // the write, and never exits — waiting first deadlocked forever.
+        let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
         // A non-zero exit (not a git repo, transient git error) likewise means
         // we can't trust the output — don't assume clean.
@@ -272,7 +277,6 @@ extension AutoCodeUpdateService {
             log.error("isWorkingTreeClean: git status exited \(p.terminationStatus) at \(localPath, privacy: .public)")
             return false
         }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
         let s = String(data: data, encoding: .utf8) ?? ""
         return s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -647,14 +651,17 @@ extension AutoCodeUpdateService {
             if data.isEmpty {
                 handle.readabilityHandler = nil
                 if let rest = accumulator.withLock({ $0.flush() }) {
-                    logFileHandle?.write((rest + "\n").data(using: .utf8) ?? Data())
+                    try? logFileHandle?.write(contentsOf: (rest + "\n").data(using: .utf8) ?? Data())
                     let captured = rest
                     Task { @MainActor in store.append(logStoreId, captured) }
                 }
                 logFileHandle?.closeFile()
                 return
             }
-            logFileHandle?.write(data)
+            // Throwing `write(contentsOf:)`, not legacy `write(_:)`: the
+            // legacy call raises NSFileHandleOperationException on ENOSPC/EIO,
+            // which killed the app from this GCD handler when the disk filled.
+            try? logFileHandle?.write(contentsOf: data)
             guard let chunk = String(data: data, encoding: .utf8) else { return }
             for line in accumulator.withLock({ $0.feed(chunk) }) {
                 let captured = line
