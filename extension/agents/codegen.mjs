@@ -24,7 +24,9 @@ function sanitizePath(p) {
   if (/[\u0000]/.test(p)) return null;
   if (p.startsWith('/') || p.includes('..')) return null;
   if (p.length > 300) return null;
-  return p.replace(/\\/g, '/');
+  let out = p.replace(/\\/g, '/');
+  while (out.startsWith('./')) out = out.slice(2);
+  return out || null;
 }
 
 function readFileSafely(absPath, maxBytes = MAX_FILE_BYTES) {
@@ -42,13 +44,21 @@ function readFileSafely(absPath, maxBytes = MAX_FILE_BYTES) {
   }
 }
 
-/** `absRef` relative to the first allowed root containing it, POSIX separators. */
+/**
+ * `absRef` relative to the most specific (longest) allowed root containing it,
+ * POSIX separators — a parent root listed before its child must not win.
+ */
 export function repoRelative(absRef, roots) {
+  let best = null;
+  let bestLen = -1;
   for (const root of Array.isArray(roots) ? roots : []) {
     const rel = path.relative(root, absRef);
-    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) return rel.split(path.sep).join('/');
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel) && root.length > bestLen) {
+      best = rel.split(path.sep).join('/');
+      bestLen = root.length;
+    }
   }
-  return null;
+  return best;
 }
 
 /**

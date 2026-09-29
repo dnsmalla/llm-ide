@@ -122,3 +122,14 @@ test('repoRelative strips an allowed root and never escapes it', () => {
   assert.equal(repoRelative('/r/app/server/src/a.ts', ['/r/app']), 'server/src/a.ts');
   assert.equal(repoRelative('/elsewhere/a.ts', ['/r/app']), null);
 });
+
+test('repoRelative picks the most specific root when a parent is listed first', () => {
+  assert.equal(repoRelative('/r/app/extension/a.ts', ['/r', '/r/app']), 'extension/a.ts');
+});
+
+test('validate treats ./src/a.ts as src/a.ts', () => {
+  const out = validate({ summary: 's', files: [{ path: './src/a.ts', kind: 'modify', content: 'x' }], tests: [] },
+    { modifiable: new Set(['src/a.ts']) });
+  assert.equal(out.files.length, 1);
+  assert.equal(out.files[0].path, 'src/a.ts');
+});
