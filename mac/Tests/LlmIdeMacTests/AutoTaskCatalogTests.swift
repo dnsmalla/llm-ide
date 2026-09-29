@@ -138,6 +138,27 @@ final class AutoTaskSkillCatalogTests: XCTestCase {
         XCTAssertEqual(found.map(\.name), ["alpha-skill", "beta-skill"])
     }
 
+    /// `refactor-apply` edits code and is safe only inside a Refactoring loop
+    /// with a Test stage after it; a scheduled Auto Task has none, so the
+    /// picker never offers it. The exclusion list is kept in sync with the
+    /// Loop's code-applying skill ids.
+    func testCodeApplyingLoopSkillsAreNeverOffered() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("auto-task-skills-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let skills = root.appendingPathComponent(".claude/skills")
+        for name in ["refactor-apply", "refactor-planner"] {
+            let dir = skills.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try "---\nname: \(name)\ndescription: d\n---\n\nBody."
+                .write(to: dir.appendingPathComponent("SKILL.md"),
+                       atomically: true, encoding: .utf8)
+        }
+        XCTAssertEqual(AutoTaskSkillCatalog.scan(projectRoot: root).map(\.name), ["refactor-planner"])
+        let loopNames = Set(LoopStage.codeApplySkillIds.map { ($0 as NSString).lastPathComponent })
+        XCTAssertEqual(AutoTaskSkillCatalog.excludedSkillNames, loopNames)
+    }
+
     func testScanOfAProjectWithoutSkillsIsEmpty() {
         XCTAssertTrue(AutoTaskSkillCatalog.scan(
             projectRoot: FileManager.default.temporaryDirectory
