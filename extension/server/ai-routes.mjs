@@ -114,6 +114,29 @@ function ingestGeneratedDoc({ userId, ref, title, body, meta }) {
 // working unchanged.
 export { selectAttachments };
 
+/** Fixed-field-list agentContext the legacy engine sees (exported for tests). */
+export function buildEnrichedAgentContext(agentContext, recentMeetings) {
+  return {
+    activeProject: agentContext.activeProject || null,
+    indexedRepos: Array.isArray(agentContext.indexedRepos) ? agentContext.indexedRepos : [],
+    recentIssues: Array.isArray(agentContext.recentIssues) ? agentContext.recentIssues : [],
+    recentMeetings,
+    // Open workspace folder root (home-relative or absolute) for the
+    // read-only file tools. Validated server-side in buildReadableRoots.
+    workspaceRoot: typeof agentContext.workspaceRoot === 'string' ? agentContext.workspaceRoot : null,
+    // Settings-active clone: only narrows the graph scope within workspaceRoot.
+    activeRepoRoot: typeof agentContext.activeRepoRoot === 'string' ? agentContext.activeRepoRoot : null,
+    sessionId: agentContext?.sessionId ?? null,
+    // The client's STABLE chat id, distinct from the volatile per-turn
+    // `sessionId`. resolveChatSessionId (kb/session-memory.mjs) prefers
+    // it for everything keyed to "this chat" — session memory AND the
+    // task tools — on both engines. Without forwarding it here the
+    // resolver always fell back to `sessionId`, so a chat's tasks were
+    // keyed to whatever session id that turn happened to carry.
+    chatSessionId: typeof agentContext.chatSessionId === 'string' ? agentContext.chatSessionId : null,
+  };
+}
+
 export async function handleAIRoutes(req, res) {
   // Generate markdown notes
   if (req.method === 'POST' && req.url === '/generate-notes') {
@@ -429,23 +452,7 @@ export async function handleAIRoutes(req, res) {
         } catch { /* ignore */ }
 
         const sessionId = body.agentContext?.sessionId ?? null;
-        const enrichedAgentContext = {
-          activeProject: body.agentContext.activeProject || null,
-          indexedRepos: Array.isArray(body.agentContext.indexedRepos) ? body.agentContext.indexedRepos : [],
-          recentIssues: Array.isArray(body.agentContext.recentIssues) ? body.agentContext.recentIssues : [],
-          recentMeetings,
-          // Open workspace folder root (home-relative or absolute) for the
-          // read-only file tools. Validated server-side in buildReadableRoots.
-          workspaceRoot: typeof body.agentContext.workspaceRoot === 'string' ? body.agentContext.workspaceRoot : null,
-          sessionId,
-          // The client's STABLE chat id, distinct from the volatile per-turn
-          // `sessionId`. resolveChatSessionId (kb/session-memory.mjs) prefers
-          // it for everything keyed to "this chat" — session memory AND the
-          // task tools — on both engines. Without forwarding it here the
-          // resolver always fell back to `sessionId`, so a chat's tasks were
-          // keyed to whatever session id that turn happened to carry.
-          chatSessionId: typeof body.agentContext.chatSessionId === 'string' ? body.agentContext.chatSessionId : null,
-        };
+        const enrichedAgentContext = buildEnrichedAgentContext(body.agentContext, recentMeetings);
 
         // Build the attachments block + language directive separately
         // so the agent path gets the same context the legacy path

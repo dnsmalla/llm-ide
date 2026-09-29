@@ -97,3 +97,31 @@ test('workspaceRepoIds picks only the most specific repo containing the workspac
   // Parent workspace still gets every repo beneath it.
   assert.deepEqual([...db.workspaceRepoIds(U, WORKSPACE)].sort(), [WS_REPO, VENDOR].sort());
 });
+
+test('resolveRepoScope prefers the active repo over a parent workspace', () => {
+  const sib = path.join(WORKSPACE, 'code', 'sibling');
+  db.writeCodeGraph(U, sib, graph('siblingOnly'), { source: 'structure' });
+  // Parent workspace alone sees both children.
+  const both = db.resolveRepoScope(U, { workspaceRoot: WORKSPACE });
+  assert.ok(both.includes(WS_REPO) && both.includes(sib));
+  // With the active repo, only that one.
+  assert.deepEqual(db.resolveRepoScope(U, { activeRepoRoot: WS_REPO, workspaceRoot: WORKSPACE }), [WS_REPO]);
+});
+
+test('resolveRepoScope falls back to the workspace when the active repo is not graphed', () => {
+  const scoped = db.resolveRepoScope(U, { activeRepoRoot: '/not/graphed/anywhere', workspaceRoot: WORKSPACE });
+  assert.ok(scoped.includes(WS_REPO));
+});
+
+test('resolveRepoScope: an active repo outside the workspace scope never replaces it', () => {
+  // OTHER_REPO is graphed but is not under WORKSPACE (the Settings clone of a
+  // different project). It may only narrow the open workspace, not override it.
+  const ws = db.resolveRepoScope(U, { workspaceRoot: WORKSPACE });
+  const scoped = db.resolveRepoScope(U, { activeRepoRoot: OTHER_REPO, workspaceRoot: WORKSPACE });
+  assert.deepEqual([...scoped].sort(), [...ws].sort());
+  assert.ok(!scoped.includes(OTHER_REPO));
+});
+
+test('resolveRepoScope: no workspace scope means the active repo is not applied', () => {
+  assert.equal(db.resolveRepoScope(U, { activeRepoRoot: WS_REPO, workspaceRoot: '/nowhere/else' }), null);
+});

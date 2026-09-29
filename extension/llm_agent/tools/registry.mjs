@@ -27,6 +27,7 @@ import { handleWebSearch } from '../runtime/handlers/web-search.mjs';
 import { handleFetchUrl } from '../runtime/handlers/fetch-url.mjs';
 import { handleListFiles, handleReadFile, buildTrustedRoots } from '../runtime/handlers/repo-files.mjs';
 import { handleFindCode } from '../runtime/handlers/find-code.mjs';
+import { handleCheckCitations } from '../runtime/handlers/check-citations.mjs';
 import { searchKb } from '../runtime/handlers/search-kb.mjs';
 import { tasks } from '../runtime/handlers/session-tasks.mjs';
 import { handleRunBash, resolveBashCwd } from '../runtime/handlers/run-bash.mjs';
@@ -105,6 +106,17 @@ const ENTRIES = [
       userId: ctx.userId,
       roots: ctx.readableRoots,
       workspaceRoot: ctx.agentContext?.workspaceRoot,
+      activeRepoRoot: ctx.agentContext?.activeRepoRoot,
+    }),
+  },
+  {
+    name: 'check-citations',
+    kind: 'read',
+    execute: (args, ctx) => handleCheckCitations(args, {
+      userId: ctx.userId,
+      roots: ctx.readableRoots,
+      workspaceRoot: ctx.agentContext?.workspaceRoot,
+      activeRepoRoot: ctx.agentContext?.activeRepoRoot,
     }),
   },
   // Unifies legacy's search-kb with the v2-only kb_search (sdk/tools.mjs

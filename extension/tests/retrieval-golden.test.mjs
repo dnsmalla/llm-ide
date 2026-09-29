@@ -91,17 +91,15 @@ for (const g of GOLDEN) {
 }
 
 // Parent workspace with two sibling graphed repos: a sibling's symbol must not leak.
-// Fails today (workspaceRepoIds returns every repo under the parent); todo records it.
-test('parent workspace with sibling repos does not leak a sibling repo', {
-  todo: 'needs the active project repo from the client (Phase B follow-up)',
-}, () => {
+// The client's active repo (activeRepoRoot) selects the one the user works in.
+test('parent workspace with sibling repos does not leak a sibling repo', () => {
   const PARENT = fs.mkdtempSync(path.join(__dirname, '_rg-parent-'));
   try {
     const A = path.join(PARENT, 'code', 'alpha');
     const B = path.join(PARENT, 'code', 'beta');
     db.writeCodeGraph(U, A, { nodes: [file('a.ts'), sym('a.ts', 'siblingAlphaOnly', 'function', 1)], edges: [] }, { source: 'structure' });
     db.writeCodeGraph(U, B, { nodes: [file('b.ts'), sym('b.ts', 'siblingBetaOnly', 'function', 1)], edges: [] }, { source: 'structure' });
-    const out = handleFindCode({ query: 'siblingBetaOnly' }, { userId: U, roots: [A], workspaceRoot: PARENT });
+    const out = handleFindCode({ query: 'siblingBetaOnly' }, { userId: U, roots: [A], workspaceRoot: PARENT, activeRepoRoot: A });
     const names = [...out.symbols, ...out.related].map((s) => s.name ?? s.path);
     assert.ok(!names.includes('siblingBetaOnly'), `sibling repo leaked: ${JSON.stringify(names)}`);
   } finally {
@@ -109,10 +107,27 @@ test('parent workspace with sibling repos does not leak a sibling repo', {
   }
 });
 
+test('parent workspace without an active repo searches every child repo (documented fallback)', () => {
+  const PARENT = fs.mkdtempSync(path.join(__dirname, '_rg-parent-'));
+  try {
+    const A = path.join(PARENT, 'code', 'alpha');
+    const B = path.join(PARENT, 'code', 'beta');
+    db.writeCodeGraph(U, A, { nodes: [file('a.ts'), sym('a.ts', 'siblingAlphaOnly', 'function', 1)], edges: [] }, { source: 'structure' });
+    db.writeCodeGraph(U, B, { nodes: [file('b.ts'), sym('b.ts', 'siblingBetaOnly', 'function', 1)], edges: [] }, { source: 'structure' });
+    const ctx = { userId: U, roots: [A], workspaceRoot: PARENT };
+    const names = (q) => {
+      const out = handleFindCode({ query: q }, ctx);
+      return [...out.symbols, ...out.related].map((s) => s.name ?? s.path);
+    };
+    assert.ok(names('siblingBetaOnly').includes('siblingBetaOnly'));
+    assert.ok(names('siblingAlphaOnly').includes('siblingAlphaOnly'));
+  } finally {
+    fs.rmSync(PARENT, { recursive: true, force: true });
+  }
+});
+
 // Doc-only seeds must not crowd out a later token's exact title match (fails today: top 3 are doc-only handlers).
-test('doc-only seeds do not crowd out an exact title match', {
-  todo: 'doc-only seeds crowd out title matches (Phase C/D)',
-}, () => {
+test('doc-only seeds do not crowd out an exact title match', () => {
   const R = path.join(WORKSPACE, 'code', 'crowd');
   const LONG = 'authenticationmiddlewareconfiguration';
   const nodes = [file('c/f.ts')];

@@ -30,7 +30,7 @@ function expandHome(p) {
  * Returns null when nothing matches: a different clone must still get answers
  * (find-code already flags such paths `outsideWorkspace`).
  * Known limitation: a parent workspace with several child repos yields all of
- * them; picking the active project's repo needs client input (Phase B).
+ * them; `resolveRepoScope` narrows that using the client's active repo.
  */
 export function workspaceRepoIds(userId, workspaceRoot) {
   requireUser(userId);
@@ -47,6 +47,25 @@ export function workspaceRepoIds(userId, workspaceRoot) {
   }
   const under = repos.filter((r) => within(r.abs, ws)).map((r) => r.id);
   return under.length > 0 ? under : null;
+}
+
+/**
+ * The repo scope for a code-graph read. The open workspace decides the scope;
+ * the client's active repo (`agentContext.activeRepoRoot`, the Settings-active
+ * clone — a GLOBAL setting that does not follow project switches) may only
+ * NARROW it, and only when every repo it resolves to is already inside the
+ * workspace scope. This fixes a parent workspace holding several graphed repos
+ * without letting a stale Settings clone override the project the user has
+ * open. Returns null (unscoped) when the workspace matches nothing.
+ */
+export function resolveRepoScope(userId, { activeRepoRoot = '', workspaceRoot = '' } = {}) {
+  requireUser(userId);
+  const ws = workspaceRoot ? workspaceRepoIds(userId, workspaceRoot) : null;
+  if (activeRepoRoot && ws) {
+    const active = workspaceRepoIds(userId, activeRepoRoot);
+    if (active && active.every((id) => ws.includes(id))) return active;
+  }
+  return ws;
 }
 
 // Edge kinds traversed by expandSymbols. The first three are everything the
@@ -356,6 +375,19 @@ export function hydrateSymbols(userId, symbolIds, { repoIds = null } = {}) {
     `SELECT symbol_id, title, kind, repo_id, source_file, line FROM code_graph_nodes
      WHERE user_id=?${scope.sql} AND symbol_id IN (${place})`,
   ).all(userId, ...scope.params, ...symbolIds);
+}
+
+/** Which of `titles` exist as node titles in scope. Capped at 100 names. */
+export function existingSymbolTitles(userId, titles, { repoIds = null } = {}) {
+  requireUser(userId);
+  const list = [...new Set((Array.isArray(titles) ? titles : []).filter((t) => typeof t === 'string' && t))].slice(0, 100);
+  if (list.length === 0) return new Set();
+  const scope = repoScope(repoIds);
+  const rows = getDb().prepare(
+    `SELECT DISTINCT title FROM code_graph_nodes
+     WHERE user_id=?${scope.sql} AND title IN (${list.map(() => '?').join(',')})`,
+  ).all(userId, ...scope.params, ...list);
+  return new Set(rows.map((r) => r.title));
 }
 
 /** All nodes/edges for a repo (verification / future Mac read). */

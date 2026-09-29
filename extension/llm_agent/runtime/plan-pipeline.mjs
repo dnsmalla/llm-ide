@@ -131,6 +131,17 @@ const FACTS_CLAUSE =
   + 'covers what was recorded about this project before. Those four are the '
   + 'cheap path — use them before you consider anything broader.';
 
+// The output half of the graph contract: a plan that cites a file, line or
+// function that does not exist sends Execute to the wrong place, and the Mac's
+// disk-only check runs after the turn, when the model can no longer fix it.
+const VERIFY_CLAUSE =
+  '- **Verify before you present.** Before you present a finished plan, call '
+  + '`check-citations` with its full text. Fix every `lineOutOfRange`. For '
+  + '`missingPaths`, keep the files the plan will create (mark them as new) and '
+  + 'fix the rest. For `unknownSymbols`, check with `find-code` and keep '
+  + 'library and builtin names. Then present the plan. One '
+  + 'call per plan; skip it only for a reply that cites no code.';
+
 // Every plan-like mode is read-only apart from save-plan, so the upstream
 // text's file writes, commits, worktrees and branches are all unavailable.
 // Stated as a redirect rather than a prohibition: "you cannot commit" leaves
@@ -358,9 +369,10 @@ export function buildPlanBinding(mode, { skillName, engine = 'legacy', planWrite
     + `${stopClause(engine)}\n`
     + artifactClauses
     + `${FACTS_CLAUSE}\n`
+    + `${VERIFY_CLAUSE}\n`
     + '- **No other write tool.** File edits, shell commands, git operations '
     + 'and issue/PR actions are unavailable in this mode'
-    + (engine === 'agent' ? '.' : '; `save-plan` (and `ask-user`, for a question) is all you can call.');
+    + (engine === 'agent' ? '.' : '; `save-plan` (and `ask-user`, for a question) is the only write action; read tools such as `find-code` and `check-citations` stay available.');
 }
 
 /**

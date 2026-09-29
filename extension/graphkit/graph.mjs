@@ -179,7 +179,13 @@ export function searchCodeIndex(userId, query, { limit = 8, hops = 1, repoIds = 
     for (const row of searchCodeSymbols(userId, cand, seedLimit, { repoIds })) {
       if (!byId.has(row.symbol_id)) byId.set(row.symbol_id, row);
     }
-    if (byId.size >= seedLimit) break;
+    // Only TITLE matches (tier 0-2) may end probing early. `searchCodeSymbols`
+    // also matches `doc LIKE`, and now that declarations are uploaded as `doc`
+    // a common long token fills the cap with tier-3 rows, so a later token's
+    // exact title match was never probed. Probing is still bounded by
+    // MAX_SEED_CANDIDATES; the cross-candidate re-rank below puts titles first.
+    const titleHits = [...byId.values()].filter((r) => r.tier < 3).length;
+    if (titleHits >= seedLimit) break;
   }
   // Re-rank ACROSS candidates before truncating. searchCodeSymbols ranks within
   // one probe, but insertion order across probes is probe order — so on a

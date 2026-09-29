@@ -125,7 +125,9 @@ test('server/ai-routes.mjs forwards the client chatSessionId into enrichedAgentC
   // source because the surrounding route can only be driven end-to-end with a
   // live model call.
   const src = readFileSync(path.join(__dirname, '..', 'server', 'ai-routes.mjs'), 'utf8');
-  const block = src.slice(src.indexOf('const enrichedAgentContext'), src.indexOf('const enrichedAgentContext') + 1400);
-  assert.match(block, /chatSessionId:\s*typeof body\.agentContext\.chatSessionId === 'string'/,
+  // The field list lives in buildEnrichedAgentContext (called for enrichedAgentContext).
+  const block = src.slice(src.indexOf('export function buildEnrichedAgentContext'), src.indexOf('export function buildEnrichedAgentContext') + 1800);
+  assert.match(src, /const enrichedAgentContext = buildEnrichedAgentContext\(body\.agentContext/);
+  assert.match(block, /chatSessionId:\s*typeof agentContext\.chatSessionId === 'string'/,
     'enrichedAgentContext must forward the client-supplied chatSessionId');
 });
