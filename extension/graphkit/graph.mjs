@@ -181,6 +181,9 @@ export function relationLabel(viaKind, direction) {
   return RELATION_LABELS[viaKind]?.[direction] || `${viaKind} (${direction})`;
 }
 
+/** Cap on doc rows (`isDocRow`) in one search's stage-2 `related` list. */
+export const MAX_RELATED_DOC_ROWS = 3;
+
 /** A markdown doc page (graph-kit makes `.md` files `docPage` nodes). */
 function isDocRow(row) {
   return row?.kind === 'docPage' || /\.md$/i.test(String(row?.source_file || ''));
@@ -332,11 +335,19 @@ export function searchCodeIndex(userId, query, { limit = 8, hops = 1, repoIds = 
     const rows = new Map(
       hydrateSymbols(userId, [...new Set(hits.map((h) => h.symbolId))], { repoIds }).map((r) => [r.symbol_id, r]),
     );
+    let docRows = 0;
     for (const hit of hits) {
       if (relatedSeen.has(hit.symbolId)) continue;
       const row = rows.get(hit.symbolId);
       if (!row) continue;                       // dangling edge — skip silently
       if (!row.source_file) continue;           // nowhere to point the agent
+      // A widely cited symbol can have dozens of docs pointing at it; they
+      // must not crowd code out of `related`. At most MAX_RELATED_DOC_ROWS
+      // docs; the rest of the budget goes to code.
+      if (isDocRow(row)) {
+        if (docRows >= MAX_RELATED_DOC_ROWS) continue;
+        docRows += 1;
+      }
       relatedSeen.add(hit.symbolId);
       related.push({
         ...row,

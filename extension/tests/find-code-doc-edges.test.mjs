@@ -63,3 +63,31 @@ test('a doc seed lists what it documents', () => {
   assert.equal(r['store.mjs'], 'documents');
   assert.equal(r.saveLedgerRow, 'documents (inferred)');
 });
+
+test('at most three docs reach related; the rest of the budget goes to code', () => {
+  const REPO2 = '/r/cited-app';
+  const docs = [1, 2, 3, 4, 5, 6].map((i) => ({
+    id: `file:docs/page${i}.md`, title: `page${i}.md`, kind: 'docPage',
+    metadata: { source_file: `docs/page${i}.md`, line: 'L0' },
+  }));
+  const callers = [1, 2, 3].map((i) => ({
+    id: `function:src/caller${i}.mjs:callSite${i}`, title: `callSite${i}`, kind: 'function',
+    metadata: { source_file: `src/caller${i}.mjs`, line: 'L2' },
+  }));
+  db.writeCodeGraph(U, REPO2, {
+    nodes: [
+      { id: 'function:src/vault.mjs:reconcileVaultEntry', title: 'reconcileVaultEntry', kind: 'function', metadata: { source_file: 'src/vault.mjs', line: 'L9' } },
+      ...docs, ...callers,
+    ],
+    edges: [
+      ...docs.map((d) => ({ fromId: d.id, toId: 'function:src/vault.mjs:reconcileVaultEntry', kind: 'references', confidence: 'INFERRED' })),
+      ...callers.map((c) => ({ fromId: c.id, toId: 'function:src/vault.mjs:reconcileVaultEntry', kind: 'calls', confidence: 'EXTRACTED' })),
+    ],
+  }, { source: 'structure' });
+  const res = searchCodeIndex(U, 'reconcileVaultEntry', { repoIds: [REPO2] });
+  const docRows = res.related.filter((r) => /\.md$/.test(r.source_file));
+  assert.equal(docRows.length, 3, JSON.stringify(res.related.map((r) => r.title)));
+  for (const c of callers) {
+    assert.ok(res.related.some((r) => r.title === c.title), `${c.title} missing: ${JSON.stringify(res.related.map((r) => r.title))}`);
+  }
+});
