@@ -460,6 +460,79 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(verifier.calls.isEmpty)
     }
 
+    // MARK: - Code-applying stages need a verify stage after them
+
+    private func refactorApplyConfig(testEnabled: Bool?) -> LoopEngineConfig {
+        var stages = [LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 0,
+                                skillId: "skills/refactor-apply")]
+        if let testEnabled {
+            stages.append(LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test",
+                                    order: 1, enabled: testEnabled))
+        }
+        return LoopEngineConfig(stages: stages, maxIterations: 3, consecutiveFailureStop: 2)
+    }
+
+    private func assertRefusesUnverifiedApply(_ config: LoopEngineConfig,
+                                              file: StaticString = #filePath, line: UInt = #line) async {
+        let skillExecutor = StubSkillExecutor()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor,
+            approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        let message = "Refactor Apply needs an enabled test stage after it; skipped — nothing was edited"
+        XCTAssertEqual(result, .error(message), file: file, line: line)
+        XCTAssertEqual(skillExecutor.callCount, 0, "the skill executor must never be called", file: file, line: line)
+        XCTAssertTrue(runner.log.contains { $0.text.contains(message) }, file: file, line: line)
+        XCTAssertEqual(runner.stageStates["a1"], .failed, file: file, line: line)
+    }
+
+    /// "Run this stage only" on Refactor Apply (desktop menu / phone
+    /// `loop_start_stage`) leaves nothing to verify its edits.
+    func testSoloRefactorApplyIsRefusedWithoutCallingTheSkill() async throws {
+        var config = refactorApplyConfig(testEnabled: true)
+        config.stages = try XCTUnwrap(LoopStage.soloing(config.stages, id: "a1"))
+        await assertRefusesUnverifiedApply(config)
+    }
+
+    func testRefactorApplyWithADisabledTestStageIsRefused() async {
+        await assertRefusesUnverifiedApply(refactorApplyConfig(testEnabled: false))
+    }
+
+    func testRefactorApplyWithNoTestStageIsRefused() async {
+        await assertRefusesUnverifiedApply(refactorApplyConfig(testEnabled: nil))
+    }
+
+    func testRefactorApplyFollowedByAnEnabledTestStageRuns() async {
+        let skillExecutor = StubSkillExecutor()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor,
+            approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: refactorApplyConfig(testEnabled: true),
+                                      faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(skillExecutor.callCount, 1)
+        XCTAssertEqual(verifier.calls, ["swift test"])
+    }
+
+    /// The predicate itself: order matters, and a verify stage BEFORE the
+    /// apply stage does not count.
+    func testLacksVerifyAfterOnlyCountsAnEnabledVerifyStageAfterTheApply() {
+        let apply = LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 1,
+                              skillId: "skills/refactor-apply")
+        let testBefore = LoopStage(id: "t0", name: "Test", kind: .shellCommand, command: "x", order: 0)
+        let sweepAfter = LoopStage(id: "r2", name: "Regression", kind: .regressionSweep, order: 2)
+        XCTAssertTrue(LoopStage.lacksVerifyAfter(apply, in: [testBefore, apply]))
+        XCTAssertFalse(LoopStage.lacksVerifyAfter(apply, in: [testBefore, apply, sweepAfter]))
+        let other = LoopStage(id: "s1", name: "Docs", kind: .skill, order: 0, skillId: "skills/doc-writer")
+        XCTAssertFalse(LoopStage.lacksVerifyAfter(other, in: [other]), "only code-applying skills are gated")
+    }
+
     func testDisabledSkillStageWithoutSkillDoesNotFailPreflight() async {
         // Disabling is the sanctioned way to park a half-configured stage;
         // preflight must not reject the run for a stage it will never execute.

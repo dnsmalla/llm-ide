@@ -617,6 +617,8 @@ final class LoopEngineRunner: ObservableObject {
                         stage, config: config, gitRoot: runGitRoot,
                         progress: &progress, repairsUsed: &repairsUsed,
                         goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
+                case .skill where LoopStage.lacksVerifyAfter(stage, in: orderedStages):
+                    decision = refuseUnverifiedCodeApply(stage)
                 case .skill:
                     decision = await runSkillStage(
                         stage, config: config, gitRoot: runGitRoot,
@@ -877,6 +879,24 @@ final class LoopEngineRunner: ObservableObject {
             }
             return .retryIteration
         }
+    }
+
+    /// A code-applying stage (`LoopStage.appliesCode`) with no enabled verify
+    /// stage after it in this run (`LoopStage.lacksVerifyAfter`) — reached by
+    /// "Run this stage only", a disabled Test stage, or a hand-built loop. It
+    /// is refused WITHOUT calling the skill executor, recorded as failed, and
+    /// ends the run as an error: an edit nothing re-tests must never land.
+    static func unverifiedCodeApplyMessage(_ stage: LoopStage) -> String {
+        "\(stage.name) needs an enabled test stage after it; skipped — nothing was edited"
+    }
+
+    private func refuseUnverifiedCodeApply(_ stage: LoopStage) -> StageDecision {
+        let message = Self.unverifiedCodeApplyMessage(stage)
+        appendLog(.error, "  [\(stage.name)] \(message)")
+        stageStates[stage.id] = .failed
+        record(stage, startedAt: Date(), duration: 0, exitCode: nil,
+               passed: false, output: message, score: nil)
+        return .terminate(.error(message))
     }
 
     private func runSkillStage(_ stage: LoopStage, config: LoopEngineConfig,

@@ -209,4 +209,41 @@ extension LoopStage {
             return copy
         }
     }
+
+    // MARK: - Code-applying stages
+    //
+    // The ONE place the "never edit code without a verify stage after it" rule
+    // lives. The Refactoring loop's apply stage rewrites the tree batch by
+    // batch; with no test run after it, a behaviour change would land in Run
+    // Changes unproven. The default loop never ships one without a Test stage,
+    // but the stage can still be reached without one by hand: "Run this stage
+    // only" (`soloing`, the phone's `loop_start_stage`), a disabled Test stage,
+    // a template applied to a repo with no test tooling, or a user-built loop.
+
+    /// Skill ids whose stage applies code edits that must be verified.
+    static let codeApplySkillIds: Set<String> = ["skills/refactor-apply"]
+
+    /// Whether this stage applies code edits (see `codeApplySkillIds`).
+    var appliesCode: Bool {
+        kind == .skill && skillId.map(Self.codeApplySkillIds.contains) == true
+    }
+
+    /// Whether this stage verifies the tree (a shell command or the fault sweep).
+    var verifies: Bool { kind == .shellCommand || kind == .regressionSweep }
+
+    /// Whether `stage` applies code but no ENABLED verify stage comes after it
+    /// in `stages`' run order — the runner refuses such a stage without
+    /// calling the skill executor.
+    static func lacksVerifyAfter(_ stage: LoopStage, in stages: [LoopStage]) -> Bool {
+        guard stage.appliesCode else { return false }
+        let ordered = runOrder(stages)
+        guard let index = ordered.firstIndex(where: { $0.id == stage.id }) else { return true }
+        return !ordered[(index + 1)...].contains { $0.enabled && $0.verifies }
+    }
+
+    /// Whether `stages` contains an enabled code-applying stage — what makes a
+    /// loop manual-only whatever its `defaultKey` (`LoopDefinition.isManualOnly`).
+    static func containsEnabledCodeApply(_ stages: [LoopStage]) -> Bool {
+        stages.contains { $0.enabled && $0.appliesCode }
+    }
 }
