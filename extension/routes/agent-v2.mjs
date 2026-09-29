@@ -31,6 +31,9 @@ import {
   deleteAgentSession,
 } from '../kb/agent-sessions.mjs';
 import { recordUsage } from '../kb/usage.mjs';
+import { randomUUID } from 'node:crypto';
+import { createToolAccounting } from '../llm_agent/sdk/tool-accounting.mjs';
+import { recordToolEvents } from '../kb/tool-events.mjs';
 import { isSdkUpdating } from '../llm_agent/sdk/updater.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
 
@@ -332,10 +335,15 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   // "Step 1 of 30" for the whole turn. A task tool can only change the list
   // by running, so a tool_result is the exact moment to re-check it.
   const emitTaskProgress = makeTaskProgressEmitter({ userId, agentContext, mode, send });
+  // Joins this turn's tool accounting (turn_tool_events) to its ledger rows
+  // (usage_ledger.request_id), which were written with no request id before.
+  const turnId = randomUUID();
+  const toolAccounting = createToolAccounting();
   const onEvent = (ev) => {
     if (ev && typeof ev.sessionId === 'string' && ev.sessionId) currentSdkSessionId = ev.sessionId;
     if (typeof ev?.model === 'string' && ev.model) resolvedModel = ev.model;
     send(ev);
+    toolAccounting.observe(ev);
     if (!initSeen && ev && ev.type === 'init') {
       initSeen = true;
       send({ type: 'mode_set', mode });
@@ -421,7 +429,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     const meteredModel = resolvedModel ?? model;
     bindSdkSession();
     for (const row of ledgerRowsForTurn(meteredModel, usageTotals)) {
-      recordUsage(db, { userId, provider, ...row });
+      recordUsage(db, { userId, provider, requestId: turnId, ...row });
     }
     // Task parity with legacy /code-assist: emit after the SDK result so the
     // Mac can populate PlanTimelineCard and auto-continue when work remains.
@@ -458,6 +466,9 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       }
     }
   }
+  // Every exit path — success, Stop, failure: a stopped turn's tool calls
+  // still cost tokens and are exactly the data the report needs.
+  recordToolEvents(userId, { turnId, engine: 'v2', mode, events: toolAccounting.events() });
   if (!res.writableEnded) res.end();
   return true;
 }
