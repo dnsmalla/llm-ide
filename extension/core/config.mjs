@@ -10,6 +10,7 @@
 
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -137,7 +138,14 @@ export const config = Object.freeze({
   trustProxy:   envBool('LLMIDE_TRUST_PROXY', false),
 
   // Database
-  dbPath:       envStr('LLMIDE_DB_PATH', path.join(ROOT, 'kb', 'data.db')),
+  // Under the Node test runner (it sets NODE_TEST_CONTEXT in every test
+  // process) a test that forgets LLMIDE_DB_PATH gets a per-process temp DB,
+  // never the live repo-root kb/data.db: one such test wrote rows into the
+  // live DB on every `npm test` and applied migrations to it from a second
+  // process. An explicit LLMIDE_DB_PATH still wins.
+  dbPath:       envStr('LLMIDE_DB_PATH', process.env.NODE_TEST_CONTEXT
+    ? path.join(os.tmpdir(), `llmide-test-${process.pid}.db`)
+    : path.join(ROOT, 'kb', 'data.db')),
 
   // Auth
   jwtSecret:    _jwtSecret,
