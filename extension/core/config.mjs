@@ -10,6 +10,7 @@
 
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -120,6 +121,19 @@ if (_bcryptCost < 10 || _bcryptCost > 14) {
   throw new Error(`LLMIDE_BCRYPT_COST must be between 10 and 14 (got ${_bcryptCost})`);
 }
 
+// The per-process test DB (see `dbPath` below) is removed when the test
+// process exits, so `npm test` leaves nothing behind in the temp dir.
+const TEST_DB_PATH = process.env.NODE_TEST_CONTEXT && !process.env.LLMIDE_DB_PATH
+  ? path.join(os.tmpdir(), `llmide-test-${process.pid}.db`)
+  : null;
+if (TEST_DB_PATH) {
+  process.once('exit', () => {
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { fs.rmSync(TEST_DB_PATH + suffix, { force: true }); } catch { /* best effort */ }
+    }
+  });
+}
+
 export const config = Object.freeze({
   env:          isProd ? 'production' : envStr('NODE_ENV', 'development'),
   isProd,
@@ -137,7 +151,12 @@ export const config = Object.freeze({
   trustProxy:   envBool('LLMIDE_TRUST_PROXY', false),
 
   // Database
-  dbPath:       envStr('LLMIDE_DB_PATH', path.join(ROOT, 'kb', 'data.db')),
+  // Under the Node test runner (it sets NODE_TEST_CONTEXT in every test
+  // process) a test that forgets LLMIDE_DB_PATH gets a per-process temp DB,
+  // never the live repo-root kb/data.db: one such test wrote rows into the
+  // live DB on every `npm test` and applied migrations to it from a second
+  // process. An explicit LLMIDE_DB_PATH still wins.
+  dbPath:       envStr('LLMIDE_DB_PATH', TEST_DB_PATH ?? path.join(ROOT, 'kb', 'data.db')),
 
   // Auth
   jwtSecret:    _jwtSecret,
