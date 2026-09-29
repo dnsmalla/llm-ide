@@ -470,7 +470,11 @@ export async function handleKB(req, res) {
       }
       try {
         const result = ingestStructureGraph(userId, normalized, body.graph,
-          { replace: body.replace === true });
+          {
+            replace: body.replace === true,
+            commitSha: typeof body.commitSha === 'string' ? body.commitSha : null,
+            generatedAt: typeof body.generatedAt === 'string' ? body.generatedAt : null,
+          });
         sendJSON(res, 200, { ok: true, ...result });
       } catch (err) {
         sendJSON(res, 400, { error: { code: 'CODE_GRAPH_INGEST_FAILED', message: err.message } });

@@ -500,6 +500,7 @@ export {
   writeCodeGraph, clearCodeGraph, deleteScipSources, expandSymbols,
   findCodeSymbolIds, hydrateSymbols, getCodeGraphSnapshot,
   graphNeighbors, searchCodeSymbols, hasCodeGraph, workspaceRepoIds, resolveRepoScope, existingSymbolTitles, CONTAINS_EDGE_KIND,
+  setCodeGraphMeta, getCodeGraphMeta,
 } from './code-graph.mjs';
 
 // Per-turn tool accounting (migration 0035).

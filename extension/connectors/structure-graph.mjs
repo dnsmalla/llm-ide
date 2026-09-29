@@ -21,7 +21,7 @@
 
 import path from 'node:path';
 import { getDb } from '../kb/db.mjs';
-import { writeCodeGraph, clearCodeGraph, GRAPH_SOURCE_STRUCTURE } from '../kb/code-graph.mjs';
+import { writeCodeGraph, clearCodeGraph, setCodeGraphMeta, GRAPH_SOURCE_STRUCTURE } from '../kb/code-graph.mjs';
 
 // Per-request ceilings. The Mac client batches, so these bound ONE batch, not a
 // repo — a graph larger than this arrives across several calls. Sized well under
@@ -109,6 +109,9 @@ export function ingestStructureGraph(userId, repoPath, graph, opts = {}) {
     if (replace) clearCodeGraph(userId, repoId, { source: GRAPH_SOURCE_STRUCTURE });
     const written = writeCodeGraph(userId, repoId, { nodes, edges },
       { source: GRAPH_SOURCE_STRUCTURE });
+    if (replace && (opts.commitSha || opts.generatedAt)) {
+      setCodeGraphMeta(userId, repoId, { commitSha: opts.commitSha, generatedAt: opts.generatedAt });
+    }
     return {
       repo: repoId,
       nodes: written.nodes,
