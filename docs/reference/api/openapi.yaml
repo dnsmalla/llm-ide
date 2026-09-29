@@ -1543,6 +1543,8 @@ paths:
               properties:
                 repoPath: { type: string, description: 'Absolute path to the repo root (must be on user allow-list)' }
                 replace:  { type: boolean, default: false, description: 'Clear this producer''s existing rows for the repo first (first batch only)' }
+                commitSha:   { type: string, pattern: '^[0-9a-fA-F]{7,64}$', description: 'Git commit the graph was generated from (7-64 hex); find-code compares it to HEAD to warn about a stale graph' }
+                generatedAt: { type: string, format: date-time, description: 'ISO-8601 time the graph was generated' }
                 graph:
                   type: object
                   properties:
