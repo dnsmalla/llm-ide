@@ -662,7 +662,9 @@ public enum LoopStageDetector {
     static let refactorApplyPrompt = "Apply exactly one batch of the refactor plan at the Input to the "
         + "code under the Output path: the FIRST batch whose status is todo. " + resolvePathsRule
         + " Apply it behaviour-preservingly: a move or rename updates every import and reference, no "
-        + "public API changes unless the batch says so, and no test is weakened or deleted. Then mark the "
+        + "public API changes unless the batch says so, and no test is weakened, skipped or deleted "
+        + "(updating import and path references inside tests and build config is allowed when the move "
+        + "requires it). Then mark the "
         + "batch done in the plan with a one-line note — or skipped with the reason when it cannot be done "
         + "safely. Never touch more than that batch, and never commit. With no todo batch left, change "
         + "nothing."
@@ -867,8 +869,29 @@ public enum LoopStageDetector {
                                   goal: contract?.goal,
                                   acceptanceCriteria: contract?.acceptance,
                                   defaultKey: key,
-                                  config: LoopEngineDefaults.newConfig(stages: stages, defaults: defaults))
+                                  config: creationConfig(
+                                    forLoop: key,
+                                    LoopEngineDefaults.newConfig(stages: stages, defaults: defaults)))
         }
+    }
+
+    /// The protected-path policy the Refactoring loop (and its template) is
+    /// CREATED with. A batch that moves a module must also rewrite the
+    /// imports in the tests and build config that name it; `.revert` would
+    /// undo only those edits and block the run on a half-moved, broken tree.
+    /// `.warn` keeps the edits, lets the Test stage verify them, and logs and
+    /// journals every protected-path touch for the Run Changes review.
+    /// Applied at creation only — a persisted loop is never rewritten.
+    static let refactorProtectedPathPolicy: ProtectedPathPolicy = .warn
+
+    /// `config` adjusted for a default loop being created now (never applied
+    /// to an existing loop): the Refactoring loop gets
+    /// `refactorProtectedPathPolicy`.
+    static func creationConfig(forLoop key: String, _ config: LoopEngineConfig) -> LoopEngineConfig {
+        guard key == LoopDefaultLoopKey.refactor else { return config }
+        var copy = config
+        copy.protectedPathPolicy = refactorProtectedPathPolicy
+        return copy
     }
 
     /// Bring `store` up to the current default-loops contract, and migrate a
@@ -979,7 +1002,9 @@ public enum LoopStageDetector {
                     goal: defaultLoopContract(key)?.goal,
                     acceptanceCriteria: defaultLoopContract(key)?.acceptance,
                     defaultKey: key,
-                    config: budgetSource?.config ?? LoopEngineDefaults.newConfig(stages: [], defaults: defaults))
+                    config: creationConfig(
+                        forLoop: key,
+                        budgetSource?.config ?? LoopEngineDefaults.newConfig(stages: [], defaults: defaults)))
                 created.config.stages = LoopStage.renumbered(claimed)
                 loops.append(created)
                 moved[key] = []

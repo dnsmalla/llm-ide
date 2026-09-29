@@ -205,6 +205,32 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertTrue(stages.allSatisfy(\.isDefault))
     }
 
+    /// A move rewrites test imports and build config; `.revert` would undo
+    /// only those and block on a half-moved tree, so the Refactoring loop is
+    /// CREATED with `.warn` (edits kept, Test verifies, touches journalled).
+    /// Other default loops keep the default, and a persisted Refactoring loop
+    /// is never rewritten.
+    func testRefactorLoopIsCreatedWithTheWarnProtectedPathPolicy() throws {
+        try write("Package.swift")
+        let suite = try XCTUnwrap(UserDefaults(suiteName: "loop-default-loops-\(UUID().uuidString)"))
+        let created = LoopStageDetector.ensureDefaultLoops(
+            in: LoopEngineProjectStore(loops: []), gitRoot: repo, defaults: suite).store
+        XCTAssertEqual(created.loop(defaultKey: LoopDefaultLoopKey.refactor)?.config.protectedPathPolicy, .warn)
+        for loop in created.loops where loop.defaultKey != LoopDefaultLoopKey.refactor {
+            XCTAssertEqual(loop.config.protectedPathPolicy, .revert, "\(loop.name) must keep the default")
+        }
+
+        var persisted = created
+        let index = try XCTUnwrap(persisted.loops.firstIndex { $0.defaultKey == LoopDefaultLoopKey.refactor })
+        persisted.loops[index].config.protectedPathPolicy = .revert
+        let reloaded = LoopStageDetector.ensureDefaultLoops(in: persisted, gitRoot: repo, defaults: suite).store
+        XCTAssertEqual(reloaded.loop(defaultKey: LoopDefaultLoopKey.refactor)?.config.protectedPathPolicy, .revert,
+                       "an existing loop's policy is never rewritten")
+
+        XCTAssertEqual(LoopTemplate.refactoring.config.protectedPathPolicy, .warn)
+        XCTAssertEqual(LoopTemplate.refactoring.applied(to: repo).protectedPathPolicy, .warn)
+    }
+
     func testDocLoopIndexesThenWritesTheGeneratedDocTree() throws {
         let docs = try XCTUnwrap(loop(LoopDefaultLoopKey.docs,
                                       in: LoopStageDetector.defaultLoops(gitRoot: repo)))
