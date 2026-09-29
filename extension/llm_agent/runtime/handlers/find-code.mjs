@@ -25,9 +25,10 @@
 // allowlist (mode-personas.mjs).
 
 import { existsSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { searchCodeIndex } from '../../../graphkit/index.mjs';
-import { resolveRepoScope } from '../../../kb/db.mjs';
+import { resolveRepoScope, getCodeGraphMeta } from '../../../kb/db.mjs';
 import { expandTilde } from '../../../graphkit/memory.mjs';
 import { redactFence } from '../redaction.mjs';
 
@@ -39,6 +40,36 @@ const MAX_HOPS = 2;
 // tokens instead of a few thousand on a whole-file read, so the excerpt has to
 // stay a hint — enough to judge relevance, never a substitute for read-file.
 const MAX_EXCERPT_CHARS = 200;
+
+// HEAD per repo, cached briefly: find-code runs on the server's only thread
+// and a git spawn per call would add up in a busy turn.
+const headCache = new Map();
+function headCommit(repo, maxAgeMs) {
+  const hit = headCache.get(repo);
+  if (hit && Date.now() - hit.at < maxAgeMs) return hit.sha;
+  let sha = null;
+  try {
+    sha = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
+  } catch { sha = null; }
+  headCache.set(repo, { sha, at: Date.now() });
+  return sha;
+}
+
+/** Scoped repos whose graph commit differs from HEAD (short SHAs), or []. */
+function staleGraphs(userId, repoIds, maxAgeMs) {
+  if (!Array.isArray(repoIds) || repoIds.length === 0) return [];
+  const out = [];
+  for (const m of getCodeGraphMeta(userId, repoIds)) {
+    if (!m.commit_sha) continue;
+    const head = headCommit(m.repo_id, maxAgeMs);
+    if (head && head !== m.commit_sha) {
+      out.push({ repo: m.repo_id.split(/[/\\]/).pop(), graphCommit: m.commit_sha.slice(0, 7), headCommit: head.slice(0, 7) });
+    }
+  }
+  return out;
+}
+
+const STALE_HINT = 'The code graph was generated from an older commit than HEAD — line numbers and recently added symbols may be out of date; confirm with a narrow read before citing them.';
 
 function clampInt(value, { min, max, fallback }) {
   const n = Number(value);
@@ -173,10 +204,11 @@ export function handleFindCode(args, ctx) {
   const activeRepoRoot = typeof ctx.activeRepoRoot === 'string' ? ctx.activeRepoRoot : '';
 
   let result;
+  let repoIds = null;
   try {
     // Scope to the repos graphed for the open workspace; null (no match, or
     // no workspace) keeps the unscoped search so another clone still answers.
-    const repoIds = resolveRepoScope(ctx.userId, { activeRepoRoot, workspaceRoot });
+    repoIds = resolveRepoScope(ctx.userId, { activeRepoRoot, workspaceRoot });
     result = searchCodeIndex(ctx.userId, query, { limit, hops, repoIds });
   } catch (err) {
     // A missing/locked graph table must degrade to "no index", never break the
@@ -201,6 +233,12 @@ export function handleFindCode(args, ctx) {
     })
     .filter(Boolean);
 
+  const stale = (() => {
+    try { return staleGraphs(ctx.userId, repoIds, Number.isFinite(ctx.freshnessCacheMs) ? ctx.freshnessCacheMs : 30_000); }
+    catch { return []; }
+  })();
+  const hint = buildHint({ result, symbols, related, files });
+
   return {
     query,
     symbols,
@@ -210,7 +248,8 @@ export function handleFindCode(args, ctx) {
     // re-derive the policy from the skill doc every turn. Three distinct empty
     // cases, because they need three different responses — conflating them is
     // how a user with a perfectly good index gets told to go generate one.
-    hint: buildHint({ result, symbols, related, files }),
+    hint: stale.length ? `${hint} ${STALE_HINT}` : hint,
+    ...(stale.length ? { staleGraph: stale } : {}),
   };
 }
 
