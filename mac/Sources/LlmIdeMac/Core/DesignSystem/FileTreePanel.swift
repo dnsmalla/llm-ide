@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 // MARK: - Tree node model
@@ -325,7 +326,12 @@ struct FileTreePanel: View {
         }
         // Mirror LibraryView: re-sync and rebuild the tree whenever
         // the meeting index changes (new note file, project switch, etc.).
-        .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
+        // Hopped to main: the notification is posted from background queues
+        // (FolderIndexer.fullScan on the watcher queue, Task.detached ingests),
+        // and `onReceive` delivers on the posting thread — this used to read
+        // the @MainActor store and write @State off-main, racing the UI.
+        .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)
+                    .receive(on: DispatchQueue.main)) { _ in
             syncIfNeeded()
             rebuildTreeCache()
         }
