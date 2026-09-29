@@ -19,26 +19,34 @@ function expandHome(p) {
 }
 
 /**
- * The graphed repos that belong to the open workspace: repo_id equal to, under,
- * or containing `workspaceRoot`. Graph rows carry the INDEXED clone's path, and
- * the Mac graphs a project's `code/<child>` repo while the workspace is the
- * project folder — so equality alone would match nothing on the live layout.
+ * The graphed repos that belong to the open workspace. Graph rows carry the
+ * INDEXED clone's path as repo_id, and the Mac graphs a project's `code/<child>`
+ * repo while the workspace is the project folder, so equality alone would match
+ * nothing on the live layout. Two cases:
+ *  1. The workspace is at or inside a graphed repo: return ONLY the most
+ *     specific such repo (longest resolved path) — a workspace inside a repo
+ *     belongs to exactly that repo, even when an outer repo also contains it.
+ *  2. Otherwise return every graphed repo under the workspace.
  * Returns null when nothing matches: a different clone must still get answers
  * (find-code already flags such paths `outsideWorkspace`).
+ * Known limitation: a parent workspace with several child repos yields all of
+ * them; picking the active project's repo needs client input (Phase B).
  */
 export function workspaceRepoIds(userId, workspaceRoot) {
   requireUser(userId);
   if (typeof workspaceRoot !== 'string' || !workspaceRoot.trim()) return null;
   const ws = path.resolve(expandHome(workspaceRoot.trim()));
   const within = (child, parent) => child === parent || child.startsWith(parent + path.sep);
-  const hits = getDb().prepare('SELECT DISTINCT repo_id FROM code_graph_nodes WHERE user_id=?')
+  const repos = getDb().prepare('SELECT DISTINCT repo_id FROM code_graph_nodes WHERE user_id=?')
     .all(userId)
-    .map((r) => r.repo_id)
-    .filter((r) => {
-      const repo = path.resolve(expandHome(String(r)));
-      return within(repo, ws) || within(ws, repo);
-    });
-  return hits.length > 0 ? hits : null;
+    .map((r) => ({ id: r.repo_id, abs: path.resolve(expandHome(String(r.repo_id))) }));
+  const containing = repos.filter((r) => within(ws, r.abs));
+  if (containing.length > 0) {
+    containing.sort((x, y) => y.abs.length - x.abs.length);
+    return [containing[0].id];
+  }
+  const under = repos.filter((r) => within(r.abs, ws)).map((r) => r.id);
+  return under.length > 0 ? under : null;
 }
 
 // Edge kinds traversed by expandSymbols. The first three are everything the

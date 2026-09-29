@@ -87,3 +87,13 @@ test('find-code scopes to the open workspace', () => {
   assert.ok(names.includes('runStage'));
   assert.ok(!names.includes('runStageAffiliate'), 'affiliate repo must not leak into this workspace');
 });
+
+test('workspaceRepoIds picks only the most specific repo containing the workspace', () => {
+  const VENDOR = path.join(WS_REPO, 'vendor', 'lib');
+  db.writeCodeGraph(U, VENDOR, graph('vendorFn'), { source: 'structure' });
+  assert.deepEqual(db.workspaceRepoIds(U, path.join(VENDOR, 'src')), [VENDOR]);
+  assert.deepEqual(db.workspaceRepoIds(U, VENDOR), [VENDOR]);
+  assert.deepEqual(db.workspaceRepoIds(U, path.join(WS_REPO, 'src')), [WS_REPO]);
+  // Parent workspace still gets every repo beneath it.
+  assert.deepEqual([...db.workspaceRepoIds(U, WORKSPACE)].sort(), [WS_REPO, VENDOR].sort());
+});
