@@ -1,0 +1,12 @@
+[
+  { "q": "where is the mobile pairing PIN rotated", "files": ["MobilePin.swift", "MobileControlManager.swift"], "symbols": ["rotateInMemory", "MobilePin"] },
+  { "q": "how does the Loop runner retry a failed stage", "files": ["LoopEngineRunner.swift"], "symbols": ["LoopEngineRunner"] },
+  { "q": "what calls findGraphContext", "files": ["planner.mjs", "graph.mjs"], "symbols": ["findGraphContext", "generatePlan"] },
+  { "q": "where is the code graph uploaded to the server", "files": ["CodeGraphUploadService.swift", "LlmIdeAPIClient+CodeGraph.swift"], "symbols": ["CodeGraphUploadService", "ingestCodeGraph"] },
+  { "q": "how does codegen decide which files it may modify", "files": ["codegen.mjs", "codegen-apply.mjs"], "symbols": ["validate", "repoRelative", "isWithinAllowlist"] },
+  { "q": "where are v2 chat tool calls recorded for the retrieval report", "files": ["agent-v2.mjs", "tool-events.mjs", "tool-accounting.mjs"], "symbols": ["recordToolEvents", "createToolAccounting"] },
+  { "q": "how does find-code scope results to the open workspace", "files": ["code-graph.mjs", "find-code.mjs"], "symbols": ["resolveRepoScope", "workspaceRepoIds"] },
+  { "q": "where does the Mac app decide the workspace root", "files": ["WorkspaceRoot.swift"], "symbols": ["WorkspaceRoot", "resolve", "pick"] },
+  { "q": "how is the scan cache invalidated when the extractor changes", "files": ["ScanCache.swift"], "symbols": ["ScanCache", "currentVersion"] },
+  { "q": "where is SIGPIPE handled for child process stdin", "files": ["RepoManager.swift", "GlabAuthSync.swift"], "symbols": [] }
+]
