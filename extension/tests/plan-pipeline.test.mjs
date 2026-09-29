@@ -397,3 +397,13 @@ test('execute binding: a step with nothing to do is skipped, not failed', () => 
   }
   assert.match(V2_EXECUTE_GUIDANCE, /`skipped`/, 'the v2 execute guidance says so too');
 });
+
+test('plan bindings tell the model to check citations before presenting', () => {
+  for (const engine of ['agent', 'legacy']) {
+    for (const mode of ['plan', 'assist_plan']) {
+      const text = buildPlanBinding(mode, { skillName: 'brainstorming', engine });
+      assert.match(text, /`check-citations`/, `${mode}/${engine}`);
+      assert.match(text, /before you present/i, `${mode}/${engine}`);
+    }
+  }
+});

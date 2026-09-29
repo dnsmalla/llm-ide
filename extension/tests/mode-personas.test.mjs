@@ -61,7 +61,12 @@ for (const mode of ['plan', 'assist_plan']) {
     // at all, given that the plan card's Execute is the mode's only exit, and
     // the "Nothing to execute." marker the Mac keys off. An app fact again —
     // nothing in it re-describes brainstorming or grilling.
-    assert.ok(persona.length < 4700, `binding should stay short, was ${persona.length} chars`);
+    //
+    // Raised 4700 → 5000 for the verify clause: before presenting a plan, the
+    // model must call check-citations to verify that all cited paths, lines and
+    // symbols exist. This is the output half of the graph contract, an app fact
+    // the skill cannot know.
+    assert.ok(persona.length < 5000, `binding should stay short, was ${persona.length} chars`);
   });
 }
 
