@@ -502,6 +502,9 @@ export {
   graphNeighbors, searchCodeSymbols, hasCodeGraph, workspaceRepoIds, CONTAINS_EDGE_KIND,
 } from './code-graph.mjs';
 
+// Per-turn tool accounting (migration 0035).
+export { recordToolEvents, summarizeToolEvents } from './tool-events.mjs';
+
 // Random id helper. Exported so the extracted helper modules
 // (reviews.mjs, plans.mjs) can mint plan/task/review ids without
 // duplicating the CSPRNG + base64url plumbing.
