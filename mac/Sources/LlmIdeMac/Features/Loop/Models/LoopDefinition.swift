@@ -64,9 +64,22 @@ public struct LoopDefinition: Codable, Equatable, Identifiable {
     /// Whether this is one of the built-in default loops.
     public var isDefault: Bool { defaultKey != nil }
 
-    /// Whether this loop may only be started by hand
-    /// (`LoopDefaultLoopKey.manualOnly`) — never by the schedule.
-    public var isManualOnly: Bool { defaultKey.map(LoopDefaultLoopKey.manualOnly.contains) ?? false }
+    /// Whether this loop may only be started by hand — never by the schedule.
+    /// Follows the RECIPE, not only the key: a built-in in
+    /// `LoopDefaultLoopKey.manualOnly`, or any loop holding an enabled
+    /// code-applying stage (`LoopStage.containsEnabledCodeApply`), so a
+    /// Refactoring loop made from the template or by Duplicate is manual-only
+    /// too.
+    public var isManualOnly: Bool {
+        Self.isManualOnly(defaultKey: defaultKey, stages: config.stages)
+    }
+
+    /// `isManualOnly` for an editor that holds the fields separately (the Loop
+    /// page's detail pane).
+    static func isManualOnly(defaultKey: String?, stages: [LoopStage]) -> Bool {
+        defaultKey.map(LoopDefaultLoopKey.manualOnly.contains) == true
+            || LoopStage.containsEnabledCodeApply(stages)
+    }
 
     public init(id: String = UUID().uuidString, name: String, isPrimary: Bool = false,
          goal: String? = nil, acceptanceCriteria: String? = nil,

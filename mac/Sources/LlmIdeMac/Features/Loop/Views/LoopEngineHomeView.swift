@@ -164,8 +164,9 @@ struct LoopEngineHomeView: View {
                 if !loop.isPrimary {
                     Button("Set as Primary") { setPrimary(loop) }
                 }
-                // A manual-only loop (Refactoring edits code) is never offered
-                // the schedule — `scheduledLoops` would skip it anyway, so the
+                // A manual-only loop (it applies code — see
+                // `LoopDefinition.isManualOnly`) is never offered the
+                // schedule — `scheduledLoops` would skip it anyway, so the
                 // item would be a toggle that does nothing.
                 if !loop.isManualOnly {
                     Button(loop.runsOnSchedule ? "Don't run on schedule" : "Run on schedule") {

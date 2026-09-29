@@ -313,6 +313,28 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertFalse(store.loop(defaultKey: LoopDefaultLoopKey.refactor)?.runsOnSchedule ?? true)
     }
 
+    /// Manual-only follows the recipe, not only the key: a Refactoring loop
+    /// made from the template or by Duplicate (no `defaultKey`) holds an
+    /// enabled refactor-apply stage and must stay off the schedule too.
+    func testAnyLoopWithAnEnabledCodeApplyStageIsManualOnly() {
+        let apply = LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 0,
+                              skillId: "skills/refactor-apply")
+        let test = LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        var copy = LoopDefinition(name: "Refactoring copy", runsOnSchedule: true,
+                                  config: LoopEngineConfig(stages: [apply, test]))
+        XCTAssertTrue(copy.isManualOnly)
+        XCTAssertTrue(LoopEngineProjectStore(loops: [copy]).scheduledLoops.isEmpty)
+
+        copy.config.stages[0].enabled = false
+        XCTAssertFalse(copy.isManualOnly, "a disabled apply stage edits nothing")
+        XCTAssertEqual(LoopEngineProjectStore(loops: [copy]).scheduledLoops.map(\.id), [copy.id])
+
+        let docs = LoopDefinition(name: "Doc Optimization", defaultKey: LoopDefaultLoopKey.docs,
+                                  config: LoopEngineConfig(stages: []))
+        XCTAssertFalse(docs.isManualOnly)
+        XCTAssertTrue(LoopDefinition.isManualOnly(defaultKey: LoopDefaultLoopKey.refactor, stages: []))
+    }
+
     /// The template must never yield code edits without a verify stage: with
     /// no test tooling the Test placeholder is dropped, so Refactor Apply goes
     /// too and the template applies plan-only — like its default loop.
