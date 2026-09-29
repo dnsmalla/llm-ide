@@ -23,7 +23,8 @@
     "format:check": "prettier --check 'src/**/*.{ts,tsx,css}'",
     "package": "npm run build && cd dist && zip -r -X ../extension-v$npm_package_version.zip . && cd ..",
     "init": "cd .. && bash setup.sh",
-    "sync:skills": "bash scripts/sync-skills.sh"
+    "sync:skills": "bash scripts/sync-skills.sh",
+    "report:retrieval": "node scripts/retrieval-report.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.283",
