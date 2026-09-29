@@ -407,3 +407,9 @@ test('plan bindings tell the model to check citations before presenting', () => 
     }
   }
 });
+
+test('legacy plan binding says save-plan is the only WRITE action, read tools stay available', () => {
+  const legacy = buildPlanBinding('plan', { skillName: 'brainstorming' });
+  assert.match(legacy, /is the only write action; read tools such as `find-code` and `check-citations` stay available/);
+  assert.doesNotMatch(legacy, /is all you can call/);
+});

@@ -19,7 +19,9 @@ exist.
 ## What it checks
 
 - Backticked **paths** (`src/app/view.ts`) — the file must exist in the open
-  workspace or an indexed repo.
+  workspace or an indexed repo. Only paths whose last segment has a source/doc
+  extension are judged; directories and branch names (`feat/x`,
+  `llm-doc/plans`) are skipped.
 - Backticked **`path:line`** or **`path:start-end`** — the line must be inside the file.
 - Backticked **calls** (`rotatePin()`, `Store.save()`) and **PascalCase type
   names** (`ChatEngine`) — the name must exist in the code graph for the repo

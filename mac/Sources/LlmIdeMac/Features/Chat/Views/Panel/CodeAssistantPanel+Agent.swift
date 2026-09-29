@@ -174,6 +174,8 @@ extension CodeAssistantPanel {
             chatSessionId: engine.currentSessionIDString.isEmpty ? nil : engine.currentSessionIDString,
             currentBranch: gitBranch,
             gitStatus: gitStatus,
+            // The Settings-active clone (config.activeRepoLocalURL) — a server-side NARROWING
+            // hint only, NOT this panel's WorkspaceRoot-based `activeRepoRoot`; the open workspace decides scope.
             activeRepoRoot: config.activeRepoLocalURL?.path
         )
     }

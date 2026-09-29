@@ -66,7 +66,10 @@ for (const mode of ['plan', 'assist_plan']) {
     // model must call check-citations to verify that all cited paths, lines and
     // symbols exist. This is the output half of the graph contract, an app fact
     // the skill cannot know.
-    assert.ok(persona.length < 5000, `binding should stay short, was ${persona.length} chars`);
+    //
+    // Raised 5000 → 5100 for the legacy "only write action; read tools stay
+    // available" wording (a fact about this app's tool surface, not process).
+    assert.ok(persona.length < 5100, `binding should stay short, was ${persona.length} chars`);
   });
 }
 

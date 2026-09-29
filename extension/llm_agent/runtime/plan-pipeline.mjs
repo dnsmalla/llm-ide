@@ -372,7 +372,7 @@ export function buildPlanBinding(mode, { skillName, engine = 'legacy', planWrite
     + `${VERIFY_CLAUSE}\n`
     + '- **No other write tool.** File edits, shell commands, git operations '
     + 'and issue/PR actions are unavailable in this mode'
-    + (engine === 'agent' ? '.' : '; `save-plan` (and `ask-user`, for a question) is all you can call.');
+    + (engine === 'agent' ? '.' : '; `save-plan` (and `ask-user`, for a question) is the only write action; read tools such as `find-code` and `check-citations` stay available.');
 }
 
 /**
