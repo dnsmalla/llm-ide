@@ -4,7 +4,50 @@
 // Every helper is userId-first (tenancy); writes are transactional.
 
 import path from 'node:path';
+import os from 'node:os';
 import { getDb, requireUser } from './db.mjs';
+
+// `AND repo_id IN (…)` for an optional repo scope. null/[] = unscoped, so every
+// existing caller (code-sync, tests) keeps today's behaviour.
+function repoScope(repoIds) {
+  if (!Array.isArray(repoIds) || repoIds.length === 0) return { sql: '', params: [] };
+  return { sql: ` AND repo_id IN (${repoIds.map(() => '?').join(',')})`, params: repoIds };
+}
+
+function expandHome(p) {
+  return p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p;
+}
+
+/**
+ * The graphed repos that belong to the open workspace. Graph rows carry the
+ * INDEXED clone's path as repo_id, and the Mac graphs a project's `code/<child>`
+ * repo while the workspace is the project folder, so equality alone would match
+ * nothing on the live layout. Two cases:
+ *  1. The workspace is at or inside a graphed repo: return ONLY the most
+ *     specific such repo (longest resolved path) — a workspace inside a repo
+ *     belongs to exactly that repo, even when an outer repo also contains it.
+ *  2. Otherwise return every graphed repo under the workspace.
+ * Returns null when nothing matches: a different clone must still get answers
+ * (find-code already flags such paths `outsideWorkspace`).
+ * Known limitation: a parent workspace with several child repos yields all of
+ * them; picking the active project's repo needs client input (Phase B).
+ */
+export function workspaceRepoIds(userId, workspaceRoot) {
+  requireUser(userId);
+  if (typeof workspaceRoot !== 'string' || !workspaceRoot.trim()) return null;
+  const ws = path.resolve(expandHome(workspaceRoot.trim()));
+  const within = (child, parent) => child === parent || child.startsWith(parent + path.sep);
+  const repos = getDb().prepare('SELECT DISTINCT repo_id FROM code_graph_nodes WHERE user_id=?')
+    .all(userId)
+    .map((r) => ({ id: r.repo_id, abs: path.resolve(expandHome(String(r.repo_id))) }));
+  const containing = repos.filter((r) => within(ws, r.abs));
+  if (containing.length > 0) {
+    containing.sort((x, y) => y.abs.length - x.abs.length);
+    return [containing[0].id];
+  }
+  const under = repos.filter((r) => within(r.abs, ws)).map((r) => r.id);
+  return under.length > 0 ? under : null;
+}
 
 // Edge kinds traversed by expandSymbols. The first three are everything the
 // SCIP parser emits, so its behaviour is unchanged; `calls` and `inherits`
@@ -161,6 +204,7 @@ export function graphNeighbors(userId, seedIds, {
   edgeKinds = DEFAULT_EDGE_KINDS,
   direction = 'both',
   limit = 60,
+  repoIds = null,
 } = {}) {
   requireUser(userId);
   if (!Array.isArray(seedIds) || seedIds.length === 0) return [];
@@ -172,6 +216,7 @@ export function graphNeighbors(userId, seedIds, {
   const out = [];
   let frontier = [...new Set(seedIds)].slice(0, MAX_FRONTIER);
   const kindPlace = edgeKinds.map(() => '?').join(',');
+  const scope = repoScope(repoIds);
 
   for (let hop = 1; hop <= hops; hop++) {
     if (frontier.length === 0 || out.length >= limit) break;
@@ -180,14 +225,14 @@ export function graphNeighbors(userId, seedIds, {
     if (wantOut) {
       rows.push(...db.prepare(
         `SELECT from_id, to_id AS neighbor_id, kind, 'out' AS dir FROM code_graph_edges
-         WHERE user_id=? AND from_id IN (${place}) AND kind IN (${kindPlace})`,
-      ).all(userId, ...frontier, ...edgeKinds));
+         WHERE user_id=?${scope.sql} AND from_id IN (${place}) AND kind IN (${kindPlace})`,
+      ).all(userId, ...scope.params, ...frontier, ...edgeKinds));
     }
     if (wantIn) {
       rows.push(...db.prepare(
         `SELECT to_id AS from_id, from_id AS neighbor_id, kind, 'in' AS dir FROM code_graph_edges
-         WHERE user_id=? AND to_id IN (${place}) AND kind IN (${kindPlace})`,
-      ).all(userId, ...frontier, ...edgeKinds));
+         WHERE user_id=?${scope.sql} AND to_id IN (${place}) AND kind IN (${kindPlace})`,
+      ).all(userId, ...scope.params, ...frontier, ...edgeKinds));
     }
     const next = [];
     for (const r of rows) {
@@ -249,7 +294,7 @@ export function findCodeSymbolIds(userId, query, limit = 10) {
  * Same LIKE-escaping contract as findCodeSymbolIds; same scan-cost caveat as
  * the TODO above.
  */
-export function searchCodeSymbols(userId, query, limit = 10) {
+export function searchCodeSymbols(userId, query, limit = 10, { repoIds = null } = {}) {
   requireUser(userId);
   const q = typeof query === 'string' ? query.trim() : '';
   if (!q) return [];
@@ -260,6 +305,7 @@ export function searchCodeSymbols(userId, query, limit = 10) {
   const contains = `%${escaped}%`;
   const prefix = `${escaped}%`;
   const lower = q.toLowerCase();
+  const scope = repoScope(repoIds);
   return getDb().prepare(
     `SELECT symbol_id, title, kind, repo_id, source_file, line, language, doc,
             CASE
@@ -269,12 +315,12 @@ export function searchCodeSymbols(userId, query, limit = 10) {
               ELSE 3
             END AS tier
      FROM code_graph_nodes
-     WHERE user_id=? AND (title LIKE ? ESCAPE '\\' OR doc LIKE ? ESCAPE '\\')
+     WHERE user_id=?${scope.sql} AND (title LIKE ? ESCAPE '\\' OR doc LIKE ? ESCAPE '\\')
      ORDER BY tier, length(title), title
      LIMIT ?`,
-    // Bind order is SQL-text order: the three CASE tiers in the SELECT come
-    // before the WHERE clause's user_id + LIKE pair.
-  ).all(lower, prefix, contains, userId, contains, contains, limit);
+    // Bind order is SQL-text order: the three CASE tiers, then user_id, the
+    // optional repo scope, the LIKE pair, and LIMIT.
+  ).all(lower, prefix, contains, userId, ...scope.params, contains, contains, limit);
 }
 
 /**
@@ -301,14 +347,15 @@ export function hasCodeGraph(userId) {
  * on-disk path — e.g. codegen.mjs uses it to confirm which FTS-matched file
  * a task's compiler-derived symbols actually touch.
  */
-export function hydrateSymbols(userId, symbolIds) {
+export function hydrateSymbols(userId, symbolIds, { repoIds = null } = {}) {
   requireUser(userId);
   if (!Array.isArray(symbolIds) || symbolIds.length === 0) return [];
   const place = symbolIds.map(() => '?').join(',');
+  const scope = repoScope(repoIds);
   return getDb().prepare(
     `SELECT symbol_id, title, kind, repo_id, source_file, line FROM code_graph_nodes
-     WHERE user_id=? AND symbol_id IN (${place})`,
-  ).all(userId, ...symbolIds);
+     WHERE user_id=?${scope.sql} AND symbol_id IN (${place})`,
+  ).all(userId, ...scope.params, ...symbolIds);
 }
 
 /** All nodes/edges for a repo (verification / future Mac read). */

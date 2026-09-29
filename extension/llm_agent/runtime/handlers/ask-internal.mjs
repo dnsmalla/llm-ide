@@ -46,7 +46,7 @@ export async function askInternal(args, ctx) {
     skills: ctx.internalSkills.skills,
     userMessage: args.question,
     history: [],                        // fresh — internal is stateless
-    agentContext: { ...(ctx.agentContext || {}), base: internalBase, includeSystemContext: true },
+    agentContext: { ...(ctx.agentContext || {}), base: internalBase, includeSystemContext: true, includeRepoMemory: false },
     runClaude: ctx.runClaude,
     kb: ctx.kb,
     userId: ctx.userId,

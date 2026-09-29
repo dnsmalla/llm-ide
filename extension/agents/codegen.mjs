@@ -9,10 +9,13 @@
 import fs from 'fs';
 import path from 'path';
 import { runClaude, tryParseJSON, languageDirective } from '../providers/runtime.mjs';
-import { getTaskById, getPlan, mergeTaskMeta } from '../kb/db.mjs';
+import { getTaskById, getPlan, mergeTaskMeta, userRepoAllowlist } from '../kb/db.mjs';
 
 const MAX_FILES = 8;
 export const MAX_FILE_BYTES = 25 * 1024;
+// Full-file JSON for up to MAX_FILES × MAX_FILE_BYTES does not fit 4096 output
+// tokens; the old cap produced truncated JSON and a same-cost retry.
+export const MAX_OUTPUT_TOKENS = 16_000;
 
 function sanitizePath(p) {
   if (typeof p !== 'string') return null;
@@ -21,7 +24,9 @@ function sanitizePath(p) {
   if (/[\u0000]/.test(p)) return null;
   if (p.startsWith('/') || p.includes('..')) return null;
   if (p.length > 300) return null;
-  return p.replace(/\\/g, '/');
+  let out = p.replace(/\\/g, '/');
+  while (out.startsWith('./')) out = out.slice(2);
+  return out || null;
 }
 
 function readFileSafely(absPath, maxBytes = MAX_FILE_BYTES) {
@@ -32,10 +37,28 @@ function readFileSafely(absPath, maxBytes = MAX_FILE_BYTES) {
     const lst = fs.lstatSync(absPath);
     if (!lst.isFile()) return null;
     if (lst.size > maxBytes * 4) return null;
-    return fs.readFileSync(absPath, 'utf8').slice(0, maxBytes);
+    const full = fs.readFileSync(absPath, 'utf8');
+    return { content: full.slice(0, maxBytes), truncated: full.length > maxBytes };
   } catch {
     return null;
   }
+}
+
+/**
+ * `absRef` relative to the most specific (longest) allowed root containing it,
+ * POSIX separators — a parent root listed before its child must not win.
+ */
+export function repoRelative(absRef, roots) {
+  let best = null;
+  let bestLen = -1;
+  for (const root of Array.isArray(roots) ? roots : []) {
+    const rel = path.relative(root, absRef);
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel) && root.length > bestLen) {
+      best = rel.split(path.sep).join('/');
+      bestLen = root.length;
+    }
+  }
+  return best;
 }
 
 /**
@@ -66,7 +89,9 @@ export function selectRelevantFiles(files, symbols) {
 function buildPrompt({ task, plan, lang, filesCtx }) {
   const refsBlock = filesCtx.length === 0
     ? '(no related files were retrieved from the KB code index)'
-    : filesCtx.map((f) => `\n--- ${f.relPath} ---\n${f.content}\n`).join('\n');
+    : filesCtx.map((f) => (f.truncated
+      ? `\n--- ${f.relPath} (TRUNCATED at ${Math.floor(MAX_FILE_BYTES / 1024)} KB — read-only, do not "modify" it) ---\n${f.content}\n`
+      : `\n--- ${f.relPath} ---\n${f.content}\n`)).join('\n');
 
   return `You are an autonomous coding agent.  Produce a focused implementation for ONE task.
 
@@ -93,6 +118,7 @@ Rules:
 - Paths MUST be relative to the repo root.  No absolute paths.  No "..".
 - Each "content" must be the COMPLETE file body after the change, not a diff.
 - Only emit code for THIS task.  Do not touch unrelated files.
+- "modify" is ONLY allowed for a path listed under "Related files" below that is not marked TRUNCATED. Any other existing file you need changed goes in "notes".
 - If the task is unclear, return an empty "files" / "tests" array and
   put your blocking questions in "notes" — do not guess.
 ${lang.line ? `- ${lang.line}\n` : ''}
@@ -110,13 +136,17 @@ ones you actually need to change):
 ${refsBlock}`;
 }
 
-export function validate(raw) {
+export function validate(raw, { modifiable = null } = {}) {
   if (!raw || typeof raw !== 'object') return null;
   // Collect any file whose body exceeds the per-file cap. We must NEVER
   // silently truncate a generated file — the auto-PR flow writes these to
   // disk and commits them, so a partial body would be committed as if it
   // were the complete file. Fail loud instead (see throw below).
   const oversize = [];
+  // A `modify` must target a file the model was actually shown in full:
+  // anything else is a full-body rewrite of a file it never read (or read
+  // truncated) and would clobber it on approval.
+  const rejected = [];
   const cleanArr = (arr) => (Array.isArray(arr) ? arr : [])
     .map((f) => {
       const p = sanitizePath(f?.path);
@@ -129,9 +159,14 @@ export function validate(raw) {
         oversize.push(`${p} (${Buffer.byteLength(content, 'utf8')} bytes)`);
         return null;
       }
+      const kind = f?.kind === 'modify' ? 'modify' : 'create';
+      if (modifiable && kind === 'modify' && !modifiable.has(p)) {
+        rejected.push(p);
+        return null;
+      }
       return {
         path: p,
-        kind: f?.kind === 'modify' ? 'modify' : 'create',
+        kind,
         language: typeof f?.language === 'string' ? f.language.slice(0, 30) : '',
         content,
       };
@@ -147,12 +182,17 @@ export function validate(raw) {
       `${oversize.join(', ')}. Split the task into smaller files — refusing to write a truncated file.`,
     );
   }
-  if (files.length + tests.length === 0 && !raw.notes) return null;
+  if (files.length + tests.length === 0 && !raw.notes && rejected.length === 0) return null;
+  const baseNotes = typeof raw.notes === 'string' ? raw.notes.slice(0, 5000) : '';
+  const rejectNote = rejected.length > 0
+    ? `Dropped "modify" for file(s) not provided in full as context: ${rejected.join(', ')}.`
+    : '';
   return {
     summary: typeof raw.summary === 'string' ? raw.summary.slice(0, 2000) : '',
     files,
     tests,
-    notes: typeof raw.notes === 'string' ? raw.notes.slice(0, 5000) : '',
+    notes: [baseNotes, rejectNote].filter(Boolean).join('\n\n'),
+    rejected,
   };
 }
 
@@ -167,30 +207,31 @@ export async function generateCodeForTask(userId, { taskId, language, includeFil
   // is false (huge plans, slow networks), we just pass the title list.
   const filesCtx = [];
   if (includeFileContext) {
+    const roots = (() => { try { return userRepoAllowlist(userId); } catch { return []; } })();
     const candidateFiles = selectRelevantFiles(task.files, task.symbols);
     for (const f of candidateFiles.slice(0, 5)) {
       if (!f?.ref) continue;
-      const content = readFileSafely(f.ref);
-      if (!content) continue;
-      // Best-effort relative path: strip everything up to /src/ or repo
-      // detection — fall back to basename to keep the prompt readable.
-      const rel = f.ref.replace(/^.*?\/(src|app|lib|server)\//, (m, dir) => `${dir}/`);
-      filesCtx.push({ relPath: rel || path.basename(f.ref), content });
+      const read = readFileSafely(f.ref);
+      if (!read) continue;
+      // Repo-relative via the user's allowed roots; the old regex fallback
+      // only for a ref outside every root.
+      const rel = repoRelative(f.ref, roots)
+        || f.ref.replace(/^.*?\/(src|app|lib|server)\//, (m, dir) => `${dir}/`);
+      filesCtx.push({ relPath: rel || path.basename(f.ref), content: read.content, truncated: read.truncated });
     }
   }
+  const modifiable = new Set(filesCtx.filter((f) => !f.truncated).map((f) => f.relPath));
 
   const lang = languageDirective(language || plan.language);
   const prompt = buildPrompt({ task, plan, lang, filesCtx });
 
-  // Cap output tokens — the codegen JSON schema is bounded by MAX_FILES.
-  // 4096 tokens is generous for 8 files × ~500 lines each.
-  let parsed = tryParseJSON(await runClaude(prompt, { userId, maxTokens: 4096 }));
-  let validated = validate(parsed);
+  let parsed = tryParseJSON(await runClaude(prompt, { userId, maxTokens: MAX_OUTPUT_TOKENS }));
+  let validated = validate(parsed, { modifiable });
   if (!validated) {
     // Stricter retry — most failures are the model wrapping JSON in prose.
     const stricter = `${prompt}\n\nYour previous response was not valid JSON. Output ONLY the JSON object — start with { and end with }.`;
-    parsed = tryParseJSON(await runClaude(stricter, { userId, maxTokens: 4096 }));
-    validated = validate(parsed);
+    parsed = tryParseJSON(await runClaude(stricter, { userId, maxTokens: MAX_OUTPUT_TOKENS }));
+    validated = validate(parsed, { modifiable });
   }
   if (!validated) {
     throw new Error('Code generation failed: model did not return valid JSON.');

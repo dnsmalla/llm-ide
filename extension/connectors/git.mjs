@@ -8,7 +8,7 @@
 
 import fsp from 'fs/promises';
 import path from 'path';
-import { ingestSources, deleteSourcesByPrefix } from '../kb/db.mjs';
+import { ingestSources, deleteSourcesByPrefix, getDb, MAX_INGEST_BATCH } from '../kb/db.mjs';
 
 const TEXT_EXT = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
@@ -105,18 +105,13 @@ export async function indexLocalRepo(userId, repoPath, opts = {}) {
   }
 
   const replace = opts.replace !== false;
-  if (replace) {
-    // Wipe previous chunks for this repo so deleted files disappear from
-    // search instead of lingering as stale rows.  Ref prefix is the abs
-    // path so two different roots don't clobber each other.
-    deleteSourcesByPrefix(userId, 'code', `${absRoot}${path.sep}`);
-  }
+  const walk = typeof opts.walk === 'function' ? opts.walk : walkAsync;
 
   const items = [];
   let filesScanned = 0;
   let filesIndexed = 0;
 
-  for await (const filePath of walkAsync(absRoot)) {
+  for await (const filePath of walk(absRoot)) {
     filesScanned += 1;
     const ext = path.extname(filePath).toLowerCase();
     if (!TEXT_EXT.has(ext)) continue;
@@ -148,6 +143,18 @@ export async function indexLocalRepo(userId, repoPath, opts = {}) {
     filesIndexed += 1;
   }
 
-  const written = ingestSources(userId, items);
+  // Wipe-then-insert in ONE transaction, after the walk has finished: the old
+  // order deleted first and walked asynchronously, so an error or crash
+  // mid-walk left the repo with no code index at all. Ref prefix is the abs
+  // path so two different roots don't clobber each other.
+  const written = getDb().transaction(() => {
+    if (replace) deleteSourcesByPrefix(userId, 'code', `${absRoot}${path.sep}`);
+    // ingestSources caps a single call; slice inside the same transaction.
+    let total = 0;
+    for (let i = 0; i < items.length; i += MAX_INGEST_BATCH) {
+      total += ingestSources(userId, items.slice(i, i + MAX_INGEST_BATCH));
+    }
+    return total;
+  })();
   return { repo: absRoot, filesScanned, filesIndexed, chunks: written };
 }

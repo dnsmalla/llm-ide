@@ -26,6 +26,13 @@ extension LlmIdeAPIClient {
             for key in ["source_file", "line", "language", "doc"] {
                 if let v = node.metadata[key], !v.isEmpty { meta[key] = v }
             }
+            // The graph's `doc` is empty for structure nodes, so without this
+            // the server knows a symbol's name but never its signature and the
+            // model must open the file anyway. Capped: a declaration is a line
+            // or two, not a body.
+            if meta["doc"] == nil, let decl = node.metadata["declaration"], !decl.isEmpty {
+                meta["doc"] = String(decl.prefix(500))
+            }
             self.metadata = meta
         }
     }

@@ -493,13 +493,13 @@ export function safeParseMeta(s) {
 
 
 // Phase-3 external source ingestion lives in sources.mjs.
-export { ingestSources, deleteSourcesByPrefix } from './sources.mjs';
+export { ingestSources, deleteSourcesByPrefix, MAX_INGEST_BATCH } from './sources.mjs';
 
 // SCIP code-graph node+edge store + multi-hop traversal (migration 0025).
 export {
   writeCodeGraph, clearCodeGraph, deleteScipSources, expandSymbols,
   findCodeSymbolIds, hydrateSymbols, getCodeGraphSnapshot,
-  graphNeighbors, searchCodeSymbols, hasCodeGraph, CONTAINS_EDGE_KIND,
+  graphNeighbors, searchCodeSymbols, hasCodeGraph, workspaceRepoIds, CONTAINS_EDGE_KIND,
 } from './code-graph.mjs';
 
 // Random id helper. Exported so the extracted helper modules
@@ -622,7 +622,7 @@ export { exportProject } from './project-export.mjs';
 // semantics so a multi-word task title still produces ranked candidates
 // even when no single chunk contains every term — the agent layer can
 // always filter further on rank, but a strict-AND no-match starves it.
-export function findContext(userId, query, limit = 5) {
+export function findContext(userId, query, limit = 5, { kinds = null } = {}) {
   requireUser(userId);
   const built = buildSearchFilter(query, 'or');
   if (!built) return { meetings: [], tasks: [], code: [], tickets: [], blockers: [] };
@@ -715,12 +715,15 @@ export function findContext(userId, query, limit = 5) {
     return hits.filter((h) => owned.has(h.entity_id));
   });
 
+  // `kinds` lets a caller skip slices it never renders — each is up to two
+  // FTS queries plus a hydration query. Absent = every slice (unchanged).
+  const want = (k) => !Array.isArray(kinds) || kinds.includes(k);
   return {
-    meetings: sliceMeetings('meeting'),
-    tasks:    sliceTasks(),
-    code:     sliceCode(),
-    tickets:  sliceTickets(),
-    blockers: sliceEntities('blocker'),
+    meetings: want('meetings') ? sliceMeetings('meeting') : [],
+    tasks:    want('tasks') ? sliceTasks() : [],
+    code:     want('code') ? sliceCode() : [],
+    tickets:  want('tickets') ? sliceTickets() : [],
+    blockers: want('blockers') ? sliceEntities('blocker') : [],
   };
 }
 

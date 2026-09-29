@@ -80,11 +80,16 @@ ${(meeting.transcriptText || '').slice(0, 200_000)}
 <<<END>>>`;
 }
 
-function validatePlan(raw, meeting, goal) {
+export function validatePlan(raw, meeting, goal) {
   if (!raw || typeof raw !== 'object') return null;
   const title = sanitizeStr(raw.title, 200) || meeting.title || 'Plan';
   const goalText = sanitizeStr(raw.goal, 2000) || sanitizeStr(goal, 2000) || '';
   const milestones = Array.isArray(raw.milestones) ? raw.milestones : [];
+
+  // The prompt tells the model to pick owners from the participant list; an
+  // owner outside it is invented, and would be dispatched as an assignee.
+  const participants = new Set((meeting?.participants || []).map((p) => String(p).trim().toLowerCase()));
+  const checkOwner = (o) => (o && participants.size > 0 && !participants.has(o.trim().toLowerCase()) ? null : o);
 
   // Resolve dependsOn (titles → ids) once we've assigned ids.
   const tasks = [];
@@ -108,7 +113,7 @@ function validatePlan(raw, meeting, goal) {
         milestone: ms,
         title: tTitle,
         description: sanitizeStr(t?.description, 2000) || null,
-        owner: typeof t?.owner === 'string' ? sanitizeStr(t.owner, 80) || null : null,
+        owner: typeof t?.owner === 'string' ? checkOwner(sanitizeStr(t.owner, 80) || null) : null,
         estimateDays: Number.isFinite(t?.estimateDays) ? Math.max(0, t.estimateDays) : null,
         _dependsOnTitles: Array.isArray(t?.dependsOn) ? t.dependsOn.map((d) => sanitizeStr(d, 200)).filter(Boolean) : [],
         status: 'planned',
@@ -135,7 +140,10 @@ export async function generatePlan(userId, { meetingId, goal, language }) {
   }
 
   const lang = languageDirective(language || meeting.language);
-  const context = findGraphContext(userId, buildContextQuery(meeting, goal), 5);
+  // buildPrompt renders meetings/tasks/blockers/tickets only; the code slice
+  // was fetched and discarded on every plan.
+  const context = findGraphContext(userId, buildContextQuery(meeting, goal), 5,
+    { kinds: ['meetings', 'tasks', 'tickets', 'blockers'] });
 
   // Cap output tokens — plan JSON schema is bounded by task count (max ~30).
   const claudeOpts = { userId, maxTokens: 3000 };

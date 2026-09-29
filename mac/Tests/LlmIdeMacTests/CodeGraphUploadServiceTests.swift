@@ -108,6 +108,42 @@ final class CodeGraphUploadServiceTests: XCTestCase {
                        CodeGraphUploadService.fingerprint(laidOut))
     }
 
+    // MARK: - fingerprint covers what the server stores
+
+    /// An edit that only shifts lines keeps every id/title/kind, so the old
+    /// fingerprint never changed and the server kept stale line numbers.
+    func testLineShiftChangesTheFingerprint() {
+        func graph(_ line: String) -> CGData {
+            CGData(nodes: [CGNode(id: "function:a.swift:f", title: "f", kind: .function,
+                                  metadata: ["source_file": "a.swift", "line": line])], edges: [])
+        }
+        XCTAssertNotEqual(CodeGraphUploadService.fingerprint(graph("L3")),
+                          CodeGraphUploadService.fingerprint(graph("L9")))
+    }
+
+    func testDeclarationChangeChangesTheFingerprint() {
+        func graph(_ decl: String) -> CGData {
+            CGData(nodes: [CGNode(id: "function:a.swift:f", title: "f", kind: .function,
+                                  metadata: ["declaration": decl])], edges: [])
+        }
+        XCTAssertNotEqual(CodeGraphUploadService.fingerprint(graph("func f()")),
+                          CodeGraphUploadService.fingerprint(graph("func f(x: Int)")))
+    }
+
+    // MARK: - payload
+
+    func testPayloadSendsDeclarationAsDocWhenNoDoc() {
+        let node = CGNode(id: "function:a.py:f", title: "f", kind: .function,
+                          metadata: ["source_file": "a.py", "declaration": "def f(x):"])
+        XCTAssertEqual(LlmIdeAPIClient.CodeGraphNodePayload(node).metadata["doc"], "def f(x):")
+    }
+
+    func testPayloadKeepsAnExistingDoc() {
+        let node = CGNode(id: "function:a.py:f", title: "f", kind: .function,
+                          metadata: ["doc": "Documented.", "declaration": "def f(x):"])
+        XCTAssertEqual(LlmIdeAPIClient.CodeGraphNodePayload(node).metadata["doc"], "Documented.")
+    }
+
     // MARK: - upload guards
 
     @MainActor

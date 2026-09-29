@@ -27,6 +27,7 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { searchCodeIndex } from '../../../graphkit/index.mjs';
+import { workspaceRepoIds } from '../../../kb/db.mjs';
 import { expandTilde } from '../../../graphkit/memory.mjs';
 import { redactFence } from '../redaction.mjs';
 
@@ -171,7 +172,10 @@ export function handleFindCode(args, ctx) {
 
   let result;
   try {
-    result = searchCodeIndex(ctx.userId, query, { limit, hops });
+    // Scope to the repos graphed for the open workspace; null (no match, or
+    // no workspace) keeps the unscoped search so another clone still answers.
+    const repoIds = workspaceRoot ? workspaceRepoIds(ctx.userId, workspaceRoot) : null;
+    result = searchCodeIndex(ctx.userId, query, { limit, hops, repoIds });
   } catch (err) {
     // A missing/locked graph table must degrade to "no index", never break the
     // turn — the agent still has list-files/read-file/run-bash.

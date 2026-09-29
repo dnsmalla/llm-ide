@@ -488,7 +488,11 @@ export async function runAgentLoop({
   // global agent. For internal that message is global's restated question,
   // which is exactly the right relevance signal.
   const contextBlock = agentContext && agentContext.includeSystemContext === true
-    ? composeSystemContext(agentContext, userId, userMessage)
+    ? composeSystemContext(agentContext, userId, userMessage,
+      // ask-internal sets includeRepoMemory:false — the global agent that
+      // delegated already carries the repo-memory block, and re-rendering it
+      // here doubled it inside an uncached sub-loop.
+      { memory: agentContext.includeRepoMemory !== false })
     : '';
   const systemPrompt = buildSystemPrompt({
     base,
