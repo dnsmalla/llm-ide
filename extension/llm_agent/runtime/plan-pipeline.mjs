@@ -136,9 +136,10 @@ const FACTS_CLAUSE =
 // disk-only check runs after the turn, when the model can no longer fix it.
 const VERIFY_CLAUSE =
   '- **Verify before you present.** Before you present a finished plan, call '
-  + '`check-citations` with its full text. Fix or remove every entry it reports '
-  + 'in `missingPaths`, `lineOutOfRange` and `unknownSymbols` (look the right '
-  + 'name or line up with `find-code`), then present the corrected plan. One '
+  + '`check-citations` with its full text. Fix every `lineOutOfRange`. For '
+  + '`missingPaths`, keep the files the plan will create (mark them as new) and '
+  + 'fix the rest. For `unknownSymbols`, check with `find-code` and keep '
+  + 'library and builtin names. Then present the plan. One '
   + 'call per plan; skip it only for a reply that cites no code.';
 
 // Every plan-like mode is read-only apart from save-plan, so the upstream
