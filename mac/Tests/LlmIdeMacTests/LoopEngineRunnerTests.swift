@@ -520,6 +520,43 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(verifier.calls, ["swift test"])
     }
 
+    /// A failed Test + repair re-runs every stage from the top. The apply
+    /// stage must NOT run again — that would stack the next batch onto a tree
+    /// the tests have not yet proven — while the diff-first plan stage may.
+    func testRetryIterationDoesNotReapplyTheCodeApplyStage() async {
+        let skillExecutor = StubSkillExecutor()
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return VerifyOutcome(exitCode: callIndex == 0 ? 1 : 0, output: callIndex == 0 ? "boom" : "")
+        }
+        let repairer = StubRepairer()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "p1", name: "Refactor Plan", kind: .skill, order: 0,
+                      skillId: "skills/refactor-planner"),
+            LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 1,
+                      skillId: "skills/refactor-apply"),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 2)
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor,
+            approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(runner.iteration, 2)
+        XCTAssertEqual(repairer.repairCount, 1)
+        XCTAssertEqual(verifier.calls, ["swift test", "swift test"])
+        let applyCalls = skillExecutor.receivedMessages.filter { $0.contains("\"Refactor Apply\"") }
+        let planCalls = skillExecutor.receivedMessages.filter { $0.contains("\"Refactor Plan\"") }
+        XCTAssertEqual(applyCalls.count, 1, "the apply stage applies one batch per run")
+        XCTAssertEqual(planCalls.count, 2, "the diff-first plan stage may re-run")
+        XCTAssertTrue(runner.log.contains {
+            $0.text.contains("Refactor Apply already applied its batch this run; skipped")
+        })
+    }
+
     /// The predicate itself: order matters, and a verify stage BEFORE the
     /// apply stage does not count.
     func testLacksVerifyAfterOnlyCountsAnEnabledVerifyStageAfterTheApply() {

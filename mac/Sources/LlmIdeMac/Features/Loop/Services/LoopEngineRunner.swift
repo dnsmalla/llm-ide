@@ -555,6 +555,11 @@ final class LoopEngineRunner: ObservableObject {
         /// Repairs spent per stage this run — `maxRepairsPerStage`'s counter.
         var repairsUsed: [String: Int] = [:]
 
+        // Code-applying stages that already applied their batch this run. A
+        // failed verify's `.retryIteration` re-runs every stage from the top;
+        // re-running the apply stage would stack the NEXT batch onto a tree
+        // the tests have not yet proven, so it runs at most once per run.
+        var codeAppliedStageIDs = Set<String>()
         iterationLoop: while iteration < config.maxIterations {
             // `RegressionSweepRunning.sweep` is fail-closed and
             // returns `false` on cancellation rather than throwing, so a
@@ -619,7 +624,12 @@ final class LoopEngineRunner: ObservableObject {
                         goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
                 case .skill where LoopStage.lacksVerifyAfter(stage, in: orderedStages):
                     decision = refuseUnverifiedCodeApply(stage)
+                case .skill where stage.appliesCode && codeAppliedStageIDs.contains(stage.id):
+                    appendLog(.info, "  [\(stage.name)] \(Self.codeAlreadyAppliedMessage(stage))")
+                    stageStates[stage.id] = .passed
+                    decision = .proceed
                 case .skill:
+                    if stage.appliesCode { codeAppliedStageIDs.insert(stage.id) }
                     decision = await runSkillStage(
                         stage, config: config, gitRoot: runGitRoot,
                         goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
@@ -888,6 +898,14 @@ final class LoopEngineRunner: ObservableObject {
     /// ends the run as an error: an edit nothing re-tests must never land.
     static func unverifiedCodeApplyMessage(_ stage: LoopStage) -> String {
         "\(stage.name) needs an enabled test stage after it; skipped — nothing was edited"
+    }
+
+    /// Logged when a code-applying stage is reached again in the same run
+    /// (after a failed verify's retry): it is skipped without calling the
+    /// skill executor, so a retry repairs the batch already applied instead
+    /// of applying the next one.
+    static func codeAlreadyAppliedMessage(_ stage: LoopStage) -> String {
+        "\(stage.name) already applied its batch this run; skipped"
     }
 
     private func refuseUnverifiedCodeApply(_ stage: LoopStage) -> StageDecision {
