@@ -499,7 +499,7 @@ export { ingestSources, deleteSourcesByPrefix, MAX_INGEST_BATCH } from './source
 export {
   writeCodeGraph, clearCodeGraph, deleteScipSources, expandSymbols,
   findCodeSymbolIds, hydrateSymbols, getCodeGraphSnapshot,
-  graphNeighbors, searchCodeSymbols, hasCodeGraph, workspaceRepoIds, resolveRepoScope, CONTAINS_EDGE_KIND,
+  graphNeighbors, searchCodeSymbols, hasCodeGraph, workspaceRepoIds, resolveRepoScope, existingSymbolTitles, CONTAINS_EDGE_KIND,
 } from './code-graph.mjs';
 
 // Per-turn tool accounting (migration 0035).

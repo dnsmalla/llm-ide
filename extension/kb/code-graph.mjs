@@ -374,6 +374,19 @@ export function hydrateSymbols(userId, symbolIds, { repoIds = null } = {}) {
   ).all(userId, ...scope.params, ...symbolIds);
 }
 
+/** Which of `titles` exist as node titles in scope. Capped at 100 names. */
+export function existingSymbolTitles(userId, titles, { repoIds = null } = {}) {
+  requireUser(userId);
+  const list = [...new Set((Array.isArray(titles) ? titles : []).filter((t) => typeof t === 'string' && t))].slice(0, 100);
+  if (list.length === 0) return new Set();
+  const scope = repoScope(repoIds);
+  const rows = getDb().prepare(
+    `SELECT DISTINCT title FROM code_graph_nodes
+     WHERE user_id=?${scope.sql} AND title IN (${list.map(() => '?').join(',')})`,
+  ).all(userId, ...scope.params, ...list);
+  return new Set(rows.map((r) => r.title));
+}
+
 /** All nodes/edges for a repo (verification / future Mac read). */
 export function getCodeGraphSnapshot(userId, repoId) {
   requireUser(userId);
