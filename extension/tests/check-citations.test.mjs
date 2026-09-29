@@ -92,3 +92,21 @@ test('a real invented name is still reported next to builtins', () => {
   const out = handleCheckCitations({ text: '`JSON.parse` then `inventedHelper()`' }, ctx);
   assert.deepEqual(out.unknownSymbols, ['inventedHelper']);
 });
+
+test('line counting never reads an unvalidated workspaceRoot', () => {
+  const rogue = fs.mkdtempSync(path.join(__dirname, '_cc-rogue-'));
+  try {
+    fs.mkdirSync(path.join(rogue, 'src'), { recursive: true });
+    const hundred = Array.from({ length: 100 }, (_, i) => `// ${i}`).join('\n') + '\n';
+    fs.writeFileSync(path.join(rogue, 'src', 'pin.ts'), hundred);   // also exists in roots (3 lines)
+    fs.writeFileSync(path.join(rogue, 'src', 'only-rogue.ts'), hundred);
+    const out = handleCheckCitations(
+      { text: '`src/pin.ts:50` and `src/only-rogue.ts:50`' },
+      { userId: U, roots: [WS], workspaceRoot: rogue },
+    );
+    assert.deepEqual(out.lineOutOfRange, [{ path: 'src/pin.ts', line: 50, lines: 3 }]);
+    assert.deepEqual(out.missingPaths, ['src/only-rogue.ts']);
+  } finally {
+    fs.rmSync(rogue, { recursive: true, force: true });
+  }
+});

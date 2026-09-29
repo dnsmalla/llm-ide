@@ -5,7 +5,7 @@
 // Read-only; returns names and numbers only, never file contents.
 import fs from 'node:fs';
 import path from 'node:path';
-import { resolveAgentPath } from './find-code.mjs';
+import { resolveAgentPath, orderRoots } from './find-code.mjs';
 import { resolveRepoScope, existingSymbolTitles, hasCodeGraph } from '../../../kb/db.mjs';
 
 const MAX_TEXT = 200_000;
@@ -77,9 +77,10 @@ function lineCount(absPath) {
   }
 }
 
+// Only the validated readable roots are consulted (workspace first when it is
+// one of them) — the raw client workspaceRoot is never read from here.
 function absoluteFor(relPath, roots, workspaceRoot) {
-  const ordered = [workspaceRoot, ...roots].filter(Boolean);
-  for (const root of ordered) {
+  for (const root of orderRoots(roots, workspaceRoot)) {
     const abs = path.join(root, relPath);
     if (fs.existsSync(abs)) return abs;
   }
@@ -97,6 +98,7 @@ export function handleCheckCitations(args, ctx) {
   const { paths, symbols } = extractCitations(text);
   const missingPaths = [];
   const lineOutOfRange = [];
+  const lineCounts = new Map();   // abs path -> lines, so a file cited on several lines is read once
   for (const c of paths) {
     // Bare filenames (no `/`) are ambiguous — they can live anywhere — so
     // they are extracted but never judged.
@@ -106,7 +108,11 @@ export function handleCheckCitations(args, ctx) {
     const want = c.endLine || c.line;
     if (!want) continue;
     const abs = absoluteFor(resolved.path, roots, workspaceRoot);
-    const lines = abs ? lineCount(abs) : null;
+    let lines = null;
+    if (abs) {
+      if (!lineCounts.has(abs)) lineCounts.set(abs, lineCount(abs));
+      lines = lineCounts.get(abs);
+    }
     if (lines !== null && want > lines) lineOutOfRange.push({ path: c.path, line: want, lines });
   }
 
