@@ -308,6 +308,10 @@ cp "$BUILT_BIN" "$APP_DIR/Contents/MacOS/$APP_NAME"
 # code looks them up with Bundle(url:) (never `Bundle.module`, which traps).
 for res_bundle in "$PROJ_DIR"/.build/release/*.bundle; do
   [ -d "$res_bundle" ] || continue
+  # The app's own bundle is already mirrored loose into Contents/Resources by
+  # the rsync above (and read from Bundle.main first) — copying it would ship
+  # ~8 MB of monaco/mermaid twice.
+  [ "$(basename "$res_bundle")" = "LlmIdeMac_LlmIdeMacLib.bundle" ] && continue
   rm -rf "$APP_DIR/Contents/Resources/$(basename "$res_bundle")"
   cp -R "$res_bundle" "$APP_DIR/Contents/Resources/"
 done
