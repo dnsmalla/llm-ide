@@ -1207,3 +1207,48 @@ test('stream: a turn is refused with SDK_UPDATING while the SDK is being replace
     await pending;
   }
 });
+
+// The measurement rests on this join: one turn id ties turn_tool_events to
+// usage_ledger.request_id.
+const toolTurnReq = (user, chatSessionId) => makeReq({
+  method: 'POST',
+  url: '/agent/v2/stream',
+  body: { message: 'go', mode: 'execute', model: 'claude-sonnet-5', agentContext: { chatSessionId, workspaceRoot: WS } },
+  user,
+});
+
+test('stream: tool events and ledger rows share one turn id (the measurement join)', async () => {
+  const db = getDb();
+  const user = newUser('v2route-join@example.com');
+  const fakeTurn = async ({ onEvent }) => {
+    onEvent({ type: 'init', sessionId: 'sdk-join', claudeCodeVersion: '2.1.234', tools: [], capabilities: [] });
+    onEvent({ type: 'tool_use_start', index: 0, id: 'tu1', name: 'mcp__llmide__find-code' });
+    onEvent({ type: 'tool_result', toolUseId: 'tu1', isError: false, text: 'x'.repeat(50), truncated: false });
+    return { result: { subtype: 'success' }, usageTotals: { inputTokens: 7, outputTokens: 3 } };
+  };
+  await handleAgentV2Routes(toolTurnReq(user, 'chat-join'), makeRes(), { runTurn: fakeTurn });
+  const ev = db.prepare('SELECT DISTINCT turn_id, tool, engine, result_chars FROM turn_tool_events WHERE user_id = ?').all(user.id);
+  assert.equal(ev.length, 1);
+  assert.equal(ev[0].tool, 'find-code');
+  assert.equal(ev[0].engine, 'v2');
+  assert.equal(ev[0].result_chars, 50);
+  const ledger = db.prepare('SELECT request_id FROM usage_ledger WHERE user_id = ?').all(user.id);
+  assert.ok(ledger.length >= 1);
+  assert.ok(ledger.every((r) => r.request_id === ev[0].turn_id));
+});
+
+test('stream: a turn that throws after a tool event still records it, with no ledger row', async () => {
+  const db = getDb();
+  const user = newUser('v2route-join-throw@example.com');
+  const fakeTurn = async ({ onEvent }) => {
+    onEvent({ type: 'tool_use_start', index: 0, id: 'tu9', name: 'Read' });
+    onEvent({ type: 'tool_result', toolUseId: 'tu9', isError: false, text: 'abc', truncated: false });
+    throw new Error('boom');
+  };
+  await handleAgentV2Routes(toolTurnReq(user, 'chat-join-throw'), makeRes(), { runTurn: fakeTurn });
+  const ev = db.prepare('SELECT DISTINCT turn_id, tool FROM turn_tool_events WHERE user_id = ?').all(user.id);
+  assert.equal(ev.length, 1);
+  assert.equal(ev[0].tool, 'Read');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM usage_ledger WHERE user_id = ?').get(user.id).n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM usage_ledger WHERE request_id = ?').get(ev[0].turn_id).n, 0);
+});
