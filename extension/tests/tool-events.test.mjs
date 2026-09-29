@@ -98,3 +98,33 @@ test('the summary module can be imported without rotating server.log (report is 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('summary is per-engine: legacy memory_push turns never leak into the default v2 summary', () => {
+  const before = db.summarizeToolEvents(U, { days: 7 });
+  db.recordToolEvents(U, { turnId: 'L1', engine: 'legacy', events: [{ tool: 'memory_push', resultChars: 800 }] });
+  db.recordToolEvents(U, { turnId: 'L2', engine: 'legacy', events: [{ tool: 'memory_push', resultChars: 400 }] });
+  const after = db.summarizeToolEvents(U, { days: 7 });
+  assert.equal(after.turns, before.turns);
+  assert.equal(after.turnsWithFindCode, before.turnsWithFindCode);
+  assert.deepEqual(after.byTool, before.byTool);
+  assert.ok(!after.byTool.some((r) => r.tool === 'memory_push'));
+  assert.deepEqual(after.tokensWithoutFindCode, before.tokensWithoutFindCode);
+
+  const legacy = db.summarizeToolEvents(U, { days: 7, engine: 'legacy' });
+  assert.equal(legacy.turns, 2);
+  assert.equal(legacy.byTool.find((r) => r.tool === 'memory_push').avgChars, 600);
+
+  const all = db.summarizeToolEvents(U, { days: 7, engine: null });
+  assert.equal(all.turns, before.turns + 2);
+});
+
+test('token averages are scoped to the requesting user', () => {
+  const other = users.registerUser(db.getDb(), {
+    email: `te2-${Date.now()}@example.test`, password: 'CorrectHorseBattery', displayName: 'o',
+  }).id;
+  // Same request id as U's find-code turn 't1', but another user's ledger row.
+  recordUsage(db.getDb(), { userId: other, provider: 'anthropic', model: 'm', endpoint: '/agent/v2/stream',
+    inputTokens: 1, outputTokens: 1, cacheReadTokens: 1, cacheCreationTokens: 500000, requestId: 't1' });
+  const s = db.summarizeToolEvents(U, { days: 7 });
+  assert.equal(s.tokensWithFindCode.cacheCreation, 1000);
+});

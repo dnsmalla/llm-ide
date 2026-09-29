@@ -5,14 +5,16 @@
 
 /**
  * Core query implementation that uses a provided db handle.
- * userId null = every user (operator report only).
+ * userId null = every user (operator report only). engine defaults to 'v2'
+ * (legacy turns never have ledger rows); engine null = all engines.
  */
-export function summarizeToolEventsOn(db, userId, { days = 7 } = {}) {
+export function summarizeToolEventsOn(db, userId, { days = 7, engine = 'v2' } = {}) {
   if (userId !== null && (typeof userId !== 'string' || !userId)) throw new Error('userId is required');
   const since = `-${Math.max(1, Math.min(365, Math.trunc(Number(days) || 7)))} days`;
   const userSql = userId === null ? '' : ' AND user_id = ?';
-  const binds = userId === null ? [since] : [since, userId];
-  const window = `created_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now', ?)${userSql}`;
+  const engineSql = engine === null ? '' : ' AND engine = ?';
+  const binds = [since, ...(userId === null ? [] : [userId]), ...(engine === null ? [] : [engine])];
+  const window = `created_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now', ?)${userSql}${engineSql}`;
 
   const turnIds = db.prepare(
     `SELECT DISTINCT turn_id FROM turn_tool_events WHERE ${window}`,
@@ -30,23 +32,28 @@ export function summarizeToolEventsOn(db, userId, { days = 7 } = {}) {
             MIN(CASE WHEN tool IN ('Read','Grep','Glob') THEN seq END) AS native
      FROM turn_tool_events WHERE ${window} GROUP BY turn_id`,
   ).all(...binds);
-  const withFc = perTurn.filter((t) => t.fc !== null).map((t) => t.turn_id);
-  const withoutFc = perTurn.filter((t) => t.fc === null).map((t) => t.turn_id);
   const fcFirst = perTurn.filter((t) => t.fc !== null && (t.native === null || t.fc < t.native)).length;
+  const withFcCount = perTurn.filter((t) => t.fc !== null).length;
 
-  const tokenAvg = (ids) => {
-    if (ids.length === 0) return null;
-    const place = ids.map(() => '?').join(',');
-    // Sum a turn's ledger rows first (a turn can meter several models), then
-    // average across turns.
+  // Sum a turn's ledger rows first (a turn can meter several models), then
+  // average across turns. The turn set is a subquery over the same window,
+  // so there is no bound parameter per turn id.
+  const tokenAvg = (hasFindCode) => {
+    const ledgerUser = userId === null ? '' : ' AND user_id = ?';
     const row = db.prepare(
       `SELECT COUNT(*) AS turns, AVG(i) AS input, AVG(cr) AS cacheRead,
               AVG(cc) AS cacheCreation, AVG(o) AS output
        FROM (SELECT request_id,
                     SUM(COALESCE(input_tokens,0)) AS i, SUM(COALESCE(cache_read_tokens,0)) AS cr,
                     SUM(COALESCE(cache_creation_tokens,0)) AS cc, SUM(COALESCE(output_tokens,0)) AS o
-             FROM usage_ledger WHERE request_id IN (${place}) GROUP BY request_id)`,
-    ).get(...ids);
+             FROM usage_ledger
+             WHERE request_id IN (
+               SELECT turn_id FROM turn_tool_events WHERE ${window}
+               GROUP BY turn_id
+               HAVING ${hasFindCode ? '' : 'NOT '}SUM(tool = 'find-code') > 0
+             )${ledgerUser}
+             GROUP BY request_id)`,
+    ).get(...binds, ...(userId === null ? [] : [userId]));
     if (!row || !row.turns) return null;
     const r = (v) => Math.round(v || 0);
     return { turns: row.turns, input: r(row.input), cacheRead: r(row.cacheRead),
@@ -55,10 +62,10 @@ export function summarizeToolEventsOn(db, userId, { days = 7 } = {}) {
 
   return {
     turns: turnIds.length,
-    turnsWithFindCode: withFc.length,
+    turnsWithFindCode: withFcCount,
     findCodeFirstTurns: fcFirst,
     byTool,
-    tokensWithFindCode: tokenAvg(withFc),
-    tokensWithoutFindCode: tokenAvg(withoutFc),
+    tokensWithFindCode: tokenAvg(true),
+    tokensWithoutFindCode: tokenAvg(false),
   };
 }
