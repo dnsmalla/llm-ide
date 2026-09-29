@@ -577,15 +577,26 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertFalse(message.contains("project root"), message)
     }
 
-    /// The predicate itself: order matters, and a verify stage BEFORE the
-    /// apply stage does not count.
-    func testLacksVerifyAfterOnlyCountsAnEnabledVerifyStageAfterTheApply() {
+    /// The predicate itself: order matters, a verify stage BEFORE the apply
+    /// stage does not count, and only a BLOCKING shell command verifies — the
+    /// regression sweep and advisory stages do not.
+    func testLacksVerifyAfterOnlyCountsAnEnabledBlockingShellStageAfterTheApply() {
         let apply = LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 1,
                               skillId: "skills/refactor-apply")
         let testBefore = LoopStage(id: "t0", name: "Test", kind: .shellCommand, command: "x", order: 0)
         let sweepAfter = LoopStage(id: "r2", name: "Regression", kind: .regressionSweep, order: 2)
+        let advisoryAfter = LoopStage(id: "v2", name: "Lint", kind: .shellCommand, command: "x", order: 2,
+                                      severity: .advisory)
+        let testAfter = LoopStage(id: "t2", name: "Test", kind: .shellCommand, command: "x", order: 2)
         XCTAssertTrue(LoopStage.lacksVerifyAfter(apply, in: [testBefore, apply]))
-        XCTAssertFalse(LoopStage.lacksVerifyAfter(apply, in: [testBefore, apply, sweepAfter]))
+        XCTAssertTrue(LoopStage.lacksVerifyAfter(apply, in: [testBefore, apply, sweepAfter]),
+                      "the regression sweep does not verify a code edit")
+        XCTAssertTrue(LoopStage.lacksVerifyAfter(apply, in: [apply, advisoryAfter]),
+                      "an advisory stage never fails the run, so it does not verify")
+        XCTAssertFalse(LoopStage.lacksVerifyAfter(apply, in: [testBefore, apply, testAfter]))
+        XCTAssertFalse(sweepAfter.verifies)
+        XCTAssertFalse(advisoryAfter.verifies)
+        XCTAssertTrue(testAfter.verifies)
         let other = LoopStage(id: "s1", name: "Docs", kind: .skill, order: 0, skillId: "skills/doc-writer")
         XCTAssertFalse(LoopStage.lacksVerifyAfter(other, in: [other]), "only code-applying skills are gated")
     }

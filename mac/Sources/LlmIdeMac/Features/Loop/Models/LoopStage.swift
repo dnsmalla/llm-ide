@@ -228,8 +228,10 @@ extension LoopStage {
         kind == .skill && skillId.map(Self.codeApplySkillIds.contains) == true
     }
 
-    /// Whether this stage verifies the tree (a shell command or the fault sweep).
-    var verifies: Bool { kind == .shellCommand || kind == .regressionSweep }
+    /// Whether this stage verifies the tree: a BLOCKING shell command. The
+    /// regression sweep only re-checks already-known faults, and an advisory
+    /// stage never fails the run — neither proves a code edit changed nothing.
+    var verifies: Bool { kind == .shellCommand && severity != .advisory }
 
     /// Whether `stage` applies code but no ENABLED verify stage comes after it
     /// in `stages`' run order — the runner refuses such a stage without
