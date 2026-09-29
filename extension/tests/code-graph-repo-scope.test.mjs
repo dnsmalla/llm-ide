@@ -112,3 +112,16 @@ test('resolveRepoScope falls back to the workspace when the active repo is not g
   const scoped = db.resolveRepoScope(U, { activeRepoRoot: '/not/graphed/anywhere', workspaceRoot: WORKSPACE });
   assert.ok(scoped.includes(WS_REPO));
 });
+
+test('resolveRepoScope: an active repo outside the workspace scope never replaces it', () => {
+  // OTHER_REPO is graphed but is not under WORKSPACE (the Settings clone of a
+  // different project). It may only narrow the open workspace, not override it.
+  const ws = db.resolveRepoScope(U, { workspaceRoot: WORKSPACE });
+  const scoped = db.resolveRepoScope(U, { activeRepoRoot: OTHER_REPO, workspaceRoot: WORKSPACE });
+  assert.deepEqual([...scoped].sort(), [...ws].sort());
+  assert.ok(!scoped.includes(OTHER_REPO));
+});
+
+test('resolveRepoScope: no workspace scope means the active repo is not applied', () => {
+  assert.equal(db.resolveRepoScope(U, { activeRepoRoot: WS_REPO, workspaceRoot: '/nowhere/else' }), null);
+});

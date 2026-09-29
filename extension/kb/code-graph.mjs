@@ -30,7 +30,7 @@ function expandHome(p) {
  * Returns null when nothing matches: a different clone must still get answers
  * (find-code already flags such paths `outsideWorkspace`).
  * Known limitation: a parent workspace with several child repos yields all of
- * them; picking the active project's repo needs client input (Phase B).
+ * them; `resolveRepoScope` narrows that using the client's active repo.
  */
 export function workspaceRepoIds(userId, workspaceRoot) {
   requireUser(userId);
@@ -50,19 +50,22 @@ export function workspaceRepoIds(userId, workspaceRoot) {
 }
 
 /**
- * The repo scope for a code-graph read. The client's active repo (the one the
- * user works in — `agentContext.activeRepoRoot`) wins when it is graphed;
- * otherwise the workspace rule applies. This is what fixes a parent workspace
- * holding several graphed repos, where the workspace rule alone returns all
- * of them. Returns null (unscoped) when neither matches anything.
+ * The repo scope for a code-graph read. The open workspace decides the scope;
+ * the client's active repo (`agentContext.activeRepoRoot`, the Settings-active
+ * clone — a GLOBAL setting that does not follow project switches) may only
+ * NARROW it, and only when every repo it resolves to is already inside the
+ * workspace scope. This fixes a parent workspace holding several graphed repos
+ * without letting a stale Settings clone override the project the user has
+ * open. Returns null (unscoped) when the workspace matches nothing.
  */
 export function resolveRepoScope(userId, { activeRepoRoot = '', workspaceRoot = '' } = {}) {
   requireUser(userId);
-  if (activeRepoRoot) {
+  const ws = workspaceRoot ? workspaceRepoIds(userId, workspaceRoot) : null;
+  if (activeRepoRoot && ws) {
     const active = workspaceRepoIds(userId, activeRepoRoot);
-    if (active) return active;
+    if (active && active.every((id) => ws.includes(id))) return active;
   }
-  return workspaceRoot ? workspaceRepoIds(userId, workspaceRoot) : null;
+  return ws;
 }
 
 // Edge kinds traversed by expandSymbols. The first three are everything the
