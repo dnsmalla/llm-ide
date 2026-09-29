@@ -28,6 +28,10 @@ public final class CodeNoteService: ObservableObject {
     @Published public private(set) var progress: Progress = .idle
     /// The current graph (file + symbol nodes). Published so the UI re-renders.
     @Published public private(set) var graph: CGData = .empty
+    /// Doc→code citation overlay of the same scan as `graph`
+    /// (`GraphEngine.scanCodeWithCitations`) — for the backend upload only,
+    /// never rendered.
+    @Published public private(set) var citationOverlay: CGData = .empty
 
     private let launcher: ProcessLauncher
     /// Produces the scan this service turns into notes. Injected rather than
@@ -110,8 +114,9 @@ public final class CodeNoteService: ObservableObject {
         // already excludes markdown from the graph it returns.
         report(.scanning)
         let scanned: CodeScan
+        let citations: CGData
         do {
-            scanned = try await engine.scanCode(repoRoot: repoRoot)
+            (scanned, citations) = try await engine.scanCodeWithCitations(repoRoot: repoRoot)
         } catch {
             report(.failed(error.localizedDescription))
             return .failure(.engineFailed(error.localizedDescription))
@@ -151,6 +156,7 @@ public final class CodeNoteService: ObservableObject {
         // Publish on the main actor — unless a newer run superseded this one.
         guard currentRun == run else { return .failure(.cancelled) }
         self.graph = graph
+        self.citationOverlay = citations
         report(.complete(files: result.files.count,
                          edges: graph.edges.count,
                          reused: scanned.reusedFiles))

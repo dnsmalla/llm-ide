@@ -12,7 +12,7 @@
 // requirement), add stages one at a time with the same "+" affordance the
 // main page uses, wire in each generate stage's skill/input/output, decide
 // whether it should leave a summary note, then create it. Input/output are
-// `PathPickerField`s scoped to the project root (browse or type any path,
+// `PathPickerField`s scoped to the repo (git) root (browse or type any path,
 // not just items already curated into the Library) — see LoopStage.targetPath
 // /outputPath and LoopEngineRunner.composeSkillMessage for how they're used.
 //
@@ -302,7 +302,7 @@ struct NewLoopWizardView: View {
                     .labelsHidden()
                 }
 
-                Text("Input (optional) — file or folder under the project root").font(Typography.caption).foregroundStyle(t.textMuted)
+                Text("Input (optional) — file or folder under the repo root").font(Typography.caption).foregroundStyle(t.textMuted)
                 PathPickerField(root: gitRoot, path: stage.targetPath)
 
                 Text("Output (optional) — where the skill should write its result").font(Typography.caption).foregroundStyle(t.textMuted)

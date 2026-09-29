@@ -460,6 +460,147 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(verifier.calls.isEmpty)
     }
 
+    // MARK: - Code-applying stages need a verify stage after them
+
+    private func refactorApplyConfig(testEnabled: Bool?) -> LoopEngineConfig {
+        var stages = [LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 0,
+                                skillId: "skills/refactor-apply")]
+        if let testEnabled {
+            stages.append(LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test",
+                                    order: 1, enabled: testEnabled))
+        }
+        return LoopEngineConfig(stages: stages, maxIterations: 3, consecutiveFailureStop: 2)
+    }
+
+    private func assertRefusesUnverifiedApply(_ config: LoopEngineConfig,
+                                              file: StaticString = #filePath, line: UInt = #line) async {
+        let skillExecutor = StubSkillExecutor()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor,
+            approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        let message = "Refactor Apply needs an enabled test stage after it; skipped — nothing was edited"
+        XCTAssertEqual(result, .error(message), file: file, line: line)
+        XCTAssertEqual(skillExecutor.callCount, 0, "the skill executor must never be called", file: file, line: line)
+        XCTAssertTrue(runner.log.contains { $0.text.contains(message) }, file: file, line: line)
+        XCTAssertEqual(runner.stageStates["a1"], .failed, file: file, line: line)
+    }
+
+    /// "Run this stage only" on Refactor Apply (desktop menu / phone
+    /// `loop_start_stage`) leaves nothing to verify its edits.
+    func testSoloRefactorApplyIsRefusedWithoutCallingTheSkill() async throws {
+        var config = refactorApplyConfig(testEnabled: true)
+        config.stages = try XCTUnwrap(LoopStage.soloing(config.stages, id: "a1"))
+        await assertRefusesUnverifiedApply(config)
+    }
+
+    func testRefactorApplyWithADisabledTestStageIsRefused() async {
+        await assertRefusesUnverifiedApply(refactorApplyConfig(testEnabled: false))
+    }
+
+    func testRefactorApplyWithNoTestStageIsRefused() async {
+        await assertRefusesUnverifiedApply(refactorApplyConfig(testEnabled: nil))
+    }
+
+    func testRefactorApplyFollowedByAnEnabledTestStageRuns() async {
+        let skillExecutor = StubSkillExecutor()
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor,
+            approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: refactorApplyConfig(testEnabled: true),
+                                      faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(skillExecutor.callCount, 1)
+        XCTAssertEqual(verifier.calls, ["swift test"])
+    }
+
+    /// A failed Test + repair re-runs every stage from the top. The apply
+    /// stage must NOT run again — that would stack the next batch onto a tree
+    /// the tests have not yet proven — while the diff-first plan stage may.
+    func testRetryIterationDoesNotReapplyTheCodeApplyStage() async {
+        let skillExecutor = StubSkillExecutor()
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return VerifyOutcome(exitCode: callIndex == 0 ? 1 : 0, output: callIndex == 0 ? "boom" : "")
+        }
+        let repairer = StubRepairer()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "p1", name: "Refactor Plan", kind: .skill, order: 0,
+                      skillId: "skills/refactor-planner"),
+            LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 1,
+                      skillId: "skills/refactor-apply"),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 2)
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor,
+            approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(runner.iteration, 2)
+        XCTAssertEqual(repairer.repairCount, 1)
+        XCTAssertEqual(verifier.calls, ["swift test", "swift test"])
+        let applyCalls = skillExecutor.receivedMessages.filter { $0.contains("\"Refactor Apply\"") }
+        let planCalls = skillExecutor.receivedMessages.filter { $0.contains("\"Refactor Plan\"") }
+        XCTAssertEqual(applyCalls.count, 1, "the apply stage applies one batch per run")
+        XCTAssertEqual(planCalls.count, 2, "the diff-first plan stage may re-run")
+        XCTAssertTrue(runner.log.contains {
+            $0.text.contains("Refactor Apply already applied its batch this run; skipped")
+        })
+    }
+
+    /// Stage paths are relative to the git root, so "." is the repo root —
+    /// not the project root, which sits two levels up in the code/ layout.
+    func testDotPathIsDescribedAsTheRepoRoot() async {
+        let skillExecutor = StubSkillExecutor()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "d1", name: "Doc Index", kind: .skill, order: 0,
+                      skillId: "skills/doc-structure-index", targetPath: ".",
+                      outputPath: "llm-doc/docs/INDEX.md")
+        ], maxIterations: 1, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor, approvals: makeApprovals())
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        let message = skillExecutor.receivedMessages.first ?? ""
+        XCTAssertTrue(message.contains("Input: the repo root."), message)
+        XCTAssertFalse(message.contains("project root"), message)
+    }
+
+    /// The predicate itself: order matters, a verify stage BEFORE the apply
+    /// stage does not count, and only a BLOCKING shell command verifies — the
+    /// regression sweep and advisory stages do not.
+    func testLacksVerifyAfterOnlyCountsAnEnabledBlockingShellStageAfterTheApply() {
+        let apply = LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 1,
+                              skillId: "skills/refactor-apply")
+        let testBefore = LoopStage(id: "t0", name: "Test", kind: .shellCommand, command: "x", order: 0)
+        let sweepAfter = LoopStage(id: "r2", name: "Regression", kind: .regressionSweep, order: 2)
+        let advisoryAfter = LoopStage(id: "v2", name: "Lint", kind: .shellCommand, command: "x", order: 2,
+                                      severity: .advisory)
+        let testAfter = LoopStage(id: "t2", name: "Test", kind: .shellCommand, command: "x", order: 2)
+        XCTAssertTrue(LoopStage.lacksVerifyAfter(apply, in: [testBefore, apply]))
+        XCTAssertTrue(LoopStage.lacksVerifyAfter(apply, in: [testBefore, apply, sweepAfter]),
+                      "the regression sweep does not verify a code edit")
+        XCTAssertTrue(LoopStage.lacksVerifyAfter(apply, in: [apply, advisoryAfter]),
+                      "an advisory stage never fails the run, so it does not verify")
+        XCTAssertFalse(LoopStage.lacksVerifyAfter(apply, in: [testBefore, apply, testAfter]))
+        XCTAssertFalse(sweepAfter.verifies)
+        XCTAssertFalse(advisoryAfter.verifies)
+        XCTAssertTrue(testAfter.verifies)
+        let other = LoopStage(id: "s1", name: "Docs", kind: .skill, order: 0, skillId: "skills/doc-writer")
+        XCTAssertFalse(LoopStage.lacksVerifyAfter(other, in: [other]), "only code-applying skills are gated")
+    }
+
     func testDisabledSkillStageWithoutSkillDoesNotFailPreflight() async {
         // Disabling is the sanctioned way to park a half-configured stage;
         // preflight must not reject the run for a stage it will never execute.
@@ -1252,6 +1393,86 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertFalse(attempt.passed)
         XCTAssertEqual(attempt.scopeVerdict, .violatedReverted)
         XCTAssertEqual(attempt.changedPaths, ["mac/Tests/A.swift"])
+    }
+
+    // MARK: - Code-apply stages see `.warn` under a `.revert`/`.stop` loop
+
+    private func refactorWithTest() -> [LoopStage] {
+        [LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 0, skillId: "skills/refactor-apply"),
+         LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)]
+    }
+
+    /// A move rewrites a test's import: under the loop's `.revert` (and
+    /// `.stop`) the code-apply stage's edit is KEPT, journalled, and the run
+    /// continues so Test verifies it; the row reads passed with the paths.
+    func testCodeApplyStageProtectedEditIsKeptUnderARevertLoop() async {
+        for policy in [ProtectedPathPolicy.revert, .stop] {
+            let journal = InMemoryJournal()
+            let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+            let scopeGuard = StubScopeGuard(result: .violated(
+                paths: ["mac/Tests/A.swift"], allChangedPaths: ["mac/Tests/A.swift", "Sources/B.swift"]))
+            let config = LoopEngineConfig(stages: refactorWithTest(), maxIterations: 3,
+                                          consecutiveFailureStop: 2, protectedPathPolicy: policy)
+            let runner = makeRunner(
+                verifier: verifier, stageRepairer: StubRepairer(),
+                regressionSweep: StubRegressionSweep(alwaysPasses: true),
+                skillExecutor: StubSkillExecutor(),
+                approvals: makeApprovals(approve: [("t1", "swift test")]),
+                journal: journal, scopeGuard: scopeGuard)
+            let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+            XCTAssertEqual(result, .success, "\(policy)")
+            XCTAssertTrue(scopeGuard.revertedPaths.isEmpty, "the apply stage's edits must stay (\(policy))")
+            XCTAssertEqual(verifier.calls, ["swift test"], "Test must run and verify the edits (\(policy))")
+            let attempt = journal.written[0].iterations[0].attempts[0]
+            XCTAssertTrue(attempt.passed, "an allowed touch is not a failed row (\(policy))")
+            XCTAssertEqual(attempt.scopeVerdict, .violated, "the touch is still journalled (\(policy))")
+            XCTAssertTrue(attempt.outputTail.contains("mac/Tests/A.swift"), attempt.outputTail)
+            XCTAssertEqual(runner.stageStates["a1"], .passed)
+            XCTAssertTrue(runner.log.contains { $0.text.contains("kept for a code-applying stage") })
+        }
+    }
+
+    /// The same loop's Test REPAIR keeps the loop's `.revert`: editing a test
+    /// to make it pass is still reverted and blocks the run.
+    func testRepairInARefactorLoopIsStillRevertedAndBlocked() async {
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return VerifyOutcome(exitCode: callIndex == 0 ? 1 : 0, output: callIndex == 0 ? "boom" : "")
+        }
+        let scopeGuard = StubScopeGuard(result: .violated(
+            paths: ["mac/Tests/A.swift"], allChangedPaths: ["mac/Tests/A.swift"]))
+        let config = LoopEngineConfig(stages: refactorWithTest(), maxIterations: 3,
+                                      consecutiveFailureStop: 3, protectedPathPolicy: .revert)
+        let repairer = StubRepairer()
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            scopeGuard: scopeGuard)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .blocked(reason: .repairOutOfScope(
+            stageName: "Test", paths: ["mac/Tests/A.swift"])))
+        XCTAssertEqual(repairer.repairCount, 1)
+        XCTAssertEqual(scopeGuard.revertedPaths, ["mac/Tests/A.swift"],
+                       "only the repair's edit is reverted, once")
+        XCTAssertEqual(verifier.calls.count, 1, "never re-verified after the reward-hacking repair")
+    }
+
+    func testEffectivePolicyPromotesOnlyCodeApplyStagesFromRevertOrStop() {
+        let apply = LoopStage(name: "Refactor Apply", kind: .skill, order: 0, skillId: "skills/refactor-apply")
+        let other = LoopStage(name: "Docs", kind: .skill, order: 0, skillId: "skills/doc-writer")
+        let test = LoopStage(name: "Test", kind: .shellCommand, command: "x", order: 1)
+        let expected: [ProtectedPathPolicy: ProtectedPathPolicy] = [.revert: .warn, .stop: .warn, .warn: .warn, .off: .off]
+        for (loop, promoted) in expected {
+            let config = LoopEngineConfig(stages: [], protectedPathPolicy: loop)
+            XCTAssertEqual(LoopEngineRunner.effectivePolicy(for: apply, config: config), promoted)
+            XCTAssertEqual(LoopEngineRunner.effectivePolicy(for: other, config: config), loop)
+            XCTAssertEqual(LoopEngineRunner.effectivePolicy(for: test, config: config), loop)
+        }
     }
 
     /// The mirror case: a skill stage that edits only production code is a clean

@@ -198,7 +198,9 @@ final class GraphAutoUpdater: ObservableObject {
             // (not spawned separately) so two ticks can't upload concurrently;
             // the service no-ops when the graph is unchanged, which is the
             // common case for a periodic tick.
-            await self.uploader.upload(graph: self.graph.codeGraph, repoRoot: heldRoot)
+            // `codeGraphForUpload` = the rendered code graph plus the doc→code
+            // citation overlay (server-only; the views never see doc nodes).
+            await self.uploader.upload(graph: self.graph.codeGraphForUpload, repoRoot: heldRoot)
             self.objectWillChange.send()
         }
     }

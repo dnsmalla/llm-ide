@@ -40,6 +40,48 @@ enum FileClassifier {
         return CGData(nodes: nodes, edges: edges)
     }
 
+    /// The doc→code **citation overlay** of a RAW (unstripped) code graph: the
+    /// doc FILE nodes (`.docPage` with a `file:` id — never a heading) that
+    /// cite code, plus their `references` edges whose target survives
+    /// `strippingDocNodes`. A doc→doc link is left out (its target is
+    /// stripped), and so is a doc whose citations all point at stripped nodes.
+    ///
+    /// Why it exists: stripping removes every edge touching a `.docPage`, so
+    /// graph-kit's doc→code citation edges never reached the server's
+    /// find-code ("documented by"). The views keep rendering the stripped
+    /// graph (no double counting in "All"); only the upload payload merges
+    /// this back in (`mergingCitationOverlay`).
+    static func citationOverlay(from graph: CGData) -> CGData {
+        let docFiles = Dictionary(
+            graph.nodes.filter { $0.kind == .docPage && $0.id.hasPrefix("file:") }.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first })
+        guard !docFiles.isEmpty else { return .empty }
+        let surviving = Set(strippingDocNodes(from: graph).nodes.map(\.id))
+        let edges = graph.edges.filter {
+            $0.kind == .references && docFiles[$0.fromId] != nil && surviving.contains($0.toId)
+        }
+        guard !edges.isEmpty else { return .empty }
+        var seen = Set<String>()
+        let nodes = edges.compactMap { e -> CGNode? in
+            guard seen.insert(e.fromId).inserted else { return nil }
+            return docFiles[e.fromId]
+        }
+        return CGData(nodes: nodes, edges: edges)
+    }
+
+    /// The graph the backend upload receives: the stripped `code` graph plus
+    /// `overlay`'s doc nodes and those citation edges whose target is in
+    /// `code`. Never used for rendering.
+    static func mergingCitationOverlay(_ overlay: CGData, into code: CGData) -> CGData {
+        guard !overlay.edges.isEmpty else { return code }
+        let codeIds = Set(code.nodes.map(\.id))
+        let edges = overlay.edges.filter { codeIds.contains($0.toId) && !codeIds.contains($0.fromId) }
+        guard !edges.isEmpty else { return code }
+        let sources = Set(edges.map(\.fromId))
+        let nodes = overlay.nodes.filter { sources.contains($0.id) }
+        return CGData(nodes: code.nodes + nodes, edges: code.edges + edges)
+    }
+
     /// Node kinds the doc/InfiniteBrain track emits: `MemoryGenerator` produces
     /// `memoryDoc`/`memoryChunk` plus the vault `note*` kinds (see its
     /// `kindFromTypeString`/`classify`), and markdown enters as `docPage`.

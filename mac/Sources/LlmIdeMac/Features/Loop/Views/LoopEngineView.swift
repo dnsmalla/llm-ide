@@ -691,7 +691,7 @@ struct LoopEngineView: View {
                     }
                 }
 
-                Text("Input (optional) — file or folder under the project root").font(Typography.caption).foregroundStyle(t.textMuted)
+                Text("Input (optional) — file or folder under the repo root").font(Typography.caption).foregroundStyle(t.textMuted)
                 // Rooted at the git root ONLY (no projectRoot fallback) to match
                 // targetPath/outputPath's documented contract ("relative to the
                 // project's git root") and the New Loop wizard's PathPickerField —

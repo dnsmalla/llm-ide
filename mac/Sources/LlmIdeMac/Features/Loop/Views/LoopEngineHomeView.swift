@@ -164,8 +164,14 @@ struct LoopEngineHomeView: View {
                 if !loop.isPrimary {
                     Button("Set as Primary") { setPrimary(loop) }
                 }
-                Button(loop.runsOnSchedule ? "Don't run on schedule" : "Run on schedule") {
-                    setRunsOnSchedule(loop, !loop.runsOnSchedule)
+                // A manual-only loop (it applies code — see
+                // `LoopDefinition.isManualOnly`) is never offered the
+                // schedule — `scheduledLoops` would skip it anyway, so the
+                // item would be a toggle that does nothing.
+                if !loop.isManualOnly {
+                    Button(loop.runsOnSchedule ? "Don't run on schedule" : "Run on schedule") {
+                        setRunsOnSchedule(loop, !loop.runsOnSchedule)
+                    }
                 }
                 Button("Duplicate") { duplicateLoop(loop) }
                 // A built-in loop is never deletable — `ensureDefaultLoops`

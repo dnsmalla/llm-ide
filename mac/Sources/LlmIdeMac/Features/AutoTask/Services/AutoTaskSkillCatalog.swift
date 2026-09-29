@@ -34,6 +34,14 @@ final class AutoTaskSkillCatalog: ObservableObject {
 
     init() {}
 
+    /// Skills never offered to an Auto Task. `refactor-apply` edits code one
+    /// batch at a time and is safe only inside a Refactoring loop, where a Test
+    /// stage verifies each batch (the Loop's `LoopStage.codeApplySkillIds`); a
+    /// scheduled Auto Task has no verify stage, so it must not run it. Kept as
+    /// names here rather than read from the Loop feature (features never
+    /// reference each other); `AutoTaskSkillCatalogTests` pins the two in sync.
+    nonisolated static let excludedSkillNames: Set<String> = ["refactor-apply"]
+
     /// The prompt line that invokes `name`.
     nonisolated static func directive(for name: String) -> String {
         "Use the \(name) skill:"
@@ -86,6 +94,7 @@ final class AutoTaskSkillCatalog: ObservableObject {
                 guard let contents = try? String(contentsOf: manifest, encoding: .utf8) else { return nil }
                 return parse(manifest: contents, folderName: entry.lastPathComponent)
             }
+            .filter { !excludedSkillNames.contains($0.name) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 

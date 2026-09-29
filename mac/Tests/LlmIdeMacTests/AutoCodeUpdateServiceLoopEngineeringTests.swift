@@ -148,8 +148,9 @@ final class AutoCodeUpdateServiceLoopEngineeringTests: XCTestCase {
             return copy
         }
         XCTAssertEqual(store.scheduledLoops.compactMap(\.defaultKey),
-                       [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.plan],
-                       "only the unconditional loops (Regression, Plan) have stages to run in a bare tree")
+                       [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.plan, LoopDefaultLoopKey.docs],
+                       "only the unconditional loops (Regression, Plan, Doc Optimization) are scheduled "
+                           + "targets in a bare tree — Refactoring is manual-only")
         XCTAssertTrue(store.loops.contains { !$0.isDefault && $0.config.stages.isEmpty },
                       "the editable loop exists, it is just not a target yet")
     }
