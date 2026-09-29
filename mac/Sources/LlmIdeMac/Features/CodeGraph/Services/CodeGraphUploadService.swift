@@ -85,14 +85,20 @@ final class CodeGraphUploadService {
         self.api = api
     }
 
-    /// Content fingerprint of a graph: node ids + edge triples, hashed. Pure +
+    /// Content fingerprint of a graph: node ids + the metadata the server
+    /// stores (file, line, signature) + edge triples, hashed. Pure +
     /// static so it can be tested without a client. Node ORDER is significant
     /// only in that the builder is deterministic — the same scan produces the
     /// same order, so no sort is needed.
     nonisolated static func fingerprint(_ graph: CGData) -> String {
         var hasher = SHA256()
         for n in graph.nodes {
-            hasher.update(data: Data("\(n.id)|\(n.title)|\(n.kind.rawValue)\n".utf8))
+            // file/line/declaration included: the server persists them, and an
+            // edit that only shifts lines must still re-upload or the server's
+            // line numbers go stale silently. Layout positions stay excluded.
+            let m = n.metadata
+            let row = "\(n.id)|\(n.title)|\(n.kind.rawValue)|\(m["source_file"] ?? "")|\(m["line"] ?? "")|\(m["declaration"] ?? "")\n"
+            hasher.update(data: Data(row.utf8))
         }
         for e in graph.edges {
             hasher.update(data: Data("\(e.fromId)>\(e.toId):\(e.kind.rawValue)\n".utf8))
