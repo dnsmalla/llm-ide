@@ -243,13 +243,13 @@ export function graphNeighbors(userId, seedIds, {
     const rows = [];
     if (wantOut) {
       rows.push(...db.prepare(
-        `SELECT from_id, to_id AS neighbor_id, kind, 'out' AS dir FROM code_graph_edges
+        `SELECT from_id, to_id AS neighbor_id, kind, confidence, 'out' AS dir FROM code_graph_edges
          WHERE user_id=?${scope.sql} AND from_id IN (${place}) AND kind IN (${kindPlace})`,
       ).all(userId, ...scope.params, ...frontier, ...edgeKinds));
     }
     if (wantIn) {
       rows.push(...db.prepare(
-        `SELECT to_id AS from_id, from_id AS neighbor_id, kind, 'in' AS dir FROM code_graph_edges
+        `SELECT to_id AS from_id, from_id AS neighbor_id, kind, confidence, 'in' AS dir FROM code_graph_edges
          WHERE user_id=?${scope.sql} AND to_id IN (${place}) AND kind IN (${kindPlace})`,
       ).all(userId, ...scope.params, ...frontier, ...edgeKinds));
     }
@@ -261,6 +261,7 @@ export function graphNeighbors(userId, seedIds, {
       out.push({
         symbolId: r.neighbor_id,
         viaKind: r.kind,
+        confidence: r.confidence,
         direction: r.dir,
         hop,
         fromId: r.from_id,
