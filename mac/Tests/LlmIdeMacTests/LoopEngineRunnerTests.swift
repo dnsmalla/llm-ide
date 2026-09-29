@@ -1395,6 +1395,86 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(attempt.changedPaths, ["mac/Tests/A.swift"])
     }
 
+    // MARK: - Code-apply stages see `.warn` under a `.revert`/`.stop` loop
+
+    private func refactorWithTest() -> [LoopStage] {
+        [LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 0, skillId: "skills/refactor-apply"),
+         LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)]
+    }
+
+    /// A move rewrites a test's import: under the loop's `.revert` (and
+    /// `.stop`) the code-apply stage's edit is KEPT, journalled, and the run
+    /// continues so Test verifies it; the row reads passed with the paths.
+    func testCodeApplyStageProtectedEditIsKeptUnderARevertLoop() async {
+        for policy in [ProtectedPathPolicy.revert, .stop] {
+            let journal = InMemoryJournal()
+            let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+            let scopeGuard = StubScopeGuard(result: .violated(
+                paths: ["mac/Tests/A.swift"], allChangedPaths: ["mac/Tests/A.swift", "Sources/B.swift"]))
+            let config = LoopEngineConfig(stages: refactorWithTest(), maxIterations: 3,
+                                          consecutiveFailureStop: 2, protectedPathPolicy: policy)
+            let runner = makeRunner(
+                verifier: verifier, stageRepairer: StubRepairer(),
+                regressionSweep: StubRegressionSweep(alwaysPasses: true),
+                skillExecutor: StubSkillExecutor(),
+                approvals: makeApprovals(approve: [("t1", "swift test")]),
+                journal: journal, scopeGuard: scopeGuard)
+            let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+            XCTAssertEqual(result, .success, "\(policy)")
+            XCTAssertTrue(scopeGuard.revertedPaths.isEmpty, "the apply stage's edits must stay (\(policy))")
+            XCTAssertEqual(verifier.calls, ["swift test"], "Test must run and verify the edits (\(policy))")
+            let attempt = journal.written[0].iterations[0].attempts[0]
+            XCTAssertTrue(attempt.passed, "an allowed touch is not a failed row (\(policy))")
+            XCTAssertEqual(attempt.scopeVerdict, .violated, "the touch is still journalled (\(policy))")
+            XCTAssertTrue(attempt.outputTail.contains("mac/Tests/A.swift"), attempt.outputTail)
+            XCTAssertEqual(runner.stageStates["a1"], .passed)
+            XCTAssertTrue(runner.log.contains { $0.text.contains("kept for a code-applying stage") })
+        }
+    }
+
+    /// The same loop's Test REPAIR keeps the loop's `.revert`: editing a test
+    /// to make it pass is still reverted and blocks the run.
+    func testRepairInARefactorLoopIsStillRevertedAndBlocked() async {
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return VerifyOutcome(exitCode: callIndex == 0 ? 1 : 0, output: callIndex == 0 ? "boom" : "")
+        }
+        let scopeGuard = StubScopeGuard(result: .violated(
+            paths: ["mac/Tests/A.swift"], allChangedPaths: ["mac/Tests/A.swift"]))
+        let config = LoopEngineConfig(stages: refactorWithTest(), maxIterations: 3,
+                                      consecutiveFailureStop: 3, protectedPathPolicy: .revert)
+        let repairer = StubRepairer()
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            scopeGuard: scopeGuard)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .blocked(reason: .repairOutOfScope(
+            stageName: "Test", paths: ["mac/Tests/A.swift"])))
+        XCTAssertEqual(repairer.repairCount, 1)
+        XCTAssertEqual(scopeGuard.revertedPaths, ["mac/Tests/A.swift"],
+                       "only the repair's edit is reverted, once")
+        XCTAssertEqual(verifier.calls.count, 1, "never re-verified after the reward-hacking repair")
+    }
+
+    func testEffectivePolicyPromotesOnlyCodeApplyStagesFromRevertOrStop() {
+        let apply = LoopStage(name: "Refactor Apply", kind: .skill, order: 0, skillId: "skills/refactor-apply")
+        let other = LoopStage(name: "Docs", kind: .skill, order: 0, skillId: "skills/doc-writer")
+        let test = LoopStage(name: "Test", kind: .shellCommand, command: "x", order: 1)
+        let expected: [ProtectedPathPolicy: ProtectedPathPolicy] = [.revert: .warn, .stop: .warn, .warn: .warn, .off: .off]
+        for (loop, promoted) in expected {
+            let config = LoopEngineConfig(stages: [], protectedPathPolicy: loop)
+            XCTAssertEqual(LoopEngineRunner.effectivePolicy(for: apply, config: config), promoted)
+            XCTAssertEqual(LoopEngineRunner.effectivePolicy(for: other, config: config), loop)
+            XCTAssertEqual(LoopEngineRunner.effectivePolicy(for: test, config: config), loop)
+        }
+    }
+
     /// The mirror case: a skill stage that edits only production code is a clean
     /// pass, so the guard cannot be accused of flagging ordinary work.
     func testCleanSkillStageIsJournalledAsPassed() async {

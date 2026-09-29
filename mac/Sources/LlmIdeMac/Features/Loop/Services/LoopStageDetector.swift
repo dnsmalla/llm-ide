@@ -877,29 +877,8 @@ public enum LoopStageDetector {
                                   goal: contract?.goal,
                                   acceptanceCriteria: contract?.acceptance,
                                   defaultKey: key,
-                                  config: creationConfig(
-                                    forLoop: key,
-                                    LoopEngineDefaults.newConfig(stages: stages, defaults: defaults)))
+                                  config: LoopEngineDefaults.newConfig(stages: stages, defaults: defaults))
         }
-    }
-
-    /// The protected-path policy the Refactoring loop (and its template) is
-    /// CREATED with. A batch that moves a module must also rewrite the
-    /// imports in the tests and build config that name it; `.revert` would
-    /// undo only those edits and block the run on a half-moved, broken tree.
-    /// `.warn` keeps the edits, lets the Test stage verify them, and logs and
-    /// journals every protected-path touch for the Run Changes review.
-    /// Applied at creation only — a persisted loop is never rewritten.
-    static let refactorProtectedPathPolicy: ProtectedPathPolicy = .warn
-
-    /// `config` adjusted for a default loop being created now (never applied
-    /// to an existing loop): the Refactoring loop gets
-    /// `refactorProtectedPathPolicy`.
-    static func creationConfig(forLoop key: String, _ config: LoopEngineConfig) -> LoopEngineConfig {
-        guard key == LoopDefaultLoopKey.refactor else { return config }
-        var copy = config
-        copy.protectedPathPolicy = refactorProtectedPathPolicy
-        return copy
     }
 
     /// Bring `store` up to the current default-loops contract, and migrate a
@@ -1010,9 +989,7 @@ public enum LoopStageDetector {
                     goal: defaultLoopContract(key)?.goal,
                     acceptanceCriteria: defaultLoopContract(key)?.acceptance,
                     defaultKey: key,
-                    config: creationConfig(
-                        forLoop: key,
-                        budgetSource?.config ?? LoopEngineDefaults.newConfig(stages: [], defaults: defaults)))
+                    config: budgetSource?.config ?? LoopEngineDefaults.newConfig(stages: [], defaults: defaults))
                 created.config.stages = LoopStage.renumbered(claimed)
                 loops.append(created)
                 moved[key] = []

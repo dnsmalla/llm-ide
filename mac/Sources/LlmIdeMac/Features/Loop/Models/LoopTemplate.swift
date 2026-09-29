@@ -326,12 +326,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                 LoopStage(name: "Test", kind: .shellCommand,
                           command: detectedTestCommand, order: 2)
             ],
-            maxIterations: 4, consecutiveFailureStop: 2,
-            // A move legitimately rewrites test imports and build config;
-            // `.revert` would undo only those and block on a half-moved tree.
-            // `.warn` keeps the edits, lets Test verify them, and journals
-            // every protected-path touch for the Run Changes review.
-            protectedPathPolicy: LoopStageDetector.refactorProtectedPathPolicy),
+            maxIterations: 4, consecutiveFailureStop: 2),
         isBuiltIn: true)
 
     /// The Doc Optimization default loop's recipe (`LoopDefaultLoopKey.docs`):

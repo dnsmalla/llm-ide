@@ -952,10 +952,25 @@ final class LoopEngineRunner: ObservableObject {
             // whose edits were rejected as out-of-scope did not do its job, and
             // recording it as passed would render as a clean row directly above
             // the violation it caused in the run summary.
-            let clean = violations.isEmpty
+            // A code-applying stage whose protected-path touches were ALLOWED
+            // (`effectivePolicy` promoted the loop's policy to `.warn`) did its
+            // job: record it as passed, with the touched paths in its output,
+            // so a successful run does not show a failed row.
+            let allowed = !violations.isEmpty && stage.appliesCode
+                && config.protectedPathPolicy != .warn
+                && Self.effectivePolicy(for: stage, config: config) == .warn
+            let clean = violations.isEmpty || allowed
             stageStates[stage.id] = clean ? .passed : .failed
+            let output: String
+            if violations.isEmpty {
+                output = ""
+            } else if allowed {
+                output = "allowed protected-path edit(s), verified by the test stage: \(violations.joined(separator: ", "))"
+            } else {
+                output = "touched a protected or out-of-scope path(s): \(violations.joined(separator: ", "))"
+            }
             record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
-                   passed: clean, output: clean ? "" : "touched a protected or out-of-scope path(s): \(violations.joined(separator: ", "))",
+                   passed: clean, output: output,
                    score: nil, changedPaths: changed, scopeVerdict: verdictScope)
             if let terminal = scopeTermination(stage: stage, config: config,
                                               verdict: verdictScope, violations: violations) {
@@ -966,6 +981,30 @@ final class LoopEngineRunner: ObservableObject {
     }
 
     // MARK: - Protected-path guard
+
+    /// The protected-path policy the guard applies to one guarded edit — the
+    /// ONE place a stage can see a different policy from its loop's.
+    ///
+    /// A code-applying stage (`LoopStage.appliesCode`, i.e. Refactor Apply)
+    /// legitimately rewrites the imports in tests and build config when it
+    /// moves a module; `.revert` would undo only those edits and `.stop` would
+    /// end the run, either way stranding a half-moved tree. For that stage a
+    /// loop policy of `.revert` or `.stop` is treated as `.warn`: the edits
+    /// stay, the violation is logged and journalled for Run Changes, and the
+    /// run continues so the Test stage after it (always present —
+    /// `lacksVerifyAfter`) verifies them. `.off` stays off and `.warn` stays
+    /// warn. Every other guarded edit — including the Test stage's REPAIR,
+    /// which is where "make the tests pass" by editing them would happen —
+    /// keeps the loop's own policy.
+    nonisolated static func effectivePolicy(for stage: LoopStage,
+                                            config: LoopEngineConfig) -> ProtectedPathPolicy {
+        let policy = config.protectedPathPolicy
+        guard stage.appliesCode else { return policy }
+        switch policy {
+        case .revert, .stop: return .warn
+        case .warn, .off: return policy
+        }
+    }
 
     private enum GuardedEditResult {
         case failed(Error)
@@ -992,7 +1031,7 @@ final class LoopEngineRunner: ObservableObject {
     private func withScopeGuard(stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
                                 scopeGlobs: [String] = [],
                                 edit: () async throws -> Void) async -> GuardedEditResult {
-        guard config.protectedPathPolicy != .off else {
+        guard Self.effectivePolicy(for: stage, config: config) != .off else {
             do { try await edit() } catch { return .failed(error) }
             return .completed(.notChecked, violations: [], changed: [])
         }
@@ -1052,7 +1091,7 @@ final class LoopEngineRunner: ObservableObject {
     private func handleViolation(_ paths: [String], changed: [String], stage: LoopStage,
                                  config: LoopEngineConfig, gitRoot: URL) async -> GuardedEditResult {
         appendLog(.error, "  [\(stage.name)] repair edited protected/out-of-scope path(s): \(paths.joined(separator: ", "))")
-        guard config.protectedPathPolicy == .revert else {
+        guard Self.effectivePolicy(for: stage, config: config) == .revert else {
             return .completed(.violated, violations: paths, changed: changed)
         }
         if let error = await scopeGuard.revert(paths: paths, gitRoot: gitRoot) {
@@ -1073,9 +1112,13 @@ final class LoopEngineRunner: ObservableObject {
                                   verdict: RepairScopeVerdict,
                                   violations: [String]) -> LoopEngineStatus? {
         guard verdict == .violated || verdict == .violatedReverted else { return nil }
-        switch config.protectedPathPolicy {
+        switch Self.effectivePolicy(for: stage, config: config) {
         case .revert, .stop:
             return .blocked(reason: .repairOutOfScope(stageName: stage.name, paths: violations))
+        case .warn where config.protectedPathPolicy != .warn:
+            appendLog(.warn, "  [\(stage.name)] protected-path edit(s) kept for a code-applying stage "
+                      + "(the test stage after it verifies them)")
+            return nil
         case .warn:
             appendLog(.warn, "  [\(stage.name)] protected-path violation left in place (policy: warn)")
             return nil
