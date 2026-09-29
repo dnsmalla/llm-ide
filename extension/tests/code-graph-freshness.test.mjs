@@ -57,3 +57,10 @@ test('find-code reports staleGraph once HEAD moves', () => {
   assert.equal(out.staleGraph[0].graphCommit, C1.slice(0, 7));
   assert.match(out.hint || '', /graph|stale|line numbers/i);
 });
+
+test('find-code treats a stored short SHA that prefixes HEAD as fresh', () => {
+  const head = git('rev-parse', 'HEAD');
+  ingestStructureGraph(U, REPO, graph, { replace: true, commitSha: head.slice(0, 7), generatedAt: '2026-09-29T00:00:00Z' });
+  const out = handleFindCode({ query: 'freshSym' }, { userId: U, roots: [REPO], workspaceRoot: REPO, freshnessCacheMs: 0 });
+  assert.equal(out.staleGraph, undefined);
+});

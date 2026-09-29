@@ -62,7 +62,10 @@ function staleGraphs(userId, repoIds, maxAgeMs) {
   for (const m of getCodeGraphMeta(userId, repoIds)) {
     if (!m.commit_sha) continue;
     const head = headCommit(m.repo_id, maxAgeMs);
-    if (head && head !== m.commit_sha) {
+    // The server accepts 7-64 char SHAs, so compare by prefix either way.
+    const h = head ? head.toLowerCase() : '';
+    const g = m.commit_sha.toLowerCase();
+    if (h && !h.startsWith(g) && !g.startsWith(h)) {
       out.push({ repo: m.repo_id.split(/[/\\]/).pop(), graphCommit: m.commit_sha.slice(0, 7), headCommit: head.slice(0, 7) });
     }
   }
