@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -18,8 +19,15 @@ const users = await import('../server/users.mjs');
 const { ingestStructureGraph } = await import('../connectors/structure-graph.mjs');
 const { handleFindCode } = await import('../llm_agent/runtime/handlers/find-code.mjs');
 
+const REPO = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-fr-'));
+// Registered BEFORE any setup that can throw, so a failed git/DB setup still
+// removes the temp repo and DB files.
+test.after(() => {
+  try { db.closeDb(); } catch { /* setup may have failed before the DB opened */ }
+  fs.rmSync(REPO, { recursive: true, force: true });
+  for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) fs.rmSync(f, { force: true });
+});
 const U = users.registerUser(db.getDb(), { email: `fr-${Date.now()}@example.test`, password: 'CorrectHorseBattery', displayName: 'f' }).id;
-const REPO = fs.mkdtempSync(path.join(__dirname, '_fr-repo-'));
 const git = (...a) => execFileSync('git', ['-C', REPO, ...a], { encoding: 'utf8' }).trim();
 git('init', '-q'); git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
 fs.writeFileSync(path.join(REPO, 'a.ts'), 'export function freshSym() {}\n');
@@ -30,12 +38,6 @@ const graph = { nodes: [
   { id: 'file:a.ts', title: 'a.ts', kind: 'file', metadata: { source_file: 'a.ts', line: 'L0' } },
   { id: 'function:a.ts:freshSym', title: 'freshSym', kind: 'function', metadata: { source_file: 'a.ts', line: 'L1' } },
 ], edges: [] };
-
-test.after(() => {
-  db.closeDb();
-  fs.rmSync(REPO, { recursive: true, force: true });
-  for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) fs.rmSync(f, { force: true });
-});
 
 test('ingest stores the graph commit on the replacing batch', () => {
   ingestStructureGraph(U, REPO, graph, { replace: true, commitSha: C1, generatedAt: '2026-09-29T00:00:00Z' });
