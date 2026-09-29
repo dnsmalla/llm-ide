@@ -65,6 +65,20 @@ final class CodeGraphUploadServiceTests: XCTestCase {
         XCTAssertTrue(out[0].edges.isEmpty)
     }
 
+    // MARK: - dedupe key includes the commit
+
+    /// Same graph at a new HEAD must re-upload, or the server keeps the old SHA
+    /// and find-code reports the graph stale until the next structural change.
+    func testDedupeKeyChangesWithCommitButNotWithSameCommit() {
+        let fp = CodeGraphUploadService.fingerprint(CGData(nodes: nodes(2), edges: []))
+        XCTAssertNotEqual(CodeGraphUploadService.dedupeKey(fingerprint: fp, commitSha: "aaa1111"),
+                          CodeGraphUploadService.dedupeKey(fingerprint: fp, commitSha: "bbb2222"))
+        XCTAssertEqual(CodeGraphUploadService.dedupeKey(fingerprint: fp, commitSha: "aaa1111"),
+                       CodeGraphUploadService.dedupeKey(fingerprint: fp, commitSha: "aaa1111"))
+        XCTAssertEqual(CodeGraphUploadService.dedupeKey(fingerprint: fp, commitSha: nil),
+                       CodeGraphUploadService.dedupeKey(fingerprint: fp, commitSha: nil))
+    }
+
     // MARK: - fingerprint
 
     func testIdenticalGraphsShareAFingerprint() {

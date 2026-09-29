@@ -106,6 +106,14 @@ final class CodeGraphUploadService {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Dedupe key: graph fingerprint plus the commit it was generated at. The
+    /// commit is part of it so an unchanged graph at a NEW HEAD re-uploads once
+    /// (refreshing the server's recorded SHA) instead of leaving find-code's
+    /// stale warning stuck until the next structural change.
+    nonisolated static func dedupeKey(fingerprint: String, commitSha: String?) -> String {
+        fingerprint + "@" + (commitSha ?? "")
+    }
+
     /// Split a graph into upload batches. The FIRST batch carries `replace` so
     /// one generation replaces the previous one exactly once; later batches
     /// append to it. Pure + static for testability.
@@ -274,7 +282,9 @@ final class CodeGraphUploadService {
         guard !graph.nodes.isEmpty else { return false }
 
         let repoPath = repoRoot.standardizedFileURL.path
-        let fp = Self.fingerprint(graph)
+        // HEAD is read before the dedupe so a new commit defeats it.
+        let commitSha = await Self.headCommit(of: repoRoot)
+        let fp = Self.dedupeKey(fingerprint: Self.fingerprint(graph), commitSha: commitSha)
         if lastUploaded[repoPath] == fp { return false }
 
         let prepared = Self.prepareForUpload(nodes: graph.nodes, edges: graph.edges, repoPath: repoPath)
@@ -297,7 +307,6 @@ final class CodeGraphUploadService {
             var uploadedEdges = 0
             // Which commit this graph describes, so the server can tell the
             // model when HEAD has moved on. Sent on the replacing batch only.
-            let commitSha = await Self.headCommit(of: repoRoot)
             let generatedAt = ISO8601DateFormatter().string(from: Date())
             for batch in Self.batches(nodes: nodes, edges: edges) {
                 let result = try await api.ingestCodeGraph(repoPath: repoPath,
