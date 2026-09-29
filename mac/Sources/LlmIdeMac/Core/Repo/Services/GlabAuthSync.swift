@@ -67,6 +67,9 @@ enum GlabAuthSync {
             if let stdin {
                 // Throwing API: the legacy write(_:) raises an uncaught
                 // exception on EPIPE when glab exits before reading stdin.
+                // F_SETNOSIGPIPE so that EPIPE is returned at all — by default
+                // SIGPIPE kills the app first (see RepoManager.git).
+                _ = fcntl(inPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
                 try? inPipe.fileHandleForWriting.write(contentsOf: stdin)
                 try? inPipe.fileHandleForWriting.close()
             }
