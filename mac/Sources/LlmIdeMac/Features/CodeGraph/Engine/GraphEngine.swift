@@ -31,6 +31,16 @@ public protocol GraphEngine: Sendable {
     /// what changed.
     func scanCode(repoRoot: URL) async throws -> CodeScan
 
+    /// `scanCode` plus the doc→code **citation overlay**
+    /// (`FileClassifier.citationOverlay(from:)`): the doc FILE nodes and the
+    /// `references` edges from them into code that stripping markdown deletes.
+    /// The overlay is for the backend upload only — it never reaches a graph
+    /// view. Defaulted from `scanCode`'s graph, so an engine that leaves its
+    /// doc nodes in still contributes citations and one that strips them
+    /// contributes none; an engine that strips must override this to compute
+    /// the overlay from its raw graph.
+    func scanCodeWithCitations(repoRoot: URL) async throws -> (scan: CodeScan, citations: CGData)
+
     /// Chunk the documents under `roots` into a graph plus ordered chunks.
     func generateDocMemory(roots: [URL]) async throws -> GeneratedMemory
 
@@ -44,6 +54,13 @@ public protocol GraphEngine: Sendable {
     /// Cheap change-detection signature for a document set, so an unchanged
     /// re-generate can be skipped.
     func docSetFingerprint(roots: [URL]) -> String
+}
+
+public extension GraphEngine {
+    func scanCodeWithCitations(repoRoot: URL) async throws -> (scan: CodeScan, citations: CGData) {
+        let scan = try await scanCode(repoRoot: repoRoot)
+        return (scan, FileClassifier.citationOverlay(from: scan.graph))
+    }
 }
 
 /// Why no engine is usable, in words the UI can show directly.

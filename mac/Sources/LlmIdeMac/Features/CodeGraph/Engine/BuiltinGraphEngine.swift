@@ -26,6 +26,10 @@ public struct BuiltinGraphEngine: GraphEngine {
     // MARK: - Code → graph
 
     public func scanCode(repoRoot: URL) async throws -> CodeScan {
+        try await scanCodeWithCitations(repoRoot: repoRoot).scan
+    }
+
+    public func scanCodeWithCitations(repoRoot: URL) async throws -> (scan: CodeScan, citations: CGData) {
         let incremental = await StructureScanner(launcher: SystemProcessLauncher())
             .scanIncremental(repoRoot: repoRoot)
         let graph = StructureGraphBuilder.build(incremental.result, repoRoot: repoRoot)
@@ -33,7 +37,10 @@ public struct BuiltinGraphEngine: GraphEngine {
         // nodes. Leaving them in double-counts every document once the two
         // tracks are merged, so they are stripped here — the engine owns this
         // because it is the engine that chose to emit them.
-        return CodeScan(graph: FileClassifier.strippingDocNodes(from: graph),
+        //
+        // The doc→code citation edges die with them, so they are carried
+        // separately (`citationOverlay`) for the backend upload only.
+        let scan = CodeScan(graph: FileClassifier.strippingDocNodes(from: graph),
                         scan: incremental.result,
                         changedPaths: incremental.changedPaths,
                         totalFiles: incremental.totalFiles,
@@ -41,6 +48,7 @@ public struct BuiltinGraphEngine: GraphEngine {
                         // This scanner enumerates the repository itself, so an
                         // empty result really does mean "no code files here".
                         reportsSymbols: true)
+        return (scan, FileClassifier.citationOverlay(from: graph))
     }
 
     // MARK: - Docs → graph

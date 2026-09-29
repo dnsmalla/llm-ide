@@ -26,6 +26,16 @@ final class KnowledgeGraphService: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     /// The structural code graph (file + symbol nodes).
     @Published private(set) var codeGraph: CGData = .empty
+    /// Doc→code citation overlay for `codeGraph` (see
+    /// `FileClassifier.citationOverlay`). Deliberately NOT part of `codeGraph`,
+    /// which every graph view renders — only `codeGraphForUpload` merges it.
+    @Published private(set) var codeCitationOverlay: CGData = .empty
+    /// What the backend upload receives: `codeGraph` plus the citation
+    /// overlay, so find-code can label doc→code edges "documented by". Also
+    /// what the upload fingerprints, so a doc-only change re-uploads.
+    var codeGraphForUpload: CGData {
+        FileClassifier.mergingCitationOverlay(codeCitationOverlay, into: codeGraph)
+    }
     /// The InfiniteBrain doc/memory graph (doc + chunk nodes).
     @Published private(set) var docGraph: CGData = .empty
     /// Code + doc unified into one graph, with doc→code cross-links (Stage 2).
@@ -144,6 +154,7 @@ final class KnowledgeGraphService: ObservableObject {
                 // nodes; strip them so markdown lives only in the doc track and
                 // is not double-counted when merged below.
                 codeGraph = FileClassifier.strippingDocNodes(from: codeNotes.graph)
+                codeCitationOverlay = codeNotes.citationOverlay
             case .failure(.busy):
                 // Expected, not a failure: the background updater and a manual
                 // generate both run on timers and contend for the same repo's
