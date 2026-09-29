@@ -162,7 +162,7 @@ function isFileNode(row) {
  * Returns plain data; path resolution against the agent's readable roots is the
  * caller's job (see llm_agent/runtime/handlers/find-code.mjs).
  */
-export function searchCodeIndex(userId, query, { limit = 8, hops = 1 } = {}) {
+export function searchCodeIndex(userId, query, { limit = 8, hops = 1, repoIds = null } = {}) {
   const q = typeof query === 'string' ? query.trim() : '';
   const empty = { query: q, symbols: [], related: [], files: [], indexPresent: false };
   if (!q) return empty;
@@ -176,7 +176,7 @@ export function searchCodeIndex(userId, query, { limit = 8, hops = 1 } = {}) {
   // `FileDetailView` node, which no whole-string LIKE would match.
   const byId = new Map();
   for (const cand of seedCandidates(q)) {
-    for (const row of searchCodeSymbols(userId, cand, seedLimit)) {
+    for (const row of searchCodeSymbols(userId, cand, seedLimit, { repoIds })) {
       if (!byId.has(row.symbol_id)) byId.set(row.symbol_id, row);
     }
     if (byId.size >= seedLimit) break;
@@ -210,18 +210,19 @@ export function searchCodeIndex(userId, query, { limit = 8, hops = 1 } = {}) {
     const fetchLimit = Math.min(relatedLimit * 4, 200);
     const hits = [];
     if (symbolSeeds.length > 0) {
-      hits.push(...graphNeighbors(userId, symbolSeeds, { hops, limit: fetchLimit }));
+      hits.push(...graphNeighbors(userId, symbolSeeds, { hops, limit: fetchLimit, repoIds }));
     }
     if (fileSeeds.length > 0) {
       hits.push(...graphNeighbors(userId, fileSeeds, {
         hops,
         limit: fetchLimit,
+        repoIds,
         edgeKinds: [CONTAINS_EDGE_KIND, 'imports'],
       }));
     }
     // Hydrate in one query, then re-attach each neighbour's relationship.
     const rows = new Map(
-      hydrateSymbols(userId, [...new Set(hits.map((h) => h.symbolId))]).map((r) => [r.symbol_id, r]),
+      hydrateSymbols(userId, [...new Set(hits.map((h) => h.symbolId))], { repoIds }).map((r) => [r.symbol_id, r]),
     );
     for (const hit of hits) {
       if (relatedSeen.has(hit.symbolId)) continue;
@@ -264,11 +265,12 @@ export function searchCodeIndex(userId, query, { limit = 8, hops = 1 } = {}) {
         const importers = graphNeighbors(userId, fileIds, {
           hops: 1,
           direction: 'in',
+          repoIds,
           edgeKinds: ['imports'],
           limit: Math.min(relatedLimit * 4, 200),   // same over-fetch as above
         });
         const ids = [...new Set([...fileIds, ...importers.map((h) => h.symbolId)])];
-        const rows = new Map(hydrateSymbols(userId, ids).map((r) => [r.symbol_id, r]));
+        const rows = new Map(hydrateSymbols(userId, ids, { repoIds }).map((r) => [r.symbol_id, r]));
         for (const id of fileIds) {
           const row = rows.get(id);
           if (row && !relatedSeen.has(id)) {
