@@ -49,6 +49,22 @@ export function workspaceRepoIds(userId, workspaceRoot) {
   return under.length > 0 ? under : null;
 }
 
+/**
+ * The repo scope for a code-graph read. The client's active repo (the one the
+ * user works in — `agentContext.activeRepoRoot`) wins when it is graphed;
+ * otherwise the workspace rule applies. This is what fixes a parent workspace
+ * holding several graphed repos, where the workspace rule alone returns all
+ * of them. Returns null (unscoped) when neither matches anything.
+ */
+export function resolveRepoScope(userId, { activeRepoRoot = '', workspaceRoot = '' } = {}) {
+  requireUser(userId);
+  if (activeRepoRoot) {
+    const active = workspaceRepoIds(userId, activeRepoRoot);
+    if (active) return active;
+  }
+  return workspaceRoot ? workspaceRepoIds(userId, workspaceRoot) : null;
+}
+
 // Edge kinds traversed by expandSymbols. The first three are everything the
 // SCIP parser emits, so its behaviour is unchanged; `calls` and `inherits`
 // exist only in the structural graph, where they are the natural symbol→symbol

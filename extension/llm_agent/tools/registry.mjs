@@ -105,6 +105,7 @@ const ENTRIES = [
       userId: ctx.userId,
       roots: ctx.readableRoots,
       workspaceRoot: ctx.agentContext?.workspaceRoot,
+      activeRepoRoot: ctx.agentContext?.activeRepoRoot,
     }),
   },
   // Unifies legacy's search-kb with the v2-only kb_search (sdk/tools.mjs
