@@ -78,3 +78,23 @@ test('summarizeToolEventsOn works with a readonly DB handle (proves query is wri
     roDb.close();
   }
 });
+
+test('the summary module can be imported without rotating server.log (report is read-only)', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const os = await import('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'te-log-'));
+  const logFile = path.join(dir, 'server.log');
+  fs.writeFileSync(logFile, 'sentinel\n');
+  try {
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e',
+      "await import('./kb/tool-events-summary.mjs')"], {
+      cwd: path.resolve(__dirname, '..'), env: { ...process.env, LLMIDE_LOG_FILE: logFile }, encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(fs.existsSync(logFile), 'server.log must not be rotated away');
+    assert.ok(!fs.existsSync(`${logFile}.old`));
+    assert.equal(fs.readFileSync(logFile, 'utf8'), 'sentinel\n');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

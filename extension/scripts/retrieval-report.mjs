@@ -15,7 +15,7 @@ const dbPath = process.env.LLMIDE_DB_PATH || path.resolve(__dirname, '..', '..',
 const daysArg = process.argv.indexOf('--days');
 const days = daysArg > -1 ? Number(process.argv[daysArg + 1]) || 7 : 7;
 
-const { summarizeToolEventsOn } = await import('../kb/db.mjs');
+const { summarizeToolEventsOn } = await import('../kb/tool-events-summary.mjs');
 
 let db;
 try {
