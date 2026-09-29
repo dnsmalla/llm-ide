@@ -343,6 +343,84 @@ export function searchCodeSymbols(userId, query, limit = 10, { repoIds = null } 
   ).all(lower, prefix, contains, userId, ...scope.params, contains, contains, limit);
 }
 
+function likeContains(term) {
+  return `%${String(term).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')}%`;
+}
+
+/**
+ * MULTI-TERM symbol lookup for natural-language questions: the rows that match
+ * the most (and the rarest) of `terms` across title and file path, best
+ * first. searchCodeSymbols ranks one string; a question's answer usually
+ * matches several of its words at once (`rotateInMemory` in `MobilePin.swift`
+ * for "mobile pairing PIN rotated") while each word alone matches hundreds of
+ * short incidental titles.
+ *
+ * ONE scan evaluates each term's LIKE set once per row (the per-term CASE sits
+ * in a subquery that `LIMIT -1` keeps SQLite from flattening, which would
+ * re-evaluate it for every reference) and returns only the rowid, title and
+ * per-term field weights of rows that match anything. Document frequency, the
+ * rarity weights and the ranking are computed here from those rows — so the
+ * cost is one LIKE set per term per row, not one per term per use — and only
+ * the top `limit` rows are then fetched in full, by rowid.
+ *
+ * Per term a row earns the term's weight once, for its best field: title 1,
+ * file path 0.6. `doc` is deliberately not matched: it now holds the
+ * declaration, which mostly repeats the title, and a LIKE over it was the
+ * largest share of the scan's cost for no measured retrieval gain. Returned
+ * rows carry `score` and `matched` (how many terms hit) so the caller can
+ * re-rank.
+ */
+export function searchCodeSymbolsByTerms(userId, terms, limit = 40, { repoIds = null } = {}) {
+  requireUser(userId);
+  const list = (Array.isArray(terms) ? terms : []).map((t) => String(t).trim()).filter(Boolean).slice(0, 8);
+  if (list.length === 0) return [];
+  const likes = list.map(likeContains);
+  const scope = repoScope(repoIds);
+  const cols = list.map((_, i) =>
+    `(CASE WHEN title LIKE ? ESCAPE '\\' THEN 1.0 WHEN source_file LIKE ? ESCAPE '\\' THEN 0.6 ELSE 0 END) AS m${i}`);
+  const database = getDb();
+  const total = database.prepare(
+    `SELECT COUNT(*) AS n FROM code_graph_nodes WHERE user_id=?${scope.sql}`,
+  ).get(userId, ...scope.params)?.n || 0;
+  const hits = database.prepare(
+    `SELECT * FROM (
+       SELECT rowid AS rid, title, ${cols.join(', ')}
+       FROM code_graph_nodes WHERE user_id=?${scope.sql}
+       LIMIT -1
+     ) WHERE ${list.map((_, i) => `m${i}`).join(' + ')} > 0`,
+    // Bind order is SQL-text order: the per-term CASE pairs, user_id, scope.
+  ).all(...likes.flatMap((l) => [l, l]), userId, ...scope.params);
+  if (hits.length === 0) return [];
+
+  // Inverse document frequency, floored so a term present everywhere still
+  // counts a little toward coverage.
+  const df = list.map((_, i) => hits.reduce((n, h) => n + (h[`m${i}`] > 0 ? 1 : 0), 0));
+  const weights = df.map((d) => Math.max(0.05, Math.log((total + 1) / (d + 1))));
+  const ranked = hits.map((h) => {
+    let score = 0;
+    let matched = 0;
+    list.forEach((_, i) => {
+      const m = h[`m${i}`];
+      if (m > 0) { score += m * weights[i]; matched += 1; }
+    });
+    return { rid: h.rid, title: h.title || '', score, matched };
+  }).sort((x, y) => (y.score - x.score)
+    || (x.title.length - y.title.length)
+    || x.title.localeCompare(y.title))
+    .slice(0, limit);
+
+  const byRid = new Map(database.prepare(
+    `SELECT rowid AS rid, symbol_id, title, kind, repo_id, source_file, line, language, doc
+     FROM code_graph_nodes WHERE user_id=? AND rowid IN (${ranked.map(() => '?').join(',')})`,
+  ).all(userId, ...ranked.map((r) => r.rid)).map((row) => [row.rid, row]));
+  return ranked
+    .filter((r) => byRid.has(r.rid))
+    .map((r) => {
+      const { rid: _rid, ...row } = byRid.get(r.rid);
+      return { ...row, score: r.score, matched: r.matched };
+    });
+}
+
 /**
  * Whether this user has ANY code-graph rows — i.e. whether a graph has ever
  * been generated for them.
