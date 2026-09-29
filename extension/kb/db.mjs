@@ -493,7 +493,7 @@ export function safeParseMeta(s) {
 
 
 // Phase-3 external source ingestion lives in sources.mjs.
-export { ingestSources, deleteSourcesByPrefix } from './sources.mjs';
+export { ingestSources, deleteSourcesByPrefix, MAX_INGEST_BATCH } from './sources.mjs';
 
 // SCIP code-graph node+edge store + multi-hop traversal (migration 0025).
 export {

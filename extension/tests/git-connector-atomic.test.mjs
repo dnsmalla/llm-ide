@@ -50,3 +50,24 @@ test('a successful reindex still replaces stale rows', async () => {
   assert.ok(refs.every((r) => !r.endsWith('a.ts')));
   assert.ok(refs.some((r) => r.endsWith('b.ts')));
 });
+
+test('a repo with more chunks than the ingest batch cap still indexes', async () => {
+  const BIG = fs.mkdtempSync(path.join(__dirname, '_ga-big-'));
+  try {
+    const paths = [];
+    for (let i = 0; i < 5100; i++) {
+      const p = path.join(BIG, `f${i}.ts`);
+      fs.writeFileSync(p, `export const v${i} = ${i};\n`);
+      paths.push(p);
+    }
+    async function* walk() { yield* paths; }
+    const res = await indexLocalRepo(U, BIG, { walk });
+    const n = db.getDb()
+      .prepare("SELECT COUNT(*) AS n FROM sources WHERE user_id=? AND kind='code' AND ref LIKE ?")
+      .get(U, `${BIG}%`).n;
+    assert.ok(res.chunks > 5000);
+    assert.equal(n, res.chunks);
+  } finally {
+    fs.rmSync(BIG, { recursive: true, force: true });
+  }
+});

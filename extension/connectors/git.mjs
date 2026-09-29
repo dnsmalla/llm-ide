@@ -8,7 +8,7 @@
 
 import fsp from 'fs/promises';
 import path from 'path';
-import { ingestSources, deleteSourcesByPrefix, getDb } from '../kb/db.mjs';
+import { ingestSources, deleteSourcesByPrefix, getDb, MAX_INGEST_BATCH } from '../kb/db.mjs';
 
 const TEXT_EXT = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
@@ -149,7 +149,12 @@ export async function indexLocalRepo(userId, repoPath, opts = {}) {
   // path so two different roots don't clobber each other.
   const written = getDb().transaction(() => {
     if (replace) deleteSourcesByPrefix(userId, 'code', `${absRoot}${path.sep}`);
-    return ingestSources(userId, items);
+    // ingestSources caps a single call; slice inside the same transaction.
+    let total = 0;
+    for (let i = 0; i < items.length; i += MAX_INGEST_BATCH) {
+      total += ingestSources(userId, items.slice(i, i + MAX_INGEST_BATCH));
+    }
+    return total;
   })();
   return { repo: absRoot, filesScanned, filesIndexed, chunks: written };
 }
