@@ -127,7 +127,13 @@ public enum CodeNoteGenerator {
             out.append("|------|------|-----------|")
             for f in funcs {
                 let sig = f.declaration.map { "`\($0)`" } ?? "`\(f.name)`"
-                let displayName = f.parent.map { "\($0).\(f.name)" } ?? f.name
+                // Only prepend parent if name doesn't already start with it (scanner may emit "Cls.meth")
+                let displayName: String
+                if let p = f.parent, !f.name.hasPrefix("\(p).") {
+                    displayName = "\(p).\(f.name)"
+                } else {
+                    displayName = f.name
+                }
                 out.append("| `\(displayName)` | L\(f.line) | \(sig) |")
             }
             out.append("")
