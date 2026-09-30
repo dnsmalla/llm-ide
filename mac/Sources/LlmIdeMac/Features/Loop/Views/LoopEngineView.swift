@@ -60,7 +60,7 @@ struct LoopEngineView: View {
     /// service owns the instance and this page only renders its `@Published`
     /// live state — which is what lets a run keep its visible log across a
     /// page or project switch instead of dying with the view that started it.
-    @ObservedObject var runner: LoopEngineRunner
+    let runner: LoopEngineRunner
 
     /// Shared verify-command allowlist — consulted by the detail pane's
     /// "Approve command" button. The SAME instance every runner is
@@ -104,6 +104,9 @@ struct LoopEngineView: View {
     /// instead of the live in-memory log.
     @State var selectedPastRunId: String?
     @State var inspectedPastRun: LoopRunRecord?
+    /// Where the inspected record lives on disk, resolved ONCE on selection —
+    /// `resolveRecordURL` may scan `loop-runs/`, which must not happen in body.
+    @State var inspectedRecordURL: URL?
     @State var pastRunInspectLoadFailed = false
     /// Debounced autosave of the current config (see `scheduleAutosave`).
     @State private var autosaveTask: Task<Void, Never>?
@@ -179,6 +182,11 @@ struct LoopEngineView: View {
     /// from disk instead, precisely because this copy can be stale.
     @State var isPrimaryLoop = false
 
+    /// Command candidates for the active repo, detected ONCE per loaded loop
+    /// (`.task(id: reloadKey)`, off the main actor) — not in `body`, which ran
+    /// the filesystem scan per shell stage per render.
+    @State var detectedCommandCandidates: [LoopStageDetector.DetectedCommand] = []
+
     /// How many past runs the history list shows. One constant, so the header's
     /// "latest N" badge cannot claim a different cap than `loadPastRuns`
     /// actually applies.
@@ -223,6 +231,12 @@ struct LoopEngineView: View {
         // LoopRunService at runner creation, not per page appearance, so it
         // survives this page being closed mid-run.)
         .task(id: reloadKey) {
+            let gitRoot = activeGitRootURL
+            detectedCommandCandidates = gitRoot == nil ? [] : await Task.detached(priority: .userInitiated) {
+                LoopStageDetector.detectCommandCandidates(gitRoot: gitRoot!)
+            }.value
+        }
+        .task(id: reloadKey) {
             selectedStageId = nil
             // The runner is long-lived now: opening the page of a loop whose
             // run is still in flight must show that run's live log, not wipe
@@ -240,7 +254,7 @@ struct LoopEngineView: View {
         // existed THEN; this page can be torn down and re-created mid-run
         // (switch loop and back), and the re-created page observes the same
         // long-lived runner, so this fires on whichever instance is live.
-        .onChange(of: runner.running) { _, isRunning in
+        .onReceive(runner.$running.dropFirst().removeDuplicates()) { isRunning in
             if !isRunning {
                 loadPastRuns()
             }
@@ -381,8 +395,10 @@ struct LoopEngineView: View {
             Button("Move down") { moveStage(stage, by: 1) }
                 .disabled(position == count - 1)
             Divider()
-            Button("Run this stage only") { startRun(only: stage) }
-                .disabled(runner.running || activeGitRootURL == nil)
+            RunnerObserver(runner: runner) {
+                Button("Run this stage only") { startRun(only: stage) }
+                    .disabled(runner.running || activeGitRootURL == nil)
+            }
             Divider()
             Button("Duplicate") { duplicateStage(stage) }
             if !stage.isDefault {
@@ -546,6 +562,10 @@ struct LoopEngineView: View {
     }
 
     private var toolbar: some View {
+        RunnerObserver(runner: runner) { toolbarContent }
+    }
+
+    private var toolbarContent: some View {
         HStack(spacing: Spacing.md) {
             Button(runner.waitingInQueue ? "Queued…"
                    : runner.running ? "Running… (iteration \(runner.iteration))" : "Run") {
@@ -659,8 +679,8 @@ struct LoopEngineView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 11, design: .monospaced))
 
-                    if let gitRoot = activeGitRootURL {
-                        commandSuggestionsMenu(gitRoot: gitRoot, stageName: stage.wrappedValue.name) { candidate in
+                    if activeGitRootURL != nil {
+                        commandSuggestionsMenu(stageName: stage.wrappedValue.name) { candidate in
                             stage.wrappedValue.command = candidate.command
                             // A NON-primary pick is an unknown quantity: it is
                             // whatever else the Makefile happens to define, so
@@ -801,10 +821,10 @@ struct LoopEngineView: View {
     /// trade-off `activeGitRootURL` above already makes for this view.
     @ViewBuilder
     private func commandSuggestionsMenu(
-        gitRoot: URL, stageName: String,
+        stageName: String,
         onSelect: @escaping (LoopStageDetector.DetectedCommand) -> Void
     ) -> some View {
-        let candidates = LoopStageDetector.detectCommandCandidates(gitRoot: gitRoot, stageName: stageName)
+        let candidates = LoopStageDetector.rankCandidates(detectedCommandCandidates, stageName: stageName)
         // `isPrimary` false is every OTHER real Makefile target — setup and
         // cleanup steps (`hooks`, `clean`, `docs-deps`) that exit 0
         // unconditionally. Nothing here is hidden, but a Verify stage's
@@ -859,6 +879,10 @@ struct LoopEngineView: View {
     // MARK: - Log pane
 
     private var logPane: some View {
+        RunnerObserver(runner: runner) { logPaneContent }
+    }
+
+    private var logPaneContent: some View {
         let t = theme.current
         let inspecting = inspectedPastRun != nil || pastRunInspectLoadFailed
         // Filtered ONCE per render and threaded down. `visibleLog` is a
@@ -876,19 +900,14 @@ struct LoopEngineView: View {
                 SectionLabel(inspecting ? "RUN DETAIL" : "RUN LOG")
                 Spacer()
                 if inspecting {
-                    if let record = inspectedPastRun,
-                       let root = workspaceContext?.projectRoot {
-                        // Ask the journal where the file actually is — recomputing
-                        // the month bucket here would miss the scan fallback and
-                        // hand Finder a path that does not exist.
-                        if let url = journal.resolveRecordURL(
-                            id: record.id, startedAt: record.startedAt, root: root) {
-                            Button("Reveal JSON") {
-                                NSWorkspace.shared.activateFileViewerSelecting([url])
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                    // URL resolved by the journal on selection (not here) —
+                    // recomputing the month bucket would miss the scan fallback.
+                    if let url = inspectedRecordURL {
+                        Button("Reveal JSON") {
+                            NSWorkspace.shared.activateFileViewerSelecting([url])
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
                     Button("Back") { clearPastRunInspection() }
                         .buttonStyle(.bordered)
@@ -1140,8 +1159,12 @@ struct LoopEngineView: View {
     /// published run-snapshot fields (`runMaxIterations`, `runWallClockBudget`)
     /// rather than this page's editable config state, so it describes the run
     /// actually executing even after the user edits budgets mid-run.
-    @ViewBuilder
     private var liveRunHeader: some View {
+        RunnerObserver(runner: runner) { liveRunHeaderContent }
+    }
+
+    @ViewBuilder
+    private var liveRunHeaderContent: some View {
         let t = theme.current
         if runner.running || runner.waitingInQueue {
             VStack(alignment: .leading, spacing: 6) {
@@ -1760,12 +1783,15 @@ struct LoopEngineView: View {
             return
         }
         inspectedPastRun = journal.loadRecord(id: entry.id, startedAt: entry.startedAt, root: root)
+        inspectedRecordURL = inspectedPastRun == nil ? nil
+            : journal.resolveRecordURL(id: entry.id, startedAt: entry.startedAt, root: root)
         pastRunInspectLoadFailed = inspectedPastRun == nil
     }
 
     func clearPastRunInspection() {
         selectedPastRunId = nil
         inspectedPastRun = nil
+        inspectedRecordURL = nil
         pastRunInspectLoadFailed = false
     }
 
@@ -1775,6 +1801,8 @@ struct LoopEngineView: View {
               let entry = pastRuns.first(where: { $0.id == id })
         else { return }
         inspectedPastRun = journal.loadRecord(id: entry.id, startedAt: entry.startedAt, root: projectRoot)
+        inspectedRecordURL = inspectedPastRun == nil ? nil
+            : journal.resolveRecordURL(id: entry.id, startedAt: entry.startedAt, root: projectRoot)
         pastRunInspectLoadFailed = inspectedPastRun == nil
     }
 
@@ -1853,4 +1881,20 @@ struct LoopEngineView: View {
         newTemplateSummary = ""
     }
 
+}
+
+/// Observes the runner on behalf of the subtree built by `content`, so the
+/// enclosing page does NOT re-render (all three panes) on every published
+/// runner change — a log line per tick during a run. The page holds the
+/// runner as a plain reference and wraps only the parts that read it.
+struct RunnerObserver<Content: View>: View {
+    @ObservedObject var runner: LoopEngineRunner
+    @ViewBuilder var content: () -> Content
+
+    init(runner: LoopEngineRunner, @ViewBuilder content: @escaping () -> Content) {
+        self.runner = runner
+        self.content = content
+    }
+
+    var body: some View { content() }
 }

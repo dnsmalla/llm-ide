@@ -612,6 +612,13 @@ public enum LoopStageDetector {
             }
         }
 
+        return rankCandidates(candidates, stageName: stageName)
+    }
+
+    /// Stage-name relevance ordering, split out of detection so a view can
+    /// detect once per loaded loop and re-rank per stage name (pure, cheap)
+    /// without touching the filesystem again.
+    static func rankCandidates(_ candidates: [DetectedCommand], stageName: String) -> [DetectedCommand] {
         let needle = stageName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !needle.isEmpty else { return candidates }
         let matched = candidates.filter { $0.command.lowercased().contains(needle) }

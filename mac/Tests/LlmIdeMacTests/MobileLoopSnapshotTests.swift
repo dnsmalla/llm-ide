@@ -23,3 +23,20 @@ final class MobileLoopSnapshotTests: XCTestCase {
         XCTAssertNil(snap.recent)
     }
 }
+
+final class CommandCandidateRankingTests: XCTestCase {
+    func testRankingMatchesDetectionAndIsPure() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("rank-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "// swift-tools-version:5.9".write(to: dir.appendingPathComponent("Package.swift"), atomically: true, encoding: .utf8)
+        let base = LoopStageDetector.detectCommandCandidates(gitRoot: dir)
+        XCTAssertFalse(base.isEmpty)
+        // Detect once, rank per stage name: same answer as detecting per name.
+        for name in ["", "build", "Test"] {
+            XCTAssertEqual(LoopStageDetector.rankCandidates(base, stageName: name).map(\.command),
+                           LoopStageDetector.detectCommandCandidates(gitRoot: dir, stageName: name).map(\.command))
+        }
+        XCTAssertEqual(LoopStageDetector.rankCandidates(base, stageName: "build").first?.command, "swift build")
+    }
+}

@@ -375,33 +375,7 @@ extension LoopEngineView {
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             }
-            ForEach(Array(scopeGlobs.enumerated()), id: \.offset) { index, glob in
-                HStack(spacing: 4) {
-                    // Bounds-guarded: the minus button removes this row while
-                    // its field may still be focused, and the field's commit
-                    // on focus loss then runs through the captured `index` —
-                    // on the last row that is past the end and trapped.
-                    TextField("e.g. src/auth/**", text: Binding(
-                        get: { scopeGlobs.indices.contains(index) ? scopeGlobs[index] : "" },
-                        set: { if scopeGlobs.indices.contains(index) { scopeGlobs[index] = $0 } }
-                    ))
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11, design: .monospaced))
-                    Button {
-                        scopeGlobs.remove(at: index)
-                    } label: {
-                        Image(systemName: "minus.circle")
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-            Button {
-                scopeGlobs.append("")
-            } label: {
-                Label("Add path", systemImage: "plus")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+            ScopeGlobRows(globs: $scopeGlobs)
             Text("When set, a repair that changes a path matching none of these is treated as an out-of-scope violation, under the same policy as the protected-path setting above.")
                 .font(Typography.caption)
                 .foregroundStyle(t.textMuted)
@@ -501,5 +475,55 @@ extension LoopEngineView {
                     .foregroundStyle(t.textMuted)
             }
         }
+    }
+}
+
+/// The editable scope-glob list with STABLE row identity. The rows used to be
+/// keyed by offset, so removing row N re-bound every later row's TextField
+/// (focus and in-progress edits jumped to the neighbour). Ids live beside the
+/// strings; add/remove update both in one action, and an external reload that
+/// changes the count simply mints fresh ids.
+struct ScopeGlobRows: View {
+    @Binding var globs: [String]
+    @State private var ids: [UUID] = []
+
+    private var rowIds: [UUID] {
+        globs.indices.map { ids.indices.contains($0) ? ids[$0] : UUID() }
+    }
+
+    var body: some View {
+        ForEach(Array(zip(rowIds, globs.indices)), id: \.0) { id, index in
+            HStack(spacing: 4) {
+                // Bounds-guarded: the minus button removes this row while its
+                // field may still be focused, and the field's commit on focus
+                // loss then runs through the captured `index`.
+                TextField("e.g. src/auth/**", text: Binding(
+                    get: { globs.indices.contains(index) ? globs[index] : "" },
+                    set: { if globs.indices.contains(index) { globs[index] = $0 } }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11, design: .monospaced))
+                Button {
+                    guard globs.indices.contains(index) else { return }
+                    if ids.count == globs.count { ids.remove(at: index) }
+                    globs.remove(at: index)
+                } label: {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .onChange(of: globs.count, initial: true) { _, count in
+            if ids.count != count { ids = (0..<count).map { _ in UUID() } }
+        }
+        Button {
+            if ids.count != globs.count { ids = globs.map { _ in UUID() } }
+            ids.append(UUID())
+            globs.append("")
+        } label: {
+            Label("Add path", systemImage: "plus")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
     }
 }
