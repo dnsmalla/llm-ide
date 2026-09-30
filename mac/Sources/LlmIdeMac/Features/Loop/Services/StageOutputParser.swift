@@ -136,8 +136,7 @@ public enum StageOutputParser {
         return (errors.isEmpty ? lines : errors).prefix(limit).joined(separator: "\n")
     }
 
-    private static let errorLinePattern =
-        #"(?:^|[\s:])(?:error|ERROR|Error):|[Ff]atal error|(?:^|\s)(?:--- )?FAIL(?::|\s|$)"#
+    private static let errorLinePattern = TestFailureExtractor.errorLinePattern
 
     /// The binary name a shell reported as missing, when `output` looks like an
     /// exit-127 "command not found" line. Handles both the bash/dash/sh phrasing

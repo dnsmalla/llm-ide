@@ -42,7 +42,7 @@ final class AgentLoopStageRepairerTests: XCTestCase {
     }
 
     func testLongFailureOutputIsTruncated() {
-        let huge = String(repeating: "x", count: 10_000)
+        let huge = String(repeating: "x", count: 30_000)
         let prompt = AgentLoopStageRepairer.buildPrompt(
             stageName: "Test", command: "swift test", failureOutput: huge,
             repoRoot: URL(fileURLWithPath: "/tmp/repo")
@@ -51,7 +51,7 @@ final class AgentLoopStageRepairerTests: XCTestCase {
     }
 
     func testLongFailureOutputKeepsTailNotHead() {
-        let huge = "HEAD_NOISE" + String(repeating: "x", count: 10_000) + "TAIL_ERROR"
+        let huge = "HEAD_NOISE" + String(repeating: "x", count: 30_000) + "TAIL_ERROR"
         let prompt = AgentLoopStageRepairer.buildPrompt(
             stageName: "Test", command: "swift test", failureOutput: huge,
             repoRoot: URL(fileURLWithPath: "/tmp/repo")

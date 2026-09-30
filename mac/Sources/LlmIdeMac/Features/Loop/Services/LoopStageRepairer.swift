@@ -67,7 +67,7 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
         self.init(agent: APILoopAgentRunner(api: api, language: language))
     }
 
-    static let maxFailureOutputChars = 4_000
+    static let maxFailureOutputChars = 12_000
 
     /// Builds the repair prompt. Factored out as a `static func` (unlike
     /// `AgentFaultRepairer`, which inlines its prompt) so it is
@@ -79,7 +79,7 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
         The "\(stageName)" stage of an automated verify-and-repair loop is failing in the codebase at \(repoRoot.path).
 
         \(commandLine)Failure output:
-        \(String(failureOutput.suffix(maxFailureOutputChars)))
+        \(TestFailureExtractor.repairExcerpt(failureOutput, budget: maxFailureOutputChars))
         \(evidenceBlock(evidence))
         Edit the code so this stage passes. Make the minimal change required.
         Do not modify the stage command, weaken or delete tests/assertions, or skip cases to make it pass.

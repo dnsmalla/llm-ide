@@ -1983,7 +1983,7 @@ final class LoopEngineRunner: ObservableObject {
                                             hashing: Bool) async -> (score: Int?, hash: String, errorLines: String) {
         await Task.detached(priority: .utility) {
             (StageOutputParser.parseFailureCount(output),
-             hashing ? hash(output) : "",
+             hashing ? (TestFailureExtractor.failureSetHash(output) ?? hash(output)) : "",
              hashing ? StageOutputParser.firstErrorLines(output) : "")
         }.value
     }

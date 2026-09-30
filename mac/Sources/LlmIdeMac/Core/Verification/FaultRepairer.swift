@@ -70,7 +70,7 @@ final class AgentFaultRepairer: FaultRepairer {
         \(String(fault.response.prefix(4_000)))
 
         The verify command now FAILS with this output:
-        \(String(failureOutput.prefix(4_000)))
+        \(TestFailureExtractor.repairExcerpt(failureOutput, budget: 12_000))
 
         Edit the code so the verify command passes again. Make the minimal
         change required. Do not modify the verify command itself.
