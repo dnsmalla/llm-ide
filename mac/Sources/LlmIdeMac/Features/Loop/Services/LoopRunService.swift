@@ -62,7 +62,9 @@ final class LoopRunService: ObservableObject {
             regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
             skillExecutor: AgentLoopSkillExecutor(api: api),
             approvals: approvals,
-            repoRegistrar: APILoopRepoRegistrar(api: api))
+            repoRegistrar: APILoopRepoRegistrar(api: api),
+            defaultShellTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().shellSeconds),
+            defaultAgentTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().agentSeconds))
         // Mirror into the shared per-task log — the buffer the Auto Tasks
         // page and the phone read — so page-driven runs stay visible there.
         // Owned here (not per page appearance) so the mirror survives the
@@ -99,6 +101,10 @@ final class LoopRunService: ObservableObject {
             return
         }
         let runner = runner(projectId: projectId, loopId: loopId)
+        // The runner outlives Settings edits; re-read the app defaults per run.
+        let timeouts = LoopEngineDefaults.stageTimeouts()
+        runner.defaultShellTimeout = TimeInterval(timeouts.shellSeconds)
+        runner.defaultAgentTimeout = TimeInterval(timeouts.agentSeconds)
         activeKeys.insert(key)
         // The user just pressed Run, so they are looking at the app — the
         // one moment the one-shot permission alert can actually be seen.

@@ -52,4 +52,32 @@ enum LoopEngineDefaults {
         config.stages = stages
         return config
     }
+
+    // MARK: - Default stage timeouts
+
+    /// App-wide ceilings for a stage with no `timeoutSeconds` of its own. Kept
+    /// outside `LoopEngineConfig` (so `loop.json` stays unchanged and every
+    /// persisted file still decodes) and applied by the runner at run time.
+    /// 0 means "no limit".
+    struct StageTimeouts: Equatable {
+        var shellSeconds: Int
+        var agentSeconds: Int
+        static let standard = StageTimeouts(shellSeconds: 30 * 60, agentSeconds: 20 * 60)
+    }
+
+    private static let shellTimeoutKey = "loopDefaultShellTimeoutSeconds"
+    private static let agentTimeoutKey = "loopDefaultAgentTimeoutSeconds"
+
+    static func stageTimeouts(defaults: UserDefaults = .standard) -> StageTimeouts {
+        func read(_ key: String, _ fallback: Int) -> Int {
+            defaults.object(forKey: key) == nil ? fallback : max(0, defaults.integer(forKey: key))
+        }
+        return StageTimeouts(shellSeconds: read(shellTimeoutKey, StageTimeouts.standard.shellSeconds),
+                             agentSeconds: read(agentTimeoutKey, StageTimeouts.standard.agentSeconds))
+    }
+
+    static func saveStageTimeouts(_ value: StageTimeouts, defaults: UserDefaults = .standard) {
+        defaults.set(max(0, value.shellSeconds), forKey: shellTimeoutKey)
+        defaults.set(max(0, value.agentSeconds), forKey: agentTimeoutKey)
+    }
 }

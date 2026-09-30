@@ -186,6 +186,10 @@ final class LoopEngineRunner: ObservableObject {
     /// running. `ShellFaultVerifier` treats <= 0 as unbounded and leans on
     /// `ResourceGuardService` instead.
     private let stageTimeout: TimeInterval
+    /// App-wide defaults (Settings → Loop) for a stage that sets no timeout of
+    /// its own and when `stageTimeout` is 0. 0 = no limit (the test default).
+    var defaultShellTimeout: TimeInterval
+    var defaultAgentTimeout: TimeInterval
     private let journal: LoopRunJournaling
     private let summaryWriter: LoopRunSummaryWriting
     private let scopeGuard: RepairScopeGuarding
@@ -240,7 +244,9 @@ final class LoopEngineRunner: ObservableObject {
          scopeGuard: RepairScopeGuarding = GitRepairScopeGuard(),
          trigger: LoopRunTrigger = .manual,
          repoRegistrar: LoopRepoRegistering? = nil,
-         transportRetryDelay: TimeInterval = 2) {
+         transportRetryDelay: TimeInterval = 2,
+         defaultShellTimeout: TimeInterval = 0,
+         defaultAgentTimeout: TimeInterval = 0) {
         self.transportRetryDelay = transportRetryDelay
         self.repoRegistrar = repoRegistrar
         self.verifier = verifier
@@ -249,6 +255,8 @@ final class LoopEngineRunner: ObservableObject {
         self.skillExecutor = skillExecutor
         self.approvals = approvals
         self.stageTimeout = stageTimeout
+        self.defaultShellTimeout = defaultShellTimeout
+        self.defaultAgentTimeout = defaultAgentTimeout
         self.journal = journal
         self.summaryWriter = summaryWriter
         self.scopeGuard = scopeGuard
@@ -829,7 +837,7 @@ final class LoopEngineRunner: ObservableObject {
         }
 
         let startedAt = Date()
-        let timeout = stage.timeoutSeconds.map(TimeInterval.init) ?? stageTimeout
+        let timeout = shellTimeout(for: stage)
         let outcome: VerifyOutcome
         // A timed-out stage's `output` is a synthesized sentence, not the
         // runner's own output, so nothing can be concluded from the parser
@@ -852,6 +860,15 @@ final class LoopEngineRunner: ObservableObject {
             // fatal.
             outcome = VerifyOutcome(exitCode: -1, output: "stage timed out after \(seconds)s")
             didTimeOut = true
+            // The budget clamp (`shellTimeout`) is what cut this stage short:
+            // end the run rather than spend a repair the budget cannot cover.
+            if budgetExhausted() {
+                appendLog(.warn, "  [\(stage.name)] stopped · the run's time budget ran out mid-stage")
+                stageStates[stage.id] = .failed
+                record(stage, startedAt: startedAt, duration: Date().timeIntervalSince(startedAt),
+                       exitCode: -1, passed: false, output: outcome.output, score: nil)
+                return .terminate(.givenUp(reason: .wallClockExceeded))
+            }
         } catch VerifyError.stoppedForResources(let reason) {
             // Explicitly NOT the timeout path above: a resource stop must not be
             // scored as a stage failure, because a failing stage is what triggers
@@ -945,6 +962,13 @@ final class LoopEngineRunner: ObservableObject {
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, outputHash: failureHash, score: score)
             return .terminate(.givenUp(reason: .repairBudgetExhausted(stageName: stage.name)))
+        }
+
+        if budgetExhausted() {
+            appendLog(.warn, "  [\(stage.name)] no repair · the run's time budget is used up")
+            record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                   passed: false, output: outcome.output, outputHash: failureHash, score: score)
+            return .terminate(.givenUp(reason: .wallClockExceeded))
         }
 
         do {
@@ -1103,7 +1127,28 @@ final class LoopEngineRunner: ObservableObject {
     /// a late repair gets only the time the run still has.
     func agentTimeout(for stage: LoopStage, now: Date = Date()) -> TimeInterval? {
         let stageLimit = stage.timeoutSeconds.map(TimeInterval.init)
-            ?? (stageTimeout > 0 ? stageTimeout : nil)
+            ?? (stageTimeout > 0 ? stageTimeout : (defaultAgentTimeout > 0 ? defaultAgentTimeout : nil))
+        return clampToBudget(stageLimit, now: now)
+    }
+
+    /// The timeout handed to the shell verifier (0 = unbounded): the stage's
+    /// own limit, else the runner fallback, else the app default — clamped to
+    /// what is left of the run's wall-clock budget, so a stage cannot outlive
+    /// the budget (the watchdog). An explicit `timeoutSeconds` of 0 means the
+    /// user wants no stage limit; the budget clamp still applies.
+    func shellTimeout(for stage: LoopStage, now: Date = Date()) -> TimeInterval {
+        let limit: TimeInterval?
+        if let own = stage.timeoutSeconds {
+            limit = own > 0 ? TimeInterval(own) : nil
+        } else if stageTimeout > 0 {
+            limit = stageTimeout
+        } else {
+            limit = defaultShellTimeout > 0 ? defaultShellTimeout : nil
+        }
+        return clampToBudget(limit, now: now) ?? 0
+    }
+
+    private func clampToBudget(_ stageLimit: TimeInterval?, now: Date) -> TimeInterval? {
         var remaining: TimeInterval?
         if let budget = runWallClockBudget, let started = runStartedAt {
             // Never 0 or negative: the server rejects that; an overrun run
@@ -1116,6 +1161,12 @@ final class LoopEngineRunner: ObservableObject {
         case let (nil, left?): return left
         case (nil, nil): return nil
         }
+    }
+
+    /// True once the run's working time has used up its wall-clock budget.
+    private func budgetExhausted(now: Date = Date()) -> Bool {
+        guard let budget = runWallClockBudget, let started = runStartedAt else { return false }
+        return workingElapsed(since: started, asOf: now) >= budget
     }
 
     /// Why a skill stage whose agent run returned must still FAIL, or nil:

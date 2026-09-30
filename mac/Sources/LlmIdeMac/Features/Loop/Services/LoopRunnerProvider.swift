@@ -33,7 +33,9 @@ final class LoopRunnerProvider: LoopRunnerProviding {
             regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
             skillExecutor: AgentLoopSkillExecutor(api: api),
             trigger: trigger,
-            repoRegistrar: APILoopRepoRegistrar(api: api)
+            repoRegistrar: APILoopRepoRegistrar(api: api),
+            defaultShellTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().shellSeconds),
+            defaultAgentTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().agentSeconds)
         )
     }
 }

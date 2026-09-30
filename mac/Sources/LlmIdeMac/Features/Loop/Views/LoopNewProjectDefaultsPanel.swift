@@ -7,6 +7,7 @@ struct LoopNewProjectDefaultsPanel: View {
     @State private var defaults = LoopEngineConfig(stages: [])
     @State private var templateCount = (builtIn: 0, saved: 0)
     @State private var isExpanded = false
+    @State private var timeouts = LoopEngineDefaults.stageTimeouts()
 
     var body: some View {
         let t = theme.current
@@ -39,6 +40,16 @@ struct LoopNewProjectDefaultsPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                Text("Default stage timeouts (minutes, 0 = no limit) — used when a stage sets none")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+                HStack {
+                    Stepper("Shell \(timeouts.shellSeconds / 60)", value: minutesBinding(\.shellSeconds),
+                            in: 0...720, step: 5)
+                    Stepper("Agent \(timeouts.agentSeconds / 60)", value: minutesBinding(\.agentSeconds),
+                            in: 0...720, step: 5)
+                }
+
                 Toggle("Write a run summary note to the Library", isOn: $defaults.writeSummaryNote)
                     .font(Typography.caption)
 
@@ -65,9 +76,16 @@ struct LoopNewProjectDefaultsPanel: View {
                 .foregroundStyle(t.textMuted)
         }
         .onAppear {
+            timeouts = LoopEngineDefaults.stageTimeouts()
             defaults = LoopEngineDefaults.load()
             let store = LoopTemplateStore()
             templateCount = (LoopTemplate.builtIns.count, store.customTemplates.count)
         }
+    }
+
+    private func minutesBinding(_ keyPath: WritableKeyPath<LoopEngineDefaults.StageTimeouts, Int>) -> Binding<Int> {
+        Binding(get: { timeouts[keyPath: keyPath] / 60 },
+                set: { timeouts[keyPath: keyPath] = $0 * 60
+                       LoopEngineDefaults.saveStageTimeouts(timeouts) })
     }
 }
