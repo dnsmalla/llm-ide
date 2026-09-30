@@ -264,8 +264,14 @@ final class AutoCodeUpdateService: ObservableObject {
 
     /// Starts `body` on the loop lane. Returns false when a loop-lane run is
     /// already scheduled or in flight.
-    private func startLoopLane(_ body: @escaping @MainActor () async -> Void) -> Bool {
-        guard loopLaneTask == nil else { return false }
+    @discardableResult
+    func startLoopLane(_ body: @escaping @MainActor () async -> Void) -> Bool {
+        guard loopLaneTask == nil else {
+            // Say so: a silent refusal looks like the button did nothing.
+            statusMessage = Self.loopBusyMessage
+            logStore.append(.loopEngineering, Self.loopBusyMessage)
+            return false
+        }
         loopLaneTask = Task { [weak self] in
             await body()
             self?.loopLaneTask = nil
@@ -540,6 +546,9 @@ final class AutoCodeUpdateService: ObservableObject {
 
     /// True while a run Task is queued or executing (including the gap before
     /// `isRunning` flips true). Used by mobile control to reject duplicate runs.
+    /// True while a loop-lane run is queued or executing.
+    var hasScheduledLoopRun: Bool { loopLaneTask != nil }
+
     var hasScheduledRun: Bool { runTask != nil || loopLaneTask != nil }
 
     /// Resolve backend/project once, then run a single task body.
@@ -714,11 +723,19 @@ final class AutoCodeUpdateService: ObservableObject {
     /// until relaunch — Stop looked like it did nothing. Whatever is still
     /// alive after `cancelKillGrace` is SIGKILLed.
     func cancel() {
+        // Auto Tasks only: a running loop has its own Stop (`cancelLoopLane`).
         runTask?.cancel()
-        loopLaneTask?.cancel()
         if let activeProcess {
             Self.terminateWithKillFallback(activeProcess, grace: Self.cancelKillGrace)
         }
+    }
+
+    static let loopBusyMessage = "A loop sweep is already running"
+
+    /// Stop the loop lane only (the runner kills its own processes on
+    /// cancellation); Auto Task runs are untouched.
+    func cancelLoopLane() {
+        loopLaneTask?.cancel()
     }
 
     /// Grace between SIGTERM and SIGKILL for a user-initiated Stop.
@@ -779,6 +796,7 @@ final class AutoCodeUpdateService: ObservableObject {
         timer = nil
         // Disabling auto-tasks also stops any run that's currently executing.
         cancel()
+        cancelLoopLane()
     }
 
     func setError(_ message: String) {
