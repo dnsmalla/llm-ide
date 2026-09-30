@@ -110,6 +110,13 @@ final class AutoCodeUpdateService: ObservableObject {
     /// lifecycle section (runNow/runSingle/runDue/cancel), all of which
     /// stay in this file — kept `private`.
     private var runTask: Task<Void, Never>?
+    /// The Loop lane: loop runs (scheduled, per-task ▶, phone) live here, NOT in
+    /// `runTask`, so a long loop never blocks the other Auto Tasks and they
+    /// never block it. At most one loop-lane run at a time (two sweeps must not
+    /// overlap); per-git-root serialisation is still `LoopRunQueue`'s job.
+    private var loopLaneTask: Task<Void, Never>?
+    /// True while a loop-lane run is executing (distinct from `isRunning`).
+    @Published private(set) var isLoopRunning = false
     /// The currently-executing CLI subprocess, so `cancel()` can kill it
     /// instead of waiting out its 10-minute timeout. Set/cleared on the
     /// main actor around each subprocess. Touched from `cancel()` here
@@ -230,6 +237,11 @@ final class AutoCodeUpdateService: ObservableObject {
     /// guard with `runNow()` so a global run and a per-task run can't overlap.
     @discardableResult
     func runSingle(_ task: AutoTask, trigger: AutoTaskRunTrigger = .manual) -> Bool {
+        if task == .loopEngineering {
+            return startLoopLane { [weak self] in
+                await self?.runLoopFiltered(loopId: nil, stageId: nil, trigger: trigger)
+            }
+        }
         guard runTask == nil else { return false }
         runTask = Task { [weak self] in
             await self?.runOne(task, trigger: trigger)
@@ -241,14 +253,22 @@ final class AutoCodeUpdateService: ObservableObject {
     /// Phone-triggered "Run this stage only" (`loop_start_stage`). A dedicated
     /// entry point rather than a parameter on `runSingle(_:)`: no other task
     /// has a use for a stage id, and this keeps the generic signatures
-    /// untouched. Shares the `runTask` re-entrancy guard, so it can never
-    /// overlap a global run, a per-task run, or a custom run.
+    /// untouched. Runs on the loop lane: one loop run at a time, never blocked by
+    /// (and never blocking) the other Auto Tasks.
     @discardableResult
     func runSingleLoopStage(stageId: String, trigger: AutoTaskRunTrigger = .manual) -> Bool {
-        guard runTask == nil else { return false }
-        runTask = Task { [weak self] in
+        startLoopLane { [weak self] in
             await self?.runLoopFiltered(loopId: nil, stageId: stageId, trigger: trigger)
-            self?.runTask = nil
+        }
+    }
+
+    /// Starts `body` on the loop lane. Returns false when a loop-lane run is
+    /// already scheduled or in flight.
+    private func startLoopLane(_ body: @escaping @MainActor () async -> Void) -> Bool {
+        guard loopLaneTask == nil else { return false }
+        loopLaneTask = Task { [weak self] in
+            await body()
+            self?.loopLaneTask = nil
         }
         return true
     }
@@ -262,12 +282,9 @@ final class AutoCodeUpdateService: ObservableObject {
     /// three. Same re-entrancy guard as every other entry point.
     @discardableResult
     func runSingleLoop(loopId: String, trigger: AutoTaskRunTrigger = .manual) -> Bool {
-        guard runTask == nil else { return false }
-        runTask = Task { [weak self] in
+        startLoopLane { [weak self] in
             await self?.runLoopFiltered(loopId: loopId, stageId: nil, trigger: trigger)
-            self?.runTask = nil
         }
-        return true
     }
 
     /// How an Auto Task trigger is recorded in the LOOP journal.
@@ -292,8 +309,8 @@ final class AutoCodeUpdateService: ObservableObject {
     /// shell is per-entry-point state management, not shareable logic.
     private func runLoopFiltered(loopId: String?, stageId: String?,
                                  trigger: AutoTaskRunTrigger) async {
-        guard !isRunning else { return }
-        isRunning = true
+        guard !isLoopRunning else { return }
+        isLoopRunning = true
         let startedAt = Date()
         let loopLabel = AutoTask.loopEngineering.label
         // Captured with `resolveBackendAndProject()` below (same main-actor
@@ -302,9 +319,10 @@ final class AutoCodeUpdateService: ObservableObject {
         // Set once the sweep reports back; read by the defer below.
         var didStart = true
         defer {
-            isRunning = false
-            currentTask = nil
-            currentStep = nil
+            isLoopRunning = false
+            // Shared display fields: only clear what this lane set, so a
+            // concurrently running non-loop task keeps its own.
+            if currentTask == .loopEngineering { currentTask = nil }
             lastRunDate = Date()
             appendRunRecord(taskId: AutoTask.loopEngineering.rawValue, label: loopLabel,
                             logSuffix: AutoTask.loopEngineering.logSuffix, startedAt: startedAt,
@@ -320,8 +338,7 @@ final class AutoCodeUpdateService: ObservableObject {
             taskErrors[AutoTask.loopEngineering.rawValue] = reason
             return
         }
-        currentTask = .loopEngineering
-        currentStep = stageId != nil ? "Running Loop stage" : "Running Loop"
+        if currentTask == nil { currentTask = .loopEngineering }
         logStore.append(.loopEngineering,
                         stageId != nil ? "Running Loop (single stage)…" : "Running Loop (one loop)…")
         didStart = await runLoopEngineeringSweep(projectRoot: resolved.projectRoot,
@@ -495,20 +512,35 @@ final class AutoCodeUpdateService: ObservableObject {
     func runDue(now: Date = Date()) -> Bool {
         let dueBuiltIn = dueTasks(now: now)
         let dueCustom = dueCustomTasks(now: now)
-        guard !(dueBuiltIn.isEmpty && dueCustom.isEmpty), runTask == nil else { return false }
-        for task in dueBuiltIn { realignNextFire(for: task, now: now) }       // realign BEFORE running
-        for task in dueCustom { realignCustomNextFire(for: task, now: now) }
-        runTask = Task { [weak self] in
-            for task in dueBuiltIn { await self?.runOne(task, trigger: .cron) }
-            for task in dueCustom { await self?.runCustomTask(task, trigger: .cron) }
-            self?.runTask = nil
+        // Loops go to their own lane; everything else keeps the original slot.
+        // Each lane is skipped (and its tasks stay due for the next tick) only
+        // while ITS OWN slot is busy.
+        let dueLoop = dueBuiltIn.filter { $0 == .loopEngineering }
+        let dueOther = dueBuiltIn.filter { $0 != .loopEngineering }
+        let startOther = runTask == nil && !(dueOther.isEmpty && dueCustom.isEmpty)
+        let startLoop = loopLaneTask == nil && !dueLoop.isEmpty
+        guard startOther || startLoop else { return false }
+        if startOther {
+            for task in dueOther { realignNextFire(for: task, now: now) }       // realign BEFORE running
+            for task in dueCustom { realignCustomNextFire(for: task, now: now) }
+            runTask = Task { [weak self] in
+                for task in dueOther { await self?.runOne(task, trigger: .cron) }
+                for task in dueCustom { await self?.runCustomTask(task, trigger: .cron) }
+                self?.runTask = nil
+            }
+        }
+        if startLoop {
+            for task in dueLoop { realignNextFire(for: task, now: now) }
+            _ = startLoopLane { [weak self] in
+                await self?.runLoopFiltered(loopId: nil, stageId: nil, trigger: .cron)
+            }
         }
         return true
     }
 
     /// True while a run Task is queued or executing (including the gap before
     /// `isRunning` flips true). Used by mobile control to reject duplicate runs.
-    var hasScheduledRun: Bool { runTask != nil }
+    var hasScheduledRun: Bool { runTask != nil || loopLaneTask != nil }
 
     /// Resolve backend/project once, then run a single task body.
     private func runOne(_ task: AutoTask, trigger: AutoTaskRunTrigger) async {
@@ -683,6 +715,7 @@ final class AutoCodeUpdateService: ObservableObject {
     /// alive after `cancelKillGrace` is SIGKILLed.
     func cancel() {
         runTask?.cancel()
+        loopLaneTask?.cancel()
         if let activeProcess {
             Self.terminateWithKillFallback(activeProcess, grace: Self.cancelKillGrace)
         }
@@ -735,6 +768,7 @@ final class AutoCodeUpdateService: ObservableObject {
     /// Shell's willTerminate hook stops only the backend and mobile.
     func handleAppTerminating() {
         runTask?.cancel()
+        loopLaneTask?.cancel()
         if let activeProcess {
             Self.terminateBlocking(activeProcess, grace: Self.quitKillGrace)
         }
