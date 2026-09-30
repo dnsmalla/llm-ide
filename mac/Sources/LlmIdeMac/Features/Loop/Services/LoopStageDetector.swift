@@ -108,9 +108,45 @@ public enum LoopStageDetector {
             checks.append(("shared-protocol", "iOS ↔ Mac shared protocol", "make test-shared-protocol"))
         }
         if exists("mac/Package.swift") {
-            checks.append(("mac-app", "Mac app", "cd mac && swift test"))
+            checks.append(("mac-app", "Mac app", macAppCommand(gitRoot: gitRoot)))
         }
         return checks
+    }
+
+    /// The command `swift test` used to be, before the Mac-app stage got the
+    /// memory keychain. `migratingMacAppCommand` matches it EXACTLY.
+    static let legacyMacAppCommand = "cd mac && swift test"
+
+    /// Without `LLMIDE_KEYCHAIN_BACKEND=memory` the suite blocks on securityd
+    /// from a non-interactive run. `make test-mac` sets it; fall back to the
+    /// explicit env var when the Makefile lacks that target.
+    static func macAppCommand(gitRoot: URL) -> String {
+        if let makefile = try? String(contentsOf: gitRoot.appendingPathComponent("Makefile"), encoding: .utf8),
+           makefile.range(of: #"(?m)^test-mac:"#, options: .regularExpression) != nil {
+            return "make test-mac"
+        }
+        return "cd mac && LLMIDE_KEYCHAIN_BACKEND=memory swift test"
+    }
+
+    /// One-shot migration: a persisted `mac-app` stage whose command is
+    /// EXACTLY the old default becomes the current default. An edited command
+    /// never equals it, so user changes are untouched; after the update the
+    /// command no longer matches, which makes this idempotent.
+    static func migratingMacAppCommand(in loops: [LoopDefinition], gitRoot: URL?) -> [LoopDefinition] {
+        guard let gitRoot else { return loops }
+        let new = macAppCommand(gitRoot: gitRoot)
+        return loops.map { loop in
+            var loop = loop
+            loop.config.stages = loop.config.stages.map { stage in
+                guard stage.defaultKey == "mac-app", stage.kind == .shellCommand,
+                      stage.command == legacyMacAppCommand else { return stage }
+                var updated = stage
+                updated.command = new
+                if updated.detectedCommand == legacyMacAppCommand { updated.detectedCommand = new }
+                return updated
+            }
+            return loop
+        }
     }
 
     /// Ensure `config` contains the WHOLE pre-split default catalogue, each
@@ -1026,6 +1062,7 @@ public enum LoopStageDetector {
         let (revalidatedLoops, revalidationChanges) = revalidatingTestStages(
             in: loops, gitRoot: gitRoot, eligibleStageIDs: loadedTestStageIDs)
         loops = revalidatedLoops
+        loops = migratingMacAppCommand(in: loops, gitRoot: gitRoot)
 
         // 5. Keep one editable loop. A first-time project gets one; an
         //    existing project keeps whatever it has (including a loop this

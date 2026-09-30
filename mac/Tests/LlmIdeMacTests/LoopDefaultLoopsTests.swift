@@ -731,3 +731,53 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertFalse(decoded.runsOnSchedule)
     }
 }
+
+// MARK: - Mac-app System Check command (memory keychain)
+
+final class LoopMacAppCommandTests: XCTestCase {
+    private var repo: URL!
+
+    override func setUpWithError() throws {
+        repo = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loop-macapp-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try "".write(to: repo.appendingPathComponent("x"), atomically: true, encoding: .utf8)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: repo)
+    }
+
+    func testDefaultUsesMakeTargetWhenPresentElseEnvVar() throws {
+        XCTAssertEqual(LoopStageDetector.macAppCommand(gitRoot: repo),
+                       "cd mac && LLMIDE_KEYCHAIN_BACKEND=memory swift test")
+        try "test-mac:\n\techo hi\n".write(to: repo.appendingPathComponent("Makefile"),
+                                          atomically: true, encoding: .utf8)
+        XCTAssertEqual(LoopStageDetector.macAppCommand(gitRoot: repo), "make test-mac")
+    }
+
+    private func loop(command: String) -> LoopDefinition {
+        var stage = LoopStage(id: "m", name: "Mac app", kind: .shellCommand, command: command, order: 1)
+        stage.defaultKey = "mac-app"
+        stage.isDefault = true
+        var other = LoopStage(id: "o", name: "Other", kind: .shellCommand, command: "cd mac && swift test", order: 2)
+        other.defaultKey = nil
+        var def = LoopDefinition(name: "System Check", defaultKey: LoopDefaultLoopKey.systemCheck,
+                                 config: LoopEngineDefaults.newConfig(stages: [], defaults: .standard))
+        def.config.stages = [stage, other]
+        return def
+    }
+
+    func testMigrationUpdatesOnlyTheExactOldCommandAndIsIdempotent() throws {
+        try "test-mac:\n".write(to: repo.appendingPathComponent("Makefile"), atomically: true, encoding: .utf8)
+        let once = LoopStageDetector.migratingMacAppCommand(
+            in: [loop(command: "cd mac && swift test")], gitRoot: repo)
+        XCTAssertEqual(once[0].config.stages[0].command, "make test-mac")
+        XCTAssertEqual(once[0].config.stages[1].command, "cd mac && swift test", "unkeyed stage untouched")
+        let twice = LoopStageDetector.migratingMacAppCommand(in: once, gitRoot: repo)
+        XCTAssertEqual(twice, once)
+
+        let edited = loop(command: "cd mac && swift test --filter Foo")
+        XCTAssertEqual(LoopStageDetector.migratingMacAppCommand(in: [edited], gitRoot: repo), [edited])
+    }
+}
