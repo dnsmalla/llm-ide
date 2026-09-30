@@ -1088,10 +1088,10 @@ final class LoopEngineRunner: ObservableObject {
     private func ensureRepoRegistered() async throws {
         guard let repoRegistrar, let root = runMainGitRoot, !repoRegisteredThisRun else { return }
         do {
-            try await repoRegistrar.register(repoRoot: root)
+            try await LoopRepoRoot.register(repoRegistrar, root: root)
             repoRegisteredThisRun = true
         } catch {
-            if Self.isCancellation(error) { throw error }
+            if Self.isCancellation(error) || error is LoopRepoRoot.TooBroadError { throw error }
             throw RepoNotRegisteredError(path: root.path, reason: error.localizedDescription)
         }
     }
@@ -1454,12 +1454,40 @@ final class LoopEngineRunner: ObservableObject {
                                   gitRoot: gitRoot, scopeGlobs: scopeGlobs, reported: reported)
         }.value
         guard let thrown else { return checked }
-        switch checked {
-        case .completed(let verdict, let violations, let changed):
+        // A client abort does not stop the server-side agent at once: a write
+        // can land just AFTER the throw. Check once more after a short pause
+        // (non-cancellable — a Stop must not skip it) and union both results.
+        let late = await Task { @MainActor in
+            try? await Task.sleep(nanoseconds: self.postThrowRecheckNanos)
+            return await self.checkScope(since: before, stage: stage, config: config,
+                                         gitRoot: gitRoot, scopeGlobs: scopeGlobs, reported: reported)
+        }.value
+        switch (checked, late) {
+        case (.completed(let v1, let viol1, let ch1), .completed(let v2, let viol2, let ch2)):
+            return .failed(thrown, Self.worseVerdict(v1, v2),
+                           violations: Array(Set(viol1).union(viol2)).sorted(),
+                           changed: Array(Set(ch1).union(ch2)).sorted())
+        case (.completed(let verdict, let violations, let changed), .failed):
             return .failed(thrown, verdict, violations: violations, changed: changed)
-        case .failed:
+        case (.failed, _):
             return checked
         }
+    }
+
+    /// Pause before the post-throw re-check (see `withScopeGuard`).
+    var postThrowRecheckNanos: UInt64 = 500_000_000
+
+    private static func worseVerdict(_ a: RepairScopeVerdict, _ b: RepairScopeVerdict) -> RepairScopeVerdict {
+        func rank(_ v: RepairScopeVerdict) -> Int {
+            switch v {
+            case .notChecked: return 0
+            case .clean: return 1
+            case .indeterminate: return 2
+            case .violatedReverted: return 3
+            case .violated: return 4
+            }
+        }
+        return rank(b) > rank(a) ? b : a
     }
 
     /// What an agent run said it wrote (repo-relative), and which of those
@@ -1596,7 +1624,7 @@ final class LoopEngineRunner: ObservableObject {
         }
         if !unlistedRevertable.isEmpty,
            let error = await scopeGuard.revertUnlisted(paths: unlistedRevertable, created: created,
-                                                       gitRoot: gitRoot) {
+                                                       before: before, gitRoot: gitRoot) {
             errors.append(error)
         }
         if !errors.isEmpty {

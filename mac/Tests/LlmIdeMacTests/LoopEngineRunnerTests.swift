@@ -199,6 +199,12 @@ final class LoopEngineRunnerTests: XCTestCase {
         }
         func revert(paths: [String], gitRoot: URL) async -> String? {
             revertedPaths.append(contentsOf: paths)
+            // A reverted path is clean on the next check (the post-throw re-check).
+            if revertError == nil, case .violated(let bad, let all) = result {
+                let left = bad.filter { !paths.contains($0) }
+                result = left.isEmpty ? .clean(changedPaths: all.filter { !paths.contains($0) })
+                                      : .violated(paths: left, allChangedPaths: all)
+            }
             return revertError
         }
     }
@@ -2772,7 +2778,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
 
         XCTAssertEqual(result, .blocked(reason: .repairOutOfScope(stageName: "Plan", paths: ["Makefile"])))
-        XCTAssertEqual(scopeGuard.checkCount, 1)
+        XCTAssertEqual(scopeGuard.checkCount, 2, "checked, then re-checked after the throw")
         XCTAssertTrue(scopeGuard.revertedPaths.isEmpty)
     }
 

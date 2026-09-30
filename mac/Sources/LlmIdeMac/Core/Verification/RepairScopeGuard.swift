@@ -79,6 +79,12 @@ protocol RepairScopeGuarding: AnyObject {
     /// before the edit and is not in HEAD cannot be restored and is left in
     /// place. Returns nil on success, else why not.
     func revertUnlisted(paths: [String], created: Set<String>, gitRoot: URL) async -> String?
+    /// As above, but told the pre-edit snapshot: a tracked file hidden from
+    /// `git status` (assume-unchanged / skip-worktree) is restored from HEAD
+    /// only when its pre-edit content equalled HEAD's blob — else the local
+    /// edit that was there first would be destroyed, so it is left in place.
+    func revertUnlisted(paths: [String], created: Set<String>, before: RepairScopeSnapshot,
+                        gitRoot: URL) async -> String?
 }
 
 extension RepairScopeGuarding {
@@ -86,6 +92,11 @@ extension RepairScopeGuarding {
     /// so, which keeps the violation (and the run) blocked.
     func revertUnlisted(paths: [String], created: Set<String>, gitRoot: URL) async -> String? {
         paths.isEmpty ? nil : "cannot restore unlisted path(s): \(paths.joined(separator: ", "))"
+    }
+
+    func revertUnlisted(paths: [String], created: Set<String>, before: RepairScopeSnapshot,
+                        gitRoot: URL) async -> String? {
+        await revertUnlisted(paths: paths, created: created, gitRoot: gitRoot)
     }
 }
 
@@ -111,6 +122,10 @@ struct RepairScopeSnapshot: Equatable {
     /// True when a snapshot probe's output was elided — `check` then fails
     /// closed with `.unverifiable`.
     var elided: Bool = false
+    /// Tracked files git hides from `status` (assume-unchanged / skip-worktree)
+    /// that could violate, with their content hash ("" when it could not be
+    /// taken). Their local content may differ from HEAD with no trace in git.
+    var hiddenHashes: [String: String] = [:]
 
     static func unusable(_ reason: String) -> RepairScopeSnapshot {
         RepairScopeSnapshot(dirtyPaths: [], usable: false, reason: reason)
@@ -161,13 +176,35 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
                 Self.canViolate($0, protectedGlobs: protectedGlobs, scopeGlobs: scopeGlobs)
             }
             let hashed = await hashes(of: worth, gitRoot: gitRoot)
-            return RepairScopeSnapshot(dirtyPaths: paths, usable: true, reason: nil,
-                                       contentHashes: hashed.hashes, elided: hashed.truncated)
+            var snap = RepairScopeSnapshot(dirtyPaths: paths, usable: true, reason: nil,
+                                           contentHashes: hashed.hashes, elided: hashed.truncated)
+            snap.hiddenHashes = await hiddenTracked(gitRoot: gitRoot, protectedGlobs: protectedGlobs,
+                                                    scopeGlobs: scopeGlobs)
+            return snap
         case .truncated:
             return RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil, elided: true)
         case .failure(let reason):
             return .unusable(reason)
         }
+    }
+
+    /// Tracked files marked assume-unchanged or skip-worktree (`git ls-files -v`
+    /// tags: lowercase, or `S`) that could violate, each with its content hash.
+    private func hiddenTracked(gitRoot: URL, protectedGlobs: [String],
+                               scopeGlobs: [String]) async -> [String: String] {
+        guard case .success(let output) = await run("git ls-files -v", gitRoot: gitRoot) else { return [:] }
+        var hidden = Set<String>()
+        for line in output.split(whereSeparator: \.isNewline) where line.count > 2 {
+            let tag = line.first!
+            let hides = tag == "S" || (tag.isLetter && tag.isLowercase)
+            let path = String(line.dropFirst(2))
+            if hides, Self.canViolate(path, protectedGlobs: protectedGlobs, scopeGlobs: scopeGlobs) {
+                hidden.insert(path)
+            }
+        }
+        guard !hidden.isEmpty else { return [:] }
+        let hashed = await hashes(of: hidden, gitRoot: gitRoot).hashes
+        return Dictionary(uniqueKeysWithValues: hidden.map { ($0, hashed[$0] ?? "") })
     }
 
     /// Whether an edit to `path` could be a violation: it is protected, or a
@@ -330,9 +367,27 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
     /// with embedded quotes escaped, since these strings come from git's own
     /// output rather than from a user but still reach a shell.
     func revertUnlisted(paths: [String], created: Set<String>, gitRoot: URL) async -> String? {
+        await revertUnlisted(paths: paths, created: created,
+                             before: RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil),
+                             gitRoot: gitRoot)
+    }
+
+    func revertUnlisted(paths: [String], created: Set<String>, before: RepairScopeSnapshot,
+                        gitRoot: URL) async -> String? {
         var failures: [String] = []
         for path in paths {
             if case .success = await run("git cat-file -e \(Self.shellQuoted(["HEAD:" + path]))", gitRoot: gitRoot) {
+                // Hidden from `status` before the edit: its local content may
+                // have been the user's own. Restore only if it equalled HEAD.
+                if let pre = before.hiddenHashes[path] {
+                    guard case .success(let head) = await run(
+                        "git rev-parse \(Self.shellQuoted(["HEAD:" + path]))", gitRoot: gitRoot),
+                          !pre.isEmpty, head.trimmingCharacters(in: .whitespacesAndNewlines) == pre else {
+                        failures.append("\(path) is hidden from git status (assume-unchanged/skip-worktree) and "
+                                        + "its pre-edit content differed from HEAD, so it was left in place")
+                        continue
+                    }
+                }
                 if case .failure(let reason) = await run("git checkout HEAD -- \(Self.shellQuoted([path]))",
                                                          gitRoot: gitRoot) {
                     failures.append(reason)

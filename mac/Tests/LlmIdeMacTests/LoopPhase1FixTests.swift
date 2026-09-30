@@ -91,6 +91,7 @@ final class LoopPhase1FixTests: XCTestCase {
         }
         func revert(paths: [String], gitRoot: URL) async -> String? {
             reverted.append(contentsOf: paths)
+            violation.removeAll { paths.contains($0) }   // a reverted path is clean on the next check
             return nil
         }
         private(set) var revertedUnlisted: [String] = []
@@ -449,5 +450,134 @@ final class LoopPhase1FixTests: XCTestCase {
         guard case .error(let message)? = status else { return XCTFail("expected .error") }
         XCTAssertTrue(message.contains("repo \(repoRoot.path) is not registered with the server"), message)
         XCTAssertEqual(skills.calls, 0)
+    }
+
+    // MARK: - Follow-up: too-broad roots, late writes, hidden tracked files
+
+    func testTooBroadRootRule() {
+        XCTAssertTrue(LoopRepoRoot.isTooBroad(URL(fileURLWithPath: "/")))
+        XCTAssertTrue(LoopRepoRoot.isTooBroad(URL(fileURLWithPath: NSHomeDirectory())))
+        XCTAssertTrue(LoopRepoRoot.isTooBroad(URL(fileURLWithPath: "/Users")))
+        XCTAssertTrue(LoopRepoRoot.isTooBroad(URL(fileURLWithPath: "/usr/local")))
+        XCTAssertFalse(LoopRepoRoot.isTooBroad(URL(fileURLWithPath: NSHomeDirectory() + "/code/app")))
+        XCTAssertFalse(LoopRepoRoot.isTooBroad(URL(fileURLWithPath: "/tmp/some/repo")))
+    }
+
+    func testTooBroadRootFailsTheStageAndSkipsRegistration() async {
+        let registrar = Registrar()
+        let skills = SkillExecutor()
+        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        let r = runner(skills: skills, approvals: approvals([]), registrar: registrar,
+                       scopeGuard: CancellationSensitiveGuard(violation: []))
+        let status = await r.run(config: skillConfig(), faultsRoot: repoRoot, gitRoot: home)
+        guard case .error(let message)? = status else { return XCTFail("expected .error, got \(String(describing: status))") }
+        XCTAssertTrue(message.contains("is too broad for a Loop agent (e.g. your home folder)"), message)
+        XCTAssertEqual(registrar.registered, [], "never sent to the server")
+        XCTAssertEqual(skills.calls, 0)
+    }
+
+    func testSweepGuardRegistersTheRepoBeforeTheRepairAndRefusesABroadOne() async throws {
+        let registrar = Registrar()
+        let scope = CancellationSensitiveGuard(violation: [])
+        let repairGuard = ProtectedPathRepairGuard.make(scopeGuard: scope, registrar: registrar)
+        var order: [String] = []
+        let root = URL(fileURLWithPath: "/tmp/r")
+        _ = try await repairGuard(root) { _ in order.append("repair:\(registrar.registered.count)"); return LoopAgentResult() }
+        XCTAssertEqual(registrar.registered, [root])
+        XCTAssertEqual(order, ["repair:1"], "registered before the repair ran")
+
+        var ran = false
+        do {
+            _ = try await repairGuard(URL(fileURLWithPath: NSHomeDirectory())) { _ in ran = true; return LoopAgentResult() }
+            XCTFail("expected a too-broad refusal")
+        } catch { XCTAssertTrue(error is LoopRepoRoot.TooBroadError) }
+        XCTAssertFalse(ran)
+        XCTAssertEqual(registrar.registered.count, 1)
+    }
+
+    /// Reports clean on the first check and a violation on the next: the write
+    /// lands just after the client aborted.
+    final class LateWriteGuard: RepairScopeGuarding {
+        private(set) var checks = 0
+        private(set) var reverted: [String] = []
+        func snapshot(gitRoot: URL, protectedGlobs: [String], scopeGlobs: [String]) async -> RepairScopeSnapshot {
+            RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil)
+        }
+        func check(since snapshot: RepairScopeSnapshot, gitRoot: URL,
+                   protectedGlobs: [String]) async -> RepairScopeCheck {
+            checks += 1
+            return checks == 1 ? .clean(changedPaths: [])
+                : .violated(paths: ["Tests/LateTests.swift"], allChangedPaths: ["Tests/LateTests.swift"])
+        }
+        func revert(paths: [String], gitRoot: URL) async -> String? { reverted += paths; return nil }
+    }
+
+    func testAWriteLandingJustAfterTheAbortIsStillCaught() async {
+        let started = expectation(description: "repair started")
+        let repairer = Repairer()
+        repairer.body = {
+            started.fulfill()
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+            return LoopAgentResult()
+        }
+        let scope = LateWriteGuard()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 3, protectedPathPolicy: .revert)
+        let r = runner(verifier: Verifier { _ in VerifyOutcome(exitCode: 1, output: "1 failure") },
+                       repairer: repairer, approvals: approvals([("t", "swift test")]),
+                       journal: Journal(), scopeGuard: scope)
+        r.postThrowRecheckNanos = 20_000_000
+        let root = repoRoot
+        let task = Task { await r.run(config: config, faultsRoot: root, gitRoot: root) }
+        await fulfillment(of: [started], timeout: 10)
+        task.cancel()
+        _ = await task.value
+        XCTAssertEqual(scope.checks, 2, "re-checked after the pause")
+        XCTAssertEqual(scope.reverted, ["Tests/LateTests.swift"])
+    }
+
+    // Real git: an assume-unchanged file whose local content differs from HEAD
+    // is the user's own edit — never overwritten; one equal to HEAD is restored.
+    func testRevertUnlistedNeverClobbersAHiddenLocalEdit() async throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("p1fix-hidden-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: root.appendingPathComponent("tests"), withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        func git(_ args: String...) throws {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.arguments = ["-C", root.path] + args
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            try p.run(); p.waitUntilExit()
+            XCTAssertEqual(p.terminationStatus, 0, "git \(args)")
+        }
+        func write(_ name: String, _ text: String) throws {
+            try text.write(to: root.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        try write("tests/mine.txt", "v1\n")
+        try write("tests/same.txt", "v1\n")
+        try git("init", "-q")
+        try git("add", ".")
+        try git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init")
+        try git("update-index", "--assume-unchanged", "tests/mine.txt", "tests/same.txt")
+        try write("tests/mine.txt", "my local edit\n")   // invisible to git status
+
+        let guardUnderTest = GitRepairScopeGuard()
+        let before = await guardUnderTest.snapshot(gitRoot: root)
+        XCTAssertEqual(Set(before.hiddenHashes.keys), ["tests/mine.txt", "tests/same.txt"])
+        try write("tests/mine.txt", "rigged\n")
+        try write("tests/same.txt", "rigged\n")
+
+        let error = await guardUnderTest.revertUnlisted(
+            paths: ["tests/mine.txt", "tests/same.txt"], created: [], before: before, gitRoot: root)
+
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("tests/mine.txt"), encoding: .utf8),
+                       "rigged\n", "left in place: HEAD's blob is not the user's pre-edit content")
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("tests/same.txt"), encoding: .utf8),
+                       "v1\n", "pre-edit content equalled HEAD, so it is restored")
+        XCTAssertTrue(error?.contains("tests/mine.txt") == true, String(describing: error))
+        XCTAssertFalse(error?.contains("tests/same.txt") == true)
     }
 }

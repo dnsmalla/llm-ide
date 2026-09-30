@@ -756,7 +756,7 @@ extension AutoCodeUpdateService {
         // test it is meant to satisfy. RegressionRunner refuses to repair
         // without one.
         let logStore = self.logStore
-        let repairGuard = ProtectedPathRepairGuard.make(log: { line in
+        let repairGuard = ProtectedPathRepairGuard.make(registrar: APILoopRepoRegistrar(api: api), log: { line in
             logStore.append(.regression, line, level: .error)
         })
         await runner.run(faultsRoot: faultsRoot, gitRoot: gitRootURL,

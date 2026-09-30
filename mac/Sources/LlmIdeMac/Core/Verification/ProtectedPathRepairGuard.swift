@@ -12,8 +12,18 @@ enum ProtectedPathRepairGuard {
 
     static func make(scopeGuard: RepairScopeGuarding = GitRepairScopeGuard(),
                      protectedGlobs: [String] = GitRepairScopeGuard.defaultProtectedGlobs,
+                     registrar: LoopRepoRegistering? = nil,
                      log: @escaping @MainActor (String) -> Void = { _ in }) -> FaultRepairGuard {
         { repoRoot, repair in
+            // The repair's agent call is refused by the server unless the repo
+            // is on the allow-list — register it first, as the Loop does. A
+            // failure (or a too-broad root) rejects the repair before any edit.
+            if let registrar {
+                do { try await LoopRepoRoot.register(registrar, root: repoRoot) } catch {
+                    if !(error is CancellationError) { log("repair rejected: \(error.localizedDescription)") }
+                    throw error
+                }
+            }
             let before = await scopeGuard.snapshot(gitRoot: repoRoot, protectedGlobs: protectedGlobs,
                                                    scopeGlobs: [])
             var reported = Set<String>()
@@ -79,7 +89,8 @@ enum ProtectedPathRepairGuard {
             errors.append(error)
         }
         if !others.isEmpty,
-           let error = await scopeGuard.revertUnlisted(paths: others, created: created, gitRoot: repoRoot) {
+           let error = await scopeGuard.revertUnlisted(paths: others, created: created, before: before,
+                                                      gitRoot: repoRoot) {
             errors.append(error)
         }
         let note = errors.isEmpty ? "reverted" : "could not revert all of them: \(errors.joined(separator: "; "))"
