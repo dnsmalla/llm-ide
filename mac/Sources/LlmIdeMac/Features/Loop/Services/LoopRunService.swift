@@ -31,6 +31,25 @@ final class LoopRunService: ObservableObject {
     weak var activity: ActivityStore?
     weak var logStore: (any TaskLogWriting)?
 
+    /// A run on the Auto Task loop lane (started from the phone or the
+    /// schedule), keyed like `activeKeys`. The Loop page shows it and routes
+    /// its Stop to `cancelLoopLane` instead of pretending nothing is running.
+    struct LaneRun {
+        let runner: LoopEngineRunner
+        let trigger: LoopRunTrigger
+        /// Who started it, for the page's wording.
+        var source: String { trigger == .phone ? "phone" : "schedule" }
+        /// "Running (started from phone)" — the live header's label.
+        var label: String { "Running (started from \(source))" }
+    }
+    @Published private(set) var laneRuns: [String: LaneRun] = [:]
+    /// Stops the loop lane. Wired at boot by the Shell (the lane belongs to
+    /// the Auto Task scheduler, which Loop must not name).
+    var cancelLoopLane: (() -> Void)?
+
+    /// Which run a Stop pressed on the Loop page addresses.
+    enum StopTarget: Equatable { case desktop, lane, none }
+
     private let api: LlmIdeAPIClient
     private var runners: [String: LoopEngineRunner] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
@@ -144,6 +163,40 @@ final class LoopRunService: ObservableObject {
         let prefix = "\(projectId)::"
         for (key, task) in tasks where key.hasPrefix(prefix) {
             task.cancel()
+        }
+    }
+
+    /// Registers a runner `LoopRunnerProvider` made for the loop lane, so its
+    /// runs appear in `laneRuns` while admitted.
+    func attachLaneRunner(_ runner: LoopEngineRunner, trigger: LoopRunTrigger) {
+        runner.onAdmissionChange = { [weak self, weak runner] projectId, loopId, active in
+            guard let self, let runner, let projectId else { return }
+            let key = Self.key(projectId: projectId, loopId: loopId)
+            if active {
+                self.laneRuns[key] = LaneRun(runner: runner, trigger: trigger)
+            } else if self.laneRuns[key]?.runner === runner {
+                self.laneRuns[key] = nil
+            }
+        }
+    }
+
+    /// The lane run in flight (or queued) for this loop, if any.
+    func laneRun(projectId: String, loopId: String) -> LaneRun? {
+        laneRuns[Self.key(projectId: projectId, loopId: loopId)]
+    }
+
+    /// A desktop run is this page's own and wins; otherwise a lane run.
+    static func stopTarget(desktopActive: Bool, laneActive: Bool) -> StopTarget {
+        desktopActive ? .desktop : (laneActive ? .lane : .none)
+    }
+
+    /// Stop whichever run the Loop page is showing for this loop.
+    func stopShownRun(projectId: String, loopId: String) {
+        switch Self.stopTarget(desktopActive: tasks[Self.key(projectId: projectId, loopId: loopId)] != nil,
+                               laneActive: laneRun(projectId: projectId, loopId: loopId) != nil) {
+        case .desktop: stop(projectId: projectId, loopId: loopId)
+        case .lane: cancelLoopLane?()
+        case .none: break
         }
     }
 

@@ -397,7 +397,7 @@ struct LoopEngineView: View {
             Divider()
             RunnerObserver(runner: runner) {
                 Button("Run this stage only") { startRun(only: stage) }
-                    .disabled(runner.running || activeGitRootURL == nil)
+                    .disabled(runner.running || laneRun != nil || activeGitRootURL == nil)
             }
             Divider()
             Button("Duplicate") { duplicateStage(stage) }
@@ -565,6 +565,13 @@ struct LoopEngineView: View {
         RunnerObserver(runner: runner) { toolbarContent }
     }
 
+    /// A phone/schedule run of THIS loop on the Auto Task lane — shown in the
+    /// live header, stoppable here, and it blocks Run while in flight.
+    private var laneRun: LoopRunService.LaneRun? {
+        guard let projectId = activeProjectId else { return nil }
+        return runService.laneRun(projectId: projectId, loopId: loopId)
+    }
+
     private var toolbarContent: some View {
         HStack(spacing: Spacing.md) {
             Button(runner.waitingInQueue ? "Queued…"
@@ -577,8 +584,14 @@ struct LoopEngineView: View {
             // Run and the runner's own `running`/`waitingInQueue` flipping —
             // without it a fast double-click reached the service's refusal
             // path and reported "already busy" for a run that DID start.
-            .disabled(runner.running || runner.waitingInQueue || isStartPending
+            .disabled(runner.running || runner.waitingInQueue || isStartPending || laneRun != nil
                       || !stages.contains(where: \.enabled) || activeGitRootURL == nil)
+            .help(laneRun.map { "\($0.label) — stop it before running from here." } ?? "")
+            if let lane = laneRun, !runner.running {
+                Button("Stop") { stopRun() }
+                    .controlSize(.small)
+                    .help("Stop the run started from \(lane.source)")
+            }
             if runner.running {
                 // The service owns the run's Task; cancelling it makes
                 // `Task.isCancelled` true on the same task `runner.run` is
@@ -1160,7 +1173,36 @@ struct LoopEngineView: View {
     /// rather than this page's editable config state, so it describes the run
     /// actually executing even after the user edits budgets mid-run.
     private var liveRunHeader: some View {
-        RunnerObserver(runner: runner) { liveRunHeaderContent }
+        RunnerObserver(runner: runner) {
+            if let lane = laneRun, !runner.running, !runner.waitingInQueue {
+                RunnerObserver(runner: lane.runner) { laneRunHeader(lane) }
+            } else {
+                liveRunHeaderContent
+            }
+        }
+    }
+
+    /// Compact live header for a phone/schedule run of this loop.
+    private func laneRunHeader(_ lane: LoopRunService.LaneRun) -> some View {
+        let t = theme.current
+        return HStack(spacing: 6) {
+            ProgressView().controlSize(.small)
+            Text(lane.runner.waitingInQueue ? "Queued (started from \(lane.source))"
+                                            : lane.label)
+                .font(Typography.captionStrong)
+                .foregroundStyle(t.text)
+            if lane.runner.running {
+                Text("· iteration \(lane.runner.iteration)/\(lane.runner.runMaxIterations)"
+                     + (lane.runner.currentStageName.map { " · \($0)" } ?? ""))
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.sm)
     }
 
     @ViewBuilder
@@ -1571,7 +1613,8 @@ struct LoopEngineView: View {
         else { return }
         // Fail-closed twin of the Run button's `isStartPending` disable —
         // "Run this stage only" lives in a menu the disable doesn't cover.
-        guard !runService.isRunning(projectId: projectId, loopId: loopId) else { return }
+        guard !runService.isRunning(projectId: projectId, loopId: loopId),
+              runService.laneRun(projectId: projectId, loopId: loopId) == nil else { return }
         // Only after every refusal path: a refused start must not close the
         // journal record the user was reading.
         clearPastRunInspection()
@@ -1615,7 +1658,7 @@ struct LoopEngineView: View {
     /// its Task.
     private func stopRun() {
         guard let projectId = activeProjectId else { return }
-        runService.stop(projectId: projectId, loopId: loopId)
+        runService.stopShownRun(projectId: projectId, loopId: loopId)
     }
 
     private func pauseRun() {

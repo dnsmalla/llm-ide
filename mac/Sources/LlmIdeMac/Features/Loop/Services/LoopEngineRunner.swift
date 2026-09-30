@@ -129,6 +129,10 @@ final class LoopEngineRunner: ObservableObject {
     /// they got the terminal outcome and nothing else. A sink at the single
     /// append site is enough to fix that without moving any ownership.
     var onLog: ((LoopLogLine) -> Void)?
+    /// Called when a run is admitted (`true`, before any queue wait) and when
+    /// it ends (`false`), with the run's project and loop. `LoopRunService`
+    /// uses it to show — and stop — a lane run on the Loop page.
+    var onAdmissionChange: ((_ projectId: String?, _ loopId: String, _ active: Bool) -> Void)?
 
     /// Whether ANY runner instance is mid-run on `gitRoot`, resolved the same
     /// way `LoopRunQueue` keys it. Read-only view of the process-wide lock, for
@@ -427,7 +431,11 @@ final class LoopEngineRunner: ObservableObject {
             return nil
         }
         isAdmitted = true
-        defer { isAdmitted = false }
+        onAdmissionChange?(projectId, loopId, true)
+        defer {
+            isAdmitted = false
+            onAdmissionChange?(projectId, loopId, false)
+        }
         let mainGitRoot = gitRoot
         let mainRootKey = mainGitRoot.resolvingSymlinksInPath().path
         var runGitRoot = mainGitRoot

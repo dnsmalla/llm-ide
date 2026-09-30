@@ -157,3 +157,63 @@ final class LoopHonestVerdictTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Item 4: the Loop page sees and stops lane runs
+
+@MainActor
+final class LoopLaneRunRoutingTests: XCTestCase {
+    typealias P1 = LoopPhase1FixTests
+
+    override func tearDown() {
+        LoopRunQueue._resetForTesting()
+        LoopWorktreeManager._resetForTesting()
+        super.tearDown()
+    }
+
+    /// Records whether the page could see the lane run while a stage ran.
+    final class ObservingSkill: LoopSkillExecuting {
+        var observe: @MainActor () -> Void = {}
+        func execute(skillId: String, targetPath: String?, message: String,
+                     repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult {
+            await observe()
+            return LoopAgentResult()
+        }
+    }
+
+    func testStopTargetPrefersTheDesktopRunThenTheLane() {
+        XCTAssertEqual(LoopRunService.stopTarget(desktopActive: true, laneActive: true), .desktop)
+        XCTAssertEqual(LoopRunService.stopTarget(desktopActive: false, laneActive: true), .lane)
+        XCTAssertEqual(LoopRunService.stopTarget(desktopActive: false, laneActive: false), .none)
+    }
+
+    func testLaneRunIsVisibleWhileAdmittedAndItsStopRoutesToTheLane() async {
+        let service = LoopRunService(api: LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456"))
+        var laneCancels = 0
+        service.cancelLoopLane = { laneCancels += 1 }
+        let skill = ObservingSkill()
+        let runner = LoopEngineRunner(
+            verifier: P1.Verifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: P1.Repairer(), regressionSweep: P1.Sweep(), skillExecutor: skill,
+            approvals: VerifyApprovalStore(defaults: UserDefaults(suiteName: "lane-\(UUID().uuidString)")!),
+            stageTimeout: 600, journal: P1.Journal(), summaryWriter: P1.Summary(),
+            scopeGuard: P1.CancellationSensitiveGuard(violation: []), repoRegistrar: nil,
+            transportRetryDelay: 0)
+        service.attachLaneRunner(runner, trigger: .phone)
+        var seen: LoopRunService.LaneRun?
+        skill.observe = {
+            seen = service.laneRun(projectId: "p", loopId: "L")
+            service.stopShownRun(projectId: "p", loopId: "L")
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("lane-\(UUID().uuidString)")
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "s", name: "Plan", kind: .skill, order: 0, skillId: "fam/plan")
+        ], maxIterations: 1)
+        _ = await runner.run(config: config, faultsRoot: root, gitRoot: root, projectId: "p", loopId: "L")
+
+        XCTAssertTrue(seen?.runner === runner, "the page sees the lane run while it is in flight")
+        XCTAssertEqual(seen?.label, "Running (started from phone)")
+        XCTAssertEqual(laneCancels, 1, "the page's Stop reached the lane")
+        XCTAssertNil(service.laneRun(projectId: "p", loopId: "L"), "cleared once the run ends")
+        XCTAssertNil(service.laneRun(projectId: "p", loopId: "other"))
+    }
+}

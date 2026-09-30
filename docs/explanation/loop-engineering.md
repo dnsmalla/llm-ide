@@ -480,7 +480,10 @@ Application Support until removed by hand.
 Loop runs execute on their own lane in the Auto Task service, separate from the
 other Auto Tasks: a running loop does not block them and they do not block it, while
 two loop sweeps never overlap and runs on one git root still queue (`LoopRunQueue`).
-Each lane has its own Stop. A stage with no `timeoutSeconds` inherits the app
+Each lane has its own Stop. The Loop page also shows a lane run of the loop it is
+open on — "Running (started from phone)" or "(started from schedule)" in the live
+header — routes its Stop to the lane, and disables Run until that run ends
+(`LoopRunService.laneRuns`, fed by `LoopRunnerProvider`). A stage with no `timeoutSeconds` inherits the app
 defaults (Loop page → New project defaults: 30 min shell, 20 min agent; 0 = no
 limit), every shell stage, agent call and regression-sweep verify is clamped to the
 run's remaining wall-clock budget, and once the budget is used up no repair starts.
