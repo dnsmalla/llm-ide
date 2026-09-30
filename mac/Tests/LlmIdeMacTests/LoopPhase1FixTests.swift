@@ -93,6 +93,13 @@ final class LoopPhase1FixTests: XCTestCase {
             reverted.append(contentsOf: paths)
             return nil
         }
+        private(set) var revertedUnlisted: [String] = []
+        private(set) var unlistedCreated: Set<String> = []
+        func revertUnlisted(paths: [String], created: Set<String>, gitRoot: URL) async -> String? {
+            revertedUnlisted.append(contentsOf: paths)
+            unlistedCreated = created
+            return nil
+        }
     }
 
     private func approvals(_ stages: [(String, String)]) -> VerifyApprovalStore {
@@ -313,5 +320,90 @@ final class LoopPhase1FixTests: XCTestCase {
         _ = await r.run(config: skillConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
         XCTAssertEqual(skills.timeouts.count, 1)
         XCTAssertNil(skills.timeouts.first ?? nil, "nil → the server's default budget")
+    }
+
+    // MARK: - P4: the agent's own changedPaths reach the guard
+
+    func testIgnoredProtectedWriteReportedByTheAgentIsSeenAndReverted() async {
+        var runs = 0
+        let repairer = Repairer()
+        repairer.body = {
+            // git status cannot see these (ignored); only the server's list can.
+            LoopAgentResult(changedPaths: ["tests/fixtures/expected.json", "src/app.swift"],
+                            createdPaths: ["tests/fixtures/expected.json"])
+        }
+        let scope = CancellationSensitiveGuard(violation: [])
+        let journal = Journal()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 3, protectedPathPolicy: .revert)
+        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs == 1 ? 1 : 0, output: "x") },
+                       repairer: repairer, approvals: approvals([("t", "swift test")]),
+                       journal: journal, scopeGuard: scope)
+        let status = await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        guard case .blocked? = status else { return XCTFail("expected .blocked, got \(String(describing: status))") }
+        XCTAssertEqual(scope.revertedUnlisted, ["tests/fixtures/expected.json"])
+        XCTAssertEqual(scope.unlistedCreated, ["tests/fixtures/expected.json"])
+        XCTAssertEqual(scope.reverted, [], "nothing git listed needed reverting")
+        let attempt = journal.written.last?.iterations.first?.attempts.first
+        XCTAssertEqual(attempt?.changedPaths, ["src/app.swift", "tests/fixtures/expected.json"])
+        XCTAssertEqual(attempt?.scopeVerdict, .violatedReverted)
+    }
+
+    func testReportedWriteOfAnUnprotectedPathStaysClean() async {
+        var runs = 0
+        let repairer = Repairer()
+        repairer.body = { LoopAgentResult(changedPaths: ["build/cache.txt"]) }
+        let journal = Journal()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 3, protectedPathPolicy: .revert)
+        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs == 1 ? 1 : 0, output: "x") },
+                       repairer: repairer, approvals: approvals([("t", "swift test")]),
+                       journal: journal, scopeGuard: CancellationSensitiveGuard(violation: []))
+        let status = await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(status, .success)
+        XCTAssertEqual(journal.written.last?.iterations.first?.attempts.first?.changedPaths, ["build/cache.txt"])
+    }
+
+    // Real git: restore a tracked ignored file from HEAD, delete a created one,
+    // and never delete an ignored file that was there before the edit.
+    func testGitRevertUnlistedRestoresTrackedDeletesCreatedKeepsPreexisting() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("p1fix-unlisted-\(UUID().uuidString)", isDirectory: true)
+        let fm = FileManager.default
+        try fm.createDirectory(at: root.appendingPathComponent("gen"), withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        try "gen/\n".write(to: root.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+        try "v1\n".write(to: root.appendingPathComponent("gen/tracked.txt"), atomically: true, encoding: .utf8)
+        func git(_ args: String...) throws {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.arguments = ["-C", root.path] + args
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            try p.run(); p.waitUntilExit()
+            XCTAssertEqual(p.terminationStatus, 0, "git \(args)")
+        }
+        try git("init", "-q")
+        try git("add", ".gitignore")
+        try git("add", "-f", "gen/tracked.txt")
+        try git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init")
+        try "local\n".write(to: root.appendingPathComponent("gen/preexisting.txt"), atomically: true, encoding: .utf8)
+        // The agent's edits:
+        try "rigged\n".write(to: root.appendingPathComponent("gen/tracked.txt"), atomically: true, encoding: .utf8)
+        try "new\n".write(to: root.appendingPathComponent("gen/created.txt"), atomically: true, encoding: .utf8)
+        try "rigged\n".write(to: root.appendingPathComponent("gen/preexisting.txt"), atomically: true, encoding: .utf8)
+
+        let error = await GitRepairScopeGuard().revertUnlisted(
+            paths: ["gen/tracked.txt", "gen/created.txt", "gen/preexisting.txt"],
+            created: ["gen/created.txt"], gitRoot: root)
+
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("gen/tracked.txt"), encoding: .utf8), "v1\n")
+        XCTAssertFalse(fm.fileExists(atPath: root.appendingPathComponent("gen/created.txt").path))
+        XCTAssertTrue(fm.fileExists(atPath: root.appendingPathComponent("gen/preexisting.txt").path),
+                      "a file that existed before the edit is never deleted")
+        XCTAssertTrue(error?.contains("gen/preexisting.txt") == true, String(describing: error))
     }
 }

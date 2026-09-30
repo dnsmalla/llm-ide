@@ -36,6 +36,9 @@ struct LoopAgentResult: Equatable, Sendable {
     /// Absolute paths the agent edited inside an accepted extra root (the
     /// project's `llm-doc/` in the split layout).
     var changedExtraPaths: [String]
+    /// The subset of `changedPaths` a Write created (no file was there
+    /// before) — the only ones the Loop's guard may delete to undo an edit.
+    var createdPaths: [String]
     var usage: Usage?
     var resolvedSkills: [String]
     /// Skill ids the server could not find. Non-empty means the server did
@@ -49,13 +52,14 @@ struct LoopAgentResult: Equatable, Sendable {
     var denied: [Denial]
 
     init(reply: String = "", changedPaths: [String] = [], changedExtraPaths: [String] = [],
-         usage: Usage? = nil,
+         createdPaths: [String] = [], usage: Usage? = nil,
          resolvedSkills: [String] = [], unresolvedSkills: [String] = [],
          truncatedSkills: [String] = [], ran: Bool = true,
          resultSubtype: String? = "success", denied: [Denial] = []) {
         self.reply = reply
         self.changedPaths = changedPaths
         self.changedExtraPaths = changedExtraPaths
+        self.createdPaths = createdPaths
         self.usage = usage
         self.resolvedSkills = resolvedSkills
         self.unresolvedSkills = unresolvedSkills

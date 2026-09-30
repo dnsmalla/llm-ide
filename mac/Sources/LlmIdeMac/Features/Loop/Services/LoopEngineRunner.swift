@@ -717,9 +717,13 @@ final class LoopEngineRunner: ObservableObject {
             guard let self else { return false }
             let guarded = await self.withScopeGuard(stage: stage, config: config, gitRoot: repoRoot,
                                                     scopeGlobs: scopeGlobs) {
-                _ = try await self.withTransportRetry(stage: stage) {
+                let result = try await self.withTransportRetry(stage: stage) {
                     try await repair(self.agentTimeout(for: stage))
                 }
+                if let note = Self.agentRunNote(result) {
+                    self.appendLog(.warn, "  [\(stage.name)] fault repair: \(note)")
+                }
+                return result
             }
             switch guarded {
             case .failed(let error, let verdict, let violations, let changed):
@@ -955,6 +959,7 @@ final class LoopEngineRunner: ObservableObject {
                     stageName: stage.name, command: command, failureOutput: failureOutput,
                     evidence: evidence, repoRoot: gitRoot, timeout: self.agentTimeout(for: stage))
             }
+            return repairResult
         }
         let repairDuration = Date().timeIntervalSince(repairStartedAt)
         let repairIndex = used + 1
@@ -1146,6 +1151,7 @@ final class LoopEngineRunner: ObservableObject {
                     skillId: skillId, targetPath: stage.targetPath, message: message,
                     repoRoot: gitRoot, extraRoots: extraRoots, timeout: self.agentTimeout(for: stage))
             }
+            return agentResult
         }
         let duration = Date().timeIntervalSince(startedAt)
         lastSkillResults[stage.id] = agentResult
@@ -1365,16 +1371,24 @@ final class LoopEngineRunner: ObservableObject {
 
     private func withScopeGuard(stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
                                 scopeGlobs: [String] = [],
-                                edit: () async throws -> Void) async -> GuardedEditResult {
+                                edit: () async throws -> LoopAgentResult?) async -> GuardedEditResult {
         guard Self.effectivePolicy(for: stage, config: config) != .off else {
-            do { try await edit() } catch { return .failed(error, .notChecked, violations: [], changed: []) }
+            do { _ = try await edit() } catch { return .failed(error, .notChecked, violations: [], changed: []) }
             return .completed(.notChecked, violations: [], changed: [])
         }
 
         let before = await scopeGuard.snapshot(gitRoot: gitRoot, protectedGlobs: config.protectedGlobs,
                                                scopeGlobs: scopeGlobs)
         var thrown: Error?
-        do { try await edit() } catch { thrown = error }
+        // What the agent says it wrote. `git status` cannot see an ignored
+        // file, so the server's own list is part of the changed set too.
+        var reported = AgentReportedEdits()
+        do {
+            if let result = try await edit() {
+                reported = AgentReportedEdits(paths: Set(result.changedPaths),
+                                              created: Set(result.createdPaths))
+            }
+        } catch { thrown = error }
         // Checked in a task of its own, which a Stop does not cancel: after a
         // Stop the edit's task is cancelled, the guard's git probes would fail
         // in it (`.indeterminate`, fail-open) and whatever the agent wrote
@@ -1382,7 +1396,7 @@ final class LoopEngineRunner: ObservableObject {
         // completion; the cancellation still propagates from `thrown`.
         let checked = await Task { @MainActor in
             await self.checkScope(since: before, stage: stage, config: config,
-                                  gitRoot: gitRoot, scopeGlobs: scopeGlobs)
+                                  gitRoot: gitRoot, scopeGlobs: scopeGlobs, reported: reported)
         }.value
         guard let thrown else { return checked }
         switch checked {
@@ -1393,20 +1407,25 @@ final class LoopEngineRunner: ObservableObject {
         }
     }
 
+    /// What an agent run said it wrote (repo-relative), and which of those
+    /// files it created. `git status` cannot see an ignored file, so a write
+    /// there is only visible through this list.
+    struct AgentReportedEdits {
+        var paths: Set<String> = []
+        var created: Set<String> = []
+    }
+
     /// The check-and-handle half of `withScopeGuard`, run after the edit
     /// whether it returned or threw.
     private func checkScope(since before: RepairScopeSnapshot, stage: LoopStage,
                             config: LoopEngineConfig, gitRoot: URL,
-                            scopeGlobs: [String]) async -> GuardedEditResult {
+                            scopeGlobs: [String],
+                            reported: AgentReportedEdits = AgentReportedEdits()) async -> GuardedEditResult {
         switch await scopeGuard.check(since: before, gitRoot: gitRoot,
                                       protectedGlobs: config.protectedGlobs) {
         case .clean(let changed):
-            let outOfScope = Self.outOfScopePaths(changed, scopeGlobs: scopeGlobs)
-            guard outOfScope.isEmpty else {
-                return await handleViolation(outOfScope, changed: changed, stage: stage,
-                                             config: config, gitRoot: gitRoot, before: before)
-            }
-            return .completed(.clean, violations: [], changed: changed)
+            return await judge(gitChanged: changed, gitViolations: [], reported: reported, stage: stage,
+                               config: config, gitRoot: gitRoot, scopeGlobs: scopeGlobs, before: before)
 
         case .indeterminate(let reason):
             // Fail-open, and say so. Refusing to run the loop wherever git cannot
@@ -1415,9 +1434,16 @@ final class LoopEngineRunner: ObservableObject {
             // unverified repair, which is what every run did before this guard
             // existed. The verdict is recorded as `.indeterminate`, never
             // `.clean`, so a journal reader is not told a check passed when it
-            // never ran.
+            // never ran. The agent's own list of writes is still judged.
             appendLog(.warn, "  [\(stage.name)] protected-path check could not run: \(reason)")
-            return .completed(.indeterminate, violations: [], changed: [])
+            let paths = reported.paths.sorted()
+            let hits = Self.violatingPaths(paths, protectedGlobs: config.protectedGlobs, scopeGlobs: scopeGlobs)
+            guard !hits.isEmpty else { return .completed(.indeterminate, violations: [], changed: paths) }
+            // Blocked, not reverted: with no usable snapshot there is no way to
+            // tell the agent's edit from uncommitted work that was there first.
+            appendLog(.error, "  [\(stage.name)] the agent reported editing protected/out-of-scope path(s): "
+                      + hits.joined(separator: ", "))
+            return .completed(.violated, violations: hits, changed: paths)
 
         case .unverifiable(let reason):
             // Fail-CLOSED: the check ran but saw an incomplete list, so a
@@ -1427,10 +1453,37 @@ final class LoopEngineRunner: ObservableObject {
             return .completed(.violated, violations: ["(unverifiable: \(reason))"], changed: [])
 
         case .violated(let paths, let changed):
-            let outOfScope = Self.outOfScopePaths(changed, scopeGlobs: scopeGlobs)
-            let merged = Array(Set(paths).union(outOfScope)).sorted()
-            return await handleViolation(merged, changed: changed, stage: stage,
-                                         config: config, gitRoot: gitRoot, before: before)
+            return await judge(gitChanged: changed, gitViolations: paths, reported: reported, stage: stage,
+                               config: config, gitRoot: gitRoot, scopeGlobs: scopeGlobs, before: before)
+        }
+    }
+
+    /// Merges git's view of an edit with the agent's reported writes and
+    /// applies the policy. A reported path git did not list (typically an
+    /// ignored file) that was not dirty before is the agent's edit too, and is
+    /// matched against the protected and scope globs like any other.
+    private func judge(gitChanged: [String], gitViolations: [String], reported: AgentReportedEdits,
+                       stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
+                       scopeGlobs: [String], before: RepairScopeSnapshot) async -> GuardedEditResult {
+        let gitSet = Set(gitChanged)
+        let unlisted = reported.paths.subtracting(gitSet).subtracting(before.dirtyPaths)
+        let merged = gitSet.union(unlisted).sorted()
+        let unlistedHits = Self.violatingPaths(unlisted.sorted(), protectedGlobs: config.protectedGlobs,
+                                               scopeGlobs: [])
+        let violations = Set(gitViolations).union(unlistedHits)
+            .union(Self.outOfScopePaths(merged, scopeGlobs: scopeGlobs)).sorted()
+        guard !violations.isEmpty else { return .completed(.clean, violations: [], changed: merged) }
+        return await handleViolation(violations, changed: merged, stage: stage, config: config,
+                                     gitRoot: gitRoot, before: before,
+                                     unlisted: unlisted, created: reported.created)
+    }
+
+    /// `paths` that match a protected glob or fall outside the scope allowlist.
+    private static func violatingPaths(_ paths: [String], protectedGlobs: [String],
+                                       scopeGlobs: [String]) -> [String] {
+        let outOfScope = Set(outOfScopePaths(paths, scopeGlobs: scopeGlobs))
+        return paths.filter { path in
+            outOfScope.contains(path) || protectedGlobs.contains { GlobMatch.matches(path: path, pattern: $0) }
         }
     }
 
@@ -1454,9 +1507,15 @@ final class LoopEngineRunner: ObservableObject {
     /// Factored out of the old inline `.violated` branch so the scope-allowlist
     /// path (which can reach a violation from a `.clean` scope-guard result)
     /// gets identical policy handling instead of a second copy of it.
+    /// `unlisted` are paths only the agent reported (git did not list them —
+    /// ignored files): they are restored from HEAD when tracked there, else
+    /// deleted only when the agent CREATED them (`created`), never a file that
+    /// existed before the edit.
     private func handleViolation(_ paths: [String], changed: [String], stage: LoopStage,
                                  config: LoopEngineConfig, gitRoot: URL,
-                                 before: RepairScopeSnapshot) async -> GuardedEditResult {
+                                 before: RepairScopeSnapshot,
+                                 unlisted: Set<String> = [],
+                                 created: Set<String> = []) async -> GuardedEditResult {
         appendLog(.error, "  [\(stage.name)] repair edited protected/out-of-scope path(s): \(paths.joined(separator: ", "))")
         guard Self.effectivePolicy(for: stage, config: config) == .revert else {
             return .completed(.violated, violations: paths, changed: changed)
@@ -1474,8 +1533,19 @@ final class LoopEngineRunner: ObservableObject {
         guard !revertable.isEmpty else {
             return .completed(.violated, violations: paths, changed: changed)
         }
-        if let error = await scopeGuard.revert(paths: revertable, gitRoot: gitRoot) {
-            appendLog(.error, "  [\(stage.name)] could not revert protected/out-of-scope path(s): \(error)")
+        var errors: [String] = []
+        let listed = revertable.filter { !unlisted.contains($0) }
+        let unlistedRevertable = revertable.filter { unlisted.contains($0) }
+        if !listed.isEmpty, let error = await scopeGuard.revert(paths: listed, gitRoot: gitRoot) {
+            errors.append(error)
+        }
+        if !unlistedRevertable.isEmpty,
+           let error = await scopeGuard.revertUnlisted(paths: unlistedRevertable, created: created,
+                                                       gitRoot: gitRoot) {
+            errors.append(error)
+        }
+        if !errors.isEmpty {
+            appendLog(.error, "  [\(stage.name)] could not revert protected/out-of-scope path(s): \(errors.joined(separator: "; "))")
             return .completed(.violated, violations: paths, changed: changed)
         }
         appendLog(.info, "  [\(stage.name)] reverted \(revertable.count) protected/out-of-scope path(s)")

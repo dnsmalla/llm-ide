@@ -73,6 +73,20 @@ protocol RepairScopeGuarding: AnyObject {
     /// Restores `paths` to their committed state. Returns `nil` on success, or a
     /// diagnostic.
     func revert(paths: [String], gitRoot: URL) async -> String?
+    /// Undo edits to paths `git status` does not list (ignored files the agent
+    /// wrote): restore each from HEAD when it is tracked there, else delete it
+    /// only when it is in `created` (the agent made it); a file that existed
+    /// before the edit and is not in HEAD cannot be restored and is left in
+    /// place. Returns nil on success, else why not.
+    func revertUnlisted(paths: [String], created: Set<String>, gitRoot: URL) async -> String?
+}
+
+extension RepairScopeGuarding {
+    /// Fail-closed default: a guard that cannot restore unlisted paths says
+    /// so, which keeps the violation (and the run) blocked.
+    func revertUnlisted(paths: [String], created: Set<String>, gitRoot: URL) async -> String? {
+        paths.isEmpty ? nil : "cannot restore unlisted path(s): \(paths.joined(separator: ", "))"
+    }
 }
 
 /// The set of dirty paths in the working tree at a point in time, plus a
@@ -315,6 +329,30 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
     /// looks like a ref cannot be reinterpreted; each path is single-quoted
     /// with embedded quotes escaped, since these strings come from git's own
     /// output rather than from a user but still reach a shell.
+    func revertUnlisted(paths: [String], created: Set<String>, gitRoot: URL) async -> String? {
+        var failures: [String] = []
+        for path in paths {
+            if case .success = await run("git cat-file -e \(Self.shellQuoted(["HEAD:" + path]))", gitRoot: gitRoot) {
+                if case .failure(let reason) = await run("git checkout HEAD -- \(Self.shellQuoted([path]))",
+                                                         gitRoot: gitRoot) {
+                    failures.append(reason)
+                }
+            } else if created.contains(path) {
+                do {
+                    let url = gitRoot.appendingPathComponent(path)
+                    if FileManager.default.fileExists(atPath: url.path) {
+                        try FileManager.default.removeItem(at: url)
+                    }
+                } catch {
+                    failures.append("could not delete \(path): \(error.localizedDescription)")
+                }
+            } else {
+                failures.append("\(path) existed before the edit and is not in HEAD, so it was left in place")
+            }
+        }
+        return failures.isEmpty ? nil : failures.joined(separator: "; ")
+    }
+
     private static func shellQuoted(_ paths: [String]) -> String {
         paths.map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
             .joined(separator: " ")

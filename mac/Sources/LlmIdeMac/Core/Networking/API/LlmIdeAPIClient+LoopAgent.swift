@@ -30,6 +30,7 @@ extension LlmIdeAPIClient {
         let reply: String?
         let changedPaths: [String]?
         let changedExtraPaths: [String]?
+        let createdPaths: [String]?
         let usage: LoopAgentResult.Usage?
         let resolvedSkills: [String]?
         let unresolvedSkills: [String]?
@@ -41,7 +42,8 @@ extension LlmIdeAPIClient {
         var result: LoopAgentResult {
             LoopAgentResult(
                 reply: reply ?? "", changedPaths: changedPaths ?? [],
-                changedExtraPaths: changedExtraPaths ?? [], usage: usage,
+                changedExtraPaths: changedExtraPaths ?? [], createdPaths: createdPaths ?? [],
+                usage: usage,
                 resolvedSkills: resolvedSkills ?? [], unresolvedSkills: unresolvedSkills ?? [],
                 truncatedSkills: truncatedSkills ?? [],
                 // The server always sends `ran`; if it is ever absent, infer it
