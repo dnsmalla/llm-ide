@@ -801,7 +801,23 @@ public enum LoopStageDetector {
     /// detected, so `defaultLoops` does not create it. Returning `[]` never
     /// removes a loop that already exists (see `ensureDefaultLoops`), so a
     /// temporarily unresolvable git root cannot delete a project's loops.
+    ///
+    /// Every stage gets a STABLE id, `<loopKey>/<stageKey>`, so a project whose
+    /// `loop.json` was never persisted sees the same ids on every read (the
+    /// journal, approvals and the phone all reference them). Stages already
+    /// on disk keep whatever id they were saved with — this only names new ones.
     static func defaultStages(forLoop loopKey: String, gitRoot: URL?) -> [LoopStage] {
+        rawDefaultStages(forLoop: loopKey, gitRoot: gitRoot).map { stage in
+            var copy = stage
+            if let key = stage.defaultKey { copy.id = "\(loopKey)/\(key)" }
+            return copy
+        }
+    }
+
+    /// Stable id of a default loop created by this build: `default-<loopKey>`.
+    static func defaultLoopId(_ loopKey: String) -> String { "default-\(loopKey)" }
+
+    private static func rawDefaultStages(forLoop loopKey: String, gitRoot: URL?) -> [LoopStage] {
         switch loopKey {
         case LoopDefaultLoopKey.regression:
             // Gated on a resolvable git root like every other loop: with no
@@ -913,7 +929,7 @@ public enum LoopStageDetector {
             let stages = defaultStages(forLoop: key, gitRoot: gitRoot)
             guard !stages.isEmpty else { return nil }
             let contract = defaultLoopContract(key)
-            return LoopDefinition(name: defaultLoopName(key),
+            return LoopDefinition(id: defaultLoopId(key), name: defaultLoopName(key),
                                   goal: contract?.goal,
                                   acceptanceCriteria: contract?.acceptance,
                                   defaultKey: key,
@@ -1025,6 +1041,7 @@ public enum LoopStageDetector {
             let claimed = moved[key] ?? []
             if !claimed.isEmpty {
                 var created = LoopDefinition(
+                    id: defaultLoopId(key),
                     name: defaultLoopName(key),
                     goal: defaultLoopContract(key)?.goal,
                     acceptanceCriteria: defaultLoopContract(key)?.acceptance,
@@ -1071,7 +1088,7 @@ public enum LoopStageDetector {
         // project with no resolvable working tree has nothing to run, and a
         // loop invented here would make every surface report "configured".
         if store.loops.isEmpty, gitRoot != nil {
-            loops.append(LoopDefinition(name: "Main Loop",
+            loops.append(LoopDefinition(id: "main-loop", name: "Main Loop",
                                         config: LoopEngineDefaults.newConfig(stages: [], defaults: defaults)))
         }
 
