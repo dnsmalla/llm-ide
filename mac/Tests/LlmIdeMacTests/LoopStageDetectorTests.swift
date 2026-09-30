@@ -212,7 +212,8 @@ final class LoopStageDetectorTests: XCTestCase {
         try writeNested("mac/Package.swift")
         let stages = LoopStageDetector.defaultStages(gitRoot: tempDir)
         let stage = stages.first { $0.name == "Mac app" }
-        XCTAssertEqual(stage?.command, "cd mac && swift test")
+        // No Makefile `test-mac:` target here, so the memory keychain is set inline.
+        XCTAssertEqual(stage?.command, "cd mac && LLMIDE_KEYCHAIN_BACKEND=memory swift test")
     }
 
     func testAllSystemCheckMarkersTogetherYieldEveryStageExactlyOnce() throws {
