@@ -211,15 +211,18 @@ A stage is one step of the run (`LoopStage`). Three kinds:
   fault reports. Its own score is the failing-fault count (every fault not
   `unchanged` or `repaired`). The sweep's own fault repairs run inside the same
   protected-path guard and transport retry as a stage repair; a repair the
-  policy rejects is recorded `repairFailed` without being re-verified. A fault
+  policy rejects is recorded `repairFailed` without being re-verified. Those
+  repairs also honour the loop's scope allowlist (`scopeGlobs`): a fault repair
+  that edits outside it is a violation, as a stage repair's would be. A fault
   whose verify command still needs approval ends the run `needs approval`
   instead of retrying.
 - **`shellCommand`** — an arbitrary project command (`swift test`, `npm test`).
   Requires an explicit approval in `VerifyApprovalStore` before it will ever run.
 - **`skill`** — a central skill executed as a *generate* step: it edits the tree,
   and the verify stages decide whether that helped. When the agent call fails
-  (a transient transport error — connection refused/reset, timeout, 5xx other
-  than a 504 `AGENT_RUN_TIMEOUT` — is retried once first) the stage is recorded
+  (retried once first only when the request provably never reached a running
+  agent — could not connect / `ECONNREFUSED`; a timeout, a dropped connection
+  or any 5xx is not retried, since the agent may already have edited) the stage is recorded
   **errored**, and a run with an errored stage and no passing blocking verify
   stage in its final iteration ends `error`, never `success`.
 
@@ -309,8 +312,13 @@ Two deliberate limits, both recorded rather than hidden:
   path's `git hash-object`, so a repair that edits such a file *again* (or
   restores it) is caught; under `revert` that file is left in place rather than
   checked out (which would discard the earlier edits), and the run still blocks.
-  Rename sources count as dirty paths, and the check also runs when the agent
-  call throws.
+  Rename sources count as dirty paths (a reverted source is restored with
+  `git checkout HEAD --`), and the check also runs when the agent call throws.
+  Only dirty paths that could produce a violation — protected, or outside a
+  non-empty scope allowlist — are hashed, in one `git hash-object --stdin-paths`
+  process; files over 1 MB are judged by membership alone. The attribution is
+  by content, not by author: if the user edits such an already-dirty file
+  while the repair runs, that edit is attributed to the repair.
 - When git cannot report (not a working tree, git unavailable) the check is
   **`indeterminate`, never `clean`**, is logged as a warning, and the run
   continues. Refusing to loop at all in those projects would be a worse outcome
