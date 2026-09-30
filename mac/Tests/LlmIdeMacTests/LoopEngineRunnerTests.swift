@@ -34,10 +34,11 @@ final class LoopEngineRunnerTests: XCTestCase {
         /// acceptance context was prepended) rather than just the call count.
         private(set) var receivedFailureOutputs: [String] = []
         func repair(stageName: String, command: String?, failureOutput: String,
-                    evidence: RepairEvidence?, repoRoot: URL) async throws {
+                    evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
             repairCount += 1
             self.evidence.append(evidence)
             receivedFailureOutputs.append(failureOutput)
+            return LoopAgentResult()
         }
     }
 
@@ -49,10 +50,12 @@ final class LoopEngineRunnerTests: XCTestCase {
         /// assert on the composed text itself (e.g. whether goal/acceptance
         /// context was prepended) rather than just the call count.
         private(set) var receivedMessages: [String] = []
-        func execute(skillId: String, targetPath: String?, message: String) async throws {
+        func execute(skillId: String, targetPath: String?, message: String,
+                     repoRoot: URL) async throws -> LoopAgentResult {
             callCount += 1
             receivedMessages.append(message)
             if throwOnEveryCall { throw SkillError() }
+            return LoopAgentResult()
         }
     }
 
@@ -81,10 +84,11 @@ final class LoopEngineRunnerTests: XCTestCase {
         let release = Signal()
         private(set) var repairCount = 0
         func repair(stageName: String, command: String?, failureOutput: String,
-                    evidence: RepairEvidence?, repoRoot: URL) async throws {
+                    evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
             repairCount += 1
             await started.fire()
             await release.wait()
+            return LoopAgentResult()
         }
     }
 
@@ -132,7 +136,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let error: Error
         init(error: Error) { self.error = error }
         func repair(stageName: String, command: String?, failureOutput: String,
-                    evidence: RepairEvidence?, repoRoot: URL) async throws {
+                    evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
             throw error
         }
     }
@@ -2298,5 +2302,131 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(skill.receivedMessages.count, 1)
         XCTAssertTrue(skill.receivedMessages[0].contains("Ship the refactor"))
         XCTAssertTrue(skill.receivedMessages[0].contains("no behavior change"))
+    }
+
+    // MARK: - Confined agent runs carry the run's git root
+
+    /// A config whose skill stage and failing-once test stage together make
+    /// the runner call BOTH production agent adapters.
+    private func agentRootConfig(worktrees: Bool = false) -> LoopEngineConfig {
+        var config = LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Generate", kind: .skill, order: 0,
+                      skillId: "superpowers/brainstorming"),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        config.useWorktreesForConcurrentRuns = worktrees
+        return config
+    }
+
+    private func failOnceVerifier() -> StubVerifier {
+        var calls = 0
+        return StubVerifier { _ in
+            calls += 1
+            return calls == 1 ? VerifyOutcome(exitCode: 1, output: "1 failure")
+                              : VerifyOutcome(exitCode: 0, output: "")
+        }
+    }
+
+    func testEveryLoopAgentCallCarriesTheRunsGitRoot() async {
+        let agent = RecordingLoopAgent()
+        let runner = makeRunner(
+            verifier: failOnceVerifier(),
+            stageRepairer: AgentLoopStageRepairer(agent: agent),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: AgentLoopSkillExecutor(agent: agent),
+            approvals: makeApprovals(approve: [("t1", "swift test")]))
+
+        let result = await runner.run(config: agentRootConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertTrue(agent.calls.contains { $0.skills == ["superpowers/brainstorming"] }, "skill stage ran")
+        XCTAssertTrue(agent.calls.contains { $0.skills.isEmpty }, "repair ran")
+        XCTAssertFalse(agent.calls.isEmpty)
+        for call in agent.calls {
+            XCTAssertEqual(call.repoRoot, repoRoot)
+        }
+        XCTAssertEqual(runner.lastSkillResults["s1"]?.reply, "done", "the skill reply is kept")
+        XCTAssertEqual(runner.lastRepairResults["t1"]?.reply, "done", "the repair reply is kept")
+    }
+
+    func testWorktreeRunConfinesEveryAgentCallToTheWorktree() async throws {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("loop-agent-root-\(UUID().uuidString)", isDirectory: true)
+        let mainRepo = base.appendingPathComponent("repo", isDirectory: true)
+        let project = base.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: mainRepo, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        for args in [["init", "-q"], ["config", "user.email", "t@example.com"],
+                     ["config", "user.name", "T"], ["commit", "--allow-empty", "-qm", "init"]] {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.currentDirectoryURL = mainRepo
+            p.arguments = args
+            try p.run()
+            p.waitUntilExit()
+            XCTAssertEqual(p.terminationStatus, 0, "git \(args.joined(separator: " "))")
+        }
+
+        // Another run holds the main checkout, so this one is redirected into
+        // a worktree instead of queueing.
+        let mainKey = mainRepo.resolvingSymlinksInPath().path
+        try await LoopRunQueue.acquire(rootKey: mainKey)
+        defer { LoopRunQueue.release(rootKey: mainKey) }
+
+        let suite = UserDefaults(suiteName: "loop-agent-root-\(UUID().uuidString)")!
+        let approvals = VerifyApprovalStore(defaults: suite)
+        approvals.approveStage(repo: mainRepo, stageId: "t1", command: "swift test")
+
+        let agent = RecordingLoopAgent()
+        let runner = makeRunner(
+            verifier: failOnceVerifier(),
+            stageRepairer: AgentLoopStageRepairer(agent: agent),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: AgentLoopSkillExecutor(agent: agent),
+            approvals: approvals)
+
+        let result = await runner.run(config: agentRootConfig(worktrees: true),
+                                      faultsRoot: project, gitRoot: mainRepo)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertTrue(agent.calls.contains { !$0.skills.isEmpty }, "skill stage ran")
+        XCTAssertTrue(agent.calls.contains { $0.skills.isEmpty }, "repair ran")
+        let worktreeParent = project.appendingPathComponent("system/loop-worktrees").path
+        for call in agent.calls {
+            XCTAssertNotEqual(call.repoRoot.resolvingSymlinksInPath().path, mainKey,
+                              "a worktree run must never target the main checkout")
+            XCTAssertTrue(call.repoRoot.path.hasPrefix(worktreeParent + "/"),
+                          "\(call.repoRoot.path) is not the run's worktree")
+        }
+        XCTAssertEqual(Set(agent.calls.map(\.repoRoot)).count, 1, "one worktree for the whole run")
+    }
+
+    func testSkillStageWithUnresolvedSkillFailsTheStage() async {
+        let agent = RecordingLoopAgent()
+        agent.result = { skills in
+            LoopAgentResult(unresolvedSkills: skills, ran: false, resultSubtype: nil)
+        }
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: verifier,
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: AgentLoopSkillExecutor(agent: agent),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            journal: journal)
+
+        let result = await runner.run(config: agentRootConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        let message = "skill superpowers/brainstorming is not installed"
+        XCTAssertEqual(LoopEngineRunner.skillNotInstalledMessage(["superpowers/brainstorming"]), message)
+        XCTAssertEqual(result, .error(message))
+        XCTAssertEqual(runner.stageStates["s1"], .failed)
+        XCTAssertTrue(verifier.calls.isEmpty, "the run ends at the failed skill stage")
+        XCTAssertEqual(agent.calls.count, 1)
+        let stageRecord = journal.written.last?.iterations.first?.attempts.first
+        XCTAssertEqual(stageRecord?.passed, false)
+        XCTAssertEqual(stageRecord?.outputTail, message)
     }
 }

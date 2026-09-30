@@ -11,22 +11,31 @@ protocol FaultRepairer: AnyObject {
     /// when the agent has finished editing (or made no change). Throws
     /// only on transport/CLI failure — "made no edit" is not an error
     /// (the caller re-verifies to decide the verdict).
-    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL) async throws
+    ///
+    /// Returns the agent run's result (reply, changed paths, …) so a caller
+    /// can keep what the agent said it did.
+    @discardableResult
+    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL) async throws -> LoopAgentResult
 }
 
-/// Production adapter — sends a structured repair instruction through
-/// the same code-assist surface the rest of the app uses. The agent has
-/// write tools in this deployment, so it can edit the repo directly.
+/// Production adapter — sends a structured repair instruction as a headless,
+/// confined agent run (`LoopAgentRunning` → POST /kb/loop/agent-run) rooted
+/// at `repoRoot`, so the agent can actually edit files there (and only there).
+/// It used to go through `/code-assist` with no agent context, which the
+/// server answers with no tools at all — no repair could edit anything.
 final class AgentFaultRepairer: FaultRepairer {
-    private let api: LlmIdeAPIClient
-    private let language: String
+    private let agent: LoopAgentRunning
 
-    init(api: LlmIdeAPIClient, language: String = "en") {
-        self.api = api
-        self.language = language
+    init(agent: LoopAgentRunning) {
+        self.agent = agent
     }
 
-    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL) async throws {
+    convenience init(api: LlmIdeAPIClient, language: String = "en") {
+        self.init(agent: APILoopAgentRunner(api: api, language: language))
+    }
+
+    @discardableResult
+    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL) async throws -> LoopAgentResult {
         let prompt = """
         A previously-fixed fault has regressed. Fix it in the codebase at \(repoRoot.path).
 
@@ -42,9 +51,6 @@ final class AgentFaultRepairer: FaultRepairer {
         Edit the code so the verify command passes again. Make the minimal
         change required. Do not modify the verify command itself.
         """
-        _ = try await api.codeAssist(
-            message: prompt, language: language, model: nil,
-            history: [], attachments: [], agentContext: nil
-        )
+        return try await agent.run(message: prompt, skills: [], repoRoot: repoRoot, timeout: nil)
     }
 }

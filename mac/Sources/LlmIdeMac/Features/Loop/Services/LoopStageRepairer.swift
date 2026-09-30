@@ -35,20 +35,27 @@ protocol LoopStageRepairer: AnyObject {
     ///
     /// - Parameter evidence: What the previous attempt on this stage achieved,
     ///   or `nil` on the first attempt.
+    /// - Parameter repoRoot: The git root the run uses — the worktree when the
+    ///   run was redirected into one. The agent is confined to it.
+    /// - Returns: The agent run's result; the reply is kept for later attempts.
+    @discardableResult
     func repair(stageName: String, command: String?, failureOutput: String,
-                evidence: RepairEvidence?, repoRoot: URL) async throws
+                evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult
 }
 
-/// Production adapter — same `api.codeAssist` transport `AgentFaultRepairer`
-/// uses; the agent has write tools in this deployment and edits the working
-/// tree directly.
+/// Production adapter — a headless, confined agent run (`LoopAgentRunning` →
+/// POST /kb/loop/agent-run) rooted at `repoRoot`, the same transport
+/// `AgentFaultRepairer` uses. (It used to be `/code-assist` with no agent
+/// context, which the server answers with no tools — no repair could edit.)
 final class AgentLoopStageRepairer: LoopStageRepairer {
-    private let api: LlmIdeAPIClient
-    private let language: String
+    private let agent: LoopAgentRunning
 
-    init(api: LlmIdeAPIClient, language: String = "en") {
-        self.api = api
-        self.language = language
+    init(agent: LoopAgentRunning) {
+        self.agent = agent
+    }
+
+    convenience init(api: LlmIdeAPIClient, language: String = "en") {
+        self.init(agent: APILoopAgentRunner(api: api, language: language))
     }
 
     static let maxFailureOutputChars = 4_000
@@ -101,14 +108,12 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
         return lines.joined(separator: "\n") + "\n"
     }
 
+    @discardableResult
     func repair(stageName: String, command: String?, failureOutput: String,
-                evidence: RepairEvidence?, repoRoot: URL) async throws {
+                evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
         let prompt = Self.buildPrompt(stageName: stageName, command: command,
                                        failureOutput: failureOutput, repoRoot: repoRoot,
                                        evidence: evidence)
-        _ = try await api.codeAssist(
-            message: prompt, language: language, model: nil,
-            history: [], attachments: [], agentContext: nil
-        )
+        return try await agent.run(message: prompt, skills: [], repoRoot: repoRoot, timeout: nil)
     }
 }

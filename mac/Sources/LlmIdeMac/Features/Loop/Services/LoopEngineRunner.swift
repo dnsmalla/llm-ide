@@ -197,6 +197,13 @@ final class LoopEngineRunner: ObservableObject {
     /// to it; `@MainActor` makes that safe.
     private var iterationRecords: [LoopIterationRecord] = []
 
+    /// The latest agent result per stage id for the current run — what each
+    /// skill stage and each repair's agent said and changed. Kept (rather than
+    /// discarded, as before) so a later repair attempt can be given its
+    /// predecessor's reply. Reset at the start of every run.
+    private(set) var lastSkillResults: [String: LoopAgentResult] = [:]
+    private(set) var lastRepairResults: [String: LoopAgentResult] = [:]
+
     /// The identifying parameters of `run`'s current call, or `nil` between
     /// runs. `run`'s own parameters are locals, invisible to
     /// `handleAppTerminating()` — which fires from a notification, not from
@@ -437,6 +444,8 @@ final class LoopEngineRunner: ObservableObject {
         runMaxIterations = config.maxIterations
         runWallClockBudget = config.wallClockBudgetSeconds
         stageStates = [:]
+        lastSkillResults = [:]
+        lastRepairResults = [:]
         unrecognisedRunnerStages = []
         // Must be reset per run, not only in the defer: a run that ended while
         // paused would otherwise leave `paused == true`, and the NEXT run
@@ -851,9 +860,10 @@ final class LoopEngineRunner: ObservableObject {
         // and splitting them out would report a repair as faster than the run
         // actually waited.
         let repairStartedAt = Date()
+        var repairResult: LoopAgentResult?
         let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot,
                                            scopeGlobs: scopeGlobs) {
-            try await stageRepairer.repair(
+            repairResult = try await stageRepairer.repair(
                 stageName: stage.name, command: command,
                 failureOutput: Self.prependGoalContext(outcome.output, goal: goal,
                                                        acceptanceCriteria: acceptanceCriteria,
@@ -862,6 +872,7 @@ final class LoopEngineRunner: ObservableObject {
         }
         let repairDuration = Date().timeIntervalSince(repairStartedAt)
         let repairIndex = used + 1
+        lastRepairResults[stage.id] = repairResult
 
         // The repair finished either way; the stage itself is still failed —
         // the next iteration's re-run (or the terminal status) says whether
@@ -908,6 +919,13 @@ final class LoopEngineRunner: ObservableObject {
         "\(stage.name) already applied its batch this run; skipped"
     }
 
+    /// Why a skill stage failed when the server could not resolve its skill.
+    nonisolated static func skillNotInstalledMessage(_ skillIds: [String]) -> String {
+        skillIds.count == 1
+            ? "skill \(skillIds[0]) is not installed"
+            : "skills \(skillIds.joined(separator: ", ")) are not installed"
+    }
+
     private func refuseUnverifiedCodeApply(_ stage: LoopStage) -> StageDecision {
         let message = Self.unverifiedCodeApplyMessage(stage)
         appendLog(.error, "  [\(stage.name)] \(message)")
@@ -930,11 +948,28 @@ final class LoopEngineRunner: ObservableObject {
         // A skill stage is a generate step that edits the tree, so it gets the
         // same protected-path guard as a repair: "make the tests pass" is as
         // available to a skill as it is to the repairer.
+        // `gitRoot` is the run's root — the worktree when this run was
+        // redirected into one — and it is what the agent is confined to.
+        var agentResult: LoopAgentResult?
         let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot,
                                            scopeGlobs: scopeGlobs) {
-            try await skillExecutor.execute(skillId: skillId, targetPath: stage.targetPath, message: message)
+            agentResult = try await skillExecutor.execute(
+                skillId: skillId, targetPath: stage.targetPath, message: message, repoRoot: gitRoot)
         }
         let duration = Date().timeIntervalSince(startedAt)
+        lastSkillResults[stage.id] = agentResult
+
+        // The server does not run the agent when a requested skill is missing,
+        // so "completed" would claim work that never happened. Fail the stage
+        // and end the run: no retry can install the skill.
+        if case .completed = guarded, let missing = agentResult?.unresolvedSkills, !missing.isEmpty {
+            let message = Self.skillNotInstalledMessage(missing)
+            stageStates[stage.id] = .failed
+            appendLog(.error, "  [\(stage.name)] \(message)")
+            record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
+                   passed: false, output: message, score: nil)
+            return .terminate(.error(message))
+        }
 
         switch guarded {
         case .failed(let error):

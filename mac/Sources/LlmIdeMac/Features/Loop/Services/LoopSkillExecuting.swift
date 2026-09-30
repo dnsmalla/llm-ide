@@ -1,32 +1,37 @@
 import Foundation
 
-/// Runs a `.skill` (generate) Loop stage by invoking a chosen central skill
-/// via the same one-shot agent path `AgentLoopStageRepairer` and the chat "/"
-/// menu use (`LlmIdeAPIClient.codeAssist` → POST /code-assist). The server
-/// resolves the skill id ("<family>/<dir>") to its SKILL.md and frames it as a
-/// trusted instruction. A skill stage has no pass/fail of its own — it always
-/// "completes" (or throws on a transport error, which the runner logs without
-/// ending the run); the loop's verify stages gate termination.
+/// Runs a `.skill` (generate) Loop stage by invoking a chosen central skill as
+/// a headless, confined agent run (`LoopAgentRunning` → POST
+/// /kb/loop/agent-run) rooted at the run's git root. The server resolves the
+/// skill id ("<family>/<dir>") to its SKILL.md and frames it as a trusted
+/// instruction; an id it cannot find comes back in `unresolvedSkills` and the
+/// agent is not run — the runner fails the stage on that. The stage's
+/// `targetPath` is already part of the composed `message`.
 protocol LoopSkillExecuting: AnyObject {
-    func execute(skillId: String, targetPath: String?, message: String) async throws
+    /// - Parameter repoRoot: The git root the run uses — the worktree when the
+    ///   run was redirected into one. The agent is confined to it.
+    func execute(skillId: String, targetPath: String?, message: String,
+                 repoRoot: URL) async throws -> LoopAgentResult
 }
 
-/// Production adapter. Mirrors `AgentLoopStageRepairer`: holds the API client
-/// + language, calls `codeAssist` with `skills: [skillId]`, and discards the
-/// reply — "made no edit" is not an error (the caller re-verifies via the loop).
+/// Production adapter. Mirrors `AgentLoopStageRepairer`: one confined agent
+/// run with `skills: [skillId]`, returning the result — "made no edit" is not
+/// an error (the loop's verify stages re-check).
 @MainActor
 final class AgentLoopSkillExecutor: LoopSkillExecuting {
-    private let api: LlmIdeAPIClient
-    private let language: String
+    private let agent: LoopAgentRunning
 
-    init(api: LlmIdeAPIClient, language: String = "en") {
-        self.api = api
-        self.language = language
+    init(agent: LoopAgentRunning) {
+        self.agent = agent
     }
 
-    func execute(skillId: String, targetPath: String?, message: String) async throws {
-        _ = try await api.codeAssist(
-            message: message, language: language, model: nil,
-            history: [], attachments: [], skills: [skillId], agentContext: nil)
+    convenience init(api: LlmIdeAPIClient, language: String = "en") {
+        self.init(agent: APILoopAgentRunner(api: api, language: language))
+    }
+
+    func execute(skillId: String, targetPath: String?, message: String,
+                 repoRoot: URL) async throws -> LoopAgentResult {
+        try await agent.run(message: message, skills: skillId.isEmpty ? [] : [skillId],
+                            repoRoot: repoRoot, timeout: nil)
     }
 }
