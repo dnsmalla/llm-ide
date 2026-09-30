@@ -70,10 +70,25 @@ final class LoopTemplateStore: ObservableObject {
         var templates: [LoopTemplate]
     }
 
+    /// UserDefaults key the raw bytes are copied to when they fail to decode.
+    static let undecodableBackupKey = "loopTemplateStore.undecodable"
+
+    /// True when the stored bytes could not be decoded (hand-edit, a newer
+    /// build's shape). The raw data is left in place and backed up under
+    /// `undecodableBackupKey`, and `persist()` refuses to overwrite it — the old
+    /// behaviour loaded `[]` and the next save wiped every custom template.
+    private(set) var storedDataUndecodable = false
+
     private func load() {
-        guard let data = defaults.data(forKey: Self.storeKey),
-              let file = try? JSONDecoder().decode(StoreFile.self, from: data)
-        else { return }
+        guard let data = defaults.data(forKey: Self.storeKey) else { return }
+        guard let file = try? JSONDecoder().decode(StoreFile.self, from: data) else {
+            storedDataUndecodable = true
+            if defaults.data(forKey: Self.undecodableBackupKey) == nil {
+                defaults.set(data, forKey: Self.undecodableBackupKey)
+            }
+            NSLog("LoopTemplateStore: stored templates could not be decoded; keeping the raw data and not saving over it")
+            return
+        }
         // Anything persisted is the user's by definition; force the flag so a
         // stored `isBuiltIn: true` (e.g. hand-edited defaults) can never make a
         // custom template undeletable.
@@ -85,6 +100,7 @@ final class LoopTemplateStore: ObservableObject {
     }
 
     private func persist() {
+        guard !storedDataUndecodable else { return }
         guard let data = try? JSONEncoder().encode(StoreFile(templates: customTemplates)) else { return }
         defaults.set(data, forKey: Self.storeKey)
     }
