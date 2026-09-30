@@ -111,7 +111,9 @@ struct ShellFaultVerifier: FaultVerifier {
         while !proc.hasExited {
             if let deadline, Date() >= deadline {
                 proc.terminateTree(grace: 0.5)
-                try? await proc.waitForExit()
+                // Non-throwing: a cancellation arriving now must not skip the
+                // wait (and spin), the SIGKILL above bounds it.
+                while !proc.hasExited { await GroupedSubprocess.pause(nanoseconds: 25_000_000) }
                 _ = await proc.collectOutput()
                 throw VerifyError.timedOut(timeout)
             }

@@ -82,6 +82,19 @@ final class GroupedSubprocessTests: XCTestCase {
         XCTAssertFalse(buffer.wasElided)
     }
 
+    /// The drain waits must not busy-spin in a cancelled task: `pause` still
+    /// waits its full interval after cancellation (a `try? Task.sleep` would not).
+    func testPauseIsNotCutShortByCancellation() async {
+        let task = Task { () -> TimeInterval in
+            let start = Date()
+            await GroupedSubprocess.pause(nanoseconds: 200_000_000)
+            return Date().timeIntervalSince(start)
+        }
+        task.cancel()
+        let elapsed = await task.value
+        XCTAssertGreaterThan(elapsed, 0.15)
+    }
+
     // MARK: - Group kill
 
     func testTerminateTreeKillsEveryProcessInTheGroup() async throws {

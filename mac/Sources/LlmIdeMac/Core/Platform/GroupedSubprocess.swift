@@ -254,23 +254,33 @@ final class GroupedSubprocess: @unchecked Sendable {
         while !hasExited { try await Task.sleep(nanoseconds: pollInterval) }
     }
 
+    /// A sleep that cancellation cannot cut short. `try? await Task.sleep`
+    /// returns IMMEDIATELY in a cancelled task, which turned the bounded
+    /// drain waits below into busy-spins after a Stop.
+    static func pause(nanoseconds: UInt64) async {
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .utility)
+                .asyncAfter(deadline: .now() + .nanoseconds(Int(nanoseconds))) { done.resume() }
+        }
+    }
+
     /// The output, once the shell has exited. Waits up to `drainWindow` for
     /// EOF; if something the shell left behind still holds the pipe after
     /// that, stops that leftover tree and returns what was captured —
     /// never an empty result because of it.
     func collectOutput(drainWindow: TimeInterval = 2.0) async -> String {
         let deadline = Date().addingTimeInterval(drainWindow)
-        while !outputComplete, Date() < deadline { try? await Task.sleep(nanoseconds: 10_000_000) }
+        while !outputComplete, Date() < deadline { await Self.pause(nanoseconds: 10_000_000) }
         if !outputComplete {
             // Killing the leftovers closes their write ends, so the reader
             // normally reaches EOF on its own; only a holder that escaped
             // every signal makes the reader give up instead.
             terminateTree(grace: 0.5)
             let eofBy = Date().addingTimeInterval(1.0)
-            while !outputComplete, Date() < eofBy { try? await Task.sleep(nanoseconds: 10_000_000) }
+            while !outputComplete, Date() < eofBy { await Self.pause(nanoseconds: 10_000_000) }
             requestStopReading()
             let stopBy = Date().addingTimeInterval(0.5)
-            while !outputComplete, Date() < stopBy { try? await Task.sleep(nanoseconds: 10_000_000) }
+            while !outputComplete, Date() < stopBy { await Self.pause(nanoseconds: 10_000_000) }
         }
         return output.text()
     }
