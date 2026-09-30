@@ -171,7 +171,7 @@ final class LoopAttemptLedgerTests: XCTestCase {
         XCTAssertEqual(scope.quotable, ["Sources/A.swift", "Sources/B.swift"], "a secret path's diff is never read")
         XCTAssertFalse(seen?.first?.diff.contains("ghp_") ?? true, "credential shapes are redacted")
 
-        let first = journal.written.last?.iterations.first?.attempts.first
+        let first = journal.written.last?.iterations.first?.attempts.first(where: { $0.repairAttempted })
         XCTAssertEqual(first?.ledger?.n, 1)
         XCTAssertNotNil(first?.ledger?.resultingFailureSet, "the next verification settles the entry")
         XCTAssertEqual(first?.ledger?.resultingFailureSet, first?.outputHash)

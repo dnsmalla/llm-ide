@@ -83,15 +83,17 @@ struct ProgressWatch {
         }
 
         // A partial fix (one fixed, one new) with no better count is neutral:
-        // evidence of movement, not of a stall.
+        // evidence of movement, not of a stall. Never when the failing set grew
+        // (1 fixed + 2 new is worse), nor when ids cannot be parsed.
         var neutral = false
         if !improved, !notReporting, let ids, let before = previous.ids, !ids.isEmpty, !before.isEmpty,
-           !before.subtracting(ids).isEmpty, !ids.subtracting(before).isEmpty {
+           !before.subtracting(ids).isEmpty, !ids.subtracting(before).isEmpty,
+           ids.count <= before.count {
             neutral = true
         }
         let streak = improved ? 1 : (neutral ? previous.streak : previous.streak + 1)
         state[key] = State(score: score, hash: hash, streak: streak,
-                           lastKnownScore: score ?? previous.lastKnownScore, ids: ids ?? previous.ids)
+                           lastKnownScore: score ?? previous.lastKnownScore, ids: ids)
         return Verdict(improved: improved, streak: streak, previousScore: previous.score,
                        stoppedReporting: stoppedReporting, notReporting: notReporting, neutral: neutral)
     }

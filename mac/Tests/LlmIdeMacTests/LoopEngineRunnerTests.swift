@@ -340,16 +340,9 @@ final class LoopEngineRunnerTests: XCTestCase {
     }
 
     func testMaxIterationsGivesUpWhenNeverFixed() async {
-        // Re-verifying the repaired stage alone means only a PASS starts another
-        // iteration: pass after each repair, then fail again on the full re-run
-        // (calls 0-1 are the failure and the flake gate's re-run).
-        var callIndex = 0
-        let verifier = StubVerifier { _ in
-            defer { callIndex += 1 }
-            return (callIndex < 2 || callIndex % 2 == 1)
-                ? VerifyOutcome(exitCode: 1, output: "still broken 1")
-                : VerifyOutcome(exitCode: 0, output: "")
-        }
+        // Never fixed: every verify fails. Each repair + stage re-verify is one
+        // iteration, so maxIterations still means maxIterations-1 repairs.
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "still broken 1") }
         let repairer = StubRepairer()
         let config = LoopEngineConfig(stages: [
             LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
@@ -384,9 +377,9 @@ final class LoopEngineRunnerTests: XCTestCase {
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
         XCTAssertEqual(result, .givenUp(reason: .repeatedFailure))
         XCTAssertEqual(runner.status, .givenUp(reason: .repeatedFailure))
-        // The stage is re-verified in place: failure, flake re-run, one blind
-        // repair, then the informed repair at the first no-progress verdict.
-        XCTAssertEqual(runner.iteration, 1)
+        // Failure + flake re-run, blind repair (iteration 2 re-verify), informed
+        // repair at the first no-progress verdict (iteration 3), then give up.
+        XCTAssertEqual(runner.iteration, 3)
         XCTAssertEqual(repairer.repairCount, 2)
     }
 
@@ -588,7 +581,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(runner.iteration, 2)
         XCTAssertEqual(repairer.repairCount, 1)
         // failure, flake re-run, re-verify of the repaired stage, full confirmation
-        XCTAssertEqual(verifier.calls, Array(repeating: "swift test", count: 4))
+        XCTAssertEqual(verifier.calls, ["swift test", "swift test", "swift test", "swift test"])
         let applyCalls = skillExecutor.receivedMessages.filter { $0.contains("\"Refactor Apply\"") }
         let planCalls = skillExecutor.receivedMessages.filter { $0.contains("\"Refactor Plan\"") }
         XCTAssertEqual(applyCalls.count, 1, "the apply stage applies one batch per run")
@@ -1066,7 +1059,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         // are stripped before hashing — this must count as the SAME
         // failure twice, not two distinct ones.
         XCTAssertEqual(result, .givenUp(reason: .repeatedFailure))
-        XCTAssertEqual(runner.iteration, 1)
+        XCTAssertEqual(runner.iteration, 3)
     }
 
     /// A blanket "strip every digit" normalizer (the previous round's
@@ -1100,10 +1093,10 @@ final class LoopEngineRunnerTests: XCTestCase {
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
         // If "3 failures" and "1 failure" had hashed equal, this would
-        // incorrectly give up with `.repeatedFailure` instead of reaching a
-        // real fix (then the full-pipeline confirmation, iteration 2).
+        // incorrectly give up at iteration 2 with `.repeatedFailure`
+        // instead of reaching a real fix on iteration 3.
         XCTAssertEqual(result, .success)
-        XCTAssertEqual(runner.iteration, 2)
+        XCTAssertEqual(runner.iteration, 3)
         XCTAssertEqual(repairer.repairCount, 2)
     }
 
@@ -1164,12 +1157,12 @@ final class LoopEngineRunnerTests: XCTestCase {
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
         XCTAssertEqual(result, .givenUp(reason: .repeatedFailure))
-        // Iteration 1: A fails, repaired, re-verified alone (passes). Iteration
-        // 2: A passes, B fails (1st on its own) and is repaired; its retry
-        // fails (streak 2: the informed repair), then fails again (streak 3)
-        // → gives up. If A's history leaked into B, B's first repair would not
-        // have been reached with a streak of 1.
-        XCTAssertEqual(runner.iteration, 2)
+        // Iteration 1: A fails, repaired. Iteration 2: A re-verified alone
+        // (passes), then the full pipeline: B fails (1st on its own), repaired.
+        // Iteration 3: B fails (streak 2: the informed repair). Iteration 4: B
+        // fails (streak 3) → gives up. If A's history leaked into B, B's first
+        // failure would already have had a streak above 1.
+        XCTAssertEqual(runner.iteration, 4)
         XCTAssertEqual(repairer.repairCount, 3)
     }
 
@@ -1723,7 +1716,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
 
         XCTAssertEqual(result, .givenUp(reason: .noProgress(stageName: "Test")))
-        XCTAssertEqual(runner.iteration, 1)
+        XCTAssertEqual(runner.iteration, 3)
     }
 
     /// The mirror image: a shrinking count is progress, so the loop must keep
@@ -1752,7 +1745,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
         XCTAssertEqual(result, .success)
-        XCTAssertEqual(runner.iteration, 2)
+        XCTAssertEqual(runner.iteration, 4)
     }
 
     /// A count that disappears (a compile error) always earns one more repair,
@@ -2048,7 +2041,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         )
         _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
 
-        let first = journal.written[0].iterations[0].attempts[0]
+        let first = journal.written[0].iterations[0].attempts.first(where: { $0.repairAttempted })!
         XCTAssertEqual(first.score, 4)
         XCTAssertEqual(first.exitCode, 1)
         XCTAssertFalse(first.passed)
@@ -2320,7 +2313,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         ], maxIterations: 2, consecutiveFailureStop: 5)
         _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot,
                              goal: "Stabilize auth", acceptanceCriteria: "swift test passes")
-        XCTAssertGreaterThanOrEqual(repairer.receivedFailureOutputs.count, 1)
+        XCTAssertEqual(repairer.receivedFailureOutputs.count, 1)
         let seen = repairer.receivedFailureOutputs[0]
         XCTAssertTrue(seen.contains("Stabilize auth"))
         XCTAssertTrue(seen.contains("swift test passes"))
@@ -2386,7 +2379,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         // See the sibling above: a repair needs a second iteration to exist.
         ], maxIterations: 2, consecutiveFailureStop: 5)
         _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
-        XCTAssertEqual(Set(repairer.receivedFailureOutputs), ["boom"])
+        XCTAssertEqual(repairer.receivedFailureOutputs, ["boom"])
     }
 
     func testSkillMessageIncludesGoalAndAcceptanceCriteriaWhenSet() async {
@@ -2623,7 +2616,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let result = await runner.run(config: skillThenTestConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
 
         guard case .error(let message) = result else { return XCTFail("got \(String(describing: result))") }
-        XCTAssertTrue(message.contains("given up"), message)
+        XCTAssertTrue(message.contains("given up (max iterations)"), message)
     }
 
     /// A 502 may come from mid-run — the agent may already have edited — so
@@ -2782,7 +2775,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(result, .blocked(reason: .repairOutOfScope(
             stageName: "Test", paths: ["mac/Tests/FooTests.swift"])))
         XCTAssertEqual(scopeGuard.revertedPaths, ["mac/Tests/FooTests.swift"])
-        let attempt = journal.written.last?.iterations.first?.attempts.first
+        let attempt = journal.written.last?.iterations.first?.attempts.first(where: { $0.repairAttempted })
         XCTAssertEqual(attempt?.changedPaths, ["mac/Tests/FooTests.swift"])
         XCTAssertEqual(attempt?.scopeVerdict, .violatedReverted)
     }
@@ -2827,7 +2820,7 @@ final class LoopEngineRunnerTests: XCTestCase {
 
         guard case .blocked = result else { return XCTFail("got \(String(describing: result))") }
         XCTAssertEqual(scopeGuard.revertedPaths, ["Makefile"])
-        XCTAssertEqual(journal.written.last?.iterations.first?.attempts.first?.scopeVerdict, .violated)
+        XCTAssertEqual(journal.written.last?.iterations.first?.attempts.first(where: { $0.repairAttempted })?.scopeVerdict, .violated)
     }
 
     // MARK: - Regression stage: score, guarded sweep repairs, needs approval

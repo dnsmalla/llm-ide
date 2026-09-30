@@ -78,6 +78,7 @@ struct LoopEngineView: View {
     /// in `currentConfig` and `loadConfig`.
     @State var wallClockMinutes: Int = 60
     @State var maxRepairsPerStage: Int = 3
+    @State var repairModel: String?
     @State var protectedPathPolicy: ProtectedPathPolicy = .revert
     /// No UI (the built-in protected set covers the common cases); held in state
     /// purely so a hand-edited value survives a save from this page instead of
@@ -1370,7 +1371,8 @@ struct LoopEngineView: View {
             protectedPathPolicy: protectedPathPolicy,
             extraProtectedGlobs: extraProtectedGlobs,
             writeSummaryNote: writeSummaryNote,
-            useWorktreesForConcurrentRuns: useWorktreesForConcurrentRuns)
+            useWorktreesForConcurrentRuns: useWorktreesForConcurrentRuns,
+            repairModel: repairModel)
     }
 
     /// The full `LoopDefinition` this page currently represents — `currentConfig`
@@ -1415,6 +1417,7 @@ struct LoopEngineView: View {
             consecutiveFailureStop = ensuredConfig.consecutiveFailureStop
             wallClockMinutes = LoopBudgetsEditor.minutes(fromSeconds: ensuredConfig.wallClockBudgetSeconds)
             maxRepairsPerStage = ensuredConfig.maxRepairsPerStage
+            repairModel = ensuredConfig.repairModel
             protectedPathPolicy = ensuredConfig.protectedPathPolicy
             extraProtectedGlobs = ensuredConfig.extraProtectedGlobs
             writeSummaryNote = ensuredConfig.writeSummaryNote
@@ -1470,6 +1473,7 @@ struct LoopEngineView: View {
         consecutiveFailureStop = seed.consecutiveFailureStop
         wallClockMinutes = LoopBudgetsEditor.minutes(fromSeconds: seed.wallClockBudgetSeconds)
         maxRepairsPerStage = seed.maxRepairsPerStage
+        repairModel = seed.repairModel
         protectedPathPolicy = seed.protectedPathPolicy
         extraProtectedGlobs = seed.extraProtectedGlobs
         writeSummaryNote = seed.writeSummaryNote
@@ -1804,6 +1808,7 @@ struct LoopEngineView: View {
         consecutiveFailureStop = applied.consecutiveFailureStop
         wallClockMinutes = LoopBudgetsEditor.minutes(fromSeconds: applied.wallClockBudgetSeconds)
         maxRepairsPerStage = applied.maxRepairsPerStage
+        repairModel = applied.repairModel
         protectedPathPolicy = applied.protectedPathPolicy
         extraProtectedGlobs = applied.extraProtectedGlobs
         writeSummaryNote = applied.writeSummaryNote

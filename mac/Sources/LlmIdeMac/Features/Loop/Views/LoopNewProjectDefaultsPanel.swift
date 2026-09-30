@@ -21,16 +21,8 @@ struct LoopNewProjectDefaultsPanel: View {
                 LoopBudgetsEditor(maxIterations: $defaults.maxIterations,
                                   consecutiveFailureStop: $defaults.consecutiveFailureStop,
                                   wallClockMinutes: LoopBudgetsEditor.wallClockMinutes($defaults),
-                                  maxRepairsPerStage: $defaults.maxRepairsPerStage)
-                HStack {
-                    Text("Repair model")
-                    TextField("App default", text: Binding(
-                        get: { defaults.repairModel ?? "" },
-                        set: { let v = $0.trimmingCharacters(in: .whitespaces)
-                               defaults.repairModel = v.isEmpty ? nil : v }))
-                        .textFieldStyle(.roundedBorder)
-                }
-                .font(Typography.caption)
+                                  maxRepairsPerStage: $defaults.maxRepairsPerStage,
+                                  repairModel: $defaults.repairModel)
 
                 Text("If a repair edits a test, build file, or system/")
                     .font(Typography.caption)

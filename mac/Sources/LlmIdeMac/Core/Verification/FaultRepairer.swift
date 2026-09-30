@@ -19,6 +19,20 @@ protocol FaultRepairer: AnyObject {
     @discardableResult
     func repair(fault: FaultReport, failureOutput: String, repoRoot: URL,
                 timeout: TimeInterval?) async throws -> LoopAgentResult
+
+    /// Same, on a chosen model (`nil` = the app's default). Defaults to the
+    /// model-less call for conformers that predate model tiers.
+    @discardableResult
+    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL,
+                timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult
+}
+
+extension FaultRepairer {
+    @discardableResult
+    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL,
+                timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult {
+        try await repair(fault: fault, failureOutput: failureOutput, repoRoot: repoRoot, timeout: timeout)
+    }
 }
 
 /// Wraps one fault repair so the caller can check what it changed.
@@ -60,6 +74,13 @@ final class AgentFaultRepairer: FaultRepairer {
     @discardableResult
     func repair(fault: FaultReport, failureOutput: String, repoRoot: URL,
                 timeout: TimeInterval?) async throws -> LoopAgentResult {
+        try await repair(fault: fault, failureOutput: failureOutput, repoRoot: repoRoot,
+                         timeout: timeout, model: nil)
+    }
+
+    @discardableResult
+    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL,
+                timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult {
         let prompt = """
         A previously-fixed fault has regressed. Fix it in the codebase at \(repoRoot.path).
 
@@ -75,6 +96,7 @@ final class AgentFaultRepairer: FaultRepairer {
         Edit the code so the verify command passes again. Make the minimal
         change required. Do not modify the verify command itself.
         """
-        return try await agent.run(message: prompt, skills: [], repoRoot: repoRoot, timeout: timeout)
+        return try await agent.run(message: prompt, skills: [], repoRoot: repoRoot, extraRoots: [],
+                                   timeout: timeout, model: model)
     }
 }

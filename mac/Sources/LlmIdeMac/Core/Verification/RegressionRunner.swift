@@ -32,6 +32,9 @@ protocol RegressionJudge: AnyObject {
 
 @MainActor
 final class RegressionRunner: ObservableObject {
+    /// Model the fault repairs run on (`nil` = the app's default). Set per run
+    /// by the Loop from its config.
+    var repairModel: String?
     enum Verdict: Equatable {
         case pending
         case unchanged
@@ -305,7 +308,7 @@ final class RegressionRunner: ObservableObject {
             let fault = try store.loadFault(at: url)
             let kept = try await repairGuard(repoRoot) { timeout in
                 try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot,
-                                          timeout: timeout)
+                                          timeout: timeout, model: repairModel)
             }
             guard kept else {
                 results[idx].verdict = .repairFailed("repair rejected: it touched a protected or out-of-scope path")

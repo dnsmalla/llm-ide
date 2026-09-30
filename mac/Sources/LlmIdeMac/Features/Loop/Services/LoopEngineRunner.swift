@@ -208,6 +208,9 @@ final class LoopEngineRunner: ObservableObject {
     /// Shell stages already flake-checked this run (the check happens once per
     /// stage per run, before its first repair).
     private var flakeCheckedStages: Set<String> = []
+    /// Names of stages that failed then passed on the flake gate's re-run this
+    /// run — surfaced in the summary note and the finish notification.
+    private(set) var flakyStages: [String] = []
     /// The last failed artifact check's message, handed to the generate (skill)
     /// stages of the retry so they fix what it found. Cleared when the check passes.
     private var artifactCheckFeedback: String?
@@ -493,6 +496,7 @@ final class LoopEngineRunner: ObservableObject {
         repoRegisteredThisRun = false
         unrecognisedRunnerStages = []
         flakeCheckedStages = []
+        flakyStages = []
         artifactCheckFeedback = nil
         // Must be reset per run, not only in the defer: a run that ended while
         // paused would otherwise leave `paused == true`, and the NEXT run
@@ -735,14 +739,31 @@ final class LoopEngineRunner: ObservableObject {
 
                 switch decision {
                 case .proceed:
-                    if retriedStageID == stage.id, iteration < config.maxIterations {
+                    if retriedStageID == stage.id {
                         // The repaired stage passes: confirm the whole pipeline.
+                        // Same iteration — the re-verify already paid for it.
                         appendLog(.info, "  [\(stage.name)] passes after repair — re-running the full pipeline")
-                        continue iterationLoop
+                        retriedStageID = nil
+                        stageStates = Dictionary(uniqueKeysWithValues:
+                            orderedStages.map { ($0.id, LiveStageState.pending) })
+                        stageIndex = 0
+                    } else {
+                        stageIndex += 1
                     }
-                    stageIndex += 1
                 case .retryStage:
+                    // Each repair + stage-only re-verify is charged as one
+                    // iteration, so `maxIterations` still bounds repair rounds.
+                    if let budget = config.wallClockBudgetSeconds,
+                       workingElapsed(since: startedAt, asOf: Date()) > budget {
+                        appendLog(.warn, "Time budget of \(Int(budget))s exceeded after \(iteration) iteration(s)")
+                        status = .givenUp(reason: .wallClockExceeded)
+                        break iterationLoop
+                    }
                     retriedStageID = stage.id
+                    iteration += 1
+                    iterationRecords.append(LoopIterationRecord(index: iteration))
+                    emit(LoopRunEvent(kind: LoopRunEvent.Kind.iterationStarted, iteration: iteration))
+                    appendLog(.info, "Iteration \(iteration)/\(config.maxIterations) — re-verifying \(stage.name)")
                 case .retryIteration:
                     continue iterationLoop
                 case .terminate(let terminal):
@@ -820,6 +841,7 @@ final class LoopEngineRunner: ObservableObject {
         if let budget = runWallClockBudget, let started = runStartedAt {
             deadline = Date().addingTimeInterval(max(0, budget - workingElapsed(since: started, asOf: Date())))
         }
+        regressionSweep.setRepairModel(config.repairModel)
         let outcome = await regressionSweep.sweep(
             faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: true, repairGuard: repairGuard,
             deadline: deadline)
@@ -1050,6 +1072,9 @@ final class LoopEngineRunner: ObservableObject {
             return .terminate(.givenUp(reason: .wallClockExceeded))
         }
 
+        // The output the repair is shown: the failure itself, or the flake
+        // gate's re-run when that failed differently.
+        var repairOutput = outcome.output
         // Flake gate: before the FIRST repair of this stage in this run, run it
         // once more. A pass means the failure was not real — no repair.
         if used == 0, !didTimeOut, outcome.exitCode != 127, !flakeCheckedStages.contains(stage.id) {
@@ -1066,11 +1091,19 @@ final class LoopEngineRunner: ObservableObject {
                            passed: false, output: outcome.output, outputHash: failureHash, score: score)
                     record(stage, startedAt: rerunStartedAt, duration: Date().timeIntervalSince(rerunStartedAt),
                            exitCode: 0, passed: true, output: "", score: nil,
-                           agentNote: "flaky: failed once, passed on immediate re-run")
+                           agentNote: "flaky: failed once, passed on immediate re-run", flaky: true)
+                    flakyStages.append(stage.name)
                     stageStates[stage.id] = .passed
                     progress.clear(key: stage.id)
                     return .proceed
                 }
+                // Failed again: journal the re-run, and show the repair what
+                // the stage says NOW if it failed differently.
+                let again2 = await Self.analyse(again.output, hashing: true)
+                record(stage, startedAt: rerunStartedAt, duration: Date().timeIntervalSince(rerunStartedAt),
+                       exitCode: again.exitCode, passed: false, output: again.output,
+                       outputHash: again2.hash, score: again2.score)
+                if again2.hash != failureHash { repairOutput = again.output }
             } catch is CancellationError {
                 stageStates[stage.id] = .pending
                 return .terminate(.aborted)
@@ -1082,6 +1115,13 @@ final class LoopEngineRunner: ObservableObject {
                 // Inconclusive (timeout, launch error): treat as still failing.
             }
             stageStates[stage.id] = .failed
+            // The re-run may have used up the budget: end, don't start a repair.
+            if budgetExhausted() {
+                appendLog(.warn, "  [\(stage.name)] no repair · the run's time budget is used up")
+                record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                       passed: false, output: outcome.output, outputHash: failureHash, score: score)
+                return .terminate(.givenUp(reason: .wallClockExceeded))
+            }
         }
 
         do {
@@ -1117,7 +1157,7 @@ final class LoopEngineRunner: ObservableObject {
         let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot,
                                            scopeGlobs: scopeGlobs) {
             let failureOutput = Self.prependGoalContext(
-                outcome.output, goal: goal, acceptanceCriteria: acceptanceCriteria,
+                repairOutput, goal: goal, acceptanceCriteria: acceptanceCriteria,
                 reservedForTruncation: AgentLoopStageRepairer.maxFailureOutputChars)
             repairResult = try await self.withTransportRetry(stage: stage) {
                 try await self.stageRepairer.repair(
@@ -1979,7 +2019,7 @@ final class LoopEngineRunner: ObservableObject {
                         changedPaths: [String] = [],
                         scopeVerdict: RepairScopeVerdict = .notChecked,
                         errored: Bool = false, agentNote: String? = nil,
-                        ledger: LoopLedgerEntry? = nil) {
+                        ledger: LoopLedgerEntry? = nil, flaky: Bool? = nil) {
         guard !iterationRecords.isEmpty else { return }
         let attempt = LoopStageAttempt(
                 stageId: stage.id, stageName: stage.name, kind: stage.kind,
@@ -1990,7 +2030,7 @@ final class LoopEngineRunner: ObservableObject {
                 repairDurationSeconds: repairDuration, repairAttemptIndex: repairIndex,
                 changedPaths: changedPaths,
                 scopeVerdict: scopeVerdict,
-                errored: errored ? true : nil, agentNote: agentNote, ledger: ledger)
+                errored: errored ? true : nil, agentNote: agentNote, ledger: ledger, flaky: flaky)
         iterationRecords[iterationRecords.count - 1].attempts.append(attempt)
         emit(LoopRunEvent(kind: LoopRunEvent.Kind.stageFinished, iteration: iteration,
                           stageId: stage.id, stageName: stage.name, attempt: attempt))

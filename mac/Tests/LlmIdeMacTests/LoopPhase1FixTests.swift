@@ -276,7 +276,7 @@ final class LoopPhase1FixTests: XCTestCase {
                        journal: journal, scopeGuard: CancellationSensitiveGuard(violation: []))
         let status = await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
         XCTAssertEqual(status, .success, "the verify re-run decides, not the repair's ending")
-        let repairAttempt = journal.written.last?.iterations.first?.attempts.first
+        let repairAttempt = journal.written.last?.iterations.first?.attempts.first(where: { $0.repairAttempted })
         XCTAssertEqual(repairAttempt?.repairAttempted, true)
         XCTAssertEqual(repairAttempt?.agentNote,
                        "agent run ended error_max_turns; 1 tool call(s) refused, first: Bash is not available")
@@ -348,7 +348,7 @@ final class LoopPhase1FixTests: XCTestCase {
         XCTAssertEqual(scope.revertedUnlisted, ["tests/fixtures/expected.json"])
         XCTAssertEqual(scope.unlistedCreated, ["tests/fixtures/expected.json"])
         XCTAssertEqual(scope.reverted, [], "nothing git listed needed reverting")
-        let attempt = journal.written.last?.iterations.first?.attempts.first
+        let attempt = journal.written.last?.iterations.first?.attempts.first(where: { $0.repairAttempted })
         XCTAssertEqual(attempt?.changedPaths, ["src/app.swift", "tests/fixtures/expected.json"])
         XCTAssertEqual(attempt?.scopeVerdict, .violatedReverted)
     }
@@ -366,7 +366,7 @@ final class LoopPhase1FixTests: XCTestCase {
                        journal: journal, scopeGuard: CancellationSensitiveGuard(violation: []))
         let status = await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
         XCTAssertEqual(status, .success)
-        XCTAssertEqual(journal.written.last?.iterations.first?.attempts.first?.changedPaths, ["build/cache.txt"])
+        XCTAssertEqual(journal.written.last?.iterations.first?.attempts.first(where: { $0.repairAttempted })?.changedPaths, ["build/cache.txt"])
     }
 
     // Real git: restore a tracked ignored file from HEAD, delete a created one,

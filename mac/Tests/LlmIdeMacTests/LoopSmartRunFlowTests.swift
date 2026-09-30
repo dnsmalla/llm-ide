@@ -73,6 +73,7 @@ final class LoopSmartRunFlowTests: XCTestCase {
 
     /// Each repair "changes" a different file so successive diffs differ.
     final class Guard: RepairScopeGuarding {
+        var constantDiff = false
         private var snaps = 0
         func snapshot(gitRoot: URL, protectedGlobs: [String], scopeGlobs: [String]) async -> RepairScopeSnapshot {
             RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil)
@@ -85,7 +86,7 @@ final class LoopSmartRunFlowTests: XCTestCase {
         func snapshotTree(gitRoot: URL) async -> String? { snaps += 1; return "tree\(snaps)" }
         func treeDiff(from: String, to: String, gitRoot: URL, maxChars: Int,
                       isQuotable: (String) -> Bool) async -> RepairDiffSummary? {
-            RepairDiffSummary(changedPaths: ["Sources/A.swift"], stat: "1 file", diff: "+diff \(to)")
+            RepairDiffSummary(changedPaths: ["Sources/A.swift"], stat: "1 file", diff: constantDiff ? "+same" : "+diff \(to)")
         }
     }
 
@@ -97,13 +98,15 @@ final class LoopSmartRunFlowTests: XCTestCase {
     }
 
     private func run(_ config: LoopEngineConfig, verifier: Verifier, repairer: Repairer,
-                     journal: Journal = Journal()) async -> LoopEngineStatus? {
+                     journal: Journal = Journal(), constantDiff: Bool = false) async -> LoopEngineStatus? {
+        let scope = Guard()
+        scope.constantDiff = constantDiff
         let approvals = VerifyApprovalStore(defaults: UserDefaults(suiteName: "smart-\(UUID().uuidString)")!)
         approvals.approveStage(repo: repoRoot, stageId: "b", command: "build")
         approvals.approveStage(repo: repoRoot, stageId: "t", command: "test")
         let r = LoopEngineRunner(verifier: verifier, stageRepairer: repairer, regressionSweep: Sweep(),
                                  skillExecutor: Skills(), approvals: approvals, stageTimeout: 60,
-                                 journal: journal, summaryWriter: Summary(), scopeGuard: Guard(),
+                                 journal: journal, summaryWriter: Summary(), scopeGuard: scope,
                                  transportRetryDelay: 0)
         return await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
     }
@@ -181,12 +184,70 @@ final class LoopSmartRunFlowTests: XCTestCase {
     }
 
     func testFirstNoProgressVerdictStillGetsOneInformedRepairAtStopTwo() async {
-        // Score stays 1 via distinct ids of equal count so no early-stop by diff
-        // (same failure set is not repeated), stop=2.
-        let v = Verifier(["test": [(1, xc(["a"])), (1, xc(["a"])), (1, xc(["b"])), (1, xc(["c"])), (1, xc(["d"]))]])
+        // Identical failure and identical diffs (so the two-diffs rule stays out
+        // of it), stop=2: the first no-progress verdict still gets one more
+        // (informed) repair, then the run gives up.
+        let v = Verifier(["test": [(1, xc(["a"]))]])
         let rep = Repairer()
-        _ = await run(config(stop: 2, repairs: 9), verifier: v, repairer: rep)
-        XCTAssertGreaterThanOrEqual(rep.count, 2)
+        let status = await run(config(stop: 2, repairs: 9), verifier: v, repairer: rep, constantDiff: true)
+        XCTAssertEqual(status, .givenUp(reason: .noProgress(stageName: "Test")))
+        XCTAssertEqual(rep.count, 2)
+    }
+
+    // MARK: - Fix round 1
+
+    func testFlakyPassIsFlaggedOnTheAttemptAndInTheSummary() async {
+        let v = Verifier(["test": [(1, xc(["a"])), (0, "")]])
+        let journal = Journal()
+        _ = await run(config(), verifier: v, repairer: Repairer(), journal: journal)
+        let record = journal.written[0]
+        XCTAssertTrue(record.iterations.flatMap(\.attempts).contains { $0.flaky == true })
+        XCTAssertTrue(NoteLoopRunSummaryWriter.render(record, title: "t").contains("Possibly flaky"))
+    }
+
+    func testRepairIsShownTheRerunsOutputWhenItFailedDifferently() async {
+        final class Seeing: LoopStageRepairer {
+            var outputs: [String] = []
+            func repair(stageName: String, command: String?, failureOutput: String,
+                        evidence: RepairEvidence?, repoRoot: URL, timeout: TimeInterval?) async throws -> LoopAgentResult {
+                outputs.append(failureOutput); return LoopAgentResult()
+            }
+        }
+        let v = Verifier(["test": [(1, xc(["a"])), (1, xc(["b"])), (0, "")]])
+        let rep = Seeing()
+        let approvals = VerifyApprovalStore(defaults: UserDefaults(suiteName: "smart-\(UUID().uuidString)")!)
+        approvals.approveStage(repo: repoRoot, stageId: "b", command: "build")
+        approvals.approveStage(repo: repoRoot, stageId: "t", command: "test")
+        let r = LoopEngineRunner(verifier: v, stageRepairer: rep, regressionSweep: Sweep(),
+                                 skillExecutor: Skills(), approvals: approvals, stageTimeout: 60,
+                                 journal: Journal(), summaryWriter: Summary(), scopeGuard: Guard(),
+                                 transportRetryDelay: 0)
+        _ = await r.run(config: config(), faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(rep.outputs.count, 1)
+        XCTAssertTrue(rep.outputs[0].contains("C b]"))
+        XCTAssertFalse(rep.outputs[0].contains("C a]"))
+    }
+
+    func testGrowingFailureSetIsNotNeutral() {
+        var w = ProgressWatch()
+        _ = w.record(key: "t", score: 2, hash: "h1", ids: ["a", "b"])
+        let v = w.record(key: "t", score: nil, hash: "h2", ids: ["b", "c", "d"])
+        XCTAssertFalse(v.neutral)
+        XCTAssertEqual(v.streak, 2)
+    }
+
+    func testEachRepairRoundIsChargedAsAnIteration() async {
+        let v = Verifier(["test": [(1, xc(["a"]))]])
+        let rep = Repairer()
+        let cfg = LoopEngineConfig(stages: config().stages, maxIterations: 3, consecutiveFailureStop: 9,
+                                   maxRepairsPerStage: 9)
+        let status = await run(cfg, verifier: v, repairer: rep, constantDiff: true)
+        XCTAssertEqual(status, .givenUp(reason: .maxIterations))
+        XCTAssertEqual(rep.count, 2, "maxIterations-1 repair rounds, as before")
+    }
+
+    func testBuiltInTemplatesStopAfterThree() {
+        for t in LoopTemplate.builtIns { XCTAssertEqual(t.config.consecutiveFailureStop, 3, t.name) }
     }
 
     // MARK: - Model tier + defaults

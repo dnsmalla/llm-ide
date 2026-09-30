@@ -87,6 +87,9 @@ struct LoopStageAttempt: Codable, Equatable {
     /// The attempt-ledger entry for the repair this attempt ran (diff, reply,
     /// resulting failure set). Optional so older records decode.
     var ledger: LoopLedgerEntry?
+    /// True when the stage failed and then passed on an immediate re-run (the
+    /// flake gate). Optional so older records decode.
+    var flaky: Bool?
 
     init(stageId: String, stageName: String, kind: LoopStage.Kind,
          severity: LoopStageSeverity, startedAt: Date, durationSeconds: Double,
@@ -96,7 +99,7 @@ struct LoopStageAttempt: Codable, Equatable {
          changedPaths: [String] = [],
          scopeVerdict: RepairScopeVerdict = .notChecked,
          errored: Bool? = nil, agentNote: String? = nil,
-         ledger: LoopLedgerEntry? = nil) {
+         ledger: LoopLedgerEntry? = nil, flaky: Bool? = nil) {
         self.stageId = stageId
         self.stageName = stageName
         self.kind = kind
@@ -116,6 +119,7 @@ struct LoopStageAttempt: Codable, Equatable {
         self.errored = errored
         self.agentNote = agentNote
         self.ledger = ledger
+        self.flaky = flaky
     }
 }
 

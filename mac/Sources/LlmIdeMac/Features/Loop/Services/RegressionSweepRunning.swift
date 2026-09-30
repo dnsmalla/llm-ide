@@ -29,9 +29,14 @@ protocol RegressionSweepRunning {
     /// Default: ignores the deadline (implementations that cannot honour it).
     func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
                repairGuard: FaultRepairGuard?, deadline: Date?) async -> SweepOutcome
+
+    /// The model the sweep's fault repairs run on (`nil` = app default).
+    func setRepairModel(_ model: String?)
 }
 
 extension RegressionSweepRunning {
+    func setRepairModel(_ model: String?) {}
+
     func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
                repairGuard: FaultRepairGuard?, deadline: Date?) async -> SweepOutcome {
         await sweep(faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: attemptRepair,
@@ -78,6 +83,8 @@ final class RegressionRunnerSweepAdapter: RegressionSweepRunning {
     init(runner: RegressionRunner) {
         self.runner = runner
     }
+
+    func setRepairModel(_ model: String?) { runner.repairModel = model }
 
     func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
                repairGuard: FaultRepairGuard?) async -> SweepOutcome {
