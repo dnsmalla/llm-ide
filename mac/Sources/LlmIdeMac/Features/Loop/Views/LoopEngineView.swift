@@ -1700,8 +1700,11 @@ struct LoopEngineView: View {
         // Read more than the display limit — a project journal interleaves
         // every loop's runs, so filtering down to this loop must not starve
         // the list.
-        // Runs an earlier launch left without a final record become .aborted.
-        journal.reconcileInterrupted(root: root)
+        // Runs an earlier launch left without a final record become .aborted —
+        // off the main thread, once per project per launch.
+        Task { @MainActor in
+            if await journal.reconcileOncePerLaunch(root: root) > 0 { loadPastRuns() }
+        }
         let recent = journal.recentRuns(root: root, limit: 60)
         pastRuns = Array(recent
             .filter { $0.loopId == loopId || ($0.loopId == nil && isPrimaryLoop) }

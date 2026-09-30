@@ -1,6 +1,8 @@
 import Foundation
 
-/// One line of a run's crash-safe event log (`system/loop-runs/events/<runId>.jsonl`).
+/// One line of a run's crash-safe event log
+/// (`<Application Support>/loop-events/<root hash>/<runId>.jsonl`, outside the
+/// project so `RepairScopeGuard`'s protected `system/loop-runs/**` never sees it).
 ///
 /// The final `LoopRunRecord` is only written when a run finishes, so a crash or
 /// force-quit used to leave nothing behind. Events are appended (and flushed)

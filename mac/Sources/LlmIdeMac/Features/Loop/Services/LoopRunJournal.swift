@@ -29,20 +29,31 @@ protocol LoopRunJournaling: AnyObject {
     /// live in this process — into an `.aborted` record. Returns how many.
     @discardableResult
     func reconcileInterrupted(root: URL) -> Int
+
+    /// `reconcileInterrupted`, off the calling thread and at most once per
+    /// project root per app launch. Returns how many runs were reconciled.
+    func reconcileOncePerLaunch(root: URL) async -> Int
 }
 
 extension LoopRunJournaling {
     func appendEvent(_ event: LoopRunEvent, runId: String, root: URL) {}
     @discardableResult
     func reconcileInterrupted(root: URL) -> Int { 0 }
+    func reconcileOncePerLaunch(root: URL) async -> Int { 0 }
 }
 
 /// File-system journal under `<root>/system/loop-runs/`:
 ///
 /// ```
-/// system/loop-runs/index.jsonl          — one LoopRunIndexEntry per line, append-only
+/// system/loop-runs/index-2026-08.jsonl — one LoopRunIndexEntry per line, append-only,
+///                                          one file per month (legacy single
+///                                          index.jsonl is still read, as the oldest)
 /// system/loop-runs/2026-08/<runId>.json — the full LoopRunRecord
 /// ```
+///
+/// While a run is in flight its events go to an append-only log OUTSIDE the
+/// project (`<Application Support>/loop-events/<root hash>/<runId>.jsonl`, see
+/// `eventsDirectory`); the final record supersedes it.
 ///
 /// `<root>/system/` is the same per-project directory `RegressionRunner`
 /// already owns for `system/faults/` and `faults.csv`, so a project's harness
@@ -225,6 +236,33 @@ final class FileLoopRunJournal: LoopRunJournaling {
         }
     }
 
+    private static var reconciledRoots: Set<String> = []
+
+    func reconcileOncePerLaunch(root: URL) async -> Int {
+        let key = root.resolvingSymlinksInPath().standardizedFileURL.path
+        Self.liveLock.lock()
+        let first = Self.reconciledRoots.insert(key).inserted
+        Self.liveLock.unlock()
+        guard first else { return 0 }
+        return await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .utility).async { cont.resume(returning: self.reconcileInterrupted(root: root)) }
+        }
+    }
+
+    /// Appends the index line for `record` unless its month file already has it
+    /// (checked over the tail only): a crash between the record write and the
+    /// index append leaves exactly that gap.
+    private func repairIndexLine(for record: LoopRunRecord, root: URL) {
+        let file = Self.indexURL(root: root, for: record.startedAt)
+        let decoder = Self.decoder()
+        let present = Self.tailLines(of: file, max: 200).lines.contains {
+            (try? decoder.decode(LoopRunIndexEntry.self, from: $0))?.id == record.id
+        }
+        guard !present, var line = try? Self.encoder().encode(LoopRunIndexEntry(record)) else { return }
+        line.append(0x0A)
+        try? Self.append(line, to: file)
+    }
+
     @discardableResult
     func reconcileInterrupted(root: URL) -> Int {
         Self.flushEvents()
@@ -245,15 +283,17 @@ final class FileLoopRunJournal: LoopRunJournaling {
                 try? FileManager.default.removeItem(at: url)
                 continue
             }
-            if resolveRecordURL(id: runId, startedAt: start.startedAt, root: root) == nil {
+            if let existing = resolveRecordURL(id: runId, startedAt: start.startedAt, root: root) {
+                // Finished (record exists) — but make sure it is also indexed
+                // before the log, the only other trace, is dropped.
+                if let record = Self.decodeRecord(at: existing) { repairIndexLine(for: record, root: root) }
+                try? FileManager.default.removeItem(at: url)
+            } else {
                 // `write` removes the log on success; on failure it stays for
                 // the next launch to retry.
                 if let record = LoopRunEvent.reconstruct(from: events), write(record, root: root) == nil {
                     count += 1
                 }
-            } else {
-                // Finished normally (record exists): the log is redundant.
-                try? FileManager.default.removeItem(at: url)
             }
         }
         return count

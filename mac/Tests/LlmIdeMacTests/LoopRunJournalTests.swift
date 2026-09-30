@@ -214,6 +214,46 @@ final class LoopRunJournalTests: XCTestCase {
         XCTAssertEqual(journal.recentRuns(root: root, limit: 5).count, 1)
     }
 
+    /// Crash between the record write and the index append: the record exists,
+    /// its index line does not. Reconcile must index it before dropping the log.
+    func testReconcileRepairsAMissingIndexLineBeforeDroppingTheLog() throws {
+        let journal = eventJournal()
+        let record = makeRecord(id: "unindexed")
+        journal.appendEvent(startEvent(for: record), runId: record.id, root: root)
+        // Write only the record file, as a crash before the index append would leave it.
+        let file = FileLoopRunJournal.recordFileURL(id: record.id, startedAt: record.startedAt, root: root)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .custom { d, enc in
+            var c = enc.singleValueContainer()
+            let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            try c.encode(f.string(from: d))
+        }
+        try e.encode(record).write(to: file)
+        FileLoopRunJournal.forgetLiveRuns()
+        XCTAssertTrue(journal.recentRuns(root: root, limit: 5).isEmpty)
+
+        XCTAssertEqual(journal.reconcileInterrupted(root: root), 0, "not aborted: it finished")
+
+        XCTAssertEqual(journal.recentRuns(root: root, limit: 5).map(\.id), ["unindexed"])
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: journal.eventLogURL(runId: "unindexed", root: root).path))
+        journal.reconcileInterrupted(root: root)
+        XCTAssertEqual(journal.recentRuns(root: root, limit: 5).count, 1, "never double-indexed")
+    }
+
+    func testReconcileOncePerLaunchRunsOnceAndOffTheCaller() async throws {
+        let journal = eventJournal()
+        let record = makeRecord(id: "once")
+        journal.appendEvent(startEvent(for: record), runId: record.id, root: root)
+        FileLoopRunJournal.forgetLiveRuns()
+        let first = await journal.reconcileOncePerLaunch(root: root)
+        let second = await journal.reconcileOncePerLaunch(root: root)
+        XCTAssertEqual(first, 1)
+        XCTAssertEqual(second, 0)
+    }
+
     func testLiveRunIsNeverReconciled() throws {
         let journal = eventJournal()
         let record = makeRecord(id: "live")

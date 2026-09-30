@@ -396,7 +396,7 @@ journal is what survives, written beneath the project root that already holds th
 fault reports:
 
 ```text
-system/loop-runs/index.jsonl          # one LoopRunIndexEntry per line, append-only
+system/loop-runs/index-2026-08.jsonl # one LoopRunIndexEntry per line, append-only, one file per month
 system/loop-runs/2026-08/<runId>.json # the full LoopRunRecord
 ```
 
@@ -417,7 +417,44 @@ Two invariants make it trustworthy:
   distinguishable from "the cron never ran".
 
 The index is append-only JSONL rather than a rewritten array so a crash mid-append
-costs one unparseable line — skipped on read — instead of the whole history.
+costs one unparseable line — skipped on read — instead of the whole history. The
+index rotates monthly (`index-YYYY-MM.jsonl`); an older single `index.jsonl` is still
+read, as the oldest entries, and recent runs are found by reading each file from
+its end rather than whole.
+
+### Crash-safe event log
+
+The final record is only written when a run ends, so a run also appends its
+events (`started`, iteration and stage started/finished, repair requested/replied,
+`verdict`) to a per-run JSONL as they happen, flushed per event and written off the
+main actor. The log lives **outside the project**, at
+`<Application Support>/llm-ide/loop-events/<hash of the project root path>/<runId>.jsonl`:
+`system/loop-runs/**` is a protected path for the repair scope guard, so a log
+appended to there during a repair would read as the repair editing the harness's
+own state. When the final record is written the log is deleted.
+
+At the next launch (once per project, off the main thread) and before the first run,
+a log with a `started` event but no final record becomes an `aborted` record
+("app quit or crashed") rebuilt from the stage results it had logged; a log whose
+record exists but whose index line is missing gets that line appended first.
+
+Limitation: the log folder is keyed by the project root's path. Moving or renaming
+the project folder orphans any unreconciled log of an interrupted run — it is never
+read for the new path (the run's record is not recovered), and the orphan stays in
+Application Support until removed by hand.
+
+### Run lanes and timeouts
+
+Loop runs execute on their own lane in the Auto Task service, separate from the
+other Auto Tasks: a running loop does not block them and they do not block it, while
+two loop sweeps never overlap and runs on one git root still queue (`LoopRunQueue`).
+Each lane has its own Stop. A stage with no `timeoutSeconds` inherits the app
+defaults (Loop page → New project defaults: 30 min shell, 20 min agent; 0 = no
+limit), every shell stage, agent call and regression-sweep verify is clamped to the
+run's remaining wall-clock budget, and once the budget is used up no repair starts.
+At run start, leftover loop worktrees no live run owns are pruned (clean ones whose
+commits are already in the main checkout; dirty or divergent ones are kept and
+logged).
 
 ## Output
 
