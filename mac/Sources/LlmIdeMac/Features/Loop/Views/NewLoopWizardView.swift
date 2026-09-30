@@ -252,6 +252,7 @@ struct NewLoopWizardView: View {
         case .shellCommand: "New Stage"
         case .regressionSweep: "Regression"
         case .skill: "New Skill Stage"
+        case .artifactCheck: "Artifact Check"
         case .unsupported: "Unsupported stage"
         }
         stages.append(LoopStage(name: name, kind: kind,
@@ -335,6 +336,10 @@ struct NewLoopWizardView: View {
                 .font(.system(size: 11, design: .monospaced))
             case .regressionSweep:
                 Text("Re-runs the fault sweep (known regressions + repo checks) against this project.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+            case .artifactCheck:
+                Text(s.check?.summary ?? "Checks generated files in-app (existence, line caps, citations).")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             case .unsupported:

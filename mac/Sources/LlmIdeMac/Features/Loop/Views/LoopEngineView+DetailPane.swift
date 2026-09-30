@@ -157,6 +157,8 @@ extension LoopEngineView {
             if let input = stage.targetPath, !input.isEmpty { detail += " · \(input)" }
             if let output = stage.outputPath, !output.isEmpty { detail += " → \(output)" }
             return detail
+        case .artifactCheck:
+            return stage.check?.summary ?? "no checks configured"
         case .unsupported:
             return "unsupported stage kind — kept as-is, never run"
         }

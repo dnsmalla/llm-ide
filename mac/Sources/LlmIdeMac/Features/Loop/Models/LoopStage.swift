@@ -33,6 +33,11 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         case regressionSweep
         case shellCommand
         case skill
+        /// An in-app check of generated artifacts (no shell, no agent): files
+        /// that must exist, line caps, resolvable citations. Its parameters are
+        /// `check`. A build that predates this kind reads it as `.unsupported`
+        /// (kept verbatim, never run).
+        case artifactCheck
         /// A kind this build does not know (written by a newer build). The
         /// stage is kept verbatim in `rawJSON`, written back unchanged on
         /// save, shown as unsupported, and NEVER run.
@@ -114,13 +119,20 @@ public struct LoopStage: Identifiable, Codable, Equatable {
     /// nil) and it is left alone. Set only where a stage's command is
     /// actually seeded FROM detection; never touched by hand-authoring.
     public var detectedCommand: String? = nil
+    /// `.artifactCheck` only — what to check.
+    public var check: ArtifactCheckSpec? = nil
+    /// Revision of the detector default this stage's content was last brought
+    /// to (`LoopStageDetector.upgradingDefaultRevisions`); `nil` on a stage
+    /// saved before revisions existed, which reads as revision 1.
+    public var defaultRevision: Int? = nil
 
     // Explicit memberwise initializer (preserved for existing call sites)
     public init(id: String = UUID().uuidString, name: String, kind: Kind, command: String? = nil, order: Int,
          skillId: String? = nil, targetPath: String? = nil, outputPath: String? = nil, prompt: String? = nil,
          isDefault: Bool = false, enabled: Bool = true, defaultKey: String? = nil,
          severity: LoopStageSeverity = .blocking, timeoutSeconds: Int? = nil,
-         detectedCommand: String? = nil) {
+         detectedCommand: String? = nil, check: ArtifactCheckSpec? = nil,
+         defaultRevision: Int? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
@@ -136,13 +148,15 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         self.severity = severity
         self.timeoutSeconds = timeoutSeconds
         self.detectedCommand = detectedCommand
+        self.check = check
+        self.defaultRevision = defaultRevision
     }
 
     // MARK: - Codable backward compatibility
 
     enum CodingKeys: String, CodingKey {
         case id, name, kind, command, order, skillId, targetPath, outputPath, prompt, isDefault
-        case enabled, defaultKey, severity, timeoutSeconds, detectedCommand
+        case enabled, defaultKey, severity, timeoutSeconds, detectedCommand, check, defaultRevision
     }
 
     /// Every field added after the first shipped version MUST be decoded with
@@ -180,6 +194,8 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         severity = (try? container.decodeIfPresent(LoopStageSeverity.self, forKey: .severity)) ?? .blocking
         timeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds)
         detectedCommand = try container.decodeIfPresent(String.self, forKey: .detectedCommand)
+        check = try container.decodeIfPresent(ArtifactCheckSpec.self, forKey: .check)
+        defaultRevision = try container.decodeIfPresent(Int.self, forKey: .defaultRevision)
     }
 
     /// An `.unsupported` stage writes back its original JSON untouched;
@@ -206,6 +222,8 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         try c.encode(severity, forKey: .severity)
         try c.encodeIfPresent(timeoutSeconds, forKey: .timeoutSeconds)
         try c.encodeIfPresent(detectedCommand, forKey: .detectedCommand)
+        try c.encodeIfPresent(check, forKey: .check)
+        try c.encodeIfPresent(defaultRevision, forKey: .defaultRevision)
     }
 }
 
@@ -283,6 +301,12 @@ extension LoopStage {
     /// regression sweep only re-checks already-known faults, and an advisory
     /// stage never fails the run — neither proves a code edit changed nothing.
     var verifies: Bool { kind == .shellCommand && severity != .advisory }
+
+    /// Whether this stage is a blocking in-app artifact check. It gates a
+    /// generate loop (a failure re-runs the generate stages) but is NOT a
+    /// `verifies` stage: checking that a file exists proves nothing about a
+    /// code edit, so it never satisfies `lacksVerifyAfter`.
+    var isBlockingArtifactCheck: Bool { kind == .artifactCheck && severity != .advisory }
 
     /// Whether `stage` applies code but no ENABLED verify stage comes after it
     /// in `stages`' run order — the runner refuses such a stage without

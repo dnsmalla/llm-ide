@@ -78,8 +78,10 @@ struct ShellFaultVerifier: FaultVerifier {
             let buffer = capped
                 ? CappedOutputBuffer()
                 : CappedOutputBuffer(headLimit: .max, tailLimit: 0)
+            // CI=1: most test runners (jest, react-scripts, vitest) start a
+            // watcher on a terminal and exit on CI; a stage must never wait.
             proc = try GroupedSubprocess.launch(shellCommand: command, directory: repoRoot,
-                                                output: buffer)
+                                                output: buffer, environment: ["CI": "1"])
         } catch {
             throw VerifyError.launchFailed(error.localizedDescription)
         }

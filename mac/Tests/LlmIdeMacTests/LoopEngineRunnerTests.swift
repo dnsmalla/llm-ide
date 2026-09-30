@@ -3041,4 +3041,75 @@ final class LoopEngineRunnerTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - Artifact check stage
+
+    private final class WritingSkillExecutor: LoopSkillExecuting {
+        private(set) var messages: [String] = []
+        let onCall: (Int) throws -> Void
+        init(onCall: @escaping (Int) throws -> Void) { self.onCall = onCall }
+        func execute(skillId: String, targetPath: String?, message: String,
+                     repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult {
+            messages.append(message)
+            try onCall(messages.count)
+            return LoopAgentResult()
+        }
+    }
+
+    private func makeTempRepo() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("artifact-run-\(UUID().uuidString)").resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return dir
+    }
+
+    private func artifactConfig(severity: LoopStageSeverity = .blocking) -> LoopEngineConfig {
+        LoopEngineConfig(stages: [
+            LoopStage(id: "g1", name: "Generate", kind: .skill, order: 0, skillId: "skills/plan-director"),
+            LoopStage(id: "c1", name: "Check", kind: .artifactCheck, order: 1, severity: severity,
+                      check: ArtifactCheckSpec(requiredPaths: ["PLAN.md"],
+                                               lineLimits: [.init(glob: "PLAN.md", maxLines: 5)]))
+        ], maxIterations: 4, consecutiveFailureStop: 2)
+    }
+
+    func testFailedBlockingCheckReRunsTheGenerateStageWithFindingsThenSucceeds() async throws {
+        let repo = try makeTempRepo()
+        let executor = WritingSkillExecutor { call in
+            // First pass writes nothing; the retry writes a valid file.
+            if call == 2 { try "ok\n".write(to: repo.appendingPathComponent("PLAN.md"), atomically: true, encoding: .utf8) }
+        }
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: executor, approvals: makeApprovals())
+        let result = await runner.run(config: artifactConfig(), faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(executor.messages.count, 2)
+        XCTAssertFalse(executor.messages[0].contains("failed these automatic checks"))
+        XCTAssertTrue(executor.messages[1].contains("missing: PLAN.md"), executor.messages[1])
+        XCTAssertEqual(runner.iteration, 2)
+    }
+
+    func testPersistentlyFailingBlockingCheckStopsOnNoProgress() async throws {
+        let repo = try makeTempRepo()
+        let executor = WritingSkillExecutor { _ in }
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: executor, approvals: makeApprovals())
+        let result = await runner.run(config: artifactConfig(), faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(result, .givenUp(reason: .noProgress(stageName: "Check")))
+        XCTAssertEqual(executor.messages.count, 2, "bounded — not one generate pass per iteration forever")
+    }
+
+    func testAdvisoryCheckFailureNeverGatesTheRun() async throws {
+        let repo = try makeTempRepo()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: WritingSkillExecutor { _ in }, approvals: makeApprovals())
+        let result = await runner.run(config: artifactConfig(severity: .advisory), faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(result, .success)
+    }
 }

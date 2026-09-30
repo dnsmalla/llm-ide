@@ -282,13 +282,14 @@ public enum LoopStageDetector {
                 // Only the two test-role keys are ever revalidated, so only
                 // they need provenance (`revalidatingTestStages.isEligible`).
                 backfillProvenance = def.defaultKey == "test" || def.defaultKey == "regression-test"
+                    || def.defaultKey == "refactor-test"
             } else if def.kind == .regressionSweep {
                 // The Regression sweep never carries a command (it is not a
                 // `.shellCommand` stage at all), so kind alone is unambiguous
                 // and safe here — there is nothing for a command check to
                 // gate, and nothing here is a "test-role" key either.
                 matches = { $0.kind == def.kind && $0.defaultKey == nil }
-            } else if def.defaultKey == "regression-test" {
+            } else if def.defaultKey == "regression-test" || def.defaultKey == "refactor-test" {
                 // BOTH gates are required HERE. Round 3 added the command gate
                 // but (for `"regression-test"` specifically) dropped a name
                 // gate that already existed: before this branch was unified,
@@ -406,6 +407,21 @@ public enum LoopStageDetector {
         return body()
     }
 
+    /// `npm init`'s placeholder (`echo "Error: no test specified" && exit 1`)
+    /// is not a test suite, and a `--watch` script never exits, so neither can
+    /// be a verify stage (`watchScriptNote` flags the latter).
+    static func isRunnableNpmTestScript(_ script: String) -> Bool {
+        let s = script.lowercased()
+        if s.contains("no test specified") { return false }
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && !isWatchScript(script)
+    }
+
+    /// True for a test script that starts a watcher instead of exiting.
+    static func isWatchScript(_ script: String) -> Bool {
+        script.range(of: #"(^|\s)--watch(All)?(\s|=|$)"#, options: .regularExpression) != nil
+    }
+
     private static func detectTestCommandUncached(gitRoot: URL) -> String? {
         let fm = FileManager.default
 
@@ -416,14 +432,20 @@ public enum LoopStageDetector {
         if let data = try? Data(contentsOf: gitRoot.appendingPathComponent("package.json")),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let scripts = obj["scripts"] as? [String: Any],
-           scripts["test"] != nil {
+           let script = scripts["test"] as? String,
+           isRunnableNpmTestScript(script) {
             return "npm test"
         }
 
         if let makefile = try? String(
             contentsOf: gitRoot.appendingPathComponent("Makefile"), encoding: .utf8
-        ), makefile.range(of: #"(?m)^(test|regression):"#, options: .regularExpression) != nil {
-            return "make test"
+        ) {
+            // The target that actually matched, never a guess: a Makefile with
+            // only `regression:` used to answer `make test`, which does not exist.
+            for target in ["test", "regression"]
+            where makefile.range(of: "(?m)^\(target):", options: .regularExpression) != nil {
+                return "make \(target)"
+            }
         }
 
         let pytestMarkers = ["pytest.ini", "pyproject.toml", "setup.cfg"]
@@ -619,11 +641,13 @@ public enum LoopStageDetector {
         "mac-app": LoopDefaultLoopKey.systemCheck,
         "plan-structure-index": LoopDefaultLoopKey.plan,
         "plan-director": LoopDefaultLoopKey.plan,
+        "plan-check": LoopDefaultLoopKey.plan,
         "refactor-plan": LoopDefaultLoopKey.refactor,
         "refactor-apply": LoopDefaultLoopKey.refactor,
         "refactor-test": LoopDefaultLoopKey.refactor,
         "doc-index": LoopDefaultLoopKey.docs,
         "doc-writer": LoopDefaultLoopKey.docs,
+        "doc-check": LoopDefaultLoopKey.docs,
     ]
 
     /// The Plan loop's two generate stages: refresh the structure indexes,
@@ -665,6 +689,7 @@ public enum LoopStageDetector {
         "plan-structure-index", "plan-director",
         "refactor-plan", "refactor-apply",
         "doc-index", "doc-writer",
+        "plan-check", "doc-check",
     ]
 
     private static func planStages() -> [LoopStage] {
@@ -699,8 +724,28 @@ public enum LoopStageDetector {
                           + "the Output file. Preserve existing task IDs and completed ticks; never delete or "
                           + "rewrite the source plans.",
                       isDefault: true, defaultKey: "plan-director"),
+            LoopStage(name: "Plan Check", kind: .artifactCheck, order: 2,
+                      isDefault: true, defaultKey: "plan-check", check: planCheckSpec),
         ]
     }
+
+    /// The Plan loop's blocking check: both artifacts exist, within their caps.
+    /// Plan files live under the project's llm-doc/, which may be outside the
+    /// repo, hence the project-root fallback.
+    static let planCheckSpec = ArtifactCheckSpec(
+        requiredPaths: ["llm-doc/plans/INDEX.md", "llm-doc/plans/PLAN.md"],
+        lineLimits: [.init(glob: "llm-doc/plans/INDEX.md", maxLines: 300),
+                     .init(glob: "llm-doc/plans/PLAN.md", maxLines: 250)],
+        projectRootFallback: true)
+
+    /// The Doc Optimization loop's blocking check: the index exists, pages stay
+    /// within 250 lines (the index within 300) and every citation resolves.
+    /// Docs live in the repo (see `docResolvePathsRule`), so no project fallback.
+    static let docCheckSpec = ArtifactCheckSpec(
+        requiredPaths: ["llm-doc/docs/INDEX.md"],
+        lineLimits: [.init(glob: "llm-doc/docs/INDEX.md", maxLines: 300),
+                     .init(glob: "llm-doc/docs/**/*.md", maxLines: 250, excludes: ["llm-doc/docs/INDEX.md"])],
+        citationGlobs: ["llm-doc/docs/**/*.md"])
 
     // MARK: Refactoring + Doc Optimization stage prompts
     //
@@ -811,6 +856,8 @@ public enum LoopStageDetector {
                       outputPath: "llm-doc/docs",
                       prompt: docWriterPrompt,
                       isDefault: true, defaultKey: "doc-writer"),
+            LoopStage(name: "Doc Check", kind: .artifactCheck, order: 2,
+                      isDefault: true, defaultKey: "doc-check", check: docCheckSpec),
         ]
     }
 
@@ -843,7 +890,10 @@ public enum LoopStageDetector {
     static func defaultStages(forLoop loopKey: String, gitRoot: URL?) -> [LoopStage] {
         rawDefaultStages(forLoop: loopKey, gitRoot: gitRoot).map { stage in
             var copy = stage
-            if let key = stage.defaultKey { copy.id = "\(loopKey)/\(key)" }
+            if let key = stage.defaultKey {
+                copy.id = "\(loopKey)/\(key)"
+                copy.defaultRevision = DefaultRevisionCatalog.shipped.current(key)
+            }
             return copy
         }
     }
@@ -1027,6 +1077,7 @@ public enum LoopStageDetector {
         let loadedStages: [LoopStage] = store.loops.flatMap { (loop: LoopDefinition) -> [LoopStage] in loop.config.stages }
         let loadedTestStages: [LoopStage] = loadedStages.filter { (stage: LoopStage) -> Bool in
             stage.defaultKey == "test" || stage.defaultKey == "regression-test"
+                || stage.defaultKey == "refactor-test"
         }
         let loadedTestStageIDs: Set<String> = Set(loadedTestStages.map { (stage: LoopStage) -> String in stage.id })
 
@@ -1115,6 +1166,9 @@ public enum LoopStageDetector {
         loops = revalidatedLoops
         loops = migratingMacAppCommand(in: loops, gitRoot: gitRoot,
                                        approvals: VerifyApprovalStore(defaults: defaults))
+        // 4.6 Bring unedited default stages to the current shipped revision.
+        let (upgradedLoops, upgradeChanges) = upgradingDefaultRevisions(in: loops, gitRoot: gitRoot)
+        loops = upgradedLoops
 
         // 5. Keep one editable loop. A first-time project gets one; an
         //    existing project keeps whatever it has (including a loop this
@@ -1148,7 +1202,7 @@ public enum LoopStageDetector {
                 return copy
             }
         }
-        return (LoopEngineProjectStore(loops: loops), revalidationChanges)
+        return (LoopEngineProjectStore(loops: loops), revalidationChanges + upgradeChanges)
     }
 
     /// One change `revalidatingTestStages` made, for the caller that actually
@@ -1160,6 +1214,12 @@ public enum LoopStageDetector {
         public enum Kind: Equatable {
             /// The command changed because detection found a different one.
             case updated(from: String, to: String)
+            /// Detection found no test tooling for a Refactoring loop's auto-detected
+            /// Test stage, so the loop's Refactor Apply stage was DISABLED: code
+            /// must never be edited without a verify stage that can run.
+            case disabledRefactorApply
+            /// A default stage was brought to a newer shipped revision.
+            case upgradedDefault(revision: Int)
             // There is deliberately no `removed` case: a nil detection never
             // drops a stage (see `revalidatingTestStages`).
         }
@@ -1232,7 +1292,11 @@ public enum LoopStageDetector {
 
         func isEligible(_ stage: LoopStage) -> Bool {
             guard stage.isDefault, stage.kind == .shellCommand, let key = stage.defaultKey,
-                  key == "test" || key == "regression-test" else { return false }
+                  key == "test" || key == "regression-test" || key == "refactor-test" else { return false }
+            // Every refactor-test stage ever written carries its provenance
+            // (`refactorStages` always set it), so one without it is a stray or
+            // adopted stage — never rewritten by key alone.
+            if key == "refactor-test", stage.detectedCommand == nil { return false }
             return eligibleStageIDs.contains(stage.id)
         }
 
@@ -1262,6 +1326,18 @@ public enum LoopStageDetector {
                                                    kind: .updated(from: command, to: detected)))
                 mutated = true
                 kept.append(updatedStage)
+            }
+            // Paired rule: a Refactoring loop whose auto-detected Test stage has
+            // lost its tooling must not keep an ENABLED Refactor Apply — it
+            // would edit code with nothing able to verify it.
+            if detected == nil,
+               let test = kept.first(where: { $0.defaultKey == "refactor-test" && isEligible($0) }),
+               test.detectedCommand != nil, test.detectedCommand == test.command,
+               let applyIndex = kept.firstIndex(where: { $0.defaultKey == "refactor-apply" && $0.enabled }) {
+                kept[applyIndex].enabled = false
+                changes.append(RevalidationChange(loopName: loop.name, stageName: kept[applyIndex].name,
+                                                   kind: .disabledRefactorApply))
+                mutated = true
             }
             guard mutated else { return loop }
             var updated = loop

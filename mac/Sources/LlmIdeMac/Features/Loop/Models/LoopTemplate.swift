@@ -296,9 +296,11 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                               + "status proposed — future plans build on these indexes. Keep every "
                               + "generated plan file within the 250-line limit, splitting oversized areas into an "
                               + "areas/ folder beside the Output file. Preserve existing task IDs and completed "
-                              + "ticks; never delete or rewrite the source plans.")
+                              + "ticks; never delete or rewrite the source plans."),
+                LoopStage(name: "Plan Check", kind: .artifactCheck, order: 2,
+                          check: LoopStageDetector.planCheckSpec)
             ],
-            maxIterations: 2, consecutiveFailureStop: 2),
+            maxIterations: 3, consecutiveFailureStop: 2),
         isBuiltIn: true)
 
     /// The Refactoring default loop's recipe (`LoopDefaultLoopKey.refactor`):
@@ -349,8 +351,10 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           skillId: "skills/doc-writer",
                           targetPath: "llm-doc/docs/INDEX.md",
                           outputPath: "llm-doc/docs",
-                          prompt: LoopStageDetector.docWriterPrompt)
+                          prompt: LoopStageDetector.docWriterPrompt),
+                LoopStage(name: "Doc Check", kind: .artifactCheck, order: 2,
+                          check: LoopStageDetector.docCheckSpec)
             ],
-            maxIterations: 2, consecutiveFailureStop: 2),
+            maxIterations: 3, consecutiveFailureStop: 2),
         isBuiltIn: true)
 }

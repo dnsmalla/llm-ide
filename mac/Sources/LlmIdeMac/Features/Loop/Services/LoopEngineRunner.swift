@@ -208,6 +208,9 @@ final class LoopEngineRunner: ObservableObject {
     /// Shell stages already flake-checked this run (the check happens once per
     /// stage per run, before its first repair).
     private var flakeCheckedStages: Set<String> = []
+    /// The last failed artifact check's message, handed to the generate (skill)
+    /// stages of the retry so they fix what it found. Cleared when the check passes.
+    private var artifactCheckFeedback: String?
 
     /// Accumulated journal state for the in-flight run. Instance state rather
     /// than a `run`-local `var` only because the per-stage helpers below append
@@ -490,6 +493,7 @@ final class LoopEngineRunner: ObservableObject {
         repoRegisteredThisRun = false
         unrecognisedRunnerStages = []
         flakeCheckedStages = []
+        artifactCheckFeedback = nil
         // Must be reset per run, not only in the defer: a run that ended while
         // paused would otherwise leave `paused == true`, and the NEXT run
         // would hold at its first stage boundary forever with no visible
@@ -576,6 +580,9 @@ final class LoopEngineRunner: ObservableObject {
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
+                if LoopStageDetector.isWatchScript(stage.command ?? "") {
+                    appendLog(.warn, "  [\(stage.name)] the command uses --watch; it may never exit (CI=1 is set, but a watcher flag overrides it)")
+                }
                 guard let command = Self.validCommand(stage) else {
                     // Unreachable: `commandProblem` above returns non-nil for
                     // exactly the cases `validCommand` rejects. Fail closed
@@ -600,6 +607,14 @@ final class LoopEngineRunner: ObservableObject {
                 guard let skillId = stage.skillId,
                       !skillId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                     return await finish(.error("Stage \"\(stage.name)\" has no skill chosen"),
+                                        config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
+                                        projectId: projectId, startedAt: startedAt,
+                                        loopId: loopId, loopName: loopName)
+                }
+            case .artifactCheck:
+                guard let check = stage.check,
+                      !(check.requiredPaths.isEmpty && check.lineLimits.isEmpty && check.citationGlobs.isEmpty) else {
+                    return await finish(.error("Stage \"\(stage.name)\" has no checks configured"),
                                         config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
@@ -692,6 +707,10 @@ final class LoopEngineRunner: ObservableObject {
                         stage, config: config, gitRoot: runGitRoot,
                         progress: &progress, repairsUsed: &repairsUsed,
                         goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
+                case .artifactCheck:
+                    decision = await runArtifactCheckStage(
+                        stage, config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
+                        progress: &progress)
                 case .unsupported:
                     // Filtered out of `orderedStages` above; fail closed if one
                     // ever gets here — an unknown stage kind is never run.
@@ -1342,12 +1361,74 @@ final class LoopEngineRunner: ObservableObject {
         return .terminate(.error(message))
     }
 
+    /// An in-app artifact check (no shell, no agent). A failure of a BLOCKING
+    /// check re-runs the pipeline from the top — the generate stages before it
+    /// get the failure as feedback — bounded by `maxIterations`, the wall-clock
+    /// budget, and the same no-progress rule as every other stage (the failing
+    /// item count is its score). Code-applying stages still run at most once.
+    private func runArtifactCheckStage(_ stage: LoopStage, config: LoopEngineConfig,
+                                       faultsRoot: URL, gitRoot: URL,
+                                       progress: inout ProgressWatch) async -> StageDecision {
+        guard let spec = stage.check else {
+            stageStates[stage.id] = .failed
+            return .terminate(.error("Stage \"\(stage.name)\" has no checks configured"))
+        }
+        let startedAt = Date()
+        let roots = ArtifactCheckEvaluator.Roots(repo: gitRoot, project: faultsRoot)
+        // File IO off the main actor.
+        let result = await Task.detached(priority: .utility) {
+            ArtifactCheckEvaluator.evaluate(spec, roots: roots)
+        }.value
+        let duration = Date().timeIntervalSince(startedAt)
+        if Task.isCancelled {
+            stageStates[stage.id] = .pending
+            return .terminate(.aborted)
+        }
+        if result.passed {
+            appendLog(.info, "  [\(stage.name)] passed")
+            stageStates[stage.id] = .passed
+            record(stage, startedAt: startedAt, duration: duration, exitCode: 0, passed: true, output: "", score: nil)
+            progress.clear(key: stage.id)
+            artifactCheckFeedback = nil
+            return .proceed
+        }
+
+        stageStates[stage.id] = .failed
+        let message = result.message
+        let hash = Self.hash(message)
+        let score = result.failures.count
+        appendLog(.warn, "  [\(stage.name)] FAILED (\(score) problem(s)): \(message.prefix(500))")
+        record(stage, startedAt: startedAt, duration: duration, exitCode: 1, passed: false,
+               output: message, outputHash: hash, score: score)
+        if stage.severity == .advisory {
+            appendLog(.warn, "  [\(stage.name)] advisory — not gating the run")
+            return .proceed
+        }
+        let verdict = progress.record(key: stage.id, score: score, hash: hash)
+        if verdict.streak >= config.consecutiveFailureStop {
+            return .terminate(.givenUp(reason: .noProgress(stageName: stage.name)))
+        }
+        if iteration >= config.maxIterations { return .terminate(.givenUp(reason: .maxIterations)) }
+        if budgetExhausted() {
+            appendLog(.warn, "  [\(stage.name)] no retry · the run's time budget is used up")
+            return .terminate(.givenUp(reason: .wallClockExceeded))
+        }
+        artifactCheckFeedback = message
+        appendLog(.info, "  [\(stage.name)] re-running the generate stages with the findings")
+        return .retryIteration
+    }
+
     private func runSkillStage(_ stage: LoopStage, config: LoopEngineConfig,
                               faultsRoot: URL, gitRoot: URL,
                               goal: String? = nil, acceptanceCriteria: String? = nil,
                               scopeGlobs: [String] = []) async -> StageDecision {
         let skillId = stage.skillId ?? ""
-        let message = Self.prependGoalContext(Self.composeSkillMessage(stage), goal: goal,
+        var composed = Self.composeSkillMessage(stage)
+        if let feedback = artifactCheckFeedback {
+            composed += "\n\nThe previous pass's output failed these automatic checks. Fix exactly these, "
+                + "changing nothing else:\n" + String(feedback.prefix(3000))
+        }
+        let message = Self.prependGoalContext(composed, goal: goal,
                                               acceptanceCriteria: acceptanceCriteria)
         let startedAt = Date()
         appendLog(.info, "  [\(stage.name)] running skill \(skillId.isEmpty ? "(none set)" : skillId) (generate)")

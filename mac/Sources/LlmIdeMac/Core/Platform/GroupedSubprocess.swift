@@ -123,8 +123,12 @@ final class GroupedSubprocess: @unchecked Sendable {
 
     /// Runs `command` under `/bin/sh -c` in `directory`, stdin from /dev/null,
     /// stdout+stderr into one capped buffer.
+    ///
+    /// `environment` entries are added to (and override) the inherited
+    /// environment.
     static func launch(shellCommand command: String, directory: URL,
-                       output: CappedOutputBuffer = CappedOutputBuffer()) throws -> GroupedSubprocess {
+                       output: CappedOutputBuffer = CappedOutputBuffer(),
+                       environment: [String: String] = [:]) throws -> GroupedSubprocess {
         var fds: [Int32] = [0, 0]
         guard pipe(&fds) == 0 else { throw LaunchError.failed("pipe: \(String(cString: strerror(errno)))") }
         let (readFd, writeFd) = (fds[0], fds[1])
@@ -163,8 +167,12 @@ final class GroupedSubprocess: @unchecked Sendable {
 
         let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(command), nil]
         defer { argv.forEach { free($0) } }
+        var merged = ProcessInfo.processInfo.environment
+        for (key, value) in environment { merged[key] = value }
+        let envp: [UnsafeMutablePointer<CChar>?] = merged.map { strdup("\($0.key)=\($0.value)") } + [nil]
+        defer { envp.forEach { free($0) } }
         var child: pid_t = 0
-        let rc = posix_spawn(&child, "/bin/sh", &actions, &attr, argv, environ)
+        let rc = posix_spawn(&child, "/bin/sh", &actions, &attr, argv, envp)
         close(writeFd)   // the child has its own copy; ours would block EOF forever
         guard rc == 0 else {
             close(readFd)

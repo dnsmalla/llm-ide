@@ -478,7 +478,7 @@ struct LoopEngineView: View {
                 Image(systemName: stage.kind == .regressionSweep ? "arrow.uturn.backward.circle"
                       : stage.kind == .shellCommand ? "terminal" : "sparkles")
                     .foregroundStyle(t.textMuted)
-                Text(stage.kind == .skill ? "Generate" : "Verify")
+                Text(stage.kind == .skill ? "Generate" : stage.kind == .artifactCheck ? "Check" : "Verify")
                     .font(Typography.captionStrong)
                     .foregroundStyle(stage.kind == .skill ? t.accent2 : t.accent)
                 if stage.isDefault {
@@ -502,6 +502,18 @@ struct LoopEngineView: View {
                       : "Disabled — the runner skips this stage")
                 stageMenu(stage, position: position, count: stages.count)
             }
+            if LoopStageDetector.updateAvailable(for: stage) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                    Text("Update available — a newer default exists for this stage.")
+                        .font(Typography.caption)
+                    Button("Reset to default") { resetStageToDefault(stage) }
+                        .controlSize(.mini)
+                        .help("Replace this stage's content with the current default (your enabled/severity/timeout choices are kept)")
+                    Spacer()
+                }
+                .foregroundStyle(t.accent4)
+            }
             stageDetail(stage: stageBinding(id: stage.id, fallback: stage))
                 .opacity(stage.enabled ? 1 : 0.55)
         }
@@ -515,6 +527,15 @@ struct LoopEngineView: View {
         // focusing/activating them. `simultaneous` lets this fire alongside
         // whichever child control the click actually landed on.
         .simultaneousGesture(TapGesture().onEnded { selectedStageId = stage.id })
+    }
+
+    /// One-click reset of a default stage whose content is behind the shipped
+    /// revision (`LoopStageDetector.updateAvailable`).
+    private func resetStageToDefault(_ stage: LoopStage) {
+        guard let reset = LoopStageDetector.resetToDefault(stage, loopKey: loopDefaultKey,
+                                                           gitRoot: activeGitRootURL),
+              let i = stages.firstIndex(where: { $0.id == stage.id }) else { return }
+        stages[i] = reset
     }
 
     private var toolbar: some View {
@@ -676,6 +697,12 @@ struct LoopEngineView: View {
                     Text("Open a project with a cloned repo to approve or run shell-command stages.")
                         .font(Typography.caption).foregroundStyle(t.textMuted)
                 }
+            } else if stage.wrappedValue.kind == .artifactCheck {
+                Text("Checked in-app after the generate stages; a failure re-runs them with the findings.")
+                    .font(Typography.caption).foregroundStyle(t.textMuted)
+                Text(stage.wrappedValue.check?.summary ?? "no checks configured")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(t.textMuted)
             } else if stage.wrappedValue.kind == .skill {
                 Text("Skill").font(Typography.caption).foregroundStyle(t.textMuted)
                 if skillCatalog.isEmpty {

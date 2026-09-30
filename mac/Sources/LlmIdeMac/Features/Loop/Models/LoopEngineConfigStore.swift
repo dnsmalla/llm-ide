@@ -225,6 +225,12 @@ enum LoopEngineConfigStore {
             case let .updated(from, to):
                 NSLog("LoopEngineConfigStore: [%@ / %@] test command re-detected, updating \"%@\" -> \"%@\"",
                       change.loopName, change.stageName, from, to)
+            case .disabledRefactorApply:
+                NSLog("LoopEngineConfigStore: [%@ / %@] no test tooling detected, disabling the code-applying stage",
+                      change.loopName, change.stageName)
+            case let .upgradedDefault(revision):
+                NSLog("LoopEngineConfigStore: [%@ / %@] default stage upgraded to revision %d",
+                      change.loopName, change.stageName, revision)
             }
         }
         // Only where there is a file to write the result to — see the helper.
