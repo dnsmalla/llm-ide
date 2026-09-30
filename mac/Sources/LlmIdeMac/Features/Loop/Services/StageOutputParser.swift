@@ -22,12 +22,16 @@ public enum StageOutputParser {
         let group: Int
     }
 
-    /// XCTest: "Executed 12 tests, with 3 failures (0 unexpected) in 0.5 seconds".
-    /// XCTest prints one such line PER SUITE and the aggregate last, so the
-    /// total is the LAST match — the first is just the first suite's count.
-    /// With skips it reads "Executed 12 tests, with 1 test skipped and 3 failures".
-    private static let xctestSummary =
+    /// XCTest: "Executed 12 tests, with 3 failures (0 unexpected) in 0.5 seconds"
+    /// (with skips: "…, with 1 test skipped and 3 failures"). XCTest prints one
+    /// such line PER SUITE; only the one right after the run-wide
+    /// "Test Suite 'All tests' / 'Selected tests' passed|failed" header is the
+    /// total. A per-suite line is never used as the score: when the run
+    /// crashed (or the total was elided) the count is UNKNOWN, not partial.
+    private static let xctestLine =
         #"Executed \d+ tests?, with (?:\d+ tests? skipped and )?(\d+) failures?"#
+    private static let xctestTotal =
+        #"Test Suite '(?:All|Selected) tests' (?:passed|failed)[^\n]*\n\s*"# + xctestLine
     /// swift-testing: "✘ Test run with 12 tests [in 3 suites] failed after 0.5
     /// seconds with 3 issues." and, on success, "... passed after ...".
     private static let swiftTestingFailed =
@@ -63,7 +67,10 @@ public enum StageOutputParser {
     /// Pure and not actor-bound: the runner calls it off the main actor on the
     /// verifier's already-capped output.
     static func parseFailureCount(_ output: String) -> Int? {
-        let xctest = lastCapture(xctestSummary, group: 1, in: output)
+        let xctest = lastCapture(xctestTotal, group: 1, in: output)
+        // XCTest ran (per-suite lines) but reported no total: a crash or an
+        // elided tail. Any number would be a partial count — say "unknown".
+        if xctest == nil, matchCount(xctestLine, in: output) > 0 { return nil }
         var swiftTesting = lastCapture(swiftTestingFailed, group: 1, in: output)
         if swiftTesting == nil, matchCount(swiftTestingPassed, in: output) > 0 { swiftTesting = 0 }
         if xctest != nil || swiftTesting != nil {

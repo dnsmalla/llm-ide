@@ -1676,9 +1676,9 @@ final class LoopEngineRunnerTests: XCTestCase {
     /// loop happily burned all ten iterations.
     func testDifferentFailuresWithAnUnchangingCountGiveUpAsNoProgress() async {
         let outputs = [
-            "Executed 10 tests, with 3 failures (0 unexpected) in 1.0 seconds — alpha",
-            "Executed 10 tests, with 3 failures (0 unexpected) in 1.0 seconds — beta",
-            "Executed 10 tests, with 3 failures (0 unexpected) in 1.0 seconds — gamma"
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds — alpha",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds — beta",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds — gamma"
         ]
         var callIndex = 0
         let verifier = StubVerifier { _ in
@@ -1704,9 +1704,9 @@ final class LoopEngineRunnerTests: XCTestCase {
     /// going even though every failure text differs.
     func testShrinkingScoreKeepsTheLoopRunning() async {
         let outputs = [
-            "Executed 10 tests, with 3 failures (0 unexpected) in 1.0 seconds",
-            "Executed 10 tests, with 2 failures (0 unexpected) in 1.0 seconds",
-            "Executed 10 tests, with 1 failure (0 unexpected) in 1.0 seconds"
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 2 failures (0 unexpected) in 1.0 seconds",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 1 failure (0 unexpected) in 1.0 seconds"
         ]
         var callIndex = 0
         let verifier = StubVerifier { _ in
@@ -1733,8 +1733,8 @@ final class LoopEngineRunnerTests: XCTestCase {
     /// edit did nothing.
     func testRepairerReceivesTheMeasuredDeltaAsEvidence() async {
         let outputs = [
-            "Executed 10 tests, with 3 failures (0 unexpected) in 1.0 seconds",
-            "Executed 10 tests, with 2 failures (0 unexpected) in 1.0 seconds"
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 2 failures (0 unexpected) in 1.0 seconds"
         ]
         var callIndex = 0
         let verifier = StubVerifier { _ in
@@ -1969,7 +1969,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let verifier = StubVerifier { _ in
             defer { callIndex += 1 }
             return callIndex == 0
-                ? VerifyOutcome(exitCode: 1, output: "Executed 10 tests, with 4 failures (0 unexpected) in 1.0 seconds")
+                ? VerifyOutcome(exitCode: 1, output: "Test Suite 'All tests' failed.\nExecuted 10 tests, with 4 failures (0 unexpected) in 1.0 seconds")
                 : VerifyOutcome(exitCode: 0, output: "")
         }
         let config = LoopEngineConfig(stages: [

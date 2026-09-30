@@ -16,7 +16,7 @@ final class StageOutputParserTests: XCTestCase {
 
     func testXCTestSingularFailure() {
         XCTAssertEqual(
-            StageOutputParser.parseFailureCount("Executed 16 tests, with 1 failure (0 unexpected) in 0.005 seconds"),
+            StageOutputParser.parseFailureCount("Test Suite 'All tests' failed at 2026-09-30 10:00:00.000.\nExecuted 16 tests, with 1 failure (0 unexpected) in 0.005 seconds"),
             1)
     }
 
@@ -24,7 +24,7 @@ final class StageOutputParserTests: XCTestCase {
     /// "unrecognised" drive different code paths in the runner.
     func testXCTestZeroFailuresScoresZeroNotNil() {
         XCTAssertEqual(
-            StageOutputParser.parseFailureCount("Executed 294 tests, with 0 failures (0 unexpected) in 3.4 seconds"),
+            StageOutputParser.parseFailureCount("Test Suite 'All tests' passed at 2026-09-30 10:00:00.000.\nExecuted 294 tests, with 0 failures (0 unexpected) in 3.4 seconds"),
             0)
     }
 
@@ -51,14 +51,38 @@ final class StageOutputParserTests: XCTestCase {
     /// be recognised (this repo's own suite has a skip).
     func testXCTestSummaryWithSkippedTests() {
         XCTAssertEqual(StageOutputParser.parseFailureCount(
-            "\t Executed 1508 tests, with 1 test skipped and 2 failures (0 unexpected) in 69.4 (69.5) seconds"), 2)
+            "Test Suite 'All tests' failed at 2026-09-30 10:00:00.000.\n\t Executed 1508 tests, with 1 test skipped and 2 failures (0 unexpected) in 69.4 (69.5) seconds"), 2)
         XCTAssertEqual(StageOutputParser.parseFailureCount(
-            "\t Executed 1508 tests, with 3 tests skipped and 0 failures (0 unexpected) in 69.4 (69.5) seconds"), 0)
+            "Test Suite 'All tests' failed at 2026-09-30 10:00:00.000.\n\t Executed 1508 tests, with 3 tests skipped and 0 failures (0 unexpected) in 69.4 (69.5) seconds"), 0)
+    }
+
+    /// A crash leaves per-suite lines but no run-wide total: the count is
+    /// unknown (nil), never the partial sum of the suites that finished.
+    func testXCTestCrashWithOnlyPerSuiteLinesIsUnknown() {
+        let output = """
+        Test Suite 'AlphaTests' failed at 2026-09-30 10:00:00.000.
+        \t Executed 4 tests, with 1 failure (0 unexpected) in 0.1 (0.1) seconds
+        Test Case '-[BetaTests testBoom]' started.
+        Fatal error: Unexpectedly found nil while unwrapping an Optional value
+        error: Exited with unexpected signal code 4
+        """
+        XCTAssertNil(StageOutputParser.parseFailureCount(output))
+    }
+
+    func testSelectedTestsTotalIsUsedUnderAFilter() {
+        let output = """
+        Test Suite 'AlphaTests' failed at 2026-09-30 10:00:00.000.
+        \t Executed 4 tests, with 1 failure (0 unexpected) in 0.1 (0.1) seconds
+        Test Suite 'Selected tests' failed at 2026-09-30 10:00:01.000.
+        \t Executed 4 tests, with 1 failure (0 unexpected) in 0.1 (0.1) seconds
+        """
+        XCTAssertEqual(StageOutputParser.parseFailureCount(output), 1)
     }
 
     /// `swift test` runs both frameworks; the failures are the sum.
     func testXCTestAndSwiftTestingFailuresAreSummed() {
         let output = """
+        Test Suite 'All tests' failed at 2026-09-30 10:00:01.000.
         \t Executed 10 tests, with 2 failures (0 unexpected) in 0.3 (0.3) seconds
         ✘ Test run with 20 tests in 4 suites failed after 0.8 seconds with 5 issues.
         """
@@ -67,6 +91,7 @@ final class StageOutputParserTests: XCTestCase {
 
     func testXCTestFailuresWithPassingSwiftTesting() {
         let output = """
+        Test Suite 'All tests' failed at 2026-09-30 10:00:01.000.
         \t Executed 10 tests, with 2 failures (0 unexpected) in 0.3 (0.3) seconds
         ✔ Test run with 20 tests in 4 suites passed after 0.8 seconds.
         """
@@ -75,6 +100,7 @@ final class StageOutputParserTests: XCTestCase {
 
     func testSwiftTestingFailuresWithPassingXCTest() {
         let output = """
+        Test Suite 'All tests' failed at 2026-09-30 10:00:01.000.
         \t Executed 10 tests, with 0 failures (0 unexpected) in 0.3 (0.3) seconds
         ✘ Test run with 20 tests in 4 suites failed after 0.8 seconds with 1 issue.
         """
@@ -146,6 +172,7 @@ final class StageOutputParserTests: XCTestCase {
     func testMostSpecificPatternWins() {
         let output = """
         1 failed
+        Test Suite 'All tests' failed at 2026-09-30 10:00:00.000.
         Executed 10 tests, with 7 failures (0 unexpected) in 1.0 seconds
         """
         XCTAssertEqual(StageOutputParser.parseFailureCount(output), 7)
