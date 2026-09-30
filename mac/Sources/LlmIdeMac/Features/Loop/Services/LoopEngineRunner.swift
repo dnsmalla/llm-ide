@@ -1262,8 +1262,15 @@ final class LoopEngineRunner: ObservableObject {
                                                scopeGlobs: scopeGlobs)
         var thrown: Error?
         do { try await edit() } catch { thrown = error }
-        let checked = await checkScope(since: before, stage: stage, config: config,
-                                       gitRoot: gitRoot, scopeGlobs: scopeGlobs)
+        // Checked in a task of its own, which a Stop does not cancel: after a
+        // Stop the edit's task is cancelled, the guard's git probes would fail
+        // in it (`.indeterminate`, fail-open) and whatever the agent wrote
+        // before the Stop would go unchecked and unreverted. The check runs to
+        // completion; the cancellation still propagates from `thrown`.
+        let checked = await Task { @MainActor in
+            await self.checkScope(since: before, stage: stage, config: config,
+                                  gitRoot: gitRoot, scopeGlobs: scopeGlobs)
+        }.value
         guard let thrown else { return checked }
         switch checked {
         case .completed(let verdict, let violations, let changed):
