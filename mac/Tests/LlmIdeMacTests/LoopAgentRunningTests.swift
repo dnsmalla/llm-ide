@@ -7,6 +7,7 @@ final class RecordingLoopAgent: LoopAgentRunning, @unchecked Sendable {
         let message: String
         let skills: [String]
         let repoRoot: URL
+        var extraRoots: [URL] = []
         let timeout: TimeInterval?
     }
     private(set) var calls: [Call] = []
@@ -15,9 +16,10 @@ final class RecordingLoopAgent: LoopAgentRunning, @unchecked Sendable {
         LoopAgentResult(reply: "done", resolvedSkills: skills)
     }
 
-    func run(message: String, skills: [String], repoRoot: URL,
+    func run(message: String, skills: [String], repoRoot: URL, extraRoots: [URL],
              timeout: TimeInterval?) async throws -> LoopAgentResult {
-        calls.append(Call(message: message, skills: skills, repoRoot: repoRoot, timeout: timeout))
+        calls.append(Call(message: message, skills: skills, repoRoot: repoRoot,
+                          extraRoots: extraRoots, timeout: timeout))
         return result(skills)
     }
 }
@@ -103,7 +105,7 @@ final class LoopAgentRunningTests: XCTestCase {
         let agent = RecordingLoopAgent()
         let root = URL(fileURLWithPath: "/tmp/wt-\(UUID().uuidString)")
         let result = try await AgentLoopSkillExecutor(agent: agent)
-            .execute(skillId: "fam/dir", targetPath: "src", message: "go", repoRoot: root)
+            .execute(skillId: "fam/dir", targetPath: "src", message: "go", repoRoot: root, extraRoots: [])
         XCTAssertEqual(agent.calls, [.init(message: "go", skills: ["fam/dir"], repoRoot: root, timeout: nil)])
         XCTAssertEqual(result.reply, "done")
     }

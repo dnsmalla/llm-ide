@@ -37,9 +37,11 @@ final class LoopPhase1FixTests: XCTestCase {
     final class SkillExecutor: LoopSkillExecuting {
         var result = LoopAgentResult()
         private(set) var calls = 0
+        private(set) var extraRoots: [[URL]] = []
         func execute(skillId: String, targetPath: String?, message: String,
-                     repoRoot: URL) async throws -> LoopAgentResult {
+                     repoRoot: URL, extraRoots: [URL]) async throws -> LoopAgentResult {
             calls += 1
+            self.extraRoots.append(extraRoots)
             return result
         }
     }
@@ -138,5 +140,62 @@ final class LoopPhase1FixTests: XCTestCase {
         let attempt = journal.written.last?.iterations.last?.attempts.last
         XCTAssertEqual(attempt?.scopeVerdict, .violatedReverted)
         XCTAssertEqual(attempt?.changedPaths, ["Tests/FooTests.swift"])
+    }
+
+    // MARK: - P1: split layout — the skill agent reaches <project>/llm-doc
+
+    private func makeSplitProject() throws -> (project: URL, repo: URL) {
+        let project = FileManager.default.temporaryDirectory
+            .appendingPathComponent("p1fix-split-\(UUID().uuidString)", isDirectory: true)
+        let repo = project.appendingPathComponent("code/app", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: project.appendingPathComponent("system"),
+                                                withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: project.appendingPathComponent("system/project.json"))
+        addTeardownBlock { try? FileManager.default.removeItem(at: project) }
+        return (project.resolvingSymlinksInPath(), repo.resolvingSymlinksInPath())
+    }
+
+    private func skillConfig() -> LoopEngineConfig {
+        LoopEngineConfig(stages: [
+            LoopStage(id: "plan", name: "Plan", kind: .skill, order: 0, skillId: "fam/plan")
+        ], maxIterations: 1)
+    }
+
+    func testSplitLayoutSkillRunSendsTheProjectLlmDoc() async throws {
+        let (project, repo) = try makeSplitProject()
+        let skills = SkillExecutor()
+        let r = runner(skills: skills, approvals: approvals([]), scopeGuard: CancellationSensitiveGuard(violation: []))
+        _ = await r.run(config: skillConfig(), faultsRoot: project, gitRoot: repo)
+
+        let llmDoc = project.appendingPathComponent("llm-doc", isDirectory: true)
+        XCTAssertEqual(skills.extraRoots.map { $0.map(\.path) }, [[llmDoc.path]])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: llmDoc.path), "created when missing")
+    }
+
+    func testSkillExtraRootsOnlyForAnOutsideLlmDocOfARealProject() throws {
+        let (project, repo) = try makeSplitProject()
+        XCTAssertEqual(LoopEngineRunner.skillExtraRoots(projectRoot: project, gitRoot: project), [],
+                       "project root IS the repo: llm-doc is already inside")
+        let deep = project.appendingPathComponent("a/b/c/d")
+        XCTAssertEqual(LoopEngineRunner.skillExtraRoots(projectRoot: project, gitRoot: deep), [],
+                       "more than 3 levels down — the server would refuse it")
+        let unrelated = FileManager.default.temporaryDirectory.appendingPathComponent("elsewhere")
+        XCTAssertEqual(LoopEngineRunner.skillExtraRoots(projectRoot: project, gitRoot: unrelated), [])
+        try FileManager.default.removeItem(at: project.appendingPathComponent("system/project.json"))
+        XCTAssertEqual(LoopEngineRunner.skillExtraRoots(projectRoot: project, gitRoot: repo), [],
+                       "not an LLM-IDE project")
+    }
+
+    func testRequestCarriesExtraRootsOnlyWhenSet() throws {
+        let body = LlmIdeAPIClient.loopAgentRunRequest(
+            message: "m", skills: [], repoRoot: URL(fileURLWithPath: "/tmp/p/code/app"),
+            extraRoots: [URL(fileURLWithPath: "/tmp/p/llm-doc")], language: nil, model: nil, timeout: nil)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(body)) as? [String: Any])
+        XCTAssertEqual(json["extraRoots"] as? [String], ["/tmp/p/llm-doc"])
+        let bare = LlmIdeAPIClient.loopAgentRunRequest(
+            message: "m", skills: [], repoRoot: URL(fileURLWithPath: "/tmp/r"), language: nil, model: nil, timeout: nil)
+        let bareJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(bare)) as? [String: Any])
+        XCTAssertNil(bareJSON["extraRoots"])
     }
 }

@@ -9,9 +9,12 @@ import Foundation
 /// `targetPath` is already part of the composed `message`.
 protocol LoopSkillExecuting: AnyObject {
     /// - Parameter repoRoot: The git root the run uses — the worktree when the
-    ///   run was redirected into one. The agent is confined to it.
+    ///   run was redirected into one. The agent is confined to it (and to
+    ///   `extraRoots`).
+    /// - Parameter extraRoots: The project's `llm-doc/` when it lies outside
+    ///   `repoRoot` (split layout), so plan/doc skills can reach it.
     func execute(skillId: String, targetPath: String?, message: String,
-                 repoRoot: URL) async throws -> LoopAgentResult
+                 repoRoot: URL, extraRoots: [URL]) async throws -> LoopAgentResult
 }
 
 /// Production adapter. Mirrors `AgentLoopStageRepairer`: one confined agent
@@ -30,8 +33,8 @@ final class AgentLoopSkillExecutor: LoopSkillExecuting {
     }
 
     func execute(skillId: String, targetPath: String?, message: String,
-                 repoRoot: URL) async throws -> LoopAgentResult {
+                 repoRoot: URL, extraRoots: [URL]) async throws -> LoopAgentResult {
         try await agent.run(message: message, skills: skillId.isEmpty ? [] : [skillId],
-                            repoRoot: repoRoot, timeout: nil)
+                            repoRoot: repoRoot, extraRoots: extraRoots, timeout: nil)
     }
 }

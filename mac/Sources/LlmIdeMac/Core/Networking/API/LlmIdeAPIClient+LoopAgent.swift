@@ -15,6 +15,11 @@ extension LlmIdeAPIClient {
         /// `REPO_ROOT_NOT_ALLOWED`) a root outside the user's repo allow-list
         /// or an `.llmide-loop-worktrees/` child of one.
         let repoRoot: String
+        /// Project `llm-doc/` directories the agent may also read and edit
+        /// (split layout). The server accepts only an existing `llm-doc` whose
+        /// parent holds `system/project.json` and is `repoRoot` or at most 3
+        /// levels above it (else 400 `EXTRA_ROOT_NOT_ALLOWED`). Omitted when empty.
+        let extraRoots: [String]?
         let language: String?
         let model: String?
         /// Omitted → the server's default budget (30 min).
@@ -24,6 +29,7 @@ extension LlmIdeAPIClient {
     struct LoopAgentRunResponse: Decodable, Equatable {
         let reply: String?
         let changedPaths: [String]?
+        let changedExtraPaths: [String]?
         let usage: LoopAgentResult.Usage?
         let resolvedSkills: [String]?
         let unresolvedSkills: [String]?
@@ -34,7 +40,8 @@ extension LlmIdeAPIClient {
 
         var result: LoopAgentResult {
             LoopAgentResult(
-                reply: reply ?? "", changedPaths: changedPaths ?? [], usage: usage,
+                reply: reply ?? "", changedPaths: changedPaths ?? [],
+                changedExtraPaths: changedExtraPaths ?? [], usage: usage,
                 resolvedSkills: resolvedSkills ?? [], unresolvedSkills: unresolvedSkills ?? [],
                 truncatedSkills: truncatedSkills ?? [],
                 // The server always sends `ran`; if it is ever absent, infer it
@@ -54,11 +61,13 @@ extension LlmIdeAPIClient {
     /// Builds the request body. Split out so the encoding is testable without
     /// a network call.
     static func loopAgentRunRequest(message: String, skills: [String], repoRoot: URL,
+                                    extraRoots: [URL] = [],
                                     language: String?, model: String?,
                                     timeout: TimeInterval?) -> LoopAgentRunRequest {
         LoopAgentRunRequest(
             message: message, skills: skills,
             repoRoot: repoRoot.standardizedFileURL.path,
+            extraRoots: extraRoots.isEmpty ? nil : extraRoots.map(\.standardizedFileURL.path),
             language: language, model: model,
             timeoutMs: timeout.map { Int(($0 * 1000).rounded()) })
     }
@@ -70,9 +79,11 @@ extension LlmIdeAPIClient {
     }
 
     func loopAgentRun(message: String, skills: [String], repoRoot: URL,
+                      extraRoots: [URL] = [],
                       language: String?, model: String? = nil,
                       timeout: TimeInterval?) async throws -> LoopAgentResult {
         let body = Self.loopAgentRunRequest(message: message, skills: skills, repoRoot: repoRoot,
+                                            extraRoots: extraRoots,
                                             language: language, model: model, timeout: timeout)
         let response: LoopAgentRunResponse = try await post(
             "/kb/loop/agent-run", body: body, authenticated: true,
@@ -93,9 +104,9 @@ final class APILoopAgentRunner: LoopAgentRunning {
         self.language = language
     }
 
-    func run(message: String, skills: [String], repoRoot: URL,
+    func run(message: String, skills: [String], repoRoot: URL, extraRoots: [URL],
              timeout: TimeInterval?) async throws -> LoopAgentResult {
         try await api.loopAgentRun(message: message, skills: skills, repoRoot: repoRoot,
-                                   language: language, timeout: timeout)
+                                   extraRoots: extraRoots, language: language, timeout: timeout)
     }
 }

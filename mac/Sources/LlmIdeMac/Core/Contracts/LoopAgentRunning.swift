@@ -33,6 +33,9 @@ struct LoopAgentResult: Equatable, Sendable {
     var reply: String
     /// Files the agent edited, relative to `repoRoot`.
     var changedPaths: [String]
+    /// Absolute paths the agent edited inside an accepted extra root (the
+    /// project's `llm-doc/` in the split layout).
+    var changedExtraPaths: [String]
     var usage: Usage?
     var resolvedSkills: [String]
     /// Skill ids the server could not find. Non-empty means the server did
@@ -45,12 +48,14 @@ struct LoopAgentResult: Equatable, Sendable {
     var resultSubtype: String?
     var denied: [Denial]
 
-    init(reply: String = "", changedPaths: [String] = [], usage: Usage? = nil,
+    init(reply: String = "", changedPaths: [String] = [], changedExtraPaths: [String] = [],
+         usage: Usage? = nil,
          resolvedSkills: [String] = [], unresolvedSkills: [String] = [],
          truncatedSkills: [String] = [], ran: Bool = true,
          resultSubtype: String? = "success", denied: [Denial] = []) {
         self.reply = reply
         self.changedPaths = changedPaths
+        self.changedExtraPaths = changedExtraPaths
         self.usage = usage
         self.resolvedSkills = resolvedSkills
         self.unresolvedSkills = unresolvedSkills
@@ -68,8 +73,20 @@ struct LoopAgentResult: Equatable, Sendable {
 /// one), never the prompt text alone. Throws on transport / server failure;
 /// "made no edit" is not an error.
 protocol LoopAgentRunning: AnyObject {
+    /// - Parameter extraRoots: Directories outside `repoRoot` the agent may
+    ///   also read and edit — only ever the project's `llm-doc/` (the server
+    ///   refuses anything else).
     /// - Parameter timeout: Wall-clock budget for the run; `nil` = the
     ///   server's default (30 min).
-    func run(message: String, skills: [String], repoRoot: URL,
+    func run(message: String, skills: [String], repoRoot: URL, extraRoots: [URL],
              timeout: TimeInterval?) async throws -> LoopAgentResult
+}
+
+extension LoopAgentRunning {
+    /// A run confined to `repoRoot` alone — every repair.
+    func run(message: String, skills: [String], repoRoot: URL,
+             timeout: TimeInterval?) async throws -> LoopAgentResult {
+        try await run(message: message, skills: skills, repoRoot: repoRoot, extraRoots: [],
+                      timeout: timeout)
+    }
 }

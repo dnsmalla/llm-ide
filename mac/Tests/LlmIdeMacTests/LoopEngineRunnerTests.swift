@@ -55,7 +55,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         /// context was prepended) rather than just the call count.
         private(set) var receivedMessages: [String] = []
         func execute(skillId: String, targetPath: String?, message: String,
-                     repoRoot: URL) async throws -> LoopAgentResult {
+                     repoRoot: URL, extraRoots: [URL]) async throws -> LoopAgentResult {
             callCount += 1
             receivedMessages.append(message)
             if !queuedErrors.isEmpty { throw queuedErrors.removeFirst() }

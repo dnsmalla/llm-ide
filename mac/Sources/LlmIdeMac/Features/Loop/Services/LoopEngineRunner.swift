@@ -653,7 +653,7 @@ final class LoopEngineRunner: ObservableObject {
                     decision = .proceed
                 case .skill:
                     decision = await runSkillStage(
-                        stage, config: config, gitRoot: runGitRoot,
+                        stage, config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                         goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
                     // Only an apply that actually RAN counts as applied: an
                     // errored one (the agent never answered) applied nothing,
@@ -1010,6 +1010,37 @@ final class LoopEngineRunner: ObservableObject {
         "\(stage.name) already applied its batch this run; skipped"
     }
 
+    /// The extra root a skill stage's agent gets: `<projectRoot>/llm-doc` when
+    /// it lies OUTSIDE `gitRoot` (the split layout, `<project>/code/<repo>`,
+    /// or a Loop worktree under `<project>/system/loop-worktrees/`), created
+    /// when missing. Mirrors the server's acceptance rule so a project it
+    /// would refuse never gets a 400: the project must be an LLM-IDE project
+    /// (`system/project.json`) and `gitRoot` must sit at most 3 levels below
+    /// it. `[]` otherwise — including when the project root IS the repo,
+    /// where llm-doc is already inside the confinement.
+    nonisolated static func skillExtraRoots(projectRoot: URL, gitRoot: URL,
+                                            fileManager: FileManager = .default) -> [URL] {
+        let project = projectRoot.resolvingSymlinksInPath().standardizedFileURL
+        let repo = gitRoot.resolvingSymlinksInPath().standardizedFileURL
+        let projectPath = project.path
+        let repoPath = repo.path
+        guard repoPath == projectPath || repoPath.hasPrefix(projectPath + "/") else { return [] }
+        let depth = repoPath == projectPath ? 0
+            : repoPath.dropFirst(projectPath.count + 1).split(separator: "/").count
+        guard depth > 0, depth <= 3 else { return [] }
+        guard fileManager.fileExists(atPath: project.appendingPathComponent("system/project.json").path)
+        else { return [] }
+        let llmDoc = project.appendingPathComponent("llm-doc", isDirectory: true)
+        var isDir: ObjCBool = false
+        if !fileManager.fileExists(atPath: llmDoc.path, isDirectory: &isDir) {
+            guard (try? fileManager.createDirectory(at: llmDoc, withIntermediateDirectories: true)) != nil
+            else { return [] }
+        } else if !isDir.boolValue {
+            return []
+        }
+        return [llmDoc]
+    }
+
     /// Why a skill stage failed when the server could not resolve its skill.
     nonisolated static func skillNotInstalledMessage(_ skillIds: [String]) -> String {
         skillIds.count == 1
@@ -1027,7 +1058,7 @@ final class LoopEngineRunner: ObservableObject {
     }
 
     private func runSkillStage(_ stage: LoopStage, config: LoopEngineConfig,
-                              gitRoot: URL,
+                              faultsRoot: URL, gitRoot: URL,
                               goal: String? = nil, acceptanceCriteria: String? = nil,
                               scopeGlobs: [String] = []) async -> StageDecision {
         let skillId = stage.skillId ?? ""
@@ -1041,12 +1072,16 @@ final class LoopEngineRunner: ObservableObject {
         // available to a skill as it is to the repairer.
         // `gitRoot` is the run's root — the worktree when this run was
         // redirected into one — and it is what the agent is confined to.
+        // In the split layout the project's llm-doc/ (plans, docs, the
+        // refactor plan) sits outside the git root; the agent is let into it.
+        let extraRoots = Self.skillExtraRoots(projectRoot: faultsRoot, gitRoot: gitRoot)
         var agentResult: LoopAgentResult?
         let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot,
                                            scopeGlobs: scopeGlobs) {
             agentResult = try await self.withTransportRetry(stage: stage) {
                 try await self.skillExecutor.execute(
-                    skillId: skillId, targetPath: stage.targetPath, message: message, repoRoot: gitRoot)
+                    skillId: skillId, targetPath: stage.targetPath, message: message,
+                    repoRoot: gitRoot, extraRoots: extraRoots)
             }
         }
         let duration = Date().timeIntervalSince(startedAt)
