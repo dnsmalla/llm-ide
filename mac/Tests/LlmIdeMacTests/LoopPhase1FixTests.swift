@@ -114,11 +114,12 @@ final class LoopPhase1FixTests: XCTestCase {
                         approvals: VerifyApprovalStore,
                         journal: Journal = Journal(),
                         stageTimeout: TimeInterval = 600,
+                        registrar: LoopRepoRegistering? = nil,
                         scopeGuard: RepairScopeGuarding) -> LoopEngineRunner {
         LoopEngineRunner(verifier: verifier, stageRepairer: repairer, regressionSweep: Sweep(),
                          skillExecutor: skills, approvals: approvals, stageTimeout: stageTimeout,
                          journal: journal, summaryWriter: Summary(), scopeGuard: scopeGuard,
-                         transportRetryDelay: 0)
+                         repoRegistrar: registrar, transportRetryDelay: 0)
     }
 
     // MARK: - P2: a Stop mid-edit still runs the guard
@@ -405,5 +406,48 @@ final class LoopPhase1FixTests: XCTestCase {
         XCTAssertTrue(fm.fileExists(atPath: root.appendingPathComponent("gen/preexisting.txt").path),
                       "a file that existed before the edit is never deleted")
         XCTAssertTrue(error?.contains("gen/preexisting.txt") == true, String(describing: error))
+    }
+
+    // MARK: - P6: the run's main git root is registered before any agent call
+
+    final class Registrar: LoopRepoRegistering {
+        var error: Error?
+        private(set) var registered: [URL] = []
+        func register(repoRoot: URL) async throws {
+            registered.append(repoRoot)
+            if let error { throw error }
+        }
+    }
+
+    func testMainGitRootIsRegisteredOnceBeforeTheFirstAgentCall() async {
+        var runs = 0
+        let registrar = Registrar()
+        let skills = SkillExecutor()
+        let repairer = Repairer()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "plan", name: "Plan", kind: .skill, order: 0, skillId: "fam/plan"),
+            LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs == 1 ? 1 : 0, output: "x") },
+                       repairer: repairer, skills: skills, approvals: approvals([("t", "swift test")]),
+                       registrar: registrar, scopeGuard: CancellationSensitiveGuard(violation: []))
+        let status = await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(status, .success)
+        XCTAssertEqual(registrar.registered, [repoRoot], "once per run, the main git root")
+        XCTAssertEqual(repairer.calls, 1)
+        XCTAssertEqual(skills.calls, 2, "the retry iteration re-runs the skill")
+    }
+
+    func testRegistrationFailureFailsTheStageWithoutCallingTheAgent() async {
+        struct Down: LocalizedError { var errorDescription: String? { "HTTP 500" } }
+        let registrar = Registrar()
+        registrar.error = Down()
+        let skills = SkillExecutor()
+        let r = runner(skills: skills, approvals: approvals([]), registrar: registrar,
+                       scopeGuard: CancellationSensitiveGuard(violation: []))
+        let status = await r.run(config: skillConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+        guard case .error(let message)? = status else { return XCTFail("expected .error") }
+        XCTAssertTrue(message.contains("repo \(repoRoot.path) is not registered with the server"), message)
+        XCTAssertEqual(skills.calls, 0)
     }
 }

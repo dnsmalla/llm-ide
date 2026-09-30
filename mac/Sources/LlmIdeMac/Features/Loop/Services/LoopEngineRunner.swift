@@ -190,6 +190,12 @@ final class LoopEngineRunner: ObservableObject {
     private let summaryWriter: LoopRunSummaryWriting
     private let scopeGuard: RepairScopeGuarding
     private let trigger: LoopRunTrigger
+    /// Registers the run's main git root with the server's repo allow-list
+    /// before the first agent call. nil (tests) skips registration.
+    private let repoRegistrar: LoopRepoRegistering?
+    /// The current run's main git root, and whether it is registered yet.
+    private var runMainGitRoot: URL?
+    private var repoRegisteredThisRun = false
 
     /// Stages already warned about an unparseable failure count this run —
     /// the notice is per stage, not per iteration, or a 10-iteration run
@@ -233,8 +239,10 @@ final class LoopEngineRunner: ObservableObject {
          summaryWriter: LoopRunSummaryWriting = NoteLoopRunSummaryWriter(),
          scopeGuard: RepairScopeGuarding = GitRepairScopeGuard(),
          trigger: LoopRunTrigger = .manual,
+         repoRegistrar: LoopRepoRegistering? = nil,
          transportRetryDelay: TimeInterval = 2) {
         self.transportRetryDelay = transportRetryDelay
+        self.repoRegistrar = repoRegistrar
         self.verifier = verifier
         self.stageRepairer = stageRepairer
         self.regressionSweep = regressionSweep
@@ -456,6 +464,8 @@ final class LoopEngineRunner: ObservableObject {
         stageStates = [:]
         lastSkillResults = [:]
         lastRepairResults = [:]
+        runMainGitRoot = mainGitRoot
+        repoRegisteredThisRun = false
         unrecognisedRunnerStages = []
         // Must be reset per run, not only in the defer: a run that ended while
         // paused would otherwise leave `paused == true`, and the NEXT run
@@ -715,6 +725,7 @@ final class LoopEngineRunner: ObservableObject {
             // Fail closed: with the runner gone there is no guard to run the
             // repair inside, so it is rejected, never run unguarded.
             guard let self else { return false }
+            try await self.ensureRepoRegistered()
             let guarded = await self.withScopeGuard(stage: stage, config: config, gitRoot: repoRoot,
                                                     scopeGlobs: scopeGlobs) {
                 let result = try await self.withTransportRetry(stage: stage) {
@@ -934,6 +945,15 @@ final class LoopEngineRunner: ObservableObject {
             return .terminate(.givenUp(reason: .repairBudgetExhausted(stageName: stage.name)))
         }
 
+        do {
+            try await ensureRepoRegistered()
+        } catch {
+            record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                   passed: false, output: outcome.output, outputHash: failureHash, score: score)
+            if Self.isCancellation(error) { return .terminate(.aborted) }
+            appendLog(.error, "  [\(stage.name)] \(error.localizedDescription)")
+            return .terminate(.error(error.localizedDescription))
+        }
         appendLog(.info, "  [\(stage.name)] repairing…")
         stageStates[stage.id] = .repairing
         repairsUsed[stage.id] = used + 1
@@ -1052,6 +1072,28 @@ final class LoopEngineRunner: ObservableObject {
         return [llmDoc]
     }
 
+    /// Why an agent call could not be made: the server would refuse the repo.
+    struct RepoNotRegisteredError: LocalizedError, Equatable {
+        let path: String
+        let reason: String
+        var errorDescription: String? { "repo \(path) is not registered with the server (\(reason))" }
+    }
+
+    /// Registers the run's main git root with the server's repo allow-list,
+    /// once per run, before its first agent call (worktrees are then accepted
+    /// as linked worktrees of it). Throws `RepoNotRegisteredError`, or the
+    /// cancellation, when that fails.
+    private func ensureRepoRegistered() async throws {
+        guard let repoRegistrar, let root = runMainGitRoot, !repoRegisteredThisRun else { return }
+        do {
+            try await repoRegistrar.register(repoRoot: root)
+            repoRegisteredThisRun = true
+        } catch {
+            if Self.isCancellation(error) { throw error }
+            throw RepoNotRegisteredError(path: root.path, reason: error.localizedDescription)
+        }
+    }
+
     /// The budget for one agent call on `stage`: the smaller of the stage's
     /// timeout (its own `timeoutSeconds`, else the runner's fallback when set)
     /// and what is left of the run's wall-clock budget; nil when neither
@@ -1143,6 +1185,17 @@ final class LoopEngineRunner: ObservableObject {
         // In the split layout the project's llm-doc/ (plans, docs, the
         // refactor plan) sits outside the git root; the agent is let into it.
         let extraRoots = Self.skillExtraRoots(projectRoot: faultsRoot, gitRoot: gitRoot)
+        do {
+            try await ensureRepoRegistered()
+        } catch {
+            let cancelled = Self.isCancellation(error)
+            stageStates[stage.id] = cancelled ? .pending : .failed
+            record(stage, startedAt: startedAt, duration: Date().timeIntervalSince(startedAt), exitCode: nil,
+                   passed: false, output: error.localizedDescription, score: nil)
+            if cancelled { return .terminate(.aborted) }
+            appendLog(.error, "  [\(stage.name)] \(error.localizedDescription)")
+            return .terminate(.error(error.localizedDescription))
+        }
         var agentResult: LoopAgentResult?
         let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot,
                                            scopeGlobs: scopeGlobs) {

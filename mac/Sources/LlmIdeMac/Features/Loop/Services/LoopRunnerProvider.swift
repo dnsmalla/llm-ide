@@ -32,7 +32,8 @@ final class LoopRunnerProvider: LoopRunnerProviding {
             stageRepairer: AgentLoopStageRepairer(api: api),
             regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
             skillExecutor: AgentLoopSkillExecutor(api: api),
-            trigger: trigger
+            trigger: trigger,
+            repoRegistrar: APILoopRepoRegistrar(api: api)
         )
     }
 }

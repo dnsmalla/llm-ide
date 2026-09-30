@@ -61,7 +61,8 @@ final class LoopRunService: ObservableObject {
             stageRepairer: AgentLoopStageRepairer(api: api),
             regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
             skillExecutor: AgentLoopSkillExecutor(api: api),
-            approvals: approvals)
+            approvals: approvals,
+            repoRegistrar: APILoopRepoRegistrar(api: api))
         // Mirror into the shared per-task log — the buffer the Auto Tasks
         // page and the phone read — so page-driven runs stay visible there.
         // Owned here (not per page appearance) so the mirror survives the
