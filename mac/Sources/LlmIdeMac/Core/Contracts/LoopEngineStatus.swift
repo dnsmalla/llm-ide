@@ -14,6 +14,10 @@ enum LoopEngineStatus: Equatable {
         case wallClockExceeded
         /// `LoopEngineConfig.maxRepairsPerStage` reached for one stage.
         case repairBudgetExhausted(stageName: String)
+        /// A stage's failure count disappeared — a change stopped the build or
+        /// tests from running — and the repair given after that did not bring
+        /// it back.
+        case stoppedReporting(stageName: String)
     }
 
     /// Why a run was stopped for safety rather than given up on for lack of
@@ -53,6 +57,7 @@ extension LoopEngineStatus {
         case .givenUp(.noProgress(let name)): return "given up (\"\(name)\" stopped improving)"
         case .givenUp(.wallClockExceeded): return "given up (time budget exceeded)"
         case .givenUp(.repairBudgetExhausted(let name)): return "given up (repair budget exhausted for \"\(name)\")"
+        case .givenUp(.stoppedReporting(let name)): return "given up (a change stopped \"\(name)\" from running its tests)"
         case .blocked(.repairOutOfScope(let name, let paths)):
             let list = paths.prefix(3).joined(separator: ", ")
             let more = paths.count > 3 ? " (+\(paths.count - 3) more)" : ""
@@ -77,6 +82,7 @@ extension LoopEngineStatus {
         case .givenUp(.noProgress): return "given_up.no_progress"
         case .givenUp(.wallClockExceeded): return "given_up.wall_clock"
         case .givenUp(.repairBudgetExhausted): return "given_up.repair_budget"
+        case .givenUp(.stoppedReporting): return "given_up.stopped_reporting"
         case .blocked(.repairOutOfScope): return "blocked.repair_out_of_scope"
         case .needsApproval: return "needs_approval"
         case .error: return "error"

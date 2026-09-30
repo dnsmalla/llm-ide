@@ -890,9 +890,16 @@ final class LoopEngineRunner: ObservableObject {
             return .proceed
         }
 
-        if verdict.streak >= config.consecutiveFailureStop {
+        // The attempt right after a count disappeared always gets its repair,
+        // even at `consecutiveFailureStop` — that repair is the only one told
+        // "your last change stopped the tests from running", and stopping
+        // before it would give up on the one piece of evidence that matters.
+        if verdict.streak >= config.consecutiveFailureStop, !verdict.stoppedReporting {
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, outputHash: failureHash, score: score)
+            if verdict.notReporting {
+                return .terminate(.givenUp(reason: .stoppedReporting(stageName: stage.name)))
+            }
             // A measured, unchanging failure COUNT and a byte-identical failure are
             // different diagnoses and get different statuses: `.noProgress` says
             // "the failures kept changing but never shrank" (thrashing), which a
@@ -923,9 +930,8 @@ final class LoopEngineRunner: ObservableObject {
         let evidence = RepairEvidence(
             attempt: used + 1, previousScore: verdict.previousScore, currentScore: score,
             improved: verdict.improved, streak: verdict.streak,
-            stoppedRunning: verdict.stoppedReporting,
-            errorExcerpt: verdict.stoppedReporting
-                ? StageOutputParser.firstErrorLines(outcome.output) : nil)
+            stoppedRunning: verdict.notReporting,
+            errorExcerpt: verdict.notReporting ? analysis.errorLines : nil)
 
         // Timed around the guard, not just the agent call: the scope check's
         // two `git status` runs are part of what a repair costs in wall clock,
@@ -1597,12 +1603,15 @@ final class LoopEngineRunner: ObservableObject {
         return stage.command
     }
 
-    /// Failure count and (when `hashing`) the stall-detector hash of a shell
-    /// stage's output, computed on a background executor.
+    /// Failure count and, for a failure (`hashing`), the stall-detector hash
+    /// and first error lines of a shell stage's output — on a background
+    /// executor, never the main actor.
     nonisolated private static func analyse(_ output: String,
-                                            hashing: Bool) async -> (score: Int?, hash: String) {
+                                            hashing: Bool) async -> (score: Int?, hash: String, errorLines: String) {
         await Task.detached(priority: .utility) {
-            (StageOutputParser.parseFailureCount(output), hashing ? hash(output) : "")
+            (StageOutputParser.parseFailureCount(output),
+             hashing ? hash(output) : "",
+             hashing ? StageOutputParser.firstErrorLines(output) : "")
         }.value
     }
 

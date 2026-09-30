@@ -35,6 +35,22 @@ final class ProgressWatchTests: XCTestCase {
         XCTAssertEqual(verdict.previousScore, 3)
     }
 
+    /// Once the count is gone, later count-less failures stay "not improved"
+    /// even though their text differs, until a count comes back.
+    func testStillNotReportingStaysWorseUntilACountReturns() {
+        var watch = ProgressWatch()
+        _ = watch.record(key: "a", score: 3, hash: "h1")
+        _ = watch.record(key: "a", score: nil, hash: "err1")
+        let still = watch.record(key: "a", score: nil, hash: "err2")
+        XCTAssertFalse(still.improved)
+        XCTAssertFalse(still.stoppedReporting)
+        XCTAssertTrue(still.notReporting)
+        XCTAssertEqual(still.streak, 3)
+        let back = watch.record(key: "a", score: 2, hash: "h2")
+        XCTAssertTrue(back.improved)
+        XCTAssertFalse(back.notReporting)
+    }
+
     func testNilToNilIsNotStoppedReporting() {
         var watch = ProgressWatch()
         _ = watch.record(key: "a", score: nil, hash: "h1")

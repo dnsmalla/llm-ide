@@ -20,7 +20,10 @@ import Foundation
 /// - A score that DISAPPEARS (the previous failure had a count, this one has
 ///   none) is worse, never "improved": the build or test run itself broke — a
 ///   compile error prints no test summary. It used to fall through to the hash
-///   comparison, where the new, different output read as progress.
+///   comparison, where the new, different output read as progress. It STAYS
+///   worse on every later count-less failure until a count comes back
+///   (`notReporting`), so a still-broken build cannot look like progress
+///   just because its compile errors changed.
 /// - With no score on either side, it falls back to hash equality: a different
 ///   hash resets, an identical hash increments. That is exactly the old shell
 ///   behaviour, so an unrecognised test runner loses nothing.
@@ -37,12 +40,18 @@ struct ProgressWatch {
         /// True when the previous failure had a count and this one has none —
         /// the last change stopped the tests from running at all.
         var stoppedReporting: Bool = false
+        /// True while failures have had no count since one that did — the
+        /// build/test run is (still) broken. Includes the `stoppedReporting`
+        /// transition itself.
+        var notReporting: Bool = false
     }
 
     private struct State {
         var score: Int?
         var hash: String
         var streak: Int
+        /// The most recent non-nil score in this key's history.
+        var lastKnownScore: Int?
     }
 
     private var state: [String: State] = [:]
@@ -50,13 +59,14 @@ struct ProgressWatch {
     /// Records a failure for `key` and returns the verdict.
     mutating func record(key: String, score: Int?, hash: String) -> Verdict {
         guard let previous = state[key] else {
-            state[key] = State(score: score, hash: hash, streak: 1)
+            state[key] = State(score: score, hash: hash, streak: 1, lastKnownScore: score)
             return Verdict(improved: false, streak: 1, previousScore: nil)
         }
 
         let improved: Bool
         let stoppedReporting = score == nil && previous.score != nil
-        if stoppedReporting {
+        let notReporting = score == nil && previous.lastKnownScore != nil
+        if notReporting {
             improved = false
         } else if let score, let previousScore = previous.score {
             improved = score < previousScore
@@ -67,9 +77,10 @@ struct ProgressWatch {
         }
 
         let streak = improved ? 1 : previous.streak + 1
-        state[key] = State(score: score, hash: hash, streak: streak)
+        state[key] = State(score: score, hash: hash, streak: streak,
+                           lastKnownScore: score ?? previous.lastKnownScore)
         return Verdict(improved: improved, streak: streak, previousScore: previous.score,
-                       stoppedReporting: stoppedReporting)
+                       stoppedReporting: stoppedReporting, notReporting: notReporting)
     }
 
     /// Forgets `key`'s history. Called when a stage passes, so a later failure in

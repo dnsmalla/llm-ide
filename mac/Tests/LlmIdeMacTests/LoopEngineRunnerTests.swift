@@ -1728,6 +1728,41 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(runner.iteration, 4)
     }
 
+    /// A count that disappears (a compile error) always earns one more repair,
+    /// even at `consecutiveFailureStop == 2`, and that repair is told its last
+    /// change stopped the tests from running. If the build stays broken the run
+    /// gives up with its own reason.
+    func testCountDisappearingGetsOneInformedRepairThenItsOwnGiveUp() async {
+        let outputs = [
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds",
+            "Foo.swift:3:5: error: cannot find 'bar' in scope\nerror: fatalError",
+            "Foo.swift:9:1: error: expected '}'"
+        ]
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return VerifyOutcome(exitCode: 1, output: outputs[min(callIndex, outputs.count - 1)])
+        }
+        let repairer = StubRepairer()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 10, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .givenUp(reason: .stoppedReporting(stageName: "Test")))
+        XCTAssertEqual(repairer.repairCount, 2)
+        XCTAssertEqual(repairer.evidence[1]?.stoppedRunning, true)
+        XCTAssertEqual(repairer.evidence[1]?.errorExcerpt?.hasPrefix("Foo.swift:3:5: error:"), true)
+        XCTAssertEqual(LoopEngineStatus.givenUp(reason: .stoppedReporting(stageName: "Test")).code,
+                       "given_up.stopped_reporting")
+    }
+
     /// Evidence is what turns a retry into an iteration: without the measured
     /// delta, the agent is handed the same failure and has no way to know its last
     /// edit did nothing.
