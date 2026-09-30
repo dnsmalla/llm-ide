@@ -26,12 +26,27 @@ final class LoopStoreCache: @unchecked Sendable {
     }
 
     /// Files whose content feeds `LoopStageDetector`'s answers.
-    private static let markers = ["Package.swift", "Makefile", "package.json", "pyproject.toml",
-                                  "Cargo.toml", "go.mod", "mac/Package.swift"]
+    /// Inputs that come from UserDefaults (the schedule opt-in hint, loop
+    /// defaults) and the many test files System Check probes are NOT watched:
+    /// they rely on the `maxAge` expiry.
+    static let markers = ["Package.swift", "Makefile", "package.json", "pyproject.toml",
+                          "pytest.ini", "setup.cfg", "Cargo.toml", "go.mod", "mac/Package.swift",
+                          "extension/package.json", "extension/tests"]
     var maxAge: TimeInterval = 30
 
     private let lock = NSLock()
     private var entries: [Key: Entry] = [:]
+    private var generations: [String: Int] = [:]
+
+    /// Snapshot to take BEFORE a load; hand it back to `store` so a write that
+    /// lands mid-load is never cached under a newer signature.
+    struct Ticket { let generation: Int; let signature: [String] }
+
+    func ticket(projectRoot: String, file: URL, gitRoot: URL?) -> Ticket {
+        lock.lock(); defer { lock.unlock() }
+        return Ticket(generation: generations[projectRoot, default: 0],
+                      signature: Self.signature(file: file, gitRoot: gitRoot))
+    }
 
     func value(for key: Key, file: URL, gitRoot: URL?) -> LoopEngineProjectStore? {
         lock.lock(); defer { lock.unlock() }
@@ -44,18 +59,24 @@ final class LoopStoreCache: @unchecked Sendable {
         return e.store
     }
 
-    func store(_ store: LoopEngineProjectStore, for key: Key, file: URL, gitRoot: URL?) {
+    /// Caches `store` only when nothing invalidated the project since `ticket`
+    /// (a load that wrote the file itself just misses once on the next read,
+    /// then caches the stable result).
+    func store(_ store: LoopEngineProjectStore, for key: Key, ticket: Ticket, file: URL, gitRoot: URL?) {
         lock.lock(); defer { lock.unlock() }
-        entries[key] = Entry(store: store, signature: Self.signature(file: file, gitRoot: gitRoot), at: Date())
+        guard generations[key.projectRoot, default: 0] == ticket.generation else { return }
+        entries[key] = Entry(store: store, signature: ticket.signature, at: Date())
     }
 
     func invalidate(projectRoot: String) {
         lock.lock(); defer { lock.unlock() }
+        generations[projectRoot, default: 0] += 1
         entries = entries.filter { $0.key.projectRoot != projectRoot }
     }
 
     func invalidateAll() {
         lock.lock(); defer { lock.unlock() }
+        for k in generations.keys { generations[k]! += 1 }
         entries.removeAll()
     }
 

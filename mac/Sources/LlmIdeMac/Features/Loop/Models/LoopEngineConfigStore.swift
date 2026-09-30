@@ -184,11 +184,14 @@ enum LoopEngineConfigStore {
                                                  gitRoot: gitRoot) {
             return hit
         }
+        // Signature BEFORE the load: a write landing mid-load must not be
+        // cached as if the (older) result matched it.
+        let file = fileURL(projectRoot: projectRoot)
+        let ticket = LoopStoreCache.shared.ticket(projectRoot: projectRoot.path, file: file, gitRoot: gitRoot)
         let result = LoopStageDetector.withDetectionMemo {
             loadEnsured(projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot, defaults: defaults)
         }
-        // Signature taken AFTER the load: it may have written the file itself.
-        LoopStoreCache.shared.store(result, for: key, file: fileURL(projectRoot: projectRoot), gitRoot: gitRoot)
+        LoopStoreCache.shared.store(result, for: key, ticket: ticket, file: file, gitRoot: gitRoot)
         return result
     }
 

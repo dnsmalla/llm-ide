@@ -920,6 +920,8 @@ extension AutoCodeUpdateService {
 
         var failures: [String] = []
         var passed = 0
+        // Loops the pre-run re-check skipped: not a pass, not a failure.
+        var skipped = 0
         var totalIterations = 0
         // Whether ANY loop reached a terminal status. Decides the caller's
         // record status, so it must survive a mid-sweep bail-out below.
@@ -929,6 +931,13 @@ extension AutoCodeUpdateService {
         // (single loop / single stage) runs as asked whatever its schedule flag.
         let rereadsBeforeRun = onlyStageId == nil && onlyLoopId == nil
         sweep: for plannedLoop in targets {
+            // The Stop button cancels the enclosing task; stop starting NEW
+            // loops the moment that happens rather than working through the
+            // rest of the list.
+            if Task.isCancelled {
+                logStore.append(.loopEngineering, "Stopped — remaining loop(s) skipped.", level: .error)
+                break
+            }
             var loop = plannedLoop
             if rereadsBeforeRun {
                 let recheck = LoopEngineConfigStore.sweepRecheck(
@@ -937,16 +946,10 @@ extension AutoCodeUpdateService {
                 guard let fresh = recheck.loop else {
                     logStore.append(.loopEngineering,
                                     "Skipping \(plannedLoop.name) — \(recheck.skipReason ?? "it changed").")
+                    skipped += 1
                     continue
                 }
                 loop = fresh
-            }
-            // The Stop button cancels the enclosing task; stop starting NEW
-            // loops the moment that happens rather than working through the
-            // rest of the list.
-            if Task.isCancelled {
-                logStore.append(.loopEngineering, "Stopped — remaining loop(s) skipped.", level: .error)
-                break
             }
             let enabledStageCount = loop.config.stages.filter(\.enabled).count
             logStore.append(.loopEngineering,
@@ -1043,19 +1046,21 @@ extension AutoCodeUpdateService {
         } else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop — " + failures.joined(separator: "; ") + "."
         }
+        let ran = targets.count - skipped
+        let skipNote = skipped > 0 ? " (\(skipped) skipped)" : ""
         activity?.report(
             kind: .loopEngineeringDone,
-            title: "Loop complete — \(passed)/\(targets.count) loop(s) passed",
-            detail: ["iterations": totalIterations, "loops": targets.count],
+            title: "Loop complete — \(passed)/\(ran) loop(s) passed\(skipNote)",
+            detail: ["iterations": totalIterations, "loops": ran, "skipped": skipped],
             link: ShellState.Section.loopEngine.rawValue
         )
         // Same background-only banner desktop runs get from LoopRunService —
         // a scheduled run finishing while the user is elsewhere was previously
         // silent outside the activity feed.
         LoopRunNotifier.notify(
-            title: passed == targets.count ? "Loop auto task finished"
+            title: passed == ran ? "Loop auto task finished"
                                            : "Loop auto task needs attention",
-            body: "\(passed)/\(targets.count) loop(s) passed · \(totalIterations) iteration(s)")
+            body: "\(passed)/\(ran) loop(s) passed\(skipNote) · \(totalIterations) iteration(s)")
         return reachedTerminal
     }
 
