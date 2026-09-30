@@ -148,9 +148,12 @@ final class RegressionRunner: ObservableObject {
     /// (`<project>/code/<repo>`). `gitRoot == nil` means no working tree is
     /// resolvable, so command-backed faults are skipped rather than run in the
     /// wrong cwd (answer-compare faults still run — they need no repo).
+    ///   - repairGuard: when set, every repair runs through it (see
+    ///     `FaultRepairGuard`); a rejected repair is recorded `.repairFailed`.
     func run(faultsRoot: URL, gitRoot: URL?, only: Set<URL>? = nil,
              autoReopen requestedAutoReopen: Bool = false,
-             attemptRepair: Bool = false) async {
+             attemptRepair: Bool = false,
+             repairGuard: FaultRepairGuard? = nil) async {
         guard !running else { return }
         running = true
         // Auto-reopen mutates files on disk. The exact-match verdict is a
@@ -194,7 +197,8 @@ final class RegressionRunner: ObservableObject {
                 await runCommandFault(idx: idx, url: url, command: cmd,
                                       verifier: verifier, gitRoot: gitRoot,
                                       attemptRepair: attemptRepair,
-                                      autoReopen: requestedAutoReopen)
+                                      autoReopen: requestedAutoReopen,
+                                      repairGuard: repairGuard)
             } else {
                 await runAnswerCompareFault(idx: idx, fault: fault, url: url, autoReopen: autoReopen)
             }
@@ -222,7 +226,8 @@ final class RegressionRunner: ObservableObject {
     private func runCommandFault(idx: Int, url: URL, command: String,
                                  verifier: FaultVerifier, gitRoot: URL?,
                                  attemptRepair: Bool,
-                                 autoReopen reopenOnRegression: Bool) async {
+                                 autoReopen reopenOnRegression: Bool,
+                                 repairGuard: FaultRepairGuard? = nil) async {
         // Verify commands + git ops need a working tree. None resolved (a
         // project with no cloned repo) → skip rather than run in the wrong cwd.
         guard let repoRoot = gitRoot else {
@@ -258,7 +263,18 @@ final class RegressionRunner: ObservableObject {
             let dirtyBefore = Set((try? store.gitDiff(at: repoRoot).changedPaths) ?? [])
             appendLog(.info, "  → repairing…")
             let fault = try store.loadFault(at: url)
-            try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot)
+            if let repairGuard {
+                let kept = try await repairGuard(repoRoot) {
+                    try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot)
+                }
+                guard kept else {
+                    results[idx].verdict = .repairFailed("repair rejected: it touched a protected or out-of-scope path")
+                    appendLog(.error, "  → repair rejected (protected/out-of-scope path) · not re-verified")
+                    return
+                }
+            } else {
+                try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot)
+            }
             let second = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeout)
             if second.exitCode == 0 {
                 results[idx].verdict = .repaired

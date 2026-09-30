@@ -18,7 +18,27 @@ struct SweepOutcome: Equatable {
 }
 
 protocol RegressionSweepRunning {
-    func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> SweepOutcome
+    /// `repairGuard` wraps each fault repair the sweep makes — the Loop passes
+    /// its protected-path guard so the sweep's own repairs are checked like
+    /// every other agent edit.
+    func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
+               repairGuard: FaultRepairGuard?) async -> SweepOutcome
+}
+
+extension RegressionSweepRunning {
+    func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> SweepOutcome {
+        await sweep(faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: attemptRepair,
+                    repairGuard: nil)
+    }
+}
+
+extension SweepOutcome {
+    /// Faults that make the sweep fail: everything that is not `.unchanged`
+    /// or `.repaired`. The regression stage's progress score — `regressed`
+    /// alone is always 0 once repair is attempted (a repaired-or-not fault is
+    /// `.repaired` / `.repairFailed`, never `.regressed`), so it could never
+    /// show progress or a stall.
+    var failingCount: Int { max(0, total - (unchanged + repaired)) }
 }
 
 /// Production adapter wrapping the real `RegressionRunner`. A sweep
@@ -47,7 +67,8 @@ final class RegressionRunnerSweepAdapter: RegressionSweepRunning {
         self.runner = runner
     }
 
-    func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> SweepOutcome {
+    func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
+               repairGuard: FaultRepairGuard?) async -> SweepOutcome {
         // `RegressionRunner.run()` guards re-entrancy by no-op-returning
         // without resetting `results` — reading that stale/partial state
         // would silently report a pass. Refuse instead (fail-closed).
@@ -56,7 +77,8 @@ final class RegressionRunnerSweepAdapter: RegressionSweepRunning {
                                  repaired: 0, repairFailed: 0, needsApproval: 0,
                                  failed: 0, pending: 0)
         }
-        await runner.run(faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: attemptRepair)
+        await runner.run(faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: attemptRepair,
+                         repairGuard: repairGuard)
 
         var regressed = 0, unchanged = 0, repaired = 0
         var repairFailed = 0, needsApproval = 0, failed = 0, pending = 0

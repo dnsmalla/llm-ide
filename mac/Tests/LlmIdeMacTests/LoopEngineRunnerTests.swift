@@ -108,7 +108,8 @@ final class LoopEngineRunnerTests: XCTestCase {
             self.alwaysPasses = alwaysPasses
             self.onSweep = onSweep
         }
-        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> SweepOutcome {
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
+                   repairGuard: FaultRepairGuard?) async -> SweepOutcome {
             onSweep?()
             return alwaysPasses
                 ? SweepOutcome(passed: true, total: 0, regressed: 0, unchanged: 0,
@@ -128,7 +129,8 @@ final class LoopEngineRunnerTests: XCTestCase {
     /// outlasts the sequence still sees a well-formed failing outcome.
     private final class DecreasingRegressionSweep: RegressionSweepRunning {
         private var callCount = 0
-        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> SweepOutcome {
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
+                   repairGuard: FaultRepairGuard?) async -> SweepOutcome {
             defer { callCount += 1 }
             let regressed = max(1, 5 - callCount)
             return SweepOutcome(passed: false, total: regressed, regressed: regressed, unchanged: 0,
@@ -2475,7 +2477,7 @@ final class LoopEngineRunnerTests: XCTestCase {
             skillExecutor: skill, approvals: makeApprovals(), journal: journal)
         let result = await runner.run(config: skillOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
 
-        guard case .error(let message) = result else { return XCTFail("got \(result)") }
+        guard case .error(let message) = result else { return XCTFail("got \(String(describing: result))") }
         XCTAssertTrue(message.contains("\"Plan\" errored"), message)
         XCTAssertEqual(skill.callCount, 2, "one call plus exactly one retry")
         XCTAssertEqual(runner.stageStates["s1"], .errored)
@@ -2512,7 +2514,7 @@ final class LoopEngineRunnerTests: XCTestCase {
             skillExecutor: skill, approvals: makeApprovals())
         let result = await runner.run(config: skillOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
 
-        guard case .error = result else { return XCTFail("got \(result)") }
+        guard case .error = result else { return XCTFail("got \(String(describing: result))") }
         XCTAssertEqual(skill.callCount, 1)
     }
 
@@ -2528,7 +2530,7 @@ final class LoopEngineRunnerTests: XCTestCase {
             skillExecutor: skill, approvals: makeApprovals(approve: [("t1", "swift test")]))
         let result = await runner.run(config: skillThenTestConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
 
-        guard case .error = result else { return XCTFail("got \(result)") }
+        guard case .error = result else { return XCTFail("got \(String(describing: result))") }
     }
 
     func testRepairTransportBlipIsRetriedOnce() async {
@@ -2642,8 +2644,108 @@ final class LoopEngineRunnerTests: XCTestCase {
             journal: journal, scopeGuard: scopeGuard)
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
 
-        guard case .blocked = result else { return XCTFail("got \(result)") }
+        guard case .blocked = result else { return XCTFail("got \(String(describing: result))") }
         XCTAssertEqual(scopeGuard.revertedPaths, ["Makefile"])
         XCTAssertEqual(journal.written.last?.iterations.first?.attempts.first?.scopeVerdict, .violated)
     }
+
+    // MARK: - Regression stage: score, guarded sweep repairs, needs approval
+
+    /// Returns a fixed outcome; when `repairWith` is set, first runs one
+    /// repair through the guard the runner passed (as the real sweep does for
+    /// a failing fault) and records whether the guard kept it.
+    private final class ScriptedRegressionSweep: RegressionSweepRunning {
+        let outcome: SweepOutcome
+        var repairWith: (() async throws -> Void)?
+        private(set) var guardVerdicts: [Bool] = []
+        private(set) var receivedGuard = false
+        init(_ outcome: SweepOutcome) { self.outcome = outcome }
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
+                   repairGuard: FaultRepairGuard?) async -> SweepOutcome {
+            receivedGuard = repairGuard != nil
+            if let repairWith, let repairGuard, let root = gitRoot {
+                if let kept = try? await repairGuard(root, repairWith) { guardVerdicts.append(kept) }
+            }
+            return outcome
+        }
+    }
+
+    private func outcome(total: Int, regressed: Int = 0, unchanged: Int = 0, repaired: Int = 0,
+                         repairFailed: Int = 0, needsApproval: Int = 0) -> SweepOutcome {
+        let passed = regressed + repairFailed + needsApproval == 0 && unchanged + repaired == total
+        return SweepOutcome(passed: passed, total: total, regressed: regressed, unchanged: unchanged,
+                            repaired: repaired, repairFailed: repairFailed,
+                            needsApproval: needsApproval, failed: 0, pending: 0)
+    }
+
+    private func regressionOnlyConfig(policy: ProtectedPathPolicy = .revert) -> LoopEngineConfig {
+        LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0)
+        ], maxIterations: 2, consecutiveFailureStop: 5, protectedPathPolicy: policy)
+    }
+
+    /// With repair on, a failing fault is `.repairFailed`, never `.regressed`,
+    /// so the old `regressed` score was always 0. The score is the failing count.
+    func testRegressionScoreIsTheFailingFaultCount() async {
+        let sweep = ScriptedRegressionSweep(outcome(total: 3, unchanged: 1, repairFailed: 2))
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: sweep,
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals(), journal: journal)
+        _ = await runner.run(config: regressionOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        let attempt = journal.written.last?.iterations.first?.attempts.first
+        XCTAssertEqual(attempt?.score, 2)
+        XCTAssertTrue(attempt?.outputTail.contains("2 failing") ?? false, attempt?.outputTail ?? "")
+        XCTAssertTrue(sweep.receivedGuard, "the sweep's repairs must run through the guard")
+    }
+
+    func testRegressionFaultNeedingApprovalStopsAsNeedsApproval() async {
+        let sweep = ScriptedRegressionSweep(outcome(total: 2, unchanged: 1, needsApproval: 1))
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: sweep,
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals())
+        let result = await runner.run(config: regressionOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .needsApproval(stageName: "Regression"))
+        XCTAssertEqual(runner.iteration, 1, "no retry can approve a command")
+    }
+
+    /// A sweep repair that edits a fault's test is rejected by the guard (so
+    /// the sweep does not re-verify it) and the run is blocked — even though
+    /// the sweep itself reported a pass.
+    func testSweepRepairThatTouchesAProtectedPathIsRejectedAndBlocks() async {
+        let sweep = ScriptedRegressionSweep(outcome(total: 1, repaired: 1))
+        sweep.repairWith = {}
+        let scopeGuard = violatingGuard("tests/test_fault.py")
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: sweep,
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals(), scopeGuard: scopeGuard)
+        let result = await runner.run(config: regressionOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(sweep.guardVerdicts, [false])
+        XCTAssertEqual(scopeGuard.revertedPaths, ["tests/test_fault.py"])
+        XCTAssertEqual(result, .blocked(reason: .repairOutOfScope(
+            stageName: "Regression", paths: ["tests/test_fault.py"])))
+    }
+
+    func testSweepRepairUnderWarnPolicyIsKept() async {
+        let sweep = ScriptedRegressionSweep(outcome(total: 1, repaired: 1))
+        sweep.repairWith = {}
+        let scopeGuard = violatingGuard("tests/test_fault.py")
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: sweep,
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals(), scopeGuard: scopeGuard)
+        let result = await runner.run(config: regressionOnlyConfig(policy: .warn),
+                                      faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(sweep.guardVerdicts, [true])
+        XCTAssertTrue(scopeGuard.revertedPaths.isEmpty)
+        XCTAssertEqual(result, .success)
+    }
 }
+

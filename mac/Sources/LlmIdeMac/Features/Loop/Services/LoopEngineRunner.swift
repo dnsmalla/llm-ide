@@ -635,7 +635,7 @@ final class LoopEngineRunner: ObservableObject {
                 case .regressionSweep:
                     decision = await runRegressionStage(
                         stage, config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
-                        progress: &progress)
+                        progress: &progress, scopeGlobs: scopeGlobs)
                 case .shellCommand:
                     decision = await runShellStage(
                         stage, config: config, gitRoot: runGitRoot,
@@ -693,22 +693,60 @@ final class LoopEngineRunner: ObservableObject {
 
     private func runRegressionStage(_ stage: LoopStage, config: LoopEngineConfig,
                                     faultsRoot: URL, gitRoot: URL,
-                                    progress: inout ProgressWatch) async -> StageDecision {
+                                    progress: inout ProgressWatch,
+                                    scopeGlobs: [String] = []) async -> StageDecision {
         let startedAt = Date()
+        // The sweep's own fault repairs are agent edits like any other: each
+        // runs inside the protected-path guard (and the transport retry). The
+        // findings are collected here and judged once the sweep returns; a
+        // repair the policy rejects is not kept, so the sweep never re-verifies
+        // a fault whose test the repair just edited.
+        var findings: [(verdict: RepairScopeVerdict, violations: [String], changed: [String])] = []
+        let repairGuard: FaultRepairGuard = { [weak self] repoRoot, repair in
+            guard let self else { try await repair(); return true }
+            let guarded = await self.withScopeGuard(stage: stage, config: config, gitRoot: repoRoot,
+                                                    scopeGlobs: scopeGlobs) {
+                try await self.withTransportRetry(stage: stage) { try await repair() }
+            }
+            switch guarded {
+            case .failed(let error, let verdict, let violations, let changed):
+                findings.append((verdict, violations, changed))
+                throw error
+            case .completed(let verdict, let violations, let changed):
+                findings.append((verdict, violations, changed))
+                let rejected = (verdict == .violated || verdict == .violatedReverted)
+                    && [.revert, .stop].contains(Self.effectivePolicy(for: stage, config: config))
+                return !rejected
+            }
+        }
         let outcome = await regressionSweep.sweep(
-            faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: true)
+            faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: true, repairGuard: repairGuard)
         let duration = Date().timeIntervalSince(startedAt)
-        // The regressed count IS the score here — no parsing needed, which is why
-        // this stage could always see progress while shell stages could not. The
+        let changed = Array(Set(findings.flatMap(\.changed))).sorted()
+        let violations = Array(Set(findings.flatMap(\.violations))).sorted()
+        let scopeVerdict = Self.worstVerdict(findings.map(\.verdict))
+        // The failing-fault count IS the score here — no parsing needed. The
         // same line is the log entry, the journal's output tail, and the hash
         // input, so it is built once.
         let line = Self.regressionLine(outcome)
         appendLog(outcome.passed ? .info : .warn, "  [\(stage.name)] \(line)")
 
+        // A violation ends the run whatever the sweep concluded: a sweep that
+        // "passed" because a repair edited the fault's test must not pass.
+        if let terminal = scopeTermination(stage: stage, config: config,
+                                           verdict: scopeVerdict, violations: violations) {
+            stageStates[stage.id] = .failed
+            record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
+                   passed: false, output: line, score: outcome.failingCount,
+                   changedPaths: changed, scopeVerdict: scopeVerdict)
+            return .terminate(terminal)
+        }
+
         if outcome.passed {
             stageStates[stage.id] = .passed
             record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
-                   passed: true, output: "", score: 0)
+                   passed: true, output: "", score: 0,
+                   changedPaths: changed, scopeVerdict: scopeVerdict)
             // A pass restarts the stall watch so a later failure in the same run
             // counts from scratch.
             progress.clear(key: stage.id)
@@ -716,13 +754,21 @@ final class LoopEngineRunner: ObservableObject {
         }
 
         stageStates[stage.id] = .failed
-        let verdict = progress.record(key: stage.id, score: outcome.regressed, hash: Self.hash(line))
+        let score = outcome.failingCount
+        let verdict = progress.record(key: stage.id, score: score, hash: Self.hash(line))
         record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
-               passed: false, output: line, score: outcome.regressed)
+               passed: false, output: line, score: score,
+               changedPaths: changed, scopeVerdict: scopeVerdict)
 
         if stage.severity == .advisory {
             appendLog(.warn, "  [\(stage.name)] advisory — not gating the run")
             return .proceed
+        }
+        // An unapproved verify command cannot start passing on a retry — only a
+        // human approving it can change that — so re-running the loop would
+        // burn every iteration on the same answer.
+        if outcome.needsApproval > 0 {
+            return .terminate(.needsApproval(stageName: stage.name))
         }
         if verdict.streak >= config.consecutiveFailureStop {
             return .terminate(.givenUp(reason: .regressionStalled))
@@ -1368,6 +1414,14 @@ final class LoopEngineRunner: ObservableObject {
 
     // MARK: - Helpers
 
+    /// The most severe of several guard verdicts (the sweep runs one guarded
+    /// repair per failing fault): violated > reverted > indeterminate > clean
+    /// > not checked.
+    nonisolated static func worstVerdict(_ verdicts: [RepairScopeVerdict]) -> RepairScopeVerdict {
+        let rank: [RepairScopeVerdict] = [.violated, .violatedReverted, .indeterminate, .clean]
+        return rank.first(where: verdicts.contains) ?? .notChecked
+    }
+
     /// One-line, human-readable regression-sweep result for the run log:
     /// either "passed — M of T" or "failed — R regressed / M passed of T".
     /// M = faults that still hold (.unchanged + .repaired).
@@ -1376,7 +1430,12 @@ final class LoopEngineRunner: ObservableObject {
         if outcome.passed {
             return "passed — \(passedCount) of \(outcome.total)"
         }
-        return "failed — \(outcome.regressed) regressed / \(passedCount) passed of \(outcome.total)"
+        var parts = ["\(outcome.regressed) regressed"]
+        if outcome.repairFailed > 0 { parts.append("\(outcome.repairFailed) repair failed") }
+        if outcome.needsApproval > 0 { parts.append("\(outcome.needsApproval) need approval") }
+        if outcome.failed > 0 { parts.append("\(outcome.failed) could not run") }
+        if outcome.pending > 0 { parts.append("\(outcome.pending) not reached") }
+        return "failed — \(outcome.failingCount) failing (\(parts.joined(separator: ", "))) / \(passedCount) passed of \(outcome.total)"
     }
 
     /// Default agent message for a `.skill` stage with no user-written prompt:

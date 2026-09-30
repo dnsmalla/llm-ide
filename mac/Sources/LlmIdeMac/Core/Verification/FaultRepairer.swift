@@ -18,6 +18,19 @@ protocol FaultRepairer: AnyObject {
     func repair(fault: FaultReport, failureOutput: String, repoRoot: URL) async throws -> LoopAgentResult
 }
 
+/// Wraps one fault repair so the caller can check what it changed.
+///
+/// `RegressionRunner` hands the guard the repo root and the repair to run; the
+/// guard runs it (it may retry it, snapshot the tree around it, revert what it
+/// touched) and returns `true` to keep the repair — the fault is then
+/// re-verified — or `false` when it rejected the repair, in which case the
+/// fault is recorded `.repairFailed` WITHOUT re-verifying (a re-verify after a
+/// rejected edit to a test would observe the pass the edit bought). Errors
+/// from the repair propagate. A closure, not a Loop type, because Core must
+/// never import a feature: the Loop's protected-path guard is passed in.
+typealias FaultRepairGuard = @MainActor (_ repoRoot: URL,
+                                         _ repair: () async throws -> Void) async throws -> Bool
+
 /// Production adapter — sends a structured repair instruction as a headless,
 /// confined agent run (`LoopAgentRunning` → POST /kb/loop/agent-run) rooted
 /// at `repoRoot`, so the agent can actually edit files there (and only there).
