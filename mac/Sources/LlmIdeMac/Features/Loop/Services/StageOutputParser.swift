@@ -25,7 +25,9 @@ public enum StageOutputParser {
     /// XCTest: "Executed 12 tests, with 3 failures (0 unexpected) in 0.5 seconds".
     /// XCTest prints one such line PER SUITE and the aggregate last, so the
     /// total is the LAST match — the first is just the first suite's count.
-    private static let xctestSummary = #"Executed \d+ tests?, with (\d+) failures?"#
+    /// With skips it reads "Executed 12 tests, with 1 test skipped and 3 failures".
+    private static let xctestSummary =
+        #"Executed \d+ tests?, with (?:\d+ tests? skipped and )?(\d+) failures?"#
     /// swift-testing: "✘ Test run with 12 tests [in 3 suites] failed after 0.5
     /// seconds with 3 issues." and, on success, "... passed after ...".
     private static let swiftTestingFailed =

@@ -47,6 +47,15 @@ final class StageOutputParserTests: XCTestCase {
         XCTAssertEqual(StageOutputParser.parseFailureCount(output), 3)
     }
 
+    /// A run with skipped tests words the summary differently; it must still
+    /// be recognised (this repo's own suite has a skip).
+    func testXCTestSummaryWithSkippedTests() {
+        XCTAssertEqual(StageOutputParser.parseFailureCount(
+            "\t Executed 1508 tests, with 1 test skipped and 2 failures (0 unexpected) in 69.4 (69.5) seconds"), 2)
+        XCTAssertEqual(StageOutputParser.parseFailureCount(
+            "\t Executed 1508 tests, with 3 tests skipped and 0 failures (0 unexpected) in 69.4 (69.5) seconds"), 0)
+    }
+
     /// `swift test` runs both frameworks; the failures are the sum.
     func testXCTestAndSwiftTestingFailuresAreSummed() {
         let output = """
