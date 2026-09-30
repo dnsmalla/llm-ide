@@ -36,6 +36,9 @@ struct LoopStagePaths: Equatable {
             return p
         }
         func resolveOne(_ raw: String, checkingParent: Bool) -> URL {
+            if raw == "~" || raw.hasPrefix("~/") {
+                return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath).standardizedFileURL
+            }
             if raw.hasPrefix("/") { return URL(fileURLWithPath: raw).standardizedFileURL }
             if raw == "." { return repo }
             let inRepo = repo.appendingPathComponent(raw).standardizedFileURL
@@ -63,9 +66,10 @@ struct LoopStagePaths: Equatable {
     /// standardized, symlink-resolved paths. A not-yet-existing file is
     /// resolved through its nearest existing ancestor.
     nonisolated static func isInside(_ url: URL, roots: [URL]) -> Bool {
-        let path = realPath(url)
+        // Case-insensitive (default macOS volumes), like the server's samePath.
+        let path = realPath(url).lowercased()
         return roots.contains { root in
-            let r = realPath(root)
+            let r = realPath(root).lowercased()
             return path == r || path.hasPrefix(r.hasSuffix("/") ? r : r + "/")
         }
     }
@@ -80,6 +84,22 @@ struct LoopStagePaths: Equatable {
         var resolved = base.resolvingSymlinksInPath()
         for t in tail { resolved.appendPathComponent(t) }
         return resolved.path
+    }
+
+    /// A Loop worktree checked out as a sibling of the project (same-root
+    /// layout) is deleted with the run: anything under its `llm-doc/` is lost.
+    nonisolated static func isSiblingWorktree(_ gitRoot: URL) -> Bool {
+        gitRoot.standardizedFileURL.pathComponents.contains(".llmide-loop-worktrees")
+    }
+
+    /// Non-doc stages must not write `llm-doc/…` inside a throwaway sibling worktree.
+    nonisolated func throwawayProblem(stageName: String, stage: LoopStage, gitRoot: URL) -> String? {
+        guard Self.isSiblingWorktree(gitRoot), !Self.isDocStage(stage) else { return nil }
+        let doc = gitRoot.appendingPathComponent("llm-doc", isDirectory: true)
+        for url in [input, output].compactMap({ $0 }) where Self.isInside(url, roots: [doc]) {
+            return "\(stageName) writes to llm-doc/…, which would land in a throwaway worktree — run this loop without a worktree (or check out the repo under code/)"
+        }
+        return nil
     }
 
     /// The refusal message for the first path outside the allowed roots, or nil.

@@ -672,4 +672,39 @@ final class LoopPhase1FixTests: XCTestCase {
         _ = await r.run(config: config, faultsRoot: project, gitRoot: repo)
         XCTAssertEqual(skills.calls, 1)
     }
+
+    func testSiblingWorktreeRefusesNonDocLlmDocWrites() async throws {
+        let (project, _) = try makeSplitProject()
+        let wt = project.deletingLastPathComponent()
+            .appendingPathComponent(".llmide-loop-worktrees/run-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: wt, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: wt.deletingLastPathComponent()) }
+        let skills = SkillExecutor()
+        let r = runner(skills: skills, approvals: approvals([]), scopeGuard: CancellationSensitiveGuard(violation: []))
+        let plan = LoopEngineConfig(stages: [
+            LoopStage(id: "plan", name: "Plan", kind: .skill, order: 0, skillId: "fam/plan",
+                      outputPath: "llm-doc/plans/INDEX.md")], maxIterations: 1)
+        let status = await r.run(config: plan, faultsRoot: wt, gitRoot: wt)
+        XCTAssertEqual(skills.calls, 0)
+        guard case .error(let m) = status else { return XCTFail("\(status)") }
+        XCTAssertTrue(m.contains("throwaway worktree"), m)
+        let doc = LoopEngineConfig(stages: [
+            LoopStage(id: "d", name: "Doc", kind: .skill, order: 0, skillId: "skills/doc-writer",
+                      outputPath: "llm-doc/docs/a.md")], maxIterations: 1)
+        _ = await r.run(config: doc, faultsRoot: wt, gitRoot: wt)
+        XCTAssertEqual(skills.calls, 1, "doc stages are unaffected")
+    }
+
+    func testContainmentIsCaseInsensitive() throws {
+        let (_, repo) = try makeSplitProject()
+        let shouty = URL(fileURLWithPath: repo.path.uppercased() + "/x.md")
+        XCTAssertTrue(LoopStagePaths.isInside(shouty, roots: [repo]))
+    }
+
+    func testLeadingTildeIsExpandedThenValidated() throws {
+        let (project, repo) = try makeSplitProject()
+        let p = LoopStagePaths.resolve(pathStage(input: "~/somewhere/in.md"), gitRoot: repo, projectRoot: project)
+        XCTAssertEqual(p.input?.path, NSHomeDirectory() + "/somewhere/in.md")
+        XCTAssertNotNil(p.outsideProblem(roots: [repo]))
+    }
 }

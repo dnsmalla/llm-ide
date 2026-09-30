@@ -1496,7 +1496,8 @@ final class LoopEngineRunner: ObservableObject {
         let extraRoots = Self.skillExtraRoots(projectRoot: faultsRoot, gitRoot: gitRoot)
         // An Input/Output outside the agent's confinement would make it write
         // nothing while the stage "passes": refuse before calling the agent.
-        if let problem = stagePaths.outsideProblem(roots: [gitRoot] + extraRoots) {
+        if let problem = stagePaths.outsideProblem(roots: [gitRoot] + extraRoots)
+            ?? stagePaths.throwawayProblem(stageName: stage.name, stage: stage, gitRoot: gitRoot) {
             stageStates[stage.id] = .failed
             appendLog(.error, "  [\(stage.name)] \(problem)")
             record(stage, startedAt: startedAt, duration: 0, exitCode: nil,

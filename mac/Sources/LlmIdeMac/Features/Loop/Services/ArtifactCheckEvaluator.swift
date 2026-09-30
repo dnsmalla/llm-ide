@@ -50,7 +50,13 @@ enum ArtifactCheckEvaluator {
 
         func resolve(_ relative: String) -> URL? {
             var candidates = [roots.repo.appendingPathComponent(relative)]
-            if spec.projectRootFallback, let project = roots.project {
+            // Same rule as LoopStagePaths: when the file's parent folder exists
+            // in the repo, that is where the stage wrote — a stale copy under
+            // the project root must not satisfy the check.
+            let parent = (relative as NSString).deletingLastPathComponent
+            let repoHasParent = !parent.isEmpty
+                && fm.fileExists(atPath: roots.repo.appendingPathComponent(parent).path)
+            if spec.projectRootFallback, !repoHasParent, let project = roots.project {
                 candidates.append(project.appendingPathComponent(relative))
             }
             return candidates.first { fm.fileExists(atPath: $0.path) }

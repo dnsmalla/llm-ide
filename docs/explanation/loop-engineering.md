@@ -260,8 +260,10 @@ Input (or the Output's parent directory) exists there, else the project root
 (an LLM-IDE project, git root at most 3 levels below it). If a resolved path is
 outside the git root and the project's `llm-doc`, the stage fails **before** the
 agent is called (`Input|Output path … is outside the repo and the project's
-llm-doc`) instead of silently writing nothing. The artifact check still resolves
-its own paths (repo first, then project-root fallback) with the same order.
+llm-doc`) instead of silently writing nothing. The artifact check applies the same parent-folder rule (repo when the file's
+parent folder exists there, else the project root). A non-doc stage writing
+`llm-doc/…` inside a throwaway sibling worktree is refused up front; a leading
+`~` is expanded and containment is case-insensitive.
 
 ### How a shell stage runs
 
