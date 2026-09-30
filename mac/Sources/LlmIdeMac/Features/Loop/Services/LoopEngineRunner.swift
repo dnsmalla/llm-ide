@@ -2044,7 +2044,7 @@ final class LoopEngineRunner: ObservableObject {
     nonisolated private static func analyse(_ output: String,
                                             hashing: Bool) async -> (score: Int?, hash: String, errorLines: String) {
         await Task.detached(priority: .utility) {
-            (StageOutputParser.parseFailureCount(output),
+            (hashing ? StageOutputParser.failureScore(output) : StageOutputParser.parseFailureCount(output),
              hashing ? (TestFailureExtractor.failureSetHash(output) ?? hash(output)) : "",
              hashing ? StageOutputParser.firstErrorLines(output) : "")
         }.value

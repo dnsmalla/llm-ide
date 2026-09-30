@@ -193,7 +193,7 @@ FAIL	example.com/m	0.004s
         let filler = (0..<2000).map { "noise line \($0)" }.joined(separator: "\n")
         let output = "start\n/p/A.swift:7: error: -[M.C testX] : XCTAssertTrue failed\n" + filler + "\nSUMMARY-AT-END"
         let excerpt = TestFailureExtractor.repairExcerpt(output, budget: 2_000)
-        XCTAssertLessThanOrEqual(excerpt.count, 2_100)
+        XCTAssertLessThanOrEqual(excerpt.count, 2_000)
         XCTAssertTrue(excerpt.contains("A.swift:7: error"), "early error must survive")
         XCTAssertTrue(excerpt.contains("SUMMARY-AT-END"), "tail must survive")
         XCTAssertFalse(excerpt.contains("noise line 900"))
@@ -204,5 +204,46 @@ FAIL	example.com/m	0.004s
         let output = (0..<50).map { _ in err }.joined(separator: "\n") + String(repeating: "\nx", count: 5000)
         let excerpt = TestFailureExtractor.repairExcerpt(output, budget: 1_000)
         XCTAssertEqual(excerpt.components(separatedBy: err).count - 1, 1)
+    }
+
+    func testNodeNestedIdsAndTodoSkip() {
+        let tap = """
+        TAP version 13
+        # Subtest: outer
+            # Subtest: same
+            not ok 1 - same
+            # Subtest: fine
+            ok 2 - fine
+        not ok 1 - outer
+        # Subtest: other
+            # Subtest: same
+            not ok 1 - same
+        not ok 2 - other
+        not ok 3 - todo thing # TODO not yet
+        not ok 4 - skipped # SKIP why
+        """
+        XCTAssertEqual(TestFailureExtractor.extract(tap).ids,
+                       ["other", "other/same", "outer", "outer/same"])
+    }
+
+    func testCompilerLocationsAndHeader() {
+        let output = "/p/F.swift:12:5: error: cannot find 'x' in scope\n" + String(repeating: "x\n", count: 3000)
+        let excerpt = TestFailureExtractor.repairExcerpt(output, budget: 1_000)
+        XCTAssertTrue(excerpt.hasPrefix("at: /p/F.swift:12: cannot find 'x' in scope"))
+        XCTAssertLessThanOrEqual(excerpt.count, 1_000)
+    }
+
+    func testNoCountRunnerScoreDirection() {
+        let two = "not ok 1 - a\nnot ok 2 - b"
+        let four = two + "\nnot ok 3 - c\nnot ok 4 - d"
+        XCTAssertEqual(StageOutputParser.failureScore(four), 4)
+        var w = ProgressWatch()
+        func rec(_ o: String) -> ProgressWatch.Verdict {
+            w.record(key: "s", score: StageOutputParser.failureScore(o), hash: TestFailureExtractor.failureSetHash(o) ?? "")
+        }
+        _ = rec(two)
+        XCTAssertFalse(rec(four).improved)
+        XCTAssertTrue(rec(two).improved)
+        XCTAssertFalse(rec(two).improved)
     }
 }

@@ -35,6 +35,10 @@ enum TestFailureExtractor {
         for m in captures(#"(?m)^Test Case '-\[(\S+) (\S+)\]' failed"#, output) where m.count == 3 {
             add("\(m[1])/\(m[2])")
         }
+        // compiler: "/path/F.swift:12:5: error: cannot find 'x' in scope"
+        for m in captures(#"(?m)^(\S+:\d+):\d+: error: (.*)$"#, output) where m.count == 3 {
+            loc("\(m[1]): \(m[2])")
+        }
         // XCTest: "/path/T.swift:6: error: -[Mod.Class method] : XCTAssert… failed"
         for m in captures(#"(?m)^(\S+:\d+): error: -\[\S+ \S+\] : (.*)$"#, output) where m.count == 3 {
             loc("\(m[1]): \(m[2])")
@@ -47,8 +51,21 @@ enum TestFailureExtractor {
         for m in captures(#"(?m)^✘ Test .+? recorded an issue at (\S+?:\d+)(?::\d+)?: (.*)$"#, output) where m.count == 3 {
             loc("\(m[1]): \(m[2])")
         }
-        // node TAP: "not ok 2 - subtracts wrongly", then "location: '/p/a.test.mjs:3:1'".
-        for m in captures(#"(?m)^\s*not ok \d+ - (.+?)(?: # .*)?$"#, output) where m.count == 2 { add(m[1]) }
+        // node TAP: "not ok 2 - subtracts wrongly" -> "parent/child" from "# Subtest:"
+        // nesting (indent); `# TODO` / `# SKIP` are not failures. Then "location: '/p/a.test.mjs:3:1'".
+        var stack: [(indent: Int, name: String)] = []
+        for line in output.components(separatedBy: "\n") {
+            let indent = line.prefix { $0 == " " }.count
+            let body = line.dropFirst(indent)
+            if body.hasPrefix("# Subtest: ") {
+                while let last = stack.last, last.indent >= indent { stack.removeLast() }
+                stack.append((indent, String(body.dropFirst(11))))
+            } else if body.hasPrefix("not ok "),
+                      let m = captures(#"^not ok \d+ - (.+?)(?: # (TODO|SKIP).*)?$"#, String(body)).first,
+                      m.count == 3, m[2].isEmpty {
+                add((stack.filter { $0.indent < indent }.map(\.name) + [m[1]]).joined(separator: "/"))
+            }
+        }
         for m in captures(#"(?m)^\s*location: '(.+?:\d+)(?::\d+)?'"#, output) where m.count == 2 { loc(m[1]) }
         // jest: "  ● Suite › test name" (not "● Test suite failed to run" headers' details).
         for m in captures(#"(?m)^\s*● (.+?)\s*$"#, output) where m.count == 2 {
@@ -59,7 +76,7 @@ enum TestFailureExtractor {
             loc(m[1])
         }
         // pytest: "FAILED tests/test_a.py::test_b - AssertionError: …"
-        for m in captures(#"(?m)^FAILED (\S+)"#, output) where m.count == 2 { add(m[1]) }
+        for m in captures(#"(?m)^FAILED (\S+::\S+|\S+\.py\S*)"#, output) where m.count == 2 { add(m[1]) }
         // pytest: "tests/test_a.py:12: AssertionError"
         for m in captures(#"(?m)^(\S+\.py:\d+): (\w*(?:Error|Exception|Failed).*)$"#, output) where m.count == 3 {
             loc("\(m[1]): \(m[2])")
@@ -94,18 +111,26 @@ enum TestFailureExtractor {
     static let errorShare = 0.6
     static let contextLines = 5
 
-    /// The part of `output` the repairing agent needs: the error lines with
-    /// ±5 lines of context (windows merged, repeated lines dropped, at most
-    /// 60% of `budget`), then as much of the tail as remains. Output within the
-    /// budget is returned whole. A bare suffix lost errors printed early; a
-    /// bare prefix lost the summary — this keeps both ends of the story.
+    /// The part of `output` the repairing agent needs: a one-line header of
+    /// failing ids and locations, the error lines with ±5 lines of context
+    /// (windows merged, repeated lines dropped, at most 60% of the space after
+    /// the header), then as much of the tail as remains. Never longer than
+    /// `budget`. Output within the budget is returned whole.
     static func repairExcerpt(_ output: String, budget: Int) -> String {
         guard output.count > budget else { return output }
+        let extraction = extract(output)
+        var header = ""
+        if !extraction.ids.isEmpty || !extraction.locations.isEmpty {
+            var bits: [String] = []
+            if !extraction.ids.isEmpty { bits.append("Failing: " + extraction.ids.prefix(10).joined(separator: ", ")) }
+            if !extraction.locations.isEmpty { bits.append("at: " + extraction.locations.prefix(10).joined(separator: ", ")) }
+            header = String(bits.joined(separator: " / ").prefix(budget / 5)) + "\n"
+        }
+        let room = budget - header.count
         let lines = output.components(separatedBy: .newlines)
         let hits = lines.indices.filter {
             lines[$0].range(of: excerptPattern, options: .regularExpression) != nil
         }
-        // Merge ±context windows into ranges.
         var ranges: [ClosedRange<Int>] = []
         for i in hits {
             let r = max(0, i - contextLines)...min(lines.count - 1, i + contextLines)
@@ -115,30 +140,40 @@ enum TestFailureExtractor {
                 ranges.append(r)
             }
         }
-        let errorBudget = Int(Double(budget) * errorShare)
+        let errorBudget = Int(Double(room) * errorShare)
+        let sep = "\n[…]\n"
+        let tailMarker = "\n[… tail of output …]\n"
         var seen = Set<String>()
         var parts: [String] = []
         var used = 0
-        outer: for r in ranges {
+        for r in ranges {
             var chunk: [String] = []
+            var newSeen = seen
             for i in r {
                 let line = lines[i]
-                if !line.trimmingCharacters(in: .whitespaces).isEmpty, !seen.insert(line).inserted { continue }
+                if !line.trimmingCharacters(in: .whitespaces).isEmpty, !newSeen.insert(line).inserted { continue }
                 chunk.append(line)
             }
             let text = chunk.joined(separator: "\n")
-            if used + text.count + 1 > errorBudget {
-                // Keep what fits of the first window rather than nothing.
-                if parts.isEmpty { parts.append(String(text.prefix(errorBudget))); used = errorBudget }
-                break outer
+            let cost = text.count + (parts.isEmpty ? 0 : sep.count)
+            if used + cost > errorBudget {
+                if parts.isEmpty, errorBudget > 0 { parts.append(String(text.prefix(errorBudget))); used = errorBudget }
+                continue
             }
+            seen = newSeen
             parts.append(text)
-            used += text.count + 1
+            used += cost
         }
-        let tailBudget = max(0, budget - used - 40)
-        let tail = String(output.suffix(tailBudget))
-        guard !parts.isEmpty else { return tail }
-        return parts.joined(separator: "\n[…]\n") + "\n[… tail of output …]\n" + tail
+        let errorPart = parts.joined(separator: sep)
+        guard !errorPart.isEmpty else { return header + String(output.suffix(max(0, room))) }
+        let tailRoom = room - errorPart.count - tailMarker.count
+        var tail = ""
+        if tailRoom > 0 {
+            let tailLines = String(output.suffix(tailRoom)).components(separatedBy: "\n")
+                .filter { $0.trimmingCharacters(in: .whitespaces).isEmpty || !seen.contains($0) }
+            tail = tailMarker + tailLines.joined(separator: "\n")
+        }
+        return String((header + errorPart + tail).prefix(budget))
     }
 
     // MARK: Regex helper

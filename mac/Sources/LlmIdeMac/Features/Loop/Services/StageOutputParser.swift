@@ -90,6 +90,16 @@ public enum StageOutputParser {
         return nil
     }
 
+    /// The score the stall detector steers on: the runner's own failure count,
+    /// else the number of failing test ids extracted from a failing output, so a
+    /// runner with no recognised summary still distinguishes "2 failing -> 4
+    /// failing" (worse) from "4 -> 2" (better). `nil` when neither is available.
+    static func failureScore(_ output: String) -> Int? {
+        if let count = parseFailureCount(output) { return count }
+        let ids = TestFailureExtractor.extract(output).ids.count
+        return ids > 0 ? ids : nil
+    }
+
     private static func lastCapture(_ regex: String, group: Int, in text: String) -> Int? {
         guard let re = try? NSRegularExpression(pattern: regex) else { return nil }
         let matches = re.matches(in: text, range: NSRange(text.startIndex..., in: text))
