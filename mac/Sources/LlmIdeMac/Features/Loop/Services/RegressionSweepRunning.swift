@@ -86,7 +86,9 @@ final class RegressionRunnerSweepAdapter: RegressionSweepRunning {
             switch result.verdict {
             case .pending:        pending += 1
             case .unchanged:      unchanged += 1
-            case .regressed:      regressed += 1
+            // A skipped repair leaves the fault regressed (the Loop always
+            // passes a guard, so it never sees one).
+            case .regressed, .repairSkipped: regressed += 1
             case .repaired:       repaired += 1
             case .repairFailed:   repairFailed += 1
             case .needsApproval:  needsApproval += 1

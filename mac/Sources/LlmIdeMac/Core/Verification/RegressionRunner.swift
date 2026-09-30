@@ -39,6 +39,10 @@ final class RegressionRunner: ObservableObject {
         case repaired                 // verify failed → repaired → re-verify passed
         case repairFailed(String)     // repaired but re-verify still failing
         case needsApproval            // has a verify command not yet approved on this machine
+        /// Verify failed and a repair was requested, but no protected-path
+        /// guard was supplied, so no repair ran — an unguarded agent edit
+        /// could rewrite the test it is meant to satisfy. Needs attention.
+        case repairSkipped(String)
         /// CLI / network error — surfaces in the UI as "couldn't run".
         case failed(String)           // couldn't run the check
     }
@@ -258,24 +262,30 @@ final class RegressionRunner: ObservableObject {
                 }
                 return
             }
+            // A repair only ever runs inside a protected-path guard: without
+            // one the agent could edit the failing test and the re-verify
+            // would certify the rigged pass.
+            guard let repairGuard else {
+                results[idx].verdict = .repairSkipped("no protected-path guard was supplied, so no repair ran")
+                appendLog(.warn, "  → REGRESSED · repair skipped (no protected-path guard)")
+                if reopenOnRegression, (try? store.updateFaultStatus(at: url, to: .open)) != nil {
+                    results[idx].autoReopened = true
+                }
+                return
+            }
             // Snapshot already-dirty paths so Discard only reverts files the
             // repair itself introduced — never the user's pre-existing edits.
             let dirtyBefore = Set((try? store.gitDiff(at: repoRoot).changedPaths) ?? [])
             appendLog(.info, "  → repairing…")
             let fault = try store.loadFault(at: url)
-            if let repairGuard {
-                let kept = try await repairGuard(repoRoot) { timeout in
-                    try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot,
-                                              timeout: timeout)
-                }
-                guard kept else {
-                    results[idx].verdict = .repairFailed("repair rejected: it touched a protected or out-of-scope path")
-                    appendLog(.error, "  → repair rejected (protected/out-of-scope path) · not re-verified")
-                    return
-                }
-            } else {
+            let kept = try await repairGuard(repoRoot) { timeout in
                 try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot,
-                                          timeout: nil)
+                                          timeout: timeout)
+            }
+            guard kept else {
+                results[idx].verdict = .repairFailed("repair rejected: it touched a protected or out-of-scope path")
+                appendLog(.error, "  → repair rejected (protected/out-of-scope path) · not re-verified")
+                return
             }
             let second = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeout)
             if second.exitCode == 0 {

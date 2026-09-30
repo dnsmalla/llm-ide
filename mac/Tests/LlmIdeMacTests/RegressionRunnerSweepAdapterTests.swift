@@ -150,7 +150,8 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
 
     /// A repair the guard rejects is `.repairFailed` and is NOT re-verified —
     /// a re-verify would observe the pass a rigged test bought.
-    private func runGuardedCommandFault(keep: Bool) async throws -> (SweepOutcome, CountingVerifier, CountingRepairer, Int) {
+    /// `keep == nil` sweeps with NO guard at all.
+    private func runGuardedCommandFault(keep: Bool?) async throws -> (SweepOutcome, CountingVerifier, CountingRepairer, Int) {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("regression-sweep-guard-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -169,13 +170,16 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
         let runner = RegressionRunner(prompter: StubPrompter(), store: store, verifier: verifier,
                                       repairer: repairer, approvals: approvals)
         var guardCalls = 0
-        let outcome = await RegressionRunnerSweepAdapter(runner: runner).sweep(
-            faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: true,
-            repairGuard: { _, repair in
+        var repairGuard: FaultRepairGuard?
+        if let keep {
+            repairGuard = { _, repair in
                 guardCalls += 1
                 _ = try await repair(nil)
                 return keep
-            })
+            }
+        }
+        let outcome = await RegressionRunnerSweepAdapter(runner: runner).sweep(
+            faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: true, repairGuard: repairGuard)
         return (outcome, verifier, repairer, guardCalls)
     }
 
@@ -195,5 +199,60 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
         XCTAssertEqual(outcome.repaired, 1)
         XCTAssertTrue(outcome.passed)
     }
-}
 
+    /// No guard, no repair: an unguarded agent edit could rewrite the test it
+    /// is meant to satisfy, so the fault is left regressed and flagged.
+    func testRepairWithoutAGuardIsSkippedNotRun() async throws {
+        let (outcome, verifier, repairer, _) = try await runGuardedCommandFault(keep: nil)
+        XCTAssertEqual(repairer.calls, 0, "never repaired unguarded")
+        XCTAssertEqual(verifier.calls, 1)
+        XCTAssertEqual(outcome.regressed, 1)
+        XCTAssertFalse(outcome.passed)
+    }
+
+    // MARK: - ProtectedPathRepairGuard (the Auto Task sweep's guard)
+
+    private final class ScriptedScopeGuard: RepairScopeGuarding {
+        var check: RepairScopeCheck
+        private(set) var reverted: [String] = []
+        private(set) var revertedUnlisted: [String] = []
+        init(_ check: RepairScopeCheck) { self.check = check }
+        func snapshot(gitRoot: URL, protectedGlobs: [String], scopeGlobs: [String]) async -> RepairScopeSnapshot {
+            RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil)
+        }
+        func check(since snapshot: RepairScopeSnapshot, gitRoot: URL,
+                   protectedGlobs: [String]) async -> RepairScopeCheck { check }
+        func revert(paths: [String], gitRoot: URL) async -> String? { reverted += paths; return nil }
+        func revertUnlisted(paths: [String], created: Set<String>, gitRoot: URL) async -> String? {
+            revertedUnlisted += paths; return nil
+        }
+    }
+
+    private func runProtectedGuard(_ scope: ScriptedScopeGuard,
+                                   result: LoopAgentResult = LoopAgentResult()) async throws -> Bool {
+        let repairGuard = ProtectedPathRepairGuard.make(scopeGuard: scope)
+        return try await repairGuard(URL(fileURLWithPath: "/tmp/r")) { _ in result }
+    }
+
+    func testProtectedGuardKeepsACleanRepair() async throws {
+        let scope = ScriptedScopeGuard(.clean(changedPaths: ["src/a.swift"]))
+        let kept = try await runProtectedGuard(scope)
+        XCTAssertTrue(kept)
+        XCTAssertEqual(scope.reverted, [])
+    }
+
+    func testProtectedGuardRevertsAndRejectsATestEdit() async throws {
+        let scope = ScriptedScopeGuard(.violated(paths: ["Tests/ATests.swift"],
+                                                 allChangedPaths: ["Tests/ATests.swift", "src/a.swift"]))
+        let kept = try await runProtectedGuard(scope)
+        XCTAssertFalse(kept)
+        XCTAssertEqual(scope.reverted, ["Tests/ATests.swift"])
+    }
+
+    func testProtectedGuardSeesAnIgnoredProtectedWriteTheAgentReported() async throws {
+        let scope = ScriptedScopeGuard(.clean(changedPaths: []))
+        let kept = try await runProtectedGuard(scope, result: LoopAgentResult(changedPaths: ["tests/snap.json"]))
+        XCTAssertFalse(kept)
+        XCTAssertEqual(scope.revertedUnlisted, ["tests/snap.json"])
+    }
+}

@@ -156,7 +156,7 @@ extension AutoCodeUpdateService {
             switch verdict {
             case .unchanged, .repaired:
                 break // passing — confirmed still fixed
-            case .regressed:
+            case .regressed, .repairSkipped:
                 regressed += 1
                 nonPassing += 1
             case .repairFailed, .needsApproval, .pending, .failed:
@@ -751,9 +751,18 @@ extension AutoCodeUpdateService {
                                       verifier: ShellFaultVerifier(), repairer: repairer,
                                       verifyTimeout: autoTaskSettings.regressionVerifyTimeout, config: config)
         runner.activity = activity
+        // Every sweep repair runs inside the protected-path guard (default
+        // globs, revert): an unattended repair must never keep an edit to the
+        // test it is meant to satisfy. RegressionRunner refuses to repair
+        // without one.
+        let logStore = self.logStore
+        let repairGuard = ProtectedPathRepairGuard.make(log: { line in
+            logStore.append(.regression, line, level: .error)
+        })
         await runner.run(faultsRoot: faultsRoot, gitRoot: gitRootURL,
                          autoReopen: autoTaskSettings.regressionAutoReopen,
-                         attemptRepair: autoTaskSettings.regressionAttemptRepair)
+                         attemptRepair: autoTaskSettings.regressionAttemptRepair,
+                         repairGuard: repairGuard)
         // RegressionRunner's published `results` lives on its own
         // lifetime — we read once after the await for the summary. The
         // verdict→summary accounting is fail-closed (any non-passing
