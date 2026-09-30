@@ -246,6 +246,22 @@ Three per-stage properties shape how a stage participates:
   build-and-test cycle and a two-second format check do not belong under one
   number.
 
+### How a shell stage runs
+
+A shell stage (and every verify command) runs through `GroupedSubprocess`: `/bin/sh -c`
+in its own **process group**, stdin from `/dev/null`. Stop, a timeout, and the
+resource guard send SIGTERM and then SIGKILL to the **whole group** (plus any
+descendant that left it), so `swift test`'s compiler and test processes stop, not
+only the shell. Output is captured as the first 64 KB plus the last 192 KB with an
+elision marker between them, and decoded leniently (a non-UTF-8 byte cannot empty
+it).
+
+When the shell exits normally, a background process it left behind that **still
+holds the output pipe** is stopped after a 2 s drain window, so the stage's result
+never waits on it. Background members that **do not** hold the pipe (for example
+`server >/dev/null 2>&1 &`) **survive** a normal exit — by design, since a stage
+may legitimately start a server for a later stage.
+
 ## Verification steers on a measured score
 
 `StageOutputParser` extracts a failing-test count from recognised runners (XCTest,
@@ -260,6 +276,18 @@ compares successive failures for that stage:
   of the failure output, which is the pre-score behaviour: identical output
   increments, different output resets. Giving up this way reports
   `repeatedFailure`.
+- **Score disappeared** (the last failure had a count, this one has none) → worse,
+  never progress: the change broke the build or the test run itself (a compile
+  error prints no summary). The next repair is always granted, even at
+  `consecutiveFailureStop`, and is told "your last change stopped the tests from
+  running" with the first error lines. Count-less failures after that stay
+  not-improved until a count returns; giving up this way reports
+  `stoppedReporting` (`given_up.stopped_reporting`).
+
+For XCTest only the run-wide total counts — the `Executed … with M failures` line
+right after `Test Suite 'All tests'` / `'Selected tests'` — added to the
+swift-testing issue count when both frameworks ran. Output with per-suite lines but
+no total (a crash) scores as unknown, never as a partial count.
 
 The distinction between the two give-up reasons is diagnostic, and it is the whole
 reason for scoring. A hash comparison cannot tell "three failures, then three
@@ -323,6 +351,10 @@ Two deliberate limits, both recorded rather than hidden:
   **`indeterminate`, never `clean`**, is logged as a warning, and the run
   continues. Refusing to loop at all in those projects would be a worse outcome
   than an unverified repair, which is what every run did before the guard existed.
+  The guard's git probes are captured **uncapped** (their output is paths and
+  hashes); if one were ever elided anyway, the check is **`unverifiable`** and
+  fails **closed** — the run is blocked like a violation, because an incomplete
+  path list could hide exactly the protected edit.
 
 ## Four budgets
 
