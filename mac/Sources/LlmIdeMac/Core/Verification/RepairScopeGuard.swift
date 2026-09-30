@@ -431,16 +431,26 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
 
     func snapshotTree(gitRoot: URL) async -> String? {
         // A throwaway index in its own temp dir: the user's real index is never
-        // read or written. `read-tree HEAD` seeds it (empty on an unborn branch),
+        // written. It is seeded from a COPY of the real index when there is one —
+        // its stat cache lets `add -A` hash only files that changed, instead of
+        // every tracked file (0.5 s → 0.08 s on this repo, and it grows with the
+        // file count) — else from `read-tree HEAD` (empty on an unborn branch).
         // `add -A` then records the working tree, honouring .gitignore.
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("llmide-idx-\(UUID().uuidString)", isDirectory: true)
         guard (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) != nil
         else { return nil }
         defer { try? FileManager.default.removeItem(at: dir) }
-        let idx = "GIT_INDEX_FILE=" + Self.shellQuoted([dir.appendingPathComponent("index").path])
-        let command = "export \(idx); (git read-tree HEAD 2>/dev/null || git read-tree --empty) "
-            + "&& git add -A && git write-tree"
+        let tmpIndex = Self.shellQuoted([dir.appendingPathComponent("index").path])
+        // The real index path is resolved BEFORE GIT_INDEX_FILE is set (after,
+        // it would name the temp file), and GIT_INDEX_FILE is exported
+        // unconditionally first thing after that, so no later command can ever
+        // fall through to the user's real index.
+        let command = "real=$(git rev-parse --git-path index 2>/dev/null); "
+            + "export GIT_INDEX_FILE=\(tmpIndex); "
+            + "if [ -n \"$real\" ] && [ -f \"$real\" ]; then cp \"$real\" \"$GIT_INDEX_FILE\"; "
+            + "else git read-tree HEAD 2>/dev/null || git read-tree --empty; fi; "
+            + "git add -A && git write-tree"
         guard case .success(let out) = await run(command, gitRoot: gitRoot) else { return nil }
         let id = out.trimmingCharacters(in: .whitespacesAndNewlines)
         return id.isEmpty ? nil : id
