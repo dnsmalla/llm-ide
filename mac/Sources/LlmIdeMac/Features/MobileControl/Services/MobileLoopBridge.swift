@@ -41,6 +41,11 @@ final class MobileLoopBridge: MobileFeatureBridge {
         set { newValue ? startedHereTracker.markStarted() : startedHereTracker.reset() }
     }
 
+    /// Orders the phone's requests: a Stop cancels a start still awaiting its
+    /// snapshot, and a reply computed for an older request than one already
+    /// answered is dropped rather than overwriting the newer answer.
+    private(set) var requestGate = MobileLoopRequestGate()
+
     init(manager: MobileControlManager, autoCode: AutoCodeUpdateService) {
         self.manager = manager
         self.autoCode = autoCode
@@ -57,9 +62,11 @@ final class MobileLoopBridge: MobileFeatureBridge {
     func handle(type: String, data: Data?) -> Bool {
         switch type {
         case MobileProtocol.Tag.loopStatusList:
+            let seq = requestGate.issue()
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let state = await self.buildLoopState()
+                guard self.requestGate.claim(seq, .status) else { return }
                 self.manager?.reply(state)
             }
             return true
@@ -74,9 +81,18 @@ final class MobileLoopBridge: MobileFeatureBridge {
                                             message: "The Mac app can't run a loop right now — its auto-code service isn't wired up."))
                 return true
             }
+            let seq = requestGate.issue()
+            let stopGeneration = requestGate.stopGeneration
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let state = await self.buildLoopState()
+                guard self.requestGate.claim(seq, .start) else { return }
+                // A Stop that arrived while the snapshot loaded cancels this start.
+                guard self.requestGate.stopGeneration == stopGeneration else {
+                    self.manager?.append(.info, "loop_start cancelled by a Stop sent meanwhile")
+                    self.manager?.reply(LoopAck(accepted: false, message: MobileLoopRequestGate.stoppedBeforeStart))
+                    return
+                }
                 // Refuse for a concrete reason rather than firing a run that the
                 // Mac would reject a moment later for the same reason.
                 guard state.configured else {
@@ -127,9 +143,17 @@ final class MobileLoopBridge: MobileFeatureBridge {
                                             message: "The Mac app can't run a loop right now — its auto-code service isn't wired up."))
                 return true
             }
+            let seq = requestGate.issue()
+            let stopGeneration = requestGate.stopGeneration
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let state = await self.buildLoopState()
+                guard self.requestGate.claim(seq, .start) else { return }
+                guard self.requestGate.stopGeneration == stopGeneration else {
+                    self.manager?.append(.info, "loop_start_stage cancelled by a Stop sent meanwhile")
+                    self.manager?.reply(LoopAck(accepted: false, message: MobileLoopRequestGate.stoppedBeforeStart))
+                    return
+                }
                 guard state.configured else {
                     self.manager?.append(.stderr, "loop_start_stage: no project or no saved loop config")
                     self.manager?.reply(LoopAck(accepted: false,
@@ -164,6 +188,7 @@ final class MobileLoopBridge: MobileFeatureBridge {
             // `cancelLoopLane()`, not `stop()`/`cancel()`: stop() also
             // invalidates the Auto Task scheduler timer, and cancel() would
             // kill unrelated Auto Task runs; a loop runs on its own lane.
+            requestGate.noteStop()
             autoCode.cancelLoopLane()
             // Also cancel any desktop-initiated run for the active project.
             // `stopAll` rather than the Primary loop's id: the phone only
@@ -367,5 +392,31 @@ struct StartedHereTracker {
     mutating func reset() { startedHere = false; sawRunning = false }
     mutating func observe(running: Bool) {
         if running { sawRunning = true } else if sawRunning { reset() }
+    }
+}
+
+/// Ordering for the phone's `loop_*` requests (pure, so it is testable).
+///
+/// - `stopGeneration` rises on every `loop_stop`; a start captures it before
+///   its await and re-checks after, so a Stop that arrived meanwhile wins.
+/// - Each status / start request takes a sequence number; `claim` delivers a
+///   reply only when no NEWER request on the same channel was answered first.
+///   Dropped on the Mac, so the wire format is unchanged.
+struct MobileLoopRequestGate {
+    enum Channel: Hashable { case status, start }
+    static let stoppedBeforeStart = "Stopped before it started."
+
+    private(set) var stopGeneration = 0
+    private var nextSeq = 0
+    private var answered: [Channel: Int] = [:]
+
+    mutating func noteStop() { stopGeneration += 1 }
+    mutating func issue() -> Int { nextSeq += 1; return nextSeq }
+    /// True (and records the answer) when `seq` is newer than the last reply
+    /// sent on `channel`; false means a newer request already answered.
+    mutating func claim(_ seq: Int, _ channel: Channel) -> Bool {
+        guard seq > (answered[channel] ?? 0) else { return false }
+        answered[channel] = seq
+        return true
     }
 }
