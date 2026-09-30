@@ -46,6 +46,10 @@ final class LoopEngineRunnerTests: XCTestCase {
     private final class StubSkillExecutor: LoopSkillExecuting {
         private(set) var callCount = 0
         var throwOnEveryCall: Bool = false
+        /// Thrown one per call, in order, before `throwOnEveryCall` applies.
+        var queuedErrors: [Error] = []
+        /// What `throwOnEveryCall` throws.
+        var everyCallError: Error = SkillError()
         /// Every `message` string the runner passed, in order — lets a test
         /// assert on the composed text itself (e.g. whether goal/acceptance
         /// context was prepended) rather than just the call count.
@@ -54,7 +58,8 @@ final class LoopEngineRunnerTests: XCTestCase {
                      repoRoot: URL) async throws -> LoopAgentResult {
             callCount += 1
             receivedMessages.append(message)
-            if throwOnEveryCall { throw SkillError() }
+            if !queuedErrors.isEmpty { throw queuedErrors.removeFirst() }
+            if throwOnEveryCall { throw everyCallError }
             return LoopAgentResult()
         }
     }
@@ -209,7 +214,8 @@ final class LoopEngineRunnerTests: XCTestCase {
             journal: journal ?? InMemoryJournal(),
             summaryWriter: summaryWriter ?? StubSummaryWriter(),
             scopeGuard: scopeGuard ?? StubScopeGuard(),
-            trigger: trigger)
+            trigger: trigger,
+            transportRetryDelay: 0)
     }
 
     private func makeApprovals(approve stages: [(stageId: String, command: String)] = []) -> VerifyApprovalStore {
@@ -2428,5 +2434,136 @@ final class LoopEngineRunnerTests: XCTestCase {
         let stageRecord = journal.written.last?.iterations.first?.attempts.first
         XCTAssertEqual(stageRecord?.passed, false)
         XCTAssertEqual(stageRecord?.outputTail, message)
+    }
+
+    // MARK: - Honest verdicts (errored stages, transport retry)
+
+    private func skillOnlyConfig() -> LoopEngineConfig {
+        LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Plan", kind: .skill, command: nil, order: 0,
+                      skillId: "skills/plan", targetPath: nil, prompt: nil)
+        ], maxIterations: 3, consecutiveFailureStop: 2)
+    }
+
+    private func skillThenTestConfig() -> LoopEngineConfig {
+        LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Fix", kind: .skill, command: nil, order: 0,
+                      skillId: "skills/fix", targetPath: nil, prompt: nil),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        ], maxIterations: 2, consecutiveFailureStop: 5)
+    }
+
+    private static let refused = APIError.network(URLError(.cannotConnectToHost))
+
+    /// A Plan/Docs-shaped loop (skill stages only) against a dead backend used
+    /// to report `.success` having done nothing.
+    func testSkillOnlyLoopWithADeadBackendEndsInError() async {
+        let skill = StubSkillExecutor()
+        skill.throwOnEveryCall = true
+        skill.everyCallError = Self.refused
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals(), journal: journal)
+        let result = await runner.run(config: skillOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        guard case .error(let message) = result else { return XCTFail("got \(result)") }
+        XCTAssertTrue(message.contains("\"Plan\" errored"), message)
+        XCTAssertEqual(skill.callCount, 2, "one call plus exactly one retry")
+        XCTAssertEqual(runner.stageStates["s1"], .errored)
+        XCTAssertEqual(journal.written.last?.iterations.first?.attempts.first?.errored, true)
+        XCTAssertEqual(journal.written.last?.statusCode, "error")
+    }
+
+    func testOneTransportBlipIsRetriedAndTheStageCompletes() async {
+        let skill = StubSkillExecutor()
+        skill.queuedErrors = [Self.refused]
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals(), journal: journal)
+        let result = await runner.run(config: skillOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(skill.callCount, 2)
+        XCTAssertEqual(runner.stageStates["s1"], .passed)
+        XCTAssertNil(journal.written.last?.iterations.first?.attempts.first?.errored)
+    }
+
+    func testAgentRunTimeoutIsNotRetried() async {
+        let skill = StubSkillExecutor()
+        skill.throwOnEveryCall = true
+        skill.everyCallError = APIError.http(status: 504, code: "AGENT_RUN_TIMEOUT",
+                                             message: "timed out", details: nil)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals())
+        let result = await runner.run(config: skillOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        guard case .error = result else { return XCTFail("got \(result)") }
+        XCTAssertEqual(skill.callCount, 1)
+    }
+
+    /// An errored stage plus a verify stage that never passes: the give-up
+    /// would blame the tests, but the real cause is that nothing ran.
+    func testErroredStageWithAFailingVerifyEndsInErrorNotGiveUp() async {
+        let skill = StubSkillExecutor()
+        skill.throwOnEveryCall = true
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: skillThenTestConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        guard case .error = result else { return XCTFail("got \(result)") }
+    }
+
+    func testRepairTransportBlipIsRetriedOnce() async {
+        final class FlakyRepairer: LoopStageRepairer {
+            var calls = 0
+            func repair(stageName: String, command: String?, failureOutput: String,
+                        evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
+                calls += 1
+                if calls == 1 { throw APIError.http(status: 502, code: "BAD_GATEWAY", message: "x", details: nil) }
+                return LoopAgentResult()
+            }
+        }
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return callIndex == 0 ? VerifyOutcome(exitCode: 1, output: "boom") : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let repairer = FlakyRepairer()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 5)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(repairer.calls, 2)
+    }
+
+    func testIsRetryableTransportClassifiesErrors() {
+        typealias R = LoopEngineRunner
+        XCTAssertTrue(R.isRetryableTransport(APIError.network(URLError(.cannotConnectToHost))))
+        XCTAssertTrue(R.isRetryableTransport(APIError.network(URLError(.networkConnectionLost))))
+        XCTAssertTrue(R.isRetryableTransport(APIError.network(URLError(.timedOut))))
+        XCTAssertTrue(R.isRetryableTransport(APIError.http(status: 500, code: "X", message: "", details: nil)))
+        XCTAssertFalse(R.isRetryableTransport(APIError.http(status: 504, code: "AGENT_RUN_TIMEOUT", message: "", details: nil)))
+        XCTAssertFalse(R.isRetryableTransport(APIError.http(status: 400, code: "BAD", message: "", details: nil)))
+        XCTAssertFalse(R.isRetryableTransport(APIError.network(URLError(.cancelled))))
+        XCTAssertFalse(R.isRetryableTransport(APIError.agent(message: "nope")))
+        XCTAssertFalse(R.isRetryableTransport(SkillError()))
     }
 }

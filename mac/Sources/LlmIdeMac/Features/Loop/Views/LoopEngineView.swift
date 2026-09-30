@@ -1216,6 +1216,7 @@ struct LoopEngineView: View {
         case .repairing: return t.accent4
         case .passed:    return t.success
         case .failed:    return t.danger
+        case .errored:   return t.danger
         }
     }
 
@@ -1226,6 +1227,7 @@ struct LoopEngineView: View {
         case .repairing: return "Failed — repair in progress"
         case .passed:    return "Passed this iteration"
         case .failed:    return "Failed this iteration"
+        case .errored:   return "Errored — the agent could not run (backend or transport error)"
         }
     }
 
