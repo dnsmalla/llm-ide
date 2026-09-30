@@ -22,6 +22,12 @@ struct RepairEvidence: Equatable {
     let improved: Bool
     /// Consecutive non-improving attempts, counting this one.
     let streak: Int
+    /// True when the previous failure had a count and this one has none: the
+    /// last change broke the build or test run itself.
+    var stoppedRunning: Bool = false
+    /// The first error lines of the current output, quoted when
+    /// `stoppedRunning` so the agent sees what broke first.
+    var errorExcerpt: String? = nil
 }
 
 /// Attempts to fix a failing Loop Engineering stage. Generalizes
@@ -85,7 +91,12 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
         guard let evidence else { return "" }
         var lines = ["", "This is attempt \(evidence.attempt) for this stage in this run."]
 
-        if let previous = evidence.previousScore, let current = evidence.currentScore {
+        if evidence.stoppedRunning {
+            let excerpt = evidence.errorExcerpt.map { $0.isEmpty ? "" : ":\n\($0)" } ?? ""
+            lines.append("Your last change stopped the tests from running\(excerpt)")
+            lines.append("That is worse than the \(evidence.previousScore.map(String.init) ?? "earlier") "
+                         + "failing test(s) before it. Fix this breakage first.")
+        } else if let previous = evidence.previousScore, let current = evidence.currentScore {
             if current < previous {
                 lines.append("Your last change reduced the failure count from \(previous) to \(current) — "
                              + "it helped. Continue in the same direction for the remaining failures.")

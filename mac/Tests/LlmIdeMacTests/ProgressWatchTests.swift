@@ -22,6 +22,27 @@ final class ProgressWatchTests: XCTestCase {
 
     // MARK: - Score path
 
+    /// A count that disappears means the build/test run broke (a compile error
+    /// prints no summary) — worse, never "improved", even though the output
+    /// text is different.
+    func testScoreDisappearingIsWorseNotImproved() {
+        var watch = ProgressWatch()
+        _ = watch.record(key: "a", score: 3, hash: "h1")
+        let verdict = watch.record(key: "a", score: nil, hash: "compile-error")
+        XCTAssertFalse(verdict.improved)
+        XCTAssertTrue(verdict.stoppedReporting)
+        XCTAssertEqual(verdict.streak, 2)
+        XCTAssertEqual(verdict.previousScore, 3)
+    }
+
+    func testNilToNilIsNotStoppedReporting() {
+        var watch = ProgressWatch()
+        _ = watch.record(key: "a", score: nil, hash: "h1")
+        let verdict = watch.record(key: "a", score: nil, hash: "h2")
+        XCTAssertFalse(verdict.stoppedReporting)
+        XCTAssertTrue(verdict.improved)
+    }
+
     func testStrictlyDecreasingScoreResetsStreak() {
         var watch = ProgressWatch()
         _ = watch.record(key: "a", score: 5, hash: "h1")

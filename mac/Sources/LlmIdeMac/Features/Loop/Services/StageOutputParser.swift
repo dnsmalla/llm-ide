@@ -113,6 +113,18 @@ public enum StageOutputParser {
         return String(text[range])
     }
 
+    /// The first `limit` lines that look like errors ("error:", "fatal error",
+    /// "Error:"), or the first non-empty lines when none do. Quoted in the
+    /// repair prompt when a change stopped the tests from running, where the
+    /// FIRST error is the cause and later ones are fallout.
+    static func firstErrorLines(_ output: String, limit: Int = 5) -> String {
+        let lines = output.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let errors = lines.filter { $0.range(of: "error", options: .caseInsensitive) != nil }
+        return (errors.isEmpty ? lines : errors).prefix(limit).joined(separator: "\n")
+    }
+
     /// The binary name a shell reported as missing, when `output` looks like an
     /// exit-127 "command not found" line. Handles both the bash/dash/sh phrasing
     /// ("/bin/sh: pytest: command not found", with or without a "line N:"

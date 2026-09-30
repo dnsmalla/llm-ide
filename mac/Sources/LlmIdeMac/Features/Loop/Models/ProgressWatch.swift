@@ -17,6 +17,10 @@ import Foundation
 ///   "give up on the first failure".
 /// - With scores on both sides, a **strictly decreasing** score is progress and
 ///   resets the streak to 1. Equal-or-worse increments it.
+/// - A score that DISAPPEARS (the previous failure had a count, this one has
+///   none) is worse, never "improved": the build or test run itself broke — a
+///   compile error prints no test summary. It used to fall through to the hash
+///   comparison, where the new, different output read as progress.
 /// - With no score on either side, it falls back to hash equality: a different
 ///   hash resets, an identical hash increments. That is exactly the old shell
 ///   behaviour, so an unrecognised test runner loses nothing.
@@ -30,6 +34,9 @@ struct ProgressWatch {
         /// The previous failure's score, when there was one. Fed to the repair
         /// prompt as evidence.
         let previousScore: Int?
+        /// True when the previous failure had a count and this one has none —
+        /// the last change stopped the tests from running at all.
+        var stoppedReporting: Bool = false
     }
 
     private struct State {
@@ -48,7 +55,10 @@ struct ProgressWatch {
         }
 
         let improved: Bool
-        if let score, let previousScore = previous.score {
+        let stoppedReporting = score == nil && previous.score != nil
+        if stoppedReporting {
+            improved = false
+        } else if let score, let previousScore = previous.score {
             improved = score < previousScore
         } else {
             // No comparable score on at least one side — fall back to "is this
@@ -58,7 +68,8 @@ struct ProgressWatch {
 
         let streak = improved ? 1 : previous.streak + 1
         state[key] = State(score: score, hash: hash, streak: streak)
-        return Verdict(improved: improved, streak: streak, previousScore: previous.score)
+        return Verdict(improved: improved, streak: streak, previousScore: previous.score,
+                       stoppedReporting: stoppedReporting)
     }
 
     /// Forgets `key`'s history. Called when a stage passes, so a later failure in

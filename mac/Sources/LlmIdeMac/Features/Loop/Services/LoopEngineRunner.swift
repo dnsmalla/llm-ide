@@ -922,7 +922,10 @@ final class LoopEngineRunner: ObservableObject {
         repairsUsed[stage.id] = used + 1
         let evidence = RepairEvidence(
             attempt: used + 1, previousScore: verdict.previousScore, currentScore: score,
-            improved: verdict.improved, streak: verdict.streak)
+            improved: verdict.improved, streak: verdict.streak,
+            stoppedRunning: verdict.stoppedReporting,
+            errorExcerpt: verdict.stoppedReporting
+                ? StageOutputParser.firstErrorLines(outcome.output) : nil)
 
         // Timed around the guard, not just the agent call: the scope check's
         // two `git status` runs are part of what a repair costs in wall clock,
