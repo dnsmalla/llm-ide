@@ -102,6 +102,8 @@ final class AutoCodeUpdateService: ObservableObject {
     let repoManager = RepoManager()
 
     private var timer: Timer?
+    /// True while the 60s cron tick is armed (test seam).
+    var isSchedulerArmed: Bool { timer?.isValid == true }
     private var cancellable: AnyCancellable?
     /// The in-flight run, so it can be cancelled (Stop button / timer
     /// shutdown). nil when no run is active. Only touched from the
@@ -202,7 +204,7 @@ final class AutoCodeUpdateService: ObservableObject {
     /// `nextFireAt` is due, then realigns its next fire to the future.
     /// The cadence is per-task cron (`AutoTaskSettings.cron`), NOT a shared
     /// interval — this timer just wakes the scheduler once a minute to check.
-    private func scheduleTimer() {
+    func scheduleTimer() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             guard let self else { return }

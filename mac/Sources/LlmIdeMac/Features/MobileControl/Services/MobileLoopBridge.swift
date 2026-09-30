@@ -147,7 +147,9 @@ final class MobileLoopBridge: MobileFeatureBridge {
                                             message: "The Mac app can't stop a loop right now — its auto-code service isn't wired up."))
                 return true
             }
-            autoCode.stop()
+            // `cancel()`, not `stop()`: stop() also invalidates the Auto Task
+            // scheduler timer, so one phone Stop would silence every schedule.
+            autoCode.cancel()
             // Also cancel any desktop-initiated run for the active project.
             // `stopAll` rather than the Primary loop's id: the phone only
             // ever shows Primary, but Stop meaning "stop the loop that is
