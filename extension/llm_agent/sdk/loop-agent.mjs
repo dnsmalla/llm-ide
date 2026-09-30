@@ -216,7 +216,9 @@ const sdkQueryFactory = (prompt, options) => query({ prompt, options });
  * `root` must already be validated (validateLoopRepoRoot) — this function
  * trusts it as the confinement root. Throws on engine failure; an abort
  * (timeout / client gone) surfaces as the SDK's abort error, and the caller
- * reads its own controller to tell which.
+ * reads its own controller to tell which. A thrown error carries
+ * `partialUsage` ({ usage, byModel, model }) — what the SDK reported before
+ * the run was cut off — so the caller can still meter it.
  *
  * @returns {Promise<{ reply: string, changedPaths: string[], usage: object,
  *   resolvedSkills: string[], unresolvedSkills: string[], truncatedSkills: string[],
@@ -343,31 +345,74 @@ export async function runLoopAgent(
   let resultSubtype = null;
   let resolvedModel = null;
   let byModel = [];
-  for await (const msg of q) {
-    if (msg?.type === 'system' && msg?.subtype === 'init' && typeof msg.model === 'string') {
-      resolvedModel = msg.model;
-    } else if (msg?.type === 'assistant') {
-      const blocks = Array.isArray(msg?.message?.content) ? msg.message.content : [];
-      const text = blocks.filter((b) => b?.type === 'text' && typeof b.text === 'string')
-        .map((b) => b.text).join('');
-      if (text.trim()) lastAssistantText = text;
-    } else if (msg?.type === 'result') {
-      resultSubtype = msg.subtype ?? null;
-      if (typeof msg.result === 'string' && msg.result.trim()) reply = msg.result;
-      // A fresh, unpersisted session: the result's running totals ARE this
-      // run's totals (no resume baseline to subtract — see engine.mjs).
-      byModel = normalizeModelUsage(msg.modelUsage);
-      for (const row of byModel) {
-        usage.inputTokens += row.inputTokens;
-        usage.outputTokens += row.outputTokens;
-        usage.cacheReadTokens += row.cacheReadTokens;
-        usage.cacheCreationTokens += row.cacheCreationTokens;
-      }
-      usage.costUsd = Number.isFinite(msg.total_cost_usd) ? msg.total_cost_usd : 0;
-      usage.numTurns = Number.isFinite(msg.num_turns) ? msg.num_turns : 0;
-      usage.durationMs = Number.isFinite(msg.duration_ms) ? msg.duration_ms : 0;
+  let sawResult = false;
+  // Per-API-call usage from assistant messages, keyed by message id (one API
+  // response can arrive split across several assistant messages carrying the
+  // same usage). Only consulted when no `result` arrives — a timeout or an
+  // abort — so a cut-off run is still metered for what it spent.
+  const streamed = new Map();
+  const applyRows = (rows) => {
+    byModel = rows;
+    usage.inputTokens = 0; usage.outputTokens = 0; usage.cacheReadTokens = 0; usage.cacheCreationTokens = 0;
+    for (const row of rows) {
+      usage.inputTokens += row.inputTokens;
+      usage.outputTokens += row.outputTokens;
+      usage.cacheReadTokens += row.cacheReadTokens;
+      usage.cacheCreationTokens += row.cacheCreationTokens;
     }
+  };
+  const streamedRows = () => {
+    const perModel = new Map();
+    for (const { model: m, u } of streamed.values()) {
+      const key = m || resolvedModel || model || 'unknown';
+      const row = perModel.get(key) ?? {
+        model: key, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+      };
+      row.inputTokens += Number(u.input_tokens) || 0;
+      row.outputTokens += Number(u.output_tokens) || 0;
+      row.cacheReadTokens += Number(u.cache_read_input_tokens) || 0;
+      row.cacheCreationTokens += Number(u.cache_creation_input_tokens) || 0;
+      perModel.set(key, row);
+    }
+    return [...perModel.values()];
+  };
+  try {
+    for await (const msg of q) {
+      if (msg?.type === 'system' && msg?.subtype === 'init' && typeof msg.model === 'string') {
+        resolvedModel = msg.model;
+      } else if (msg?.type === 'assistant') {
+        const blocks = Array.isArray(msg?.message?.content) ? msg.message.content : [];
+        const text = blocks.filter((b) => b?.type === 'text' && typeof b.text === 'string')
+          .map((b) => b.text).join('');
+        if (text.trim()) lastAssistantText = text;
+        const u = msg?.message?.usage;
+        if (u && typeof u === 'object') {
+          streamed.set(msg.message.id ?? `anon-${streamed.size}`, { model: msg.message.model, u });
+        }
+      } else if (msg?.type === 'result') {
+        sawResult = true;
+        resultSubtype = msg.subtype ?? null;
+        if (typeof msg.result === 'string' && msg.result.trim()) reply = msg.result;
+        // A fresh, unpersisted session: the result's running totals ARE this
+        // run's totals (no resume baseline to subtract — see engine.mjs).
+        applyRows(normalizeModelUsage(msg.modelUsage));
+        usage.costUsd = Number.isFinite(msg.total_cost_usd) ? msg.total_cost_usd : 0;
+        usage.numTurns = Number.isFinite(msg.num_turns) ? msg.num_turns : 0;
+        usage.durationMs = Number.isFinite(msg.duration_ms) ? msg.duration_ms : 0;
+      }
+    }
+  } catch (err) {
+    // Timeout / abort / engine failure: hand the caller what was spent so far.
+    if (!sawResult) applyRows(streamedRows());
+    if (err && typeof err === 'object') {
+      err.partialUsage = {
+        usage: { ...usage }, byModel,
+        model: resolvedModel ?? (typeof model === 'string' && model ? model : null),
+      };
+    }
+    throw err;
   }
+  if (!sawResult) applyRows(streamedRows());
 
   return {
     reply: (reply || lastAssistantText).trim(),

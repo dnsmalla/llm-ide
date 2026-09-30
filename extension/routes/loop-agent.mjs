@@ -37,6 +37,26 @@ export function resolveTimeoutMs(raw) {
   return Math.min(MAX_LOOP_AGENT_TIMEOUT_MS, Math.max(MIN_TIMEOUT_MS, Math.round(n)));
 }
 
+// Best-effort metering of one run (finished or cut off). The run already
+// happened — a metering failure never changes the answer.
+function meterRun(userId, out, requestedModel) {
+  if (!out) return;
+  const meteredModel = out.model ?? requestedModel;
+  try {
+    const db = getDb();
+    const rows = Array.isArray(out.byModel) && out.byModel.length
+      ? out.byModel
+      : (meteredModel && out.ran ? [{ model: meteredModel, ...out.usage }] : []);
+    for (const row of rows) {
+      recordUsage(db, {
+        userId, provider: AGENT_SDK_PROVIDER, model: row.model, endpoint: '/kb/loop/agent-run',
+        inputTokens: row.inputTokens, outputTokens: row.outputTokens,
+        cacheReadTokens: row.cacheReadTokens, cacheCreationTokens: row.cacheCreationTokens,
+      });
+    }
+  } catch { /* metering is best-effort */ }
+}
+
 export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}) {
   if (!(req.method === 'POST' && (req.url || '').split('?')[0] === '/kb/loop/agent-run')) return false;
   const runAgent = deps.runAgent ?? runLoopAgent;
@@ -84,25 +104,13 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       // the operator's ambient `claude login`.
       allowAmbientAuth: true,
     });
+    // Metered first: a run cut off by the timeout or a disconnect still spent tokens.
+    meterRun(userId, out, model);
     if (ac.signal.aborted && !timedOut) return true; // client gone — nobody to answer
     if (timedOut) {
       sendJSON(res, 504, { error: { code: 'AGENT_RUN_TIMEOUT', message: `The agent run exceeded ${timeoutMs} ms` } });
       return true;
     }
-    const meteredModel = out.model ?? model;
-    try {
-      const db = getDb();
-      const rows = Array.isArray(out.byModel) && out.byModel.length
-        ? out.byModel
-        : (meteredModel && out.ran ? [{ model: meteredModel, ...out.usage }] : []);
-      for (const row of rows) {
-        recordUsage(db, {
-          userId, provider: AGENT_SDK_PROVIDER, model: row.model, endpoint: '/kb/loop/agent-run',
-          inputTokens: row.inputTokens, outputTokens: row.outputTokens,
-          cacheReadTokens: row.cacheReadTokens, cacheCreationTokens: row.cacheCreationTokens,
-        });
-      }
-    } catch { /* metering is best-effort; the run already happened */ }
     sendJSON(res, 200, {
       reply: out.reply,
       changedPaths: out.changedPaths,
@@ -115,6 +123,8 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       denied: out.denied,
     });
   } catch (err) {
+    // A cut-off run still reports what it spent before it was stopped.
+    if (err?.partialUsage) meterRun(userId, { ...err.partialUsage, ran: true }, model);
     if (timedOut) {
       sendJSON(res, 504, { error: { code: 'AGENT_RUN_TIMEOUT', message: `The agent run exceeded ${timeoutMs} ms` } });
     } else if (ac.signal.aborted) {

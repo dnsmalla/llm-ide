@@ -390,3 +390,30 @@ test('route: a client disconnect aborts the run', async () => {
   assert.equal(aborted, true);
   assert.equal(res.headersSent, false, 'nobody left to answer');
 });
+
+// --- metering a cut-off run ----------------------------------------------------------
+
+test('route: a run that times out after reporting usage is still metered before the 504', async () => {
+  const db = getDb();
+  const u = newUser();
+  addUserRepo(u.id, REPO);
+  const res = makeRes();
+  await withKey(() => handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: REPO, timeoutMs: 1_000 }, user: u }), res, { userId: u.id },
+    {
+      runAgent: (args) => runLoopAgent({
+        ...args,
+        queryFactory: (prompt, options) => (async function* () {
+          yield { type: 'system', subtype: 'init', model: 'test-model' };
+          const m = { id: 'msg_1', model: 'test-model', content: [{ type: 'text', text: 'working' }], usage: { input_tokens: 40, output_tokens: 7, cache_read_input_tokens: 3 } };
+          yield { type: 'assistant', message: m };
+          yield { type: 'assistant', message: m }; // same API call, split — counted once
+          await new Promise((_, reject) => options.abortController.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+        })(),
+      }, noSkill),
+    },
+  ));
+  assert.equal(res.statusCode, 504);
+  const rows = db.prepare('SELECT model, input_tokens, output_tokens, cache_read_tokens FROM usage_ledger WHERE user_id = ?').all(u.id);
+  assert.deepEqual(rows.map((r) => ({ ...r })), [{ model: 'test-model', input_tokens: 40, output_tokens: 7, cache_read_tokens: 3 }]);
+});
