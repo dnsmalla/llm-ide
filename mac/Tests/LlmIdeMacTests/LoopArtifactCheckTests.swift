@@ -86,6 +86,15 @@ final class LoopArtifactCheckTests: XCTestCase {
         return d.filter { $0.kind == .skill }
     }
 
+    func testRepoParentFolderBeatsAStaleProjectCopy() throws {
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("llm-doc/plans"),
+                                                withIntermediateDirectories: true)
+        try write("llm-doc/plans/INDEX.md", under: project)
+        let r = ArtifactCheckEvaluator.evaluate(LoopStageDetector.planCheckSpec,
+                                                roots: .init(repo: root, project: project), stages: plan())
+        XCTAssertTrue(r.failures.contains("missing: llm-doc/plans/INDEX.md"), "\(r.failures)")
+    }
+
     func testPlanCheckFollowsAnEditedOutputAndCapsAreaPages() throws {
         try write("p/INDEX2.md", lines: 301)
         try write("p/PLAN2.md", lines: 10)

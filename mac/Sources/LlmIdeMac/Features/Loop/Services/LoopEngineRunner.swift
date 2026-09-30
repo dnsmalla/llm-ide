@@ -1475,7 +1475,8 @@ final class LoopEngineRunner: ObservableObject {
                               goal: String? = nil, acceptanceCriteria: String? = nil,
                               scopeGlobs: [String] = []) async -> StageDecision {
         let skillId = stage.skillId ?? ""
-        var composed = Self.composeSkillMessage(stage)
+        let stagePaths = LoopStagePaths.resolve(stage, gitRoot: gitRoot, projectRoot: faultsRoot)
+        var composed = Self.composeSkillMessage(stage, paths: stagePaths)
         if let feedback = artifactCheckFeedback {
             composed += "\n\nThe previous pass's output failed these automatic checks. Fix exactly these, "
                 + "changing nothing else:\n" + String(feedback.prefix(3000))
@@ -1493,6 +1494,16 @@ final class LoopEngineRunner: ObservableObject {
         // In the split layout the project's llm-doc/ (plans, docs, the
         // refactor plan) sits outside the git root; the agent is let into it.
         let extraRoots = Self.skillExtraRoots(projectRoot: faultsRoot, gitRoot: gitRoot)
+        // An Input/Output outside the agent's confinement would make it write
+        // nothing while the stage "passes": refuse before calling the agent.
+        if let problem = stagePaths.outsideProblem(roots: [gitRoot] + extraRoots)
+            ?? stagePaths.throwawayProblem(stageName: stage.name, stage: stage, gitRoot: gitRoot) {
+            stageStates[stage.id] = .failed
+            appendLog(.error, "  [\(stage.name)] \(problem)")
+            record(stage, startedAt: startedAt, duration: 0, exitCode: nil,
+                   passed: false, output: problem, score: nil)
+            return .terminate(.error(problem))
+        }
         do {
             try await ensureRepoRegistered()
         } catch {
@@ -2122,15 +2133,15 @@ final class LoopEngineRunner: ObservableObject {
     /// silently drop what they picked in the Input/Output fields. Both are
     /// text hints for the skill's own tool calls, not a mechanical redirect —
     /// the runner never reads or writes either path itself.
-    private static func composeSkillMessage(_ stage: LoopStage) -> String {
+    static func composeSkillMessage(_ stage: LoopStage, paths: LoopStagePaths? = nil) -> String {
         var msg = (stage.prompt?.isEmpty == false)
             ? stage.prompt!
             : "Apply the skill for stage \"\(stage.name)\"."
         if let target = stage.targetPath, !target.isEmpty {
-            msg += " Input: \(Self.describePath(target))."
+            msg += " Input: \(Self.describePath(target, absolute: paths?.input))."
         }
         if let output = stage.outputPath, !output.isEmpty {
-            msg += " Write output to: \(Self.describePath(output))."
+            msg += " Write output to: \(Self.describePath(output, absolute: paths?.output))."
         }
         return msg
     }
@@ -2139,8 +2150,10 @@ final class LoopEngineRunner: ObservableObject {
     /// paths are relative to the git root, not the project root — read
     /// naturally in a sentence ("Input: .." reads as a typo/ambiguous
     /// double-dot, not "the repo root").
-    private static func describePath(_ path: String) -> String {
-        path == "." ? "the repo root" : path
+    private static func describePath(_ path: String, absolute: URL? = nil) -> String {
+        let shown = path == "." ? "the repo root" : path
+        guard let absolute, absolute.path != path else { return shown }
+        return "\(absolute.path) (\(shown))"
     }
 
     /// Prefixes `goal`/`acceptanceCriteria` (when either is set) onto text the

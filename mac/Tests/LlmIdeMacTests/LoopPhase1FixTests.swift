@@ -580,4 +580,131 @@ final class LoopPhase1FixTests: XCTestCase {
         XCTAssertTrue(error?.contains("tests/mine.txt") == true, String(describing: error))
         XCTAssertFalse(error?.contains("tests/same.txt") == true)
     }
+
+    // MARK: - Stage paths: resolved absolute on the Mac, refused when outside the roots
+
+    private func pathStage(skill: String = "fam/plan", key: String? = nil,
+                           input: String? = nil, output: String? = nil) -> LoopStage {
+        LoopStage(id: "s", name: "S", kind: .skill, order: 0, skillId: skill,
+                  targetPath: input, outputPath: output, defaultKey: key)
+    }
+
+    func testStagePathsSplitLayoutPlanGoesToProjectLlmDoc() throws {
+        let (project, repo) = try makeSplitProject()
+        let p = LoopStagePaths.resolve(pathStage(input: "llm-doc/plans", output: "llm-doc/plans/INDEX.md"),
+                                       gitRoot: repo, projectRoot: project)
+        XCTAssertEqual(p.input?.path, project.appendingPathComponent("llm-doc/plans").path)
+        XCTAssertEqual(p.output?.path, project.appendingPathComponent("llm-doc/plans/INDEX.md").path)
+    }
+
+    func testStagePathsSameRootLayoutStaysInRepo() throws {
+        let (project, _) = try makeSplitProject()
+        let p = LoopStagePaths.resolve(pathStage(input: "llm-doc/plans", output: "llm-doc/plans/INDEX.md"),
+                                       gitRoot: project, projectRoot: project)
+        XCTAssertEqual(p.output?.path, project.appendingPathComponent("llm-doc/plans/INDEX.md").path)
+    }
+
+    func testStagePathsDocStageResolvesAgainstRepoOnly() throws {
+        let (project, repo) = try makeSplitProject()
+        for stage in [pathStage(skill: "skills/doc-writer", output: "docs/out.md"),
+                      pathStage(skill: "x/y", key: "doc-index", output: "docs/out.md")] {
+            XCTAssertEqual(LoopStagePaths.resolve(stage, gitRoot: repo, projectRoot: project).output?.path,
+                           repo.appendingPathComponent("docs/out.md").path)
+        }
+    }
+
+    func testStagePathsAbsoluteDotAndRepoOnlyParent() throws {
+        let (project, repo) = try makeSplitProject()
+        let abs = LoopStagePaths.resolve(pathStage(input: "/tmp/x/../y"), gitRoot: repo, projectRoot: project)
+        XCTAssertEqual(abs.input?.path, "/tmp/y")
+        XCTAssertEqual(LoopStagePaths.resolve(pathStage(input: "."), gitRoot: repo, projectRoot: project).input, repo)
+        try FileManager.default.createDirectory(at: repo.appendingPathComponent("notes"), withIntermediateDirectories: true)
+        let p = LoopStagePaths.resolve(pathStage(output: "notes/a.md"), gitRoot: repo, projectRoot: project)
+        XCTAssertEqual(p.output?.path, repo.appendingPathComponent("notes/a.md").path,
+                       "the parent exists only in the repo")
+    }
+
+    func testStagePathsWorktreeRunUsesProjectLlmDoc() throws {
+        let (project, _) = try makeSplitProject()
+        let wt = project.appendingPathComponent("system/loop-worktrees/run1", isDirectory: true)
+        try FileManager.default.createDirectory(at: wt, withIntermediateDirectories: true)
+        let p = LoopStagePaths.resolve(pathStage(output: "llm-doc/plans/INDEX.md"), gitRoot: wt, projectRoot: project)
+        XCTAssertEqual(p.output?.path, project.appendingPathComponent("llm-doc/plans/INDEX.md").path)
+        let roots = [wt] + LoopEngineRunner.skillExtraRoots(projectRoot: project, gitRoot: wt)
+        XCTAssertNil(p.outsideProblem(roots: roots))
+    }
+
+    func testComposeSkillMessageCarriesAbsolutePaths() throws {
+        let (project, repo) = try makeSplitProject()
+        let stage = pathStage(input: "llm-doc/plans", output: "llm-doc/plans/INDEX.md")
+        let paths = LoopStagePaths.resolve(stage, gitRoot: repo, projectRoot: project)
+        let msg = LoopEngineRunner.composeSkillMessage(stage, paths: paths)
+        XCTAssertTrue(msg.contains("Input: \(project.path)/llm-doc/plans (llm-doc/plans)."), msg)
+        XCTAssertTrue(msg.contains("Write output to: \(project.path)/llm-doc/plans/INDEX.md (llm-doc/plans/INDEX.md)."), msg)
+        let dot = LoopEngineRunner.composeSkillMessage(pathStage(input: "."),
+            paths: LoopStagePaths.resolve(pathStage(input: "."), gitRoot: repo, projectRoot: project))
+        XCTAssertTrue(dot.contains("Input: \(repo.path) (the repo root)."), dot)
+    }
+
+    func testOutputOutsideRootsFailsWithoutCallingTheAgent() async throws {
+        let (project, repo) = try makeSplitProject()
+        let skills = SkillExecutor()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "plan", name: "Plan", kind: .skill, order: 0, skillId: "fam/plan",
+                      outputPath: "/private/tmp/outside-\(UUID().uuidString)/out.md")
+        ], maxIterations: 1)
+        let r = runner(skills: skills, approvals: approvals([]), scopeGuard: CancellationSensitiveGuard(violation: []))
+        let status = await r.run(config: config, faultsRoot: project, gitRoot: repo)
+        XCTAssertEqual(skills.calls, 0)
+        guard case .error(let message) = status else { return XCTFail("expected .error, got \(status)") }
+        XCTAssertTrue(message.hasPrefix("Output path "), message)
+        XCTAssertTrue(message.hasSuffix("is outside the repo and the project's llm-doc — the agent could not use it"), message)
+    }
+
+    func testStageInsideRootsStillRuns() async throws {
+        let (project, repo) = try makeSplitProject()
+        let skills = SkillExecutor()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "plan", name: "Plan", kind: .skill, order: 0, skillId: "fam/plan",
+                      targetPath: "llm-doc/plans", outputPath: "llm-doc/plans/INDEX.md")
+        ], maxIterations: 1)
+        let r = runner(skills: skills, approvals: approvals([]), scopeGuard: CancellationSensitiveGuard(violation: []))
+        _ = await r.run(config: config, faultsRoot: project, gitRoot: repo)
+        XCTAssertEqual(skills.calls, 1)
+    }
+
+    func testSiblingWorktreeRefusesNonDocLlmDocWrites() async throws {
+        let (project, _) = try makeSplitProject()
+        let wt = project.deletingLastPathComponent()
+            .appendingPathComponent(".llmide-loop-worktrees/run-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: wt, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: wt.deletingLastPathComponent()) }
+        let skills = SkillExecutor()
+        let r = runner(skills: skills, approvals: approvals([]), scopeGuard: CancellationSensitiveGuard(violation: []))
+        let plan = LoopEngineConfig(stages: [
+            LoopStage(id: "plan", name: "Plan", kind: .skill, order: 0, skillId: "fam/plan",
+                      outputPath: "llm-doc/plans/INDEX.md")], maxIterations: 1)
+        let status = await r.run(config: plan, faultsRoot: wt, gitRoot: wt)
+        XCTAssertEqual(skills.calls, 0)
+        guard case .error(let m) = status else { return XCTFail("\(status)") }
+        XCTAssertTrue(m.contains("throwaway worktree"), m)
+        let doc = LoopEngineConfig(stages: [
+            LoopStage(id: "d", name: "Doc", kind: .skill, order: 0, skillId: "skills/doc-writer",
+                      outputPath: "llm-doc/docs/a.md")], maxIterations: 1)
+        _ = await r.run(config: doc, faultsRoot: wt, gitRoot: wt)
+        XCTAssertEqual(skills.calls, 1, "doc stages are unaffected")
+    }
+
+    func testContainmentIsCaseInsensitive() throws {
+        let (_, repo) = try makeSplitProject()
+        let shouty = URL(fileURLWithPath: repo.path.uppercased() + "/x.md")
+        XCTAssertTrue(LoopStagePaths.isInside(shouty, roots: [repo]))
+    }
+
+    func testLeadingTildeIsExpandedThenValidated() throws {
+        let (project, repo) = try makeSplitProject()
+        let p = LoopStagePaths.resolve(pathStage(input: "~/somewhere/in.md"), gitRoot: repo, projectRoot: project)
+        XCTAssertEqual(p.input?.path, NSHomeDirectory() + "/somewhere/in.md")
+        XCTAssertNotNil(p.outsideProblem(roots: [repo]))
+    }
 }
