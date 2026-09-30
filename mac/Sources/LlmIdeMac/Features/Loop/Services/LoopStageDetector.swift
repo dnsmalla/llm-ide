@@ -132,7 +132,14 @@ public enum LoopStageDetector {
     /// EXACTLY the old default becomes the current default. An edited command
     /// never equals it, so user changes are untouched; after the update the
     /// command no longer matches, which makes this idempotent.
-    static func migratingMacAppCommand(in loops: [LoopDefinition], gitRoot: URL?) -> [LoopDefinition] {
+    ///
+    /// Approvals are keyed by stage id AND command, so a migrated command
+    /// would otherwise need re-approval although the user approved the stage
+    /// and only its env changed. When `approvals` is given and the old command
+    /// was approved for the stage, the new one is approved too — never a
+    /// command the user had not already approved for that stage.
+    static func migratingMacAppCommand(in loops: [LoopDefinition], gitRoot: URL?,
+                                       approvals: VerifyApprovalStore? = nil) -> [LoopDefinition] {
         guard let gitRoot else { return loops }
         let new = macAppCommand(gitRoot: gitRoot)
         return loops.map { loop in
@@ -143,6 +150,10 @@ public enum LoopStageDetector {
                 var updated = stage
                 updated.command = new
                 if updated.detectedCommand == legacyMacAppCommand { updated.detectedCommand = new }
+                if let approvals,
+                   approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: legacyMacAppCommand) {
+                    approvals.approveStage(repo: gitRoot, stageId: stage.id, command: new)
+                }
                 return updated
             }
             return loop
@@ -1079,7 +1090,8 @@ public enum LoopStageDetector {
         let (revalidatedLoops, revalidationChanges) = revalidatingTestStages(
             in: loops, gitRoot: gitRoot, eligibleStageIDs: loadedTestStageIDs)
         loops = revalidatedLoops
-        loops = migratingMacAppCommand(in: loops, gitRoot: gitRoot)
+        loops = migratingMacAppCommand(in: loops, gitRoot: gitRoot,
+                                       approvals: VerifyApprovalStore(defaults: defaults))
 
         // 5. Keep one editable loop. A first-time project gets one; an
         //    existing project keeps whatever it has (including a loop this

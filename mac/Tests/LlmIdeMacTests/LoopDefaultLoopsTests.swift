@@ -781,4 +781,24 @@ final class LoopMacAppCommandTests: XCTestCase {
         let edited = loop(command: "cd mac && swift test --filter Foo")
         XCTAssertEqual(LoopStageDetector.migratingMacAppCommand(in: [edited], gitRoot: repo), [edited])
     }
+
+    func testMigrationCarriesTheStagesApprovalToTheNewCommand() throws {
+        try "test-mac:\n".write(to: repo.appendingPathComponent("Makefile"), atomically: true, encoding: .utf8)
+        let approvals = VerifyApprovalStore(defaults: UserDefaults(suiteName: "mac-app-migration-\(UUID().uuidString)")!)
+        approvals.approveStage(repo: repo, stageId: "m", command: "cd mac && swift test")
+        _ = LoopStageDetector.migratingMacAppCommand(
+            in: [loop(command: "cd mac && swift test")], gitRoot: repo, approvals: approvals)
+        XCTAssertTrue(approvals.isStageApproved(repo: repo, stageId: "m", command: "make test-mac"),
+                      "the approved stage stays approved after its command is migrated")
+        XCTAssertFalse(approvals.isStageApproved(repo: repo, stageId: "o", command: "make test-mac"),
+                       "nothing is approved for a stage the migration did not change")
+    }
+
+    func testMigrationDoesNotApproveAnUnapprovedStage() throws {
+        try "test-mac:\n".write(to: repo.appendingPathComponent("Makefile"), atomically: true, encoding: .utf8)
+        let approvals = VerifyApprovalStore(defaults: UserDefaults(suiteName: "mac-app-migration-\(UUID().uuidString)")!)
+        _ = LoopStageDetector.migratingMacAppCommand(
+            in: [loop(command: "cd mac && swift test")], gitRoot: repo, approvals: approvals)
+        XCTAssertFalse(approvals.isStageApproved(repo: repo, stageId: "m", command: "make test-mac"))
+    }
 }
