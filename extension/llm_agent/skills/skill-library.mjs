@@ -125,7 +125,10 @@ const MAX_PIPELINE_SKILL_CHARS = 48_000;
 
 // Resolve a library skill id ("<family>/<dir>") to its followable instructions
 // by reading the SKILL.md from the LOCAL central repo. Returns
-// { id, name, content } or null for an unknown id.
+// { id, name, description, content, truncated } or null for an unknown id.
+// `truncated` is true when the file was longer than the cap and `content` is
+// only its head — a caller that must not act on half a workflow (the Loop's
+// headless agent run) reports it instead of silently following the part.
 //
 // SECURITY: the id MUST be one listSkillLibrary() catalogs — we look the path
 // up in the catalog and never read a client-supplied path. This is what lets
@@ -143,7 +146,10 @@ export function readSkillInstructions(id, userId, { maxChars = MAX_SKILL_CHARS }
     // `description` rides along for the deferred-skill pointer card
     // (core/prompt-framing.mjs): a skill too heavy to inline is announced by
     // name + description + id, and the model pulls the body with load-skill.
-    return { id: entry.id, name: entry.name, description: entry.description, content: raw.slice(0, cap) };
+    return {
+      id: entry.id, name: entry.name, description: entry.description,
+      content: raw.slice(0, cap), truncated: raw.length > cap,
+    };
   } catch {
     return null;
   }

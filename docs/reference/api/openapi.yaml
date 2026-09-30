@@ -3324,6 +3324,75 @@ paths:
                   cancelled: { type: boolean }
         '400': { description: VALIDATION_FAILED — chatSessionId missing, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /kb/loop/agent-run:
+    post:
+      summary: Run one headless, confined agent step for the Mac Loop
+      description: >
+        The Loop's skill stages, stage repairs and fault repairs. Runs on the
+        Claude Agent SDK with FILE TOOLS ONLY (Read, Glob, Grep, Edit, Write),
+        working directory `repoRoot`, and every path confined to it (symlinks
+        resolved; secret paths such as `.env` and `.git/` refused). No shell,
+        no network, no MCP servers, no plugins, no operator settings. Nothing
+        is ever parked for approval: a refused tool call is denied and listed
+        in `denied`. `repoRoot` must be absolute and either at or below a root
+        on the caller's repo allow-list (`/auth/me/repos`) or a linked git
+        worktree of one under a `.llmide-loop-worktrees/` or `loop-worktrees/`
+        directory. When any requested skill id is not installed the agent does
+        not run (`ran: false`, the id in `unresolvedSkills`). `timeoutMs`
+        (default 30 min, clamped to 1 s – 4 h) aborts the run; a client
+        disconnect aborts it too. Rate-limited on the `agentTurn` bucket.
+        Server API v58.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message, repoRoot]
+              properties:
+                message:   { type: string, description: The composed Loop instruction (max 200000 chars) }
+                skills:    { type: array, maxItems: 5, items: { type: string }, description: Skill library ids ("<family>/<dir>") }
+                repoRoot:  { type: string, description: Absolute path of the run's git root (the worktree in worktree mode) }
+                language:  { type: string }
+                model:     { type: string }
+                timeoutMs: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: The run finished (or did not start because a skill is missing — see `ran`)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reply:            { type: string, description: The agent's closing summary }
+                  changedPaths:     { type: array, items: { type: string }, description: Repo-relative paths the agent's Edit/Write calls changed }
+                  usage:
+                    type: object
+                    properties:
+                      inputTokens:         { type: integer }
+                      outputTokens:        { type: integer }
+                      cacheReadTokens:     { type: integer }
+                      cacheCreationTokens: { type: integer }
+                      costUsd:             { type: number }
+                      numTurns:            { type: integer }
+                      durationMs:          { type: integer }
+                  resolvedSkills:   { type: array, items: { type: string } }
+                  unresolvedSkills: { type: array, items: { type: string } }
+                  truncatedSkills:  { type: array, items: { type: string }, description: Resolved skills longer than the cap; only their head was sent }
+                  ran:              { type: boolean }
+                  resultSubtype:    { type: string, nullable: true, description: The SDK result subtype (success, error_max_turns, …) }
+                  denied:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        toolName: { type: string }
+                        reason:   { type: string }
+        '400': { description: VALIDATION_FAILED, or REPO_ROOT_NOT_ALLOWED — repoRoot outside the allow-list, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: INTERNAL_ERROR — the engine failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { description: NO_KEY — no Anthropic credentials, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '504': { description: AGENT_RUN_TIMEOUT — timeoutMs elapsed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /agent/v2/session:
     delete:
       summary: Drop a chat's SDK-session mapping (chat deletion)

@@ -236,7 +236,14 @@ const HOST = config.host;
 //     updating, canUpdate, error }; POST /kb/agent-sdk/update { ok, from, to,
 //     rolledBack, restartNeeded, log } (always 200; `ok` says whether it updated).
 //     /kb/providers/models (anthropic) gains `entries` + `source: 'sdk'`.
-const SERVER_API_VERSION = 57;
+//   v58 — POST /kb/loop/agent-run { message, skills?, repoRoot, language?,
+//     model?, timeoutMs? } → { reply, changedPaths, usage, resolvedSkills,
+//     unresolvedSkills, truncatedSkills, ran, resultSubtype, denied }: the
+//     Loop's headless agent step — file tools only (Read/Glob/Grep/Edit/Write)
+//     confined to `repoRoot` (an allow-listed repo or a Loop worktree of one),
+//     no shell/network, never parks an approval. 400 REPO_ROOT_NOT_ALLOWED,
+//     504 AGENT_RUN_TIMEOUT. Replaces the Loop's tool-less /code-assist calls.
+const SERVER_API_VERSION = 58;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -249,6 +256,7 @@ const ENDPOINTS = [
   '/agent/v2/decision',
   '/agent/v2/session',
   '/agent/v2/cancel',
+  '/kb/loop/agent-run',
   '/generate-questions',
   '/extract-entities',
   '/kb/ingest',
@@ -382,6 +390,8 @@ function rateLimitProfile(url, method) {
   // The v2 engine's chat turn stream — the Agent-SDK successor of
   // /code-assist, same cost class (a multi-minute agent turn).
   if (url === '/agent/v2/stream')        return 'agentTurn';
+  // The Loop's headless agent step — the same multi-minute agent-turn cost.
+  if (url === '/kb/loop/agent-run')      return 'agentTurn';
   if (url === '/kb/generate-plan')       return 'llm';
   if (url === '/kb/analyze-risks')       return 'llm';
   if (url === '/kb/generate-code')       return 'llm';

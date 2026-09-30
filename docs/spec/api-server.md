@@ -51,7 +51,7 @@ Every inbound HTTP request passes through these stages **in order** (`extension/
 
 ### API version and stale-server detection
 
-`SERVER_API_VERSION = 57` (`server.mjs:239`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:240–344`) is also returned in both responses so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 58` (`server.mjs:246`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:247–352`) is also returned in both responses so clients can detect missing capabilities by name.
 
 ### Server timeouts
 
@@ -233,7 +233,7 @@ When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: 
 
 | Profile | Capacity | Refill rate | Applied to |
 |---|---|---|---|
-| `agentTurn` | 12 | 1/5 s | `/code-assist`, `/agent/v2/stream` (chat turns — the Mac engine starts auto-continue and follow-up turns on its own; one in-flight turn per chat is enforced separately) |
+| `agentTurn` | 12 | 1/5 s | `/code-assist`, `/agent/v2/stream`, `/kb/loop/agent-run` (chat turns and the Loop's headless agent step — the Mac engine starts auto-continue and follow-up turns on its own; one in-flight turn per chat is enforced separately) |
 | `llm` | 3 | 1/30 s | `/kb/generate-plan`, `/kb/analyze-risks`, `/kb/generate-code`, `/kb/summarize`, `/kb/email/classify`, `/kb/mcp-connector/classify`, `/kb/conflict-questions` |
 | `llmFast` | 6 | 1/5 s | `/generate-notes`, `/chat`, `/kb/agent/ask`, `/generate-questions`, `/extract-entities`, `/generate-docx`, `/generate-doc`, `/kb/providers/verify`, `/kb/providers/models` |
 | `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/email/test`, `/kb/email/fetch`, `/kb/slack/test`, `/kb/slack/fetch`, `/kb/box/test`, `/kb/mcp-connector/test`, `/kb/mcp-connector/fetch`, `/kb/slack/conversations`, `/kb/connect-box` (full external crawl — special-cased before the generic connect prefix) |

@@ -1,0 +1,383 @@
+// The Loop's headless, confined agent run — the engine behind
+// POST /kb/loop/agent-run (routes/loop-agent.mjs).
+//
+// Why this exists: the Mac Loop's skill stages, stage repairs and fault
+// repairs used to call POST /code-assist with no agentContext, which takes
+// that route's tool-less legacy path (`runClaude` with no tools). No Loop
+// repair or skill stage could edit a single file, and the repo root reached
+// the model only as prompt text, so a worktree run could not be targeted.
+//
+// The ruling this module implements: a Loop agent run is NON-INTERACTIVE and
+// CONFINED.
+//   - File tools only — Read, Glob, Grep, Edit, Write — rooted at the run's
+//     git root (the worktree when one is in use). No shell, no network, no
+//     subagents, no MCP servers, no plugins, no operator settings.
+//   - Nothing ever waits for a human: a tool call the confinement refuses is
+//     DENIED, never parked as an approval. The Loop verifies by running its
+//     own stages afterwards.
+//
+// Engine choice — the Agent SDK, not the legacy CLI agent loop. The legacy
+// loop (llm_agent/runtime) has no file-edit tool at all (writes go through the
+// attach+confirm flow; its only mutating tool is run-bash), so it could only
+// ever "edit" through a shell, which the ruling forbids. The SDK has exactly
+// the needed surface: a `tools` allowlist that removes everything else from
+// the model's context, `cwd`, a `canUseTool` callback, and PreToolUse /
+// PostToolUse hooks. Confinement is enforced twice — a PreToolUse hook (runs
+// for EVERY tool call, including the reads the SDK auto-allows inside cwd)
+// and canUseTool (the permission prompt, which here decides instead of
+// asking) — with the same gate as the chat engine's native Edit/Write
+// (tools/gates.mjs writePathGate: realpath of the nearest existing ancestor,
+// so a symlink pointing out of the repo is refused, plus the secret-path
+// denylist).
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import {
+  AGENT_SDK_PROVIDER, resolveAgentEngineAuth, resolveAnthropicKey, agentSdkHomeFor, normalizeModelUsage,
+} from './engine.mjs';
+import { writePathGate } from '../tools/gates.mjs';
+import { buildTrustedRoots, isTooBroadRoot, isWithinRoots } from '../runtime/handlers/repo-files.mjs';
+import { readSkillInstructions } from '../skills/index.mjs';
+import { buildLoopSkillsText } from '../../core/prompt-framing.mjs';
+import { neutralizePromptFences } from '../../core/utils.mjs';
+import { resolveLanguage } from '../../providers/runtime.mjs';
+
+// The only built-ins a Loop run may see. Everything else — Bash, WebFetch,
+// WebSearch, Agent/Task, AskUserQuestion, NotebookEdit, Skill, … — is absent
+// from the model's context entirely (SDK `tools` is an allowlist).
+export const LOOP_AGENT_TOOLS = Object.freeze(['Read', 'Glob', 'Grep', 'Edit', 'Write']);
+const LOOP_AGENT_TOOL_SET = new Set(LOOP_AGENT_TOOLS);
+const WRITE_TOOLS = new Set(['Edit', 'Write']);
+// Belt to the `tools` braces: removed from context even if a future SDK
+// default re-added one. `mcp__*` drops every MCP tool.
+const LOOP_AGENT_DISALLOWED = Object.freeze([
+  'Bash', 'BashOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Agent', 'Task',
+  'AskUserQuestion', 'NotebookEdit', 'Skill', 'mcp__*',
+]);
+
+// A Loop step is one focused edit, not a chat — but a repair across a few
+// files legitimately takes a few dozen tool calls.
+const MAX_TURNS = 60;
+// The composed Loop message (goal + failure output + instructions) is small;
+// this only bounds a pathological one.
+export const MAX_LOOP_MESSAGE_CHARS = 200_000;
+
+// Worktree parents the Mac's LoopWorktreeManager creates (sibling layout, and
+// the split project layout's `<project>/system/loop-worktrees`).
+const WORKTREE_SEGMENTS = new Set(['.llmide-loop-worktrees', 'loop-worktrees']);
+
+/**
+ * Validate a client-supplied Loop repo root against what the user may write.
+ *
+ * Accepted:
+ *   1. an existing directory at or below a root on the user's repo
+ *      allow-list (`user_repos`, DB-trusted — never the client), or
+ *   2. a linked git worktree of such a root, living under a Loop worktree
+ *      directory (`.llmide-loop-worktrees/` or `loop-worktrees/`): its `.git`
+ *      FILE must point into `<allowed root>/.git/worktrees/<name>`, and that
+ *      entry's own `gitdir` back-reference must point at this directory — the
+ *      pairing git itself maintains, so a stray `.git` file cannot claim a
+ *      repo it does not belong to.
+ *
+ * Refused: non-string, relative, `..`-laden, missing, not a directory, too
+ * broad (/, $HOME, /Users…), or outside both of the above. Symlinks are
+ * resolved first, so a link inside an allowed repo that points elsewhere is
+ * judged by where it lands.
+ *
+ * @returns {{ ok: true, root: string } | { ok: false, reason: string }}
+ */
+export function validateLoopRepoRoot(userId, repoRoot, { trustedRoots = buildTrustedRoots } = {}) {
+  if (typeof repoRoot !== 'string' || !repoRoot) return { ok: false, reason: 'repoRoot is required' };
+  if (!path.isAbsolute(repoRoot)) return { ok: false, reason: 'repoRoot must be an absolute path' };
+  if (repoRoot.split(/[/\\]/).includes('..')) return { ok: false, reason: 'repoRoot must not contain ".."' };
+  let real;
+  try { real = fs.realpathSync(repoRoot); } catch { return { ok: false, reason: 'repoRoot does not exist' }; }
+  try {
+    if (!fs.statSync(real).isDirectory()) return { ok: false, reason: 'repoRoot is not a directory' };
+  } catch { return { ok: false, reason: 'repoRoot does not exist' }; }
+  if (isTooBroadRoot(real)) return { ok: false, reason: 'repoRoot is too broad' };
+
+  let trusted = [];
+  try { trusted = trustedRoots(userId) || []; } catch { trusted = []; }
+  if (isWithinRoots(real, trusted)) return { ok: true, root: real };
+  if (isLoopWorktreeOf(real, trusted)) return { ok: true, root: real };
+  return { ok: false, reason: 'repoRoot is not in your repo allow-list' };
+}
+
+function isLoopWorktreeOf(real, trusted) {
+  if (!trusted.length) return false;
+  if (!real.split(path.sep).some((s) => WORKTREE_SEGMENTS.has(s))) return false;
+  const dotGit = path.join(real, '.git');
+  let gitFile;
+  try {
+    if (!fs.lstatSync(dotGit).isFile()) return false;
+    gitFile = fs.readFileSync(dotGit, 'utf8');
+  } catch { return false; }
+  const m = /^gitdir:\s*(.+?)\s*$/m.exec(gitFile);
+  if (!m) return false;
+  const entry = path.isAbsolute(m[1]) ? m[1] : path.resolve(real, m[1]);
+  // The entry must be `<trusted>/.git/worktrees/<name>` — exactly one level
+  // under a trusted repo's worktrees directory.
+  const worktreesDirs = trusted.map((t) => path.join(t, '.git', 'worktrees'));
+  let entryReal;
+  try { entryReal = fs.realpathSync(entry); } catch { return false; }
+  const parentOk = worktreesDirs.some((dir) => {
+    let dirReal;
+    try { dirReal = fs.realpathSync(dir); } catch { return false; }
+    return samePath(path.dirname(entryReal), dirReal);
+  });
+  if (!parentOk) return false;
+  // Git's back-reference: <entry>/gitdir names this worktree's `.git` file.
+  let back;
+  try { back = fs.readFileSync(path.join(entryReal, 'gitdir'), 'utf8').trim(); } catch { return false; }
+  if (!back) return false;
+  const backAbs = path.isAbsolute(back) ? back : path.resolve(entryReal, back);
+  let backReal;
+  try { backReal = fs.realpathSync(backAbs); } catch { return false; }
+  return samePath(backReal, fs.realpathSync(dotGit));
+}
+
+function samePath(a, b) {
+  const ci = process.platform === 'darwin' || process.platform === 'win32';
+  return ci ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+// Glob patterns are resolved against `path` (or cwd); an absolute or
+// `..`-climbing pattern would reach past it.
+function patternEscapes(pattern) {
+  if (typeof pattern !== 'string' || !pattern) return false;
+  if (pattern.startsWith('/') || pattern.startsWith('~') || /^[A-Za-z]:[\\/]/.test(pattern)) return true;
+  return pattern.split(/[/\\]/).includes('..');
+}
+
+/**
+ * Why `toolName(input)` may not run in a run rooted at `root`, or null when it
+ * may. The single confinement rule both the PreToolUse hook and canUseTool
+ * apply.
+ */
+export function loopToolRefusal(toolName, input, root) {
+  if (!LOOP_AGENT_TOOL_SET.has(toolName)) {
+    return `${toolName} is not available in a Loop run (file tools only: ${LOOP_AGENT_TOOLS.join(', ')}).`;
+  }
+  const inside = (p) => writePathGate(p, [root]) !== 'blocked';
+  if (toolName === 'Read' || WRITE_TOOLS.has(toolName)) {
+    if (!inside(input?.file_path)) {
+      return `${toolName} refused: ${String(input?.file_path ?? '(no path)')} is outside the Loop's repository ${root} (or is a protected secret path).`;
+    }
+    return null;
+  }
+  // Glob / Grep: an explicit search root must stay inside, and the file
+  // pattern must not climb out of it.
+  if (input?.path != null && input.path !== '' && !inside(input.path)) {
+    return `${toolName} refused: ${String(input.path)} is outside the Loop's repository ${root}.`;
+  }
+  const pattern = toolName === 'Glob' ? input?.pattern : input?.glob;
+  if (patternEscapes(pattern)) {
+    return `${toolName} refused: the pattern ${String(pattern)} reaches outside the Loop's repository.`;
+  }
+  return null;
+}
+
+function repoRelative(root, filePath) {
+  if (typeof filePath !== 'string' || !filePath) return null;
+  const abs = path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(root, filePath);
+  let resolved = abs;
+  try { resolved = fs.realpathSync(abs); } catch { /* deleted/renamed — judge the spelling */ }
+  const rel = path.relative(root, resolved);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  return rel.split(path.sep).join('/');
+}
+
+function headlessSystemAppend(root, languageLine, skillsText) {
+  return [
+    'You are running HEADLESS as one step of an automated verify-and-repair Loop in LLM-IDE. '
+      + 'Nobody is watching this run and nobody can answer a question.',
+    `- Work only inside the repository at ${root} (your working directory). Every path you read, `
+      + 'search or edit must stay inside it; anything else is refused.',
+    '- You have file tools only: Read, Glob, Grep, Edit, Write. There is no shell, no network and no '
+      + 'way to run builds or tests — the Loop runs its own stages afterwards to verify your change. '
+      + 'Do not claim you ran or verified anything.',
+    '- Do not ask for permission or wait for input: make the change the request describes, or say in '
+      + 'your reply why you could not.',
+    '- End with a short plain summary of what you changed (which files, and why).',
+    languageLine,
+    skillsText,
+  ].filter(Boolean).join('\n\n');
+}
+
+// The injectable factory contract (prompt, options) — same shape as the chat
+// engine's, so tests drive this runner with the same kind of fake.
+const sdkQueryFactory = (prompt, options) => query({ prompt, options });
+
+/**
+ * Run one headless, confined agent step.
+ *
+ * `root` must already be validated (validateLoopRepoRoot) — this function
+ * trusts it as the confinement root. Throws on engine failure; an abort
+ * (timeout / client gone) surfaces as the SDK's abort error, and the caller
+ * reads its own controller to tell which.
+ *
+ * @returns {Promise<{ reply: string, changedPaths: string[], usage: object,
+ *   resolvedSkills: string[], unresolvedSkills: string[], truncatedSkills: string[],
+ *   ran: boolean, resultSubtype: string|null, denied: Array<{toolName: string, reason: string}>,
+ *   model: string|null, byModel: object[] }>}
+ */
+export async function runLoopAgent(
+  {
+    message, skills, root, userId, language, model, abortController, allowAmbientAuth = false,
+    queryFactory = sdkQueryFactory,
+  } = {},
+  { readSkill = readSkillInstructions } = {},
+) {
+  if (typeof root !== 'string' || !root) throw new Error('root is required');
+  const { text: skillsText, resolved, unresolved, truncated } = buildLoopSkillsText(skills, userId, readSkill);
+  const usage = {
+    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+    costUsd: 0, numTurns: 0, durationMs: 0,
+  };
+  const base = {
+    resolvedSkills: resolved, unresolvedSkills: unresolved, truncatedSkills: truncated,
+  };
+  // A requested skill that is not installed means the step cannot do what it
+  // was configured to do. Running the agent anyway would make edits nobody
+  // asked for under the name of a skill that never ran — so nothing runs.
+  if (unresolved.length > 0) {
+    return {
+      reply: '', changedPaths: [], usage, ...base, ran: false, resultSubtype: null, denied: [],
+      model: null, byModel: [],
+    };
+  }
+
+  const auth = resolveAgentEngineAuth(AGENT_SDK_PROVIDER, userId);
+  const { key } = auth;
+  if (!key && !allowAmbientAuth) {
+    throw Object.assign(
+      new Error('No Anthropic API key available (set vault claude.apiKey or ANTHROPIC_API_KEY)'),
+      { code: 'NO_KEY' },
+    );
+  }
+  // Same per-user engine home rule as the chat engine (engine.mjs): only a
+  // first-party-keyed user is redirected; ambient auth needs the operator's
+  // default config dir to stay logged in.
+  const sdkHome = resolveAnthropicKey(userId).key ? agentSdkHomeFor(userId) : null;
+  if (sdkHome) {
+    try { fs.mkdirSync(sdkHome, { recursive: true }); } catch { /* best-effort, as in engine.mjs */ }
+  }
+
+  const lang = resolveLanguage(language);
+  const languageLine = lang.directive
+    ? `Always write your reply in ${lang.name}.`
+    : '';
+
+  const changed = new Set();
+  const denied = [];
+  const refuse = (toolName, reason) => {
+    if (denied.length < 50) denied.push({ toolName, reason });
+  };
+
+  const preToolUse = async (input) => {
+    const reason = loopToolRefusal(input?.tool_name, input?.tool_input, root);
+    if (!reason) return {};
+    refuse(input?.tool_name, reason);
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason,
+      },
+    };
+  };
+  const postToolUse = async (input) => {
+    if (WRITE_TOOLS.has(input?.tool_name)) {
+      const rel = repoRelative(root, input?.tool_input?.file_path);
+      if (rel) changed.add(rel);
+    }
+    return {};
+  };
+  // Decides instead of asking: never parks, never prompts.
+  const canUseTool = async (toolName, input) => {
+    const reason = loopToolRefusal(toolName, input, root);
+    if (reason) {
+      refuse(toolName, reason);
+      return { behavior: 'deny', message: reason };
+    }
+    return { behavior: 'allow', updatedInput: input };
+  };
+
+  const safeMessage = neutralizePromptFences(String(message ?? '')).slice(0, MAX_LOOP_MESSAGE_CHARS);
+  const q = queryFactory(safeMessage, {
+    cwd: root,
+    additionalDirectories: [],
+    // No operator settings, no user MCP, no plugins, no claude.ai connectors.
+    settingSources: [],
+    mcpServers: {},
+    tools: [...LOOP_AGENT_TOOLS],
+    // Nothing is pre-approved: every call the SDK would ask about reaches
+    // canUseTool, which applies the confinement rule.
+    allowedTools: [],
+    disallowedTools: [...LOOP_AGENT_DISALLOWED],
+    permissionMode: 'default',
+    canUseTool,
+    hooks: {
+      PreToolUse: [{ hooks: [preToolUse] }],
+      PostToolUse: [{ matcher: 'Edit|Write', hooks: [postToolUse] }],
+    },
+    systemPrompt: {
+      type: 'preset', preset: 'claude_code',
+      append: headlessSystemAppend(root, languageLine, skillsText),
+      snapshot: false,
+    },
+    maxTurns: MAX_TURNS,
+    // A one-shot step: nothing resumes it, so nothing is written to disk.
+    persistSession: false,
+    ...(typeof model === 'string' && model ? { model } : {}),
+    env: {
+      ...process.env,
+      ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
+      ...(key ? { ANTHROPIC_API_KEY: key, ...(sdkHome ? { CLAUDE_CONFIG_DIR: sdkHome } : {}) } : {}),
+    },
+    ...(abortController ? { abortController } : {}),
+  });
+
+  let reply = '';
+  let lastAssistantText = '';
+  let resultSubtype = null;
+  let resolvedModel = null;
+  let byModel = [];
+  for await (const msg of q) {
+    if (msg?.type === 'system' && msg?.subtype === 'init' && typeof msg.model === 'string') {
+      resolvedModel = msg.model;
+    } else if (msg?.type === 'assistant') {
+      const blocks = Array.isArray(msg?.message?.content) ? msg.message.content : [];
+      const text = blocks.filter((b) => b?.type === 'text' && typeof b.text === 'string')
+        .map((b) => b.text).join('');
+      if (text.trim()) lastAssistantText = text;
+    } else if (msg?.type === 'result') {
+      resultSubtype = msg.subtype ?? null;
+      if (typeof msg.result === 'string' && msg.result.trim()) reply = msg.result;
+      // A fresh, unpersisted session: the result's running totals ARE this
+      // run's totals (no resume baseline to subtract — see engine.mjs).
+      byModel = normalizeModelUsage(msg.modelUsage);
+      for (const row of byModel) {
+        usage.inputTokens += row.inputTokens;
+        usage.outputTokens += row.outputTokens;
+        usage.cacheReadTokens += row.cacheReadTokens;
+        usage.cacheCreationTokens += row.cacheCreationTokens;
+      }
+      usage.costUsd = Number.isFinite(msg.total_cost_usd) ? msg.total_cost_usd : 0;
+      usage.numTurns = Number.isFinite(msg.num_turns) ? msg.num_turns : 0;
+      usage.durationMs = Number.isFinite(msg.duration_ms) ? msg.duration_ms : 0;
+    }
+  }
+
+  return {
+    reply: (reply || lastAssistantText).trim(),
+    changedPaths: [...changed].sort(),
+    usage,
+    ...base,
+    ran: true,
+    resultSubtype,
+    denied,
+    model: resolvedModel ?? (typeof model === 'string' && model ? model : null),
+    byModel,
+  };
+}
