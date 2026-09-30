@@ -33,6 +33,51 @@ final class StageOutputParserTests: XCTestCase {
         XCTAssertEqual(StageOutputParser.parseFailureCount(output), 3)
     }
 
+    /// XCTest prints a summary per suite and the aggregate LAST; the first
+    /// match is only the first suite's count.
+    func testXCTestMultiSuiteUsesTheLastSummary() {
+        let output = """
+        Test Suite 'AlphaTests' failed at 2026-09-30 10:00:00.000.
+        \t Executed 4 tests, with 1 failure (0 unexpected) in 0.1 (0.1) seconds
+        Test Suite 'BetaTests' failed at 2026-09-30 10:00:01.000.
+        \t Executed 6 tests, with 2 failures (0 unexpected) in 0.2 (0.2) seconds
+        Test Suite 'All tests' failed at 2026-09-30 10:00:01.000.
+        \t Executed 10 tests, with 3 failures (0 unexpected) in 0.3 (0.3) seconds
+        """
+        XCTAssertEqual(StageOutputParser.parseFailureCount(output), 3)
+    }
+
+    /// `swift test` runs both frameworks; the failures are the sum.
+    func testXCTestAndSwiftTestingFailuresAreSummed() {
+        let output = """
+        \t Executed 10 tests, with 2 failures (0 unexpected) in 0.3 (0.3) seconds
+        ✘ Test run with 20 tests in 4 suites failed after 0.8 seconds with 5 issues.
+        """
+        XCTAssertEqual(StageOutputParser.parseFailureCount(output), 7)
+    }
+
+    func testXCTestFailuresWithPassingSwiftTesting() {
+        let output = """
+        \t Executed 10 tests, with 2 failures (0 unexpected) in 0.3 (0.3) seconds
+        ✔ Test run with 20 tests in 4 suites passed after 0.8 seconds.
+        """
+        XCTAssertEqual(StageOutputParser.parseFailureCount(output), 2)
+    }
+
+    func testSwiftTestingFailuresWithPassingXCTest() {
+        let output = """
+        \t Executed 10 tests, with 0 failures (0 unexpected) in 0.3 (0.3) seconds
+        ✘ Test run with 20 tests in 4 suites failed after 0.8 seconds with 1 issue.
+        """
+        XCTAssertEqual(StageOutputParser.parseFailureCount(output), 1)
+    }
+
+    func testSwiftTestingPassingSummaryScoresZero() {
+        XCTAssertEqual(
+            StageOutputParser.parseFailureCount("✔ Test run with 0 tests in 0 suites passed after 0.001 seconds."),
+            0)
+    }
+
     func testNodeTestTapSummary() {
         let output = """
         # tests 203

@@ -848,17 +848,21 @@ final class LoopEngineRunner: ObservableObject {
         }
         let duration = Date().timeIntervalSince(startedAt)
 
+        // Parse + hash off the main actor: the output can be up to the
+        // verifier's 256 KB cap, and regexes over it stalled the UI per stage.
+        let analysis = await Self.analyse(outcome.output, hashing: outcome.exitCode != 0)
         if outcome.exitCode == 0 {
             appendLog(.info, "  [\(stage.name)] passed")
             stageStates[stage.id] = .passed
             record(stage, startedAt: startedAt, duration: duration, exitCode: 0,
-                   passed: true, output: "", score: StageOutputParser.parseFailureCount(outcome.output))
+                   passed: true, output: "", score: analysis.score)
             progress.clear(key: stage.id)
             return .proceed
         }
 
         stageStates[stage.id] = .failed
-        let score = StageOutputParser.parseFailureCount(outcome.output)
+        let score = analysis.score
+        let failureHash = analysis.hash
         let excerpt = String(outcome.output.suffix(500))
         // The note text itself is pure — composed by `StageOutputParser.failureNote`
         // (exit 127 > a recognised failure count > a timeout > "not recognised", in
@@ -877,18 +881,18 @@ final class LoopEngineRunner: ObservableObject {
         }
         appendLog(.warn, "  [\(stage.name)] FAILED (exit \(outcome.exitCode))\(scoreNote): \(excerpt)")
 
-        let verdict = progress.record(key: stage.id, score: score, hash: Self.hash(outcome.output))
+        let verdict = progress.record(key: stage.id, score: score, hash: failureHash)
 
         if stage.severity == .advisory {
             appendLog(.warn, "  [\(stage.name)] advisory — not gating the run")
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
-                   passed: false, output: outcome.output, score: score)
+                   passed: false, output: outcome.output, outputHash: failureHash, score: score)
             return .proceed
         }
 
         if verdict.streak >= config.consecutiveFailureStop {
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
-                   passed: false, output: outcome.output, score: score)
+                   passed: false, output: outcome.output, outputHash: failureHash, score: score)
             // A measured, unchanging failure COUNT and a byte-identical failure are
             // different diagnoses and get different statuses: `.noProgress` says
             // "the failures kept changing but never shrank" (thrashing), which a
@@ -901,7 +905,7 @@ final class LoopEngineRunner: ObservableObject {
         }
         if iteration >= config.maxIterations {
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
-                   passed: false, output: outcome.output, score: score)
+                   passed: false, output: outcome.output, outputHash: failureHash, score: score)
             return .terminate(.givenUp(reason: .maxIterations))
         }
 
@@ -909,7 +913,7 @@ final class LoopEngineRunner: ObservableObject {
         if used >= config.maxRepairsPerStage {
             appendLog(.warn, "  [\(stage.name)] repair budget of \(config.maxRepairsPerStage) exhausted")
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
-                   passed: false, output: outcome.output, score: score)
+                   passed: false, output: outcome.output, outputHash: failureHash, score: score)
             return .terminate(.givenUp(reason: .repairBudgetExhausted(stageName: stage.name)))
         }
 
@@ -950,7 +954,7 @@ final class LoopEngineRunner: ObservableObject {
         switch guarded {
         case .failed(let error, let verdictScope, let violations, let changed):
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
-                   passed: false, output: outcome.output, score: score, repairAttempted: true,
+                   passed: false, output: outcome.output, outputHash: failureHash, score: score, repairAttempted: true,
                    repairDuration: repairDuration, repairIndex: repairIndex,
                    changedPaths: changed, scopeVerdict: verdictScope)
             if Self.isCancellation(error) { return .terminate(.aborted) }
@@ -965,7 +969,7 @@ final class LoopEngineRunner: ObservableObject {
         case .completed(let verdictScope, let violations, let changed):
             appendLog(.info, "  [\(stage.name)] repair \(repairIndex)/\(config.maxRepairsPerStage) took \(Int(repairDuration))s")
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
-                   passed: false, output: outcome.output, score: score, repairAttempted: true,
+                   passed: false, output: outcome.output, outputHash: failureHash, score: score, repairAttempted: true,
                    repairDuration: repairDuration, repairIndex: repairIndex,
                    changedPaths: changed, scopeVerdict: verdictScope)
             if let terminal = scopeTermination(stage: stage, config: config,
@@ -1370,7 +1374,8 @@ final class LoopEngineRunner: ObservableObject {
     /// runs outside any iteration (there is none today) is dropped rather than
     /// crashing on an empty array.
     private func record(_ stage: LoopStage, startedAt: Date, duration: Double,
-                        exitCode: Int32?, passed: Bool, output: String, score: Int?,
+                        exitCode: Int32?, passed: Bool, output: String,
+                        outputHash: String? = nil, score: Int?,
                         repairAttempted: Bool = false,
                         repairDuration: Double? = nil, repairIndex: Int? = nil,
                         changedPaths: [String] = [],
@@ -1382,7 +1387,7 @@ final class LoopEngineRunner: ObservableObject {
                 stageId: stage.id, stageName: stage.name, kind: stage.kind,
                 severity: stage.severity, startedAt: startedAt, durationSeconds: duration,
                 exitCode: exitCode, passed: passed, outputTail: output,
-                outputHash: passed ? nil : Self.hash(output), score: score,
+                outputHash: passed ? nil : (outputHash ?? Self.hash(output)), score: score,
                 repairAttempted: repairAttempted,
                 repairDurationSeconds: repairDuration, repairAttemptIndex: repairIndex,
                 changedPaths: changedPaths,
@@ -1582,6 +1587,15 @@ final class LoopEngineRunner: ObservableObject {
         return stage.command
     }
 
+    /// Failure count and (when `hashing`) the stall-detector hash of a shell
+    /// stage's output, computed on a background executor.
+    nonisolated private static func analyse(_ output: String,
+                                            hashing: Bool) async -> (score: Int?, hash: String) {
+        await Task.detached(priority: .utility) {
+            (StageOutputParser.parseFailureCount(output), hashing ? hash(output) : "")
+        }.value
+    }
+
     /// Hashes failure output after stripping duration-shaped and hex
     /// tokens, so elapsed-time noise (e.g. `swift test`'s `"Executed 5
     /// tests ... in 0.003 (0.005) seconds"`) doesn't make an otherwise-
@@ -1606,7 +1620,7 @@ final class LoopEngineRunner: ObservableObject {
     /// `StageOutputParser`'s score is the primary progress signal precisely
     /// because it does not share this weakness; the hash is the fallback for
     /// runners whose output it does not recognise.
-    private static func hash(_ s: String) -> String {
+    nonisolated private static func hash(_ s: String) -> String {
         var normalized = s.replacingOccurrences(
             of: #"\d+\.\d+"#, with: "#", options: .regularExpression)
         normalized = normalized.replacingOccurrences(
