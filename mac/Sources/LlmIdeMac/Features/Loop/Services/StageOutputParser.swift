@@ -122,17 +122,22 @@ public enum StageOutputParser {
         return String(text[range])
     }
 
-    /// The first `limit` lines that look like errors ("error:", "fatal error",
-    /// "Error:"), or the first non-empty lines when none do. Quoted in the
-    /// repair prompt when a change stopped the tests from running, where the
-    /// FIRST error is the cause and later ones are fallout.
+    /// The first `limit` lines that are error REPORTS — compiler/runner
+    /// `error:` lines, `fatal error` / `Fatal error` traps, `FAIL:`-style
+    /// markers — or the first non-empty lines when none are. A bare substring
+    /// "error" is not enough: it matches test names (`testErrorHandling`) and
+    /// "0 errors" summaries. Quoted in the repair prompt when a change stopped
+    /// the tests from running, where the FIRST error is the cause.
     static func firstErrorLines(_ output: String, limit: Int = 5) -> String {
         let lines = output.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        let errors = lines.filter { $0.range(of: "error", options: .caseInsensitive) != nil }
+        let errors = lines.filter { $0.range(of: errorLinePattern, options: .regularExpression) != nil }
         return (errors.isEmpty ? lines : errors).prefix(limit).joined(separator: "\n")
     }
+
+    private static let errorLinePattern =
+        #"(?:^|[\s:])(?:error|ERROR|Error):|[Ff]atal error|(?:^|\s)(?:--- )?FAIL(?::|\s|$)"#
 
     /// The binary name a shell reported as missing, when `output` looks like an
     /// exit-127 "command not found" line. Handles both the bash/dash/sh phrasing

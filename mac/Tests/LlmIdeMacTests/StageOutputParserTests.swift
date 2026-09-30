@@ -177,4 +177,20 @@ final class StageOutputParserTests: XCTestCase {
         """
         XCTAssertEqual(StageOutputParser.parseFailureCount(output), 7)
     }
+
+    func testFirstErrorLinesMatchesErrorReportsNotTheWordError() {
+        let output = """
+        Test Case 'testErrorHandling' started.
+        Build complete with 0 errors
+        Foo.swift:3:5: error: cannot find 'bar' in scope
+        Fatal error: Index out of range
+        --- FAIL: TestAlpha (0.00s)
+        """
+        XCTAssertEqual(StageOutputParser.firstErrorLines(output), """
+        Foo.swift:3:5: error: cannot find 'bar' in scope
+        Fatal error: Index out of range
+        --- FAIL: TestAlpha (0.00s)
+        """)
+        XCTAssertEqual(StageOutputParser.firstErrorLines("just\nnoise"), "just\nnoise")
+    }
 }
