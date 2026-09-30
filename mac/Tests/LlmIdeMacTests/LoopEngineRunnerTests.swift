@@ -2981,4 +2981,41 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(journal.written.first?.id, journal.eventRunIds.first)
         XCTAssertEqual(journal.events.first?.start?.id, journal.written.first?.id)
     }
+
+    private final class DeadlineCapturingSweep: RegressionSweepRunning {
+        private(set) var deadlines: [Date?] = []
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
+                   repairGuard: FaultRepairGuard?) async -> SweepOutcome {
+            XCTFail("the runner must call the deadline-aware overload")
+            return SweepOutcome(passed: true, total: 0, regressed: 0, unchanged: 0, repaired: 0,
+                                repairFailed: 0, needsApproval: 0, failed: 0, pending: 0)
+        }
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
+                   repairGuard: FaultRepairGuard?, deadline: Date?) async -> SweepOutcome {
+            deadlines.append(deadline)
+            return SweepOutcome(passed: true, total: 0, regressed: 0, unchanged: 0, repaired: 0,
+                                repairFailed: 0, needsApproval: 0, failed: 0, pending: 0)
+        }
+    }
+
+    func testRegressionSweepReceivesTheRunsBudgetDeadline() async {
+        for (budget, expectDeadline) in [(Double?(600), true), (nil, false)] {
+            let sweep = DeadlineCapturingSweep()
+            let runner = LoopEngineRunner(
+                verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+                stageRepairer: StubRepairer(), regressionSweep: sweep, skillExecutor: StubSkillExecutor(),
+                approvals: makeApprovals(), journal: InMemoryJournal(), summaryWriter: StubSummaryWriter(),
+                scopeGuard: StubScopeGuard(), transportRetryDelay: 0)
+            let config = LoopEngineConfig(stages: [
+                LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0)
+            ], maxIterations: 1, wallClockBudgetSeconds: budget)
+            _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+            XCTAssertEqual(sweep.deadlines.count, 1)
+            XCTAssertEqual(sweep.deadlines.first.flatMap { $0 } != nil, expectDeadline)
+            if let d = sweep.deadlines.first.flatMap({ $0 }) {
+                XCTAssertLessThanOrEqual(d.timeIntervalSinceNow, 600)
+                XCTAssertGreaterThan(d.timeIntervalSinceNow, 500)
+            }
+        }
+    }
 }

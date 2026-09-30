@@ -494,7 +494,7 @@ final class LoopEngineRunner: ObservableObject {
                                        runId: UUID().uuidString)
         // Runs an earlier process left without a final record become .aborted
         // records first; then this run's own crash-safe log begins.
-        journal.reconcileInterrupted(root: faultsRoot)
+        _ = await journal.reconcileOncePerLaunch(root: faultsRoot)
         emit(LoopRunEvent(kind: LoopRunEvent.Kind.started, start: .init(
             id: currentRunContext?.runId ?? "", projectId: projectId, trigger: trigger,
             gitRoot: runGitRoot.path, startedAt: startedAt, config: LoopRunConfigSnapshot(config),
@@ -773,8 +773,15 @@ final class LoopEngineRunner: ObservableObject {
                 return !rejected
             }
         }
+        // The run's remaining budget bounds the sweep (verify timeouts and
+        // whether a repair may start), like every other stage kind.
+        var deadline: Date?
+        if let budget = runWallClockBudget, let started = runStartedAt {
+            deadline = Date().addingTimeInterval(max(0, budget - workingElapsed(since: started, asOf: Date())))
+        }
         let outcome = await regressionSweep.sweep(
-            faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: true, repairGuard: repairGuard)
+            faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: true, repairGuard: repairGuard,
+            deadline: deadline)
         let duration = Date().timeIntervalSince(startedAt)
         let changed = Array(Set(findings.flatMap(\.changed))).sorted()
         let violations = Array(Set(findings.flatMap(\.violations))).sorted()
@@ -1148,8 +1155,14 @@ final class LoopEngineRunner: ObservableObject {
     /// exists (the server's default then applies). Evaluated at call time, so
     /// a late repair gets only the time the run still has.
     func agentTimeout(for stage: LoopStage, now: Date = Date()) -> TimeInterval? {
-        let stageLimit = stage.timeoutSeconds.map(TimeInterval.init)
-            ?? (stageTimeout > 0 ? stageTimeout : (defaultAgentTimeout > 0 ? defaultAgentTimeout : nil))
+        let stageLimit: TimeInterval?
+        if let own = stage.timeoutSeconds {
+            stageLimit = own > 0 ? TimeInterval(own) : nil     // explicit 0 = no limit
+        } else if stageTimeout > 0 {
+            stageLimit = stageTimeout
+        } else {
+            stageLimit = defaultAgentTimeout > 0 ? defaultAgentTimeout : nil
+        }
         return clampToBudget(stageLimit, now: now)
     }
 

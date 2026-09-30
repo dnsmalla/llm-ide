@@ -90,6 +90,18 @@ final class RegressionRunner: ObservableObject {
     private let repairer: FaultRepairer?
     private let approvals: VerifyApprovalStore
     private var verifyTimeout: TimeInterval
+    /// The enclosing run's time budget end (Loop), for the sweep in flight.
+    /// nil = unbounded. Verify timeouts are clamped to what is left, and once
+    /// it passes, remaining faults are not checked and no repair starts.
+    private var sweepDeadline: Date?
+
+    private func verifyTimeoutNow() -> TimeInterval {
+        guard let sweepDeadline else { return verifyTimeout }
+        let left = max(1, sweepDeadline.timeIntervalSinceNow)
+        return verifyTimeout > 0 ? min(verifyTimeout, left) : left
+    }
+
+    private var deadlinePassed: Bool { (sweepDeadline?.timeIntervalSinceNow ?? 1) <= 0 }
     /// Optional handle to the app's config so completed runs can
     /// publish their summary to the menu-bar pill. Set once after
     /// init by the owning view (since @EnvironmentObject is not
@@ -157,9 +169,12 @@ final class RegressionRunner: ObservableObject {
     func run(faultsRoot: URL, gitRoot: URL?, only: Set<URL>? = nil,
              autoReopen requestedAutoReopen: Bool = false,
              attemptRepair: Bool = false,
-             repairGuard: FaultRepairGuard? = nil) async {
+             repairGuard: FaultRepairGuard? = nil,
+             deadline: Date? = nil) async {
         guard !running else { return }
         running = true
+        sweepDeadline = deadline
+        defer { sweepDeadline = nil }
         // Auto-reopen mutates files on disk. The exact-match verdict is a
         // heuristic; without a semantic judge to confirm textual drift is a
         // real regression, reopening would corrupt fault files on every
@@ -195,6 +210,11 @@ final class RegressionRunner: ObservableObject {
         for (idx, pair) in fixed.enumerated() {
             if Task.isCancelled { appendLog(.warn, "Run cancelled"); break }
             let (url, fault) = pair
+            if deadlinePassed {
+                results[idx].verdict = .failed("run time budget exhausted before this fault was checked")
+                appendLog(.warn, "[\(idx + 1)/\(fixed.count)] skipped · the run's time budget is used up")
+                continue
+            }
             let preview = String(fault.prompt.prefix(60))
             appendLog(.info, "[\(idx + 1)/\(fixed.count)] \(preview)")
             if let cmd = fault.verify, !cmd.isEmpty, let verifier {
@@ -245,7 +265,7 @@ final class RegressionRunner: ObservableObject {
             return
         }
         do {
-            let first = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeout)
+            let first = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeoutNow())
             if first.exitCode == 0 {
                 results[idx].verdict = .unchanged
                 appendLog(.info, "  → verify passed")
@@ -260,6 +280,11 @@ final class RegressionRunner: ObservableObject {
                     results[idx].autoReopened = true
                     appendLog(.warn, "  → REGRESSED · auto-reopened")
                 }
+                return
+            }
+            if deadlinePassed {
+                results[idx].verdict = .repairSkipped("the run's time budget is used up, so no repair ran")
+                appendLog(.warn, "  → REGRESSED · repair skipped (time budget used up)")
                 return
             }
             // A repair only ever runs inside a protected-path guard: without
@@ -287,7 +312,7 @@ final class RegressionRunner: ObservableObject {
                 appendLog(.error, "  → repair rejected (protected/out-of-scope path) · not re-verified")
                 return
             }
-            let second = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeout)
+            let second = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeoutNow())
             if second.exitCode == 0 {
                 results[idx].verdict = .repaired
                 let changedAfter = (try? store.gitDiff(at: repoRoot).changedPaths) ?? []

@@ -133,8 +133,13 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
 
     private final class CountingVerifier: FaultVerifier, @unchecked Sendable {
         var calls = 0
+        var timeouts: [TimeInterval] = []
+        /// Simulated slow verify (seconds) — lets a deadline pass mid-sweep.
+        var delay: TimeInterval = 0
         func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
             calls += 1
+            timeouts.append(timeout)
+            if delay > 0 { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
             return VerifyOutcome(exitCode: calls == 1 ? 1 : 0, output: "boom")
         }
     }
@@ -151,7 +156,8 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
     /// A repair the guard rejects is `.repairFailed` and is NOT re-verified —
     /// a re-verify would observe the pass a rigged test bought.
     /// `keep == nil` sweeps with NO guard at all.
-    private func runGuardedCommandFault(keep: Bool?) async throws -> (SweepOutcome, CountingVerifier, CountingRepairer, Int) {
+    private func runGuardedCommandFault(keep: Bool?, deadline: Date? = nil,
+                                        verifyDelay: TimeInterval = 0) async throws -> (SweepOutcome, CountingVerifier, CountingRepairer, Int) {
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("regression-sweep-guard-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -166,6 +172,7 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
             defaults: UserDefaults(suiteName: "sweep-guard-\(UUID().uuidString)")!)
         approvals.approve(repo: tempDir, faultFile: url.lastPathComponent, command: "make check")
         let verifier = CountingVerifier()
+        verifier.delay = verifyDelay
         let repairer = CountingRepairer()
         let runner = RegressionRunner(prompter: StubPrompter(), store: store, verifier: verifier,
                                       repairer: repairer, approvals: approvals)
@@ -179,7 +186,8 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
             }
         }
         let outcome = await RegressionRunnerSweepAdapter(runner: runner).sweep(
-            faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: true, repairGuard: repairGuard)
+            faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: true, repairGuard: repairGuard,
+            deadline: deadline)
         return (outcome, verifier, repairer, guardCalls)
     }
 
@@ -206,6 +214,34 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
         let (outcome, verifier, repairer, _) = try await runGuardedCommandFault(keep: nil)
         XCTAssertEqual(repairer.calls, 0, "never repaired unguarded")
         XCTAssertEqual(verifier.calls, 1)
+        XCTAssertEqual(outcome.regressed, 1)
+        XCTAssertFalse(outcome.passed)
+    }
+
+    // MARK: - Run time budget (deadline)
+
+    func testVerifyTimeoutIsClampedToTheRemainingBudget() async throws {
+        let (_, verifier, _, _) = try await runGuardedCommandFault(
+            keep: true, deadline: Date().addingTimeInterval(100))
+        XCTAssertFalse(verifier.timeouts.isEmpty)
+        XCTAssertTrue(verifier.timeouts.allSatisfy { $0 > 0 && $0 <= 100 }, "\(verifier.timeouts)")
+    }
+
+    func testExhaustedBudgetChecksNothingAndRecordsWhy() async throws {
+        let (outcome, verifier, repairer, _) = try await runGuardedCommandFault(
+            keep: true, deadline: Date().addingTimeInterval(-1))
+        XCTAssertEqual(verifier.calls, 0)
+        XCTAssertEqual(repairer.calls, 0)
+        XCTAssertEqual(outcome.failed, 1, "unchecked fault = failed, never a silent pass")
+        XCTAssertFalse(outcome.passed)
+    }
+
+    func testBudgetSpentDuringVerifySkipsTheRepair() async throws {
+        let (outcome, verifier, repairer, guardCalls) = try await runGuardedCommandFault(
+            keep: true, deadline: Date().addingTimeInterval(0.05), verifyDelay: 0.15)
+        XCTAssertEqual(verifier.calls, 1)
+        XCTAssertEqual(guardCalls, 0)
+        XCTAssertEqual(repairer.calls, 0, "no repair once the budget is gone")
         XCTAssertEqual(outcome.regressed, 1)
         XCTAssertFalse(outcome.passed)
     }
