@@ -249,6 +249,20 @@ Three per-stage properties shape how a stage participates:
   build-and-test cycle and a two-second format check do not belong under one
   number.
 
+### How a skill stage's paths are resolved
+
+The Mac resolves a skill stage's Input/Output to **absolute** paths
+(`LoopStagePaths`) and sends both forms ("Input: /abs/llm-doc/plans
+(llm-doc/plans)"), so the agent never has to infer a folder. The rule mirrors the
+stage prompts: absolute paths as given, `.` is the git root, doc stages resolve
+against the git root only, and every other stage uses the git root when the
+Input (or the Output's parent directory) exists there, else the project root
+(an LLM-IDE project, git root at most 3 levels below it). If a resolved path is
+outside the git root and the project's `llm-doc`, the stage fails **before** the
+agent is called (`Input|Output path … is outside the repo and the project's
+llm-doc`) instead of silently writing nothing. The artifact check still resolves
+its own paths (repo first, then project-root fallback) with the same order.
+
 ### How a shell stage runs
 
 A shell stage (and every verify command) runs through `GroupedSubprocess`: `/bin/sh -c`
