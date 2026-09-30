@@ -16,12 +16,16 @@ import Foundation
 enum LoopEngineDefaults {
     private static let storeKey = "loopEngineDefaults"
 
+    /// `consecutiveFailureStop` for a NEW loop. 2 stopped a run before the
+    /// informed second repair could help; persisted configs keep their value.
+    static let newLoopFailureStop = 3
+
     /// The stored defaults, or `LoopEngineConfig`'s own values when nothing has
     /// been saved. `stages` is always empty — see `save`.
     static func load(defaults: UserDefaults = .standard) -> LoopEngineConfig {
         guard let data = defaults.data(forKey: storeKey),
               var config = try? JSONDecoder().decode(LoopEngineConfig.self, from: data)
-        else { return LoopEngineConfig(stages: []) }
+        else { return LoopEngineConfig(stages: [], consecutiveFailureStop: newLoopFailureStop) }
         config.stages = []
         return config
     }

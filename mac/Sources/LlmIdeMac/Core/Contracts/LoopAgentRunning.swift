@@ -84,9 +84,20 @@ protocol LoopAgentRunning: AnyObject {
     ///   server's default (30 min).
     func run(message: String, skills: [String], repoRoot: URL, extraRoots: [URL],
              timeout: TimeInterval?) async throws -> LoopAgentResult
+    /// The same run on a chosen model (`nil` = the server's default).
+    func run(message: String, skills: [String], repoRoot: URL, extraRoots: [URL],
+             timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult
 }
 
 extension LoopAgentRunning {
+    /// A run on a chosen model. The default ignores `model`, so a conformer
+    /// that predates model tiers keeps working (it runs on the server default).
+    func run(message: String, skills: [String], repoRoot: URL, extraRoots: [URL],
+             timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult {
+        try await run(message: message, skills: skills, repoRoot: repoRoot, extraRoots: extraRoots,
+                      timeout: timeout)
+    }
+
     /// A run confined to `repoRoot` alone — every repair.
     func run(message: String, skills: [String], repoRoot: URL,
              timeout: TimeInterval?) async throws -> LoopAgentResult {

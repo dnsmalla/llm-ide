@@ -54,6 +54,23 @@ protocol LoopStageRepairer: AnyObject {
     func repair(stageName: String, command: String?, failureOutput: String,
                 evidence: RepairEvidence?, repoRoot: URL,
                 timeout: TimeInterval?) async throws -> LoopAgentResult
+
+    /// Same, on a chosen model (`nil` = the app's default). Defaults to the
+    /// model-less call so a conformer that predates model tiers still works.
+    @discardableResult
+    func repair(stageName: String, command: String?, failureOutput: String,
+                evidence: RepairEvidence?, repoRoot: URL,
+                timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult
+}
+
+extension LoopStageRepairer {
+    @discardableResult
+    func repair(stageName: String, command: String?, failureOutput: String,
+                evidence: RepairEvidence?, repoRoot: URL,
+                timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult {
+        try await repair(stageName: stageName, command: command, failureOutput: failureOutput,
+                         evidence: evidence, repoRoot: repoRoot, timeout: timeout)
+    }
 }
 
 /// Production adapter — a headless, confined agent run (`LoopAgentRunning` →
@@ -142,9 +159,18 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
     func repair(stageName: String, command: String?, failureOutput: String,
                 evidence: RepairEvidence?, repoRoot: URL,
                 timeout: TimeInterval?) async throws -> LoopAgentResult {
+        try await repair(stageName: stageName, command: command, failureOutput: failureOutput,
+                         evidence: evidence, repoRoot: repoRoot, timeout: timeout, model: nil)
+    }
+
+    @discardableResult
+    func repair(stageName: String, command: String?, failureOutput: String,
+                evidence: RepairEvidence?, repoRoot: URL,
+                timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult {
         let prompt = Self.buildPrompt(stageName: stageName, command: command,
                                        failureOutput: failureOutput, repoRoot: repoRoot,
                                        evidence: evidence)
-        return try await agent.run(message: prompt, skills: [], repoRoot: repoRoot, timeout: timeout)
+        return try await agent.run(message: prompt, skills: [], repoRoot: repoRoot, extraRoots: [],
+                                   timeout: timeout, model: model)
     }
 }

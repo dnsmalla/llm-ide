@@ -108,7 +108,14 @@ final class APILoopAgentRunner: LoopAgentRunning {
 
     func run(message: String, skills: [String], repoRoot: URL, extraRoots: [URL],
              timeout: TimeInterval?) async throws -> LoopAgentResult {
+        try await run(message: message, skills: skills, repoRoot: repoRoot, extraRoots: extraRoots,
+                      timeout: timeout, model: nil)
+    }
+
+    func run(message: String, skills: [String], repoRoot: URL, extraRoots: [URL],
+             timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult {
         try await api.loopAgentRun(message: message, skills: skills, repoRoot: repoRoot,
-                                   extraRoots: extraRoots, language: language, timeout: timeout)
+                                   extraRoots: extraRoots, language: language, model: model,
+                                   timeout: timeout)
     }
 }
