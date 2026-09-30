@@ -1779,6 +1779,7 @@ struct LoopEngineView: View {
         selectedPastRunId = entry.id
         guard let root = workspaceContext?.projectRoot else {
             inspectedPastRun = nil
+            inspectedRecordURL = nil
             pastRunInspectLoadFailed = true
             return
         }
