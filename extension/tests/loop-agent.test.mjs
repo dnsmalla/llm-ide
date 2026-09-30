@@ -577,3 +577,17 @@ test('runLoopAgent: createdPaths lists only the files a Write created, not ones 
   fs.rmSync(fresh);
   git(['checkout', '--', 'src/a.txt'], REPO);
 }));
+
+// --- too-broad roots are never registered / trusted --------------------------------
+
+test('addUserRepo refuses too-broad roots; buildTrustedRoots drops stored ones', async () => {
+  const { buildTrustedRoots } = await import('../llm_agent/runtime/handlers/repo-files.mjs');
+  const uid = newUser().id;
+  for (const p of [os.homedir(), '/Users', '/']) {
+    assert.throws(() => addUserRepo(uid, p), /too-broad|allow-list root/);
+  }
+  // A row stored before the rule (direct insert) is filtered on read.
+  getDb().prepare('INSERT INTO user_repos (user_id, path) VALUES (?, ?)').run(uid, os.homedir());
+  addUserRepo(uid, SANDBOX);
+  assert.deepEqual(buildTrustedRoots(uid), [SANDBOX]);
+});

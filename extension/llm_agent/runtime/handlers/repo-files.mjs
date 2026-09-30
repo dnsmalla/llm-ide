@@ -18,9 +18,9 @@
 
 import { readFileSync, readdirSync, statSync, realpathSync } from 'node:fs';
 import { join, isAbsolute, resolve, sep, basename } from 'node:path';
-import { homedir } from 'node:os';
 import { expandTilde } from '../../../graphkit/memory.mjs';
 import { userRepoAllowlist } from '../../../kb/user.mjs';
+import { isTooBroadRoot } from '../../../core/broad-root.mjs';
 
 const CASE_INSENSITIVE = process.platform === 'darwin' || process.platform === 'win32';
 const MAX_READ_BYTES = 200_000;
@@ -65,18 +65,7 @@ export function isDeniedPath(absPath) {
 // Refuse roots so broad that "read within" would mean "read most of the disk".
 // Exported: the v2 engine applies the same bar to the SDK's cwd (which the
 // SDK grants read access to) — one breadth rule, never two.
-export function isTooBroadRoot(real) {
-  const home = canon(homedir()) || homedir();
-  if (real === '/' || real === home) return true;
-  if (cmp(real) === cmp(home)) return true;
-  // Reject obvious system trees and depth-1 roots like /Users, /etc, /usr.
-  const segs = real.split(sep).filter(Boolean);
-  if (segs.length <= 1) return true;
-  const top = sep + segs[0];
-  if (['/etc', '/usr', '/var', '/bin', '/sbin', '/System', '/Library', '/private', '/opt'].includes(top)
-      && segs.length <= 2) return true;
-  return false;
-}
+export { isTooBroadRoot };
 
 // Canonical, real, deduped roots the agent may read within.
 export function buildReadableRoots({ userId, workspaceRoot } = {}) {
@@ -140,6 +129,8 @@ export function buildTrustedRoots(userId) {
     const real = canon(resolve(expandTilde(p)));
     if (!real) continue;
     try { if (!statSync(real).isDirectory()) continue; } catch { continue; }
+    // Defence for rows stored before registration refused broad roots.
+    if (isTooBroadRoot(real)) continue;
     out.push(real);
   }
   return out;

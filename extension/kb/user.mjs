@@ -8,6 +8,8 @@
 // Extracted from kb/db.mjs as part of the modularization sweep.
 
 import path from 'path';
+import { realpathSync } from 'fs';
+import { isTooBroadRoot } from '../core/broad-root.mjs';
 import { getDb, lazyPrepare, requireUser } from './db.mjs';
 
 // ── Per-user repo allow-list (codegen-apply target safety) ────────
@@ -22,6 +24,15 @@ function normalizeRepoPath(p) {
   return abs;
 }
 
+// Registration-only: never widen the allow-list to a too-broad root.
+function assertNotTooBroad(abs) {
+  let real = abs;
+  try { real = realpathSync(abs); } catch { /* not on disk: judge the spelling */ }
+  if (isTooBroadRoot(real) || isTooBroadRoot(abs)) {
+    throw new Error(`Refusing to allow-list too-broad repo root ${abs} (e.g. your home folder)`);
+  }
+}
+
 export function listUserRepos(userId) {
   requireUser(userId);
   const db = getDb();
@@ -33,6 +44,7 @@ export function listUserRepos(userId) {
 export function addUserRepo(userId, repoPath, label) {
   requireUser(userId);
   const abs = normalizeRepoPath(repoPath);
+  assertNotTooBroad(abs);
   const db = getDb();
   db.prepare(`
     INSERT INTO user_repos (user_id, path, label)
