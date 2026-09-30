@@ -157,13 +157,106 @@ final class LoopRunJournalTests: XCTestCase {
         let journal = FileLoopRunJournal()
         _ = journal.write(makeRecord(id: "intact"), root: root)
 
-        let indexURL = FileLoopRunJournal.indexURL(root: root)
+        let indexURL = FileLoopRunJournal.indexURL(root: root, for: LoopRunJournalTests.fixedDate)
         let handle = try FileHandle(forWritingTo: indexURL)
         try handle.seekToEnd()
         try handle.write(contentsOf: Data(#"{"id":"torn","trigg"#.utf8))
         try handle.close()
 
         XCTAssertEqual(journal.recentRuns(root: root, limit: 10).map(\.id), ["intact"])
+    }
+
+    // MARK: - Crash-safe events, reconcile, index
+
+    private func eventJournal() -> FileLoopRunJournal {
+        FileLoopRunJournal(eventsBase: root.appendingPathComponent("events-base", isDirectory: true))
+    }
+
+    private func startEvent(for record: LoopRunRecord) -> LoopRunEvent {
+        LoopRunEvent(kind: LoopRunEvent.Kind.started, start: .init(
+            id: record.id, projectId: record.projectId, trigger: record.trigger,
+            gitRoot: record.gitRoot, startedAt: record.startedAt, config: record.config,
+            loopId: "primary", loopName: "Loop"))
+    }
+
+    func testRunWithEventsButNoRecordIsReconciledToAborted() throws {
+        let journal = eventJournal()
+        let record = makeRecord(id: "crashed")
+        journal.appendEvent(startEvent(for: record), runId: record.id, root: root)
+        journal.appendEvent(LoopRunEvent(kind: LoopRunEvent.Kind.iterationStarted, iteration: 1),
+                            runId: record.id, root: root)
+        journal.appendEvent(LoopRunEvent(kind: LoopRunEvent.Kind.stageFinished, iteration: 1,
+                                         stageId: "t1", stageName: "Test",
+                                         attempt: record.iterations[0].attempts[0]),
+                            runId: record.id, root: root)
+        // A fresh journal object = a new launch; the run is no longer live.
+        FileLoopRunJournal.forgetLiveRuns()
+
+        XCTAssertEqual(journal.reconcileInterrupted(root: root), 1)
+
+        let runs = journal.recentRuns(root: root, limit: 5)
+        XCTAssertEqual(runs.map(\.id), ["crashed"])
+        XCTAssertEqual(runs.first?.statusCode, LoopEngineStatus.aborted.code)
+        let loaded = journal.loadRecord(id: "crashed", startedAt: record.startedAt, root: root)
+        XCTAssertTrue(loaded?.statusSummary.contains("app quit or crashed") == true)
+        XCTAssertEqual(loaded?.iterations.first?.attempts.count, 1, "stage results survive the crash")
+        XCTAssertEqual(journal.reconcileInterrupted(root: root), 0, "reconcile is idempotent")
+    }
+
+    func testFinishedRunLeavesNoEventLogAndIsNotReconciled() throws {
+        let journal = eventJournal()
+        let record = makeRecord(id: "done")
+        journal.appendEvent(startEvent(for: record), runId: record.id, root: root)
+        XCTAssertNil(journal.write(record, root: root))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: journal.eventLogURL(runId: "done", root: root).path))
+        XCTAssertEqual(journal.reconcileInterrupted(root: root), 0)
+        XCTAssertEqual(journal.recentRuns(root: root, limit: 5).count, 1)
+    }
+
+    func testLiveRunIsNeverReconciled() throws {
+        let journal = eventJournal()
+        let record = makeRecord(id: "live")
+        journal.appendEvent(startEvent(for: record), runId: record.id, root: root)
+        XCTAssertEqual(journal.reconcileInterrupted(root: root), 0)
+        XCTAssertTrue(journal.recentRuns(root: root, limit: 5).isEmpty)
+    }
+
+    func testIndexRotatesByMonthAndLegacyIndexStillReads() throws {
+        let journal = FileLoopRunJournal()
+        let jan = Date(timeIntervalSince1970: 1_768_000_000)   // 2026-01
+        let mar = Date(timeIntervalSince1970: 1_773_000_000)   // 2026-03
+        // A legacy single-file index written by an older build.
+        let legacy = FileLoopRunJournal.legacyIndexURL(root: root)
+        try FileManager.default.createDirectory(at: legacy.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        var old = try JSONEncoder().encode(["id": "legacy-x"])
+        old.append(0x0A)
+        try old.write(to: legacy)   // unparseable as an entry: skipped, not fatal
+        _ = journal.write(makeRecord(id: "a-jan", startedAt: jan), root: root)
+        _ = journal.write(makeRecord(id: "b-mar", startedAt: mar), root: root)
+
+        XCTAssertNotEqual(FileLoopRunJournal.indexURL(root: root, for: jan),
+                          FileLoopRunJournal.indexURL(root: root, for: mar))
+        XCTAssertEqual(journal.recentRuns(root: root, limit: 10).map(\.id), ["b-mar", "a-jan"])
+        XCTAssertEqual(journal.recentRuns(root: root, limit: 1).map(\.id), ["b-mar"])
+    }
+
+    func testTailReadHandlesLargeIndexAndTornLine() throws {
+        let journal = FileLoopRunJournal()
+        for i in 0..<400 {
+            XCTAssertNil(journal.write(makeRecord(id: "run-\(i)"), root: root))
+        }
+        let url = FileLoopRunJournal.indexURL(root: root, for: LoopRunJournalTests.fixedDate)
+        XCTAssertGreaterThan((try Data(contentsOf: url)).count, 64 * 1024, "spans several tail chunks")
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(#"{"id":"torn","#.utf8))
+        try handle.close()
+
+        let recent = journal.recentRuns(root: root, limit: 3).map(\.id)
+        XCTAssertEqual(recent, ["run-399", "run-398", "run-397"])
+        XCTAssertEqual(journal.recentRuns(root: root, limit: 1000).count, 400)
     }
 
     // MARK: - Failure reporting

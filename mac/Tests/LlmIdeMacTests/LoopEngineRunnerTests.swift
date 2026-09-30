@@ -2905,5 +2905,80 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(scopeGuard.revertedPaths.isEmpty)
         XCTAssertEqual(result, .success)
     }
-}
 
+    // MARK: - Default timeouts, budget watchdog, event log
+
+    private final class TimeoutCapturingVerifier: FaultVerifier {
+        private(set) var timeouts: [TimeInterval] = []
+        let outcome: () throws -> VerifyOutcome
+        init(_ outcome: @escaping () throws -> VerifyOutcome) { self.outcome = outcome }
+        func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
+            timeouts.append(timeout)
+            return try outcome()
+        }
+    }
+
+    private final class EventJournal: LoopRunJournaling {
+        private(set) var written: [LoopRunRecord] = []
+        private(set) var events: [LoopRunEvent] = []
+        private(set) var eventRunIds: Set<String> = []
+        func write(_ record: LoopRunRecord, root: URL) -> String? { written.append(record); return nil }
+        func recentRuns(root: URL, limit: Int) -> [LoopRunIndexEntry] { [] }
+        func appendEvent(_ event: LoopRunEvent, runId: String, root: URL) {
+            events.append(event); eventRunIds.insert(runId)
+        }
+    }
+
+    private func timeoutRunner(_ verifier: FaultVerifier, shell: TimeInterval, agent: TimeInterval,
+                               journal: LoopRunJournaling? = nil) -> LoopEngineRunner {
+        LoopEngineRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true), skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]), stageTimeout: 0,
+            journal: journal ?? InMemoryJournal(), summaryWriter: StubSummaryWriter(),
+            scopeGuard: StubScopeGuard(), transportRetryDelay: 0,
+            defaultShellTimeout: shell, defaultAgentTimeout: agent)
+    }
+
+    func testStageWithoutATimeoutInheritsTheAppDefaults() async {
+        let verifier = TimeoutCapturingVerifier { VerifyOutcome(exitCode: 0, output: "") }
+        let runner = timeoutRunner(verifier, shell: 1800, agent: 1200)
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 2)
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(verifier.timeouts, [1800])
+        XCTAssertEqual(runner.agentTimeout(for: config.stages[0]), 1200)
+        var own = config.stages[0]; own.timeoutSeconds = 60
+        XCTAssertEqual(runner.shellTimeout(for: own), 60, "a stage's own timeout wins")
+    }
+
+    func testShellStageIsClampedToTheRemainingBudgetAndEndsTheRunWhenItTimesOut() async {
+        let verifier = TimeoutCapturingVerifier { throw VerifyError.timedOut(1) }
+        let runner = timeoutRunner(verifier, shell: 1800, agent: 1200)
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 5, wallClockBudgetSeconds: 0)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(verifier.timeouts, [1], "clamped to the (exhausted) budget, never above it")
+        XCTAssertEqual(result, .givenUp(reason: .wallClockExceeded))
+        XCTAssertEqual(runner.iteration, 1)
+    }
+
+    func testRunAppendsEventsInOrderUnderOneRunIdAndFinalRecordSharesIt() async {
+        let journal = EventJournal()
+        let verifier = TimeoutCapturingVerifier { VerifyOutcome(exitCode: 0, output: "") }
+        let runner = timeoutRunner(verifier, shell: 0, agent: 0, journal: journal)
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 2)
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(journal.events.map(\.kind), [
+            LoopRunEvent.Kind.started, LoopRunEvent.Kind.iterationStarted,
+            LoopRunEvent.Kind.stageStarted, LoopRunEvent.Kind.stageFinished,
+            LoopRunEvent.Kind.verdict])
+        XCTAssertEqual(journal.eventRunIds.count, 1)
+        XCTAssertEqual(journal.written.first?.id, journal.eventRunIds.first)
+        XCTAssertEqual(journal.events.first?.start?.id, journal.written.first?.id)
+    }
+}

@@ -230,6 +230,7 @@ final class LoopEngineRunner: ObservableObject {
         let startedAt: Date
         let loopId: String
         let loopName: String
+        let runId: String
     }
     private var currentRunContext: RunContext?
 
@@ -305,7 +306,7 @@ final class LoopEngineRunner: ObservableObject {
         // `ShellFaultVerifier` registered it with this guard for exactly this.
         ResourceGuardService.shared.stopAll(reason: "app is quitting")
         let record = LoopRunRecord(
-            id: UUID().uuidString, projectId: ctx.projectId, trigger: trigger,
+            id: ctx.runId, projectId: ctx.projectId, trigger: trigger,
             gitRoot: ctx.gitRoot.path, startedAt: ctx.startedAt, endedAt: Date(),
             iterationsUsed: iteration, config: LoopRunConfigSnapshot(ctx.config),
             iterations: iterationRecords, statusCode: LoopEngineStatus.aborted.code,
@@ -419,6 +420,10 @@ final class LoopEngineRunner: ObservableObject {
         var lockRootKey = mainRootKey
         var worktreeLease: LoopWorktreeManager.Lease?
 
+        for note in await LoopWorktreeManager.pruneStale(mainRepo: mainGitRoot, faultsRoot: faultsRoot) {
+            appendLog(.info, "Worktree cleanup · \(note)")
+        }
+
         if config.useWorktreesForConcurrentRuns && LoopRunQueue.willWait(rootKey: mainRootKey) {
             if let lease = await LoopWorktreeManager.createIfPossible(mainRepo: mainGitRoot,
                                                                       faultsRoot: faultsRoot) {
@@ -485,7 +490,15 @@ final class LoopEngineRunner: ObservableObject {
         lockRootKeyForPause = lockRootKey
         currentRunContext = RunContext(config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                                        projectId: projectId, startedAt: startedAt,
-                                       loopId: loopId, loopName: loopName)
+                                       loopId: loopId, loopName: loopName,
+                                       runId: UUID().uuidString)
+        // Runs an earlier process left without a final record become .aborted
+        // records first; then this run's own crash-safe log begins.
+        journal.reconcileInterrupted(root: faultsRoot)
+        emit(LoopRunEvent(kind: LoopRunEvent.Kind.started, start: .init(
+            id: currentRunContext?.runId ?? "", projectId: projectId, trigger: trigger,
+            gitRoot: runGitRoot.path, startedAt: startedAt, config: LoopRunConfigSnapshot(config),
+            loopId: loopId, loopName: loopName)))
         defer {
             running = false
             // `stageStates` is deliberately NOT cleared: the final per-stage
@@ -631,6 +644,7 @@ final class LoopEngineRunner: ObservableObject {
 
             iteration += 1
             iterationRecords.append(LoopIterationRecord(index: iteration))
+            emit(LoopRunEvent(kind: LoopRunEvent.Kind.iterationStarted, iteration: iteration))
             appendLog(.info, "Iteration \(iteration)/\(config.maxIterations)")
             // Every iteration re-runs every stage from the top — the pipeline
             // display must show that, not keep last iteration's verdicts.
@@ -650,6 +664,8 @@ final class LoopEngineRunner: ObservableObject {
                 }
                 currentStageName = stage.name
                 stageStates[stage.id] = .running
+                emit(LoopRunEvent(kind: LoopRunEvent.Kind.stageStarted, iteration: iteration,
+                                  stageId: stage.id, stageName: stage.name))
                 let decision: StageDecision
                 switch stage.kind {
                 case .regressionSweep:
@@ -981,6 +997,9 @@ final class LoopEngineRunner: ObservableObject {
             return .terminate(.error(error.localizedDescription))
         }
         appendLog(.info, "  [\(stage.name)] repairing…")
+        emit(LoopRunEvent(kind: LoopRunEvent.Kind.repairRequested, iteration: iteration,
+                          stageId: stage.id, stageName: stage.name,
+                          detail: "attempt \(used + 1) of \(config.maxRepairsPerStage)"))
         stageStates[stage.id] = .repairing
         repairsUsed[stage.id] = used + 1
         let evidence = RepairEvidence(
@@ -1010,6 +1029,9 @@ final class LoopEngineRunner: ObservableObject {
         let repairDuration = Date().timeIntervalSince(repairStartedAt)
         let repairIndex = used + 1
         lastRepairResults[stage.id] = repairResult
+        emit(LoopRunEvent(kind: LoopRunEvent.Kind.repairReplied, iteration: iteration,
+                          stageId: stage.id, stageName: stage.name,
+                          detail: String(format: "%.1fs", repairDuration)))
         // A repair's refusals and non-success ending are recorded, not fatal:
         // the next iteration's re-run of the stage decides whether it worked.
         let repairNote = Self.agentRunNote(repairResult)
@@ -1726,8 +1748,7 @@ final class LoopEngineRunner: ObservableObject {
                         scopeVerdict: RepairScopeVerdict = .notChecked,
                         errored: Bool = false, agentNote: String? = nil) {
         guard !iterationRecords.isEmpty else { return }
-        iterationRecords[iterationRecords.count - 1].attempts.append(
-            LoopStageAttempt(
+        let attempt = LoopStageAttempt(
                 stageId: stage.id, stageName: stage.name, kind: stage.kind,
                 severity: stage.severity, startedAt: startedAt, durationSeconds: duration,
                 exitCode: exitCode, passed: passed, outputTail: output,
@@ -1736,7 +1757,16 @@ final class LoopEngineRunner: ObservableObject {
                 repairDurationSeconds: repairDuration, repairAttemptIndex: repairIndex,
                 changedPaths: changedPaths,
                 scopeVerdict: scopeVerdict,
-                errored: errored ? true : nil, agentNote: agentNote))
+                errored: errored ? true : nil, agentNote: agentNote)
+        iterationRecords[iterationRecords.count - 1].attempts.append(attempt)
+        emit(LoopRunEvent(kind: LoopRunEvent.Kind.stageFinished, iteration: iteration,
+                          stageId: stage.id, stageName: stage.name, attempt: attempt))
+    }
+
+    /// Appends to the current run's crash-safe event log (no-op between runs).
+    private func emit(_ event: LoopRunEvent) {
+        guard let ctx = currentRunContext else { return }
+        journal.appendEvent(event, runId: ctx.runId, root: ctx.faultsRoot)
     }
 
     /// Sets the terminal status, logs it, writes the journal entry, and returns
@@ -1748,8 +1778,10 @@ final class LoopEngineRunner: ObservableObject {
         status = terminal
         appendLog(logLevel(for: terminal), "Loop finished · \(terminal.summary)")
 
+        emit(LoopRunEvent(kind: LoopRunEvent.Kind.verdict, detail: terminal.summary,
+                          statusCode: terminal.code))
         let record = LoopRunRecord(
-            id: UUID().uuidString, projectId: projectId, trigger: trigger,
+            id: currentRunContext?.runId ?? UUID().uuidString, projectId: projectId, trigger: trigger,
             gitRoot: gitRoot.path, startedAt: startedAt, endedAt: Date(),
             iterationsUsed: iteration, config: LoopRunConfigSnapshot(config),
             iterations: iterationRecords, statusCode: terminal.code,
