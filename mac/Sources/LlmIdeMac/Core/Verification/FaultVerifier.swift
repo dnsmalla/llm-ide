@@ -48,40 +48,26 @@ protocol FaultVerifier: Sendable {
 }
 
 struct ShellFaultVerifier: FaultVerifier {
-    /// Poll until `process` has exited. See the note at the end of `verify`
-    /// for why this is not `waitUntilExit()`.
-    static func waitForExit(_ process: Process) async {
-        while process.isRunning { try? await Task.sleep(nanoseconds: 25_000_000) }
-    }
+    /// SIGTERM → SIGKILL grace for the command's process group.
+    static let killGrace: TimeInterval = 1.0
 
+    /// Runs through `GroupedSubprocess`: the command leads its own process
+    /// group, so Stop, a timeout and the ResourceGuard stop the WHOLE tree
+    /// (this used to `terminate()` only `/bin/sh`, leaving `swift test`'s
+    /// children running), and output is a capped head+tail capture that a
+    /// backgrounded grandchild holding the pipe cannot empty.
     func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", command]
-        process.currentDirectoryURL = repoRoot
-        process.standardInput = FileHandle.nullDevice
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        do { try process.run() } catch {
+        let proc: GroupedSubprocess
+        do {
+            proc = try GroupedSubprocess.launch(shellCommand: command, directory: repoRoot)
+        } catch {
             throw VerifyError.launchFailed(error.localizedDescription)
         }
-
-        // Read output on a background thread so a large stream can't
-        // deadlock the pipe before the process exits.
-        let dataBox = OutputBox()
-        let reader = Thread {
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            dataBox.set(data)
-        }
-        reader.start()
 
         // `timeout <= 0` means no limit, which is now the default everywhere that
         // calls this: a verification command is the user's own test suite or
         // build, and killing it at an arbitrary mark reports "timed out" for a
-        // stage that was simply still working. The guard below still runs for a
-        // caller that opted into a finite timeout.
+        // stage that was simply still working.
         let deadline: Date? = timeout > 0 ? Date().addingTimeInterval(timeout) : nil
         // The machine, not the clock, is what stops an unbounded run. The reason
         // is recorded so the non-zero exit that follows the SIGTERM is reported as
@@ -90,62 +76,28 @@ struct ShellFaultVerifier: FaultVerifier {
         let stopReason = ResourceStopBox()
         let guardToken = ResourceGuardService.shared.register(
             label: "verify: \(command.prefix(60))"
-        ) { [weak process] reason in
+        ) { reason in
             stopReason.set(reason)
-            guard let p = process, p.isRunning else { return }
-            p.terminate()
+            guard !proc.hasExited else { return }
+            proc.terminateTree(grace: Self.killGrace)
         }
         defer { guardToken.cancel() }
-        // Every path below that ends this call after the process has already
-        // exited has already seen `isRunning` go false, so this
-        // is a no-op there. The path it actually exists for is cancellation: the
-        // plain `try await Task.sleep` in the poll loop below throws
-        // `CancellationError` on its own the moment the task is cancelled, with
-        // no code of ours in between — so without this, a cancelled Loop run (Stop,
-        // or the app quitting) walked away from the loop instantly but left the
-        // shell command (a `swift test`/`npm test`) running as an orphan. Fire
-        // SIGTERM immediately and don't wait for it: a `defer` in an async
-        // function cannot `await`, and blocking here would defeat the point of
-        // reacting to cancellation promptly.
-        defer {
-            if process.isRunning {
-                process.terminate()
-                // Re-check `isRunning` right before the kill, same as the timeout
-                // path below — SIGTERM alone is usually enough, and skipping this
-                // check would risk SIGKILLing whatever unrelated process the OS
-                // has since handed this pid to, once this one has already exited.
-                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.0) {
-                    if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                }
-            }
-        }
-        while process.isRunning {
+        // Cancellation (Loop Stop, app quit): `Task.sleep` below throws on its
+        // own, so this `defer` is what stops the tree instead of orphaning a
+        // `swift test`. It cannot await; `terminateTree` schedules the SIGKILL
+        // and the reaper thread still collects the exit.
+        defer { if !proc.hasExited { proc.terminateTree(grace: Self.killGrace) } }
+
+        while !proc.hasExited {
             if let deadline, Date() >= deadline {
-                process.terminate()                       // SIGTERM
-                // Grace period, then hard-kill if it ignored SIGTERM.
-                let killBy = Date().addingTimeInterval(0.5)
-                while process.isRunning && Date() < killBy {
-                    try? await Task.sleep(nanoseconds: 25_000_000)
-                }
-                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                await Self.waitForExit(process)            // closes pipe → reader unblocks
+                proc.terminateTree(grace: 0.5)
+                try? await proc.waitForExit()
+                _ = await proc.collectOutput()
                 throw VerifyError.timedOut(timeout)
             }
             try await Task.sleep(nanoseconds: 50_000_000) // 50ms poll
         }
-        // The loop above only ends once `isRunning` is false — the process
-        // has exited. No `waitUntilExit()` here: from an async context it
-        // parks this cooperative thread in a run loop waiting for the task's
-        // termination notification, and when that never reaches this thread
-        // it never returns. A Loop verification (and the test suite) hung
-        // forever that way with `sh` already gone.
-        //
-        // Wait for the READER, though: the output used to be read the moment
-        // the process ended, before `readDataToEndOfFile` had necessarily
-        // returned, so a result could come back empty or cut short. Bounded,
-        // because a backgrounded grandchild can hold the pipe open.
-        await dataBox.waitUntilDone(timeout: 2)
-        let output = String(data: dataBox.get(), encoding: .utf8) ?? ""
+        let output = await proc.collectOutput()
         // A guard stop must never be reported as a verification result: the
         // command was killed, so its exit code says nothing about the code under
         // test, and treating it as a failure would trigger an LLM repair while the
@@ -153,7 +105,7 @@ struct ShellFaultVerifier: FaultVerifier {
         if let reason = stopReason.get() {
             throw VerifyError.stoppedForResources(reason)
         }
-        return VerifyOutcome(exitCode: process.terminationStatus, output: output)
+        return VerifyOutcome(exitCode: proc.exitStatus ?? -1, output: output)
     }
 }
 
@@ -164,20 +116,4 @@ private final class ResourceStopBox: @unchecked Sendable {
     private var reason: String?
     func set(_ r: String) { lock.lock(); if reason == nil { reason = r }; lock.unlock() }
     func get() -> String? { lock.lock(); defer { lock.unlock() }; return reason }
-}
-
-/// Tiny thread-safe box so the reader thread and the awaiting task can
-/// hand the captured data across without a data race.
-private final class OutputBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var data = Data()
-    private var done = false
-    func set(_ d: Data) { lock.lock(); data = d; done = true; lock.unlock() }
-    func get() -> Data { lock.lock(); defer { lock.unlock() }; return data }
-    var isDone: Bool { lock.lock(); defer { lock.unlock() }; return done }
-    /// Until the reader has delivered the whole stream, or `timeout` elapses.
-    func waitUntilDone(timeout: TimeInterval) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !isDone, Date() < deadline { try? await Task.sleep(nanoseconds: 10_000_000) }
-    }
 }
