@@ -44,6 +44,10 @@ struct ProgressWatch {
         /// build/test run is (still) broken. Includes the `stoppedReporting`
         /// transition itself.
         var notReporting: Bool = false
+        /// True for a partial fix — at least one previously failing test now
+        /// passes AND at least one new one fails, with no better count. It
+        /// neither resets nor increments the streak.
+        var neutral: Bool = false
     }
 
     private struct State {
@@ -52,14 +56,16 @@ struct ProgressWatch {
         var streak: Int
         /// The most recent non-nil score in this key's history.
         var lastKnownScore: Int?
+        /// Failing test ids of the last failure, when the runner was recognised.
+        var ids: Set<String>?
     }
 
     private var state: [String: State] = [:]
 
     /// Records a failure for `key` and returns the verdict.
-    mutating func record(key: String, score: Int?, hash: String) -> Verdict {
+    mutating func record(key: String, score: Int?, hash: String, ids: Set<String>? = nil) -> Verdict {
         guard let previous = state[key] else {
-            state[key] = State(score: score, hash: hash, streak: 1, lastKnownScore: score)
+            state[key] = State(score: score, hash: hash, streak: 1, lastKnownScore: score, ids: ids)
             return Verdict(improved: false, streak: 1, previousScore: nil)
         }
 
@@ -76,11 +82,18 @@ struct ProgressWatch {
             improved = hash != previous.hash
         }
 
-        let streak = improved ? 1 : previous.streak + 1
+        // A partial fix (one fixed, one new) with no better count is neutral:
+        // evidence of movement, not of a stall.
+        var neutral = false
+        if !improved, !notReporting, let ids, let before = previous.ids, !ids.isEmpty, !before.isEmpty,
+           !before.subtracting(ids).isEmpty, !ids.subtracting(before).isEmpty {
+            neutral = true
+        }
+        let streak = improved ? 1 : (neutral ? previous.streak : previous.streak + 1)
         state[key] = State(score: score, hash: hash, streak: streak,
-                           lastKnownScore: score ?? previous.lastKnownScore)
+                           lastKnownScore: score ?? previous.lastKnownScore, ids: ids ?? previous.ids)
         return Verdict(improved: improved, streak: streak, previousScore: previous.score,
-                       stoppedReporting: stoppedReporting, notReporting: notReporting)
+                       stoppedReporting: stoppedReporting, notReporting: notReporting, neutral: neutral)
     }
 
     /// Forgets `key`'s history. Called when a stage passes, so a later failure in

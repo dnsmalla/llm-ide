@@ -115,6 +115,19 @@ enum LoopAttemptLedger {
         return more > 0 ? shown + " +\(more) more" : shown
     }
 
+    /// True when the failure set `current` is back after two repairs that made
+    /// DIFFERENT edits: the last two attempts both started from `current` (so
+    /// the first one's change did not hold) and their diffs differ. Another
+    /// repair would be a third guess at a failure two distinct fixes missed.
+    static func returnedAfterDifferentDiffs(_ entries: [LoopLedgerEntry], current: String) -> Bool {
+        guard entries.count >= 2 else { return false }
+        let a = entries[entries.count - 2], b = entries[entries.count - 1]
+        guard a.failureSetBefore == current, b.failureSetBefore == current else { return false }
+        func signature(_ e: LoopLedgerEntry) -> String { e.changedPaths.sorted().joined(separator: "\n") + "\u{0}" + e.diff }
+        let (sa, sb) = (signature(a), signature(b))
+        return sa != sb && (!a.changedPaths.isEmpty || !b.changedPaths.isEmpty)
+    }
+
     /// The entries a prior run's record offers for `stageId` when that run's
     /// last attempt at the stage failed with `failureSet` — the same set this
     /// run just hit. Empty otherwise.

@@ -261,7 +261,7 @@ final class LoopPhase1FixTests: XCTestCase {
         var runs = 0
         let verifier = Verifier { _ in
             runs += 1
-            return VerifyOutcome(exitCode: runs == 1 ? 1 : 0, output: runs == 1 ? "1 failure" : "")
+            return VerifyOutcome(exitCode: runs <= 2 ? 1 : 0, output: runs <= 2 ? "1 failure" : "")
         }
         let repairer = Repairer()
         repairer.body = {
@@ -291,7 +291,7 @@ final class LoopPhase1FixTests: XCTestCase {
             LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "swift test", order: 0,
                       timeoutSeconds: 50)
         ], maxIterations: 3, consecutiveFailureStop: 3)
-        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs == 1 ? 1 : 0, output: "x") },
+        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs <= 2 ? 1 : 0, output: "x") },
                        repairer: repairer, approvals: approvals([("t", "swift test")]),
                        scopeGuard: CancellationSensitiveGuard(violation: []))
         _ = await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -305,7 +305,7 @@ final class LoopPhase1FixTests: XCTestCase {
             LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "swift test", order: 0,
                       timeoutSeconds: 5_000)
         ], maxIterations: 3, consecutiveFailureStop: 3, wallClockBudgetSeconds: 30)
-        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs == 1 ? 1 : 0, output: "x") },
+        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs <= 2 ? 1 : 0, output: "x") },
                        repairer: repairer, approvals: approvals([("t", "swift test")]),
                        scopeGuard: CancellationSensitiveGuard(violation: []))
         _ = await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -339,7 +339,7 @@ final class LoopPhase1FixTests: XCTestCase {
         let config = LoopEngineConfig(stages: [
             LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
         ], maxIterations: 3, consecutiveFailureStop: 3, protectedPathPolicy: .revert)
-        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs == 1 ? 1 : 0, output: "x") },
+        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs <= 2 ? 1 : 0, output: "x") },
                        repairer: repairer, approvals: approvals([("t", "swift test")]),
                        journal: journal, scopeGuard: scope)
         let status = await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -361,7 +361,7 @@ final class LoopPhase1FixTests: XCTestCase {
         let config = LoopEngineConfig(stages: [
             LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
         ], maxIterations: 3, consecutiveFailureStop: 3, protectedPathPolicy: .revert)
-        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs == 1 ? 1 : 0, output: "x") },
+        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs <= 2 ? 1 : 0, output: "x") },
                        repairer: repairer, approvals: approvals([("t", "swift test")]),
                        journal: journal, scopeGuard: CancellationSensitiveGuard(violation: []))
         let status = await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
@@ -429,7 +429,7 @@ final class LoopPhase1FixTests: XCTestCase {
             LoopStage(id: "plan", name: "Plan", kind: .skill, order: 0, skillId: "fam/plan"),
             LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
         ], maxIterations: 3, consecutiveFailureStop: 3)
-        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs == 1 ? 1 : 0, output: "x") },
+        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs <= 2 ? 1 : 0, output: "x") },
                        repairer: repairer, skills: skills, approvals: approvals([("t", "swift test")]),
                        registrar: registrar, scopeGuard: CancellationSensitiveGuard(violation: []))
         let status = await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)

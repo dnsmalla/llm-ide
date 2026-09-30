@@ -284,6 +284,27 @@ compares successive failures for that stage:
   not-improved until a count returns; giving up this way reports
   `stoppedReporting` (`given_up.stopped_reporting`).
 
+### Smarter run flow (flake gate, stop rules, stage-only re-verify)
+
+- **Flake gate.** Before the FIRST repair of a failing shell stage in a run, the
+  stage is re-run once. A pass is journalled (`agentNote` "flaky: failed once,
+  passed on immediate re-run"), warned in the log, counts as passed for that
+  iteration, and no repair is spent. Timeouts and exit 127 skip the gate.
+- **Re-verify only the failed stage.** After a repair the runner re-runs just that
+  stage (same iteration). Only once it passes does the full pipeline run again (a
+  new iteration); a code-applying stage still never re-runs in the same run and
+  still needs an enabled, non-advisory verify stage after it.
+- **Stop rules.** `consecutiveFailureStop` defaults to 3 for NEW loops (persisted
+  configs keep their value). The first no-progress verdict after one repair always
+  gets one informed repair (the attempt ledger is in its prompt). The run stops
+  early (`repeatedFailure`) when the same failure set returns after two repairs
+  with DIFFERENT diffs. A partial fix (a test fixed, another newly failing, no
+  better count) is neutral: the streak is neither reset nor incremented.
+- **Repair model tier.** `LoopEngineConfig.repairModel` (Settings → Loop → new
+  project defaults, "Repair model") is passed to `/kb/loop/agent-run` as `model`;
+  empty means the app's default model. Each repair's timeout stays
+  min(stage/agent timeout, remaining run budget).
+
 For XCTest only the run-wide total counts — the `Executed … with M failures` line
 right after `Test Suite 'All tests'` / `'Selected tests'` — added to the
 swift-testing issue count when both frameworks ran. Output with per-suite lines but
@@ -378,7 +399,7 @@ Two deliberate limits, both recorded rather than hidden:
 | Budget | Field | Terminal status |
 |---|---|---|
 | Iterations | `maxIterations` (10) | `givenUp(maxIterations)` |
-| Non-improving streak per stage | `consecutiveFailureStop` (2) | `givenUp(noProgress)` / `givenUp(repeatedFailure)` / `givenUp(regressionStalled)` |
+| Non-improving streak per stage | `consecutiveFailureStop` (3 for new loops; 2 in older configs) | `givenUp(noProgress)` / `givenUp(repeatedFailure)` / `givenUp(regressionStalled)` |
 | Wall clock | `wallClockBudgetSeconds` (3600, `nil` = unlimited) | `givenUp(wallClockExceeded)` |
 | Repairs per stage | `maxRepairsPerStage` (3) | `givenUp(repairBudgetExhausted)` |
 

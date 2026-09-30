@@ -205,6 +205,9 @@ final class LoopEngineRunner: ObservableObject {
     /// the notice is per stage, not per iteration, or a 10-iteration run
     /// would repeat it ten times.
     private var unrecognisedRunnerStages: Set<String> = []
+    /// Shell stages already flake-checked this run (the check happens once per
+    /// stage per run, before its first repair).
+    private var flakeCheckedStages: Set<String> = []
 
     /// Accumulated journal state for the in-flight run. Instance state rather
     /// than a `run`-local `var` only because the per-stage helpers below append
@@ -369,6 +372,9 @@ final class LoopEngineRunner: ObservableObject {
         /// A blocking stage failed and was handled (repaired or not); restart the
         /// iteration from the first stage.
         case retryIteration
+        /// A blocking stage failed and was repaired: re-verify THAT stage alone.
+        /// The full pipeline re-runs only once it passes.
+        case retryStage
         /// End the run with this status.
         case terminate(LoopEngineStatus)
     }
@@ -483,6 +489,7 @@ final class LoopEngineRunner: ObservableObject {
         runMainGitRoot = mainGitRoot
         repoRegisteredThisRun = false
         unrecognisedRunnerStages = []
+        flakeCheckedStages = []
         // Must be reset per run, not only in the defer: a run that ended while
         // paused would otherwise leave `paused == true`, and the NEXT run
         // would hold at its first stage boundary forever with no visible
@@ -654,7 +661,12 @@ final class LoopEngineRunner: ObservableObject {
             stageStates = Dictionary(uniqueKeysWithValues:
                 orderedStages.map { ($0.id, LiveStageState.pending) })
 
-            for stage in orderedStages {
+            // The stage a repair just touched: it is re-verified alone, and the
+            // pipeline restarts from the top only after it passes.
+            var retriedStageID: String?
+            var stageIndex = 0
+            while stageIndex < orderedStages.count {
+                let stage = orderedStages[stageIndex]
                 // The stage boundary is where a pause takes effect (see
                 // `pause()`), and it is also the only place a Stop pressed
                 // BETWEEN stages was previously invisible until the next
@@ -704,7 +716,14 @@ final class LoopEngineRunner: ObservableObject {
 
                 switch decision {
                 case .proceed:
-                    continue
+                    if retriedStageID == stage.id, iteration < config.maxIterations {
+                        // The repaired stage passes: confirm the whole pipeline.
+                        appendLog(.info, "  [\(stage.name)] passes after repair — re-running the full pipeline")
+                        continue iterationLoop
+                    }
+                    stageIndex += 1
+                case .retryStage:
+                    retriedStageID = stage.id
                 case .retryIteration:
                     continue iterationLoop
                 case .terminate(let terminal):
@@ -948,7 +967,8 @@ final class LoopEngineRunner: ObservableObject {
         }
         appendLog(.warn, "  [\(stage.name)] FAILED (exit \(outcome.exitCode))\(scoreNote): \(excerpt)")
 
-        let verdict = progress.record(key: stage.id, score: score, hash: failureHash)
+        let verdict = progress.record(key: stage.id, score: score, hash: failureHash,
+                                        ids: analysis.ids.isEmpty ? nil : analysis.ids)
 
         if stage.severity == .advisory {
             appendLog(.warn, "  [\(stage.name)] advisory — not gating the run")
@@ -957,11 +977,25 @@ final class LoopEngineRunner: ObservableObject {
             return .proceed
         }
 
+        let used = repairsUsed[stage.id] ?? 0
+        // The same failure set back after two repairs with DIFFERENT diffs: a
+        // third guess at it is not worth the spend.
+        if !verdict.stoppedReporting,
+           LoopAttemptLedger.returnedAfterDifferentDiffs(attemptLedgers[stage.id] ?? [], current: failureHash) {
+            appendLog(.warn, "  [\(stage.name)] the same failure returned after two different fixes — stopping")
+            record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                   passed: false, output: outcome.output, outputHash: failureHash, score: score)
+            return .terminate(.givenUp(reason: .repeatedFailure))
+        }
         // The attempt right after a count disappeared always gets its repair,
         // even at `consecutiveFailureStop` — that repair is the only one told
         // "your last change stopped the tests from running", and stopping
         // before it would give up on the one piece of evidence that matters.
-        if verdict.streak >= config.consecutiveFailureStop, !verdict.stoppedReporting {
+        // Likewise the first no-progress verdict (streak 2) after ONE repair
+        // always gets one informed repair: the first was blind, this one has
+        // the attempt ledger.
+        if verdict.streak >= config.consecutiveFailureStop, !verdict.stoppedReporting,
+           !(used == 1 && verdict.streak == 2) {
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, outputHash: failureHash, score: score)
             if verdict.notReporting {
@@ -983,7 +1017,6 @@ final class LoopEngineRunner: ObservableObject {
             return .terminate(.givenUp(reason: .maxIterations))
         }
 
-        let used = repairsUsed[stage.id] ?? 0
         if used >= config.maxRepairsPerStage {
             appendLog(.warn, "  [\(stage.name)] repair budget of \(config.maxRepairsPerStage) exhausted")
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
@@ -996,6 +1029,40 @@ final class LoopEngineRunner: ObservableObject {
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, outputHash: failureHash, score: score)
             return .terminate(.givenUp(reason: .wallClockExceeded))
+        }
+
+        // Flake gate: before the FIRST repair of this stage in this run, run it
+        // once more. A pass means the failure was not real — no repair.
+        if used == 0, !didTimeOut, outcome.exitCode != 127, !flakeCheckedStages.contains(stage.id) {
+            flakeCheckedStages.insert(stage.id)
+            appendLog(.info, "  [\(stage.name)] failed — re-running once to rule out a flake")
+            stageStates[stage.id] = .running
+            let rerunStartedAt = Date()
+            do {
+                let again = try await verifier.verify(command: command, repoRoot: gitRoot,
+                                                      timeout: shellTimeout(for: stage))
+                if again.exitCode == 0 {
+                    appendLog(.warn, "  [\(stage.name)] FLAKY — failed, then passed on an immediate re-run; not repairing")
+                    record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                           passed: false, output: outcome.output, outputHash: failureHash, score: score)
+                    record(stage, startedAt: rerunStartedAt, duration: Date().timeIntervalSince(rerunStartedAt),
+                           exitCode: 0, passed: true, output: "", score: nil,
+                           agentNote: "flaky: failed once, passed on immediate re-run")
+                    stageStates[stage.id] = .passed
+                    progress.clear(key: stage.id)
+                    return .proceed
+                }
+            } catch is CancellationError {
+                stageStates[stage.id] = .pending
+                return .terminate(.aborted)
+            } catch VerifyError.stoppedForResources(let reason) {
+                appendLog(.warn, "  [\(stage.name)] \(reason)")
+                stageStates[stage.id] = .pending
+                return .terminate(.error(reason))
+            } catch {
+                // Inconclusive (timeout, launch error): treat as still failing.
+            }
+            stageStates[stage.id] = .failed
         }
 
         do {
@@ -1036,7 +1103,8 @@ final class LoopEngineRunner: ObservableObject {
             repairResult = try await self.withTransportRetry(stage: stage) {
                 try await self.stageRepairer.repair(
                     stageName: stage.name, command: command, failureOutput: failureOutput,
-                    evidence: evidence, repoRoot: gitRoot, timeout: self.agentTimeout(for: stage))
+                    evidence: evidence, repoRoot: gitRoot, timeout: self.agentTimeout(for: stage),
+                    model: config.repairModel)
             }
             return repairResult
         }
@@ -1094,7 +1162,7 @@ final class LoopEngineRunner: ObservableObject {
                                               verdict: verdictScope, violations: violations) {
                 return .terminate(terminal)
             }
-            return .retryIteration
+            return .retryStage
         }
     }
 
@@ -2051,11 +2119,13 @@ final class LoopEngineRunner: ObservableObject {
     /// and first error lines of a shell stage's output — on a background
     /// executor, never the main actor.
     nonisolated private static func analyse(_ output: String,
-                                            hashing: Bool) async -> (score: Int?, hash: String, errorLines: String) {
+                                            hashing: Bool) async
+        -> (score: Int?, hash: String, errorLines: String, ids: Set<String>) {
         await Task.detached(priority: .utility) {
             (hashing ? StageOutputParser.failureScore(output) : StageOutputParser.parseFailureCount(output),
              hashing ? (TestFailureExtractor.failureSetHash(output) ?? hash(output)) : "",
-             hashing ? StageOutputParser.firstErrorLines(output) : "")
+             hashing ? StageOutputParser.firstErrorLines(output) : "",
+             hashing ? Set(TestFailureExtractor.extract(output).ids) : [])
         }.value
     }
 
