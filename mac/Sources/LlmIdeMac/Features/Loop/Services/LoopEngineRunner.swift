@@ -1289,6 +1289,13 @@ final class LoopEngineRunner: ObservableObject {
             appendLog(.warn, "  [\(stage.name)] protected-path check could not run: \(reason)")
             return .completed(.indeterminate, violations: [], changed: [])
 
+        case .unverifiable(let reason):
+            // Fail-CLOSED: the check ran but saw an incomplete list, so a
+            // protected edit could be hidden. Blocked like a violation; nothing
+            // is reverted, since which paths to revert is exactly what is unknown.
+            appendLog(.error, "  [\(stage.name)] protected-path check incomplete: \(reason)")
+            return .completed(.violated, violations: ["(unverifiable: \(reason))"], changed: [])
+
         case .violated(let paths, let changed):
             let outOfScope = Self.outOfScopePaths(changed, scopeGlobs: scopeGlobs)
             let merged = Array(Set(paths).union(outOfScope)).sorted()

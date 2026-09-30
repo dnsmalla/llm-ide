@@ -52,6 +52,72 @@ final class RepairScopeGuardTests: XCTestCase {
                                         allChangedPaths: ["mac/Tests/LlmIdeMacTests/FooTests.swift"]))
     }
 
+    // MARK: - Long git output
+
+    /// A real repository whose `git status` is > 256 KB (the capped capture's
+    /// head+tail), with the protected path in the MIDDLE — exactly where a
+    /// head+tail capture drops lines.
+    private func makeRepoWithHugeStatus() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scope-guard-huge-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let git = Process()
+        git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        git.arguments = ["init", "-q", root.path]
+        try git.run(); git.waitUntilExit()
+        return root
+    }
+
+    private func fillHugeStatus(_ root: URL) throws {
+        let fm = FileManager.default
+        let pad = String(repeating: "p", count: 60)
+        for dir in ["a", "z"] {
+            let d = root.appendingPathComponent(dir)
+            try fm.createDirectory(at: d, withIntermediateDirectories: true)
+            for i in 0..<2_500 {
+                fm.createFile(atPath: d.appendingPathComponent("f\(i)-\(pad).txt").path, contents: Data())
+            }
+        }
+        let tests = root.appendingPathComponent("m/Tests")
+        try fm.createDirectory(at: tests, withIntermediateDirectories: true)
+        fm.createFile(atPath: tests.appendingPathComponent("RiggedTests.swift").path, contents: Data("x".utf8))
+    }
+
+    func testProtectedPathInTheMiddleOfHugeStatusIsStillDetected() async throws {
+        let root = try makeRepoWithHugeStatus()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let guardUnderTest = GitRepairScopeGuard()
+        let before = await guardUnderTest.snapshot(gitRoot: root)
+        try fillHugeStatus(root)
+        let check = await guardUnderTest.check(since: before, gitRoot: root, protectedGlobs: globs)
+        guard case .violated(let paths, let all) = check else {
+            return XCTFail("expected a violation, got \(check)")
+        }
+        XCTAssertEqual(paths, ["m/Tests/RiggedTests.swift"])
+        XCTAssertEqual(all.count, 5_001)
+    }
+
+    /// Defence in depth: handed a CAPPED verifier, the same tree fails closed.
+    func testElidedGitOutputFailsClosed() async throws {
+        let root = try makeRepoWithHugeStatus()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let guardUnderTest = GitRepairScopeGuard(verifier: ShellFaultVerifier())
+        let before = await guardUnderTest.snapshot(gitRoot: root)
+        try fillHugeStatus(root)
+        let check = await guardUnderTest.check(since: before, gitRoot: root, protectedGlobs: globs)
+        XCTAssertEqual(check, .unverifiable(reason: GitRepairScopeGuard.truncatedReason))
+    }
+
+    func testElidedSnapshotFailsClosed() async {
+        var elided = status([" M a.swift"])
+        elided.elided = true
+        let verifier = ScriptedVerifier(statusOutputs: [elided, status([])])
+        let guardUnderTest = GitRepairScopeGuard(verifier: verifier)
+        let before = await guardUnderTest.snapshot(gitRoot: gitRoot)
+        let check = await guardUnderTest.check(since: before, gitRoot: gitRoot, protectedGlobs: globs)
+        XCTAssertEqual(check, .unverifiable(reason: GitRepairScopeGuard.truncatedReason))
+    }
+
     func testEditToProductionCodeIsClean() async {
         let verifier = ScriptedVerifier(statusOutputs: [
             status([]),

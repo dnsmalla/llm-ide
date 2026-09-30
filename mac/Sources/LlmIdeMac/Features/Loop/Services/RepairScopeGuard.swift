@@ -36,6 +36,11 @@ enum RepairScopeCheck: Equatable {
     /// violations" when the check never ran is exactly the silent-pass this
     /// whole mechanism exists to prevent.
     case indeterminate(reason: String)
+    /// A probe ran but its output was cut short, so a changed protected path
+    /// could have been hidden. FAIL-CLOSED — unlike `.indeterminate`, which is
+    /// "git is not available here": the runner blocks the run as for a
+    /// violation, because an incomplete list is worse than none.
+    case unverifiable(reason: String)
 }
 
 /// Detects and undoes repairs that edit the things a repair must never edit.
@@ -89,6 +94,9 @@ struct RepairScopeSnapshot: Equatable {
     /// for one that no longer exists). A path absent here could not be hashed
     /// and is judged by dirty-set membership alone.
     var contentHashes: [String: String] = [:]
+    /// True when a snapshot probe's output was elided — `check` then fails
+    /// closed with `.unverifiable`.
+    var elided: Bool = false
 
     static func unusable(_ reason: String) -> RepairScopeSnapshot {
         RepairScopeSnapshot(dirtyPaths: [], usable: false, reason: reason)
@@ -119,7 +127,9 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
     private let verifier: FaultVerifier
     private let timeout: TimeInterval
 
-    init(verifier: FaultVerifier = ShellFaultVerifier(), timeout: TimeInterval = 60) {
+    /// Uncapped by default: git's output here is paths and hashes, and the
+    /// capped head+tail capture would drop the middle of a long path list.
+    init(verifier: FaultVerifier = ShellFaultVerifier.uncapped(), timeout: TimeInterval = 60) {
         self.verifier = verifier
         self.timeout = timeout
     }
@@ -136,8 +146,11 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
             let worth = paths.filter {
                 Self.canViolate($0, protectedGlobs: protectedGlobs, scopeGlobs: scopeGlobs)
             }
+            let hashed = await hashes(of: worth, gitRoot: gitRoot)
             return RepairScopeSnapshot(dirtyPaths: paths, usable: true, reason: nil,
-                                       contentHashes: await hashes(of: worth, gitRoot: gitRoot))
+                                       contentHashes: hashed.hashes, elided: hashed.truncated)
+        case .truncated:
+            return RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil, elided: true)
         case .failure(let reason):
             return .unusable(reason)
         }
@@ -165,7 +178,8 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
     /// so those paths fall back to membership-only checking rather than being
     /// guessed at; a path containing a newline cannot travel through stdin
     /// and is skipped the same way.
-    private func hashes(of paths: Set<String>, gitRoot: URL) async -> [String: String] {
+    private func hashes(of paths: Set<String>,
+                        gitRoot: URL) async -> (hashes: [String: String], truncated: Bool) {
         var out: [String: String] = [:]
         var present: [String] = []
         for path in paths.sorted() where !path.contains("\n") {
@@ -179,17 +193,22 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
                   size.intValue <= Self.maxHashedFileBytes else { continue }
             present.append(path)
         }
-        guard !present.isEmpty else { return out }
+        guard !present.isEmpty else { return (out, false) }
         // `printf` is a shell builtin: the list travels in the one command
         // string, and git reads it on stdin — one process however many paths.
         let command = "printf '%s\\n' \(Self.shellQuoted(present)) | git hash-object --stdin-paths"
-        guard case .success(let output) = await run(command, gitRoot: gitRoot) else { return out }
+        let output: String
+        switch await run(command, gitRoot: gitRoot) {
+        case .success(let text): output = text
+        case .truncated: return (out, true)
+        case .failure: return (out, false)
+        }
         let lines = output.split(whereSeparator: \.isNewline).map {
             $0.trimmingCharacters(in: .whitespaces)
         }
-        guard lines.count == present.count else { return out }
+        guard lines.count == present.count else { return (out, false) }
         for (path, hash) in zip(present, lines) { out[path] = hash }
-        return out
+        return (out, false)
     }
 
     func check(since snapshot: RepairScopeSnapshot, gitRoot: URL,
@@ -197,9 +216,11 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
         guard snapshot.usable else {
             return .indeterminate(reason: snapshot.reason ?? "no usable pre-repair snapshot")
         }
+        if snapshot.elided { return .unverifiable(reason: Self.truncatedReason) }
         let after: Set<String>
         switch await dirtyPaths(gitRoot: gitRoot) {
         case .success(let paths): after = paths
+        case .truncated: return .unverifiable(reason: Self.truncatedReason)
         case .failure(let reason): return .indeterminate(reason: reason)
         }
 
@@ -217,7 +238,9 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
         let stillDirty = after.intersection(snapshot.dirtyPaths)
             .filter { snapshot.contentHashes[$0] != nil }
         if !stillDirty.isEmpty {
-            let now = await hashes(of: stillDirty, gitRoot: gitRoot)
+            let hashed = await hashes(of: stillDirty, gitRoot: gitRoot)
+            if hashed.truncated { return .unverifiable(reason: Self.truncatedReason) }
+            let now = hashed.hashes
             for path in stillDirty {
                 if let old = snapshot.contentHashes[path], let new = now[path], old != new {
                     changedSet.insert(path)
@@ -302,8 +325,13 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
     /// show the user, not a thrown error, so it gets its own type.
     private enum Probe<T> {
         case success(T)
+        /// The probe succeeded but its output was elided — never trusted.
+        case truncated
         case failure(String)
     }
+
+    static let truncatedReason =
+        "git output was cut short, so a change to a protected path could be hidden"
 
     /// Every path git considers changed: tracked modifications plus untracked
     /// files. Untracked matters — "make the test pass" can mean adding a new
@@ -312,6 +340,8 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
         switch await run("git status --porcelain --untracked-files=all", gitRoot: gitRoot) {
         case .failure(let reason):
             return .failure(reason)
+        case .truncated:
+            return .truncated
         case .success(let output):
             // Rename/copy SOURCES count as dirty too: `git mv` of a protected
             // test to a non-protected name leaves only the destination in
@@ -331,7 +361,7 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
             guard outcome.exitCode == 0 else {
                 return .failure("`\(command)` exited \(outcome.exitCode): \(outcome.output.suffix(200))")
             }
-            return .success(outcome.output)
+            return outcome.elided ? .truncated : .success(outcome.output)
         } catch {
             return .failure("`\(command)` failed: \(error.localizedDescription)")
         }

@@ -1380,6 +1380,33 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(runner.log.contains { $0.text.contains("protected-path check could not run") })
     }
 
+    /// An incomplete git listing is NOT "git unavailable": it fails closed and
+    /// blocks exactly like a violation.
+    func testUnverifiableScopeCheckBlocks() async {
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return callIndex == 0
+                ? VerifyOutcome(exitCode: 1, output: "boom")
+                : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let scopeGuard = StubScopeGuard(result: .unverifiable(reason: "cut short"))
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 5)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            scopeGuard: scopeGuard
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        guard case .blocked = result else { return XCTFail("expected blocked, got \(result)") }
+        XCTAssertTrue(runner.log.contains { $0.text.contains("protected-path check incomplete") })
+    }
+
     /// A skill stage edits the tree too, so "make the tests pass" is as available
     /// to it as it is to the repairer.
     func testSkillStageViolationAlsoBlocks() async {

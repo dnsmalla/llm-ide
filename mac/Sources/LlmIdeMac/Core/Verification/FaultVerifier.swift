@@ -9,6 +9,10 @@ import Foundation
 struct VerifyOutcome: Equatable {
     let exitCode: Int32
     let output: String   // combined stdout + stderr
+    /// True when the middle of the output was dropped by the capture cap
+    /// (see `CappedOutputBuffer`). A caller that must see EVERY line — a git
+    /// probe listing paths — treats this as "could not verify".
+    var elided: Bool = false
 }
 
 enum VerifyError: Error, Equatable {
@@ -51,6 +55,18 @@ struct ShellFaultVerifier: FaultVerifier {
     /// SIGTERM → SIGKILL grace for the command's process group.
     static let killGrace: TimeInterval = 1.0
 
+    /// When false, output is captured in full (`uncapped()`); used only for
+    /// probes whose output is paths/hashes that must never be elided.
+    private let capped: Bool
+
+    init() { capped = true }
+    private init(capped: Bool) { self.capped = capped }
+
+    /// A verifier that keeps ALL output. For git probes only: their output is
+    /// bounded by the repository, and eliding the middle of a path list would
+    /// hide exactly the path a guard must see.
+    static func uncapped() -> ShellFaultVerifier { ShellFaultVerifier(capped: false) }
+
     /// Runs through `GroupedSubprocess`: the command leads its own process
     /// group, so Stop, a timeout and the ResourceGuard stop the WHOLE tree
     /// (this used to `terminate()` only `/bin/sh`, leaving `swift test`'s
@@ -59,7 +75,11 @@ struct ShellFaultVerifier: FaultVerifier {
     func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
         let proc: GroupedSubprocess
         do {
-            proc = try GroupedSubprocess.launch(shellCommand: command, directory: repoRoot)
+            let buffer = capped
+                ? CappedOutputBuffer()
+                : CappedOutputBuffer(headLimit: .max, tailLimit: 0)
+            proc = try GroupedSubprocess.launch(shellCommand: command, directory: repoRoot,
+                                                output: buffer)
         } catch {
             throw VerifyError.launchFailed(error.localizedDescription)
         }
@@ -105,7 +125,8 @@ struct ShellFaultVerifier: FaultVerifier {
         if let reason = stopReason.get() {
             throw VerifyError.stoppedForResources(reason)
         }
-        return VerifyOutcome(exitCode: proc.exitStatus ?? -1, output: output)
+        return VerifyOutcome(exitCode: proc.exitStatus ?? -1, output: output,
+                             elided: proc.output.wasElided)
     }
 }
 
