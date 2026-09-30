@@ -342,7 +342,8 @@ const sdkQueryFactory = (prompt, options) => query({ prompt, options });
  * `partialUsage` ({ usage, byModel, model }) — what the SDK reported before
  * the run was cut off — so the caller can still meter it.
  *
- * @returns {Promise<{ reply: string, changedPaths: string[], changedExtraPaths: string[], usage: object,
+ * @returns {Promise<{ reply: string, changedPaths: string[], changedExtraPaths: string[],
+ *   createdPaths: string[], usage: object,
  *   resolvedSkills: string[], unresolvedSkills: string[], truncatedSkills: string[],
  *   ran: boolean, resultSubtype: string|null, denied: Array<{toolName: string, reason: string}>,
  *   model: string|null, byModel: object[] }>}
@@ -370,7 +371,7 @@ export async function runLoopAgent(
   // asked for under the name of a skill that never ran — so nothing runs.
   if (unresolved.length > 0) {
     return {
-      reply: '', changedPaths: [], changedExtraPaths: [], usage, ...base, ran: false, resultSubtype: null, denied: [],
+      reply: '', changedPaths: [], changedExtraPaths: [], createdPaths: [], usage, ...base, ran: false, resultSubtype: null, denied: [],
       model: null, byModel: [],
     };
   }
@@ -398,6 +399,12 @@ export async function runLoopAgent(
 
   const changed = new Set();
   const changedExtra = new Set();
+  // Files a Write CREATED (absent when the call was allowed). The Mac's guard
+  // may delete a violating path it cannot restore from HEAD only when it is
+  // one of these — never a file that existed before the edit.
+  const pendingCreate = new Set();
+  const created = new Set();
+  const absOf = (p) => (path.isAbsolute(p) ? path.normalize(p) : path.resolve(root, p));
   const denied = [];
   const refuse = (toolName, reason) => {
     if (denied.length < 50) denied.push({ toolName, reason });
@@ -406,6 +413,10 @@ export async function runLoopAgent(
   const preToolUse = async (input) => {
     const reason = loopToolRefusal(input?.tool_name, input?.tool_input, roots);
     if (!reason) {
+      const fp = input?.tool_input?.file_path;
+      if (input?.tool_name === 'Write' && typeof fp === 'string' && fp && !fs.existsSync(absOf(fp))) {
+        pendingCreate.add(absOf(fp));
+      }
       if (input?.tool_name !== 'Grep') return {};
       // A content search must never print a secret file's lines, even one
       // .gitignore does not hide: force the denylist in as negative globs.
@@ -428,6 +439,8 @@ export async function runLoopAgent(
       const rel = repoRelative(root, input?.tool_input?.file_path);
       if (rel) {
         changed.add(rel);
+        const fp = input?.tool_input?.file_path;
+        if (input?.tool_name === 'Write' && pendingCreate.has(absOf(fp))) created.add(rel);
       } else {
         const abs = extraRootPath(roots.slice(1), input?.tool_input?.file_path);
         if (abs) changedExtra.add(abs);
@@ -558,6 +571,7 @@ export async function runLoopAgent(
     reply: (reply || lastAssistantText).trim(),
     changedPaths: [...changed].sort(),
     changedExtraPaths: [...changedExtra].sort(),
+    createdPaths: [...created].sort(),
     usage,
     ...base,
     ran: true,

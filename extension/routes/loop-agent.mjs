@@ -7,6 +7,7 @@
 // Request  { message, skills?: [id], repoRoot, extraRoots?: [abs], language?,
 //            model?, timeoutMs? }
 // Response { reply, changedPaths: [repo-relative], changedExtraPaths: [abs],
+//            createdPaths: [repo-relative, the subset a Write created],
 //            usage, resolvedSkills, unresolvedSkills, truncatedSkills, ran,
 //            resultSubtype, denied }
 //
@@ -122,6 +123,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       reply: out.reply,
       changedPaths: out.changedPaths,
       changedExtraPaths: out.changedExtraPaths ?? [],
+      createdPaths: out.createdPaths ?? [],
       usage: out.usage,
       resolvedSkills: out.resolvedSkills,
       unresolvedSkills: out.unresolvedSkills,

@@ -561,3 +561,19 @@ test('route: a run that times out after reporting usage is still metered before 
   const rows = db.prepare('SELECT model, input_tokens, output_tokens, cache_read_tokens FROM usage_ledger WHERE user_id = ?').all(u.id);
   assert.deepEqual(rows.map((r) => ({ ...r })), [{ model: 'test-model', input_tokens: 40, output_tokens: 7, cache_read_tokens: 3 }]);
 });
+
+test('runLoopAgent: createdPaths lists only the files a Write created, not ones it overwrote', () => withKey(async () => {
+  const capture = {};
+  const fresh = path.join(REPO, 'src', 'created-by-agent.txt');
+  const out = await runLoopAgent({
+    message: 'x', root: REPO, userId: user.id,
+    queryFactory: toolPlayingQuery(capture, [
+      { tool: 'Write', input: { file_path: fresh, content: 'n\n' }, run: write },
+      { tool: 'Write', input: { file_path: path.join(REPO, 'src', 'a.txt'), content: 'z\n' }, run: write },
+    ]),
+  }, noSkill);
+  assert.deepEqual(out.changedPaths, ['src/a.txt', 'src/created-by-agent.txt']);
+  assert.deepEqual(out.createdPaths, ['src/created-by-agent.txt']);
+  fs.rmSync(fresh);
+  git(['checkout', '--', 'src/a.txt'], REPO);
+}));

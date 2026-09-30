@@ -3376,6 +3376,7 @@ paths:
                   reply:            { type: string, description: The agent's closing summary }
                   changedPaths:     { type: array, items: { type: string }, description: Repo-relative paths the agent's Edit/Write calls changed }
                   changedExtraPaths: { type: array, items: { type: string }, description: Absolute paths changed inside an accepted extra root }
+                  createdPaths:     { type: array, items: { type: string }, description: The subset of changedPaths a Write created (the file did not exist before the call) }
                   usage:
                     type: object
                     properties:

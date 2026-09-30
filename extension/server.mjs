@@ -245,7 +245,8 @@ const HOST = config.host;
 //     504 AGENT_RUN_TIMEOUT. Replaces the Loop's tool-less /code-assist calls.
 //     Also `extraRoots?: [abs]` (≤ 4; each a project `llm-doc/` whose parent
 //     holds system/project.json and is repoRoot or ≤ 3 levels above it, else
-//     400 EXTRA_ROOT_NOT_ALLOWED) → `changedExtraPaths: [abs]`; Grep/Glob
+//     400 EXTRA_ROOT_NOT_ALLOWED) → `changedExtraPaths: [abs]`, plus
+//     `createdPaths` (the changedPaths a Write created); Grep/Glob
 //     never reach secret paths; a timed-out/aborted run is still metered.
 const SERVER_API_VERSION = 58;
 const ENDPOINTS = [
