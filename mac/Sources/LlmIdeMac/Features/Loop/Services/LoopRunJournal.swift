@@ -33,6 +33,9 @@ protocol LoopRunJournaling: AnyObject {
     /// `reconcileInterrupted`, off the calling thread and at most once per
     /// project root per app launch. Returns how many runs were reconciled.
     func reconcileOncePerLaunch(root: URL) async -> Int
+
+    /// The full record of a past run, or `nil` when it cannot be read.
+    func loadRecord(id: String, startedAt: Date, root: URL) -> LoopRunRecord?
 }
 
 extension LoopRunJournaling {
@@ -40,6 +43,7 @@ extension LoopRunJournaling {
     @discardableResult
     func reconcileInterrupted(root: URL) -> Int { 0 }
     func reconcileOncePerLaunch(root: URL) async -> Int { 0 }
+    func loadRecord(id: String, startedAt: Date, root: URL) -> LoopRunRecord? { nil }
 }
 
 /// File-system journal under `<root>/system/loop-runs/`:

@@ -217,6 +217,8 @@ final class LoopEngineRunner: ObservableObject {
     /// predecessor's reply. Reset at the start of every run.
     private(set) var lastSkillResults: [String: LoopAgentResult] = [:]
     private(set) var lastRepairResults: [String: LoopAgentResult] = [:]
+    /// This run's repair attempts per stage id (the attempt ledger), oldest first.
+    private var attemptLedgers: [String: [LoopLedgerEntry]] = [:]
 
     /// The identifying parameters of `run`'s current call, or `nil` between
     /// runs. `run`'s own parameters are locals, invisible to
@@ -477,6 +479,7 @@ final class LoopEngineRunner: ObservableObject {
         stageStates = [:]
         lastSkillResults = [:]
         lastRepairResults = [:]
+        attemptLedgers = [:]
         runMainGitRoot = mainGitRoot
         repoRegisteredThisRun = false
         unrecognisedRunnerStages = []
@@ -914,6 +917,7 @@ final class LoopEngineRunner: ObservableObject {
         // Parse + hash off the main actor: the output can be up to the
         // verifier's 256 KB cap, and regexes over it stalled the UI per stage.
         let analysis = await Self.analyse(outcome.output, hashing: outcome.exitCode != 0)
+        settleLedger(stageId: stage.id, passed: outcome.exitCode == 0, failureSet: analysis.hash)
         if outcome.exitCode == 0 {
             appendLog(.info, "  [\(stage.name)] passed")
             stageStates[stage.id] = .passed
@@ -1013,7 +1017,9 @@ final class LoopEngineRunner: ObservableObject {
             attempt: used + 1, previousScore: verdict.previousScore, currentScore: score,
             improved: verdict.improved, streak: verdict.streak,
             stoppedRunning: verdict.notReporting,
-            errorExcerpt: verdict.notReporting ? analysis.errorLines : nil)
+            errorExcerpt: verdict.notReporting ? analysis.errorLines : nil,
+            ledger: attemptLedgers[stage.id] ?? [],
+            priorRunLedger: used == 0 ? priorRunLedger(stageId: stage.id, failureSet: failureHash) : [])
 
         // Timed around the guard, not just the agent call: the scope check's
         // two `git status` runs are part of what a repair costs in wall clock,
@@ -1050,12 +1056,23 @@ final class LoopEngineRunner: ObservableObject {
         // otherwise.
         stageStates[stage.id] = .failed
 
+        let changedForLedger: [String]
+        switch guarded {
+        case .failed(_, _, _, let changed): changedForLedger = changed
+        case .completed(_, _, let changed): changedForLedger = changed
+        }
+        let ledgerEntry = await makeLedgerEntry(
+            n: used + 1, changed: changedForLedger, reply: repairResult?.reply ?? "",
+            failureSet: failureHash, config: config, gitRoot: gitRoot)
+        attemptLedgers[stage.id, default: []].append(ledgerEntry)
+
         switch guarded {
         case .failed(let error, let verdictScope, let violations, let changed):
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, outputHash: failureHash, score: score, repairAttempted: true,
                    repairDuration: repairDuration, repairIndex: repairIndex,
-                   changedPaths: changed, scopeVerdict: verdictScope, agentNote: repairNote)
+                   changedPaths: changed, scopeVerdict: verdictScope, agentNote: repairNote,
+                   ledger: ledgerEntry)
             if Self.isCancellation(error) { return .terminate(.aborted) }
             // What a failed repair left behind is judged before its error:
             // a protected-path violation says more than "the request failed".
@@ -1070,7 +1087,8 @@ final class LoopEngineRunner: ObservableObject {
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, outputHash: failureHash, score: score, repairAttempted: true,
                    repairDuration: repairDuration, repairIndex: repairIndex,
-                   changedPaths: changed, scopeVerdict: verdictScope, agentNote: repairNote)
+                   changedPaths: changed, scopeVerdict: verdictScope, agentNote: repairNote,
+                   ledger: ledgerEntry)
             if let terminal = scopeTermination(stage: stage, config: config,
                                               verdict: verdictScope, violations: violations) {
                 return .terminate(terminal)
@@ -1747,6 +1765,49 @@ final class LoopEngineRunner: ObservableObject {
         }
     }
 
+    // MARK: - Attempt ledger
+
+    /// Builds the ledger entry for a finished repair: stat + trimmed diff of the
+    /// paths it changed (secret and protected paths are never quoted).
+    private func makeLedgerEntry(n: Int, changed: [String], reply: String, failureSet: String,
+                                 config: LoopEngineConfig, gitRoot: URL) async -> LoopLedgerEntry {
+        let quotable = changed.filter { !LoopAttemptLedger.isUnquotable($0, protectedGlobs: config.protectedGlobs) }
+        let summary = await scopeGuard.diffSummary(paths: quotable, gitRoot: gitRoot,
+                                                   maxChars: LoopLedgerEntry.maxDiffChars)
+        return LoopLedgerEntry(n: n, changedPaths: changed, diffStat: summary.stat, diff: summary.diff,
+                               replySummary: reply, failureSetBefore: failureSet.isEmpty ? nil : failureSet)
+    }
+
+    /// Records what the stage's next verification said about its last repair,
+    /// both in the in-run ledger and on the journalled attempt that carries it.
+    private func settleLedger(stageId: String, passed: Bool, failureSet: String) {
+        if let i = attemptLedgers[stageId]?.indices.last, attemptLedgers[stageId]![i].isSettled == false {
+            if passed { attemptLedgers[stageId]![i].resultingPassed = true }
+            else { attemptLedgers[stageId]![i].resultingFailureSet = failureSet }
+        }
+        for r in iterationRecords.indices.reversed() {
+            guard let a = iterationRecords[r].attempts.lastIndex(where: {
+                $0.stageId == stageId && $0.ledger != nil }) else { continue }
+            if iterationRecords[r].attempts[a].ledger?.isSettled == false {
+                if passed { iterationRecords[r].attempts[a].ledger?.resultingPassed = true }
+                else { iterationRecords[r].attempts[a].ledger?.resultingFailureSet = failureSet }
+            }
+            return
+        }
+    }
+
+    /// The previous run's last repairs for `stageId`, when that run ended on
+    /// this same failure set. Read once per stage per run, at its first repair.
+    private func priorRunLedger(stageId: String, failureSet: String) -> [LoopLedgerEntry] {
+        guard let ctx = currentRunContext, !failureSet.isEmpty,
+              let previous = journal.recentRuns(root: ctx.faultsRoot, limit: 10)
+                  .first(where: { $0.loopId == ctx.loopId && $0.id != ctx.runId }),
+              let record = journal.loadRecord(id: previous.id, startedAt: previous.startedAt,
+                                              root: ctx.faultsRoot)
+        else { return [] }
+        return LoopAttemptLedger.priorRunEntries(in: record, stageId: stageId, failureSet: failureSet)
+    }
+
     // MARK: - Journal
 
     /// Appends one stage attempt to the current iteration's record. A stage that
@@ -1759,7 +1820,8 @@ final class LoopEngineRunner: ObservableObject {
                         repairDuration: Double? = nil, repairIndex: Int? = nil,
                         changedPaths: [String] = [],
                         scopeVerdict: RepairScopeVerdict = .notChecked,
-                        errored: Bool = false, agentNote: String? = nil) {
+                        errored: Bool = false, agentNote: String? = nil,
+                        ledger: LoopLedgerEntry? = nil) {
         guard !iterationRecords.isEmpty else { return }
         let attempt = LoopStageAttempt(
                 stageId: stage.id, stageName: stage.name, kind: stage.kind,
@@ -1770,7 +1832,7 @@ final class LoopEngineRunner: ObservableObject {
                 repairDurationSeconds: repairDuration, repairAttemptIndex: repairIndex,
                 changedPaths: changedPaths,
                 scopeVerdict: scopeVerdict,
-                errored: errored ? true : nil, agentNote: agentNote)
+                errored: errored ? true : nil, agentNote: agentNote, ledger: ledger)
         iterationRecords[iterationRecords.count - 1].attempts.append(attempt)
         emit(LoopRunEvent(kind: LoopRunEvent.Kind.stageFinished, iteration: iteration,
                           stageId: stage.id, stageName: stage.name, attempt: attempt))

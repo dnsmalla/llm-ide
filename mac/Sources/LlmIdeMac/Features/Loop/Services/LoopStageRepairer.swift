@@ -28,6 +28,10 @@ struct RepairEvidence: Equatable {
     /// The first error lines of the current output, quoted when
     /// `stoppedRunning` so the agent sees what broke first.
     var errorExcerpt: String? = nil
+    /// This run's earlier repairs of the stage, oldest first, with what each did.
+    var ledger: [LoopLedgerEntry] = []
+    /// A previous run's last repairs for this same failure set (first repair only).
+    var priorRunLedger: [LoopLedgerEntry] = []
 }
 
 /// Attempts to fix a failing Loop Engineering stage. Generalizes
@@ -80,12 +84,22 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
 
         \(commandLine)Failure output:
         \(TestFailureExtractor.repairExcerpt(failureOutput, budget: maxFailureOutputChars))
-        \(evidenceBlock(evidence))
+        \(evidenceBlock(evidence))\(ledgerBlock(evidence))
         Edit the code so this stage passes. Make the minimal change required.
         Do not modify the stage command, weaken or delete tests/assertions, or skip cases to make it pass.
         Edits to test files, build configuration, and the project's system/ directory are reverted \
         automatically and will not make the stage pass.
         """
+    }
+
+    /// The attempt-ledger paragraphs (prior run first), or "". The two blocks
+    /// share the 6k budget: this run's attempts are the fresher evidence.
+    private static func ledgerBlock(_ evidence: RepairEvidence?) -> String {
+        guard let evidence else { return "" }
+        let own = LoopAttemptLedger.block(evidence.ledger)
+        guard own.count < LoopAttemptLedger.maxBlockChars - 1_000 else { return own }
+        let prior = LoopAttemptLedger.block(evidence.priorRunLedger, priorRun: true)
+        return prior.count + own.count <= LoopAttemptLedger.maxBlockChars ? prior + own : own
     }
 
     /// The evidence paragraph, or "" on a first attempt. Built separately so the

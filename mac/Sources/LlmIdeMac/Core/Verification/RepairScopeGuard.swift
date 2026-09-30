@@ -63,6 +63,9 @@ enum RepairScopeCheck: Equatable {
 ///    `system/loop-runs/`. Editing the fault list is a direct way to make a
 ///    regression sweep pass.
 protocol RepairScopeGuarding: AnyObject {
+    /// Stat + trimmed diff against HEAD limited to `paths` (callers pass only
+    /// paths that are safe to quote). Best-effort: empty on any git failure.
+    func diffSummary(paths: [String], gitRoot: URL, maxChars: Int) async -> RepairDiffSummary
     /// Opaque token describing the working tree before a repair. The globs
     /// say which already-dirty paths are worth content-hashing: only one that
     /// is protected, or outside a non-empty scope allowlist, can ever produce
@@ -87,7 +90,16 @@ protocol RepairScopeGuarding: AnyObject {
                         gitRoot: URL) async -> String?
 }
 
+/// `git diff --stat` and a trimmed `git diff` of a repair's changed paths.
+struct RepairDiffSummary: Equatable {
+    var stat: String = ""
+    var diff: String = ""
+}
+
 extension RepairScopeGuarding {
+    /// Default: no diff available (a guard that cannot run git).
+    func diffSummary(paths: [String], gitRoot: URL, maxChars: Int) async -> RepairDiffSummary { RepairDiffSummary() }
+
     /// Fail-closed default: a guard that cannot restore unlisted paths says
     /// so, which keeps the violation (and the run) blocked.
     func revertUnlisted(paths: [String], created: Set<String>, gitRoot: URL) async -> String? {
@@ -406,6 +418,19 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
             }
         }
         return failures.isEmpty ? nil : failures.joined(separator: "; ")
+    }
+
+    func diffSummary(paths: [String], gitRoot: URL, maxChars: Int) async -> RepairDiffSummary {
+        guard !paths.isEmpty else { return RepairDiffSummary() }
+        let quoted = Self.shellQuoted(paths)
+        var out = RepairDiffSummary()
+        if case .success(let stat) = await run("git diff HEAD --stat -- \(quoted)", gitRoot: gitRoot) {
+            out.stat = String(stat.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maxChars))
+        }
+        if case .success(let diff) = await run("git diff HEAD -- \(quoted)", gitRoot: gitRoot) {
+            out.diff = String(diff.prefix(maxChars))
+        }
+        return out
     }
 
     private static func shellQuoted(_ paths: [String]) -> String {
