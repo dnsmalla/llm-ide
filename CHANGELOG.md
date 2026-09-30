@@ -5,6 +5,25 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+
+- Loop reliability (Mac app). Loop agent runs are headless and confined to the
+  run's git root; a stage whose agent call errored ends the run `error` unless
+  that stage later ran cleanly (a passing verify stage no longer launders it);
+  the protected-path guard also checks edits on the throw path; shell stages run
+  in their own process group with capped capture; structured per-runner failure
+  extraction and a per-stage repair ledger feed the next repair; a flake gate,
+  stall/no-progress stops and run budgets bound every run. Loops run on their own
+  lane (no longer blocking Auto Tasks) with a crash-safe run journal. New in-app
+  **artifact check** stage for the Plan and Doc Optimization loops (follows the
+  generate stages' editable Outputs), versioned default stages with "update
+  available", and the Loop page now shows and stops runs started from the phone
+  or the schedule; a phone Stop also cancels a start still pending.
+- **Downgrade note:** `system/loop.json` files written by this build may contain
+  `kind: "artifactCheck"` stages and `schemaVersion: 2`. Builds older than this
+  one cannot decode them and quarantine the file — upgrade every machine that
+  shares a project together.
+
 ### Added
 
 - Auto Task per-task settings and prompt templates. Each prompt-driven task's
