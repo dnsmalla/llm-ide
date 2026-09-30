@@ -925,7 +925,22 @@ extension AutoCodeUpdateService {
         // record status, so it must survive a mid-sweep bail-out below.
         var reachedTerminal = false
 
-        sweep: for loop in targets {
+        // Only the scheduled sweep re-reads: a loop the user named by hand
+        // (single loop / single stage) runs as asked whatever its schedule flag.
+        let rereadsBeforeRun = onlyStageId == nil && onlyLoopId == nil
+        sweep: for plannedLoop in targets {
+            var loop = plannedLoop
+            if rereadsBeforeRun {
+                let recheck = LoopEngineConfigStore.sweepRecheck(
+                    plannedLoop, projectRoot: faultsRoot, projectId: projectId,
+                    gitRoot: gitRootURL, defaults: defaults)
+                guard let fresh = recheck.loop else {
+                    logStore.append(.loopEngineering,
+                                    "Skipping \(plannedLoop.name) — \(recheck.skipReason ?? "it changed").")
+                    continue
+                }
+                loop = fresh
+            }
             // The Stop button cancels the enclosing task; stop starting NEW
             // loops the moment that happens rather than working through the
             // rest of the list.

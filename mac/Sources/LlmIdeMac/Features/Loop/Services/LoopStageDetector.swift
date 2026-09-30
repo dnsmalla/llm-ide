@@ -384,6 +384,29 @@ public enum LoopStageDetector {
     /// answer to resolve its `detectedTestCommand` placeholder — a built-in
     /// template must not hardcode `swift test`.
     static func detectTestCommand(gitRoot: URL) -> String? {
+        // Inside `withDetectionMemo` (one store load) the answer is computed
+        // once: a load asks for it ~7 times and each ask reads the Makefile.
+        let dict = Thread.current.threadDictionary
+        let key = "loopDetectMemo"
+        guard var memo = dict[key] as? [String: Any] else { return detectTestCommandUncached(gitRoot: gitRoot) }
+        if let hit = memo[gitRoot.path] { return hit as? String }
+        let value = detectTestCommandUncached(gitRoot: gitRoot)
+        memo[gitRoot.path] = value ?? NSNull()
+        dict[key] = memo
+        return value
+    }
+
+    /// Runs `body` with `detectTestCommand` memoised per git root (current
+    /// thread only; nested calls share the outer memo).
+    static func withDetectionMemo<T>(_ body: () -> T) -> T {
+        let dict = Thread.current.threadDictionary
+        if dict["loopDetectMemo"] != nil { return body() }
+        dict["loopDetectMemo"] = [String: Any]()
+        defer { dict.removeObject(forKey: "loopDetectMemo") }
+        return body()
+    }
+
+    private static func detectTestCommandUncached(gitRoot: URL) -> String? {
         let fm = FileManager.default
 
         if fm.fileExists(atPath: gitRoot.appendingPathComponent("Package.swift").path) {

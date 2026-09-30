@@ -143,7 +143,9 @@ enum LoopEngineConfigStore {
             }
             return
         }
+        LoopStoreCache.shared.invalidate(projectRoot: projectRoot.path)
         write(store, to: fileURL(projectRoot: projectRoot))
+        LoopStoreCache.shared.invalidate(projectRoot: projectRoot.path)
     }
 
     /// This project's loops **as the app actually runs them**: `load`, then
@@ -170,6 +172,28 @@ enum LoopEngineConfigStore {
     /// off the schedule flag that older builds set on every loop they created.
     static func loops(projectRoot: URL?, projectId: String, gitRoot: URL?,
                       defaults: UserDefaults = .standard) -> LoopEngineProjectStore {
+        // No project folder: nothing on disk to watch, so nothing to cache.
+        guard let projectRoot else {
+            return LoopStageDetector.withDetectionMemo {
+                loadEnsured(projectRoot: nil, projectId: projectId, gitRoot: gitRoot, defaults: defaults)
+            }
+        }
+        let key = LoopStoreCache.Key(projectRoot: projectRoot.path, projectId: projectId,
+                                     gitRoot: gitRoot?.path, defaults: ObjectIdentifier(defaults))
+        if let hit = LoopStoreCache.shared.value(for: key, file: fileURL(projectRoot: projectRoot),
+                                                 gitRoot: gitRoot) {
+            return hit
+        }
+        let result = LoopStageDetector.withDetectionMemo {
+            loadEnsured(projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot, defaults: defaults)
+        }
+        // Signature taken AFTER the load: it may have written the file itself.
+        LoopStoreCache.shared.store(result, for: key, file: fileURL(projectRoot: projectRoot), gitRoot: gitRoot)
+        return result
+    }
+
+    private static func loadEnsured(projectRoot: URL?, projectId: String, gitRoot: URL?,
+                                    defaults: UserDefaults) -> LoopEngineProjectStore {
         let saved = load(projectRoot: projectRoot, projectId: projectId, defaults: defaults)
         let (ensuredStore, revalidationChanges) = LoopStageDetector.ensureDefaultLoops(
             in: saved ?? LoopEngineProjectStore(loops: []), gitRoot: gitRoot, defaults: defaults)
@@ -239,6 +263,24 @@ enum LoopEngineConfigStore {
         }
         store.schemaVersion = LoopEngineProjectStore.currentSchemaVersion
         return true
+    }
+
+    /// What a scheduled sweep should do with `loop` right before running it:
+    /// the freshly re-read definition to run, or the reason to skip it. The
+    /// sweep takes its list once and then runs loops for hours; in that time
+    /// the user (or a `git pull`) may have deleted, unscheduled or emptied it.
+    static func sweepRecheck(_ loop: LoopDefinition, projectRoot: URL?, projectId: String,
+                             gitRoot: URL?, defaults: UserDefaults = .standard)
+        -> (loop: LoopDefinition?, skipReason: String?) {
+        let fresh = loops(projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot,
+                          defaults: defaults)
+        guard let current = fresh.loops.first(where: { $0.id == loop.id }) else {
+            return (nil, "it no longer exists")
+        }
+        if !current.runsOnSchedule { return (nil, "it is no longer scheduled") }
+        if current.isManualOnly { return (nil, "it is manual-only") }
+        if !current.config.stages.contains(where: \.enabled) { return (nil, "it has no enabled stages") }
+        return (current, nil)
     }
 
     /// The project's Primary loop — the phone's target, and what a surface
