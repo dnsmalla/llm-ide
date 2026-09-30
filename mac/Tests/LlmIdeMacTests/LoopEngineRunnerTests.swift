@@ -182,12 +182,18 @@ final class LoopEngineRunnerTests: XCTestCase {
         private(set) var revertedPaths: [String] = []
         /// When set, `revert` fails with this reason.
         var revertError: String?
+        /// Paths the snapshot reports as already dirty before the edit.
+        var dirtyBefore: Set<String> = []
+        private(set) var checkCount = 0
         init(result: RepairScopeCheck = .clean(changedPaths: [])) { self.result = result }
         func snapshot(gitRoot: URL) async -> RepairScopeSnapshot {
-            RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil)
+            RepairScopeSnapshot(dirtyPaths: dirtyBefore, usable: true, reason: nil)
         }
         func check(since snapshot: RepairScopeSnapshot, gitRoot: URL,
-                   protectedGlobs: [String]) async -> RepairScopeCheck { result }
+                   protectedGlobs: [String]) async -> RepairScopeCheck {
+            checkCount += 1
+            return result
+        }
         func revert(paths: [String], gitRoot: URL) async -> String? {
             revertedPaths.append(contentsOf: paths)
             return revertError
@@ -2565,5 +2571,79 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertFalse(R.isRetryableTransport(APIError.network(URLError(.cancelled))))
         XCTAssertFalse(R.isRetryableTransport(APIError.agent(message: "nope")))
         XCTAssertFalse(R.isRetryableTransport(SkillError()))
+    }
+
+    // MARK: - Guard on the throw path
+
+    private func violatingGuard(_ path: String) -> StubScopeGuard {
+        StubScopeGuard(result: .violated(paths: [path], allChangedPaths: [path]))
+    }
+
+    /// A repair that edits a test and THEN fails must not slip past the guard
+    /// as a mere "repair error".
+    func testThrowingRepairThatEditedAProtectedPathIsStillBlocked() async {
+        let scopeGuard = violatingGuard("mac/Tests/FooTests.swift")
+        let journal = InMemoryJournal()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 5, protectedPathPolicy: .revert)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: ThrowingRepairer(error: SkillError()),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            journal: journal, scopeGuard: scopeGuard)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .blocked(reason: .repairOutOfScope(
+            stageName: "Test", paths: ["mac/Tests/FooTests.swift"])))
+        XCTAssertEqual(scopeGuard.revertedPaths, ["mac/Tests/FooTests.swift"])
+        let attempt = journal.written.last?.iterations.first?.attempts.first
+        XCTAssertEqual(attempt?.changedPaths, ["mac/Tests/FooTests.swift"])
+        XCTAssertEqual(attempt?.scopeVerdict, .violatedReverted)
+    }
+
+    func testThrowingSkillThatEditedAProtectedPathIsBlocked() async {
+        let skill = StubSkillExecutor()
+        skill.throwOnEveryCall = true
+        let scopeGuard = violatingGuard("Makefile")
+        var config = skillOnlyConfig()
+        config.protectedPathPolicy = .stop
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals(), scopeGuard: scopeGuard)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .blocked(reason: .repairOutOfScope(stageName: "Plan", paths: ["Makefile"])))
+        XCTAssertEqual(scopeGuard.checkCount, 1)
+        XCTAssertTrue(scopeGuard.revertedPaths.isEmpty)
+    }
+
+    /// Reverting an already-dirty file would restore HEAD and discard the
+    /// uncommitted edits that were there first — so it is left, and still blocks.
+    func testRevertSkipsPathsThatWereAlreadyDirty() async {
+        let scopeGuard = StubScopeGuard(result: .violated(
+            paths: ["Makefile", "mac/Tests/FooTests.swift"],
+            allChangedPaths: ["Makefile", "mac/Tests/FooTests.swift"]))
+        scopeGuard.dirtyBefore = ["mac/Tests/FooTests.swift"]
+        let journal = InMemoryJournal()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 5, protectedPathPolicy: .revert)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            journal: journal, scopeGuard: scopeGuard)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        guard case .blocked = result else { return XCTFail("got \(result)") }
+        XCTAssertEqual(scopeGuard.revertedPaths, ["Makefile"])
+        XCTAssertEqual(journal.written.last?.iterations.first?.attempts.first?.scopeVerdict, .violated)
     }
 }

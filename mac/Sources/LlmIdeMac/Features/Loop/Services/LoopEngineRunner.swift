@@ -895,11 +895,18 @@ final class LoopEngineRunner: ObservableObject {
         stageStates[stage.id] = .failed
 
         switch guarded {
-        case .failed(let error):
+        case .failed(let error, let verdictScope, let violations, let changed):
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, score: score, repairAttempted: true,
-                   repairDuration: repairDuration, repairIndex: repairIndex)
+                   repairDuration: repairDuration, repairIndex: repairIndex,
+                   changedPaths: changed, scopeVerdict: verdictScope)
             if Self.isCancellation(error) { return .terminate(.aborted) }
+            // What a failed repair left behind is judged before its error:
+            // a protected-path violation says more than "the request failed".
+            if let terminal = scopeTermination(stage: stage, config: config,
+                                              verdict: verdictScope, violations: violations) {
+                return .terminate(terminal)
+            }
             appendLog(.error, "  [\(stage.name)] repair \(repairIndex) failed after \(Int(repairDuration))s: \(error.localizedDescription)")
             return .terminate(.error(error.localizedDescription))
         case .completed(let verdictScope, let violations, let changed):
@@ -988,11 +995,12 @@ final class LoopEngineRunner: ObservableObject {
         }
 
         switch guarded {
-        case .failed(let error):
+        case .failed(let error, let verdictScope, let violations, let changed):
             if Self.isCancellation(error) {
                 stageStates[stage.id] = .pending
                 record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
-                       passed: false, output: error.localizedDescription, score: nil)
+                       passed: false, output: error.localizedDescription, score: nil,
+                       changedPaths: changed, scopeVerdict: verdictScope)
                 return .terminate(.aborted)
             }
             // ERRORED, not failed: the agent never ran (or never answered). The
@@ -1002,8 +1010,15 @@ final class LoopEngineRunner: ObservableObject {
             // `.success` for a loop that did nothing.
             stageStates[stage.id] = .errored
             record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
-                   passed: false, output: error.localizedDescription, score: nil, errored: true)
+                   passed: false, output: error.localizedDescription, score: nil,
+                   changedPaths: changed, scopeVerdict: verdictScope, errored: true)
             appendLog(.error, "  [\(stage.name)] skill errored: \(error.localizedDescription)")
+            // Edits made before the error are still edits: a protected-path
+            // violation on the throw path ends the run exactly as on success.
+            if let terminal = scopeTermination(stage: stage, config: config,
+                                              verdict: verdictScope, violations: violations) {
+                return .terminate(terminal)
+            }
             return .proceed
         case .completed(let verdictScope, let violations, let changed):
             appendLog(.info, "  [\(stage.name)] skill completed (generate)")
@@ -1066,7 +1081,10 @@ final class LoopEngineRunner: ObservableObject {
     }
 
     private enum GuardedEditResult {
-        case failed(Error)
+        /// The edit threw. The guard still ran: an agent that edited files and
+        /// THEN failed (a dropped connection mid-run, a timeout) left real edits
+        /// in the tree, and they get the same check and policy as a success.
+        case failed(Error, RepairScopeVerdict, violations: [String], changed: [String])
         case completed(RepairScopeVerdict, violations: [String], changed: [String])
     }
 
@@ -1163,20 +1181,36 @@ final class LoopEngineRunner: ObservableObject {
                                 scopeGlobs: [String] = [],
                                 edit: () async throws -> Void) async -> GuardedEditResult {
         guard Self.effectivePolicy(for: stage, config: config) != .off else {
-            do { try await edit() } catch { return .failed(error) }
+            do { try await edit() } catch { return .failed(error, .notChecked, violations: [], changed: []) }
             return .completed(.notChecked, violations: [], changed: [])
         }
 
         let before = await scopeGuard.snapshot(gitRoot: gitRoot)
-        do { try await edit() } catch { return .failed(error) }
+        var thrown: Error?
+        do { try await edit() } catch { thrown = error }
+        let checked = await checkScope(since: before, stage: stage, config: config,
+                                       gitRoot: gitRoot, scopeGlobs: scopeGlobs)
+        guard let thrown else { return checked }
+        switch checked {
+        case .completed(let verdict, let violations, let changed):
+            return .failed(thrown, verdict, violations: violations, changed: changed)
+        case .failed:
+            return checked
+        }
+    }
 
+    /// The check-and-handle half of `withScopeGuard`, run after the edit
+    /// whether it returned or threw.
+    private func checkScope(since before: RepairScopeSnapshot, stage: LoopStage,
+                            config: LoopEngineConfig, gitRoot: URL,
+                            scopeGlobs: [String]) async -> GuardedEditResult {
         switch await scopeGuard.check(since: before, gitRoot: gitRoot,
                                       protectedGlobs: config.protectedGlobs) {
         case .clean(let changed):
             let outOfScope = Self.outOfScopePaths(changed, scopeGlobs: scopeGlobs)
             guard outOfScope.isEmpty else {
                 return await handleViolation(outOfScope, changed: changed, stage: stage,
-                                             config: config, gitRoot: gitRoot)
+                                             config: config, gitRoot: gitRoot, before: before)
             }
             return .completed(.clean, violations: [], changed: changed)
 
@@ -1195,7 +1229,7 @@ final class LoopEngineRunner: ObservableObject {
             let outOfScope = Self.outOfScopePaths(changed, scopeGlobs: scopeGlobs)
             let merged = Array(Set(paths).union(outOfScope)).sorted()
             return await handleViolation(merged, changed: changed, stage: stage,
-                                         config: config, gitRoot: gitRoot)
+                                         config: config, gitRoot: gitRoot, before: before)
         }
     }
 
@@ -1220,17 +1254,32 @@ final class LoopEngineRunner: ObservableObject {
     /// path (which can reach a violation from a `.clean` scope-guard result)
     /// gets identical policy handling instead of a second copy of it.
     private func handleViolation(_ paths: [String], changed: [String], stage: LoopStage,
-                                 config: LoopEngineConfig, gitRoot: URL) async -> GuardedEditResult {
+                                 config: LoopEngineConfig, gitRoot: URL,
+                                 before: RepairScopeSnapshot) async -> GuardedEditResult {
         appendLog(.error, "  [\(stage.name)] repair edited protected/out-of-scope path(s): \(paths.joined(separator: ", "))")
         guard Self.effectivePolicy(for: stage, config: config) == .revert else {
             return .completed(.violated, violations: paths, changed: changed)
         }
-        if let error = await scopeGuard.revert(paths: paths, gitRoot: gitRoot) {
+        // A path that was already dirty before the edit cannot be reverted:
+        // `git checkout --` restores the COMMITTED version, which would throw
+        // away the uncommitted edits that were there first (often the user's
+        // own). Those are left in place and the verdict stays `.violated` —
+        // the run is still blocked — so nothing is silently discarded.
+        let preDirty = paths.filter { before.dirtyPaths.contains($0) }
+        let revertable = paths.filter { !before.dirtyPaths.contains($0) }
+        if !preDirty.isEmpty {
+            appendLog(.warn, "  [\(stage.name)] not reverting already-modified path(s), to keep their earlier uncommitted edits: \(preDirty.joined(separator: ", "))")
+        }
+        guard !revertable.isEmpty else {
+            return .completed(.violated, violations: paths, changed: changed)
+        }
+        if let error = await scopeGuard.revert(paths: revertable, gitRoot: gitRoot) {
             appendLog(.error, "  [\(stage.name)] could not revert protected/out-of-scope path(s): \(error)")
             return .completed(.violated, violations: paths, changed: changed)
         }
-        appendLog(.info, "  [\(stage.name)] reverted \(paths.count) protected/out-of-scope path(s)")
-        return .completed(.violatedReverted, violations: paths, changed: changed)
+        appendLog(.info, "  [\(stage.name)] reverted \(revertable.count) protected/out-of-scope path(s)")
+        return .completed(preDirty.isEmpty ? .violatedReverted : .violated,
+                          violations: paths, changed: changed)
     }
 
     /// The terminal status a scope verdict forces, or `nil` to keep looping.
