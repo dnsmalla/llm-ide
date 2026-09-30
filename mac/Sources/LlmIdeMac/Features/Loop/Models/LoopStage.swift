@@ -33,7 +33,20 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         case regressionSweep
         case shellCommand
         case skill
+        /// A kind this build does not know (written by a newer build). The
+        /// stage is kept verbatim in `rawJSON`, written back unchanged on
+        /// save, shown as unsupported, and NEVER run.
+        case unsupported
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Kind(rawValue: raw) ?? .unsupported
+        }
     }
+
+    /// The stage's original JSON, kept only for `.unsupported` stages so a save
+    /// by this build does not destroy what a newer build wrote.
+    var rawJSON: AnyCodable? = nil
 
     public var id: String = UUID().uuidString
     public var name: String
@@ -140,9 +153,19 @@ public struct LoopStage: Identifiable, Codable, Equatable {
     /// config", silently discarding the user's stages and re-detecting defaults.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        if kind == .unsupported {
+            // Lenient: the unknown stage may have any shape. Keep it whole,
+            // disabled, and out of the runner's reach.
+            id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+            name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Unsupported stage"
+            order = try container.decodeIfPresent(Int.self, forKey: .order) ?? 0
+            enabled = false
+            rawJSON = try? AnyCodable(from: decoder)
+            return
+        }
         id = try container.decode(String.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
-        kind = try container.decode(Kind.self, forKey: .kind)
         command = try container.decodeIfPresent(String.self, forKey: .command)
         order = try container.decode(Int.self, forKey: .order)
         skillId = try container.decodeIfPresent(String.self, forKey: .skillId)
@@ -155,6 +178,32 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         severity = try container.decodeIfPresent(LoopStageSeverity.self, forKey: .severity) ?? .blocking
         timeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds)
         detectedCommand = try container.decodeIfPresent(String.self, forKey: .detectedCommand)
+    }
+
+    /// An `.unsupported` stage writes back its original JSON untouched;
+    /// everything else encodes field by field (optionals omitted when nil,
+    /// same as the synthesized encoder this replaces).
+    public func encode(to encoder: Encoder) throws {
+        if kind == .unsupported, let rawJSON {
+            try rawJSON.encode(to: encoder)
+            return
+        }
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(kind, forKey: .kind)
+        try c.encodeIfPresent(command, forKey: .command)
+        try c.encode(order, forKey: .order)
+        try c.encodeIfPresent(skillId, forKey: .skillId)
+        try c.encodeIfPresent(targetPath, forKey: .targetPath)
+        try c.encodeIfPresent(outputPath, forKey: .outputPath)
+        try c.encodeIfPresent(prompt, forKey: .prompt)
+        try c.encode(isDefault, forKey: .isDefault)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encodeIfPresent(defaultKey, forKey: .defaultKey)
+        try c.encode(severity, forKey: .severity)
+        try c.encodeIfPresent(timeoutSeconds, forKey: .timeoutSeconds)
+        try c.encodeIfPresent(detectedCommand, forKey: .detectedCommand)
     }
 }
 

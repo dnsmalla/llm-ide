@@ -498,7 +498,7 @@ final class LoopEngineRunner: ObservableObject {
         // Disabled stages are skipped entirely — not run, not preflighted.
         // Preflighting them anyway would let a disabled stage's missing
         // command or approval block a run it takes no part in.
-        let orderedStages = LoopStage.runOrder(config.stages.filter(\.enabled))
+        let orderedStages = LoopStage.runOrder(config.stages.filter { $0.enabled && $0.kind != .unsupported })
         let disabledCount = config.stages.count - orderedStages.count
         guard !orderedStages.isEmpty else {
             // Two different user errors, two different fixes — "enable one"
@@ -561,7 +561,7 @@ final class LoopEngineRunner: ObservableObject {
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
-            case .regressionSweep:
+            case .regressionSweep, .unsupported:
                 break
             }
         }
@@ -641,6 +641,10 @@ final class LoopEngineRunner: ObservableObject {
                         stage, config: config, gitRoot: runGitRoot,
                         progress: &progress, repairsUsed: &repairsUsed,
                         goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
+                case .unsupported:
+                    // Filtered out of `orderedStages` above; fail closed if one
+                    // ever gets here — an unknown stage kind is never run.
+                    decision = .proceed
                 case .skill where LoopStage.lacksVerifyAfter(stage, in: orderedStages):
                     decision = refuseUnverifiedCodeApply(stage)
                 case .skill where stage.appliesCode && codeAppliedStageIDs.contains(stage.id):

@@ -242,6 +242,7 @@ struct NewLoopWizardView: View {
         case .shellCommand: "New Stage"
         case .regressionSweep: "Regression"
         case .skill: "New Skill Stage"
+        case .unsupported: "Unsupported stage"
         }
         stages.append(LoopStage(name: name, kind: kind,
                                  command: kind == .shellCommand ? "" : nil, order: nextOrder))
@@ -324,6 +325,10 @@ struct NewLoopWizardView: View {
                 .font(.system(size: 11, design: .monospaced))
             case .regressionSweep:
                 Text("Re-runs the fault sweep (known regressions + repo checks) against this project.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+            case .unsupported:
+                Text("Unsupported stage kind — kept as-is in loop.json and never run.")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             }
