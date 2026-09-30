@@ -616,7 +616,11 @@ final class LoopEngineRunner: ObservableObject {
                                         loopId: loopId, loopName: loopName)
                 }
             case .artifactCheck:
-                guard let check = stage.check,
+                // Resolve Output-following rules exactly as the evaluator
+                // will: the shipped Plan/Docs checks carry only
+                // `outputRules`, so the raw spec looks empty; a blanked
+                // Output still resolves to nothing and fails here.
+                guard let check = stage.check?.resolved(against: orderedStages),
                       !(check.requiredPaths.isEmpty && check.lineLimits.isEmpty && check.citationGlobs.isEmpty) else {
                     return await finish(.error("Stage \"\(stage.name)\" has no checks configured"),
                                         config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
