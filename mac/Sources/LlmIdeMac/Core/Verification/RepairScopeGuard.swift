@@ -63,9 +63,14 @@ enum RepairScopeCheck: Equatable {
 ///    `system/loop-runs/`. Editing the fault list is a direct way to make a
 ///    regression sweep pass.
 protocol RepairScopeGuarding: AnyObject {
-    /// Stat + trimmed diff against HEAD limited to `paths` (callers pass only
-    /// paths that are safe to quote). Best-effort: empty on any git failure.
-    func diffSummary(paths: [String], gitRoot: URL, maxChars: Int) async -> RepairDiffSummary
+    /// Snapshots the working tree (tracked + untracked, honouring .gitignore)
+    /// into a git tree object WITHOUT touching the real index; returns its id,
+    /// or `nil` when that is not possible.
+    func snapshotTree(gitRoot: URL) async -> String?
+    /// What changed between two `snapshotTree` ids: every changed path, the
+    /// stat, and the diff limited to paths `isQuotable` accepts. `nil` on failure.
+    func treeDiff(from: String, to: String, gitRoot: URL, maxChars: Int,
+                  isQuotable: (String) -> Bool) async -> RepairDiffSummary?
     /// Opaque token describing the working tree before a repair. The globs
     /// say which already-dirty paths are worth content-hashing: only one that
     /// is protected, or outside a non-empty scope allowlist, can ever produce
@@ -90,15 +95,19 @@ protocol RepairScopeGuarding: AnyObject {
                         gitRoot: URL) async -> String?
 }
 
-/// `git diff --stat` and a trimmed `git diff` of a repair's changed paths.
+/// What a repair changed, tree to tree: all changed paths, `git diff --stat`,
+/// and a trimmed diff of the paths that are safe to quote.
 struct RepairDiffSummary: Equatable {
+    var changedPaths: [String] = []
     var stat: String = ""
     var diff: String = ""
 }
 
 extension RepairScopeGuarding {
-    /// Default: no diff available (a guard that cannot run git).
-    func diffSummary(paths: [String], gitRoot: URL, maxChars: Int) async -> RepairDiffSummary { RepairDiffSummary() }
+    /// Defaults: no tree snapshots (a guard that cannot run git).
+    func snapshotTree(gitRoot: URL) async -> String? { nil }
+    func treeDiff(from: String, to: String, gitRoot: URL, maxChars: Int,
+                  isQuotable: (String) -> Bool) async -> RepairDiffSummary? { nil }
 
     /// Fail-closed default: a guard that cannot restore unlisted paths says
     /// so, which keeps the violation (and the run) blocked.
@@ -420,14 +429,37 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
         return failures.isEmpty ? nil : failures.joined(separator: "; ")
     }
 
-    func diffSummary(paths: [String], gitRoot: URL, maxChars: Int) async -> RepairDiffSummary {
-        guard !paths.isEmpty else { return RepairDiffSummary() }
-        let quoted = Self.shellQuoted(paths)
-        var out = RepairDiffSummary()
-        if case .success(let stat) = await run("git diff HEAD --stat -- \(quoted)", gitRoot: gitRoot) {
-            out.stat = String(stat.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maxChars))
+    func snapshotTree(gitRoot: URL) async -> String? {
+        // A throwaway index in its own temp dir: the user's real index is never
+        // read or written. `read-tree HEAD` seeds it (empty on an unborn branch),
+        // `add -A` then records the working tree, honouring .gitignore.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llmide-idx-\(UUID().uuidString)", isDirectory: true)
+        guard (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) != nil
+        else { return nil }
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let idx = "GIT_INDEX_FILE=" + Self.shellQuoted([dir.appendingPathComponent("index").path])
+        let command = "export \(idx); (git read-tree HEAD 2>/dev/null || git read-tree --empty) "
+            + "&& git add -A && git write-tree"
+        guard case .success(let out) = await run(command, gitRoot: gitRoot) else { return nil }
+        let id = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return id.isEmpty ? nil : id
+    }
+
+    func treeDiff(from: String, to: String, gitRoot: URL, maxChars: Int,
+                  isQuotable: (String) -> Bool) async -> RepairDiffSummary? {
+        guard case .success(let names) = await run(
+            "git -c core.quotepath=off diff --name-only \(from) \(to)", gitRoot: gitRoot) else { return nil }
+        let paths = names.split(whereSeparator: \.isNewline).map(String.init)
+        var out = RepairDiffSummary(changedPaths: paths)
+        guard !paths.isEmpty else { return out }
+        if case .success(let stat) = await run("git -c core.quotepath=off diff --stat \(from) \(to)", gitRoot: gitRoot) {
+            out.stat = stat.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if case .success(let diff) = await run("git diff HEAD -- \(quoted)", gitRoot: gitRoot) {
+        let quotable = paths.filter(isQuotable)
+        if !quotable.isEmpty,
+           case .success(let diff) = await run(
+               "git -c core.quotepath=off diff \(from) \(to) -- \(Self.shellQuoted(quotable))", gitRoot: gitRoot) {
             out.diff = String(diff.prefix(maxChars))
         }
         return out

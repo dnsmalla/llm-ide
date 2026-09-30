@@ -36,6 +36,11 @@ protocol LoopRunJournaling: AnyObject {
 
     /// The full record of a past run, or `nil` when it cannot be read.
     func loadRecord(id: String, startedAt: Date, root: URL) -> LoopRunRecord?
+
+    /// The previous run's last repairs for `stageId` when it ended on the same
+    /// failure set, read off the calling thread.
+    func priorRunLedger(root: URL, loopId: String, excludingRunId: String,
+                        stageId: String, failureSet: String) async -> [LoopLedgerEntry]
 }
 
 extension LoopRunJournaling {
@@ -44,6 +49,20 @@ extension LoopRunJournaling {
     func reconcileInterrupted(root: URL) -> Int { 0 }
     func reconcileOncePerLaunch(root: URL) async -> Int { 0 }
     func loadRecord(id: String, startedAt: Date, root: URL) -> LoopRunRecord? { nil }
+
+    func priorRunLedger(root: URL, loopId: String, excludingRunId: String,
+                        stageId: String, failureSet: String) async -> [LoopLedgerEntry] {
+        await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .utility).async {
+                guard let previous = self.recentRuns(root: root, limit: 10)
+                        .first(where: { $0.loopId == loopId && $0.id != excludingRunId }),
+                      let record = self.loadRecord(id: previous.id, startedAt: previous.startedAt, root: root)
+                else { return cont.resume(returning: []) }
+                cont.resume(returning: LoopAttemptLedger.priorRunEntries(
+                    in: record, stageId: stageId, failureSet: failureSet))
+            }
+        }
+    }
 }
 
 /// File-system journal under `<root>/system/loop-runs/`:

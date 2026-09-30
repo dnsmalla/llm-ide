@@ -96,10 +96,12 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
     /// share the 6k budget: this run's attempts are the fresher evidence.
     private static func ledgerBlock(_ evidence: RepairEvidence?) -> String {
         guard let evidence else { return "" }
-        let own = LoopAttemptLedger.block(evidence.ledger)
-        guard own.count < LoopAttemptLedger.maxBlockChars - 1_000 else { return own }
-        let prior = LoopAttemptLedger.block(evidence.priorRunLedger, priorRun: true)
-        return prior.count + own.count <= LoopAttemptLedger.maxBlockChars ? prior + own : own
+        let total = LoopAttemptLedger.maxBlockChars
+        if evidence.priorRunLedger.isEmpty { return LoopAttemptLedger.block(evidence.ledger) }
+        if evidence.ledger.isEmpty { return LoopAttemptLedger.block(evidence.priorRunLedger, priorRun: true) }
+        let own = LoopAttemptLedger.block(evidence.ledger, budget: total / 2)
+        let prior = LoopAttemptLedger.block(evidence.priorRunLedger, priorRun: true, budget: total - own.count)
+        return prior + own
     }
 
     /// The evidence paragraph, or "" on a first attempt. Built separately so the

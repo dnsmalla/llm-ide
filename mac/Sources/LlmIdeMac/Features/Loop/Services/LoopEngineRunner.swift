@@ -1019,12 +1019,13 @@ final class LoopEngineRunner: ObservableObject {
             stoppedRunning: verdict.notReporting,
             errorExcerpt: verdict.notReporting ? analysis.errorLines : nil,
             ledger: attemptLedgers[stage.id] ?? [],
-            priorRunLedger: used == 0 ? priorRunLedger(stageId: stage.id, failureSet: failureHash) : [])
+            priorRunLedger: used == 0 ? await priorRunLedger(stageId: stage.id, failureSet: failureHash) : [])
 
         // Timed around the guard, not just the agent call: the scope check's
         // two `git status` runs are part of what a repair costs in wall clock,
         // and splitting them out would report a repair as faster than the run
         // actually waited.
+        let treeBefore = await scopeGuard.snapshotTree(gitRoot: gitRoot)
         let repairStartedAt = Date()
         var repairResult: LoopAgentResult?
         let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot,
@@ -1063,7 +1064,7 @@ final class LoopEngineRunner: ObservableObject {
         }
         let ledgerEntry = await makeLedgerEntry(
             n: used + 1, changed: changedForLedger, reply: repairResult?.reply ?? "",
-            failureSet: failureHash, config: config, gitRoot: gitRoot)
+            failureSet: failureHash, config: config, gitRoot: gitRoot, treeBefore: treeBefore)
         attemptLedgers[stage.id, default: []].append(ledgerEntry)
 
         switch guarded {
@@ -1767,20 +1768,32 @@ final class LoopEngineRunner: ObservableObject {
 
     // MARK: - Attempt ledger
 
-    /// Builds the ledger entry for a finished repair: stat + trimmed diff of the
-    /// paths it changed (secret and protected paths are never quoted).
+    /// Builds the ledger entry for a finished repair from a tree-to-tree diff
+    /// (working tree before vs after, via throwaway indexes): it sees re-edits of
+    /// already-dirty files and new untracked files, and never the user's own
+    /// earlier edits. Secret and protected paths are listed but never quoted.
+    /// Falls back to the guard's changed paths (no diff) when git cannot say.
     private func makeLedgerEntry(n: Int, changed: [String], reply: String, failureSet: String,
-                                 config: LoopEngineConfig, gitRoot: URL) async -> LoopLedgerEntry {
-        let quotable = changed.filter { !LoopAttemptLedger.isUnquotable($0, protectedGlobs: config.protectedGlobs) }
-        let summary = await scopeGuard.diffSummary(paths: quotable, gitRoot: gitRoot,
-                                                   maxChars: LoopLedgerEntry.maxDiffChars)
-        return LoopLedgerEntry(n: n, changedPaths: changed, diffStat: summary.stat, diff: summary.diff,
+                                 config: LoopEngineConfig, gitRoot: URL,
+                                 treeBefore: String?) async -> LoopLedgerEntry {
+        var summary: RepairDiffSummary?
+        if let treeBefore, let treeAfter = await scopeGuard.snapshotTree(gitRoot: gitRoot) {
+            summary = await scopeGuard.treeDiff(
+                from: treeBefore, to: treeAfter, gitRoot: gitRoot, maxChars: LoopLedgerEntry.maxDiffChars,
+                isQuotable: { !LoopAttemptLedger.isUnquotable($0, protectedGlobs: config.protectedGlobs) })
+        }
+        return LoopLedgerEntry(n: n, changedPaths: summary?.changedPaths ?? changed,
+                               diffStat: summary?.stat ?? "", diff: summary?.diff ?? "",
                                replySummary: reply, failureSetBefore: failureSet.isEmpty ? nil : failureSet)
     }
 
     /// Records what the stage's next verification said about its last repair,
     /// both in the in-run ledger and on the journalled attempt that carries it.
     private func settleLedger(stageId: String, passed: Bool, failureSet: String) {
+        if attemptLedgers[stageId]?.last?.isSettled == false {
+            emit(LoopRunEvent(kind: LoopRunEvent.Kind.ledgerSettled, iteration: iteration, stageId: stageId,
+                              detail: passed ? "passed" : failureSet))
+        }
         if let i = attemptLedgers[stageId]?.indices.last, attemptLedgers[stageId]![i].isSettled == false {
             if passed { attemptLedgers[stageId]![i].resultingPassed = true }
             else { attemptLedgers[stageId]![i].resultingFailureSet = failureSet }
@@ -1797,15 +1810,11 @@ final class LoopEngineRunner: ObservableObject {
     }
 
     /// The previous run's last repairs for `stageId`, when that run ended on
-    /// this same failure set. Read once per stage per run, at its first repair.
-    private func priorRunLedger(stageId: String, failureSet: String) -> [LoopLedgerEntry] {
-        guard let ctx = currentRunContext, !failureSet.isEmpty,
-              let previous = journal.recentRuns(root: ctx.faultsRoot, limit: 10)
-                  .first(where: { $0.loopId == ctx.loopId && $0.id != ctx.runId }),
-              let record = journal.loadRecord(id: previous.id, startedAt: previous.startedAt,
-                                              root: ctx.faultsRoot)
-        else { return [] }
-        return LoopAttemptLedger.priorRunEntries(in: record, stageId: stageId, failureSet: failureSet)
+    /// this same failure set. Read off the main actor, once per stage per run.
+    private func priorRunLedger(stageId: String, failureSet: String) async -> [LoopLedgerEntry] {
+        guard let ctx = currentRunContext, !failureSet.isEmpty else { return [] }
+        return await journal.priorRunLedger(root: ctx.faultsRoot, loopId: ctx.loopId,
+                                            excludingRunId: ctx.runId, stageId: stageId, failureSet: failureSet)
     }
 
     // MARK: - Journal

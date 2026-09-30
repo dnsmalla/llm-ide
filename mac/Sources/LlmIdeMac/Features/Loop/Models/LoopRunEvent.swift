@@ -19,6 +19,9 @@ struct LoopRunEvent: Codable, Equatable {
         static let repairRequested = "repair_requested"
         static let repairReplied = "repair_replied"
         static let verdict = "verdict"
+        /// A repair's outcome, learned at the stage's next verification: `detail`
+        /// is "passed" or the resulting failure-set hash.
+        static let ledgerSettled = "ledger_settled"
     }
 
     /// Payload of the `started` event — everything a reconstructed record needs.
@@ -70,6 +73,17 @@ struct LoopRunEvent: Codable, Equatable {
                 guard let attempt = event.attempt else { continue }
                 if iterations.isEmpty { iterations.append(LoopIterationRecord(index: event.iteration ?? 1)) }
                 iterations[iterations.count - 1].attempts.append(attempt)
+            case Kind.ledgerSettled:
+                guard let stageId = event.stageId, let detail = event.detail else { continue }
+                outer: for r in iterations.indices.reversed() {
+                    guard let a = iterations[r].attempts.lastIndex(where: { $0.stageId == stageId && $0.ledger != nil })
+                    else { continue }
+                    if iterations[r].attempts[a].ledger?.isSettled == false {
+                        if detail == "passed" { iterations[r].attempts[a].ledger?.resultingPassed = true }
+                        else { iterations[r].attempts[a].ledger?.resultingFailureSet = detail }
+                    }
+                    break outer
+                }
             default:
                 break
             }

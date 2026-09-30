@@ -7,6 +7,8 @@ import Foundation
 struct LoopLedgerEntry: Codable, Equatable {
     static let maxDiffChars = 4_000
     static let maxReplyChars = 1_000
+    static let maxStatChars = 500
+    static let maxPathsListed = 20
 
     /// 1-based repair number for this stage in its run.
     var n: Int
@@ -27,10 +29,12 @@ struct LoopLedgerEntry: Codable, Equatable {
          failureSetBefore: String?, resultingFailureSet: String? = nil, resultingPassed: Bool? = nil) {
         self.n = n
         self.changedPaths = changedPaths
-        self.diffStat = diffStat
-        self.diff = String(diff.prefix(Self.maxDiffChars))
-        self.replySummary = String(replySummary.trimmingCharacters(in: .whitespacesAndNewlines)
-            .prefix(Self.maxReplyChars))
+        // Redacted here, so nothing that reaches the journal, the event log or a
+        // prompt can carry a recognised credential shape.
+        self.diffStat = String(SecretRedactor.redact(diffStat).prefix(Self.maxStatChars))
+        self.diff = String(SecretRedactor.redact(diff).prefix(Self.maxDiffChars))
+        self.replySummary = String(SecretRedactor.redact(replySummary)
+            .trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.maxReplyChars))
         self.failureSetBefore = failureSetBefore
         self.resultingFailureSet = resultingFailureSet
         self.resultingPassed = resultingPassed
@@ -45,54 +49,70 @@ enum LoopAttemptLedger {
     /// The whole ledger block, headings included.
     static let maxBlockChars = 6_000
 
+    private static let secretDirs: Set<String> = [
+        "secrets", ".secrets", "credentials", ".ssh", ".aws", ".gnupg", ".kube"]
+
     /// True for paths whose contents must never be quoted into a prompt or the
-    /// journal: secrets, keys, credentials, and the protected set.
+    /// journal: secrets, keys, credentials, and the protected set. Any path
+    /// COMPONENT naming a secrets directory counts, not just the file name.
     static func isUnquotable(_ path: String, protectedGlobs: [String]) -> Bool {
-        let lower = path.lowercased()
-        let name = (lower as NSString).lastPathComponent
-        if name == ".env" || name.hasPrefix(".env.") || name.hasSuffix(".pem") || name.hasSuffix(".key")
-            || name.hasSuffix(".p12") || name.hasSuffix(".keystore") || name.hasPrefix("id_rsa")
-            || name.hasPrefix("id_ed25519") || name.contains("credential") || name.contains("secret")
+        let parts = path.lowercased().split(separator: "/").map(String.init)
+        if parts.dropLast().contains(where: { secretDirs.contains($0) }) { return true }
+        let name = parts.last ?? ""
+        if name == ".env" || name.hasPrefix(".env.") || name == ".envrc" || name.hasSuffix(".pem")
+            || name.hasSuffix(".key") || name.hasSuffix(".p12") || name.hasSuffix(".keystore")
+            || name.hasSuffix(".tfvars") || name == ".pgpass" || name == "kubeconfig"
+            || (name.hasPrefix("service-account") && name.hasSuffix(".json"))
+            || name.hasPrefix("id_") || name.contains("credential") || name.contains("secret")
             || name == ".npmrc" || name == ".netrc" { return true }
         return protectedGlobs.contains { GlobMatch.matches(path: path, pattern: $0) }
     }
 
     /// The prompt block for `entries` (oldest first), or "" when there are none.
-    /// Bounded to `maxBlockChars`: the diffs shrink first, then the oldest
-    /// attempts drop.
-    static func block(_ entries: [LoopLedgerEntry], priorRun: Bool = false) -> String {
+    /// Bounded to `budget`: the diffs shrink first, then the oldest attempts
+    /// drop — but never the last one, which is cut to fit instead.
+    static func block(_ entries: [LoopLedgerEntry], priorRun: Bool = false,
+                      budget: Int = maxBlockChars) -> String {
         var kept = Array(entries.suffix(maxEntries))
         guard !kept.isEmpty else { return "" }
         let header = priorRun
-            ? "A previous run already tried these fixes for this same failure and they did not work. "
+            ? "A previous run already tried these fixes for this same failure. Those marked as failed did not "
+              + "work. Do something different:"
+            : "These earlier attempts in this run did not work, except any marked as fixed-but-returned. "
               + "Do something different:"
-            : "These earlier attempts in this run did not work. Do something different:"
         for limit in [LoopLedgerEntry.maxDiffChars, 1_500, 500, 0] {
-            while !kept.isEmpty {
+            while true {
                 let text = render(header, kept, diffLimit: limit)
-                if text.count <= maxBlockChars { return text }
-                if limit == 0 { kept.removeFirst() } else { break }
+                if text.count <= budget { return text }
+                if limit == 0, kept.count > 1 { kept.removeFirst() } else { break }
             }
         }
-        return ""
+        return String(render(header, kept, diffLimit: 0).prefix(budget))
     }
 
     private static func render(_ header: String, _ entries: [LoopLedgerEntry], diffLimit: Int) -> String {
         var lines = ["", header]
         for e in entries {
             lines.append("--- attempt \(e.n) ---")
-            lines.append("Files changed: \(e.changedPaths.isEmpty ? "none" : e.changedPaths.joined(separator: ", "))")
+            lines.append("Files changed: " + pathList(e.changedPaths))
             if e.resultingPassed == true {
-                lines.append("Result: the stage passed after it.")
+                lines.append("Result: the stage passed after it (this attempt fixed it, but the failure returned).")
             } else if let after = e.resultingFailureSet {
-                lines.append(after == e.failureSetBefore ? "Result: the same failures remained."
-                                                         : "Result: the failure set changed but it still failed.")
+                lines.append(after == e.failureSetBefore ? "Result: failed — the same failures remained."
+                                                         : "Result: failed — the failure set changed but it still failed.")
             }
-            if !e.diffStat.isEmpty { lines.append(e.diffStat) }
-            if diffLimit > 0, !e.diff.isEmpty { lines.append(String(e.diff.prefix(diffLimit))) }
-            if !e.replySummary.isEmpty { lines.append("You said: \(e.replySummary)") }
+            if !e.diffStat.isEmpty { lines.append(SecretRedactor.redact(e.diffStat)) }
+            if diffLimit > 0, !e.diff.isEmpty { lines.append(String(SecretRedactor.redact(e.diff).prefix(diffLimit))) }
+            if !e.replySummary.isEmpty { lines.append("You said: \(SecretRedactor.redact(e.replySummary))") }
         }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    private static func pathList(_ paths: [String]) -> String {
+        guard !paths.isEmpty else { return "none" }
+        let shown = paths.prefix(LoopLedgerEntry.maxPathsListed).joined(separator: ", ")
+        let more = paths.count - LoopLedgerEntry.maxPathsListed
+        return more > 0 ? shown + " +\(more) more" : shown
     }
 
     /// The entries a prior run's record offers for `stageId` when that run's
@@ -102,6 +122,6 @@ enum LoopAttemptLedger {
                                 failureSet: String) -> [LoopLedgerEntry] {
         let attempts = record.iterations.flatMap(\.attempts).filter { $0.stageId == stageId }
         guard let last = attempts.last, !last.passed, last.outputHash == failureSet else { return [] }
-        return Array(attempts.compactMap(\.ledger).suffix(maxEntries))
+        return Array(attempts.compactMap(\.ledger).filter { $0.failureSetBefore == failureSet }.suffix(maxEntries))
     }
 }
