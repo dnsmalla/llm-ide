@@ -23,6 +23,13 @@ enum LoopWorktreeManager {
     }
 
     private static var activeByMainRepo: [String: Int] = [:]
+    /// Standardised paths of worktrees a live lease owns (created, not yet
+    /// finished) — what `pruneStale` must never touch.
+    private static var liveLeasePaths: Set<String> = []
+
+    private static func key(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
+    }
 
     /// Runs currently executing in a worktree for `mainRepo` (not queued on main).
     static func activeWorktreeRunCount(mainRepo: URL) -> Int {
@@ -59,9 +66,13 @@ enum LoopWorktreeManager {
             throw Error.worktreePathExists
         }
 
+        // Claimed BEFORE git creates it so a concurrent `pruneStale` cannot
+        // mistake the half-made checkout for a leftover.
+        liveLeasePaths.insert(key(path))
         do {
             _ = try await runGit(["worktree", "add", "-b", branch, path.path, "HEAD"], mainRepo)
         } catch {
+            liveLeasePaths.remove(key(path))
             try? FileManager.default.removeItem(at: path)
             throw Error.gitFailed(error.localizedDescription)
         }
@@ -81,6 +92,7 @@ enum LoopWorktreeManager {
     static func finish(_ lease: Lease,
                        runGit: ([String], URL) async throws -> String = defaultRunGit) async {
         decrementActive(mainRepo: lease.mainRepo)
+        liveLeasePaths.remove(key(lease.worktreePath))
         guard FileManager.default.fileExists(atPath: lease.worktreePath.path) else { return }
 
         guard let status = try? await runGit(["status", "--porcelain"], lease.worktreePath),
@@ -93,6 +105,50 @@ enum LoopWorktreeManager {
         _ = try? await runGit(["worktree", "remove", "--force", lease.worktreePath.path],
                                lease.mainRepo)
         _ = try? await runGit(["branch", "-D", lease.branch], lease.mainRepo)
+    }
+
+    /// Run-start hygiene: `git worktree prune`, then remove loop worktree
+    /// directories that no live lease owns (leftovers of a quit or crash, since
+    /// the cleanup in a run's `defer` never runs then). A leftover is removed
+    /// only when it is provably disposable: clean, and its HEAD already
+    /// contained in the main repo's HEAD. A dirty or divergent one is kept —
+    /// deleting a Loop's repairs is worse than a stray checkout. Returns one
+    /// human-readable line per removal or keep, for the run log.
+    @discardableResult
+    static func pruneStale(mainRepo: URL, faultsRoot: URL,
+                           runGit: ([String], URL) async throws -> String = defaultRunGit) async -> [String] {
+        let parent = worktreeParent(mainRepo: mainRepo, faultsRoot: faultsRoot)
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: parent.path) else {
+            return []
+        }
+        var notes: [String] = []
+        _ = try? await runGit(["worktree", "prune"], mainRepo)
+        for name in names.sorted() {
+            let dir = parent.appendingPathComponent(name, isDirectory: true)
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue,
+                  FileManager.default.fileExists(atPath: dir.appendingPathComponent(".git").path),
+                  !liveLeasePaths.contains(key(dir)) else { continue }
+            guard let status = try? await runGit(["status", "--porcelain"], dir),
+                  status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                notes.append("kept leftover worktree \(name) (uncommitted changes or unreadable)")
+                continue
+            }
+            guard let head = try? await runGit(["rev-parse", "HEAD"], dir)
+                    .trimmingCharacters(in: .whitespacesAndNewlines), !head.isEmpty,
+                  (try? await runGit(["merge-base", "--is-ancestor", head, "HEAD"], mainRepo)) != nil else {
+                notes.append("kept leftover worktree \(name) (has commits not in the main checkout)")
+                continue
+            }
+            _ = try? await runGit(["worktree", "remove", "--force", dir.path], mainRepo)
+            _ = try? await runGit(["branch", "-D", "llmide/loop/\(name)"], mainRepo)
+            if FileManager.default.fileExists(atPath: dir.path) {
+                notes.append("could not remove leftover worktree \(name)")
+            } else {
+                notes.append("removed leftover worktree \(name)")
+            }
+        }
+        return notes
     }
 
     /// Keep worktrees outside the checked-out repo. In the common split layout,
@@ -128,6 +184,7 @@ enum LoopWorktreeManager {
 #if DEBUG
     static func _resetForTesting() {
         activeByMainRepo.removeAll()
+        liveLeasePaths.removeAll()
     }
 #endif
 }
