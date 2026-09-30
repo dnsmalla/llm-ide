@@ -35,7 +35,11 @@ final class MobileLoopBridge: MobileFeatureBridge {
     /// True while a run this bridge triggered is in flight. Purely for
     /// reporting — the authority on whether a loop is running is the runner's
     /// process-wide guard, which also covers runs started on the desktop.
-    private var loopStartedHere = false
+    private var startedHereTracker = StartedHereTracker()
+    private var loopStartedHere: Bool {
+        get { startedHereTracker.startedHere }
+        set { newValue ? startedHereTracker.markStarted() : startedHereTracker.reset() }
+    }
 
     init(manager: MobileControlManager, autoCode: AutoCodeUpdateService) {
         self.manager = manager
@@ -53,7 +57,11 @@ final class MobileLoopBridge: MobileFeatureBridge {
     func handle(type: String, data: Data?) -> Bool {
         switch type {
         case MobileProtocol.Tag.loopStatusList:
-            manager?.reply(buildLoopState())
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let state = await self.buildLoopState()
+                self.manager?.reply(state)
+            }
             return true
 
         case MobileProtocol.Tag.loopStart:
@@ -66,41 +74,44 @@ final class MobileLoopBridge: MobileFeatureBridge {
                                             message: "The Mac app can't run a loop right now — its auto-code service isn't wired up."))
                 return true
             }
-            let state = buildLoopState()
-            // Refuse for a concrete reason rather than firing a run that the
-            // Mac would reject a moment later for the same reason.
-            guard state.configured else {
-                manager?.append(.stderr, "loop_start: no project or no saved loop config")
-                manager?.reply(LoopAck(accepted: false,
-                                       message: "No loop is set up for the active project. Create one on the Mac first."))
-                return true
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let state = await self.buildLoopState()
+                // Refuse for a concrete reason rather than firing a run that the
+                // Mac would reject a moment later for the same reason.
+                guard state.configured else {
+                    self.manager?.append(.stderr, "loop_start: no project or no saved loop config")
+                    self.manager?.reply(LoopAck(accepted: false,
+                                           message: "No loop is set up for the active project. Create one on the Mac first."))
+                    return
+                }
+                // When a run is already in flight, queue behind it — the runner's
+                // `LoopRunQueue` waits instead of rejecting concurrent callers.
+                // The PRIMARY loop specifically, not the whole scheduled sweep:
+                // this page shows one loop's stages, log tail and history, and a
+                // project now has several independent loops. Starting the sweep
+                // here would run loops the phone never showed.
+                guard let context = self.manager?.config.flatMap({ cfg in
+                          self.manager?.projectStore.flatMap { WorkspaceRoot.context(config: cfg, projectStore: $0) }
+                      }),
+                      let projectId = self.manager?.projectStore?.activeProject?.bundle.id,
+                      let primary = LoopEngineConfigStore.primaryLoop(
+                          projectRoot: context.projectRoot, projectId: projectId,
+                          gitRoot: context.gitRoot) else {
+                    self.manager?.append(.stderr, "loop_start: no resolvable project loop")
+                    self.manager?.reply(LoopAck(accepted: false,
+                                           message: "No loop is set up for the active project. Create one on the Mac first."))
+                    return
+                }
+                // runSingleLoop is @MainActor-sync and spins its own Task; false
+                // means the scheduler declined (already busy).
+                let started = autoCode.runSingleLoop(loopId: primary.id, trigger: .phone)
+                self.loopStartedHere = started
+                self.manager?.append(started ? .info : .stderr, "loop_start \(started ? "accepted" : "declined by scheduler")")
+                let queuedNote = state.running ? " Queued behind the current run." : ""
+                self.manager?.reply(LoopAck(accepted: started,
+                                       message: started ? "Loop started.\(queuedNote)" : "The Mac declined to start a run right now."))
             }
-            // When a run is already in flight, queue behind it — the runner's
-            // `LoopRunQueue` waits instead of rejecting concurrent callers.
-            // The PRIMARY loop specifically, not the whole scheduled sweep:
-            // this page shows one loop's stages, log tail and history, and a
-            // project now has several independent loops. Starting the sweep
-            // here would run loops the phone never showed.
-            guard let context = manager?.config.flatMap({ cfg in
-                      manager?.projectStore.flatMap { WorkspaceRoot.context(config: cfg, projectStore: $0) }
-                  }),
-                  let projectId = manager?.projectStore?.activeProject?.bundle.id,
-                  let primary = LoopEngineConfigStore.primaryLoop(
-                      projectRoot: context.projectRoot, projectId: projectId,
-                      gitRoot: context.gitRoot) else {
-                manager?.append(.stderr, "loop_start: no resolvable project loop")
-                manager?.reply(LoopAck(accepted: false,
-                                       message: "No loop is set up for the active project. Create one on the Mac first."))
-                return true
-            }
-            // runSingleLoop is @MainActor-sync and spins its own Task; false
-            // means the scheduler declined (already busy).
-            let started = autoCode.runSingleLoop(loopId: primary.id, trigger: .phone)
-            loopStartedHere = started
-            manager?.append(started ? .info : .stderr, "loop_start \(started ? "accepted" : "declined by scheduler")")
-            let queuedNote = state.running ? " Queued behind the current run." : ""
-            manager?.reply(LoopAck(accepted: started,
-                                   message: started ? "Loop started.\(queuedNote)" : "The Mac declined to start a run right now."))
             return true
 
         case MobileProtocol.Tag.loopStartStage:
@@ -116,28 +127,31 @@ final class MobileLoopBridge: MobileFeatureBridge {
                                             message: "The Mac app can't run a loop right now — its auto-code service isn't wired up."))
                 return true
             }
-            let state = buildLoopState()
-            guard state.configured else {
-                manager?.append(.stderr, "loop_start_stage: no project or no saved loop config")
-                manager?.reply(LoopAck(accepted: false,
-                                       message: "No loop is set up for the active project. Create one on the Mac first."))
-                return true
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let state = await self.buildLoopState()
+                guard state.configured else {
+                    self.manager?.append(.stderr, "loop_start_stage: no project or no saved loop config")
+                    self.manager?.reply(LoopAck(accepted: false,
+                                           message: "No loop is set up for the active project. Create one on the Mac first."))
+                    return
+                }
+                guard let stage = state.stages.first(where: { $0.stageId == req.stageId }) else {
+                    self.manager?.append(.stderr, "loop_start_stage: unknown stage id")
+                    self.manager?.reply(LoopAck(accepted: false,
+                                           message: "That stage no longer exists — refresh and try again."))
+                    return
+                }
+                // Queue behind an in-flight run when needed — see `loop_start`.
+                let started = autoCode.runSingleLoopStage(stageId: req.stageId, trigger: .phone)
+                self.loopStartedHere = started
+                self.manager?.append(started ? .info : .stderr,
+                                "loop_start_stage \(started ? "accepted" : "declined by scheduler") — \(stage.name)")
+                let queuedNote = state.running ? " Queued behind the current run." : ""
+                self.manager?.reply(LoopAck(accepted: started,
+                                       message: started ? "Stage \"\(stage.name)\" started.\(queuedNote)"
+                                                        : "The Mac declined to start a run right now."))
             }
-            guard let stage = state.stages.first(where: { $0.stageId == req.stageId }) else {
-                manager?.append(.stderr, "loop_start_stage: unknown stage id")
-                manager?.reply(LoopAck(accepted: false,
-                                       message: "That stage no longer exists — refresh and try again."))
-                return true
-            }
-            // Queue behind an in-flight run when needed — see `loop_start`.
-            let started = autoCode.runSingleLoopStage(stageId: req.stageId, trigger: .phone)
-            loopStartedHere = started
-            manager?.append(started ? .info : .stderr,
-                            "loop_start_stage \(started ? "accepted" : "declined by scheduler") — \(stage.name)")
-            let queuedNote = state.running ? " Queued behind the current run." : ""
-            manager?.reply(LoopAck(accepted: started,
-                                   message: started ? "Stage \"\(stage.name)\" started.\(queuedNote)"
-                                                    : "The Mac declined to start a run right now."))
             return true
 
         case MobileProtocol.Tag.loopStop:
@@ -166,7 +180,11 @@ final class MobileLoopBridge: MobileFeatureBridge {
 
         case MobileProtocol.Tag.loopHistory:
             let limit = (try? manager?.decoder.decode(LoopHistoryRequest.self, from: data ?? Data()))?.limit ?? 15
-            manager?.reply(LoopHistoryReply(runs: loopHistory(limit: min(max(limit, 1), 50))))
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let runs = await self.loopHistory(limit: min(max(limit, 1), 50))
+                self.manager?.reply(LoopHistoryReply(runs: runs))
+            }
             return true
 
         default:
@@ -197,7 +215,7 @@ final class MobileLoopBridge: MobileFeatureBridge {
     /// runner's PROCESS-WIDE guard rather than anything this bridge owns, so a
     /// run started on the desktop or by the scheduler is reported honestly
     /// instead of appearing idle to the phone.
-    private func buildLoopState() -> LoopState {
+    private func buildLoopState() async -> LoopState {
         guard let config = manager?.config, let projectStore = manager?.projectStore,
               let project = projectStore.activeProject,
               let context = WorkspaceRoot.context(config: config, projectStore: projectStore) else {
@@ -206,24 +224,9 @@ final class MobileLoopBridge: MobileFeatureBridge {
                              lastFinishedAt: nil, stages: [], queuedCount: 0)
         }
         let projectId = project.bundle.id
-        let loopConfig = Self.resolveLoopConfig(projectRoot: context.projectRoot,
-                                                projectId: projectId,
-                                                gitRoot: context.gitRoot)
-        // Stage ids from the detector are re-minted on every snapshot (no
-        // saved config) or appended fresh by ensureDefaultStages (saved
-        // config missing a default stage) — either way, an id handed to the
-        // phone here can already be stale by the time a tap's re-check runs.
-        // Only ids that exist in the PERSISTED config are stable enough to
-        // target, so unsaved/detector-appended stages get stageId: nil and
-        // the phone hides ▶ for exactly those, same as it does for old Macs.
-        let savedPrimary = LoopEngineConfigStore.primaryLoop(projectRoot: context.projectRoot,
-                                                             projectId: projectId,
-                                                             gitRoot: context.gitRoot)
-        let savedStageIds = Set(savedPrimary?.config.stages.map(\.id) ?? [])
         let running = context.gitRoot.map { LoopEngineRunner.isRunActive(gitRoot: $0) } ?? false
         let queuedCount = context.gitRoot.map { LoopEngineRunner.queuedRunCount(gitRoot: $0) } ?? 0
-        let recent = loopHistory(limit: 1).first
-
+        startedHereTracker.observe(running: running)
         // `logStore` lives on the auto-code service, not this bridge — Loop
         // runs as the `loopEngineering` Auto Task under the hood, so its live
         // log tail is that task's buffer in the SAME store the Mac Auto Tasks
@@ -231,14 +234,22 @@ final class MobileLoopBridge: MobileFeatureBridge {
         let tail = (autoCode?.logStore.buffers[AutoTask.loopEngineering.rawValue] ?? [])
             .suffix(40)
             .map { "\($0.text)" }
-
+        let startedHere = running && loopStartedHere
+        let projectRoot = context.projectRoot
+        let gitRoot = context.gitRoot
+        // Config load (first-hit detection + file read) and the journal tail
+        // read are disk IO: keep them off the main actor.
+        let (primary, recent) = await Task.detached(priority: .userInitiated) {
+            Self.loadSnapshot(projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot)
+        }.value
+        let loopConfig = primary?.config
         return LoopState(
             configured: loopConfig != nil,
             projectName: project.bundle.displayName,
             running: running,
             // Cleared whenever a run is not in flight, so a stale "started
             // here" can't outlive the run it described.
-            startedHere: running && loopStartedHere,
+            startedHere: startedHere,
             // The runner's live iteration count is instance state on a runner
             // this bridge does not own, so it is not reported as a number the
             // phone could misread as authoritative. The log tail carries the
@@ -247,17 +258,31 @@ final class MobileLoopBridge: MobileFeatureBridge {
             maxIterations: loopConfig?.maxIterations ?? 0,
             logTail: Array(tail),
             lastStatusSummary: recent?.statusSummary,
-            lastFinishedAt: recent.map { $0.startedAt + $0.durationSeconds },
+            lastFinishedAt: recent.map { $0.startedAt.timeIntervalSince1970 + $0.durationSeconds },
+            // Stage ids come from the one (cached) `primaryLoop` read above, so
+            // they are exactly the ids a follow-up `loop_start_stage` resolves.
             stages: (loopConfig?.stages ?? [])
                 .sorted { $0.order < $1.order }
                 .map {
                     LoopStageInfo(name: $0.name, kind: $0.kind.rawValue,
                                   severity: $0.severity.rawValue,
                                   enabled: $0.enabled, order: $0.order,
-                                  stageId: savedStageIds.contains($0.id) ? $0.id : nil)
+                                  stageId: $0.id)
                 },
             queuedCount: queuedCount
         )
+    }
+
+    /// One config load plus one journal tail read, both synchronous disk IO.
+    /// `nonisolated` so it runs off the main actor and is directly testable.
+    nonisolated static func loadSnapshot(projectRoot: URL?, projectId: String,
+                                         gitRoot: URL?) -> (primary: LoopDefinition?, recent: LoopRunIndexEntry?) {
+        let primary = LoopEngineConfigStore.primaryLoop(projectRoot: projectRoot, projectId: projectId,
+                                                        gitRoot: gitRoot)
+        let recent = projectRoot.flatMap {
+            scopedHistory(root: $0, primaryId: primary?.id, limit: 1).first
+        }
+        return (primary, recent)
     }
 
     /// The PRIMARY loop's config as the Mac would actually RUN it — not the raw
@@ -299,24 +324,19 @@ final class MobileLoopBridge: MobileFeatureBridge {
     /// (the design commitment predating multi-loop support), so this must
     /// filter out any other loop's runs the same way `LoopEngineView`'s own
     /// past-runs list does.
-    private func loopHistory(limit: Int) -> [LoopRunSummary] {
+    private func loopHistory(limit: Int) async -> [LoopRunSummary] {
         guard let config = manager?.config, let projectStore = manager?.projectStore,
               let project = projectStore.activeProject,
               let context = WorkspaceRoot.context(config: config, projectStore: projectStore) else { return [] }
-        let primaryId = LoopEngineConfigStore.primaryLoop(projectRoot: context.projectRoot,
-                                                           projectId: project.bundle.id,
-                                                           gitRoot: context.gitRoot)?.id
-        // Read more than the requested limit — a project's journal
-        // interleaves every loop's runs, so filtering down to the Primary
-        // loop AFTER limiting would starve the result. Mirrors
-        // LoopEngineView.loadPastRuns's identical reasoning. The absolute
-        // floor matters for the `limit: 1` call in buildLoopState: a bare
-        // 4-run window is emptied by four consecutive non-Primary runs, and
-        // the phone would then show no last status at all.
-        let candidates = FileLoopRunJournal().recentRuns(root: context.projectRoot,
-                                                         limit: max(limit * 4, 20))
-        let scoped = candidates.filter { $0.loopId == primaryId || $0.loopId == nil }
-        return scoped.prefix(limit).map {
+        let projectId = project.bundle.id
+        let root = context.projectRoot
+        let gitRoot = context.gitRoot
+        let entries = await Task.detached(priority: .userInitiated) { () -> [LoopRunIndexEntry] in
+            let primaryId = LoopEngineConfigStore.primaryLoop(projectRoot: root, projectId: projectId,
+                                                              gitRoot: gitRoot)?.id
+            return Self.scopedHistory(root: root, primaryId: primaryId, limit: limit)
+        }.value
+        return entries.map {
             LoopRunSummary(id: $0.id,
                            startedAt: $0.startedAt.timeIntervalSince1970,
                            durationSeconds: $0.durationSeconds,
@@ -325,5 +345,27 @@ final class MobileLoopBridge: MobileFeatureBridge {
                            statusSummary: $0.statusSummary,
                            trigger: $0.trigger.rawValue)
         }
+    }
+
+    /// Tail-read journal index entries scoped to the Primary loop (or
+    /// pre-multi-loop entries with no loop id).
+    nonisolated static func scopedHistory(root: URL?, primaryId: String?, limit: Int) -> [LoopRunIndexEntry] {
+        guard let root else { return [] }
+        let candidates = FileLoopRunJournal().recentRuns(root: root, limit: max(limit * 4, 20))
+        return Array(candidates.filter { $0.loopId == primaryId || $0.loopId == nil }.prefix(limit))
+    }
+}
+
+/// Tracks whether the run the phone started is still in flight. The flag is
+/// cleared once a run has been observed ending — not merely "not running" —
+/// because a just-queued run is briefly inactive.
+struct StartedHereTracker {
+    private(set) var startedHere = false
+    private var sawRunning = false
+
+    mutating func markStarted() { startedHere = true; sawRunning = false }
+    mutating func reset() { startedHere = false; sawRunning = false }
+    mutating func observe(running: Bool) {
+        if running { sawRunning = true } else if sawRunning { reset() }
     }
 }
