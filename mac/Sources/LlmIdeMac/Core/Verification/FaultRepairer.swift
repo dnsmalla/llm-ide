@@ -14,8 +14,11 @@ protocol FaultRepairer: AnyObject {
     ///
     /// Returns the agent run's result (reply, changed paths, …) so a caller
     /// can keep what the agent said it did.
+    /// - Parameter timeout: Wall-clock budget for the agent run; `nil` = the
+    ///   server's default.
     @discardableResult
-    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL) async throws -> LoopAgentResult
+    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL,
+                timeout: TimeInterval?) async throws -> LoopAgentResult
 }
 
 /// Wraps one fault repair so the caller can check what it changed.
@@ -28,8 +31,15 @@ protocol FaultRepairer: AnyObject {
 /// rejected edit to a test would observe the pass the edit bought). Errors
 /// from the repair propagate. A closure, not a Loop type, because Core must
 /// never import a feature: the Loop's protected-path guard is passed in.
-typealias FaultRepairGuard = @MainActor (_ repoRoot: URL,
-                                         _ repair: () async throws -> Void) async throws -> Bool
+///
+/// The guard calls `repair` with the agent-run timeout it allows (the Loop
+/// bounds it by the stage timeout and the run's remaining time budget) and
+/// gets back the agent's result — its reported changed paths are part of
+/// what the guard checks.
+typealias FaultRepairGuard = @MainActor (
+    _ repoRoot: URL,
+    _ repair: (_ timeout: TimeInterval?) async throws -> LoopAgentResult
+) async throws -> Bool
 
 /// Production adapter — sends a structured repair instruction as a headless,
 /// confined agent run (`LoopAgentRunning` → POST /kb/loop/agent-run) rooted
@@ -48,7 +58,8 @@ final class AgentFaultRepairer: FaultRepairer {
     }
 
     @discardableResult
-    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL) async throws -> LoopAgentResult {
+    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL,
+                timeout: TimeInterval?) async throws -> LoopAgentResult {
         let prompt = """
         A previously-fixed fault has regressed. Fix it in the codebase at \(repoRoot.path).
 
@@ -64,6 +75,6 @@ final class AgentFaultRepairer: FaultRepairer {
         Edit the code so the verify command passes again. Make the minimal
         change required. Do not modify the verify command itself.
         """
-        return try await agent.run(message: prompt, skills: [], repoRoot: repoRoot, timeout: nil)
+        return try await agent.run(message: prompt, skills: [], repoRoot: repoRoot, timeout: timeout)
     }
 }

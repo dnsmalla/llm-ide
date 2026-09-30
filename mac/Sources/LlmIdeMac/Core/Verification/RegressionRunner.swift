@@ -264,8 +264,9 @@ final class RegressionRunner: ObservableObject {
             appendLog(.info, "  → repairing…")
             let fault = try store.loadFault(at: url)
             if let repairGuard {
-                let kept = try await repairGuard(repoRoot) {
-                    try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot)
+                let kept = try await repairGuard(repoRoot) { timeout in
+                    try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot,
+                                              timeout: timeout)
                 }
                 guard kept else {
                     results[idx].verdict = .repairFailed("repair rejected: it touched a protected or out-of-scope path")
@@ -273,7 +274,8 @@ final class RegressionRunner: ObservableObject {
                     return
                 }
             } else {
-                try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot)
+                try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot,
+                                          timeout: nil)
             }
             let second = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeout)
             if second.exitCode == 0 {

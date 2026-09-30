@@ -717,7 +717,9 @@ final class LoopEngineRunner: ObservableObject {
             guard let self else { return false }
             let guarded = await self.withScopeGuard(stage: stage, config: config, gitRoot: repoRoot,
                                                     scopeGlobs: scopeGlobs) {
-                try await self.withTransportRetry(stage: stage) { try await repair() }
+                _ = try await self.withTransportRetry(stage: stage) {
+                    try await repair(self.agentTimeout(for: stage))
+                }
             }
             switch guarded {
             case .failed(let error, let verdict, let violations, let changed):
@@ -951,7 +953,7 @@ final class LoopEngineRunner: ObservableObject {
             repairResult = try await self.withTransportRetry(stage: stage) {
                 try await self.stageRepairer.repair(
                     stageName: stage.name, command: command, failureOutput: failureOutput,
-                    evidence: evidence, repoRoot: gitRoot)
+                    evidence: evidence, repoRoot: gitRoot, timeout: self.agentTimeout(for: stage))
             }
         }
         let repairDuration = Date().timeIntervalSince(repairStartedAt)
@@ -1045,6 +1047,28 @@ final class LoopEngineRunner: ObservableObject {
         return [llmDoc]
     }
 
+    /// The budget for one agent call on `stage`: the smaller of the stage's
+    /// timeout (its own `timeoutSeconds`, else the runner's fallback when set)
+    /// and what is left of the run's wall-clock budget; nil when neither
+    /// exists (the server's default then applies). Evaluated at call time, so
+    /// a late repair gets only the time the run still has.
+    func agentTimeout(for stage: LoopStage, now: Date = Date()) -> TimeInterval? {
+        let stageLimit = stage.timeoutSeconds.map(TimeInterval.init)
+            ?? (stageTimeout > 0 ? stageTimeout : nil)
+        var remaining: TimeInterval?
+        if let budget = runWallClockBudget, let started = runStartedAt {
+            // Never 0 or negative: the server rejects that; an overrun run
+            // gets a minimal slot and the budget check ends it after.
+            remaining = max(1, budget - workingElapsed(since: started, asOf: now))
+        }
+        switch (stageLimit, remaining) {
+        case let (limit?, left?): return min(limit, left)
+        case let (limit?, nil): return limit
+        case let (nil, left?): return left
+        case (nil, nil): return nil
+        }
+    }
+
     /// Why a skill stage whose agent run returned must still FAIL, or nil:
     ///   - the run ended with a result subtype other than "success"
     ///     (`error_max_turns`, `error_during_execution`, …);
@@ -1120,7 +1144,7 @@ final class LoopEngineRunner: ObservableObject {
             agentResult = try await self.withTransportRetry(stage: stage) {
                 try await self.skillExecutor.execute(
                     skillId: skillId, targetPath: stage.targetPath, message: message,
-                    repoRoot: gitRoot, extraRoots: extraRoots)
+                    repoRoot: gitRoot, extraRoots: extraRoots, timeout: self.agentTimeout(for: stage))
             }
         }
         let duration = Date().timeIntervalSince(startedAt)

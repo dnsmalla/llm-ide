@@ -44,9 +44,12 @@ protocol LoopStageRepairer: AnyObject {
     /// - Parameter repoRoot: The git root the run uses — the worktree when the
     ///   run was redirected into one. The agent is confined to it.
     /// - Returns: The agent run's result; the reply is kept for later attempts.
+    /// - Parameter timeout: Wall-clock budget for the agent run; `nil` = the
+    ///   server's default.
     @discardableResult
     func repair(stageName: String, command: String?, failureOutput: String,
-                evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult
+                evidence: RepairEvidence?, repoRoot: URL,
+                timeout: TimeInterval?) async throws -> LoopAgentResult
 }
 
 /// Production adapter — a headless, confined agent run (`LoopAgentRunning` →
@@ -121,10 +124,11 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
 
     @discardableResult
     func repair(stageName: String, command: String?, failureOutput: String,
-                evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
+                evidence: RepairEvidence?, repoRoot: URL,
+                timeout: TimeInterval?) async throws -> LoopAgentResult {
         let prompt = Self.buildPrompt(stageName: stageName, command: command,
                                        failureOutput: failureOutput, repoRoot: repoRoot,
                                        evidence: evidence)
-        return try await agent.run(message: prompt, skills: [], repoRoot: repoRoot, timeout: nil)
+        return try await agent.run(message: prompt, skills: [], repoRoot: repoRoot, timeout: timeout)
     }
 }

@@ -13,8 +13,10 @@ protocol LoopSkillExecuting: AnyObject {
     ///   `extraRoots`).
     /// - Parameter extraRoots: The project's `llm-doc/` when it lies outside
     ///   `repoRoot` (split layout), so plan/doc skills can reach it.
+    /// - Parameter timeout: Wall-clock budget for the agent run; `nil` = the
+    ///   server's default.
     func execute(skillId: String, targetPath: String?, message: String,
-                 repoRoot: URL, extraRoots: [URL]) async throws -> LoopAgentResult
+                 repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult
 }
 
 /// Production adapter. Mirrors `AgentLoopStageRepairer`: one confined agent
@@ -33,8 +35,8 @@ final class AgentLoopSkillExecutor: LoopSkillExecuting {
     }
 
     func execute(skillId: String, targetPath: String?, message: String,
-                 repoRoot: URL, extraRoots: [URL]) async throws -> LoopAgentResult {
+                 repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult {
         try await agent.run(message: message, skills: skillId.isEmpty ? [] : [skillId],
-                            repoRoot: repoRoot, extraRoots: extraRoots, timeout: nil)
+                            repoRoot: repoRoot, extraRoots: extraRoots, timeout: timeout)
     }
 }

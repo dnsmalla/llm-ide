@@ -141,7 +141,8 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
 
     private final class CountingRepairer: FaultRepairer {
         var calls = 0
-        func repair(fault: FaultReport, failureOutput: String, repoRoot: URL) async throws -> LoopAgentResult {
+        func repair(fault: FaultReport, failureOutput: String, repoRoot: URL,
+                    timeout: TimeInterval?) async throws -> LoopAgentResult {
             calls += 1
             return LoopAgentResult()
         }
@@ -172,7 +173,7 @@ final class RegressionRunnerSweepAdapterTests: XCTestCase {
             faultsRoot: tempDir, gitRoot: tempDir, attemptRepair: true,
             repairGuard: { _, repair in
                 guardCalls += 1
-                try await repair()
+                _ = try await repair(nil)
                 return keep
             })
         return (outcome, verifier, repairer, guardCalls)

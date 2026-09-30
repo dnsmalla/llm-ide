@@ -105,8 +105,9 @@ final class LoopAgentRunningTests: XCTestCase {
         let agent = RecordingLoopAgent()
         let root = URL(fileURLWithPath: "/tmp/wt-\(UUID().uuidString)")
         let result = try await AgentLoopSkillExecutor(agent: agent)
-            .execute(skillId: "fam/dir", targetPath: "src", message: "go", repoRoot: root, extraRoots: [])
-        XCTAssertEqual(agent.calls, [.init(message: "go", skills: ["fam/dir"], repoRoot: root, timeout: nil)])
+            .execute(skillId: "fam/dir", targetPath: "src", message: "go", repoRoot: root, extraRoots: [],
+                     timeout: 120)
+        XCTAssertEqual(agent.calls, [.init(message: "go", skills: ["fam/dir"], repoRoot: root, timeout: 120)])
         XCTAssertEqual(result.reply, "done")
     }
 
@@ -115,9 +116,10 @@ final class LoopAgentRunningTests: XCTestCase {
         let root = URL(fileURLWithPath: "/tmp/wt-\(UUID().uuidString)")
         let result = try await AgentLoopStageRepairer(agent: agent).repair(
             stageName: "Test", command: "swift test", failureOutput: "boom",
-            evidence: nil, repoRoot: root)
+            evidence: nil, repoRoot: root, timeout: 90)
         XCTAssertEqual(agent.calls.count, 1)
         XCTAssertEqual(agent.calls.first?.repoRoot, root)
+        XCTAssertEqual(agent.calls.first?.timeout, 90, "the budget reaches the request")
         XCTAssertEqual(agent.calls.first?.skills, [])
         XCTAssertTrue(agent.calls.first?.message.contains("boom") == true)
         XCTAssertEqual(result.reply, "done")
@@ -130,8 +132,9 @@ final class LoopAgentRunningTests: XCTestCase {
                                 severity: .info, reportedAt: Date(), appVersion: "test",
                                 agent: "claude_code", status: .fixed, tags: [])
         let result = try await AgentFaultRepairer(agent: agent)
-            .repair(fault: fault, failureOutput: "still failing", repoRoot: root)
+            .repair(fault: fault, failureOutput: "still failing", repoRoot: root, timeout: 45)
         XCTAssertEqual(agent.calls.count, 1)
+        XCTAssertEqual(agent.calls.first?.timeout, 45)
         XCTAssertEqual(agent.calls.first?.repoRoot, root)
         XCTAssertTrue(agent.calls.first?.message.contains("the prompt") == true)
         XCTAssertEqual(result.reply, "done")

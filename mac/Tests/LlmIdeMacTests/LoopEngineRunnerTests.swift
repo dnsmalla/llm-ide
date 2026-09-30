@@ -34,7 +34,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         /// acceptance context was prepended) rather than just the call count.
         private(set) var receivedFailureOutputs: [String] = []
         func repair(stageName: String, command: String?, failureOutput: String,
-                    evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
+                    evidence: RepairEvidence?, repoRoot: URL, timeout: TimeInterval?) async throws -> LoopAgentResult {
             repairCount += 1
             self.evidence.append(evidence)
             receivedFailureOutputs.append(failureOutput)
@@ -55,7 +55,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         /// context was prepended) rather than just the call count.
         private(set) var receivedMessages: [String] = []
         func execute(skillId: String, targetPath: String?, message: String,
-                     repoRoot: URL, extraRoots: [URL]) async throws -> LoopAgentResult {
+                     repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult {
             callCount += 1
             receivedMessages.append(message)
             if !queuedErrors.isEmpty { throw queuedErrors.removeFirst() }
@@ -89,7 +89,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let release = Signal()
         private(set) var repairCount = 0
         func repair(stageName: String, command: String?, failureOutput: String,
-                    evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
+                    evidence: RepairEvidence?, repoRoot: URL, timeout: TimeInterval?) async throws -> LoopAgentResult {
             repairCount += 1
             await started.fire()
             await release.wait()
@@ -143,7 +143,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let error: Error
         init(error: Error) { self.error = error }
         func repair(stageName: String, command: String?, failureOutput: String,
-                    evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
+                    evidence: RepairEvidence?, repoRoot: URL, timeout: TimeInterval?) async throws -> LoopAgentResult {
             throw error
         }
     }
@@ -2650,7 +2650,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         final class FlakyRepairer: LoopStageRepairer {
             var calls = 0
             func repair(stageName: String, command: String?, failureOutput: String,
-                        evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
+                        evidence: RepairEvidence?, repoRoot: URL, timeout: TimeInterval?) async throws -> LoopAgentResult {
                 calls += 1
                 throw APIError.http(status: 502, code: "INTERNAL_ERROR", message: "x", details: nil)
             }
@@ -2674,7 +2674,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         final class FlakyRepairer: LoopStageRepairer {
             var calls = 0
             func repair(stageName: String, command: String?, failureOutput: String,
-                        evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
+                        evidence: RepairEvidence?, repoRoot: URL, timeout: TimeInterval?) async throws -> LoopAgentResult {
                 calls += 1
                 if calls == 1 { throw APIError.network(NSError(domain: NSPOSIXErrorDomain, code: Int(ECONNREFUSED))) }
                 return LoopAgentResult()
@@ -2808,7 +2808,7 @@ final class LoopEngineRunnerTests: XCTestCase {
     /// a failing fault) and records whether the guard kept it.
     private final class ScriptedRegressionSweep: RegressionSweepRunning {
         let outcome: SweepOutcome
-        var repairWith: (() async throws -> Void)?
+        var repairWith: ((TimeInterval?) async throws -> LoopAgentResult)?
         private(set) var guardVerdicts: [Bool] = []
         private(set) var receivedGuard = false
         init(_ outcome: SweepOutcome) { self.outcome = outcome }
@@ -2870,7 +2870,7 @@ final class LoopEngineRunnerTests: XCTestCase {
     /// the sweep itself reported a pass.
     func testSweepRepairThatTouchesAProtectedPathIsRejectedAndBlocks() async {
         let sweep = ScriptedRegressionSweep(outcome(total: 1, repaired: 1))
-        sweep.repairWith = {}
+        sweep.repairWith = { _ in LoopAgentResult() }
         let scopeGuard = violatingGuard("tests/test_fault.py")
         let runner = makeRunner(
             verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
@@ -2886,7 +2886,7 @@ final class LoopEngineRunnerTests: XCTestCase {
 
     func testSweepRepairUnderWarnPolicyIsKept() async {
         let sweep = ScriptedRegressionSweep(outcome(total: 1, repaired: 1))
-        sweep.repairWith = {}
+        sweep.repairWith = { _ in LoopAgentResult() }
         let scopeGuard = violatingGuard("tests/test_fault.py")
         let runner = makeRunner(
             verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },

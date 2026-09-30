@@ -27,9 +27,11 @@ final class LoopPhase1FixTests: XCTestCase {
     final class Repairer: LoopStageRepairer {
         var body: () async throws -> LoopAgentResult = { LoopAgentResult() }
         private(set) var calls = 0
+        private(set) var timeouts: [TimeInterval?] = []
         func repair(stageName: String, command: String?, failureOutput: String,
-                    evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
+                    evidence: RepairEvidence?, repoRoot: URL, timeout: TimeInterval?) async throws -> LoopAgentResult {
             calls += 1
+            timeouts.append(timeout)
             return try await body()
         }
     }
@@ -38,9 +40,11 @@ final class LoopPhase1FixTests: XCTestCase {
         var result = LoopAgentResult()
         private(set) var calls = 0
         private(set) var extraRoots: [[URL]] = []
+        private(set) var timeouts: [TimeInterval?] = []
         func execute(skillId: String, targetPath: String?, message: String,
-                     repoRoot: URL, extraRoots: [URL]) async throws -> LoopAgentResult {
+                     repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult {
             calls += 1
+            timeouts.append(timeout)
             self.extraRoots.append(extraRoots)
             return result
         }
@@ -102,9 +106,10 @@ final class LoopPhase1FixTests: XCTestCase {
                         skills: LoopSkillExecuting = SkillExecutor(),
                         approvals: VerifyApprovalStore,
                         journal: Journal = Journal(),
+                        stageTimeout: TimeInterval = 600,
                         scopeGuard: RepairScopeGuarding) -> LoopEngineRunner {
         LoopEngineRunner(verifier: verifier, stageRepairer: repairer, regressionSweep: Sweep(),
-                         skillExecutor: skills, approvals: approvals, stageTimeout: 600,
+                         skillExecutor: skills, approvals: approvals, stageTimeout: stageTimeout,
                          journal: journal, summaryWriter: Summary(), scopeGuard: scopeGuard,
                          transportRetryDelay: 0)
     }
@@ -266,5 +271,47 @@ final class LoopPhase1FixTests: XCTestCase {
         XCTAssertEqual(repairAttempt?.repairAttempted, true)
         XCTAssertEqual(repairAttempt?.agentNote,
                        "agent run ended error_max_turns; 1 tool call(s) refused, first: Bash is not available")
+    }
+
+    // MARK: - P9: agent calls are bounded by the stage timeout and the budget
+
+    func testRepairTimeoutIsTheStageTimeoutWhenNoBudget() async {
+        var runs = 0
+        let repairer = Repairer()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "swift test", order: 0,
+                      timeoutSeconds: 50)
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs == 1 ? 1 : 0, output: "x") },
+                       repairer: repairer, approvals: approvals([("t", "swift test")]),
+                       scopeGuard: CancellationSensitiveGuard(violation: []))
+        _ = await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(repairer.timeouts, [50])
+    }
+
+    func testRepairTimeoutIsCappedByTheRemainingBudget() async {
+        var runs = 0
+        let repairer = Repairer()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "swift test", order: 0,
+                      timeoutSeconds: 5_000)
+        ], maxIterations: 3, consecutiveFailureStop: 3, wallClockBudgetSeconds: 30)
+        let r = runner(verifier: Verifier { _ in runs += 1; return VerifyOutcome(exitCode: runs == 1 ? 1 : 0, output: "x") },
+                       repairer: repairer, approvals: approvals([("t", "swift test")]),
+                       scopeGuard: CancellationSensitiveGuard(violation: []))
+        _ = await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        let timeout = try? XCTUnwrap(repairer.timeouts.first ?? nil)
+        XCTAssertNotNil(timeout)
+        XCTAssertLessThanOrEqual(timeout ?? .infinity, 30)
+        XCTAssertGreaterThan(timeout ?? 0, 25)
+    }
+
+    func testSkillTimeoutIsNilWithNeitherStageTimeoutNorBudget() async {
+        let skills = SkillExecutor()
+        let r = runner(skills: skills, approvals: approvals([]), stageTimeout: 0,
+                       scopeGuard: CancellationSensitiveGuard(violation: []))
+        _ = await r.run(config: skillConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(skills.timeouts.count, 1)
+        XCTAssertNil(skills.timeouts.first ?? nil, "nil → the server's default budget")
     }
 }
