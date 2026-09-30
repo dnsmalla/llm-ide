@@ -34,6 +34,8 @@ struct LoopEngineHomeView: View {
     @State private var skillCatalog: [LlmIdeAPIClient.SkillLibraryEntry] = []
     @StateObject private var templateStore = LoopTemplateStore()
     @State private var loopPendingDelete: LoopDefinition?
+    /// Set when `loop.json` was quarantined, unreadable, or from a newer build.
+    @State private var storeNotice: LoopStoreNotice?
 
     private var activeProjectId: String? { projectStore.activeProject?.bundle.id }
     private var workspaceContext: WorkspaceRoot.Context? {
@@ -59,6 +61,19 @@ struct LoopEngineHomeView: View {
                 emptyState
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let storeNotice {
+                Text(storeNotice.message)
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(theme.current.danger.opacity(0.12))
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: LoopStoreNotices.didChange)) { _ in
+            refreshStoreNotice()
         }
         .background(theme.current.body)
         .navigationTitle("Loop")
@@ -230,10 +245,18 @@ struct LoopEngineHomeView: View {
                                                 projectId: projectId,
                                                 gitRoot: workspaceContext?.gitRoot)
         loops = store.loops
+        refreshStoreNotice()
         if selectedLoopId == nil || !loops.contains(where: { $0.id == selectedLoopId }) {
             selectedLoopId = loops.first(where: \.isPrimary)?.id ?? loops.first?.id
         }
         Task { await loadSkillsIfNeeded() }
+    }
+
+    private func refreshStoreNotice() {
+        storeNotice = workspaceContext.flatMap {
+            LoopStoreNotices.shared.notice(
+                forFile: LoopEngineConfigStore.fileURL(projectRoot: $0.projectRoot))
+        }
     }
 
     private func loadSkillsIfNeeded() async {

@@ -336,7 +336,8 @@ final class LoopDefaultLoopsTests: XCTestCase {
         let suite = "loop-default-loops-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        _ = LoopEngineConfigStore.normalizeScheduleOptIn(&store, projectId: "p1", defaults: defaults)
+        store.schemaVersion = 1
+        _ = LoopEngineConfigStore.normalizeScheduleOptIn(&store)
         XCTAssertFalse(store.loop(defaultKey: LoopDefaultLoopKey.refactor)?.runsOnSchedule ?? true)
     }
 
