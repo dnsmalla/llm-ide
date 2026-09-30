@@ -115,6 +115,16 @@ struct NewLoopWizardView: View {
     private var templateList: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionLabel("TEMPLATE").padding(.horizontal, Spacing.lg).padding(.top, Spacing.md)
+            if templateStore.storedDataUndecodable {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LoopTemplateStore.SaveError.storedDataUndecodable.errorDescription ?? "")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.danger)
+                    Button("Reset custom templates") { templateStore.resetCustomTemplates() }
+                        .buttonStyle(.borderless)
+                }
+                .padding(.horizontal, Spacing.lg)
+            }
             List(selection: $selectedTemplateId) {
                 Section("Built-in") {
                     ForEach(LoopTemplate.builtIns) { template in
@@ -375,8 +385,10 @@ struct NewLoopWizardView: View {
     /// next one, unlike the ones applied via `create()` alone.
     private func saveAsTemplate() {
         guard !stages.isEmpty else { return }
-        let saved = templateStore.save(
-            name: newTemplateName, summary: newTemplateSummary, config: configuredConfig())
+        guard let saved = try? templateStore.save(
+            name: newTemplateName, summary: newTemplateSummary, config: configuredConfig()) else {
+            return  // the banner above the templates explains why, with a reset action
+        }
         selectedTemplateId = saved.id
         newTemplateName = ""
         newTemplateSummary = ""

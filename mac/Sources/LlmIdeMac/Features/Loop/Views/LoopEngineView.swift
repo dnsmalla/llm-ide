@@ -127,6 +127,8 @@ struct LoopEngineView: View {
     /// App-wide template library (built-in starters + the user's saved recipes).
     /// A `@StateObject` so the picker updates the moment one is saved or deleted.
     @StateObject var templateStore = LoopTemplateStore()
+    /// Why the last "save as template" failed, if it did.
+    @State var templateSaveError: String?
     @State var selectedTemplateId: UUID?
     /// Set by `applySelectedTemplate()` when the applied template's stages were
     /// all `detectedTestCommand` placeholders and none resolved — so an empty
@@ -1795,8 +1797,12 @@ struct LoopEngineView: View {
     }
 
     func saveCurrentAsTemplate() {
-        let saved = templateStore.save(
-            name: newTemplateName, summary: newTemplateSummary, config: currentConfig)
+        guard let saved = try? templateStore.save(
+            name: newTemplateName, summary: newTemplateSummary, config: currentConfig) else {
+            templateSaveError = LoopTemplateStore.SaveError.storedDataUndecodable.errorDescription
+            return
+        }
+        templateSaveError = nil
         selectedTemplateId = saved.id
         newTemplateName = ""
         newTemplateSummary = ""

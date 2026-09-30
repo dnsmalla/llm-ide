@@ -296,6 +296,15 @@ extension LoopEngineView {
         } message: {
             Text("Saves the current stages and budgets as a reusable recipe, available in every project.")
         }
+        .alert("Couldn't save template", isPresented: Binding(
+            get: { templateSaveError != nil },
+            set: { if !$0 { templateSaveError = nil } }
+        )) {
+            Button("Reset custom templates", role: .destructive) { templateStore.resetCustomTemplates() }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(templateSaveError ?? "")
+        }
     }
 
     // MARK: - Settings

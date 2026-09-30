@@ -175,7 +175,9 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         defaultKey = try container.decodeIfPresent(String.self, forKey: .defaultKey)
-        severity = try container.decodeIfPresent(LoopStageSeverity.self, forKey: .severity) ?? .blocking
+        // Lenient: an unknown severity from a newer build reads as the safe,
+        // gating default rather than failing the whole file's decode.
+        severity = (try? container.decodeIfPresent(LoopStageSeverity.self, forKey: .severity)) ?? .blocking
         timeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds)
         detectedCommand = try container.decodeIfPresent(String.self, forKey: .detectedCommand)
     }

@@ -154,7 +154,7 @@ final class LoopStoreVersioningTests: XCTestCase {
         d.set(junk, forKey: "loopTemplateStore")
         let store = LoopTemplateStore(defaults: d)
         XCTAssertTrue(store.storedDataUndecodable)
-        store.save(name: "Mine", summary: "", config: LoopEngineConfig(stages: []))
+        _ = try? store.save(name: "Mine", summary: "", config: LoopEngineConfig(stages: []))
         XCTAssertEqual(d.data(forKey: "loopTemplateStore"), junk)
         XCTAssertEqual(d.data(forKey: LoopTemplateStore.undecodableBackupKey), junk)
     }
@@ -170,5 +170,71 @@ final class LoopStoreVersioningTests: XCTestCase {
         XCTAssertEqual(a, ids())
         XCTAssertTrue(a.contains("default-regression"))
         XCTAssertTrue(a.contains("regression/regression"))
+    }
+
+    func testNewerFileThatNoLongerDecodesIsLeftByteIdentical() throws {
+        let reshaped = """
+        {"schemaVersion":3,"loops":[{"id":"L1","name":"Main","config":"reshaped"}],"extra":{"a":[1,2]}}
+        """
+        try writeRaw(reshaped)
+        let before = try Data(contentsOf: fileURL)
+        XCTAssertNil(LoopEngineConfigStore.load(projectRoot: projectRoot, projectId: projectId,
+                                                defaults: freshDefaults()))
+        let ensured = LoopEngineConfigStore.loops(projectRoot: projectRoot, projectId: projectId, gitRoot: repo)
+        LoopEngineConfigStore.save(ensured, projectRoot: projectRoot, projectId: projectId)
+        XCTAssertEqual(try Data(contentsOf: fileURL), before)
+        let siblings = try FileManager.default.contentsOfDirectory(atPath: fileURL.deletingLastPathComponent().path)
+        XCTAssertFalse(siblings.contains { $0.contains("corrupt") })
+        XCTAssertEqual(LoopStoreNotices.shared.notice(forFile: fileURL), .newerVersion(3))
+    }
+
+    func testNewerFileWithUnknownSeverityIsNotTouched() throws {
+        try writeRaw(v1Json().replacingOccurrences(of: "\"order\":0}", with: "\"order\":0,\"severity\":\"fatal\"}")
+            .replacingOccurrences(of: "{\"loops\"", with: "{\"schemaVersion\":3,\"loops\""))
+        let before = try Data(contentsOf: fileURL)
+        _ = LoopEngineConfigStore.loops(projectRoot: projectRoot, projectId: projectId, gitRoot: repo)
+        XCTAssertEqual(try Data(contentsOf: fileURL), before)
+    }
+
+    func testUnknownSeverityDecodesAsBlocking() throws {
+        let data = Data("{\"id\":\"s\",\"name\":\"n\",\"kind\":\"shellCommand\",\"order\":0,\"severity\":\"fatal\"}".utf8)
+        XCTAssertEqual(try JSONDecoder().decode(LoopStage.self, from: data).severity, .blocking)
+    }
+
+    func testLegacyMachineFlagMakesV1FileKeepItsOptIn() throws {
+        let d = freshDefaults()
+        d.set(true, forKey: "loopScheduleOptInMigrated.\(projectId)")
+        try writeRaw(v1Json())
+        let store = LoopEngineConfigStore.loops(projectRoot: projectRoot, projectId: projectId,
+                                                gitRoot: nil, defaults: d)
+        XCTAssertTrue(store.loops[0].runsOnSchedule)
+        XCTAssertEqual(store.schemaVersion, 2)
+        // Without the hint the same file is normalised.
+        try writeRaw(v1Json())
+        let other = LoopEngineConfigStore.loops(projectRoot: projectRoot, projectId: projectId,
+                                                gitRoot: nil, defaults: freshDefaults())
+        XCTAssertFalse(other.loops[0].runsOnSchedule)
+    }
+
+    func testNoticesClearAfterACleanLoad() throws {
+        try writeRaw("{ not json")
+        _ = LoopEngineConfigStore.load(projectRoot: projectRoot, projectId: projectId, defaults: freshDefaults())
+        XCTAssertNotNil(LoopStoreNotices.shared.notice(forFile: fileURL))
+        try writeRaw(v1Json())
+        _ = LoopEngineConfigStore.load(projectRoot: projectRoot, projectId: projectId, defaults: freshDefaults())
+        XCTAssertNil(LoopStoreNotices.shared.notice(forFile: fileURL))
+    }
+
+    func testTemplateSaveThrowsWhileUndecodableAndResetRestoresIt() throws {
+        let d = freshDefaults()
+        let junk = Data("not json".utf8)
+        d.set(junk, forKey: "loopTemplateStore")
+        let store = LoopTemplateStore(defaults: d)
+        XCTAssertThrowsError(try store.save(name: "Mine", summary: "", config: LoopEngineConfig(stages: [])))
+        XCTAssertTrue(store.customTemplates.isEmpty)
+        store.resetCustomTemplates()
+        XCTAssertFalse(store.storedDataUndecodable)
+        XCTAssertEqual(d.data(forKey: LoopTemplateStore.undecodableBackupKey), junk)
+        XCTAssertNoThrow(try store.save(name: "Mine", summary: "", config: LoopEngineConfig(stages: [])))
     }
 }

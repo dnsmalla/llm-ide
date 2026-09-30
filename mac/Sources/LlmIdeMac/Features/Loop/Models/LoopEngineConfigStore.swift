@@ -75,10 +75,23 @@ enum LoopEngineConfigStore {
             let version = fileSchemaVersion(data) ?? 1
             let decoder = JSONDecoder()
             decoder.userInfo[LoopDefinition.fileSchemaVersionKey] = version
-            if let store = try? decoder.decode(LoopEngineProjectStore.self, from: data) {
-                if store.schemaVersion > LoopEngineProjectStore.currentSchemaVersion {
-                    LoopStoreNotices.shared.post(.newerVersion(store.schemaVersion), forFile: url)
+            let decoded = try? decoder.decode(LoopEngineProjectStore.self, from: data)
+            if version > LoopEngineProjectStore.currentSchemaVersion {
+                // A newer build's file is read-only here — even when its shape
+                // no longer decodes, it is NOT corrupt: never quarantine it,
+                // and `write` refuses to put defaults over it.
+                LoopStoreNotices.shared.post(.newerVersion(version), forFile: url)
+                return decoded
+            }
+            if var store = decoded {
+                // The pre-file, per-machine opt-in flag is a read-only hint:
+                // a machine that already normalised this project keeps the
+                // user's later opt-ins when the file is stamped v2.
+                if store.schemaVersion < LoopEngineProjectStore.scheduleOptInSchemaVersion,
+                   defaults.bool(forKey: "loopScheduleOptInMigrated.\(projectId)") {
+                    store.schemaVersion = LoopEngineProjectStore.currentSchemaVersion
                 }
+                LoopStoreNotices.shared.clear(forFile: url)
                 return store
             }
             if let legacyConfig = try? JSONDecoder().decode(LoopEngineConfig.self, from: data) {
@@ -316,6 +329,11 @@ enum LoopEngineConfigStore {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try encoder().encode(store).write(to: url, options: .atomic)
+            // A quarantine notice stays until the next clean load; the others
+            // describe a state this write just proved is over.
+            if case .quarantined? = LoopStoreNotices.shared.notice(forFile: url) {} else {
+                LoopStoreNotices.shared.clear(forFile: url)
+            }
         } catch {
             NSLog("LoopEngineConfigStore: write failed at \(url.path): \(error.localizedDescription)")
         }

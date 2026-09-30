@@ -515,6 +515,8 @@ final class LoopEngineRunner: ObservableObject {
             // is nonsense advice for a config with no stages at all.
             let reason = config.stages.isEmpty
                 ? "No stages configured"
+                : config.stages.allSatisfy({ $0.kind == .unsupported })
+                ? "This loop's stages need a newer version of LLM-IDE"
                 : "Every stage is disabled — enable at least one"
             appendLog(.warn, "Loop not run · \(reason)")
             return await finish(.error(reason),

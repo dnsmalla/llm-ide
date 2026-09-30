@@ -34,8 +34,11 @@ final class LoopTemplateStore: ObservableObject {
     /// Saves `config` as a new named template. The name is de-duplicated against
     /// built-ins as well as custom entries, so a user cannot end up with two rows
     /// reading "Test & Fix" and no way to tell them apart.
+    /// Throws `SaveError.storedDataUndecodable` instead of adding a template
+    /// that would exist only in memory (and be lost on quit).
     @discardableResult
-    func save(name rawName: String, summary: String, config: LoopEngineConfig) -> LoopTemplate {
+    func save(name rawName: String, summary: String, config: LoopEngineConfig) throws -> LoopTemplate {
+        guard !storedDataUndecodable else { throw SaveError.storedDataUndecodable }
         let template = LoopTemplate(
             name: uniqueName(from: rawName.trimmingCharacters(in: .whitespacesAndNewlines)),
             summary: summary.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -77,7 +80,28 @@ final class LoopTemplateStore: ObservableObject {
     /// build's shape). The raw data is left in place and backed up under
     /// `undecodableBackupKey`, and `persist()` refuses to overwrite it — the old
     /// behaviour loaded `[]` and the next save wiped every custom template.
-    private(set) var storedDataUndecodable = false
+    @Published private(set) var storedDataUndecodable = false
+
+    enum SaveError: LocalizedError {
+        case storedDataUndecodable
+        var errorDescription: String? {
+            "Saved templates could not be read, so nothing can be saved over them. "
+                + "Reset custom templates to start fresh (the old data is kept as a backup)."
+        }
+    }
+
+    /// Drops the unreadable stored templates so saving works again. Safe: the
+    /// raw bytes stay under `undecodableBackupKey`.
+    func resetCustomTemplates() {
+        guard storedDataUndecodable else { return }
+        if defaults.data(forKey: Self.undecodableBackupKey) == nil,
+           let data = defaults.data(forKey: Self.storeKey) {
+            defaults.set(data, forKey: Self.undecodableBackupKey)
+        }
+        defaults.removeObject(forKey: Self.storeKey)
+        customTemplates = []
+        storedDataUndecodable = false
+    }
 
     private func load() {
         guard let data = defaults.data(forKey: Self.storeKey) else { return }
