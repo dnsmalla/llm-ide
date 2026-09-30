@@ -607,7 +607,7 @@ final class LoopEngineRunnerTests: XCTestCase {
             skillExecutor: skillExecutor, approvals: makeApprovals())
         _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
         let message = skillExecutor.receivedMessages.first ?? ""
-        XCTAssertTrue(message.contains("Input: the repo root."), message)
+        XCTAssertTrue(message.contains("Input: \(repoRoot.path) (the repo root)."), message)
         XCTAssertFalse(message.contains("project root"), message)
     }
 
