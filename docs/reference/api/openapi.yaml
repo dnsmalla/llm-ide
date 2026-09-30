@@ -3337,7 +3337,15 @@ paths:
         in `denied`. `repoRoot` must be absolute and either at or below a root
         on the caller's repo allow-list (`/auth/me/repos`) or a linked git
         worktree of one under a `.llmide-loop-worktrees/` or `loop-worktrees/`
-        directory. When any requested skill id is not installed the agent does
+        directory. `extraRoots` (at most 4) widens the confinement to a
+        project's notes directory in the split layout: each must be an existing
+        directory named `llm-doc` whose parent contains `system/project.json`
+        and is `repoRoot` itself or an ancestor of it at most 3 levels up
+        (symlinks resolved); anything else is 400 `EXTRA_ROOT_NOT_ALLOWED`.
+        Grep and Glob patterns naming a secret path are refused, and every Grep
+        carries the secret denylist as negative globs. A run cut off by the
+        timeout or a disconnect is still metered for the usage the SDK reported.
+        When any requested skill id is not installed the agent does
         not run (`ran: false`, the id in `unresolvedSkills`). `timeoutMs`
         (default 30 min, clamped to 1 s – 4 h) aborts the run; a client
         disconnect aborts it too. Rate-limited on the `agentTurn` bucket.
@@ -3353,6 +3361,7 @@ paths:
                 message:   { type: string, description: The composed Loop instruction (max 200000 chars) }
                 skills:    { type: array, maxItems: 5, items: { type: string }, description: Skill library ids ("<family>/<dir>") }
                 repoRoot:  { type: string, description: Absolute path of the run's git root (the worktree in worktree mode) }
+                extraRoots: { type: array, maxItems: 4, items: { type: string }, description: "Absolute paths of project llm-doc/ directories the run may also read and edit (split layout)" }
                 language:  { type: string }
                 model:     { type: string }
                 timeoutMs: { type: integer, minimum: 1 }
@@ -3366,6 +3375,7 @@ paths:
                 properties:
                   reply:            { type: string, description: The agent's closing summary }
                   changedPaths:     { type: array, items: { type: string }, description: Repo-relative paths the agent's Edit/Write calls changed }
+                  changedExtraPaths: { type: array, items: { type: string }, description: Absolute paths changed inside an accepted extra root }
                   usage:
                     type: object
                     properties:
@@ -3388,7 +3398,7 @@ paths:
                       properties:
                         toolName: { type: string }
                         reason:   { type: string }
-        '400': { description: VALIDATION_FAILED, or REPO_ROOT_NOT_ALLOWED — repoRoot outside the allow-list, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '400': { description: "VALIDATION_FAILED, REPO_ROOT_NOT_ALLOWED — repoRoot outside the allow-list, or EXTRA_ROOT_NOT_ALLOWED — an extraRoots entry is not the project's llm-doc", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: INTERNAL_ERROR — the engine failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '503': { description: NO_KEY — no Anthropic credentials, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '504': { description: AGENT_RUN_TIMEOUT — timeoutMs elapsed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }

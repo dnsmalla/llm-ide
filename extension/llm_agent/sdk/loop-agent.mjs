@@ -140,6 +140,57 @@ function isLoopWorktreeOf(real, trusted) {
   return samePath(backReal, fs.realpathSync(dotGit));
 }
 
+// A project's notes directory. In the split project layout it sits at
+// `<project>/llm-doc` while the run's git root is `<project>/code/<repo>` (or
+// a Loop worktree under `<project>/system/loop-worktrees/`), so a Plan/Docs
+// skill stage confined to the git root alone could not read or write a plan.
+export const MAX_LOOP_EXTRA_ROOTS = 4;
+const EXTRA_ROOT_NAME = 'llm-doc';
+const EXTRA_ROOT_MAX_DEPTH = 3;
+
+/**
+ * Validate the extra roots a Loop run may also read and edit. Each must be an
+ * existing directory named `llm-doc` whose parent is an LLM-IDE project
+ * (`system/project.json` exists) AND whose parent is `repoRoot` itself or an
+ * ancestor of it at most 3 levels up. Symlinks are resolved first.
+ * `repoRoot` must already be the validated (real) root.
+ *
+ * @returns {{ ok: true, roots: string[] } | { ok: false, reason: string }}
+ */
+export function validateLoopExtraRoots(extraRoots, repoRoot) {
+  if (extraRoots == null) return { ok: true, roots: [] };
+  if (!Array.isArray(extraRoots)) return { ok: false, reason: 'extraRoots must be an array of absolute paths' };
+  if (extraRoots.length > MAX_LOOP_EXTRA_ROOTS) {
+    return { ok: false, reason: `extraRoots may name at most ${MAX_LOOP_EXTRA_ROOTS} directories` };
+  }
+  const roots = [];
+  for (const raw of extraRoots) {
+    const label = String(raw);
+    if (typeof raw !== 'string' || !path.isAbsolute(raw) || raw.split(/[/\\]/).includes('..')) {
+      return { ok: false, reason: `extra root ${label} must be an absolute path without ".."` };
+    }
+    let real;
+    try { real = fs.realpathSync(raw); } catch { return { ok: false, reason: `extra root ${label} does not exist` }; }
+    try {
+      if (!fs.statSync(real).isDirectory()) return { ok: false, reason: `extra root ${label} is not a directory` };
+    } catch { return { ok: false, reason: `extra root ${label} does not exist` }; }
+    if (path.basename(real) !== EXTRA_ROOT_NAME) {
+      return { ok: false, reason: `extra root ${label} is not a project ${EXTRA_ROOT_NAME} directory` };
+    }
+    const project = path.dirname(real);
+    if (!fs.existsSync(path.join(project, 'system', 'project.json'))) {
+      return { ok: false, reason: `extra root ${label} is not inside an LLM-IDE project` };
+    }
+    const rel = path.relative(project, repoRoot);
+    const depth = rel === '' ? 0 : rel.split(path.sep).length;
+    if (rel.startsWith('..') || path.isAbsolute(rel) || depth > EXTRA_ROOT_MAX_DEPTH) {
+      return { ok: false, reason: `extra root ${label} does not belong to the project of ${repoRoot}` };
+    }
+    if (!roots.includes(real)) roots.push(real);
+  }
+  return { ok: true, roots };
+}
+
 function samePath(a, b) {
   const ci = process.platform === 'darwin' || process.platform === 'win32';
   return ci ? a.toLowerCase() === b.toLowerCase() : a === b;
@@ -236,6 +287,15 @@ export function loopToolRefusal(toolName, input, roots) {
   return null;
 }
 
+// The absolute (real) path of `filePath` when it lies inside one of the extra
+// roots, else null.
+function extraRootPath(extraRoots, filePath) {
+  if (!extraRoots.length || typeof filePath !== 'string' || !path.isAbsolute(filePath)) return null;
+  let resolved = path.normalize(filePath);
+  try { resolved = fs.realpathSync(resolved); } catch { /* judge the spelling */ }
+  return extraRoots.some((r) => resolved === r || resolved.startsWith(r + path.sep)) ? resolved : null;
+}
+
 function repoRelative(root, filePath) {
   if (typeof filePath !== 'string' || !filePath) return null;
   const abs = path.isAbsolute(filePath) ? path.normalize(filePath) : path.resolve(root, filePath);
@@ -246,12 +306,17 @@ function repoRelative(root, filePath) {
   return rel.split(path.sep).join('/');
 }
 
-function headlessSystemAppend(root, languageLine, skillsText) {
+function headlessSystemAppend(root, extraRoots, languageLine, skillsText) {
+  const extra = extraRoots.length
+    ? `- You may also read and edit the project's notes directory${extraRoots.length > 1 ? 'ies' : ''} `
+      + `${extraRoots.join(', ')} (plans, docs and the refactor plan live there) — use absolute paths for it.`
+    : '';
   return [
     'You are running HEADLESS as one step of an automated verify-and-repair Loop in LLM-IDE. '
       + 'Nobody is watching this run and nobody can answer a question.',
-    `- Work only inside the repository at ${root} (your working directory). Every path you read, `
-      + 'search or edit must stay inside it; anything else is refused.',
+    `- Work only inside the repository at ${root} (your working directory)${extraRoots.length ? ' and the directories below' : ''}. `
+      + 'Every path you read, search or edit must stay inside them; anything else is refused.',
+    extra,
     '- You have file tools only: Read, Glob, Grep, Edit, Write. There is no shell, no network and no '
       + 'way to run builds or tests — the Loop runs its own stages afterwards to verify your change. '
       + 'Do not claim you ran or verified anything.',
@@ -277,19 +342,21 @@ const sdkQueryFactory = (prompt, options) => query({ prompt, options });
  * `partialUsage` ({ usage, byModel, model }) — what the SDK reported before
  * the run was cut off — so the caller can still meter it.
  *
- * @returns {Promise<{ reply: string, changedPaths: string[], usage: object,
+ * @returns {Promise<{ reply: string, changedPaths: string[], changedExtraPaths: string[], usage: object,
  *   resolvedSkills: string[], unresolvedSkills: string[], truncatedSkills: string[],
  *   ran: boolean, resultSubtype: string|null, denied: Array<{toolName: string, reason: string}>,
  *   model: string|null, byModel: object[] }>}
  */
 export async function runLoopAgent(
   {
-    message, skills, root, userId, language, model, abortController, allowAmbientAuth = false,
+    message, skills, root, extraRoots = [], userId, language, model, abortController, allowAmbientAuth = false,
     queryFactory = sdkQueryFactory,
   } = {},
   { readSkill = readSkillInstructions } = {},
 ) {
   if (typeof root !== 'string' || !root) throw new Error('root is required');
+  // `extraRoots` must already be validated (validateLoopExtraRoots).
+  const roots = [root, ...(Array.isArray(extraRoots) ? extraRoots : [])];
   const { text: skillsText, resolved, unresolved, truncated } = buildLoopSkillsText(skills, userId, readSkill);
   const usage = {
     inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
@@ -303,7 +370,7 @@ export async function runLoopAgent(
   // asked for under the name of a skill that never ran — so nothing runs.
   if (unresolved.length > 0) {
     return {
-      reply: '', changedPaths: [], usage, ...base, ran: false, resultSubtype: null, denied: [],
+      reply: '', changedPaths: [], changedExtraPaths: [], usage, ...base, ran: false, resultSubtype: null, denied: [],
       model: null, byModel: [],
     };
   }
@@ -330,13 +397,14 @@ export async function runLoopAgent(
     : '';
 
   const changed = new Set();
+  const changedExtra = new Set();
   const denied = [];
   const refuse = (toolName, reason) => {
     if (denied.length < 50) denied.push({ toolName, reason });
   };
 
   const preToolUse = async (input) => {
-    const reason = loopToolRefusal(input?.tool_name, input?.tool_input, root);
+    const reason = loopToolRefusal(input?.tool_name, input?.tool_input, roots);
     if (!reason) {
       if (input?.tool_name !== 'Grep') return {};
       // A content search must never print a secret file's lines, even one
@@ -358,13 +426,18 @@ export async function runLoopAgent(
   const postToolUse = async (input) => {
     if (WRITE_TOOLS.has(input?.tool_name)) {
       const rel = repoRelative(root, input?.tool_input?.file_path);
-      if (rel) changed.add(rel);
+      if (rel) {
+        changed.add(rel);
+      } else {
+        const abs = extraRootPath(roots.slice(1), input?.tool_input?.file_path);
+        if (abs) changedExtra.add(abs);
+      }
     }
     return {};
   };
   // Decides instead of asking: never parks, never prompts.
   const canUseTool = async (toolName, input) => {
-    const reason = loopToolRefusal(toolName, input, root);
+    const reason = loopToolRefusal(toolName, input, roots);
     if (reason) {
       refuse(toolName, reason);
       return { behavior: 'deny', message: reason };
@@ -375,7 +448,7 @@ export async function runLoopAgent(
   const safeMessage = neutralizePromptFences(String(message ?? '')).slice(0, MAX_LOOP_MESSAGE_CHARS);
   const q = queryFactory(safeMessage, {
     cwd: root,
-    additionalDirectories: [],
+    additionalDirectories: roots.slice(1),
     // No operator settings, no user MCP, no plugins, no claude.ai connectors.
     settingSources: [],
     mcpServers: {},
@@ -392,7 +465,7 @@ export async function runLoopAgent(
     },
     systemPrompt: {
       type: 'preset', preset: 'claude_code',
-      append: headlessSystemAppend(root, languageLine, skillsText),
+      append: headlessSystemAppend(root, roots.slice(1), languageLine, skillsText),
       snapshot: false,
     },
     maxTurns: MAX_TURNS,
@@ -484,6 +557,7 @@ export async function runLoopAgent(
   return {
     reply: (reply || lastAssistantText).trim(),
     changedPaths: [...changed].sort(),
+    changedExtraPaths: [...changedExtra].sort(),
     usage,
     ...base,
     ran: true,

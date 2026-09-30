@@ -391,7 +391,103 @@ test('route: a client disconnect aborts the run', async () => {
   assert.equal(res.headersSent, false, 'nobody left to answer');
 });
 
-const { patternTargetsSecret, LOOP_GREP_SECRET_EXCLUSIONS } = await import('../llm_agent/sdk/loop-agent.mjs');
+// --- extra roots (split project layout: <project>/llm-doc beside code/<repo>) ---
+
+const { validateLoopExtraRoots, patternTargetsSecret, LOOP_GREP_SECRET_EXCLUSIONS } = await import('../llm_agent/sdk/loop-agent.mjs');
+
+function splitProject(name) {
+  const project = path.join(SANDBOX, name);
+  const repo = path.join(project, 'code', 'app');
+  fs.mkdirSync(path.join(project, 'system'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'system', 'project.json'), '{}');
+  fs.mkdirSync(path.join(project, 'llm-doc', 'plans'), { recursive: true });
+  fs.mkdirSync(repo, { recursive: true });
+  fs.writeFileSync(path.join(repo, 'x.txt'), 'x\n');
+  return { project, repo, llmDoc: path.join(project, 'llm-doc') };
+}
+
+test('validateLoopExtraRoots: the project llm-doc of a split layout (and of a Loop worktree) is accepted', () => {
+  const { project, repo, llmDoc } = splitProject('split-ok');
+  assert.deepEqual(validateLoopExtraRoots([llmDoc], repo), { ok: true, roots: [llmDoc] });
+  assert.deepEqual(validateLoopExtraRoots(undefined, repo), { ok: true, roots: [] });
+  // The project root itself as the repo (depth 0), and a worktree 3 levels down.
+  assert.equal(validateLoopExtraRoots([llmDoc], project).ok, true);
+  const wt = path.join(project, 'system', 'loop-worktrees', 'w1');
+  fs.mkdirSync(wt, { recursive: true });
+  assert.equal(validateLoopExtraRoots([llmDoc], wt).ok, true);
+});
+
+test('validateLoopExtraRoots: wrong name, no project.json, too deep, another project, symlinks out, too many — refused', () => {
+  const { project, repo, llmDoc } = splitProject('split-bad');
+  const other = splitProject('split-other');
+  const notNamed = path.join(project, 'docs');
+  fs.mkdirSync(notNamed);
+  assert.equal(validateLoopExtraRoots([notNamed], repo).ok, false, 'must be named llm-doc');
+  const bare = path.join(SANDBOX, 'bare', 'llm-doc');
+  fs.mkdirSync(bare, { recursive: true });
+  assert.equal(validateLoopExtraRoots([bare], path.join(SANDBOX, 'bare')).ok, false, 'parent must be a project');
+  const deep = path.join(project, 'code', 'a', 'b', 'c');
+  fs.mkdirSync(deep, { recursive: true });
+  assert.equal(validateLoopExtraRoots([llmDoc], deep).ok, false, 'more than 3 levels up');
+  assert.equal(validateLoopExtraRoots([other.llmDoc], repo).ok, false, "another project's llm-doc");
+  const linkDir = path.join(project, 'links');
+  fs.mkdirSync(linkDir);
+  fs.symlinkSync(OUTSIDE, path.join(linkDir, 'llm-doc'));
+  assert.equal(validateLoopExtraRoots([path.join(linkDir, 'llm-doc')], repo).ok, false, 'judged by where the link lands');
+  assert.equal(validateLoopExtraRoots(['llm-doc'], repo).ok, false, 'relative');
+  assert.equal(validateLoopExtraRoots([path.join(SANDBOX, 'missing', 'llm-doc')], repo).ok, false);
+  assert.equal(validateLoopExtraRoots(llmDoc, repo).ok, false, 'not an array');
+  assert.equal(validateLoopExtraRoots([llmDoc, llmDoc, llmDoc, llmDoc, llmDoc], repo).ok, false, 'at most 4');
+});
+
+test('route: a refused extra root answers 400 EXTRA_ROOT_NOT_ALLOWED before anything runs', async () => {
+  const { repo } = splitProject('split-route');
+  addUserRepo(user.id, repo);
+  let ran = false;
+  const res = makeRes();
+  await handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: repo, extraRoots: [OUTSIDE] }, user }), res, { userId: user.id },
+    { runAgent: async () => { ran = true; } },
+  );
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.json().error.code, 'EXTRA_ROOT_NOT_ALLOWED');
+  assert.equal(ran, false);
+});
+
+test('route: an accepted extra root reaches the engine', async () => {
+  const { repo, llmDoc } = splitProject('split-route-ok');
+  addUserRepo(user.id, repo);
+  let seen = null;
+  const res = makeRes();
+  await handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: repo, extraRoots: [llmDoc] }, user }), res, { userId: user.id },
+    { runAgent: async (args) => { seen = args; return { reply: '', changedPaths: [], changedExtraPaths: [path.join(llmDoc, 'p.md')], usage: {}, resolvedSkills: [], unresolvedSkills: [], truncatedSkills: [], ran: true, resultSubtype: 'success', denied: [], byModel: [] }; } },
+  );
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(seen.extraRoots, [llmDoc]);
+  assert.deepEqual(res.json().changedExtraPaths, [path.join(llmDoc, 'p.md')]);
+});
+
+test('runLoopAgent: a write into an accepted extra root lands; outside both stays refused', () => withKey(async () => {
+  const { repo, llmDoc } = splitProject('split-run');
+  const capture = {};
+  const plan = path.join(llmDoc, 'plans', 'PLAN.md');
+  const out = await runLoopAgent({
+    message: 'plan', root: repo, extraRoots: [llmDoc], userId: user.id,
+    queryFactory: toolPlayingQuery(capture, [
+      { tool: 'Write', input: { file_path: plan, content: '# plan\n' }, run: write },
+      { tool: 'Write', input: { file_path: path.join(OUTSIDE, 'p.md'), content: 'x' }, run: write },
+      { tool: 'Write', input: { file_path: path.join(repo, 'x.txt'), content: 'y\n' }, run: write },
+    ]),
+  }, noSkill);
+  assert.equal(fs.readFileSync(plan, 'utf8'), '# plan\n');
+  assert.equal(fs.existsSync(path.join(OUTSIDE, 'p.md')), false);
+  assert.deepEqual(out.changedPaths, ['x.txt']);
+  assert.deepEqual(out.changedExtraPaths, [plan]);
+  assert.deepEqual(capture.options.additionalDirectories, [llmDoc]);
+  assert.ok(capture.options.systemPrompt.append.includes(llmDoc), 'the system prompt names the extra root');
+  assert.equal(out.denied.length, 1);
+}));
 
 // --- secret paths through Grep / Glob ----------------------------------------------
 

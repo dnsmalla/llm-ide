@@ -4,15 +4,19 @@
 // contract: validation, the timeout, client-disconnect cancellation, usage
 // metering and the response shape.
 //
-// Request  { message, skills?: [id], repoRoot, language?, model?, timeoutMs? }
-// Response { reply, changedPaths: [repo-relative], usage, resolvedSkills,
-//            unresolvedSkills, truncatedSkills, ran, resultSubtype, denied }
+// Request  { message, skills?: [id], repoRoot, extraRoots?: [abs], language?,
+//            model?, timeoutMs? }
+// Response { reply, changedPaths: [repo-relative], changedExtraPaths: [abs],
+//            usage, resolvedSkills, unresolvedSkills, truncatedSkills, ran,
+//            resultSubtype, denied }
 //
 // Contract (mirrors the sibling route modules):
 //   handleLoopAgentRoutes(req, res, { userId }, deps) → Promise<boolean>
 // `deps` ({ runAgent, validateRoot }) is the tests' seam for the engine.
 
-import { runLoopAgent, validateLoopRepoRoot, MAX_LOOP_MESSAGE_CHARS } from '../llm_agent/sdk/loop-agent.mjs';
+import {
+  runLoopAgent, validateLoopRepoRoot, validateLoopExtraRoots, MAX_LOOP_MESSAGE_CHARS,
+} from '../llm_agent/sdk/loop-agent.mjs';
 import { AGENT_SDK_PROVIDER } from '../llm_agent/sdk/engine.mjs';
 import { recordUsage } from '../kb/usage.mjs';
 import { getDb } from '../kb/db.mjs';
@@ -82,6 +86,8 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
 
   const rootCheck = validateRoot(userId, body.repoRoot);
   if (!rootCheck.ok) return validationError(res, rootCheck.reason, 'REPO_ROOT_NOT_ALLOWED');
+  const extraCheck = validateLoopExtraRoots(body.extraRoots, rootCheck.root);
+  if (!extraCheck.ok) return validationError(res, extraCheck.reason, 'EXTRA_ROOT_NOT_ALLOWED');
 
   // One controller for both ways a run ends early: the timeout, and the
   // client going away (Loop Stop / app quit). `abortController` is the shape
@@ -96,6 +102,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       message: body.message,
       skills,
       root: rootCheck.root,
+      extraRoots: extraCheck.roots,
       userId,
       language,
       model,
@@ -114,6 +121,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     sendJSON(res, 200, {
       reply: out.reply,
       changedPaths: out.changedPaths,
+      changedExtraPaths: out.changedExtraPaths ?? [],
       usage: out.usage,
       resolvedSkills: out.resolvedSkills,
       unresolvedSkills: out.unresolvedSkills,
