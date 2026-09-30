@@ -198,4 +198,73 @@ final class LoopPhase1FixTests: XCTestCase {
         let bareJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(bare)) as? [String: Any])
         XCTAssertNil(bareJSON["extraRoots"])
     }
+
+    // MARK: - P1: a skill run that did nothing it was asked to FAILS
+
+    private func runSkill(returning result: LoopAgentResult,
+                          guardChanged: [String] = []) async -> (LoopEngineStatus?, LoopStageAttempt?) {
+        let skills = SkillExecutor()
+        skills.result = result
+        let journal = Journal()
+        let scope = CancellationSensitiveGuard(violation: [])
+        let r = runner(skills: skills, approvals: approvals([]), journal: journal, scopeGuard: scope)
+        let status = await r.run(config: skillConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+        return (status, journal.written.last?.iterations.last?.attempts.last)
+    }
+
+    func testSkillStageFailsWhenTheRunDidNotFinish() async {
+        let (status, attempt) = await runSkill(returning: LoopAgentResult(resultSubtype: "error_max_turns"))
+        guard case .error(let message)? = status else { return XCTFail("expected .error, got \(String(describing: status))") }
+        XCTAssertTrue(message.contains("error_max_turns"), message)
+        XCTAssertEqual(attempt?.passed, false)
+        XCTAssertEqual(attempt?.agentNote, "agent run ended error_max_turns")
+    }
+
+    func testSkillStageFailsWhenItsSkillWasTruncated() async {
+        let (status, attempt) = await runSkill(returning: LoopAgentResult(
+            changedPaths: ["a.md"], resolvedSkills: ["fam/plan"], truncatedSkills: ["fam/plan"]))
+        guard case .error(let message)? = status else { return XCTFail("expected .error") }
+        XCTAssertTrue(message.contains("fam/plan"), message)
+        XCTAssertEqual(attempt?.passed, false)
+    }
+
+    func testSkillStageFailsWhenEveryEditWasRefusedAndNothingChanged() async {
+        let denial = LoopAgentResult.Denial(toolName: "Write", reason: "Write refused: /p/llm-doc/PLAN.md is outside")
+        let (status, _) = await runSkill(returning: LoopAgentResult(denied: [denial]))
+        guard case .error(let message)? = status else { return XCTFail("expected .error") }
+        XCTAssertTrue(message.contains("PLAN.md is outside"), "names the first denial: \(message)")
+    }
+
+    func testSkillStageWithDenialsButRealEditsStillPasses() async {
+        let denial = LoopAgentResult.Denial(toolName: "Read", reason: "Read refused: .env")
+        let (status, attempt) = await runSkill(returning: LoopAgentResult(
+            changedExtraPaths: ["/p/llm-doc/plans/PLAN.md"], denied: [denial]))
+        XCTAssertEqual(status, .success)
+        XCTAssertEqual(attempt?.passed, true)
+    }
+
+    func testRepairDenialsAndSubtypeAreRecordedButDoNotFailTheStage() async {
+        var runs = 0
+        let verifier = Verifier { _ in
+            runs += 1
+            return VerifyOutcome(exitCode: runs == 1 ? 1 : 0, output: runs == 1 ? "1 failure" : "")
+        }
+        let repairer = Repairer()
+        repairer.body = {
+            LoopAgentResult(resultSubtype: "error_max_turns",
+                            denied: [.init(toolName: "Bash", reason: "Bash is not available")])
+        }
+        let journal = Journal()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        let r = runner(verifier: verifier, repairer: repairer, approvals: approvals([("t", "swift test")]),
+                       journal: journal, scopeGuard: CancellationSensitiveGuard(violation: []))
+        let status = await r.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(status, .success, "the verify re-run decides, not the repair's ending")
+        let repairAttempt = journal.written.last?.iterations.first?.attempts.first
+        XCTAssertEqual(repairAttempt?.repairAttempted, true)
+        XCTAssertEqual(repairAttempt?.agentNote,
+                       "agent run ended error_max_turns; 1 tool call(s) refused, first: Bash is not available")
+    }
 }

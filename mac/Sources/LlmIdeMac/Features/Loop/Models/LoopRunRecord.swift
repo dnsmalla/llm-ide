@@ -79,6 +79,11 @@ struct LoopStageAttempt: Codable, Equatable {
     /// and failing. Optional so records written before this field existed still
     /// decode; `nil` and `false` both mean "not errored".
     var errored: Bool?
+    /// What the agent run behind this attempt reported beyond its edits: a
+    /// result subtype other than "success" (e.g. `error_max_turns`) and the
+    /// tool calls the confinement refused. Optional so older records decode;
+    /// `nil` means the run was clean (or no agent ran).
+    var agentNote: String?
 
     init(stageId: String, stageName: String, kind: LoopStage.Kind,
          severity: LoopStageSeverity, startedAt: Date, durationSeconds: Double,
@@ -87,7 +92,7 @@ struct LoopStageAttempt: Codable, Equatable {
          repairDurationSeconds: Double? = nil, repairAttemptIndex: Int? = nil,
          changedPaths: [String] = [],
          scopeVerdict: RepairScopeVerdict = .notChecked,
-         errored: Bool? = nil) {
+         errored: Bool? = nil, agentNote: String? = nil) {
         self.stageId = stageId
         self.stageName = stageName
         self.kind = kind
@@ -105,6 +110,7 @@ struct LoopStageAttempt: Codable, Equatable {
         self.changedPaths = changedPaths
         self.scopeVerdict = scopeVerdict
         self.errored = errored
+        self.agentNote = agentNote
     }
 }
 

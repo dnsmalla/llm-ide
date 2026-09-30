@@ -957,6 +957,10 @@ final class LoopEngineRunner: ObservableObject {
         let repairDuration = Date().timeIntervalSince(repairStartedAt)
         let repairIndex = used + 1
         lastRepairResults[stage.id] = repairResult
+        // A repair's refusals and non-success ending are recorded, not fatal:
+        // the next iteration's re-run of the stage decides whether it worked.
+        let repairNote = Self.agentRunNote(repairResult)
+        if let repairNote { appendLog(.warn, "  [\(stage.name)] repair \(used + 1): \(repairNote)") }
 
         // The repair finished either way; the stage itself is still failed —
         // the next iteration's re-run (or the terminal status) says whether
@@ -969,7 +973,7 @@ final class LoopEngineRunner: ObservableObject {
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, outputHash: failureHash, score: score, repairAttempted: true,
                    repairDuration: repairDuration, repairIndex: repairIndex,
-                   changedPaths: changed, scopeVerdict: verdictScope)
+                   changedPaths: changed, scopeVerdict: verdictScope, agentNote: repairNote)
             if Self.isCancellation(error) { return .terminate(.aborted) }
             // What a failed repair left behind is judged before its error:
             // a protected-path violation says more than "the request failed".
@@ -984,7 +988,7 @@ final class LoopEngineRunner: ObservableObject {
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, outputHash: failureHash, score: score, repairAttempted: true,
                    repairDuration: repairDuration, repairIndex: repairIndex,
-                   changedPaths: changed, scopeVerdict: verdictScope)
+                   changedPaths: changed, scopeVerdict: verdictScope, agentNote: repairNote)
             if let terminal = scopeTermination(stage: stage, config: config,
                                               verdict: verdictScope, violations: violations) {
                 return .terminate(terminal)
@@ -1039,6 +1043,41 @@ final class LoopEngineRunner: ObservableObject {
             return []
         }
         return [llmDoc]
+    }
+
+    /// Why a skill stage whose agent run returned must still FAIL, or nil:
+    ///   - the run ended with a result subtype other than "success"
+    ///     (`error_max_turns`, `error_during_execution`, …);
+    ///   - a requested skill was truncated — the agent never saw all of it;
+    ///   - tool calls were refused AND the run changed nothing (nothing in the
+    ///     repo per the server or the guard, nothing in an extra root) — the
+    ///     classic split-layout symptom of every plan write being denied.
+    nonisolated static func skillRunFailure(_ result: LoopAgentResult,
+                                            guardChanged: [String]) -> String? {
+        if let subtype = result.resultSubtype, subtype != "success" {
+            return "the agent run did not finish (\(subtype))"
+        }
+        if !result.truncatedSkills.isEmpty {
+            return "skill \(result.truncatedSkills.joined(separator: ", ")) was too long and was cut off — "
+                + "the agent did not see all of it"
+        }
+        if let first = result.denied.first, result.changedPaths.isEmpty,
+           result.changedExtraPaths.isEmpty, guardChanged.isEmpty {
+            return "the agent changed nothing; its tool calls were refused: \(first.reason)"
+        }
+        return nil
+    }
+
+    /// A one-line account of an agent run's non-success ending and refused
+    /// tool calls, for the stage record; nil when there is nothing to say.
+    nonisolated static func agentRunNote(_ result: LoopAgentResult?) -> String? {
+        guard let result else { return nil }
+        var parts: [String] = []
+        if let subtype = result.resultSubtype, subtype != "success" { parts.append("agent run ended \(subtype)") }
+        if let first = result.denied.first {
+            parts.append("\(result.denied.count) tool call(s) refused, first: \(first.reason)")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "; ")
     }
 
     /// Why a skill stage failed when the server could not resolve its skill.
@@ -1126,6 +1165,21 @@ final class LoopEngineRunner: ObservableObject {
             }
             return .proceed
         case .completed(let verdictScope, let violations, let changed):
+            // A run that "completed" can still have done nothing it was asked
+            // to: cut off (error_max_turns, …), briefed with a truncated skill,
+            // or refused every edit it tried. Those fail the stage.
+            if let failure = agentResult.flatMap({ Self.skillRunFailure($0, guardChanged: changed) }) {
+                stageStates[stage.id] = .failed
+                appendLog(.error, "  [\(stage.name)] \(failure)")
+                record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
+                       passed: false, output: failure, score: nil, changedPaths: changed,
+                       scopeVerdict: verdictScope, agentNote: Self.agentRunNote(agentResult))
+                if let terminal = scopeTermination(stage: stage, config: config,
+                                                  verdict: verdictScope, violations: violations) {
+                    return .terminate(terminal)
+                }
+                return .terminate(.error(failure))
+            }
             appendLog(.info, "  [\(stage.name)] skill completed (generate)")
             // `passed` on a generate step means "ran without error" — but a step
             // whose edits were rejected as out-of-scope did not do its job, and
@@ -1442,7 +1496,7 @@ final class LoopEngineRunner: ObservableObject {
                         repairDuration: Double? = nil, repairIndex: Int? = nil,
                         changedPaths: [String] = [],
                         scopeVerdict: RepairScopeVerdict = .notChecked,
-                        errored: Bool = false) {
+                        errored: Bool = false, agentNote: String? = nil) {
         guard !iterationRecords.isEmpty else { return }
         iterationRecords[iterationRecords.count - 1].attempts.append(
             LoopStageAttempt(
@@ -1454,7 +1508,7 @@ final class LoopEngineRunner: ObservableObject {
                 repairDurationSeconds: repairDuration, repairAttemptIndex: repairIndex,
                 changedPaths: changedPaths,
                 scopeVerdict: scopeVerdict,
-                errored: errored ? true : nil))
+                errored: errored ? true : nil, agentNote: agentNote))
     }
 
     /// Sets the terminal status, logs it, writes the journal entry, and returns
