@@ -37,7 +37,9 @@ import {
   AGENT_SDK_PROVIDER, resolveAgentEngineAuth, resolveAnthropicKey, agentSdkHomeFor, normalizeModelUsage,
 } from './engine.mjs';
 import { writePathGate } from '../tools/gates.mjs';
-import { buildTrustedRoots, isTooBroadRoot, isWithinRoots } from '../runtime/handlers/repo-files.mjs';
+import {
+  buildTrustedRoots, isDeniedPath, isTooBroadRoot, isWithinRoots,
+} from '../runtime/handlers/repo-files.mjs';
 import { readSkillInstructions } from '../skills/index.mjs';
 import { buildLoopSkillsText } from '../../core/prompt-framing.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';
@@ -151,30 +153,85 @@ function patternEscapes(pattern) {
   return pattern.split(/[/\\]/).includes('..');
 }
 
+// One level of `{a,b}` alternation — enough to see `*.{pem,key}`.
+function expandBraces(token) {
+  const m = /\{([^{}]*)\}/.exec(token);
+  if (!m) return [token];
+  return m[1].split(',').map((alt) => token.slice(0, m.index) + alt + token.slice(m.index + m[0].length));
+}
+
 /**
- * Why `toolName(input)` may not run in a run rooted at `root`, or null when it
- * may. The single confinement rule both the PreToolUse hook and canUseTool
- * apply.
+ * True when a Glob pattern / Grep `glob` names a secret path the Loop may
+ * never read — the same denylist Read/Edit/Write apply (repo-files.mjs
+ * isDeniedPath): `.env*`, `*.pem`/`.key`/…, `id_rsa`, `.ssh/`, `.git/`, ….
+ * Negated tokens (`!…`) exclude files, so they never count.
  */
-export function loopToolRefusal(toolName, input, root) {
+export function patternTargetsSecret(pattern) {
+  if (typeof pattern !== 'string' || !pattern) return false;
+  for (const token of pattern.split(/[\s,]+(?![^{]*\})/).filter(Boolean)) {
+    if (token.startsWith('!')) continue;
+    for (const alt of expandBraces(token)) {
+      // Drop glob metacharacters so `.env*` reads as `.env`, `*.p[e]m` as `.pem`.
+      const literal = alt.replace(/[*?[\]{}]/g, '');
+      if (literal && isDeniedPath(path.join(path.sep, literal))) return true;
+    }
+  }
+  return false;
+}
+
+// `[pP][eE][mM]` — ripgrep globs are case-sensitive, the denylist is not.
+const anyCase = (s) => s.replace(/[a-z]/gi, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`);
+
+/**
+ * Negative globs Grep always carries in a Loop run, so a content search can
+ * never print a secret file's lines (the denylist in rg --glob form). The CLI
+ * splits Grep's `glob` on whitespace/commas into one `--glob` each, and a
+ * later negation wins in ripgrep.
+ */
+export const LOOP_GREP_SECRET_EXCLUSIONS = Object.freeze([
+  ...['.env', '.env.*', '.npmrc', '.netrc', '.pgpass', '.bash_history', '.zsh_history',
+    'id_rsa', 'id_ed25519', 'id_dsa'].map((b) => `!**/${anyCase(b)}`),
+  ...['.pem', '.key', '.p12', '.pfx', '.keystore'].map((e) => `!**/*${anyCase(e)}`),
+  ...['.git', '.ssh', '.aws', '.gnupg', '.docker', '.kube'].map((d) => `!**/${anyCase(d)}/**`),
+]);
+
+/** Grep's input with the secret exclusions appended to its `glob`. */
+export function withSecretExclusions(input) {
+  const own = typeof input?.glob === 'string' ? input.glob.trim() : '';
+  return { ...(input || {}), glob: [own, ...LOOP_GREP_SECRET_EXCLUSIONS].filter(Boolean).join(' ') };
+}
+
+/**
+ * Why `toolName(input)` may not run in a run confined to `roots` (the repo
+ * root first, then any accepted extra roots; a single string is accepted),
+ * or null when it may. The single confinement rule both the PreToolUse hook
+ * and canUseTool apply.
+ */
+export function loopToolRefusal(toolName, input, roots) {
+  const allowed = (Array.isArray(roots) ? roots : [roots]).filter(Boolean);
+  const where = allowed.join(', ');
   if (!LOOP_AGENT_TOOL_SET.has(toolName)) {
     return `${toolName} is not available in a Loop run (file tools only: ${LOOP_AGENT_TOOLS.join(', ')}).`;
   }
-  const inside = (p) => writePathGate(p, [root]) !== 'blocked';
+  const inside = (p) => writePathGate(p, allowed) !== 'blocked';
   if (toolName === 'Read' || WRITE_TOOLS.has(toolName)) {
     if (!inside(input?.file_path)) {
-      return `${toolName} refused: ${String(input?.file_path ?? '(no path)')} is outside the Loop's repository ${root} (or is a protected secret path).`;
+      return `${toolName} refused: ${String(input?.file_path ?? '(no path)')} is outside the Loop's repository ${where} (or is a protected secret path).`;
     }
     return null;
   }
-  // Glob / Grep: an explicit search root must stay inside, and the file
-  // pattern must not climb out of it.
+  // Glob / Grep: an explicit search root must stay inside (and not be a
+  // secret path), and the file pattern must neither climb out nor name a
+  // secret file.
   if (input?.path != null && input.path !== '' && !inside(input.path)) {
-    return `${toolName} refused: ${String(input.path)} is outside the Loop's repository ${root}.`;
+    return `${toolName} refused: ${String(input.path)} is outside the Loop's repository ${where} (or is a protected secret path).`;
   }
   const pattern = toolName === 'Glob' ? input?.pattern : input?.glob;
   if (patternEscapes(pattern)) {
     return `${toolName} refused: the pattern ${String(pattern)} reaches outside the Loop's repository.`;
+  }
+  if (patternTargetsSecret(pattern)) {
+    return `${toolName} refused: the pattern ${String(pattern)} targets a protected secret path.`;
   }
   return null;
 }
@@ -280,7 +337,17 @@ export async function runLoopAgent(
 
   const preToolUse = async (input) => {
     const reason = loopToolRefusal(input?.tool_name, input?.tool_input, root);
-    if (!reason) return {};
+    if (!reason) {
+      if (input?.tool_name !== 'Grep') return {};
+      // A content search must never print a secret file's lines, even one
+      // .gitignore does not hide: force the denylist in as negative globs.
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse', permissionDecision: 'allow',
+          updatedInput: withSecretExclusions(input?.tool_input),
+        },
+      };
+    }
     refuse(input?.tool_name, reason);
     return {
       hookSpecificOutput: {
@@ -302,7 +369,7 @@ export async function runLoopAgent(
       refuse(toolName, reason);
       return { behavior: 'deny', message: reason };
     }
-    return { behavior: 'allow', updatedInput: input };
+    return { behavior: 'allow', updatedInput: toolName === 'Grep' ? withSecretExclusions(input) : input };
   };
 
   const safeMessage = neutralizePromptFences(String(message ?? '')).slice(0, MAX_LOOP_MESSAGE_CHARS);

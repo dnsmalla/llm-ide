@@ -391,6 +391,54 @@ test('route: a client disconnect aborts the run', async () => {
   assert.equal(res.headersSent, false, 'nobody left to answer');
 });
 
+const { patternTargetsSecret, LOOP_GREP_SECRET_EXCLUSIONS } = await import('../llm_agent/sdk/loop-agent.mjs');
+
+// --- secret paths through Grep / Glob ----------------------------------------------
+
+test('loopToolRefusal: Grep/Glob aimed at .pem, .env* or id_rsa are refused; ordinary searches pass', () => {
+  for (const [tool, input] of [
+    ['Glob', { pattern: '**/*.pem' }],
+    ['Glob', { pattern: '**/.env*' }],
+    ['Glob', { pattern: '**/id_rsa' }],
+    ['Glob', { pattern: 'certs/*.{pem,crt}' }],
+    ['Glob', { pattern: '**/*.PEM' }],
+    ['Grep', { pattern: 'KEY', glob: '*.pem' }],
+    ['Grep', { pattern: 'TOKEN', glob: '.env.local' }],
+    ['Grep', { pattern: 'x', glob: '**/id_rsa*' }],
+    ['Grep', { pattern: 'x', path: path.join(REPO, '.env') }],
+    ['Glob', { pattern: '*', path: path.join(REPO, '.ssh') }],
+  ]) {
+    assert.ok(loopToolRefusal(tool, input, REPO), `${tool} ${JSON.stringify(input)} must be refused`);
+  }
+  for (const [tool, input] of [
+    ['Glob', { pattern: '**/*.swift' }],
+    ['Grep', { pattern: 'process.env', glob: '*.{ts,mjs}' }],
+    ['Grep', { pattern: 'x', glob: '!**/*.pem' }],
+    ['Glob', { pattern: 'src/**/*.keyboard.ts' }],
+  ]) {
+    assert.equal(loopToolRefusal(tool, input, REPO), null, `${tool} ${JSON.stringify(input)} must pass`);
+  }
+  assert.equal(patternTargetsSecret(undefined), false);
+});
+
+test('runLoopAgent: every allowed Grep carries the secret exclusions as negative globs', () => withKey(async () => {
+  const capture = {};
+  await runLoopAgent({ message: 'x', root: REPO, userId: user.id, queryFactory: toolPlayingQuery(capture, []) }, noSkill);
+  const hook = capture.options.hooks.PreToolUse[0].hooks[0];
+  const out = await hook({ tool_name: 'Grep', tool_input: { pattern: 'secret', output_mode: 'content', glob: '*.ts' } });
+  const glob = out.hookSpecificOutput.updatedInput.glob;
+  assert.equal(out.hookSpecificOutput.permissionDecision, 'allow');
+  assert.ok(glob.startsWith('*.ts '), 'the caller glob is kept first');
+  for (const g of LOOP_GREP_SECRET_EXCLUSIONS) assert.ok(glob.split(' ').includes(g));
+  assert.ok(LOOP_GREP_SECRET_EXCLUSIONS.some((g) => /pP\]\[eE\]\[mM/.test(g)), '.pem, any case');
+  assert.ok(LOOP_GREP_SECRET_EXCLUSIONS.some((g) => g.includes('[iI][dD]_[rR][sS][aA]')), 'id_rsa');
+  assert.ok(LOOP_GREP_SECRET_EXCLUSIONS.some((g) => g.endsWith('[eE][nN][vV].*')), '.env.*');
+  const perm = await capture.options.canUseTool('Grep', { pattern: 'x' }, {});
+  assert.ok(perm.updatedInput.glob.includes('!**/'), 'canUseTool adds them too');
+  // Non-Grep tools are passed through untouched.
+  assert.deepEqual(await hook({ tool_name: 'Read', tool_input: { file_path: path.join(REPO, 'src', 'a.txt') } }), {});
+}));
+
 // --- metering a cut-off run ----------------------------------------------------------
 
 test('route: a run that times out after reporting usage is still metered before the 504', async () => {
