@@ -355,6 +355,23 @@ Two deliberate limits, both recorded rather than hidden:
   hashes); if one were ever elided anyway, the check is **`unverifiable`** and
   fails **closed** — the run is blocked like a violation, because an incomplete
   path list could hide exactly the protected edit.
+- **Hidden tracked files.** A tracked file marked assume-unchanged or
+  skip-worktree is invisible to `git status`, so its local content can differ
+  from HEAD with no trace. The snapshot hashes such files (when they could
+  violate); an unlisted write to one is restored from HEAD only if its pre-edit
+  content equalled HEAD's blob — otherwise it is left in place and the run
+  blocks (fail closed).
+- **Late writes.** A client abort does not stop the server-side agent instantly,
+  so after a cancelled or thrown agent call the scope check runs once more
+  ~500 ms later and the two results are unioned.
+- **Outside git — not guarded.** Edits under the project's `llm-doc/` extra
+  root (the split layout, where it sits outside the git root) are outside git:
+  they are never checked or reverted by this guard, and they persist when a
+  worktree run is discarded.
+- **Repo registration.** The Loop (and the Auto Task regression sweep's repair
+  guard) register the run's repo root with the server's allow-list before an
+  agent call. A too-broad root (`/`, the home folder, `/Users`, …) is refused on
+  both sides — the stage fails with "repo root … is too broad for a Loop agent".
 
 ## Four budgets
 
