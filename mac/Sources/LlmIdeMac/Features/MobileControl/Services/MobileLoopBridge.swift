@@ -122,7 +122,7 @@ final class MobileLoopBridge: MobileFeatureBridge {
                 // runSingleLoop is @MainActor-sync and spins its own Task; false
                 // means the scheduler declined (already busy).
                 let started = autoCode.runSingleLoop(loopId: primary.id, trigger: .phone)
-                self.loopStartedHere = started
+                self.startedHereTracker.noteStart(succeeded: started)
                 self.manager?.append(started ? .info : .stderr, "loop_start \(started ? "accepted" : "declined by scheduler")")
                 let queuedNote = state.running ? " Queued behind the current run." : ""
                 self.manager?.reply(LoopAck(accepted: started,
@@ -168,7 +168,7 @@ final class MobileLoopBridge: MobileFeatureBridge {
                 }
                 // Queue behind an in-flight run when needed — see `loop_start`.
                 let started = autoCode.runSingleLoopStage(stageId: req.stageId, trigger: .phone)
-                self.loopStartedHere = started
+                self.startedHereTracker.noteStart(succeeded: started)
                 self.manager?.append(started ? .info : .stderr,
                                 "loop_start_stage \(started ? "accepted" : "declined by scheduler") — \(stage.name)")
                 let queuedNote = state.running ? " Queued behind the current run." : ""
@@ -389,6 +389,9 @@ struct StartedHereTracker {
     private var sawRunning = false
 
     mutating func markStarted() { startedHere = true; sawRunning = false }
+    /// Only a start that happened resets the tracker — a declined one must not
+    /// forget a phone run already in flight.
+    mutating func noteStart(succeeded: Bool) { if succeeded { markStarted() } }
     mutating func reset() { startedHere = false; sawRunning = false }
     mutating func observe(running: Bool) {
         if running { sawRunning = true } else if sawRunning { reset() }

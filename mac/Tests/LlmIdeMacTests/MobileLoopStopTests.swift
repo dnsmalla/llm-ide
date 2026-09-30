@@ -68,4 +68,15 @@ final class MobileLoopStopTests: XCTestCase {
         let newest = gate.issue()
         XCTAssertTrue(gate.claim(newest, .status))
     }
+
+    /// A declined start must not reset the tracker of a phone run in flight.
+    func testDeclinedStartKeepsTheInFlightPhoneRun() {
+        var tracker = StartedHereTracker()
+        tracker.noteStart(succeeded: true)
+        tracker.observe(running: true)
+        tracker.noteStart(succeeded: false)
+        XCTAssertTrue(tracker.startedHere)
+        tracker.observe(running: false)
+        XCTAssertFalse(tracker.startedHere, "still clears once the run is seen ending")
+    }
 }
