@@ -208,11 +208,20 @@ two jobs apart. Splitting them gives each its own iteration count, its own
 A stage is one step of the run (`LoopStage`). Three kinds:
 
 - **`regressionSweep`** — re-runs the `RegressionRunner` sweep over the project's
-  fault reports. Its own score is the regressed-fault count.
+  fault reports. Its own score is the failing-fault count (every fault not
+  `unchanged` or `repaired`). The sweep's own fault repairs run inside the same
+  protected-path guard and transport retry as a stage repair; a repair the
+  policy rejects is recorded `repairFailed` without being re-verified. A fault
+  whose verify command still needs approval ends the run `needs approval`
+  instead of retrying.
 - **`shellCommand`** — an arbitrary project command (`swift test`, `npm test`).
   Requires an explicit approval in `VerifyApprovalStore` before it will ever run.
 - **`skill`** — a central skill executed as a *generate* step: it edits the tree,
-  and the verify stages decide whether that helped.
+  and the verify stages decide whether that helped. When the agent call fails
+  (a transient transport error — connection refused/reset, timeout, 5xx other
+  than a 504 `AGENT_RUN_TIMEOUT` — is retried once first) the stage is recorded
+  **errored**, and a run with an errored stage and no passing blocking verify
+  stage in its final iteration ends `error`, never `success`.
 
 Which stages a default loop starts with is `LoopStageDetector`'s decision — see
 [Loops](#loops) above.
@@ -294,9 +303,14 @@ stage is never re-verified, so the exit 0 the violation bought is never observed
 Two deliberate limits, both recorded rather than hidden:
 
 - A file that was **already dirty before** the repair is not attributed to the
-  agent. Otherwise every run started from a tree with uncommitted test edits — the
-  normal state while developing — would be blocked, and the guard would simply be
-  switched off.
+  agent merely for being dirty. Otherwise every run started from a tree with
+  uncommitted test edits — the normal state while developing — would be blocked,
+  and the guard would simply be switched off. The snapshot does record each dirty
+  path's `git hash-object`, so a repair that edits such a file *again* (or
+  restores it) is caught; under `revert` that file is left in place rather than
+  checked out (which would discard the earlier edits), and the run still blocks.
+  Rename sources count as dirty paths, and the check also runs when the agent
+  call throws.
 - When git cannot report (not a working tree, git unavailable) the check is
   **`indeterminate`, never `clean`**, is logged as a warning, and the run
   continues. Refusing to loop at all in those projects would be a worse outcome
