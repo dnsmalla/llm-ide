@@ -76,6 +76,9 @@ final class NoteLoopRunSummaryWriter: LoopRunSummaryWriting {
 
     /// The note body. Static + pure so its shape is unit-testable without a disk.
     static func render(_ record: LoopRunRecord, title: String) -> String {
+        let flaky = Set(record.iterations.flatMap(\.attempts).filter { $0.flaky == true }.map(\.stageName))
+        let flakyLine = flaky.isEmpty ? ""
+            : "**Possibly flaky:** \(flaky.sorted().joined(separator: ", ")) passed after a re-run.\n"
         var md = """
         ---
         source: loop-engineering
@@ -94,6 +97,7 @@ final class NoteLoopRunSummaryWriter: LoopRunSummaryWriting {
         **Repo:** `\(record.gitRoot)`
         **Duration:** \(Int(record.durationSeconds))s over \(record.iterationsUsed) iteration(s)
 
+        \(flakyLine)
         ## Pipeline
 
         """

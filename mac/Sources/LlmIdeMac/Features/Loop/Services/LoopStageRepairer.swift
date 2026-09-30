@@ -22,6 +22,16 @@ struct RepairEvidence: Equatable {
     let improved: Bool
     /// Consecutive non-improving attempts, counting this one.
     let streak: Int
+    /// True when the previous failure had a count and this one has none: the
+    /// last change broke the build or test run itself.
+    var stoppedRunning: Bool = false
+    /// The first error lines of the current output, quoted when
+    /// `stoppedRunning` so the agent sees what broke first.
+    var errorExcerpt: String? = nil
+    /// This run's earlier repairs of the stage, oldest first, with what each did.
+    var ledger: [LoopLedgerEntry] = []
+    /// A previous run's last repairs for this same failure set (first repair only).
+    var priorRunLedger: [LoopLedgerEntry] = []
 }
 
 /// Attempts to fix a failing Loop Engineering stage. Generalizes
@@ -35,23 +45,50 @@ protocol LoopStageRepairer: AnyObject {
     ///
     /// - Parameter evidence: What the previous attempt on this stage achieved,
     ///   or `nil` on the first attempt.
+    /// - Parameter repoRoot: The git root the run uses — the worktree when the
+    ///   run was redirected into one. The agent is confined to it.
+    /// - Returns: The agent run's result; the reply is kept for later attempts.
+    /// - Parameter timeout: Wall-clock budget for the agent run; `nil` = the
+    ///   server's default.
+    @discardableResult
     func repair(stageName: String, command: String?, failureOutput: String,
-                evidence: RepairEvidence?, repoRoot: URL) async throws
+                evidence: RepairEvidence?, repoRoot: URL,
+                timeout: TimeInterval?) async throws -> LoopAgentResult
+
+    /// Same, on a chosen model (`nil` = the app's default). Defaults to the
+    /// model-less call so a conformer that predates model tiers still works.
+    @discardableResult
+    func repair(stageName: String, command: String?, failureOutput: String,
+                evidence: RepairEvidence?, repoRoot: URL,
+                timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult
 }
 
-/// Production adapter — same `api.codeAssist` transport `AgentFaultRepairer`
-/// uses; the agent has write tools in this deployment and edits the working
-/// tree directly.
-final class AgentLoopStageRepairer: LoopStageRepairer {
-    private let api: LlmIdeAPIClient
-    private let language: String
+extension LoopStageRepairer {
+    @discardableResult
+    func repair(stageName: String, command: String?, failureOutput: String,
+                evidence: RepairEvidence?, repoRoot: URL,
+                timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult {
+        try await repair(stageName: stageName, command: command, failureOutput: failureOutput,
+                         evidence: evidence, repoRoot: repoRoot, timeout: timeout)
+    }
+}
 
-    init(api: LlmIdeAPIClient, language: String = "en") {
-        self.api = api
-        self.language = language
+/// Production adapter — a headless, confined agent run (`LoopAgentRunning` →
+/// POST /kb/loop/agent-run) rooted at `repoRoot`, the same transport
+/// `AgentFaultRepairer` uses. (It used to be `/code-assist` with no agent
+/// context, which the server answers with no tools — no repair could edit.)
+final class AgentLoopStageRepairer: LoopStageRepairer {
+    private let agent: LoopAgentRunning
+
+    init(agent: LoopAgentRunning) {
+        self.agent = agent
     }
 
-    static let maxFailureOutputChars = 4_000
+    convenience init(api: LlmIdeAPIClient, language: String = "en") {
+        self.init(agent: APILoopAgentRunner(api: api, language: language))
+    }
+
+    static let maxFailureOutputChars = 12_000
 
     /// Builds the repair prompt. Factored out as a `static func` (unlike
     /// `AgentFaultRepairer`, which inlines its prompt) so it is
@@ -63,13 +100,25 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
         The "\(stageName)" stage of an automated verify-and-repair loop is failing in the codebase at \(repoRoot.path).
 
         \(commandLine)Failure output:
-        \(String(failureOutput.suffix(maxFailureOutputChars)))
-        \(evidenceBlock(evidence))
+        \(TestFailureExtractor.repairExcerpt(failureOutput, budget: maxFailureOutputChars))
+        \(evidenceBlock(evidence))\(ledgerBlock(evidence))
         Edit the code so this stage passes. Make the minimal change required.
         Do not modify the stage command, weaken or delete tests/assertions, or skip cases to make it pass.
         Edits to test files, build configuration, and the project's system/ directory are reverted \
         automatically and will not make the stage pass.
         """
+    }
+
+    /// The attempt-ledger paragraphs (prior run first), or "". The two blocks
+    /// share the 6k budget: this run's attempts are the fresher evidence.
+    private static func ledgerBlock(_ evidence: RepairEvidence?) -> String {
+        guard let evidence else { return "" }
+        let total = LoopAttemptLedger.maxBlockChars
+        if evidence.priorRunLedger.isEmpty { return LoopAttemptLedger.block(evidence.ledger) }
+        if evidence.ledger.isEmpty { return LoopAttemptLedger.block(evidence.priorRunLedger, priorRun: true) }
+        let own = LoopAttemptLedger.block(evidence.ledger, budget: total / 2)
+        let prior = LoopAttemptLedger.block(evidence.priorRunLedger, priorRun: true, budget: total - own.count)
+        return prior + own
     }
 
     /// The evidence paragraph, or "" on a first attempt. Built separately so the
@@ -78,7 +127,12 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
         guard let evidence else { return "" }
         var lines = ["", "This is attempt \(evidence.attempt) for this stage in this run."]
 
-        if let previous = evidence.previousScore, let current = evidence.currentScore {
+        if evidence.stoppedRunning {
+            let excerpt = evidence.errorExcerpt.map { $0.isEmpty ? "" : ":\n\($0)" } ?? ""
+            lines.append("Your last change stopped the tests from running\(excerpt)")
+            lines.append("That is worse than the \(evidence.previousScore.map(String.init) ?? "earlier") "
+                         + "failing test(s) before it. Fix this breakage first.")
+        } else if let previous = evidence.previousScore, let current = evidence.currentScore {
             if current < previous {
                 lines.append("Your last change reduced the failure count from \(previous) to \(current) — "
                              + "it helped. Continue in the same direction for the remaining failures.")
@@ -101,14 +155,22 @@ final class AgentLoopStageRepairer: LoopStageRepairer {
         return lines.joined(separator: "\n") + "\n"
     }
 
+    @discardableResult
     func repair(stageName: String, command: String?, failureOutput: String,
-                evidence: RepairEvidence?, repoRoot: URL) async throws {
+                evidence: RepairEvidence?, repoRoot: URL,
+                timeout: TimeInterval?) async throws -> LoopAgentResult {
+        try await repair(stageName: stageName, command: command, failureOutput: failureOutput,
+                         evidence: evidence, repoRoot: repoRoot, timeout: timeout, model: nil)
+    }
+
+    @discardableResult
+    func repair(stageName: String, command: String?, failureOutput: String,
+                evidence: RepairEvidence?, repoRoot: URL,
+                timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult {
         let prompt = Self.buildPrompt(stageName: stageName, command: command,
                                        failureOutput: failureOutput, repoRoot: repoRoot,
                                        evidence: evidence)
-        _ = try await api.codeAssist(
-            message: prompt, language: language, model: nil,
-            history: [], attachments: [], agentContext: nil
-        )
+        return try await agent.run(message: prompt, skills: [], repoRoot: repoRoot, extraRoots: [],
+                                   timeout: timeout, model: model)
     }
 }

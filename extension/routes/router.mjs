@@ -20,6 +20,7 @@ import { listRuns } from '../agents/meeting-agent.mjs';
 // live-sessions imports moved into routes/live.mjs.
 import { handleAgentRoutes } from './agent.mjs';
 import { handleAgentV2Routes } from './agent-v2.mjs';
+import { handleLoopAgentRoutes } from './loop-agent.mjs';
 import { handlePlanningRoutes } from './planning.mjs';
 import { handleIssueScheduleRoutes } from './issue-schedule.mjs';
 import { handleLiveRoutes } from './live.mjs';
@@ -1179,6 +1180,11 @@ export async function handleKB(req, res) {
     // The Agent-SDK chat surface: SSE turn stream, approval decisions,
     // session delete. See routes/agent-v2.mjs.
     if (await handleAgentV2Routes(req, res)) return true;
+
+    // ── Loop headless agent run (/kb/loop/agent-run) ───────────────
+    // The Mac Loop's confined, non-interactive file-editing step (skill
+    // stages + repairs). See routes/loop-agent.mjs.
+    if (await handleLoopAgentRoutes(req, res, { userId })) return true;
 
     // (Old inline agent block removed — extracted to routes/agent.mjs)
 

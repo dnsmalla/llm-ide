@@ -157,6 +157,10 @@ extension LoopEngineView {
             if let input = stage.targetPath, !input.isEmpty { detail += " · \(input)" }
             if let output = stage.outputPath, !output.isEmpty { detail += " → \(output)" }
             return detail
+        case .artifactCheck:
+            return stage.check?.summary(resolvedAgainst: stages.filter(\.enabled)) ?? "no checks configured"
+        case .unsupported:
+            return "unsupported stage kind — kept as-is, never run"
         }
     }
 
@@ -294,6 +298,15 @@ extension LoopEngineView {
         } message: {
             Text("Saves the current stages and budgets as a reusable recipe, available in every project.")
         }
+        .alert("Couldn't save template", isPresented: Binding(
+            get: { templateSaveError != nil },
+            set: { if !$0 { templateSaveError = nil } }
+        )) {
+            Button("Reset custom templates", role: .destructive) { templateStore.resetCustomTemplates() }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(templateSaveError ?? "")
+        }
     }
 
     // MARK: - Settings
@@ -316,7 +329,8 @@ extension LoopEngineView {
             LoopBudgetsEditor(maxIterations: $maxIterations,
                               consecutiveFailureStop: $consecutiveFailureStop,
                               wallClockMinutes: $wallClockMinutes,
-                              maxRepairsPerStage: $maxRepairsPerStage)
+                              maxRepairsPerStage: $maxRepairsPerStage,
+                              repairModel: $repairModel)
             Toggle("Use isolated git worktrees for concurrent runs", isOn: $useWorktreesForConcurrentRuns)
                 .font(Typography.body)
             Text("When another run is already using the main checkout, start in an isolated worktree instead of waiting. Changed worktrees and their branches are retained for review. Off by default.")
@@ -361,33 +375,7 @@ extension LoopEngineView {
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             }
-            ForEach(Array(scopeGlobs.enumerated()), id: \.offset) { index, glob in
-                HStack(spacing: 4) {
-                    // Bounds-guarded: the minus button removes this row while
-                    // its field may still be focused, and the field's commit
-                    // on focus loss then runs through the captured `index` —
-                    // on the last row that is past the end and trapped.
-                    TextField("e.g. src/auth/**", text: Binding(
-                        get: { scopeGlobs.indices.contains(index) ? scopeGlobs[index] : "" },
-                        set: { if scopeGlobs.indices.contains(index) { scopeGlobs[index] = $0 } }
-                    ))
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11, design: .monospaced))
-                    Button {
-                        scopeGlobs.remove(at: index)
-                    } label: {
-                        Image(systemName: "minus.circle")
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-            Button {
-                scopeGlobs.append("")
-            } label: {
-                Label("Add path", systemImage: "plus")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+            ScopeGlobRows(globs: $scopeGlobs)
             Text("When set, a repair that changes a path matching none of these is treated as an out-of-scope violation, under the same policy as the protected-path setting above.")
                 .font(Typography.caption)
                 .foregroundStyle(t.textMuted)
@@ -487,5 +475,55 @@ extension LoopEngineView {
                     .foregroundStyle(t.textMuted)
             }
         }
+    }
+}
+
+/// The editable scope-glob list with STABLE row identity. The rows used to be
+/// keyed by offset, so removing row N re-bound every later row's TextField
+/// (focus and in-progress edits jumped to the neighbour). Ids live beside the
+/// strings; add/remove update both in one action, and an external reload that
+/// changes the count simply mints fresh ids.
+struct ScopeGlobRows: View {
+    @Binding var globs: [String]
+    @State private var ids: [UUID] = []
+
+    private var rowIds: [UUID] {
+        globs.indices.map { ids.indices.contains($0) ? ids[$0] : UUID() }
+    }
+
+    var body: some View {
+        ForEach(Array(zip(rowIds, globs.indices)), id: \.0) { id, index in
+            HStack(spacing: 4) {
+                // Bounds-guarded: the minus button removes this row while its
+                // field may still be focused, and the field's commit on focus
+                // loss then runs through the captured `index`.
+                TextField("e.g. src/auth/**", text: Binding(
+                    get: { globs.indices.contains(index) ? globs[index] : "" },
+                    set: { if globs.indices.contains(index) { globs[index] = $0 } }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11, design: .monospaced))
+                Button {
+                    guard globs.indices.contains(index) else { return }
+                    if ids.count == globs.count { ids.remove(at: index) }
+                    globs.remove(at: index)
+                } label: {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .onChange(of: globs.count, initial: true) { _, count in
+            if ids.count != count { ids = (0..<count).map { _ in UUID() } }
+        }
+        Button {
+            if ids.count != globs.count { ids = globs.map { _ in UUID() } }
+            ids.append(UUID())
+            globs.append("")
+        } label: {
+            Label("Add path", systemImage: "plus")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.mini)
     }
 }

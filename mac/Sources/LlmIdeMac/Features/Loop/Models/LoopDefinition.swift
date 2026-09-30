@@ -98,6 +98,9 @@ public struct LoopDefinition: Codable, Equatable, Identifiable {
 
     // MARK: - Codable backward compatibility
 
+    /// `decoder.userInfo` key carrying the `loop.json` `schemaVersion` (Int).
+    static let fileSchemaVersionKey = CodingUserInfoKey(rawValue: "llmide.loopFileSchemaVersion")!
+
     enum CodingKeys: String, CodingKey {
         case id, name, isPrimary, goal, acceptanceCriteria, scopeGlobs, config
         case defaultKey, runsOnSchedule
@@ -115,10 +118,14 @@ public struct LoopDefinition: Codable, Equatable, Identifiable {
         acceptanceCriteria = try container.decodeIfPresent(String.self, forKey: .acceptanceCriteria)
         scopeGlobs = try container.decodeIfPresent([String].self, forKey: .scopeGlobs) ?? []
         defaultKey = try container.decodeIfPresent(String.self, forKey: .defaultKey)
-        // Absent ⇒ true: every loop written before this field existed was the
-        // one loop the scheduled Auto Task ran, so defaulting to false would
-        // silently turn a project's scheduled loop off on upgrade.
-        runsOnSchedule = try container.decodeIfPresent(Bool.self, forKey: .runsOnSchedule) ?? true
+        // Absent ⇒ true in a pre-v2 file: every loop written before this field
+        // existed was the one loop the scheduled Auto Task ran, so defaulting
+        // to false would silently turn a project's scheduled loop off on
+        // upgrade. In a v2+ file (`LoopEngineConfigStore` passes the version
+        // through `userInfo`) an absent key means "not opted in".
+        let fileVersion = decoder.userInfo[Self.fileSchemaVersionKey] as? Int ?? 1
+        runsOnSchedule = try container.decodeIfPresent(Bool.self, forKey: .runsOnSchedule)
+            ?? (fileVersion < LoopEngineProjectStore.scheduleOptInSchemaVersion)
         config = try container.decode(LoopEngineConfig.self, forKey: .config)
     }
 }
@@ -166,10 +173,28 @@ public enum LoopDefaultLoopKey {
 /// A project's full set of Loops — the schema `system/loop.json` holds. See
 /// `LoopEngineConfigStore` for the load/save/migration contract.
 public struct LoopEngineProjectStore: Codable, Equatable {
+    /// The `loop.json` schema this build reads and writes. 1 = files before
+    /// versioning existed (no key); 2 = `runsOnSchedule` is opt-in and the
+    /// one-time schedule normalisation has been applied. A file whose version
+    /// is HIGHER than this is read-only to this build.
+    public static let currentSchemaVersion = 2
+    /// The version from which the schedule opt-in migration no longer applies.
+    static let scheduleOptInSchemaVersion = 2
+
+    public var schemaVersion: Int
     public var loops: [LoopDefinition]
 
-    public init(loops: [LoopDefinition]) {
+    public init(loops: [LoopDefinition], schemaVersion: Int = LoopEngineProjectStore.currentSchemaVersion) {
         self.loops = loops
+        self.schemaVersion = schemaVersion
+    }
+
+    enum CodingKeys: String, CodingKey { case schemaVersion, loops }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        loops = try c.decode([LoopDefinition].self, forKey: .loops)
     }
 
     /// The loops the scheduled `.loopEngineering` Auto Task should run, in list

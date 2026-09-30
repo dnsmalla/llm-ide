@@ -64,20 +64,20 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertEqual(loops[0].config.stages.map(\.kind), [.regressionSweep])
     }
 
-    /// The Plan loop is generate-only: two `.skill` stages with their skill ids
-    /// pinned AND a self-sufficient prompt each — the prompt must carry the
+    /// The Plan loop is two `.skill` generate stages (skill ids pinned AND a
+    /// self-sufficient prompt each) plus a blocking in-app artifact check — the prompt must carry the
     /// whole contract, because the central skills repo may not be installed on
     /// the machine running the loop.
     func testPlanLoopShipsTwoSkillStagesWithPinnedSkillsAndPrompts() {
         let plan = LoopStageDetector.defaultLoops(gitRoot: repo)
             .first { $0.defaultKey == LoopDefaultLoopKey.plan }
         XCTAssertEqual(plan?.name, "Plan")
-        XCTAssertEqual(plan?.config.stages.map(\.kind), [.skill, .skill])
+        XCTAssertEqual(plan?.config.stages.map(\.kind), [.skill, .skill, .artifactCheck])
         XCTAssertEqual(plan?.config.stages.compactMap(\.defaultKey),
-                       ["plan-structure-index", "plan-director"])
+                       ["plan-structure-index", "plan-director", "plan-check"])
         XCTAssertEqual(plan?.config.stages.compactMap(\.skillId),
                        ["skills/plan-structure-index", "skills/plan-director"])
-        for stage in plan?.config.stages ?? [] {
+        for stage in plan?.config.stages ?? [] where stage.kind == .skill {
             XCTAssertFalse(stage.prompt?.isEmpty ?? true, "\(stage.name) has no prompt")
             XCTAssertEqual(stage.targetPath, "llm-doc/plans")
             XCTAssertFalse(stage.outputPath?.isEmpty ?? true, "\(stage.name) has no output path")
@@ -237,12 +237,12 @@ final class LoopDefaultLoopsTests: XCTestCase {
                                       in: LoopStageDetector.defaultLoops(gitRoot: repo)))
         XCTAssertEqual(docs.name, "Doc Optimization")
         let stages = LoopStage.runOrder(docs.config.stages)
-        XCTAssertEqual(stages.map(\.name), ["Doc Index", "Doc Writer"])
-        XCTAssertEqual(stages.map(\.kind), [.skill, .skill])
-        XCTAssertEqual(stages.compactMap(\.defaultKey), ["doc-index", "doc-writer"])
+        XCTAssertEqual(stages.map(\.name), ["Doc Index", "Doc Writer", "Doc Check"])
+        XCTAssertEqual(stages.map(\.kind), [.skill, .skill, .artifactCheck])
+        XCTAssertEqual(stages.compactMap(\.defaultKey), ["doc-index", "doc-writer", "doc-check"])
         XCTAssertEqual(stages.compactMap(\.skillId), ["skills/doc-structure-index", "skills/doc-writer"])
-        XCTAssertEqual(stages.map(\.targetPath), [".", "llm-doc/docs/INDEX.md"])
-        XCTAssertEqual(stages.map(\.outputPath), ["llm-doc/docs/INDEX.md", "llm-doc/docs"])
+        XCTAssertEqual(stages.map(\.targetPath), [".", "llm-doc/docs/INDEX.md", nil])
+        XCTAssertEqual(stages.map(\.outputPath), ["llm-doc/docs/INDEX.md", "llm-doc/docs", nil])
     }
 
     /// Prompts carry the contract but no path — the path lives only in the
@@ -336,7 +336,8 @@ final class LoopDefaultLoopsTests: XCTestCase {
         let suite = "loop-default-loops-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        _ = LoopEngineConfigStore.normalizeScheduleOptIn(&store, projectId: "p1", defaults: defaults)
+        store.schemaVersion = 1
+        _ = LoopEngineConfigStore.normalizeScheduleOptIn(&store)
         XCTAssertFalse(store.loop(defaultKey: LoopDefaultLoopKey.refactor)?.runsOnSchedule ?? true)
     }
 
@@ -729,5 +730,75 @@ final class LoopDefaultLoopsTests: XCTestCase {
             LoopDefinition.self, from: try JSONEncoder().encode(loop))
         XCTAssertEqual(decoded.defaultKey, LoopDefaultLoopKey.systemCheck)
         XCTAssertFalse(decoded.runsOnSchedule)
+    }
+}
+
+// MARK: - Mac-app System Check command (memory keychain)
+
+final class LoopMacAppCommandTests: XCTestCase {
+    private var repo: URL!
+
+    override func setUpWithError() throws {
+        repo = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loop-macapp-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try "".write(to: repo.appendingPathComponent("x"), atomically: true, encoding: .utf8)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: repo)
+    }
+
+    func testDefaultUsesMakeTargetWhenPresentElseEnvVar() throws {
+        XCTAssertEqual(LoopStageDetector.macAppCommand(gitRoot: repo),
+                       "cd mac && LLMIDE_KEYCHAIN_BACKEND=memory swift test")
+        try "test-mac:\n\techo hi\n".write(to: repo.appendingPathComponent("Makefile"),
+                                          atomically: true, encoding: .utf8)
+        XCTAssertEqual(LoopStageDetector.macAppCommand(gitRoot: repo), "make test-mac")
+    }
+
+    private func loop(command: String) -> LoopDefinition {
+        var stage = LoopStage(id: "m", name: "Mac app", kind: .shellCommand, command: command, order: 1)
+        stage.defaultKey = "mac-app"
+        stage.isDefault = true
+        var other = LoopStage(id: "o", name: "Other", kind: .shellCommand, command: "cd mac && swift test", order: 2)
+        other.defaultKey = nil
+        var def = LoopDefinition(name: "System Check", defaultKey: LoopDefaultLoopKey.systemCheck,
+                                 config: LoopEngineDefaults.newConfig(stages: [], defaults: .standard))
+        def.config.stages = [stage, other]
+        return def
+    }
+
+    func testMigrationUpdatesOnlyTheExactOldCommandAndIsIdempotent() throws {
+        try "test-mac:\n".write(to: repo.appendingPathComponent("Makefile"), atomically: true, encoding: .utf8)
+        let once = LoopStageDetector.migratingMacAppCommand(
+            in: [loop(command: "cd mac && swift test")], gitRoot: repo)
+        XCTAssertEqual(once[0].config.stages[0].command, "make test-mac")
+        XCTAssertEqual(once[0].config.stages[1].command, "cd mac && swift test", "unkeyed stage untouched")
+        let twice = LoopStageDetector.migratingMacAppCommand(in: once, gitRoot: repo)
+        XCTAssertEqual(twice, once)
+
+        let edited = loop(command: "cd mac && swift test --filter Foo")
+        XCTAssertEqual(LoopStageDetector.migratingMacAppCommand(in: [edited], gitRoot: repo), [edited])
+    }
+
+    func testMigrationCarriesTheStagesApprovalToTheNewCommand() throws {
+        try "test-mac:\n".write(to: repo.appendingPathComponent("Makefile"), atomically: true, encoding: .utf8)
+        let approvals = VerifyApprovalStore(defaults: UserDefaults(suiteName: "mac-app-migration-\(UUID().uuidString)")!)
+        approvals.approveStage(repo: repo, stageId: "m", command: "cd mac && swift test")
+        _ = LoopStageDetector.migratingMacAppCommand(
+            in: [loop(command: "cd mac && swift test")], gitRoot: repo, approvals: approvals)
+        XCTAssertTrue(approvals.isStageApproved(repo: repo, stageId: "m", command: "make test-mac"),
+                      "the approved stage stays approved after its command is migrated")
+        XCTAssertFalse(approvals.isStageApproved(repo: repo, stageId: "o", command: "make test-mac"),
+                       "nothing is approved for a stage the migration did not change")
+    }
+
+    func testMigrationDoesNotApproveAnUnapprovedStage() throws {
+        try "test-mac:\n".write(to: repo.appendingPathComponent("Makefile"), atomically: true, encoding: .utf8)
+        let approvals = VerifyApprovalStore(defaults: UserDefaults(suiteName: "mac-app-migration-\(UUID().uuidString)")!)
+        _ = LoopStageDetector.migratingMacAppCommand(
+            in: [loop(command: "cd mac && swift test")], gitRoot: repo, approvals: approvals)
+        XCTAssertFalse(approvals.isStageApproved(repo: repo, stageId: "m", command: "make test-mac"))
     }
 }

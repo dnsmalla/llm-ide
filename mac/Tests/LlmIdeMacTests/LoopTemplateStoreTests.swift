@@ -21,7 +21,7 @@ final class LoopTemplateStoreTests: XCTestCase {
 
     // MARK: - Built-ins
 
-    func testBuiltInsAreAlwaysPresentAndListedFirst() {
+    func testBuiltInsAreAlwaysPresentAndListedFirst() throws {
         let store = LoopTemplateStore(defaults: defaults)
         XCTAssertEqual(store.templates.prefix(LoopTemplate.builtIns.count).map(\.id),
                        LoopTemplate.builtIns.map(\.id))
@@ -30,7 +30,7 @@ final class LoopTemplateStoreTests: XCTestCase {
 
     /// Built-ins are the known-good floor: a project must always be able to fall
     /// back to one, so they cannot be deleted.
-    func testBuiltInsCannotBeDeleted() {
+    func testBuiltInsCannotBeDeleted() throws {
         let store = LoopTemplateStore(defaults: defaults)
         store.delete(id: LoopTemplate.testAndFix.id)
         XCTAssertNotNil(store.template(id: LoopTemplate.testAndFix.id))
@@ -38,60 +38,60 @@ final class LoopTemplateStoreTests: XCTestCase {
 
     /// Built-ins are a static constant, never persisted — otherwise an improved
     /// starter could never reach a user who had already opened the page once.
-    func testBuiltInsAreNotPersisted() {
+    func testBuiltInsAreNotPersisted() throws {
         _ = LoopTemplateStore(defaults: defaults)
         XCTAssertNil(defaults.data(forKey: "loopTemplateStore"))
     }
 
     // MARK: - Save
 
-    func testSaveAddsACustomTemplate() {
+    func testSaveAddsACustomTemplate() throws {
         let store = LoopTemplateStore(defaults: defaults)
-        let saved = store.save(name: "Mine", summary: "my loop", config: makeConfig())
+        let saved = try store.save(name: "Mine", summary: "my loop", config: makeConfig())
         XCTAssertEqual(store.customTemplates.map(\.id), [saved.id])
         XCTAssertFalse(saved.isBuiltIn)
         XCTAssertEqual(saved.config.maxIterations, 5)
     }
 
-    func testSaveTrimsWhitespace() {
+    func testSaveTrimsWhitespace() throws {
         let store = LoopTemplateStore(defaults: defaults)
-        let saved = store.save(name: "  Mine  ", summary: "  does things  ", config: makeConfig())
+        let saved = try store.save(name: "  Mine  ", summary: "  does things  ", config: makeConfig())
         XCTAssertEqual(saved.name, "Mine")
         XCTAssertEqual(saved.summary, "does things")
     }
 
-    func testSaveWithAnEmptyNameGetsAPlaceholder() {
+    func testSaveWithAnEmptyNameGetsAPlaceholder() throws {
         let store = LoopTemplateStore(defaults: defaults)
-        XCTAssertEqual(store.save(name: "   ", summary: "", config: makeConfig()).name, "Untitled loop")
+        XCTAssertEqual(try store.save(name: "   ", summary: "", config: makeConfig()).name, "Untitled loop")
     }
 
     /// Two rows both reading "Mine" with no way to tell them apart is a dead end
     /// for the picker, which shows only the name.
-    func testDuplicateNamesAreSuffixed() {
+    func testDuplicateNamesAreSuffixed() throws {
         let store = LoopTemplateStore(defaults: defaults)
-        _ = store.save(name: "Mine", summary: "", config: makeConfig())
-        XCTAssertEqual(store.save(name: "Mine", summary: "", config: makeConfig()).name, "Mine 2")
-        XCTAssertEqual(store.save(name: "Mine", summary: "", config: makeConfig()).name, "Mine 3")
+        _ = try store.save(name: "Mine", summary: "", config: makeConfig())
+        XCTAssertEqual(try store.save(name: "Mine", summary: "", config: makeConfig()).name, "Mine 2")
+        XCTAssertEqual(try store.save(name: "Mine", summary: "", config: makeConfig()).name, "Mine 3")
     }
 
-    func testNameCollisionIsCaseInsensitive() {
+    func testNameCollisionIsCaseInsensitive() throws {
         let store = LoopTemplateStore(defaults: defaults)
-        _ = store.save(name: "Mine", summary: "", config: makeConfig())
-        XCTAssertEqual(store.save(name: "mine", summary: "", config: makeConfig()).name, "mine 2")
+        _ = try store.save(name: "Mine", summary: "", config: makeConfig())
+        XCTAssertEqual(try store.save(name: "mine", summary: "", config: makeConfig()).name, "mine 2")
     }
 
     /// Collisions are checked against built-ins too — the picker lists both groups.
-    func testNameCollidingWithABuiltInIsSuffixed() {
+    func testNameCollidingWithABuiltInIsSuffixed() throws {
         let store = LoopTemplateStore(defaults: defaults)
-        XCTAssertEqual(store.save(name: "Test & Fix", summary: "", config: makeConfig()).name,
+        XCTAssertEqual(try store.save(name: "Test & Fix", summary: "", config: makeConfig()).name,
                        "Test & Fix 2")
     }
 
     // MARK: - Delete
 
-    func testDeleteRemovesACustomTemplate() {
+    func testDeleteRemovesACustomTemplate() throws {
         let store = LoopTemplateStore(defaults: defaults)
-        let saved = store.save(name: "Mine", summary: "", config: makeConfig())
+        let saved = try store.save(name: "Mine", summary: "", config: makeConfig())
         store.delete(id: saved.id)
         XCTAssertNil(store.template(id: saved.id))
         XCTAssertTrue(store.customTemplates.isEmpty)
@@ -99,18 +99,18 @@ final class LoopTemplateStoreTests: XCTestCase {
 
     // MARK: - Persistence
 
-    func testCustomTemplatesSurviveAFreshStore() {
+    func testCustomTemplatesSurviveAFreshStore() throws {
         let first = LoopTemplateStore(defaults: defaults)
-        let saved = first.save(name: "Mine", summary: "my loop", config: makeConfig("Verify"))
+        let saved = try first.save(name: "Mine", summary: "my loop", config: makeConfig("Verify"))
 
         let second = LoopTemplateStore(defaults: defaults)
         XCTAssertEqual(second.customTemplates.map(\.id), [saved.id])
         XCTAssertEqual(second.template(id: saved.id)?.config.stages.first?.name, "Verify")
     }
 
-    func testDeleteIsPersisted() {
+    func testDeleteIsPersisted() throws {
         let first = LoopTemplateStore(defaults: defaults)
-        let saved = first.save(name: "Mine", summary: "", config: makeConfig())
+        let saved = try first.save(name: "Mine", summary: "", config: makeConfig())
         first.delete(id: saved.id)
         XCTAssertTrue(LoopTemplateStore(defaults: defaults).customTemplates.isEmpty)
     }
@@ -132,7 +132,7 @@ final class LoopTemplateStoreTests: XCTestCase {
 
     /// Corrupt persisted data must degrade to "no custom templates", never crash —
     /// the built-ins still give the page something to offer.
-    func testCorruptStoreDegradesToBuiltInsOnly() {
+    func testCorruptStoreDegradesToBuiltInsOnly() throws {
         defaults.set(Data("not json".utf8), forKey: "loopTemplateStore")
         let store = LoopTemplateStore(defaults: defaults)
         XCTAssertTrue(store.customTemplates.isEmpty)

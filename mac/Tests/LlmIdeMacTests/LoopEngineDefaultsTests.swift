@@ -20,7 +20,8 @@ final class LoopEngineDefaultsTests: XCTestCase {
         let loaded = LoopEngineDefaults.load(defaults: defaults)
         let fresh = LoopEngineConfig(stages: [])
         XCTAssertEqual(loaded.maxIterations, fresh.maxIterations)
-        XCTAssertEqual(loaded.consecutiveFailureStop, fresh.consecutiveFailureStop)
+        // A NEW loop starts at 3 (persisted loops keep their own value).
+        XCTAssertEqual(loaded.consecutiveFailureStop, LoopEngineDefaults.newLoopFailureStop)
         XCTAssertEqual(loaded.wallClockBudgetSeconds, fresh.wallClockBudgetSeconds)
         XCTAssertEqual(loaded.maxRepairsPerStage, fresh.maxRepairsPerStage)
         XCTAssertEqual(loaded.protectedPathPolicy, fresh.protectedPathPolicy)

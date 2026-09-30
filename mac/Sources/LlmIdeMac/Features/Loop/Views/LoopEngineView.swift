@@ -60,7 +60,7 @@ struct LoopEngineView: View {
     /// service owns the instance and this page only renders its `@Published`
     /// live state — which is what lets a run keep its visible log across a
     /// page or project switch instead of dying with the view that started it.
-    @ObservedObject var runner: LoopEngineRunner
+    let runner: LoopEngineRunner
 
     /// Shared verify-command allowlist — consulted by the detail pane's
     /// "Approve command" button. The SAME instance every runner is
@@ -78,6 +78,7 @@ struct LoopEngineView: View {
     /// in `currentConfig` and `loadConfig`.
     @State var wallClockMinutes: Int = 60
     @State var maxRepairsPerStage: Int = 3
+    @State var repairModel: String?
     @State var protectedPathPolicy: ProtectedPathPolicy = .revert
     /// No UI (the built-in protected set covers the common cases); held in state
     /// purely so a hand-edited value survives a save from this page instead of
@@ -103,6 +104,9 @@ struct LoopEngineView: View {
     /// instead of the live in-memory log.
     @State var selectedPastRunId: String?
     @State var inspectedPastRun: LoopRunRecord?
+    /// Where the inspected record lives on disk, resolved ONCE on selection —
+    /// `resolveRecordURL` may scan `loop-runs/`, which must not happen in body.
+    @State var inspectedRecordURL: URL?
     @State var pastRunInspectLoadFailed = false
     /// Debounced autosave of the current config (see `scheduleAutosave`).
     @State private var autosaveTask: Task<Void, Never>?
@@ -127,6 +131,8 @@ struct LoopEngineView: View {
     /// App-wide template library (built-in starters + the user's saved recipes).
     /// A `@StateObject` so the picker updates the moment one is saved or deleted.
     @StateObject var templateStore = LoopTemplateStore()
+    /// Why the last "save as template" failed, if it did.
+    @State var templateSaveError: String?
     @State var selectedTemplateId: UUID?
     /// Set by `applySelectedTemplate()` when the applied template's stages were
     /// all `detectedTestCommand` placeholders and none resolved — so an empty
@@ -176,6 +182,11 @@ struct LoopEngineView: View {
     /// from disk instead, precisely because this copy can be stale.
     @State var isPrimaryLoop = false
 
+    /// Command candidates for the active repo, detected ONCE per loaded loop
+    /// (`.task(id: reloadKey)`, off the main actor) — not in `body`, which ran
+    /// the filesystem scan per shell stage per render.
+    @State var detectedCommandCandidates: [LoopStageDetector.DetectedCommand] = []
+
     /// How many past runs the history list shows. One constant, so the header's
     /// "latest N" badge cannot claim a different cap than `loadPastRuns`
     /// actually applies.
@@ -220,6 +231,12 @@ struct LoopEngineView: View {
         // LoopRunService at runner creation, not per page appearance, so it
         // survives this page being closed mid-run.)
         .task(id: reloadKey) {
+            let gitRoot = activeGitRootURL
+            detectedCommandCandidates = gitRoot == nil ? [] : await Task.detached(priority: .userInitiated) {
+                LoopStageDetector.detectCommandCandidates(gitRoot: gitRoot!)
+            }.value
+        }
+        .task(id: reloadKey) {
             selectedStageId = nil
             // The runner is long-lived now: opening the page of a loop whose
             // run is still in flight must show that run's live log, not wipe
@@ -237,7 +254,7 @@ struct LoopEngineView: View {
         // existed THEN; this page can be torn down and re-created mid-run
         // (switch loop and back), and the re-created page observes the same
         // long-lived runner, so this fires on whichever instance is live.
-        .onChange(of: runner.running) { _, isRunning in
+        .onReceive(runner.$running.dropFirst().removeDuplicates()) { isRunning in
             if !isRunning {
                 loadPastRuns()
             }
@@ -378,8 +395,10 @@ struct LoopEngineView: View {
             Button("Move down") { moveStage(stage, by: 1) }
                 .disabled(position == count - 1)
             Divider()
-            Button("Run this stage only") { startRun(only: stage) }
-                .disabled(runner.running || activeGitRootURL == nil)
+            RunnerObserver(runner: runner) {
+                Button("Run this stage only") { startRun(only: stage) }
+                    .disabled(runner.running || laneRun != nil || activeGitRootURL == nil)
+            }
             Divider()
             Button("Duplicate") { duplicateStage(stage) }
             if !stage.isDefault {
@@ -476,7 +495,7 @@ struct LoopEngineView: View {
                 Image(systemName: stage.kind == .regressionSweep ? "arrow.uturn.backward.circle"
                       : stage.kind == .shellCommand ? "terminal" : "sparkles")
                     .foregroundStyle(t.textMuted)
-                Text(stage.kind == .skill ? "Generate" : "Verify")
+                Text(stage.kind == .skill ? "Generate" : stage.kind == .artifactCheck ? "Check" : "Verify")
                     .font(Typography.captionStrong)
                     .foregroundStyle(stage.kind == .skill ? t.accent2 : t.accent)
                 if stage.isDefault {
@@ -500,6 +519,24 @@ struct LoopEngineView: View {
                       : "Disabled — the runner skips this stage")
                 stageMenu(stage, position: position, count: stages.count)
             }
+            if !stage.enabled, stage.disabledByDetection == true {
+                Label("Disabled: no test command detected — re-enabled automatically when one is found.",
+                      systemImage: "exclamationmark.triangle")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.accent4)
+            }
+            if LoopStageDetector.updateAvailable(for: stage) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                    Text("Update available — a newer default exists for this stage.")
+                        .font(Typography.caption)
+                    Button("Reset to default") { resetStageToDefault(stage) }
+                        .controlSize(.mini)
+                        .help("Replace this stage's content with the current default (your enabled/severity/timeout choices are kept)")
+                    Spacer()
+                }
+                .foregroundStyle(t.accent4)
+            }
             stageDetail(stage: stageBinding(id: stage.id, fallback: stage))
                 .opacity(stage.enabled ? 1 : 0.55)
         }
@@ -515,7 +552,27 @@ struct LoopEngineView: View {
         .simultaneousGesture(TapGesture().onEnded { selectedStageId = stage.id })
     }
 
+    /// One-click reset of a default stage whose content is behind the shipped
+    /// revision (`LoopStageDetector.updateAvailable`).
+    private func resetStageToDefault(_ stage: LoopStage) {
+        guard let reset = LoopStageDetector.resetToDefault(stage, loopKey: loopDefaultKey,
+                                                           gitRoot: activeGitRootURL),
+              let i = stages.firstIndex(where: { $0.id == stage.id }) else { return }
+        stages[i] = reset
+    }
+
     private var toolbar: some View {
+        RunnerObserver(runner: runner) { toolbarContent }
+    }
+
+    /// A phone/schedule run of THIS loop on the Auto Task lane — shown in the
+    /// live header, stoppable here, and it blocks Run while in flight.
+    private var laneRun: LoopRunService.LaneRun? {
+        guard let projectId = activeProjectId else { return nil }
+        return runService.laneRun(projectId: projectId, loopId: loopId)
+    }
+
+    private var toolbarContent: some View {
         HStack(spacing: Spacing.md) {
             Button(runner.waitingInQueue ? "Queued…"
                    : runner.running ? "Running… (iteration \(runner.iteration))" : "Run") {
@@ -527,8 +584,14 @@ struct LoopEngineView: View {
             // Run and the runner's own `running`/`waitingInQueue` flipping —
             // without it a fast double-click reached the service's refusal
             // path and reported "already busy" for a run that DID start.
-            .disabled(runner.running || runner.waitingInQueue || isStartPending
+            .disabled(runner.running || runner.waitingInQueue || isStartPending || laneRun != nil
                       || !stages.contains(where: \.enabled) || activeGitRootURL == nil)
+            .help(laneRun.map { "\($0.label) — stop it before running from here." } ?? "")
+            if let lane = laneRun, !runner.running {
+                Button("Stop") { stopRun() }
+                    .controlSize(.small)
+                    .help("Stop the run started from \(lane.source)")
+            }
             if runner.running {
                 // The service owns the run's Task; cancelling it makes
                 // `Task.isCancelled` true on the same task `runner.run` is
@@ -629,8 +692,8 @@ struct LoopEngineView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 11, design: .monospaced))
 
-                    if let gitRoot = activeGitRootURL {
-                        commandSuggestionsMenu(gitRoot: gitRoot, stageName: stage.wrappedValue.name) { candidate in
+                    if activeGitRootURL != nil {
+                        commandSuggestionsMenu(stageName: stage.wrappedValue.name) { candidate in
                             stage.wrappedValue.command = candidate.command
                             // A NON-primary pick is an unknown quantity: it is
                             // whatever else the Makefile happens to define, so
@@ -674,6 +737,12 @@ struct LoopEngineView: View {
                     Text("Open a project with a cloned repo to approve or run shell-command stages.")
                         .font(Typography.caption).foregroundStyle(t.textMuted)
                 }
+            } else if stage.wrappedValue.kind == .artifactCheck {
+                Text("Checked in-app after the generate stages; a failure re-runs them with the findings.")
+                    .font(Typography.caption).foregroundStyle(t.textMuted)
+                Text(stage.wrappedValue.check?.summary(resolvedAgainst: stages.filter(\.enabled)) ?? "no checks configured")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(t.textMuted)
             } else if stage.wrappedValue.kind == .skill {
                 Text("Skill").font(Typography.caption).foregroundStyle(t.textMuted)
                 if skillCatalog.isEmpty {
@@ -765,10 +834,10 @@ struct LoopEngineView: View {
     /// trade-off `activeGitRootURL` above already makes for this view.
     @ViewBuilder
     private func commandSuggestionsMenu(
-        gitRoot: URL, stageName: String,
+        stageName: String,
         onSelect: @escaping (LoopStageDetector.DetectedCommand) -> Void
     ) -> some View {
-        let candidates = LoopStageDetector.detectCommandCandidates(gitRoot: gitRoot, stageName: stageName)
+        let candidates = LoopStageDetector.rankCandidates(detectedCommandCandidates, stageName: stageName)
         // `isPrimary` false is every OTHER real Makefile target — setup and
         // cleanup steps (`hooks`, `clean`, `docs-deps`) that exit 0
         // unconditionally. Nothing here is hidden, but a Verify stage's
@@ -823,6 +892,10 @@ struct LoopEngineView: View {
     // MARK: - Log pane
 
     private var logPane: some View {
+        RunnerObserver(runner: runner) { logPaneContent }
+    }
+
+    private var logPaneContent: some View {
         let t = theme.current
         let inspecting = inspectedPastRun != nil || pastRunInspectLoadFailed
         // Filtered ONCE per render and threaded down. `visibleLog` is a
@@ -840,19 +913,14 @@ struct LoopEngineView: View {
                 SectionLabel(inspecting ? "RUN DETAIL" : "RUN LOG")
                 Spacer()
                 if inspecting {
-                    if let record = inspectedPastRun,
-                       let root = workspaceContext?.projectRoot {
-                        // Ask the journal where the file actually is — recomputing
-                        // the month bucket here would miss the scan fallback and
-                        // hand Finder a path that does not exist.
-                        if let url = journal.resolveRecordURL(
-                            id: record.id, startedAt: record.startedAt, root: root) {
-                            Button("Reveal JSON") {
-                                NSWorkspace.shared.activateFileViewerSelecting([url])
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                    // URL resolved by the journal on selection (not here) —
+                    // recomputing the month bucket would miss the scan fallback.
+                    if let url = inspectedRecordURL {
+                        Button("Reveal JSON") {
+                            NSWorkspace.shared.activateFileViewerSelecting([url])
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
                     Button("Back") { clearPastRunInspection() }
                         .buttonStyle(.bordered)
@@ -1104,8 +1172,41 @@ struct LoopEngineView: View {
     /// published run-snapshot fields (`runMaxIterations`, `runWallClockBudget`)
     /// rather than this page's editable config state, so it describes the run
     /// actually executing even after the user edits budgets mid-run.
-    @ViewBuilder
     private var liveRunHeader: some View {
+        RunnerObserver(runner: runner) {
+            if let lane = laneRun, !runner.running, !runner.waitingInQueue {
+                RunnerObserver(runner: lane.runner) { laneRunHeader(lane) }
+            } else {
+                liveRunHeaderContent
+            }
+        }
+    }
+
+    /// Compact live header for a phone/schedule run of this loop.
+    private func laneRunHeader(_ lane: LoopRunService.LaneRun) -> some View {
+        let t = theme.current
+        return HStack(spacing: 6) {
+            ProgressView().controlSize(.small)
+            Text(lane.runner.waitingInQueue ? "Queued (started from \(lane.source))"
+                                            : lane.label)
+                .font(Typography.captionStrong)
+                .foregroundStyle(t.text)
+            if lane.runner.running {
+                Text("· iteration \(lane.runner.iteration)/\(lane.runner.runMaxIterations)"
+                     + (lane.runner.currentStageName.map { " · \($0)" } ?? ""))
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.sm)
+    }
+
+    @ViewBuilder
+    private var liveRunHeaderContent: some View {
         let t = theme.current
         if runner.running || runner.waitingInQueue {
             VStack(alignment: .leading, spacing: 6) {
@@ -1216,6 +1317,7 @@ struct LoopEngineView: View {
         case .repairing: return t.accent4
         case .passed:    return t.success
         case .failed:    return t.danger
+        case .errored:   return t.danger
         }
     }
 
@@ -1226,6 +1328,7 @@ struct LoopEngineView: View {
         case .repairing: return "Failed — repair in progress"
         case .passed:    return "Passed this iteration"
         case .failed:    return "Failed this iteration"
+        case .errored:   return "Errored — the agent could not run (backend or transport error)"
         }
     }
 
@@ -1339,7 +1442,8 @@ struct LoopEngineView: View {
             protectedPathPolicy: protectedPathPolicy,
             extraProtectedGlobs: extraProtectedGlobs,
             writeSummaryNote: writeSummaryNote,
-            useWorktreesForConcurrentRuns: useWorktreesForConcurrentRuns)
+            useWorktreesForConcurrentRuns: useWorktreesForConcurrentRuns,
+            repairModel: repairModel)
     }
 
     /// The full `LoopDefinition` this page currently represents — `currentConfig`
@@ -1384,6 +1488,7 @@ struct LoopEngineView: View {
             consecutiveFailureStop = ensuredConfig.consecutiveFailureStop
             wallClockMinutes = LoopBudgetsEditor.minutes(fromSeconds: ensuredConfig.wallClockBudgetSeconds)
             maxRepairsPerStage = ensuredConfig.maxRepairsPerStage
+            repairModel = ensuredConfig.repairModel
             protectedPathPolicy = ensuredConfig.protectedPathPolicy
             extraProtectedGlobs = ensuredConfig.extraProtectedGlobs
             writeSummaryNote = ensuredConfig.writeSummaryNote
@@ -1439,6 +1544,7 @@ struct LoopEngineView: View {
         consecutiveFailureStop = seed.consecutiveFailureStop
         wallClockMinutes = LoopBudgetsEditor.minutes(fromSeconds: seed.wallClockBudgetSeconds)
         maxRepairsPerStage = seed.maxRepairsPerStage
+        repairModel = seed.repairModel
         protectedPathPolicy = seed.protectedPathPolicy
         extraProtectedGlobs = seed.extraProtectedGlobs
         writeSummaryNote = seed.writeSummaryNote
@@ -1484,6 +1590,8 @@ struct LoopEngineView: View {
     private func setStageEnabled(_ stage: LoopStage, _ enabled: Bool) {
         guard let index = stages.firstIndex(where: { $0.id == stage.id }) else { return }
         stages[index].enabled = enabled
+        // A manual toggle takes the stage out of detection's hands.
+        stages[index].disabledByDetection = nil
     }
 
     /// Kick off a run through `LoopRunService` — the Run button and the
@@ -1505,7 +1613,8 @@ struct LoopEngineView: View {
         else { return }
         // Fail-closed twin of the Run button's `isStartPending` disable —
         // "Run this stage only" lives in a menu the disable doesn't cover.
-        guard !runService.isRunning(projectId: projectId, loopId: loopId) else { return }
+        guard !runService.isRunning(projectId: projectId, loopId: loopId),
+              runService.laneRun(projectId: projectId, loopId: loopId) == nil else { return }
         // Only after every refusal path: a refused start must not close the
         // journal record the user was reading.
         clearPastRunInspection()
@@ -1549,7 +1658,7 @@ struct LoopEngineView: View {
     /// its Task.
     private func stopRun() {
         guard let projectId = activeProjectId else { return }
-        runService.stop(projectId: projectId, loopId: loopId)
+        runService.stopShownRun(projectId: projectId, loopId: loopId)
     }
 
     private func pauseRun() {
@@ -1696,6 +1805,11 @@ struct LoopEngineView: View {
         // Read more than the display limit — a project journal interleaves
         // every loop's runs, so filtering down to this loop must not starve
         // the list.
+        // Runs an earlier launch left without a final record become .aborted —
+        // off the main thread, once per project per launch.
+        Task { @MainActor in
+            if await journal.reconcileOncePerLaunch(root: root) > 0 { loadPastRuns() }
+        }
         let recent = journal.recentRuns(root: root, limit: 60)
         pastRuns = Array(recent
             .filter { $0.loopId == loopId || ($0.loopId == nil && isPrimaryLoop) }
@@ -1708,16 +1822,20 @@ struct LoopEngineView: View {
         selectedPastRunId = entry.id
         guard let root = workspaceContext?.projectRoot else {
             inspectedPastRun = nil
+            inspectedRecordURL = nil
             pastRunInspectLoadFailed = true
             return
         }
         inspectedPastRun = journal.loadRecord(id: entry.id, startedAt: entry.startedAt, root: root)
+        inspectedRecordURL = inspectedPastRun == nil ? nil
+            : journal.resolveRecordURL(id: entry.id, startedAt: entry.startedAt, root: root)
         pastRunInspectLoadFailed = inspectedPastRun == nil
     }
 
     func clearPastRunInspection() {
         selectedPastRunId = nil
         inspectedPastRun = nil
+        inspectedRecordURL = nil
         pastRunInspectLoadFailed = false
     }
 
@@ -1727,6 +1845,8 @@ struct LoopEngineView: View {
               let entry = pastRuns.first(where: { $0.id == id })
         else { return }
         inspectedPastRun = journal.loadRecord(id: entry.id, startedAt: entry.startedAt, root: projectRoot)
+        inspectedRecordURL = inspectedPastRun == nil ? nil
+            : journal.resolveRecordURL(id: entry.id, startedAt: entry.startedAt, root: projectRoot)
         pastRunInspectLoadFailed = inspectedPastRun == nil
     }
 
@@ -1768,6 +1888,7 @@ struct LoopEngineView: View {
         consecutiveFailureStop = applied.consecutiveFailureStop
         wallClockMinutes = LoopBudgetsEditor.minutes(fromSeconds: applied.wallClockBudgetSeconds)
         maxRepairsPerStage = applied.maxRepairsPerStage
+        repairModel = applied.repairModel
         protectedPathPolicy = applied.protectedPathPolicy
         extraProtectedGlobs = applied.extraProtectedGlobs
         writeSummaryNote = applied.writeSummaryNote
@@ -1793,11 +1914,31 @@ struct LoopEngineView: View {
     }
 
     func saveCurrentAsTemplate() {
-        let saved = templateStore.save(
-            name: newTemplateName, summary: newTemplateSummary, config: currentConfig)
+        guard let saved = try? templateStore.save(
+            name: newTemplateName, summary: newTemplateSummary, config: currentConfig) else {
+            templateSaveError = LoopTemplateStore.SaveError.storedDataUndecodable.errorDescription
+            return
+        }
+        templateSaveError = nil
         selectedTemplateId = saved.id
         newTemplateName = ""
         newTemplateSummary = ""
     }
 
+}
+
+/// Observes the runner on behalf of the subtree built by `content`, so the
+/// enclosing page does NOT re-render (all three panes) on every published
+/// runner change — a log line per tick during a run. The page holds the
+/// runner as a plain reference and wraps only the parts that read it.
+struct RunnerObserver<Content: View>: View {
+    @ObservedObject var runner: LoopEngineRunner
+    @ViewBuilder var content: () -> Content
+
+    init(runner: LoopEngineRunner, @ViewBuilder content: @escaping () -> Content) {
+        self.runner = runner
+        self.content = content
+    }
+
+    var body: some View { content() }
 }

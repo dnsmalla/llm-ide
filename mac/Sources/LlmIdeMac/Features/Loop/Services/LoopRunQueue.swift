@@ -56,6 +56,13 @@ enum LoopRunQueue {
                 cancelWaiter(rootKey: rootKey, id: waiterId)
             }
         }
+        // Cancellation can land after `release` already handed this waiter the
+        // lock (the cancel hop finds no waiter to remove). Give the lock back
+        // instead of running a cancelled caller that holds it.
+        if Task.isCancelled {
+            release(rootKey: rootKey)
+            throw CancellationError()
+        }
     }
 
     /// Release the lock after a run finishes. Wakes the next queued caller, which

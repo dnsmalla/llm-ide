@@ -447,7 +447,10 @@ enum FeatureCatalog {
         // The scheduled Loop Engineering sweep (AutoCodeUpdateService+PipelineTasks)
         // asks FeatureCatalog for a runner instead of constructing
         // LoopEngineRunner and its collaborators itself.
-        let loopProvider = LoopRunnerProvider(api: api, config: config, activity: activity)
+        let loopProvider = LoopRunnerProvider(api: api, config: config, activity: activity,
+                                              laneRegistry: loopRuns)
+        // The Loop page's Stop for a phone/schedule run is the lane's Stop.
+        loopRuns.cancelLoopLane = { [weak service] in service?.cancelLoopLane() }
 
         autoTaskSettings = settings
         autoCodeService = service

@@ -33,7 +33,25 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         case regressionSweep
         case shellCommand
         case skill
+        /// An in-app check of generated artifacts (no shell, no agent): files
+        /// that must exist, line caps, resolvable citations. Its parameters are
+        /// `check`. A build that predates this kind reads it as `.unsupported`
+        /// (kept verbatim, never run).
+        case artifactCheck
+        /// A kind this build does not know (written by a newer build). The
+        /// stage is kept verbatim in `rawJSON`, written back unchanged on
+        /// save, shown as unsupported, and NEVER run.
+        case unsupported
+
+        public init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            self = Kind(rawValue: raw) ?? .unsupported
+        }
     }
+
+    /// The stage's original JSON, kept only for `.unsupported` stages so a save
+    /// by this build does not destroy what a newer build wrote.
+    var rawJSON: AnyCodable? = nil
 
     public var id: String = UUID().uuidString
     public var name: String
@@ -101,13 +119,25 @@ public struct LoopStage: Identifiable, Codable, Equatable {
     /// nil) and it is left alone. Set only where a stage's command is
     /// actually seeded FROM detection; never touched by hand-authoring.
     public var detectedCommand: String? = nil
+    /// `.artifactCheck` only — what to check.
+    public var check: ArtifactCheckSpec? = nil
+    /// Revision of the detector default this stage's content was last brought
+    /// to (`LoopStageDetector.upgradingDefaultRevisions`); `nil` on a stage
+    /// saved before revisions existed, which reads as revision 1.
+    public var defaultRevision: Int? = nil
+    /// Set when detection (not the user) disabled this stage — Refactor Apply
+    /// when its test tooling disappeared. Only a stage still carrying it is
+    /// re-enabled automatically when detection returns; any manual toggle
+    /// clears it. `nil` otherwise (omitted from the file).
+    public var disabledByDetection: Bool? = nil
 
     // Explicit memberwise initializer (preserved for existing call sites)
     public init(id: String = UUID().uuidString, name: String, kind: Kind, command: String? = nil, order: Int,
          skillId: String? = nil, targetPath: String? = nil, outputPath: String? = nil, prompt: String? = nil,
          isDefault: Bool = false, enabled: Bool = true, defaultKey: String? = nil,
          severity: LoopStageSeverity = .blocking, timeoutSeconds: Int? = nil,
-         detectedCommand: String? = nil) {
+         detectedCommand: String? = nil, check: ArtifactCheckSpec? = nil,
+         defaultRevision: Int? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
@@ -123,13 +153,15 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         self.severity = severity
         self.timeoutSeconds = timeoutSeconds
         self.detectedCommand = detectedCommand
+        self.check = check
+        self.defaultRevision = defaultRevision
     }
 
     // MARK: - Codable backward compatibility
 
     enum CodingKeys: String, CodingKey {
         case id, name, kind, command, order, skillId, targetPath, outputPath, prompt, isDefault
-        case enabled, defaultKey, severity, timeoutSeconds, detectedCommand
+        case enabled, defaultKey, severity, timeoutSeconds, detectedCommand, check, defaultRevision, disabledByDetection
     }
 
     /// Every field added after the first shipped version MUST be decoded with
@@ -140,9 +172,19 @@ public struct LoopStage: Identifiable, Codable, Equatable {
     /// config", silently discarding the user's stages and re-detecting defaults.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        if kind == .unsupported {
+            // Lenient: the unknown stage may have any shape. Keep it whole,
+            // disabled, and out of the runner's reach.
+            id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+            name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Unsupported stage"
+            order = try container.decodeIfPresent(Int.self, forKey: .order) ?? 0
+            enabled = false
+            rawJSON = try? AnyCodable(from: decoder)
+            return
+        }
         id = try container.decode(String.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
-        kind = try container.decode(Kind.self, forKey: .kind)
         command = try container.decodeIfPresent(String.self, forKey: .command)
         order = try container.decode(Int.self, forKey: .order)
         skillId = try container.decodeIfPresent(String.self, forKey: .skillId)
@@ -152,9 +194,43 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         defaultKey = try container.decodeIfPresent(String.self, forKey: .defaultKey)
-        severity = try container.decodeIfPresent(LoopStageSeverity.self, forKey: .severity) ?? .blocking
+        // Lenient: an unknown severity from a newer build reads as the safe,
+        // gating default rather than failing the whole file's decode.
+        severity = (try? container.decodeIfPresent(LoopStageSeverity.self, forKey: .severity)) ?? .blocking
         timeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds)
         detectedCommand = try container.decodeIfPresent(String.self, forKey: .detectedCommand)
+        check = try container.decodeIfPresent(ArtifactCheckSpec.self, forKey: .check)
+        defaultRevision = try container.decodeIfPresent(Int.self, forKey: .defaultRevision)
+        disabledByDetection = try container.decodeIfPresent(Bool.self, forKey: .disabledByDetection)
+    }
+
+    /// An `.unsupported` stage writes back its original JSON untouched;
+    /// everything else encodes field by field (optionals omitted when nil,
+    /// same as the synthesized encoder this replaces).
+    public func encode(to encoder: Encoder) throws {
+        if kind == .unsupported, let rawJSON {
+            try rawJSON.encode(to: encoder)
+            return
+        }
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(kind, forKey: .kind)
+        try c.encodeIfPresent(command, forKey: .command)
+        try c.encode(order, forKey: .order)
+        try c.encodeIfPresent(skillId, forKey: .skillId)
+        try c.encodeIfPresent(targetPath, forKey: .targetPath)
+        try c.encodeIfPresent(outputPath, forKey: .outputPath)
+        try c.encodeIfPresent(prompt, forKey: .prompt)
+        try c.encode(isDefault, forKey: .isDefault)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encodeIfPresent(defaultKey, forKey: .defaultKey)
+        try c.encode(severity, forKey: .severity)
+        try c.encodeIfPresent(timeoutSeconds, forKey: .timeoutSeconds)
+        try c.encodeIfPresent(detectedCommand, forKey: .detectedCommand)
+        try c.encodeIfPresent(check, forKey: .check)
+        try c.encodeIfPresent(defaultRevision, forKey: .defaultRevision)
+        try c.encodeIfPresent(disabledByDetection, forKey: .disabledByDetection)
     }
 }
 
@@ -232,6 +308,12 @@ extension LoopStage {
     /// regression sweep only re-checks already-known faults, and an advisory
     /// stage never fails the run — neither proves a code edit changed nothing.
     var verifies: Bool { kind == .shellCommand && severity != .advisory }
+
+    /// Whether this stage is a blocking in-app artifact check. It gates a
+    /// generate loop (a failure re-runs the generate stages) but is NOT a
+    /// `verifies` stage: checking that a file exists proves nothing about a
+    /// code edit, so it never satisfies `lacksVerifyAfter`.
+    var isBlockingArtifactCheck: Bool { kind == .artifactCheck && severity != .advisory }
 
     /// Whether `stage` applies code but no ENABLED verify stage comes after it
     /// in `stages`' run order — the runner refuses such a stage without

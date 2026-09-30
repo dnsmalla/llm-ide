@@ -335,6 +335,7 @@ final class LoopEngineConfigStoreTests: XCTestCase {
     /// opted into.
     func testFirstLoadUnschedulesLoopsSavedUnderTheOldDefault() {
         var store = makeStore()
+        store.schemaVersion = 1
         store.loops[0].runsOnSchedule = true
         LoopEngineConfigStore.save(store, projectRoot: projectRoot, projectId: projectId, defaults: defaults)
 
@@ -368,10 +369,11 @@ final class LoopEngineConfigStoreTests: XCTestCase {
         XCTAssertEqual(ensured.scheduledLoops.count, 1)
     }
 
-    /// The flag is per project: opening one project must not leave another
+    /// The version lives in each project's file: opening one project must not leave another
     /// project's old, unchosen schedule flags in place.
-    func testNormalizationIsTrackedPerProject() {
+    func testNormalizationIsTrackedPerFile() {
         var store = makeStore()
+        store.schemaVersion = 1
         store.loops[0].runsOnSchedule = true
         LoopEngineConfigStore.save(store, projectRoot: projectRoot, projectId: projectId, defaults: defaults)
         _ = LoopEngineConfigStore.loops(projectRoot: projectRoot, projectId: projectId,

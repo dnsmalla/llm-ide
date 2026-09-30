@@ -18,6 +18,9 @@ struct LoopBudgetsEditor: View {
     /// (see `wallClockMinutes(_:)` for config-backed callers).
     @Binding var wallClockMinutes: Int
     @Binding var maxRepairsPerStage: Int
+    /// The repair agent's model (`nil` = the app's default). Optional so a
+    /// surface without the option can omit it.
+    var repairModel: Binding<String?>? = nil
 
     var body: some View {
         Stepper("Max iterations: \(maxIterations)", value: $maxIterations, in: 1...20)
@@ -26,6 +29,20 @@ struct LoopBudgetsEditor: View {
         Stepper(wallClockMinutes == 0 ? "Time budget: none" : "Time budget: \(wallClockMinutes) min",
                 value: $wallClockMinutes, in: 0...480, step: 15)
         Stepper("Max repairs per stage: \(maxRepairsPerStage)", value: $maxRepairsPerStage, in: 1...10)
+        if let repairModel { Self.repairModelPicker(repairModel) }
+    }
+
+    /// "Default" plus the live model list (the Agent SDK's, cached by
+    /// `LiveModelCache`); a saved id missing from the list stays selectable.
+    private static func repairModelPicker(_ selection: Binding<String?>) -> some View {
+        var models = LiveModelCache.models(for: ClaudeCLI.provider) ?? []
+        if let current = selection.wrappedValue, !models.contains(where: { $0.id == current }) {
+            models.append(AIModel(id: current, displayName: current))
+        }
+        return Picker("Repair model", selection: selection) {
+            Text("Default").tag(String?.none)
+            ForEach(models) { Text($0.displayName).tag(String?.some($0.id)) }
+        }
     }
 
     /// The 0-means-nil minutes view over a config's `wallClockBudgetSeconds` —

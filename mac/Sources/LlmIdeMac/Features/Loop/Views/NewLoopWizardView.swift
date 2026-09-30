@@ -115,6 +115,16 @@ struct NewLoopWizardView: View {
     private var templateList: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionLabel("TEMPLATE").padding(.horizontal, Spacing.lg).padding(.top, Spacing.md)
+            if templateStore.storedDataUndecodable {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LoopTemplateStore.SaveError.storedDataUndecodable.errorDescription ?? "")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.danger)
+                    Button("Reset custom templates") { templateStore.resetCustomTemplates() }
+                        .buttonStyle(.borderless)
+                }
+                .padding(.horizontal, Spacing.lg)
+            }
             List(selection: $selectedTemplateId) {
                 Section("Built-in") {
                     ForEach(LoopTemplate.builtIns) { template in
@@ -219,7 +229,8 @@ struct NewLoopWizardView: View {
                 LoopBudgetsEditor(maxIterations: $budgets.maxIterations,
                                   consecutiveFailureStop: $budgets.consecutiveFailureStop,
                                   wallClockMinutes: LoopBudgetsEditor.wallClockMinutes($budgets),
-                                  maxRepairsPerStage: $budgets.maxRepairsPerStage)
+                                  maxRepairsPerStage: $budgets.maxRepairsPerStage,
+                                  repairModel: $budgets.repairModel)
                     .font(Typography.caption)
                 Divider().background(t.border)
                 SectionLabel("OUTPUT")
@@ -242,6 +253,8 @@ struct NewLoopWizardView: View {
         case .shellCommand: "New Stage"
         case .regressionSweep: "Regression"
         case .skill: "New Skill Stage"
+        case .artifactCheck: "Artifact Check"
+        case .unsupported: "Unsupported stage"
         }
         stages.append(LoopStage(name: name, kind: kind,
                                  command: kind == .shellCommand ? "" : nil, order: nextOrder))
@@ -326,6 +339,14 @@ struct NewLoopWizardView: View {
                 Text("Re-runs the fault sweep (known regressions + repo checks) against this project.")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
+            case .artifactCheck:
+                Text(s.check?.summary(resolvedAgainst: stages.filter(\.enabled)) ?? "Checks generated files in-app (existence, line caps, citations).")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+            case .unsupported:
+                Text("Unsupported stage kind — kept as-is in loop.json and never run.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
             }
 
             // Same meaning as the Loop page's Severity picker; segmented and
@@ -370,8 +391,10 @@ struct NewLoopWizardView: View {
     /// next one, unlike the ones applied via `create()` alone.
     private func saveAsTemplate() {
         guard !stages.isEmpty else { return }
-        let saved = templateStore.save(
-            name: newTemplateName, summary: newTemplateSummary, config: configuredConfig())
+        guard let saved = try? templateStore.save(
+            name: newTemplateName, summary: newTemplateSummary, config: configuredConfig()) else {
+            return  // the banner above the templates explains why, with a reset action
+        }
         selectedTemplateId = saved.id
         newTemplateName = ""
         newTemplateSummary = ""

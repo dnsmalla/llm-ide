@@ -34,10 +34,11 @@ final class LoopEngineRunnerTests: XCTestCase {
         /// acceptance context was prepended) rather than just the call count.
         private(set) var receivedFailureOutputs: [String] = []
         func repair(stageName: String, command: String?, failureOutput: String,
-                    evidence: RepairEvidence?, repoRoot: URL) async throws {
+                    evidence: RepairEvidence?, repoRoot: URL, timeout: TimeInterval?) async throws -> LoopAgentResult {
             repairCount += 1
             self.evidence.append(evidence)
             receivedFailureOutputs.append(failureOutput)
+            return LoopAgentResult()
         }
     }
 
@@ -45,14 +46,21 @@ final class LoopEngineRunnerTests: XCTestCase {
     private final class StubSkillExecutor: LoopSkillExecuting {
         private(set) var callCount = 0
         var throwOnEveryCall: Bool = false
+        /// Thrown one per call, in order, before `throwOnEveryCall` applies.
+        var queuedErrors: [Error] = []
+        /// What `throwOnEveryCall` throws.
+        var everyCallError: Error = SkillError()
         /// Every `message` string the runner passed, in order — lets a test
         /// assert on the composed text itself (e.g. whether goal/acceptance
         /// context was prepended) rather than just the call count.
         private(set) var receivedMessages: [String] = []
-        func execute(skillId: String, targetPath: String?, message: String) async throws {
+        func execute(skillId: String, targetPath: String?, message: String,
+                     repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult {
             callCount += 1
             receivedMessages.append(message)
-            if throwOnEveryCall { throw SkillError() }
+            if !queuedErrors.isEmpty { throw queuedErrors.removeFirst() }
+            if throwOnEveryCall { throw everyCallError }
+            return LoopAgentResult()
         }
     }
 
@@ -81,10 +89,11 @@ final class LoopEngineRunnerTests: XCTestCase {
         let release = Signal()
         private(set) var repairCount = 0
         func repair(stageName: String, command: String?, failureOutput: String,
-                    evidence: RepairEvidence?, repoRoot: URL) async throws {
+                    evidence: RepairEvidence?, repoRoot: URL, timeout: TimeInterval?) async throws -> LoopAgentResult {
             repairCount += 1
             await started.fire()
             await release.wait()
+            return LoopAgentResult()
         }
     }
 
@@ -99,7 +108,8 @@ final class LoopEngineRunnerTests: XCTestCase {
             self.alwaysPasses = alwaysPasses
             self.onSweep = onSweep
         }
-        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> SweepOutcome {
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
+                   repairGuard: FaultRepairGuard?) async -> SweepOutcome {
             onSweep?()
             return alwaysPasses
                 ? SweepOutcome(passed: true, total: 0, regressed: 0, unchanged: 0,
@@ -119,7 +129,8 @@ final class LoopEngineRunnerTests: XCTestCase {
     /// outlasts the sequence still sees a well-formed failing outcome.
     private final class DecreasingRegressionSweep: RegressionSweepRunning {
         private var callCount = 0
-        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool) async -> SweepOutcome {
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
+                   repairGuard: FaultRepairGuard?) async -> SweepOutcome {
             defer { callCount += 1 }
             let regressed = max(1, 5 - callCount)
             return SweepOutcome(passed: false, total: regressed, regressed: regressed, unchanged: 0,
@@ -132,7 +143,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let error: Error
         init(error: Error) { self.error = error }
         func repair(stageName: String, command: String?, failureOutput: String,
-                    evidence: RepairEvidence?, repoRoot: URL) async throws {
+                    evidence: RepairEvidence?, repoRoot: URL, timeout: TimeInterval?) async throws -> LoopAgentResult {
             throw error
         }
     }
@@ -173,14 +184,27 @@ final class LoopEngineRunnerTests: XCTestCase {
         private(set) var revertedPaths: [String] = []
         /// When set, `revert` fails with this reason.
         var revertError: String?
+        /// Paths the snapshot reports as already dirty before the edit.
+        var dirtyBefore: Set<String> = []
+        private(set) var checkCount = 0
         init(result: RepairScopeCheck = .clean(changedPaths: [])) { self.result = result }
-        func snapshot(gitRoot: URL) async -> RepairScopeSnapshot {
-            RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil)
+        func snapshot(gitRoot: URL, protectedGlobs: [String],
+                      scopeGlobs: [String]) async -> RepairScopeSnapshot {
+            RepairScopeSnapshot(dirtyPaths: dirtyBefore, usable: true, reason: nil)
         }
         func check(since snapshot: RepairScopeSnapshot, gitRoot: URL,
-                   protectedGlobs: [String]) async -> RepairScopeCheck { result }
+                   protectedGlobs: [String]) async -> RepairScopeCheck {
+            checkCount += 1
+            return result
+        }
         func revert(paths: [String], gitRoot: URL) async -> String? {
             revertedPaths.append(contentsOf: paths)
+            // A reverted path is clean on the next check (the post-throw re-check).
+            if revertError == nil, case .violated(let bad, let all) = result {
+                let left = bad.filter { !paths.contains($0) }
+                result = left.isEmpty ? .clean(changedPaths: all.filter { !paths.contains($0) })
+                                      : .violated(paths: left, allChangedPaths: all)
+            }
             return revertError
         }
     }
@@ -205,7 +229,8 @@ final class LoopEngineRunnerTests: XCTestCase {
             journal: journal ?? InMemoryJournal(),
             summaryWriter: summaryWriter ?? StubSummaryWriter(),
             scopeGuard: scopeGuard ?? StubScopeGuard(),
-            trigger: trigger)
+            trigger: trigger,
+            transportRetryDelay: 0)
     }
 
     private func makeApprovals(approve stages: [(stageId: String, command: String)] = []) -> VerifyApprovalStore {
@@ -289,7 +314,10 @@ final class LoopEngineRunnerTests: XCTestCase {
 
     func testOneFailureThenFixThenPassSucceedsOnSecondIteration() async {
         var callIndex = 0
-        let outcomes = [VerifyOutcome(exitCode: 1, output: "boom"), VerifyOutcome(exitCode: 0, output: "")]
+        // The second failure is the flake gate's re-run: it must fail too for a
+        // repair to happen.
+        let outcomes = [VerifyOutcome(exitCode: 1, output: "boom"), VerifyOutcome(exitCode: 1, output: "boom"),
+                        VerifyOutcome(exitCode: 0, output: "")]
         let verifier = StubVerifier { _ in
             defer { callIndex += 1 }
             return outcomes[min(callIndex, outcomes.count - 1)]
@@ -312,6 +340,8 @@ final class LoopEngineRunnerTests: XCTestCase {
     }
 
     func testMaxIterationsGivesUpWhenNeverFixed() async {
+        // Never fixed: every verify fails. Each repair + stage re-verify is one
+        // iteration, so maxIterations still means maxIterations-1 repairs.
         let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "still broken 1") }
         let repairer = StubRepairer()
         let config = LoopEngineConfig(stages: [
@@ -347,7 +377,10 @@ final class LoopEngineRunnerTests: XCTestCase {
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
         XCTAssertEqual(result, .givenUp(reason: .repeatedFailure))
         XCTAssertEqual(runner.status, .givenUp(reason: .repeatedFailure))
-        XCTAssertEqual(runner.iteration, 2)
+        // Failure + flake re-run, blind repair (iteration 2 re-verify), informed
+        // repair at the first no-progress verdict (iteration 3), then give up.
+        XCTAssertEqual(runner.iteration, 3)
+        XCTAssertEqual(repairer.repairCount, 2)
     }
 
     func testUnapprovedShellStageStopsImmediatelyWithoutRepairing() async {
@@ -528,7 +561,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         var callIndex = 0
         let verifier = StubVerifier { _ in
             defer { callIndex += 1 }
-            return VerifyOutcome(exitCode: callIndex == 0 ? 1 : 0, output: callIndex == 0 ? "boom" : "")
+            return VerifyOutcome(exitCode: callIndex < 2 ? 1 : 0, output: callIndex < 2 ? "boom" : "")
         }
         let repairer = StubRepairer()
         let config = LoopEngineConfig(stages: [
@@ -547,7 +580,8 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(result, .success)
         XCTAssertEqual(runner.iteration, 2)
         XCTAssertEqual(repairer.repairCount, 1)
-        XCTAssertEqual(verifier.calls, ["swift test", "swift test"])
+        // failure, flake re-run, re-verify of the repaired stage, full confirmation
+        XCTAssertEqual(verifier.calls, ["swift test", "swift test", "swift test", "swift test"])
         let applyCalls = skillExecutor.receivedMessages.filter { $0.contains("\"Refactor Apply\"") }
         let planCalls = skillExecutor.receivedMessages.filter { $0.contains("\"Refactor Plan\"") }
         XCTAssertEqual(applyCalls.count, 1, "the apply stage applies one batch per run")
@@ -1004,7 +1038,7 @@ final class LoopEngineRunnerTests: XCTestCase {
     // MARK: - Fix 5: hash normalization ignores elapsed-time noise
 
     func testConsecutiveFailureDetectionIgnoresElapsedTimeNoise() async {
-        let outputs = ["FAILED in 0.5s", "FAILED in 1.2s"]
+        let outputs = ["FAILED in 0.5s", "FAILED in 0.6s", "FAILED in 1.2s"]
         var callIndex = 0
         let verifier = StubVerifier { _ in
             defer { callIndex += 1 }
@@ -1025,7 +1059,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         // are stripped before hashing — this must count as the SAME
         // failure twice, not two distinct ones.
         XCTAssertEqual(result, .givenUp(reason: .repeatedFailure))
-        XCTAssertEqual(runner.iteration, 2)
+        XCTAssertEqual(runner.iteration, 3)
     }
 
     /// A blanket "strip every digit" normalizer (the previous round's
@@ -1038,6 +1072,7 @@ final class LoopEngineRunnerTests: XCTestCase {
     func testShrinkingFailureCountIsTreatedAsADifferentFailureNotARepeat() async {
         let outcomes = [
             VerifyOutcome(exitCode: 1, output: "3 failures"),
+            VerifyOutcome(exitCode: 1, output: "3 failures"),     // the flake gate's re-run
             VerifyOutcome(exitCode: 1, output: "1 failure"),
             VerifyOutcome(exitCode: 0, output: "")
         ]
@@ -1099,7 +1134,8 @@ final class LoopEngineRunnerTests: XCTestCase {
             switch command {
             case "cmd-a":
                 defer { aCallCount += 1 }
-                return aCallCount == 0
+                // Calls 0-1: the failure and the flake gate's re-run.
+                return aCallCount < 2
                     ? VerifyOutcome(exitCode: 1, output: "same-output")
                     : VerifyOutcome(exitCode: 0, output: "")
             case "cmd-b":
@@ -1121,12 +1157,13 @@ final class LoopEngineRunnerTests: XCTestCase {
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
         XCTAssertEqual(result, .givenUp(reason: .repeatedFailure))
-        // Iteration 1: A fails (1st), repaired. Iteration 2: A passes, B
-        // fails (1st on its own), repaired. Iteration 3: A passes, B fails
-        // (2nd on its own) → gives up. If A's history leaked into B this
-        // would incorrectly land on iteration 2 instead of 3.
-        XCTAssertEqual(runner.iteration, 3)
-        XCTAssertEqual(repairer.repairCount, 2)
+        // Iteration 1: A fails, repaired. Iteration 2: A re-verified alone
+        // (passes), then the full pipeline: B fails (1st on its own), repaired.
+        // Iteration 3: B fails (streak 2: the informed repair). Iteration 4: B
+        // fails (streak 3) → gives up. If A's history leaked into B, B's first
+        // failure would already have had a streak above 1.
+        XCTAssertEqual(runner.iteration, 4)
+        XCTAssertEqual(repairer.repairCount, 3)
     }
 
     // MARK: - Fix 8: maxIterations of 0
@@ -1198,9 +1235,10 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(skill.callCount, 2)   // ran once per iteration, before the regression gate
     }
 
-    /// A skill that throws a transport error must NOT end the run — it's logged
-    /// and the verify stages still decide.
-    func testSkillStageErrorIsNonFatal() async {
+    /// A skill that throws must NOT abort the run on the spot — it's logged and
+    /// the verify stages still run — but a passing verify stage does not
+    /// launder it: the stage never ran cleanly, so the run ends `.error`.
+    func testSkillStageErrorIsNonFatalButNotLaundered() async {
         let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
         let repairer = StubRepairer()
         let skill = StubSkillExecutor()
@@ -1217,7 +1255,9 @@ final class LoopEngineRunnerTests: XCTestCase {
             approvals: makeApprovals(approve: [("t1", "swift test")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
-        XCTAssertEqual(result, .success)     // verify stage still passed despite the skill error
+        guard case .error(let message)? = result else { return XCTFail("got \(String(describing: result))") }
+        XCTAssertTrue(message.contains("\"Fix\" errored"), message)
+        XCTAssertEqual(verifier.calls, ["swift test"], "the verify stage still ran")
         XCTAssertEqual(skill.callCount, 1)
     }
 
@@ -1233,7 +1273,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let verifier = StubVerifier { _ in
             defer { callIndex += 1 }
             // Fails first, then "passes" — the shape a deleted test produces.
-            return callIndex == 0
+            return callIndex < 2
                 ? VerifyOutcome(exitCode: 1, output: "boom")
                 : VerifyOutcome(exitCode: 0, output: "")
         }
@@ -1255,9 +1295,9 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(result, .blocked(reason: .repairOutOfScope(
             stageName: "Test", paths: ["mac/Tests/FooTests.swift"])))
         XCTAssertNotEqual(result, .success)
-        // The stage ran exactly once: the run ended before the would-be-passing
-        // second verify.
-        XCTAssertEqual(verifier.calls.count, 1)
+        // The stage ran twice (the failure and the flake gate's re-run): the run
+        // ended before the would-be-passing verify after the repair.
+        XCTAssertEqual(verifier.calls.count, 2)
     }
 
     func testRevertPolicyRestoresOnlyTheViolatingPaths() async {
@@ -1309,7 +1349,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         var callIndex = 0
         let verifier = StubVerifier { _ in
             defer { callIndex += 1 }
-            return callIndex == 0
+            return callIndex < 2
                 ? VerifyOutcome(exitCode: 1, output: "boom")
                 : VerifyOutcome(exitCode: 0, output: "")
         }
@@ -1340,7 +1380,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         var callIndex = 0
         let verifier = StubVerifier { _ in
             defer { callIndex += 1 }
-            return callIndex == 0
+            return callIndex < 2     // the failure and the flake gate's re-run
                 ? VerifyOutcome(exitCode: 1, output: "boom")
                 : VerifyOutcome(exitCode: 0, output: "")
         }
@@ -1359,6 +1399,33 @@ final class LoopEngineRunnerTests: XCTestCase {
 
         XCTAssertEqual(result, .success)
         XCTAssertTrue(runner.log.contains { $0.text.contains("protected-path check could not run") })
+    }
+
+    /// An incomplete git listing is NOT "git unavailable": it fails closed and
+    /// blocks exactly like a violation.
+    func testUnverifiableScopeCheckBlocks() async {
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return callIndex < 2
+                ? VerifyOutcome(exitCode: 1, output: "boom")
+                : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let scopeGuard = StubScopeGuard(result: .unverifiable(reason: "cut short"))
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 5)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            scopeGuard: scopeGuard
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        guard case .blocked = result else { return XCTFail("expected blocked, got \(result)") }
+        XCTAssertTrue(runner.log.contains { $0.text.contains("protected-path check incomplete") })
     }
 
     /// A skill stage edits the tree too, so "make the tests pass" is as available
@@ -1439,7 +1506,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         var callIndex = 0
         let verifier = StubVerifier { _ in
             defer { callIndex += 1 }
-            return VerifyOutcome(exitCode: callIndex == 0 ? 1 : 0, output: callIndex == 0 ? "boom" : "")
+            return VerifyOutcome(exitCode: callIndex < 2 ? 1 : 0, output: callIndex < 2 ? "boom" : "")
         }
         let scopeGuard = StubScopeGuard(result: .violated(
             paths: ["mac/Tests/A.swift"], allChangedPaths: ["mac/Tests/A.swift"]))
@@ -1459,7 +1526,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(repairer.repairCount, 1)
         XCTAssertEqual(scopeGuard.revertedPaths, ["mac/Tests/A.swift"],
                        "only the repair's edit is reverted, once")
-        XCTAssertEqual(verifier.calls.count, 1, "never re-verified after the reward-hacking repair")
+        XCTAssertEqual(verifier.calls.count, 2, "never re-verified after the reward-hacking repair (failure + flake re-run only)")
     }
 
     func testEffectivePolicyPromotesOnlyCodeApplyStagesFromRevertOrStop() {
@@ -1506,7 +1573,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         var callIndex = 0
         let verifier = StubVerifier { _ in
             defer { callIndex += 1 }
-            return callIndex == 0
+            return callIndex < 2
                 ? VerifyOutcome(exitCode: 1, output: "boom")
                 : VerifyOutcome(exitCode: 0, output: "")
         }
@@ -1630,9 +1697,10 @@ final class LoopEngineRunnerTests: XCTestCase {
     /// loop happily burned all ten iterations.
     func testDifferentFailuresWithAnUnchangingCountGiveUpAsNoProgress() async {
         let outputs = [
-            "Executed 10 tests, with 3 failures (0 unexpected) in 1.0 seconds — alpha",
-            "Executed 10 tests, with 3 failures (0 unexpected) in 1.0 seconds — beta",
-            "Executed 10 tests, with 3 failures (0 unexpected) in 1.0 seconds — gamma"
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds — alpha",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds — alpha",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds — beta",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds — gamma"
         ]
         var callIndex = 0
         let verifier = StubVerifier { _ in
@@ -1651,16 +1719,17 @@ final class LoopEngineRunnerTests: XCTestCase {
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
 
         XCTAssertEqual(result, .givenUp(reason: .noProgress(stageName: "Test")))
-        XCTAssertEqual(runner.iteration, 2)
+        XCTAssertEqual(runner.iteration, 3)
     }
 
     /// The mirror image: a shrinking count is progress, so the loop must keep
     /// going even though every failure text differs.
     func testShrinkingScoreKeepsTheLoopRunning() async {
         let outputs = [
-            "Executed 10 tests, with 3 failures (0 unexpected) in 1.0 seconds",
-            "Executed 10 tests, with 2 failures (0 unexpected) in 1.0 seconds",
-            "Executed 10 tests, with 1 failure (0 unexpected) in 1.0 seconds"
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 2 failures (0 unexpected) in 1.0 seconds",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 1 failure (0 unexpected) in 1.0 seconds"
         ]
         var callIndex = 0
         let verifier = StubVerifier { _ in
@@ -1682,13 +1751,50 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(runner.iteration, 4)
     }
 
+    /// A count that disappears (a compile error) always earns one more repair,
+    /// even at `consecutiveFailureStop == 2`, and that repair is told its last
+    /// change stopped the tests from running. If the build stays broken the run
+    /// gives up with its own reason.
+    func testCountDisappearingGetsOneInformedRepairThenItsOwnGiveUp() async {
+        let outputs = [
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds",
+            "Foo.swift:3:5: error: cannot find 'bar' in scope\nerror: fatalError",
+            "Foo.swift:9:1: error: expected '}'"
+        ]
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return VerifyOutcome(exitCode: 1, output: outputs[min(callIndex, outputs.count - 1)])
+        }
+        let repairer = StubRepairer()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 10, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")])
+        )
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .givenUp(reason: .stoppedReporting(stageName: "Test")))
+        XCTAssertEqual(repairer.repairCount, 2)
+        XCTAssertEqual(repairer.evidence[1]?.stoppedRunning, true)
+        XCTAssertEqual(repairer.evidence[1]?.errorExcerpt?.hasPrefix("Foo.swift:3:5: error:"), true)
+        XCTAssertEqual(LoopEngineStatus.givenUp(reason: .stoppedReporting(stageName: "Test")).code,
+                       "given_up.stopped_reporting")
+    }
+
     /// Evidence is what turns a retry into an iteration: without the measured
     /// delta, the agent is handed the same failure and has no way to know its last
     /// edit did nothing.
     func testRepairerReceivesTheMeasuredDeltaAsEvidence() async {
         let outputs = [
-            "Executed 10 tests, with 3 failures (0 unexpected) in 1.0 seconds",
-            "Executed 10 tests, with 2 failures (0 unexpected) in 1.0 seconds"
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 3 failures (0 unexpected) in 1.0 seconds",
+            "Test Suite 'All tests' failed.\nExecuted 10 tests, with 2 failures (0 unexpected) in 1.0 seconds"
         ]
         var callIndex = 0
         let verifier = StubVerifier { _ in
@@ -1922,8 +2028,8 @@ final class LoopEngineRunnerTests: XCTestCase {
         var callIndex = 0
         let verifier = StubVerifier { _ in
             defer { callIndex += 1 }
-            return callIndex == 0
-                ? VerifyOutcome(exitCode: 1, output: "Executed 10 tests, with 4 failures (0 unexpected) in 1.0 seconds")
+            return callIndex < 2
+                ? VerifyOutcome(exitCode: 1, output: "Test Suite 'All tests' failed.\nExecuted 10 tests, with 4 failures (0 unexpected) in 1.0 seconds")
                 : VerifyOutcome(exitCode: 0, output: "")
         }
         let config = LoopEngineConfig(stages: [
@@ -1938,7 +2044,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         )
         _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
 
-        let first = journal.written[0].iterations[0].attempts[0]
+        let first = journal.written[0].iterations[0].attempts.first(where: { $0.repairAttempted })!
         XCTAssertEqual(first.score, 4)
         XCTAssertEqual(first.exitCode, 1)
         XCTAssertFalse(first.passed)
@@ -2298,5 +2404,729 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(skill.receivedMessages.count, 1)
         XCTAssertTrue(skill.receivedMessages[0].contains("Ship the refactor"))
         XCTAssertTrue(skill.receivedMessages[0].contains("no behavior change"))
+    }
+
+    // MARK: - Confined agent runs carry the run's git root
+
+    /// A config whose skill stage and failing-once test stage together make
+    /// the runner call BOTH production agent adapters.
+    private func agentRootConfig(worktrees: Bool = false) -> LoopEngineConfig {
+        var config = LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Generate", kind: .skill, order: 0,
+                      skillId: "superpowers/brainstorming"),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        config.useWorktreesForConcurrentRuns = worktrees
+        return config
+    }
+
+    private func failOnceVerifier() -> StubVerifier {
+        var calls = 0
+        return StubVerifier { _ in
+            calls += 1
+            return calls <= 2 ? VerifyOutcome(exitCode: 1, output: "1 failure")
+                              : VerifyOutcome(exitCode: 0, output: "")
+        }
+    }
+
+    func testEveryLoopAgentCallCarriesTheRunsGitRoot() async {
+        let agent = RecordingLoopAgent()
+        let runner = makeRunner(
+            verifier: failOnceVerifier(),
+            stageRepairer: AgentLoopStageRepairer(agent: agent),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: AgentLoopSkillExecutor(agent: agent),
+            approvals: makeApprovals(approve: [("t1", "swift test")]))
+
+        let result = await runner.run(config: agentRootConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertTrue(agent.calls.contains { $0.skills == ["superpowers/brainstorming"] }, "skill stage ran")
+        XCTAssertTrue(agent.calls.contains { $0.skills.isEmpty }, "repair ran")
+        XCTAssertFalse(agent.calls.isEmpty)
+        for call in agent.calls {
+            XCTAssertEqual(call.repoRoot, repoRoot)
+        }
+        XCTAssertEqual(runner.lastSkillResults["s1"]?.reply, "done", "the skill reply is kept")
+        XCTAssertEqual(runner.lastRepairResults["t1"]?.reply, "done", "the repair reply is kept")
+    }
+
+    func testWorktreeRunConfinesEveryAgentCallToTheWorktree() async throws {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("loop-agent-root-\(UUID().uuidString)", isDirectory: true)
+        let mainRepo = base.appendingPathComponent("repo", isDirectory: true)
+        let project = base.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: mainRepo, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        for args in [["init", "-q"], ["config", "user.email", "t@example.com"],
+                     ["config", "user.name", "T"], ["commit", "--allow-empty", "-qm", "init"]] {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.currentDirectoryURL = mainRepo
+            p.arguments = args
+            try p.run()
+            p.waitUntilExit()
+            XCTAssertEqual(p.terminationStatus, 0, "git \(args.joined(separator: " "))")
+        }
+
+        // Another run holds the main checkout, so this one is redirected into
+        // a worktree instead of queueing.
+        let mainKey = mainRepo.resolvingSymlinksInPath().path
+        try await LoopRunQueue.acquire(rootKey: mainKey)
+        defer { LoopRunQueue.release(rootKey: mainKey) }
+
+        let suite = UserDefaults(suiteName: "loop-agent-root-\(UUID().uuidString)")!
+        let approvals = VerifyApprovalStore(defaults: suite)
+        approvals.approveStage(repo: mainRepo, stageId: "t1", command: "swift test")
+
+        let agent = RecordingLoopAgent()
+        let runner = makeRunner(
+            verifier: failOnceVerifier(),
+            stageRepairer: AgentLoopStageRepairer(agent: agent),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: AgentLoopSkillExecutor(agent: agent),
+            approvals: approvals)
+
+        let result = await runner.run(config: agentRootConfig(worktrees: true),
+                                      faultsRoot: project, gitRoot: mainRepo)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertTrue(agent.calls.contains { !$0.skills.isEmpty }, "skill stage ran")
+        XCTAssertTrue(agent.calls.contains { $0.skills.isEmpty }, "repair ran")
+        let worktreeParent = project.appendingPathComponent("system/loop-worktrees").path
+        for call in agent.calls {
+            XCTAssertNotEqual(call.repoRoot.resolvingSymlinksInPath().path, mainKey,
+                              "a worktree run must never target the main checkout")
+            XCTAssertTrue(call.repoRoot.path.hasPrefix(worktreeParent + "/"),
+                          "\(call.repoRoot.path) is not the run's worktree")
+        }
+        XCTAssertEqual(Set(agent.calls.map(\.repoRoot)).count, 1, "one worktree for the whole run")
+    }
+
+    func testSkillStageWithUnresolvedSkillFailsTheStage() async {
+        let agent = RecordingLoopAgent()
+        agent.result = { skills in
+            LoopAgentResult(unresolvedSkills: skills, ran: false, resultSubtype: nil)
+        }
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: verifier,
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: AgentLoopSkillExecutor(agent: agent),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            journal: journal)
+
+        let result = await runner.run(config: agentRootConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        let message = "skill superpowers/brainstorming is not installed"
+        XCTAssertEqual(LoopEngineRunner.skillNotInstalledMessage(["superpowers/brainstorming"]), message)
+        XCTAssertEqual(result, .error(message))
+        XCTAssertEqual(runner.stageStates["s1"], .failed)
+        XCTAssertTrue(verifier.calls.isEmpty, "the run ends at the failed skill stage")
+        XCTAssertEqual(agent.calls.count, 1)
+        let stageRecord = journal.written.last?.iterations.first?.attempts.first
+        XCTAssertEqual(stageRecord?.passed, false)
+        XCTAssertEqual(stageRecord?.outputTail, message)
+    }
+
+    // MARK: - Honest verdicts (errored stages, transport retry)
+
+    private func skillOnlyConfig() -> LoopEngineConfig {
+        LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Plan", kind: .skill, command: nil, order: 0,
+                      skillId: "skills/plan", targetPath: nil, prompt: nil)
+        ], maxIterations: 3, consecutiveFailureStop: 2)
+    }
+
+    private func skillThenTestConfig() -> LoopEngineConfig {
+        LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Fix", kind: .skill, command: nil, order: 0,
+                      skillId: "skills/fix", targetPath: nil, prompt: nil),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        ], maxIterations: 2, consecutiveFailureStop: 5)
+    }
+
+    private static let refused = APIError.network(URLError(.cannotConnectToHost))
+
+    /// A Plan/Docs-shaped loop (skill stages only) against a dead backend used
+    /// to report `.success` having done nothing.
+    func testSkillOnlyLoopWithADeadBackendEndsInError() async {
+        let skill = StubSkillExecutor()
+        skill.throwOnEveryCall = true
+        skill.everyCallError = Self.refused
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals(), journal: journal)
+        let result = await runner.run(config: skillOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        guard case .error(let message) = result else { return XCTFail("got \(String(describing: result))") }
+        XCTAssertTrue(message.contains("\"Plan\" errored"), message)
+        XCTAssertEqual(skill.callCount, 2, "one call plus exactly one retry")
+        XCTAssertEqual(runner.stageStates["s1"], .errored)
+        XCTAssertEqual(journal.written.last?.iterations.first?.attempts.first?.errored, true)
+        XCTAssertEqual(journal.written.last?.statusCode, "error")
+    }
+
+    func testOneTransportBlipIsRetriedAndTheStageCompletes() async {
+        let skill = StubSkillExecutor()
+        skill.queuedErrors = [Self.refused]
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals(), journal: journal)
+        let result = await runner.run(config: skillOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(skill.callCount, 2)
+        XCTAssertEqual(runner.stageStates["s1"], .passed)
+        XCTAssertNil(journal.written.last?.iterations.first?.attempts.first?.errored)
+    }
+
+    func testAgentRunTimeoutIsNotRetried() async {
+        let skill = StubSkillExecutor()
+        skill.throwOnEveryCall = true
+        skill.everyCallError = APIError.http(status: 504, code: "AGENT_RUN_TIMEOUT",
+                                             message: "timed out", details: nil)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals())
+        let result = await runner.run(config: skillOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        guard case .error = result else { return XCTFail("got \(String(describing: result))") }
+        XCTAssertEqual(skill.callCount, 1)
+    }
+
+    /// An errored stage plus a verify stage that never passes: the give-up
+    /// would blame the tests, but the real cause is that nothing ran.
+    func testErroredStageWithAFailingVerifyEndsInErrorNotGiveUp() async {
+        let skill = StubSkillExecutor()
+        skill.throwOnEveryCall = true
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: skillThenTestConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        guard case .error(let message) = result else { return XCTFail("got \(String(describing: result))") }
+        XCTAssertTrue(message.contains("given up (max iterations)"), message)
+    }
+
+    /// A 502 may come from mid-run — the agent may already have edited — so
+    /// it is not retried; the repair error ends the run.
+    /// A skill that errors only in iteration 1 does not taint a run whose
+    /// final iteration's verify passes.
+    func testSkillErrorInAnEarlierIterationDoesNotFailAVerifiedRun() async {
+        let skill = StubSkillExecutor()
+        skill.queuedErrors = [SkillError()]
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return callIndex < 2 ? VerifyOutcome(exitCode: 1, output: "boom") : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: skillThenTestConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(runner.iteration, 2)
+        XCTAssertEqual(skill.callCount, 2)
+    }
+
+    /// An apply stage that ERRORED applied nothing, so the retry iteration
+    /// must run it again rather than skip it as "already applied".
+    func testErroredCodeApplyIsRetriedNextIteration() async {
+        let skill = StubSkillExecutor()
+        skill.queuedErrors = [SkillError()]
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return callIndex < 2 ? VerifyOutcome(exitCode: 1, output: "boom") : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 0,
+                      skillId: "skills/refactor-apply"),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(skill.callCount, 2, "the errored apply ran again in iteration 2")
+        XCTAssertFalse(runner.log.contains { $0.text.contains("already applied") })
+    }
+
+    func testRepair5xxIsNotRetried() async {
+        final class FlakyRepairer: LoopStageRepairer {
+            var calls = 0
+            func repair(stageName: String, command: String?, failureOutput: String,
+                        evidence: RepairEvidence?, repoRoot: URL, timeout: TimeInterval?) async throws -> LoopAgentResult {
+                calls += 1
+                throw APIError.http(status: 502, code: "INTERNAL_ERROR", message: "x", details: nil)
+            }
+        }
+        let repairer = FlakyRepairer()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 5)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        guard case .error = result else { return XCTFail("got \(String(describing: result))") }
+        XCTAssertEqual(repairer.calls, 1)
+    }
+
+    func testRepairThatCouldNotConnectIsRetriedOnce() async {
+        final class FlakyRepairer: LoopStageRepairer {
+            var calls = 0
+            func repair(stageName: String, command: String?, failureOutput: String,
+                        evidence: RepairEvidence?, repoRoot: URL, timeout: TimeInterval?) async throws -> LoopAgentResult {
+                calls += 1
+                if calls == 1 { throw APIError.network(NSError(domain: NSPOSIXErrorDomain, code: Int(ECONNREFUSED))) }
+                return LoopAgentResult()
+            }
+        }
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return callIndex < 2 ? VerifyOutcome(exitCode: 1, output: "boom") : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let repairer = FlakyRepairer()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 5)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(repairer.calls, 2)
+    }
+
+    /// Retry only what provably never reached a running agent.
+    func testIsRetryableTransportClassifiesErrors() {
+        typealias R = LoopEngineRunner
+        func posix(_ code: Int32) -> Error { APIError.network(NSError(domain: NSPOSIXErrorDomain, code: Int(code))) }
+        func http(_ status: Int, _ code: String) -> Error {
+            APIError.http(status: status, code: code, message: "", details: nil)
+        }
+        // Never connected — retried.
+        XCTAssertTrue(R.isRetryableTransport(APIError.network(URLError(.cannotConnectToHost))))
+        XCTAssertTrue(R.isRetryableTransport(posix(ECONNREFUSED)))
+        // Timeouts — the agent may be running.
+        XCTAssertFalse(R.isRetryableTransport(APIError.network(URLError(.timedOut))))
+        XCTAssertFalse(R.isRetryableTransport(posix(ETIMEDOUT)))
+        // A dropped connection on a single non-streaming POST — may be mid-run.
+        XCTAssertFalse(R.isRetryableTransport(APIError.network(URLError(.networkConnectionLost))))
+        XCTAssertFalse(R.isRetryableTransport(posix(ECONNRESET)))
+        // Every 5xx.
+        XCTAssertFalse(R.isRetryableTransport(http(500, "X")))
+        XCTAssertFalse(R.isRetryableTransport(http(502, "INTERNAL_ERROR")))
+        XCTAssertFalse(R.isRetryableTransport(http(503, "NO_KEY")))
+        XCTAssertFalse(R.isRetryableTransport(http(504, "AGENT_RUN_TIMEOUT")))
+        // Other shapes.
+        XCTAssertFalse(R.isRetryableTransport(http(400, "BAD")))
+        XCTAssertFalse(R.isRetryableTransport(APIError.network(URLError(.cancelled))))
+        XCTAssertFalse(R.isRetryableTransport(APIError.agent(message: "nope")))
+        XCTAssertFalse(R.isRetryableTransport(SkillError()))
+    }
+
+    // MARK: - Guard on the throw path
+
+    private func violatingGuard(_ path: String) -> StubScopeGuard {
+        StubScopeGuard(result: .violated(paths: [path], allChangedPaths: [path]))
+    }
+
+    /// A repair that edits a test and THEN fails must not slip past the guard
+    /// as a mere "repair error".
+    func testThrowingRepairThatEditedAProtectedPathIsStillBlocked() async {
+        let scopeGuard = violatingGuard("mac/Tests/FooTests.swift")
+        let journal = InMemoryJournal()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 5, protectedPathPolicy: .revert)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: ThrowingRepairer(error: SkillError()),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            journal: journal, scopeGuard: scopeGuard)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .blocked(reason: .repairOutOfScope(
+            stageName: "Test", paths: ["mac/Tests/FooTests.swift"])))
+        XCTAssertEqual(scopeGuard.revertedPaths, ["mac/Tests/FooTests.swift"])
+        let attempt = journal.written.last?.iterations.first?.attempts.first(where: { $0.repairAttempted })
+        XCTAssertEqual(attempt?.changedPaths, ["mac/Tests/FooTests.swift"])
+        XCTAssertEqual(attempt?.scopeVerdict, .violatedReverted)
+    }
+
+    func testThrowingSkillThatEditedAProtectedPathIsBlocked() async {
+        let skill = StubSkillExecutor()
+        skill.throwOnEveryCall = true
+        let scopeGuard = violatingGuard("Makefile")
+        var config = skillOnlyConfig()
+        config.protectedPathPolicy = .stop
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals(), scopeGuard: scopeGuard)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .blocked(reason: .repairOutOfScope(stageName: "Plan", paths: ["Makefile"])))
+        XCTAssertEqual(scopeGuard.checkCount, 2, "checked, then re-checked after the throw")
+        XCTAssertTrue(scopeGuard.revertedPaths.isEmpty)
+    }
+
+    /// Reverting an already-dirty file would restore HEAD and discard the
+    /// uncommitted edits that were there first — so it is left, and still blocks.
+    func testRevertSkipsPathsThatWereAlreadyDirty() async {
+        let scopeGuard = StubScopeGuard(result: .violated(
+            paths: ["Makefile", "mac/Tests/FooTests.swift"],
+            allChangedPaths: ["Makefile", "mac/Tests/FooTests.swift"]))
+        scopeGuard.dirtyBefore = ["mac/Tests/FooTests.swift"]
+        let journal = InMemoryJournal()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 5, protectedPathPolicy: .revert)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            journal: journal, scopeGuard: scopeGuard)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        guard case .blocked = result else { return XCTFail("got \(String(describing: result))") }
+        XCTAssertEqual(scopeGuard.revertedPaths, ["Makefile"])
+        XCTAssertEqual(journal.written.last?.iterations.first?.attempts.first(where: { $0.repairAttempted })?.scopeVerdict, .violated)
+    }
+
+    // MARK: - Regression stage: score, guarded sweep repairs, needs approval
+
+    /// Returns a fixed outcome; when `repairWith` is set, first runs one
+    /// repair through the guard the runner passed (as the real sweep does for
+    /// a failing fault) and records whether the guard kept it.
+    private final class ScriptedRegressionSweep: RegressionSweepRunning {
+        let outcome: SweepOutcome
+        var repairWith: ((TimeInterval?) async throws -> LoopAgentResult)?
+        private(set) var guardVerdicts: [Bool] = []
+        private(set) var receivedGuard = false
+        init(_ outcome: SweepOutcome) { self.outcome = outcome }
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
+                   repairGuard: FaultRepairGuard?) async -> SweepOutcome {
+            receivedGuard = repairGuard != nil
+            if let repairWith, let repairGuard, let root = gitRoot {
+                if let kept = try? await repairGuard(root, repairWith) { guardVerdicts.append(kept) }
+            }
+            return outcome
+        }
+    }
+
+    private func outcome(total: Int, regressed: Int = 0, unchanged: Int = 0, repaired: Int = 0,
+                         repairFailed: Int = 0, needsApproval: Int = 0) -> SweepOutcome {
+        let passed = regressed + repairFailed + needsApproval == 0 && unchanged + repaired == total
+        return SweepOutcome(passed: passed, total: total, regressed: regressed, unchanged: unchanged,
+                            repaired: repaired, repairFailed: repairFailed,
+                            needsApproval: needsApproval, failed: 0, pending: 0)
+    }
+
+    private func regressionOnlyConfig(policy: ProtectedPathPolicy = .revert) -> LoopEngineConfig {
+        LoopEngineConfig(stages: [
+            LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0)
+        ], maxIterations: 2, consecutiveFailureStop: 5, protectedPathPolicy: policy)
+    }
+
+    /// With repair on, a failing fault is `.repairFailed`, never `.regressed`,
+    /// so the old `regressed` score was always 0. The score is the failing count.
+    func testRegressionScoreIsTheFailingFaultCount() async {
+        let sweep = ScriptedRegressionSweep(outcome(total: 3, unchanged: 1, repairFailed: 2))
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: sweep,
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals(), journal: journal)
+        _ = await runner.run(config: regressionOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        let attempt = journal.written.last?.iterations.first?.attempts.first
+        XCTAssertEqual(attempt?.score, 2)
+        XCTAssertTrue(attempt?.outputTail.contains("2 failing") ?? false, attempt?.outputTail ?? "")
+        XCTAssertTrue(sweep.receivedGuard, "the sweep's repairs must run through the guard")
+    }
+
+    func testRegressionFaultNeedingApprovalStopsAsNeedsApproval() async {
+        let sweep = ScriptedRegressionSweep(outcome(total: 2, unchanged: 1, needsApproval: 1))
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: sweep,
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals())
+        let result = await runner.run(config: regressionOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .needsApproval(stageName: "Regression"))
+        XCTAssertEqual(runner.iteration, 1, "no retry can approve a command")
+    }
+
+    /// A sweep repair that edits a fault's test is rejected by the guard (so
+    /// the sweep does not re-verify it) and the run is blocked — even though
+    /// the sweep itself reported a pass.
+    func testSweepRepairThatTouchesAProtectedPathIsRejectedAndBlocks() async {
+        let sweep = ScriptedRegressionSweep(outcome(total: 1, repaired: 1))
+        sweep.repairWith = { _ in LoopAgentResult() }
+        let scopeGuard = violatingGuard("tests/test_fault.py")
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: sweep,
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals(), scopeGuard: scopeGuard)
+        let result = await runner.run(config: regressionOnlyConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(sweep.guardVerdicts, [false])
+        XCTAssertEqual(scopeGuard.revertedPaths, ["tests/test_fault.py"])
+        XCTAssertEqual(result, .blocked(reason: .repairOutOfScope(
+            stageName: "Regression", paths: ["tests/test_fault.py"])))
+    }
+
+    func testSweepRepairUnderWarnPolicyIsKept() async {
+        let sweep = ScriptedRegressionSweep(outcome(total: 1, repaired: 1))
+        sweep.repairWith = { _ in LoopAgentResult() }
+        let scopeGuard = violatingGuard("tests/test_fault.py")
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: sweep,
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals(), scopeGuard: scopeGuard)
+        let result = await runner.run(config: regressionOnlyConfig(policy: .warn),
+                                      faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(sweep.guardVerdicts, [true])
+        XCTAssertTrue(scopeGuard.revertedPaths.isEmpty)
+        XCTAssertEqual(result, .success)
+    }
+
+    // MARK: - Default timeouts, budget watchdog, event log
+
+    private final class TimeoutCapturingVerifier: FaultVerifier {
+        private(set) var timeouts: [TimeInterval] = []
+        let outcome: () throws -> VerifyOutcome
+        init(_ outcome: @escaping () throws -> VerifyOutcome) { self.outcome = outcome }
+        func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
+            timeouts.append(timeout)
+            return try outcome()
+        }
+    }
+
+    private final class EventJournal: LoopRunJournaling {
+        private(set) var written: [LoopRunRecord] = []
+        private(set) var events: [LoopRunEvent] = []
+        private(set) var eventRunIds: Set<String> = []
+        func write(_ record: LoopRunRecord, root: URL) -> String? { written.append(record); return nil }
+        func recentRuns(root: URL, limit: Int) -> [LoopRunIndexEntry] { [] }
+        func appendEvent(_ event: LoopRunEvent, runId: String, root: URL) {
+            events.append(event); eventRunIds.insert(runId)
+        }
+    }
+
+    private func timeoutRunner(_ verifier: FaultVerifier, shell: TimeInterval, agent: TimeInterval,
+                               journal: LoopRunJournaling? = nil) -> LoopEngineRunner {
+        LoopEngineRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true), skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("t1", "swift test")]), stageTimeout: 0,
+            journal: journal ?? InMemoryJournal(), summaryWriter: StubSummaryWriter(),
+            scopeGuard: StubScopeGuard(), transportRetryDelay: 0,
+            defaultShellTimeout: shell, defaultAgentTimeout: agent)
+    }
+
+    func testStageWithoutATimeoutInheritsTheAppDefaults() async {
+        let verifier = TimeoutCapturingVerifier { VerifyOutcome(exitCode: 0, output: "") }
+        let runner = timeoutRunner(verifier, shell: 1800, agent: 1200)
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 2)
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(verifier.timeouts, [1800])
+        XCTAssertEqual(runner.agentTimeout(for: config.stages[0]), 1200)
+        var own = config.stages[0]; own.timeoutSeconds = 60
+        XCTAssertEqual(runner.shellTimeout(for: own), 60, "a stage's own timeout wins")
+    }
+
+    func testShellStageIsClampedToTheRemainingBudgetAndEndsTheRunWhenItTimesOut() async {
+        let verifier = TimeoutCapturingVerifier { throw VerifyError.timedOut(1) }
+        let runner = timeoutRunner(verifier, shell: 1800, agent: 1200)
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 5, consecutiveFailureStop: 5, wallClockBudgetSeconds: 0)
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(verifier.timeouts, [1], "clamped to the (exhausted) budget, never above it")
+        XCTAssertEqual(result, .givenUp(reason: .wallClockExceeded))
+        XCTAssertEqual(runner.iteration, 1)
+    }
+
+    func testRunAppendsEventsInOrderUnderOneRunIdAndFinalRecordSharesIt() async {
+        let journal = EventJournal()
+        let verifier = TimeoutCapturingVerifier { VerifyOutcome(exitCode: 0, output: "") }
+        let runner = timeoutRunner(verifier, shell: 0, agent: 0, journal: journal)
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 2)
+        _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(journal.events.map(\.kind), [
+            LoopRunEvent.Kind.started, LoopRunEvent.Kind.iterationStarted,
+            LoopRunEvent.Kind.stageStarted, LoopRunEvent.Kind.stageFinished,
+            LoopRunEvent.Kind.verdict])
+        XCTAssertEqual(journal.eventRunIds.count, 1)
+        XCTAssertEqual(journal.written.first?.id, journal.eventRunIds.first)
+        XCTAssertEqual(journal.events.first?.start?.id, journal.written.first?.id)
+    }
+
+    private final class DeadlineCapturingSweep: RegressionSweepRunning {
+        private(set) var deadlines: [Date?] = []
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
+                   repairGuard: FaultRepairGuard?) async -> SweepOutcome {
+            XCTFail("the runner must call the deadline-aware overload")
+            return SweepOutcome(passed: true, total: 0, regressed: 0, unchanged: 0, repaired: 0,
+                                repairFailed: 0, needsApproval: 0, failed: 0, pending: 0)
+        }
+        func sweep(faultsRoot: URL, gitRoot: URL?, attemptRepair: Bool,
+                   repairGuard: FaultRepairGuard?, deadline: Date?) async -> SweepOutcome {
+            deadlines.append(deadline)
+            return SweepOutcome(passed: true, total: 0, regressed: 0, unchanged: 0, repaired: 0,
+                                repairFailed: 0, needsApproval: 0, failed: 0, pending: 0)
+        }
+    }
+
+    func testRegressionSweepReceivesTheRunsBudgetDeadline() async {
+        for (budget, expectDeadline) in [(Double?(600), true), (nil, false)] {
+            let sweep = DeadlineCapturingSweep()
+            let runner = LoopEngineRunner(
+                verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+                stageRepairer: StubRepairer(), regressionSweep: sweep, skillExecutor: StubSkillExecutor(),
+                approvals: makeApprovals(), journal: InMemoryJournal(), summaryWriter: StubSummaryWriter(),
+                scopeGuard: StubScopeGuard(), transportRetryDelay: 0)
+            let config = LoopEngineConfig(stages: [
+                LoopStage(id: "r1", name: "Regression", kind: .regressionSweep, command: nil, order: 0)
+            ], maxIterations: 1, wallClockBudgetSeconds: budget)
+            _ = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+            XCTAssertEqual(sweep.deadlines.count, 1)
+            XCTAssertEqual(sweep.deadlines.first.flatMap { $0 } != nil, expectDeadline)
+            if let d = sweep.deadlines.first.flatMap({ $0 }) {
+                XCTAssertLessThanOrEqual(d.timeIntervalSinceNow, 600)
+                XCTAssertGreaterThan(d.timeIntervalSinceNow, 500)
+            }
+        }
+    }
+
+    // MARK: - Artifact check stage
+
+    private final class WritingSkillExecutor: LoopSkillExecuting {
+        private(set) var messages: [String] = []
+        let onCall: (Int) throws -> Void
+        init(onCall: @escaping (Int) throws -> Void) { self.onCall = onCall }
+        func execute(skillId: String, targetPath: String?, message: String,
+                     repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult {
+            messages.append(message)
+            try onCall(messages.count)
+            return LoopAgentResult()
+        }
+    }
+
+    private func makeTempRepo() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("artifact-run-\(UUID().uuidString)").resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        return dir
+    }
+
+    private func artifactConfig(severity: LoopStageSeverity = .blocking) -> LoopEngineConfig {
+        LoopEngineConfig(stages: [
+            LoopStage(id: "g1", name: "Generate", kind: .skill, order: 0, skillId: "skills/plan-director"),
+            LoopStage(id: "c1", name: "Check", kind: .artifactCheck, order: 1, severity: severity,
+                      check: ArtifactCheckSpec(requiredPaths: ["PLAN.md"],
+                                               lineLimits: [.init(glob: "PLAN.md", maxLines: 5)]))
+        ], maxIterations: 4, consecutiveFailureStop: 2)
+    }
+
+    func testFailedBlockingCheckReRunsTheGenerateStageWithFindingsThenSucceeds() async throws {
+        let repo = try makeTempRepo()
+        let executor = WritingSkillExecutor { call in
+            // First pass writes nothing; the retry writes a valid file.
+            if call == 2 { try "ok\n".write(to: repo.appendingPathComponent("PLAN.md"), atomically: true, encoding: .utf8) }
+        }
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: executor, approvals: makeApprovals())
+        let result = await runner.run(config: artifactConfig(), faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(executor.messages.count, 2)
+        XCTAssertFalse(executor.messages[0].contains("failed these automatic checks"))
+        XCTAssertTrue(executor.messages[1].contains("missing: PLAN.md"), executor.messages[1])
+        XCTAssertEqual(runner.iteration, 2)
+    }
+
+    func testPersistentlyFailingBlockingCheckStopsOnNoProgress() async throws {
+        let repo = try makeTempRepo()
+        let executor = WritingSkillExecutor { _ in }
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: executor, approvals: makeApprovals())
+        let result = await runner.run(config: artifactConfig(), faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(result, .givenUp(reason: .noProgress(stageName: "Check")))
+        XCTAssertEqual(executor.messages.count, 2, "bounded — not one generate pass per iteration forever")
+    }
+
+    func testAdvisoryCheckFailureNeverGatesTheRun() async throws {
+        let repo = try makeTempRepo()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: WritingSkillExecutor { _ in }, approvals: makeApprovals())
+        let result = await runner.run(config: artifactConfig(severity: .advisory), faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(result, .success)
+    }
+
+    /// A second Plan run whose skill errored: the check passes on the FIRST
+    /// run's stale files, which says nothing about this run — `.error`.
+    func testErroredSkillWithAPassingCheckOnStaleFilesIsError() async throws {
+        let repo = try makeTempRepo()
+        try "ok\n".write(to: repo.appendingPathComponent("PLAN.md"), atomically: true, encoding: .utf8)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: WritingSkillExecutor { _ in throw SkillError() }, approvals: makeApprovals())
+        let result = await runner.run(config: artifactConfig(), faultsRoot: repo, gitRoot: repo)
+        guard case .error(let message)? = result else { return XCTFail("got \(String(describing: result))") }
+        XCTAssertTrue(message.contains("never ran cleanly"), message)
+        // Advisory checks are not evidence.
+        let advisory = await makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: WritingSkillExecutor { _ in throw SkillError() }, approvals: makeApprovals())
+            .run(config: artifactConfig(severity: .advisory), faultsRoot: repo, gitRoot: repo)
+        if case .error = advisory {} else { XCTFail("advisory check must not vouch for an errored skill: \(advisory)") }
     }
 }

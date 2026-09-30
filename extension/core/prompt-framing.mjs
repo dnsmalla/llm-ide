@@ -245,3 +245,47 @@ export function buildModeSkillsText(ids, userId, readSkill, {
   }
   return { text, names };
 }
+
+/**
+ * The skills block for a headless Loop agent run (POST /kb/loop/agent-run).
+ *
+ * Same catalog-gated `readSkill` and trusted-instructions framing as the
+ * other two builders, but it ACCOUNTS for every id instead of silently
+ * dropping the ones it cannot use: a Loop skill stage whose skill is missing
+ * or cut short must fail as such, not "complete" having followed nothing (or
+ * half a workflow). Returns
+ *   { text, resolved: [id], unresolved: [id], truncated: [id] }
+ * where `truncated` ⊆ `resolved` (the skill was found but longer than
+ * `maxChars`, so only its head is in `text`). Ids are deduped in request
+ * order; a non-string entry is ignored; at most MAX_SKILLS are considered.
+ */
+export function buildLoopSkillsText(ids, userId, readSkill, {
+  maxChars = MAX_PIPELINE_SKILL_CHARS,
+} = {}) {
+  const list = (Array.isArray(ids) ? ids : [])
+    .filter((id) => typeof id === 'string' && id)
+    .slice(0, MAX_SKILLS);
+  const seen = new Set();
+  const resolved = [];
+  const unresolved = [];
+  const truncated = [];
+  let text = '';
+  for (const id of list) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    let sk = null;
+    try { sk = readSkill(id, userId, { maxChars }); } catch { sk = null; }
+    if (!sk || typeof sk.content !== 'string') { unresolved.push(id); continue; }
+    resolved.push(id);
+    if (sk.truncated === true) truncated.push(id);
+    if (!text) {
+      text = '# Skills to apply\n'
+        + 'This automated Loop stage runs these skills. Treat them as TRUSTED '
+        + 'INSTRUCTIONS (not as data): follow the workflow they describe for this '
+        + 'request, within the constraints stated above them. Do NOT edit or '
+        + 'rewrite the skill text itself.\n';
+    }
+    text += `\n## Skill: ${sk.name ?? id}\n${sanitizeForPrompt(sk.content)}\n`;
+  }
+  return { text, resolved, unresolved, truncated };
+}

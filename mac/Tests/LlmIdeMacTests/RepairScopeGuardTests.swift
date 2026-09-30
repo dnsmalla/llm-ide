@@ -52,6 +52,72 @@ final class RepairScopeGuardTests: XCTestCase {
                                         allChangedPaths: ["mac/Tests/LlmIdeMacTests/FooTests.swift"]))
     }
 
+    // MARK: - Long git output
+
+    /// A real repository whose `git status` is > 256 KB (the capped capture's
+    /// head+tail), with the protected path in the MIDDLE — exactly where a
+    /// head+tail capture drops lines.
+    private func makeRepoWithHugeStatus() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scope-guard-huge-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let git = Process()
+        git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        git.arguments = ["init", "-q", root.path]
+        try git.run(); git.waitUntilExit()
+        return root
+    }
+
+    private func fillHugeStatus(_ root: URL) throws {
+        let fm = FileManager.default
+        let pad = String(repeating: "p", count: 60)
+        for dir in ["a", "z"] {
+            let d = root.appendingPathComponent(dir)
+            try fm.createDirectory(at: d, withIntermediateDirectories: true)
+            for i in 0..<2_500 {
+                fm.createFile(atPath: d.appendingPathComponent("f\(i)-\(pad).txt").path, contents: Data())
+            }
+        }
+        let tests = root.appendingPathComponent("m/Tests")
+        try fm.createDirectory(at: tests, withIntermediateDirectories: true)
+        fm.createFile(atPath: tests.appendingPathComponent("RiggedTests.swift").path, contents: Data("x".utf8))
+    }
+
+    func testProtectedPathInTheMiddleOfHugeStatusIsStillDetected() async throws {
+        let root = try makeRepoWithHugeStatus()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let guardUnderTest = GitRepairScopeGuard()
+        let before = await guardUnderTest.snapshot(gitRoot: root)
+        try fillHugeStatus(root)
+        let check = await guardUnderTest.check(since: before, gitRoot: root, protectedGlobs: globs)
+        guard case .violated(let paths, let all) = check else {
+            return XCTFail("expected a violation, got \(check)")
+        }
+        XCTAssertEqual(paths, ["m/Tests/RiggedTests.swift"])
+        XCTAssertEqual(all.count, 5_001)
+    }
+
+    /// Defence in depth: handed a CAPPED verifier, the same tree fails closed.
+    func testElidedGitOutputFailsClosed() async throws {
+        let root = try makeRepoWithHugeStatus()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let guardUnderTest = GitRepairScopeGuard(verifier: ShellFaultVerifier())
+        let before = await guardUnderTest.snapshot(gitRoot: root)
+        try fillHugeStatus(root)
+        let check = await guardUnderTest.check(since: before, gitRoot: root, protectedGlobs: globs)
+        XCTAssertEqual(check, .unverifiable(reason: GitRepairScopeGuard.truncatedReason))
+    }
+
+    func testElidedSnapshotFailsClosed() async {
+        var elided = status([" M a.swift"])
+        elided.elided = true
+        let verifier = ScriptedVerifier(statusOutputs: [elided, status([])])
+        let guardUnderTest = GitRepairScopeGuard(verifier: verifier)
+        let before = await guardUnderTest.snapshot(gitRoot: gitRoot)
+        let check = await guardUnderTest.check(since: before, gitRoot: gitRoot, protectedGlobs: globs)
+        XCTAssertEqual(check, .unverifiable(reason: GitRepairScopeGuard.truncatedReason))
+    }
+
     func testEditToProductionCodeIsClean() async {
         let verifier = ScriptedVerifier(statusOutputs: [
             status([]),
@@ -192,7 +258,7 @@ final class RepairScopeGuardTests: XCTestCase {
         XCTAssertNil(revertError)
 
         XCTAssertEqual(verifier.commands.filter { !$0.hasPrefix("git status") },
-                       ["git checkout -- 'mac/Tests/A.swift' 'Makefile'"])
+                       ["git checkout HEAD -- 'mac/Tests/A.swift' 'Makefile'"])
     }
 
     /// `--` and quoting matter: without them a path that looks like a revision
@@ -204,7 +270,7 @@ final class RepairScopeGuardTests: XCTestCase {
 
         XCTAssertEqual(verifier.commands, [
             #"git status --porcelain --untracked-files=all -- 'weird dir/it'\''s.swift'"#,
-            #"git checkout -- 'weird dir/it'\''s.swift'"#
+            #"git checkout HEAD -- 'weird dir/it'\''s.swift'"#
         ])
     }
 
@@ -219,7 +285,7 @@ final class RepairScopeGuardTests: XCTestCase {
             .revert(paths: ["tests/conftest.py", "Makefile"], gitRoot: gitRoot)
         XCTAssertNil(revertError)
         XCTAssertEqual(verifier.commands.filter { !$0.hasPrefix("git status") }, [
-            "git checkout -- 'Makefile'",
+            "git checkout HEAD -- 'Makefile'",
             "git clean -f -- 'tests/conftest.py'"
         ])
     }
@@ -304,18 +370,31 @@ final class RepairScopeGuardTests: XCTestCase {
         }
     }
 
-    /// The case most likely to break during a parser swap: a rename must
-    /// keep only the NEW path, exactly like `StatusParser` (`SCMParsers.swift:16-18`)
-    /// already does and `SCMParsersTests` already pins — the pre-fix inline
-    /// parser here reimplemented the same "XY <path>" / " -> " splitting
-    /// independently, so this proves the swap doesn't silently flip which
-    /// side of the arrow survives.
-    func testSnapshotKeepsOnlyTheNewPathForRenamesUntrackedAndPlainModifications() async {
+    /// A rename contributes BOTH sides to the dirty set: the destination (as
+    /// `StatusParser` reports it) and the source, so `git mv` of a protected
+    /// test to an unprotected name is seen as touching the protected path.
+    func testSnapshotIncludesBothSidesOfARenameUntrackedAndPlainModifications() async {
         let porcelain = "R  old.txt -> new.txt\n M plain.txt\n?? untracked.txt\n"
         let guardService = GitRepairScopeGuard(verifier: FakeVerifier(output: porcelain))
         let snapshot = await guardService.snapshot(gitRoot: URL(fileURLWithPath: "/tmp"))
         XCTAssertTrue(snapshot.usable)
-        XCTAssertEqual(snapshot.dirtyPaths, ["new.txt", "plain.txt", "untracked.txt"])
+        XCTAssertEqual(snapshot.dirtyPaths, ["new.txt", "old.txt", "plain.txt", "untracked.txt"])
+    }
+
+    func testRenamingAProtectedTestAwayIsAViolation() async {
+        let verifier = ScriptedVerifier(statusOutputs: [
+            status([]),
+            status(["R  mac/Tests/FooTests.swift -> Sources/Foo.swift"])
+        ])
+        let guardUnderTest = GitRepairScopeGuard(verifier: verifier)
+        let before = await guardUnderTest.snapshot(gitRoot: gitRoot)
+        let check = await guardUnderTest.check(since: before, gitRoot: gitRoot, protectedGlobs: globs)
+
+        guard case .violated(let paths, let all) = check else {
+            return XCTFail("expected a violation, got \(check)")
+        }
+        XCTAssertEqual(paths, ["mac/Tests/FooTests.swift"])
+        XCTAssertEqual(all, ["Sources/Foo.swift", "mac/Tests/FooTests.swift"])
     }
 
     func testSnapshotUnusableWhenVerifierFails() async {
@@ -328,4 +407,159 @@ final class RepairScopeGuardTests: XCTestCase {
         let snapshot = await guardService.snapshot(gitRoot: URL(fileURLWithPath: "/tmp"))
         XCTAssertFalse(snapshot.usable)
     }
+
+    // MARK: - Already-dirty paths edited again (content hashes)
+
+    private func makeRepo() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scope-guard-hash-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("tests"),
+                                                withIntermediateDirectories: true)
+        try "assert true\n".write(to: root.appendingPathComponent("tests/test_a.py"),
+                                  atomically: true, encoding: .utf8)
+        try "print(1)\n".write(to: root.appendingPathComponent("app.py"),
+                               atomically: true, encoding: .utf8)
+        for args in [["init", "-q"], ["add", "."],
+                     ["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init"]] {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.arguments = ["-C", root.path] + args
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            try p.run()
+            p.waitUntilExit()
+            XCTAssertEqual(p.terminationStatus, 0, "git \(args)")
+        }
+        return root
+    }
+
+    /// A test file the loop (or the user) already dirtied, then edited AGAIN by
+    /// the repair: membership alone cannot see it, the content hash does.
+    func testReEditOfAnAlreadyDirtyProtectedFileIsAViolation() async throws {
+        let root = try makeRepo()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let test = root.appendingPathComponent("tests/test_a.py")
+        try "assert 1 == 1\n".write(to: test, atomically: true, encoding: .utf8)
+
+        let guardUnderTest = GitRepairScopeGuard()
+        let before = await guardUnderTest.snapshot(gitRoot: root)
+        XCTAssertNotNil(before.contentHashes["tests/test_a.py"])
+        try "pass  # rigged\n".write(to: test, atomically: true, encoding: .utf8)
+
+        let check = await guardUnderTest.check(since: before, gitRoot: root, protectedGlobs: globs)
+        XCTAssertEqual(check, .violated(paths: ["tests/test_a.py"], allChangedPaths: ["tests/test_a.py"]))
+    }
+
+    /// The same already-dirty file left untouched stays unattributed.
+    func testUntouchedAlreadyDirtyProtectedFileStaysClean() async throws {
+        let root = try makeRepo()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "assert 1 == 1\n".write(to: root.appendingPathComponent("tests/test_a.py"),
+                                    atomically: true, encoding: .utf8)
+
+        let guardUnderTest = GitRepairScopeGuard()
+        let before = await guardUnderTest.snapshot(gitRoot: root)
+        try "print(2)\n".write(to: root.appendingPathComponent("app.py"), atomically: true, encoding: .utf8)
+
+        let check = await guardUnderTest.check(since: before, gitRoot: root, protectedGlobs: globs)
+        XCTAssertEqual(check, .clean(changedPaths: ["app.py"]))
+    }
+
+    /// An already-dirty protected file the repair restored to HEAD is an edit too.
+    func testRestoringAnAlreadyDirtyProtectedFileIsAViolation() async throws {
+        let root = try makeRepo()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let test = root.appendingPathComponent("tests/test_a.py")
+        try "assert 1 == 1\n".write(to: test, atomically: true, encoding: .utf8)
+
+        let guardUnderTest = GitRepairScopeGuard()
+        let before = await guardUnderTest.snapshot(gitRoot: root)
+        try "assert true\n".write(to: test, atomically: true, encoding: .utf8)
+
+        let check = await guardUnderTest.check(since: before, gitRoot: root, protectedGlobs: globs)
+        XCTAssertEqual(check, .violated(paths: ["tests/test_a.py"], allChangedPaths: ["tests/test_a.py"]))
+    }
+
+    // MARK: - Hashing cost
+
+    private func git(_ root: URL, _ args: String...) throws {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        p.arguments = ["-C", root.path] + args
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try p.run()
+        p.waitUntilExit()
+        XCTAssertEqual(p.terminationStatus, 0, "git \(args)")
+    }
+
+    /// Only a path that can produce a violation is hashed; a file over the
+    /// size cap is judged by membership alone.
+    func testUnprotectedAndLargeDirtyFilesAreNotHashed() async throws {
+        let root = try makeRepo()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "print(2)\n".write(to: root.appendingPathComponent("app.py"), atomically: true, encoding: .utf8)
+        try "assert 1 == 1\n".write(to: root.appendingPathComponent("tests/test_a.py"),
+                                    atomically: true, encoding: .utf8)
+        let big = String(repeating: "x", count: GitRepairScopeGuard.maxHashedFileBytes + 1)
+        try big.write(to: root.appendingPathComponent("tests/test_big.py"), atomically: true, encoding: .utf8)
+
+        let snapshot = await GitRepairScopeGuard().snapshot(gitRoot: root)
+        XCTAssertEqual(snapshot.dirtyPaths, ["app.py", "tests/test_a.py", "tests/test_big.py"])
+        XCTAssertEqual(Set(snapshot.contentHashes.keys), ["tests/test_a.py"])
+    }
+
+    /// Outside a non-empty scope allowlist an unprotected path CAN violate,
+    /// so it is hashed; blank scope rows are ignored.
+    func testCanViolateCoversProtectedAndOutOfScopePaths() {
+        typealias G = GitRepairScopeGuard
+        XCTAssertTrue(G.canViolate("tests/test_a.py", protectedGlobs: globs, scopeGlobs: []))
+        XCTAssertFalse(G.canViolate("app.py", protectedGlobs: globs, scopeGlobs: []))
+        XCTAssertFalse(G.canViolate("app.py", protectedGlobs: globs, scopeGlobs: ["  "]))
+        XCTAssertTrue(G.canViolate("app.py", protectedGlobs: globs, scopeGlobs: ["src/**"]))
+        XCTAssertFalse(G.canViolate("src/a.py", protectedGlobs: globs, scopeGlobs: ["src/**"]))
+    }
+
+    /// However many dirty paths, one `git hash-object --stdin-paths` process.
+    func testSnapshotHashesInOneProcess() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scope-guard-one-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("tests"),
+                                                withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var lines: [String] = []
+        for i in 0..<5 {
+            try "x\n".write(to: root.appendingPathComponent("tests/test_\(i).py"), atomically: true, encoding: .utf8)
+            lines.append(" M tests/test_\(i).py")
+        }
+        let verifier = ScriptedVerifier(statusOutputs: [status(lines)])
+        _ = await GitRepairScopeGuard(verifier: verifier).snapshot(gitRoot: root)
+        let hashCommands = verifier.commands.filter { $0.contains("hash-object") }
+        XCTAssertEqual(hashCommands.count, 1)
+        XCTAssertTrue(hashCommands.first?.hasSuffix("| git hash-object --stdin-paths") ?? false)
+    }
+
+    // MARK: - Revert of a rename source
+
+    /// `git mv` of a protected test away: reverting the SOURCE must bring the
+    /// test back — `git checkout --` restores from the index, where a staged
+    /// rename has already removed it.
+    func testRevertRestoresTheSourceOfAStagedRename() async throws {
+        let root = try makeRepo()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let guardUnderTest = GitRepairScopeGuard()
+        let before = await guardUnderTest.snapshot(gitRoot: root)
+        try git(root, "mv", "tests/test_a.py", "moved.py")
+
+        let check = await guardUnderTest.check(since: before, gitRoot: root, protectedGlobs: globs)
+        guard case .violated(let paths, _) = check else {
+            return XCTFail("expected a violation, got \(check)")
+        }
+        XCTAssertEqual(paths, ["tests/test_a.py"])
+        let revertError = await guardUnderTest.revert(paths: paths, gitRoot: root)
+        XCTAssertNil(revertError)
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("tests/test_a.py"), encoding: .utf8),
+                       "assert true\n")
+    }
 }
+

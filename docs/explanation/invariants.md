@@ -548,7 +548,10 @@ Design rationale lives in [Loop Engineering](loop-engineering.md); this is the o
 
 - **Do NOT re-verify a stage after a protected-path violation** to "see if it really passes" — that reintroduces the reward-hacking path wholesale.
 - **Do NOT let a journal write throw or change a run's verdict.**
-- **Do NOT attribute an already-dirty file to the repair.** The guard compares only *newly* dirty paths; flagging pre-existing edits would block every run started from a working tree with uncommitted test changes and get the guard switched off.
+- **Do NOT attribute an already-dirty file's pre-existing edits to the repair.** Membership of an already-dirty path is not a violation (that would block every run started from a working tree with uncommitted test changes and get the guard switched off); only a *content change* to it (its `git hash-object` differs from the snapshot) or restoring it is. Rename/copy sources count as dirty paths too.
+- **Do NOT `git checkout` an already-dirty path under `revert`.** That restores HEAD and discards the edits that were there first; the path is left in place and the run still blocks (`violated`, not `violatedReverted`).
+- **Do NOT skip the guard when an agent edit throws.** `withScopeGuard` checks (and applies the policy) on the throw path too; an agent that edits a test and then fails is still blocked.
+- **Do NOT let an errored stage end a run as `success`.** A stage whose agent call failed (after one retry, only when the backend could not be connected to at all) is recorded `errored`; a run in which any stage's LAST attempt errored ends `error` (`LoopEngineRunner.honestVerdict`) — a passing verify stage does not launder it; only that stage running cleanly later in the same run does.
 - **Do NOT make `StageOutputParser` return `0` for unrecognised output.** `nil` and `0` drive different runner paths: `nil` means "fall back to the hash", `0` means "this runner genuinely reports zero failures" (a compile error or crash).
 - **Do NOT check the wall-clock budget during the first iteration.** A run always gets one complete pass; checking earlier turns a small budget into a no-op instead of a fast failure.
 

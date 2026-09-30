@@ -74,6 +74,22 @@ struct LoopStageAttempt: Codable, Equatable {
     /// Repo-relative paths the repair changed, when the guard could enumerate them.
     var changedPaths: [String]
     var scopeVerdict: RepairScopeVerdict
+    /// True when the stage could not run at all — the agent call failed with a
+    /// transport or backend error (after its one retry) — as opposed to running
+    /// and failing. Optional so records written before this field existed still
+    /// decode; `nil` and `false` both mean "not errored".
+    var errored: Bool?
+    /// What the agent run behind this attempt reported beyond its edits: a
+    /// result subtype other than "success" (e.g. `error_max_turns`) and the
+    /// tool calls the confinement refused. Optional so older records decode;
+    /// `nil` means the run was clean (or no agent ran).
+    var agentNote: String?
+    /// The attempt-ledger entry for the repair this attempt ran (diff, reply,
+    /// resulting failure set). Optional so older records decode.
+    var ledger: LoopLedgerEntry?
+    /// True when the stage failed and then passed on an immediate re-run (the
+    /// flake gate). Optional so older records decode.
+    var flaky: Bool?
 
     init(stageId: String, stageName: String, kind: LoopStage.Kind,
          severity: LoopStageSeverity, startedAt: Date, durationSeconds: Double,
@@ -81,7 +97,9 @@ struct LoopStageAttempt: Codable, Equatable {
          score: Int?, repairAttempted: Bool = false,
          repairDurationSeconds: Double? = nil, repairAttemptIndex: Int? = nil,
          changedPaths: [String] = [],
-         scopeVerdict: RepairScopeVerdict = .notChecked) {
+         scopeVerdict: RepairScopeVerdict = .notChecked,
+         errored: Bool? = nil, agentNote: String? = nil,
+         ledger: LoopLedgerEntry? = nil, flaky: Bool? = nil) {
         self.stageId = stageId
         self.stageName = stageName
         self.kind = kind
@@ -98,6 +116,10 @@ struct LoopStageAttempt: Codable, Equatable {
         self.repairAttemptIndex = repairAttemptIndex
         self.changedPaths = changedPaths
         self.scopeVerdict = scopeVerdict
+        self.errored = errored
+        self.agentNote = agentNote
+        self.ledger = ledger
+        self.flaky = flaky
     }
 }
 

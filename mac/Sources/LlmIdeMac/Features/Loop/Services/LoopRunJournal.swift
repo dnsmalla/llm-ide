@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Persists a finished `LoopRunRecord`. The seam `LoopEngineRunner` depends on
@@ -19,14 +20,63 @@ protocol LoopRunJournaling: AnyObject {
     /// exists yet — an absent journal is the normal state for a fresh project,
     /// not an error.
     func recentRuns(root: URL, limit: Int) -> [LoopRunIndexEntry]
+
+    /// Appends one event to the run's crash-safe log (flushed per event, off
+    /// the calling thread). Fail-open like `write`. Default: no-op.
+    func appendEvent(_ event: LoopRunEvent, runId: String, root: URL)
+
+    /// Turns every run that has an event log but no final record — and is not
+    /// live in this process — into an `.aborted` record. Returns how many.
+    @discardableResult
+    func reconcileInterrupted(root: URL) -> Int
+
+    /// `reconcileInterrupted`, off the calling thread and at most once per
+    /// project root per app launch. Returns how many runs were reconciled.
+    func reconcileOncePerLaunch(root: URL) async -> Int
+
+    /// The full record of a past run, or `nil` when it cannot be read.
+    func loadRecord(id: String, startedAt: Date, root: URL) -> LoopRunRecord?
+
+    /// The previous run's last repairs for `stageId` when it ended on the same
+    /// failure set, read off the calling thread.
+    func priorRunLedger(root: URL, loopId: String, excludingRunId: String,
+                        stageId: String, failureSet: String) async -> [LoopLedgerEntry]
+}
+
+extension LoopRunJournaling {
+    func appendEvent(_ event: LoopRunEvent, runId: String, root: URL) {}
+    @discardableResult
+    func reconcileInterrupted(root: URL) -> Int { 0 }
+    func reconcileOncePerLaunch(root: URL) async -> Int { 0 }
+    func loadRecord(id: String, startedAt: Date, root: URL) -> LoopRunRecord? { nil }
+
+    func priorRunLedger(root: URL, loopId: String, excludingRunId: String,
+                        stageId: String, failureSet: String) async -> [LoopLedgerEntry] {
+        await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .utility).async {
+                guard let previous = self.recentRuns(root: root, limit: 10)
+                        .first(where: { $0.loopId == loopId && $0.id != excludingRunId }),
+                      let record = self.loadRecord(id: previous.id, startedAt: previous.startedAt, root: root)
+                else { return cont.resume(returning: []) }
+                cont.resume(returning: LoopAttemptLedger.priorRunEntries(
+                    in: record, stageId: stageId, failureSet: failureSet))
+            }
+        }
+    }
 }
 
 /// File-system journal under `<root>/system/loop-runs/`:
 ///
 /// ```
-/// system/loop-runs/index.jsonl          — one LoopRunIndexEntry per line, append-only
+/// system/loop-runs/index-2026-08.jsonl — one LoopRunIndexEntry per line, append-only,
+///                                          one file per month (legacy single
+///                                          index.jsonl is still read, as the oldest)
 /// system/loop-runs/2026-08/<runId>.json — the full LoopRunRecord
 /// ```
+///
+/// While a run is in flight its events go to an append-only log OUTSIDE the
+/// project (`<Application Support>/loop-events/<root hash>/<runId>.jsonl`, see
+/// `eventsDirectory`); the final record supersedes it.
 ///
 /// `<root>/system/` is the same per-project directory `RegressionRunner`
 /// already owns for `system/faults/` and `faults.csv`, so a project's harness
@@ -89,8 +139,47 @@ final class FileLoopRunJournal: LoopRunJournaling {
             .appendingPathComponent("loop-runs", isDirectory: true)
     }
 
-    static func indexURL(root: URL) -> URL {
+    /// The legacy single-file index. Still READ (oldest entries); new entries
+    /// go to the month-rotated file from `indexURL(root:for:)`.
+    static func legacyIndexURL(root: URL) -> URL {
         runsDirectory(root: root).appendingPathComponent("index.jsonl")
+    }
+
+    static func indexURL(root: URL, for date: Date = Date()) -> URL {
+        runsDirectory(root: root)
+            .appendingPathComponent("index-\(monthFormatter.string(from: date)).jsonl")
+    }
+
+    /// Index files newest first: `index-YYYY-MM.jsonl` descending, then the
+    /// legacy `index.jsonl` (older than anything rotated).
+    static func indexFilesNewestFirst(root: URL) -> [URL] {
+        let dir = runsDirectory(root: root)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        let rotated = names.filter { $0.hasPrefix("index-") && $0.hasSuffix(".jsonl") }
+            .sorted(by: >).map { dir.appendingPathComponent($0) }
+        let legacy = legacyIndexURL(root: root)
+        return FileManager.default.fileExists(atPath: legacy.path) ? rotated + [legacy] : rotated
+    }
+
+    /// Event logs live OUTSIDE the project tree (Application Support, one
+    /// folder per project root), not under `system/loop-runs/`: that path is a
+    /// protected path for `RepairScopeGuard`, so a log appended to while a
+    /// repair runs would read as the repair rigging the harness's own state.
+    private let eventsBase: URL
+
+    init(eventsBase: URL? = nil) {
+        self.eventsBase = eventsBase
+            ?? AppIdentity.applicationSupportRoot().appendingPathComponent("loop-events", isDirectory: true)
+    }
+
+    func eventsDirectory(root: URL) -> URL {
+        let key = SHA256.hash(data: Data(root.resolvingSymlinksInPath().standardizedFileURL.path.utf8))
+            .prefix(8).map { String(format: "%02x", $0) }.joined()
+        return eventsBase.appendingPathComponent(key, isDirectory: true)
+    }
+
+    func eventLogURL(runId: String, root: URL) -> URL {
+        eventsDirectory(root: root).appendingPathComponent("\(runId).jsonl")
     }
 
     /// Month-bucketed JSON path for a run — matches `write(_:root:)`.
@@ -129,7 +218,112 @@ final class FileLoopRunJournal: LoopRunJournaling {
         return try? decoder().decode(LoopRunRecord.self, from: data)
     }
 
+    // MARK: - Crash-safe event log
+
+    /// Serial, so events land in call order and the log writes never touch the
+    /// main actor. `flushEvents()` is the barrier the final write waits on.
+    private static let eventQueue = DispatchQueue(label: "llmide.loop.journal.events", qos: .utility)
+    private static let liveLock = NSLock()
+    private static var liveRunIds: Set<String> = []
+
+    private static func markLive(_ id: String, _ live: Bool) {
+        liveLock.lock(); defer { liveLock.unlock() }
+        if live { liveRunIds.insert(id) } else { liveRunIds.remove(id) }
+    }
+
+    private static func isLive(_ id: String) -> Bool {
+        liveLock.lock(); defer { liveLock.unlock() }
+        return liveRunIds.contains(id)
+    }
+
+#if DEBUG
+    /// Test seam: pretend the process restarted (no run is live any more).
+    static func forgetLiveRuns() {
+        liveLock.lock(); defer { liveLock.unlock() }
+        liveRunIds.removeAll()
+    }
+#endif
+
+    /// Blocks until every queued event has been written.
+    static func flushEvents() { eventQueue.sync {} }
+
+    func appendEvent(_ event: LoopRunEvent, runId: String, root: URL) {
+        if event.kind == LoopRunEvent.Kind.started { Self.markLive(runId, true) }
+        guard var line = try? Self.encoder().encode(event) else { return }
+        line.append(0x0A)
+        let url = eventLogURL(runId: runId, root: root)
+        Self.eventQueue.async {
+            // Open-append-close per event: closing flushes it to the OS, so a
+            // crash of this process (not of the machine) loses nothing.
+            try? Self.append(line, to: url)
+        }
+    }
+
+    private static var reconciledRoots: Set<String> = []
+
+    func reconcileOncePerLaunch(root: URL) async -> Int {
+        let key = root.resolvingSymlinksInPath().standardizedFileURL.path
+        Self.liveLock.lock()
+        let first = Self.reconciledRoots.insert(key).inserted
+        Self.liveLock.unlock()
+        guard first else { return 0 }
+        return await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .utility).async { cont.resume(returning: self.reconcileInterrupted(root: root)) }
+        }
+    }
+
+    /// Appends the index line for `record` unless its month file already has it
+    /// (checked over the tail only): a crash between the record write and the
+    /// index append leaves exactly that gap.
+    private func repairIndexLine(for record: LoopRunRecord, root: URL) {
+        let file = Self.indexURL(root: root, for: record.startedAt)
+        let decoder = Self.decoder()
+        let present = Self.tailLines(of: file, max: 200).lines.contains {
+            (try? decoder.decode(LoopRunIndexEntry.self, from: $0))?.id == record.id
+        }
+        guard !present, var line = try? Self.encoder().encode(LoopRunIndexEntry(record)) else { return }
+        line.append(0x0A)
+        try? Self.append(line, to: file)
+    }
+
+    @discardableResult
+    func reconcileInterrupted(root: URL) -> Int {
+        Self.flushEvents()
+        let dir = eventsDirectory(root: root)
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return 0 }
+        let decoder = Self.decoder()
+        var count = 0
+        for name in names where name.hasSuffix(".jsonl") {
+            let runId = String(name.dropLast(".jsonl".count))
+            guard !Self.isLive(runId) else { continue }
+            let url = dir.appendingPathComponent(name)
+            guard let data = try? Data(contentsOf: url) else { continue }
+            let events = data.split(separator: 0x0A).compactMap {
+                try? decoder.decode(LoopRunEvent.self, from: Data($0))
+            }
+            guard let start = events.first(where: { $0.kind == LoopRunEvent.Kind.started })?.start else {
+                // No readable start: nothing to reconstruct; drop the stub.
+                try? FileManager.default.removeItem(at: url)
+                continue
+            }
+            if let existing = resolveRecordURL(id: runId, startedAt: start.startedAt, root: root) {
+                // Finished (record exists) — but make sure it is also indexed
+                // before the log, the only other trace, is dropped.
+                if let record = Self.decodeRecord(at: existing) { repairIndexLine(for: record, root: root) }
+                try? FileManager.default.removeItem(at: url)
+            } else {
+                // `write` removes the log on success; on failure it stays for
+                // the next launch to retry.
+                if let record = LoopRunEvent.reconstruct(from: events), write(record, root: root) == nil {
+                    count += 1
+                }
+            }
+        }
+        return count
+    }
+
     func write(_ record: LoopRunRecord, root: URL) -> String? {
+        Self.flushEvents()
         let dir = Self.runsDirectory(root: root)
             .appendingPathComponent(Self.monthFormatter.string(from: record.startedAt), isDirectory: true)
         do {
@@ -143,7 +337,10 @@ final class FileLoopRunJournal: LoopRunJournaling {
             // rewriting the whole file would risk losing every prior run.
             var line = try encoder.encode(LoopRunIndexEntry(record))
             line.append(0x0A)   // "\n"
-            try Self.append(line, to: Self.indexURL(root: root))
+            try Self.append(line, to: Self.indexURL(root: root, for: record.startedAt))
+            // The record supersedes the event log.
+            try? FileManager.default.removeItem(at: eventLogURL(runId: record.id, root: root))
+            Self.markLive(record.id, false)
             return nil
         } catch {
             return error.localizedDescription
@@ -151,23 +348,56 @@ final class FileLoopRunJournal: LoopRunJournaling {
     }
 
     func recentRuns(root: URL, limit: Int) -> [LoopRunIndexEntry] {
-        guard limit > 0,
-              let data = try? Data(contentsOf: Self.indexURL(root: root)),
-              let text = String(data: data, encoding: .utf8)
-        else { return [] }
+        guard limit > 0 else { return [] }
         let decoder = Self.decoder()
-        // Newest last in an append-only file, so walk backwards and stop at
-        // `limit` rather than decoding a year of history to show ten rows.
         var entries: [LoopRunIndexEntry] = []
-        for line in text.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
-            // A partially-written final line is expected after a crash mid-append;
-            // skip it rather than discarding the whole index.
-            guard let entry = try? decoder.decode(LoopRunIndexEntry.self, from: Data(line.utf8))
-            else { continue }
-            entries.append(entry)
-            if entries.count == limit { break }
+        for file in Self.indexFilesNewestFirst(root: root) {
+            // Tail-read: seek from the end and stop once enough lines parse,
+            // so a year of history is never read to show ten rows.
+            var want = limit + 8
+            while true {
+                let (lines, reachedStart) = Self.tailLines(of: file, max: want)
+                var parsed: [LoopRunIndexEntry] = []
+                for line in lines {
+                    // A torn final line after a crash is skipped, not fatal.
+                    if let e = try? decoder.decode(LoopRunIndexEntry.self, from: line) { parsed.append(e) }
+                }
+                if parsed.count >= limit - entries.count || reachedStart {
+                    entries.append(contentsOf: parsed.prefix(limit - entries.count))
+                    break
+                }
+                want *= 2
+            }
+            if entries.count >= limit { break }
         }
         return entries
+    }
+
+    /// Up to `max` non-empty lines from the end of `url`, newest first, plus
+    /// whether the read reached the start of the file (nothing older exists).
+    static func tailLines(of url: URL, max: Int) -> (lines: [Data], reachedStart: Bool) {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return ([], true) }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd(), size > 0 else { return ([], true) }
+        var offset = size
+        var buffer = Data()
+        let chunk: UInt64 = 64 * 1024
+        var lines: [Data] = []
+        while true {
+            let step = min(chunk, offset)
+            offset -= step
+            guard (try? handle.seek(toOffset: offset)) != nil,
+                  let piece = try? handle.read(upToCount: Int(step)) else { return (lines, true) }
+            buffer = piece + buffer
+            var parts = buffer.split(separator: 0x0A, omittingEmptySubsequences: false)
+            // Bytes before the first newline may be a partial line unless the
+            // read reached the file start; carry them into the next round.
+            let head: Data? = offset > 0 ? Data(parts.removeFirst()) : nil
+            lines += parts.reversed().filter { !$0.isEmpty }.map { Data($0) }
+            if lines.count >= max { return (Array(lines.prefix(max)), false) }
+            if offset == 0 { return (lines, true) }
+            buffer = head ?? Data()
+        }
     }
 
     /// Appends to `url`, creating it (and its parent) if absent. `FileHandle`

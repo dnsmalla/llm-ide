@@ -82,7 +82,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                 LoopStage(name: "Test", kind: .shellCommand,
                           command: detectedTestCommand, order: 1)
             ],
-            maxIterations: 10, consecutiveFailureStop: 2),
+            maxIterations: 10, consecutiveFailureStop: 3),
         isBuiltIn: true)
 
     /// Adds an advisory lint stage in front. Advisory so a formatting nit is
@@ -102,7 +102,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           command: detectedTestCommand, order: 1),
                 LoopStage(name: "Regression", kind: .regressionSweep, order: 2)
             ],
-            maxIterations: 10, consecutiveFailureStop: 2),
+            maxIterations: 10, consecutiveFailureStop: 3),
         isBuiltIn: true)
 
     /// The generate → verify shape: a chosen skill edits the code each iteration
@@ -119,7 +119,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           command: detectedTestCommand, order: 1),
                 LoopStage(name: "Regression", kind: .regressionSweep, order: 2)
             ],
-            maxIterations: 6, consecutiveFailureStop: 2),
+            maxIterations: 6, consecutiveFailureStop: 3),
         isBuiltIn: true)
 
     /// Docs work touches no test, so the verify stage is the docs gate itself and
@@ -136,7 +136,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                 LoopStage(name: "Docs check", kind: .shellCommand, command: "make docs-check",
                           order: 1)
             ],
-            maxIterations: 4, consecutiveFailureStop: 2, maxRepairsPerStage: 2),
+            maxIterations: 4, consecutiveFailureStop: 3, maxRepairsPerStage: 2),
         isBuiltIn: true)
 
     /// Isolates the fault sweep alone — for re-checking known regressions
@@ -150,7 +150,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
             stages: [
                 LoopStage(name: "Regression", kind: .regressionSweep, order: 0)
             ],
-            maxIterations: 5, consecutiveFailureStop: 2),
+            maxIterations: 5, consecutiveFailureStop: 3),
         isBuiltIn: true)
 
     /// Isolates the test suite alone — for chasing a test failure without the
@@ -164,7 +164,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                 LoopStage(name: "Test", kind: .shellCommand,
                           command: detectedTestCommand, order: 0)
             ],
-            maxIterations: 10, consecutiveFailureStop: 2),
+            maxIterations: 10, consecutiveFailureStop: 3),
         isBuiltIn: true)
 
     /// llm-ide-specific, like `systemCheck`: whether the app itself runs, not
@@ -187,7 +187,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           command: "cd mac && swift build", order: 2),
                 LoopStage(name: "Regression", kind: .regressionSweep, order: 3)
             ],
-            maxIterations: 6, consecutiveFailureStop: 2),
+            maxIterations: 6, consecutiveFailureStop: 3),
         isBuiltIn: true)
 
     /// llm-ide-specific: one stage per subsystem (skills, plugins, connectors,
@@ -248,7 +248,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           command: "cd mac && swift test", order: 7),
                 LoopStage(name: "Regression", kind: .regressionSweep, order: 8)
             ],
-            maxIterations: 8, consecutiveFailureStop: 2),
+            maxIterations: 8, consecutiveFailureStop: 3),
         isBuiltIn: true)
 
     /// The Plan default loop's recipe (`LoopDefaultLoopKey.plan`), offered as a
@@ -296,9 +296,11 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                               + "status proposed — future plans build on these indexes. Keep every "
                               + "generated plan file within the 250-line limit, splitting oversized areas into an "
                               + "areas/ folder beside the Output file. Preserve existing task IDs and completed "
-                              + "ticks; never delete or rewrite the source plans.")
+                              + "ticks; never delete or rewrite the source plans."),
+                LoopStage(name: "Plan Check", kind: .artifactCheck, order: 2,
+                          check: LoopStageDetector.planCheckSpec)
             ],
-            maxIterations: 2, consecutiveFailureStop: 2),
+            maxIterations: 3, consecutiveFailureStop: 3),
         isBuiltIn: true)
 
     /// The Refactoring default loop's recipe (`LoopDefaultLoopKey.refactor`):
@@ -326,7 +328,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                 LoopStage(name: "Test", kind: .shellCommand,
                           command: detectedTestCommand, order: 2)
             ],
-            maxIterations: 4, consecutiveFailureStop: 2),
+            maxIterations: 4, consecutiveFailureStop: 3),
         isBuiltIn: true)
 
     /// The Doc Optimization default loop's recipe (`LoopDefaultLoopKey.docs`):
@@ -349,8 +351,10 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           skillId: "skills/doc-writer",
                           targetPath: "llm-doc/docs/INDEX.md",
                           outputPath: "llm-doc/docs",
-                          prompt: LoopStageDetector.docWriterPrompt)
+                          prompt: LoopStageDetector.docWriterPrompt),
+                LoopStage(name: "Doc Check", kind: .artifactCheck, order: 2,
+                          check: LoopStageDetector.docCheckSpec)
             ],
-            maxIterations: 2, consecutiveFailureStop: 2),
+            maxIterations: 3, consecutiveFailureStop: 3),
         isBuiltIn: true)
 }

@@ -31,6 +31,25 @@ final class LoopRunService: ObservableObject {
     weak var activity: ActivityStore?
     weak var logStore: (any TaskLogWriting)?
 
+    /// A run on the Auto Task loop lane (started from the phone or the
+    /// schedule), keyed like `activeKeys`. The Loop page shows it and routes
+    /// its Stop to `cancelLoopLane` instead of pretending nothing is running.
+    struct LaneRun {
+        let runner: LoopEngineRunner
+        let trigger: LoopRunTrigger
+        /// Who started it, for the page's wording.
+        var source: String { trigger == .phone ? "phone" : "schedule" }
+        /// "Running (started from phone)" — the live header's label.
+        var label: String { "Running (started from \(source))" }
+    }
+    @Published private(set) var laneRuns: [String: LaneRun] = [:]
+    /// Stops the loop lane. Wired at boot by the Shell (the lane belongs to
+    /// the Auto Task scheduler, which Loop must not name).
+    var cancelLoopLane: (() -> Void)?
+
+    /// Which run a Stop pressed on the Loop page addresses.
+    enum StopTarget: Equatable { case desktop, lane, none }
+
     private let api: LlmIdeAPIClient
     private var runners: [String: LoopEngineRunner] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
@@ -61,7 +80,10 @@ final class LoopRunService: ObservableObject {
             stageRepairer: AgentLoopStageRepairer(api: api),
             regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
             skillExecutor: AgentLoopSkillExecutor(api: api),
-            approvals: approvals)
+            approvals: approvals,
+            repoRegistrar: APILoopRepoRegistrar(api: api),
+            defaultShellTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().shellSeconds),
+            defaultAgentTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().agentSeconds))
         // Mirror into the shared per-task log — the buffer the Auto Tasks
         // page and the phone read — so page-driven runs stay visible there.
         // Owned here (not per page appearance) so the mirror survives the
@@ -98,6 +120,10 @@ final class LoopRunService: ObservableObject {
             return
         }
         let runner = runner(projectId: projectId, loopId: loopId)
+        // The runner outlives Settings edits; re-read the app defaults per run.
+        let timeouts = LoopEngineDefaults.stageTimeouts()
+        runner.defaultShellTimeout = TimeInterval(timeouts.shellSeconds)
+        runner.defaultAgentTimeout = TimeInterval(timeouts.agentSeconds)
         activeKeys.insert(key)
         // The user just pressed Run, so they are looking at the app — the
         // one moment the one-shot permission alert can actually be seen.
@@ -115,7 +141,8 @@ final class LoopRunService: ObservableObject {
             if let result {
                 self.reportFinished(loopName: loopName, status: result,
                                     iterations: runner.iteration,
-                                    duration: Date().timeIntervalSince(startedAt))
+                                    duration: Date().timeIntervalSince(startedAt),
+                                    flakyStages: runner.flakyStages)
             }
             onFinish(result)
         }
@@ -139,6 +166,40 @@ final class LoopRunService: ObservableObject {
         }
     }
 
+    /// Registers a runner `LoopRunnerProvider` made for the loop lane, so its
+    /// runs appear in `laneRuns` while admitted.
+    func attachLaneRunner(_ runner: LoopEngineRunner, trigger: LoopRunTrigger) {
+        runner.onAdmissionChange = { [weak self, weak runner] projectId, loopId, active in
+            guard let self, let runner, let projectId else { return }
+            let key = Self.key(projectId: projectId, loopId: loopId)
+            if active {
+                self.laneRuns[key] = LaneRun(runner: runner, trigger: trigger)
+            } else if self.laneRuns[key]?.runner === runner {
+                self.laneRuns[key] = nil
+            }
+        }
+    }
+
+    /// The lane run in flight (or queued) for this loop, if any.
+    func laneRun(projectId: String, loopId: String) -> LaneRun? {
+        laneRuns[Self.key(projectId: projectId, loopId: loopId)]
+    }
+
+    /// A desktop run is this page's own and wins; otherwise a lane run.
+    static func stopTarget(desktopActive: Bool, laneActive: Bool) -> StopTarget {
+        desktopActive ? .desktop : (laneActive ? .lane : .none)
+    }
+
+    /// Stop whichever run the Loop page is showing for this loop.
+    func stopShownRun(projectId: String, loopId: String) {
+        switch Self.stopTarget(desktopActive: tasks[Self.key(projectId: projectId, loopId: loopId)] != nil,
+                               laneActive: laneRun(projectId: projectId, loopId: loopId) != nil) {
+        case .desktop: stop(projectId: projectId, loopId: loopId)
+        case .lane: cancelLoopLane?()
+        case .none: break
+        }
+    }
+
     /// Hold the loop's run at its next stage boundary. Only meaningful for a
     /// run this service owns; the runner itself refuses unless it is
     /// executing (see `LoopEngineRunner.pause`).
@@ -155,7 +216,7 @@ final class LoopRunService: ObservableObject {
     /// only the Auto Task path reported there) and, when the app is in the
     /// background, a user notification.
     private func reportFinished(loopName: String, status: LoopEngineStatus,
-                                iterations: Int, duration: TimeInterval) {
+                                iterations: Int, duration: TimeInterval, flakyStages: [String] = []) {
         // `.aborted` is the user's own Stop (or app quit) — announcing an
         // action back to the person who just took it is noise, in the feed
         // and doubly so as a "needs attention" banner.
@@ -167,6 +228,6 @@ final class LoopRunService: ObservableObject {
                      "iterations": iterations,
                      "durationSeconds": Int(duration)])
         LoopRunNotifier.notifyRunFinished(loopName: loopName, status: status,
-                                          duration: duration)
+                                          duration: duration, flakyStages: flakyStages)
     }
 }

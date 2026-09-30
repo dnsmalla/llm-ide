@@ -33,6 +33,11 @@ public struct LoopEngineConfig: Codable, Equatable {
     /// iteration count, which is what actually costs LLM calls.
     public var maxRepairsPerStage: Int = 3
 
+    /// Model the repair agent runs on. `nil` (the default) = the app's default
+    /// model, the user's full chat model — repair is a multi-file edit. A
+    /// cheaper tier can be chosen per loop or as a Settings → Loop default.
+    public var repairModel: String?
+
     /// What to do when a repair edits a protected path. See `RepairScopeGuard`.
     public var protectedPathPolicy: ProtectedPathPolicy = .revert
 
@@ -68,13 +73,14 @@ public struct LoopEngineConfig: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case stages, maxIterations, consecutiveFailureStop
         case wallClockBudgetSeconds, maxRepairsPerStage, protectedPathPolicy, extraProtectedGlobs
-        case writeSummaryNote, useWorktreesForConcurrentRuns
+        case writeSummaryNote, useWorktreesForConcurrentRuns, repairModel
     }
 
     public init(stages: [LoopStage], maxIterations: Int = 10, consecutiveFailureStop: Int = 2,
          wallClockBudgetSeconds: Double? = nil, maxRepairsPerStage: Int = 3,
          protectedPathPolicy: ProtectedPathPolicy = .revert, extraProtectedGlobs: [String] = [],
-         writeSummaryNote: Bool = false, useWorktreesForConcurrentRuns: Bool = false) {
+         writeSummaryNote: Bool = false, useWorktreesForConcurrentRuns: Bool = false,
+         repairModel: String? = nil) {
         self.stages = stages
         self.maxIterations = maxIterations
         self.consecutiveFailureStop = consecutiveFailureStop
@@ -84,6 +90,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         self.extraProtectedGlobs = extraProtectedGlobs
         self.writeSummaryNote = writeSummaryNote
         self.useWorktreesForConcurrentRuns = useWorktreesForConcurrentRuns
+        self.repairModel = repairModel
     }
 
     /// Same rule as `LoopStage.init(from:)`: every field added after the first
@@ -109,6 +116,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         writeSummaryNote = try container.decodeIfPresent(Bool.self, forKey: .writeSummaryNote) ?? false
         useWorktreesForConcurrentRuns = try container.decodeIfPresent(
             Bool.self, forKey: .useWorktreesForConcurrentRuns) ?? false
+        repairModel = try container.decodeIfPresent(String.self, forKey: .repairModel)
     }
 
     /// Hand-written so `wallClockBudgetSeconds` is encoded as an explicit JSON
@@ -128,6 +136,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         try container.encode(extraProtectedGlobs, forKey: .extraProtectedGlobs)
         try container.encode(writeSummaryNote, forKey: .writeSummaryNote)
         try container.encode(useWorktreesForConcurrentRuns, forKey: .useWorktreesForConcurrentRuns)
+        try container.encodeIfPresent(repairModel, forKey: .repairModel)
     }
 
     /// Whether an auto-detected stage list is safe to persist as the

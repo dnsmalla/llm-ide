@@ -25,6 +25,38 @@ final class LoopWorktreeManagerTests: XCTestCase {
         try super.tearDownWithError()
     }
 
+    func testPruneStaleRemovesCleanLeftoverButNotLiveLease() async throws {
+        let leftover = try await LoopWorktreeManager.create(mainRepo: mainRepo, faultsRoot: projectRoot)
+        // Simulate a quit: the lease is gone but the checkout stayed on disk.
+        LoopWorktreeManager._resetForTesting()
+        let live = try await LoopWorktreeManager.create(mainRepo: mainRepo, faultsRoot: projectRoot)
+
+        let notes = await LoopWorktreeManager.pruneStale(mainRepo: mainRepo, faultsRoot: projectRoot)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: leftover.worktreePath.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: live.worktreePath.path),
+                      "a worktree a live lease owns is never pruned")
+        XCTAssertTrue(notes.contains { $0.contains("removed leftover") })
+        let branches = try await RepoManager().runGit(["branch", "--list", leftover.branch], at: mainRepo)
+        XCTAssertFalse(branches.contains(leftover.branch))
+    }
+
+    func testPruneStaleKeepsDirtyLeftover() async throws {
+        let leftover = try await LoopWorktreeManager.create(mainRepo: mainRepo, faultsRoot: projectRoot)
+        try Data("repair".utf8).write(to: leftover.worktreePath.appendingPathComponent("r.txt"))
+        LoopWorktreeManager._resetForTesting()
+
+        let notes = await LoopWorktreeManager.pruneStale(mainRepo: mainRepo, faultsRoot: projectRoot)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: leftover.worktreePath.path))
+        XCTAssertTrue(notes.contains { $0.contains("kept leftover") })
+    }
+
+    func testPruneStaleWithNoWorktreeDirectoryIsANoOp() async {
+        let notes = await LoopWorktreeManager.pruneStale(mainRepo: mainRepo, faultsRoot: projectRoot)
+        XCTAssertTrue(notes.isEmpty)
+    }
+
     func testFinishRemovesUnchangedWorktree() async throws {
         let lease = try await LoopWorktreeManager.create(mainRepo: mainRepo, faultsRoot: projectRoot)
         XCTAssertTrue(FileManager.default.fileExists(atPath: lease.worktreePath.path))

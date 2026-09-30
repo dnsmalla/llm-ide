@@ -64,11 +64,37 @@ enum LoopEngineConfigStore {
         }
         let url = fileURL(projectRoot: projectRoot)
         if FileManager.default.fileExists(atPath: url.path) {
-            let data = try? Data(contentsOf: url)
-            if let data, let store = try? JSONDecoder().decode(LoopEngineProjectStore.self, from: data) {
+            // A READ error is not a corrupt file (a transient I/O hiccup, a
+            // sync client holding it): retry once, then report and leave the
+            // file alone — `write` refuses to overwrite what it cannot read.
+            guard let data = readData(at: url) else {
+                NSLog("LoopEngineConfigStore: \(url.path) could not be read; leaving it untouched")
+                LoopStoreNotices.shared.post(.readFailed, forFile: url)
+                return nil
+            }
+            let version = fileSchemaVersion(data) ?? 1
+            let decoder = JSONDecoder()
+            decoder.userInfo[LoopDefinition.fileSchemaVersionKey] = version
+            let decoded = try? decoder.decode(LoopEngineProjectStore.self, from: data)
+            if version > LoopEngineProjectStore.currentSchemaVersion {
+                // A newer build's file is read-only here — even when its shape
+                // no longer decodes, it is NOT corrupt: never quarantine it,
+                // and `write` refuses to put defaults over it.
+                LoopStoreNotices.shared.post(.newerVersion(version), forFile: url)
+                return decoded
+            }
+            if var store = decoded {
+                // The pre-file, per-machine opt-in flag is a read-only hint:
+                // a machine that already normalised this project keeps the
+                // user's later opt-ins when the file is stamped v2.
+                if store.schemaVersion < LoopEngineProjectStore.scheduleOptInSchemaVersion,
+                   defaults.bool(forKey: "loopScheduleOptInMigrated.\(projectId)") {
+                    store.schemaVersion = LoopEngineProjectStore.currentSchemaVersion
+                }
+                LoopStoreNotices.shared.clear(forFile: url)
                 return store
             }
-            if let data, let legacyConfig = try? JSONDecoder().decode(LoopEngineConfig.self, from: data) {
+            if let legacyConfig = try? JSONDecoder().decode(LoopEngineConfig.self, from: data) {
                 let wrapped = wrapAsMainLoop(legacyConfig)
                 write(wrapped, to: url)
                 return wrapped
@@ -80,7 +106,8 @@ enum LoopEngineConfigStore {
             // through to the pre-file UserDefaults entry: a project that has
             // a file is past that era, so resurrecting it would be a second,
             // quieter clobber.
-            quarantineCorruptFile(at: url)
+            let moved = quarantineCorruptFile(at: url)
+            LoopStoreNotices.shared.post(.quarantined(movedTo: moved?.lastPathComponent), forFile: url)
             return nil
         }
         if let legacy = LoopEngineConfig.load(for: projectId, defaults: defaults) {
@@ -116,7 +143,9 @@ enum LoopEngineConfigStore {
             }
             return
         }
+        LoopStoreCache.shared.invalidate(projectRoot: projectRoot.path)
         write(store, to: fileURL(projectRoot: projectRoot))
+        LoopStoreCache.shared.invalidate(projectRoot: projectRoot.path)
     }
 
     /// This project's loops **as the app actually runs them**: `load`, then
@@ -143,10 +172,38 @@ enum LoopEngineConfigStore {
     /// off the schedule flag that older builds set on every loop they created.
     static func loops(projectRoot: URL?, projectId: String, gitRoot: URL?,
                       defaults: UserDefaults = .standard) -> LoopEngineProjectStore {
+        // No project folder: nothing on disk to watch, so nothing to cache.
+        guard let projectRoot else {
+            return LoopStageDetector.withDetectionMemo {
+                loadEnsured(projectRoot: nil, projectId: projectId, gitRoot: gitRoot, defaults: defaults)
+            }
+        }
+        let key = LoopStoreCache.Key(projectRoot: projectRoot.path, projectId: projectId,
+                                     gitRoot: gitRoot?.path, defaults: ObjectIdentifier(defaults))
+        if let hit = LoopStoreCache.shared.value(for: key, file: fileURL(projectRoot: projectRoot),
+                                                 gitRoot: gitRoot) {
+            return hit
+        }
+        // Signature BEFORE the load: a write landing mid-load must not be
+        // cached as if the (older) result matched it.
+        let file = fileURL(projectRoot: projectRoot)
+        let ticket = LoopStoreCache.shared.ticket(projectRoot: projectRoot.path, file: file, gitRoot: gitRoot)
+        let result = LoopStageDetector.withDetectionMemo {
+            loadEnsured(projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot, defaults: defaults)
+        }
+        LoopStoreCache.shared.store(result, for: key, ticket: ticket, file: file, gitRoot: gitRoot)
+        return result
+    }
+
+    private static func loadEnsured(projectRoot: URL?, projectId: String, gitRoot: URL?,
+                                    defaults: UserDefaults) -> LoopEngineProjectStore {
         let saved = load(projectRoot: projectRoot, projectId: projectId, defaults: defaults)
         let (ensuredStore, revalidationChanges) = LoopStageDetector.ensureDefaultLoops(
             in: saved ?? LoopEngineProjectStore(loops: []), gitRoot: gitRoot, defaults: defaults)
         var ensured = ensuredStore
+        // The ensure step rebuilds the store; the file's own version must
+        // survive it, or a v1 file would look migrated before it ever is.
+        if let saved { ensured.schemaVersion = saved.schemaVersion }
         // `revalidatingTestStages` (inside `ensureDefaultLoops`) is a pure
         // function on purpose — it never writes anything itself. This is the
         // one place its result actually reaches disk (`system/loop.json` is a
@@ -168,11 +225,19 @@ enum LoopEngineConfigStore {
             case let .updated(from, to):
                 NSLog("LoopEngineConfigStore: [%@ / %@] test command re-detected, updating \"%@\" -> \"%@\"",
                       change.loopName, change.stageName, from, to)
+            case .disabledRefactorApply:
+                NSLog("LoopEngineConfigStore: [%@ / %@] no test tooling detected, disabling the code-applying stage",
+                      change.loopName, change.stageName)
+            case .reenabledRefactorApply:
+                NSLog("LoopEngineConfigStore: [%@ / %@] test tooling detected again, re-enabling the code-applying stage",
+                      change.loopName, change.stageName)
+            case let .upgradedDefault(revision):
+                NSLog("LoopEngineConfigStore: [%@ / %@] default stage upgraded to revision %d",
+                      change.loopName, change.stageName, revision)
             }
         }
         // Only where there is a file to write the result to — see the helper.
-        let unscheduled = projectRoot != nil
-            && normalizeScheduleOptIn(&ensured, projectId: projectId, defaults: defaults)
+        let unscheduled = projectRoot != nil && normalizeScheduleOptIn(&ensured)
         // `unscheduled` implies `ensured != saved` (a flag was flipped on a
         // loaded loop), so it is belt-and-braces — but a normalization that
         // silently failed to persist would leave the loops running, which is
@@ -186,43 +251,48 @@ enum LoopEngineConfigStore {
         return ensured
     }
 
-    /// UserDefaults flag marking a project as already normalized. Per project,
-    /// not per app: projects are opened at different times, so a single global
-    /// flag would normalize whichever project happened to be opened first and
-    /// leave every other one scheduled.
-    private static func scheduleOptInMigrationKey(_ projectId: String) -> String {
-        "loopScheduleOptInMigrated.\(projectId)"
-    }
-
-    /// Bring a project saved under the old contract in line with the current
-    /// one, exactly once. Returns whether it changed anything.
+    /// Bring a file saved under the old contract (`schemaVersion` < 2) in line
+    /// with the current one. Returns whether it changed anything.
     ///
     /// `LoopDefinition.runsOnSchedule` used to default to `true`, so every loop
-    /// this app has ever created — the four built-in defaults included — was
-    /// written to `system/loop.json` already opted IN to the scheduled
-    /// `.loopEngineering` Auto Task, without the user ever choosing it.
-    /// Flipping the creation default to `false` fixes loops created from now
-    /// on and does nothing for the ones already on disk, which would keep
-    /// running on the cron; this switches those off.
+    /// an old build created was written already opted IN to the scheduled
+    /// `.loopEngineering` Auto Task, without the user ever choosing it. This
+    /// switches those off and stamps `schemaVersion` 2.
     ///
-    /// **Once, then never again.** The flag is set on the first call for a
-    /// project whether or not anything changed, so an opt-in the user makes
-    /// afterwards (Loop page → ⋯ → "Run on schedule") is theirs and is never
-    /// reverted. Deliberately not destructive beyond that one flag: stages,
-    /// budgets, goals and Primary are untouched, and re-enabling a loop is one
-    /// menu item.
-    static func normalizeScheduleOptIn(_ store: inout LoopEngineProjectStore, projectId: String,
-                                       defaults: UserDefaults = .standard) -> Bool {
-        let key = scheduleOptInMigrationKey(projectId)
-        guard !defaults.bool(forKey: key) else { return false }
-        defaults.set(true, forKey: key)
-        guard store.loops.contains(where: \.runsOnSchedule) else { return false }
+    /// **Keyed on the file, not the machine.** The version lives in the
+    /// committed `loop.json`, so a second machine or a teammate sees a v2 file
+    /// and does nothing — the old per-machine UserDefaults flag rewrote the
+    /// shared file on every fresh install (those `loopScheduleOptInMigrated.*`
+    /// keys are no longer read and are left harmlessly behind). Idempotent: a
+    /// v2 store is never touched, so an opt-in the user makes afterwards is
+    /// theirs. Stages, budgets, goals and Primary are untouched.
+    static func normalizeScheduleOptIn(_ store: inout LoopEngineProjectStore) -> Bool {
+        guard store.schemaVersion < LoopEngineProjectStore.scheduleOptInSchemaVersion else { return false }
         store.loops = store.loops.map { loop in
             var copy = loop
             copy.runsOnSchedule = false
             return copy
         }
+        store.schemaVersion = LoopEngineProjectStore.currentSchemaVersion
         return true
+    }
+
+    /// What a scheduled sweep should do with `loop` right before running it:
+    /// the freshly re-read definition to run, or the reason to skip it. The
+    /// sweep takes its list once and then runs loops for hours; in that time
+    /// the user (or a `git pull`) may have deleted, unscheduled or emptied it.
+    static func sweepRecheck(_ loop: LoopDefinition, projectRoot: URL?, projectId: String,
+                             gitRoot: URL?, defaults: UserDefaults = .standard)
+        -> (loop: LoopDefinition?, skipReason: String?) {
+        let fresh = loops(projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot,
+                          defaults: defaults)
+        guard let current = fresh.loops.first(where: { $0.id == loop.id }) else {
+            return (nil, "it no longer exists")
+        }
+        if !current.runsOnSchedule { return (nil, "it is no longer scheduled") }
+        if current.isManualOnly { return (nil, "it is manual-only") }
+        if !current.config.stages.contains(where: \.enabled) { return (nil, "it has no enabled stages") }
+        return (current, nil)
     }
 
     /// The project's Primary loop — the phone's target, and what a surface
@@ -267,13 +337,57 @@ enum LoopEngineConfigStore {
         }
     }
 
+    private struct VersionProbe: Decodable { let schemaVersion: Int? }
+
+    /// The file's `schemaVersion` (nil when absent), or nil when `data` is not
+    /// a JSON object at all.
+    private static func fileSchemaVersion(_ data: Data) -> Int? {
+        (try? JSONDecoder().decode(VersionProbe.self, from: data))?.schemaVersion
+    }
+
+    /// Reads the file, retrying once — a read error is never grounds to
+    /// quarantine.
+    private static func readData(at url: URL) -> Data? {
+        if let data = try? Data(contentsOf: url) { return data }
+        return try? Data(contentsOf: url)
+    }
+
+    /// Whether overwriting whatever sits at `url` is safe: refuses a file this
+    /// build cannot read or one written by a newer schema; sets aside a file
+    /// that is not even JSON so its content is never lost.
+    private static func mayOverwrite(_ url: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path) else { return true }
+        guard let data = readData(at: url) else {
+            NSLog("LoopEngineConfigStore: refusing to write \(url.path): it exists but cannot be read")
+            LoopStoreNotices.shared.post(.readFailed, forFile: url)
+            return false
+        }
+        guard (try? JSONDecoder().decode(VersionProbe.self, from: data)) != nil else {
+            let moved = quarantineCorruptFile(at: url)
+            LoopStoreNotices.shared.post(.quarantined(movedTo: moved?.lastPathComponent), forFile: url)
+            return true
+        }
+        if let onDisk = fileSchemaVersion(data), onDisk > LoopEngineProjectStore.currentSchemaVersion {
+            NSLog("LoopEngineConfigStore: refusing to write \(url.path): schemaVersion \(onDisk) is newer than this build's \(LoopEngineProjectStore.currentSchemaVersion)")
+            LoopStoreNotices.shared.post(.newerVersion(onDisk), forFile: url)
+            return false
+        }
+        return true
+    }
+
     /// Fail-quiet: losing a write is bad, but throwing from a SwiftUI action
     /// or the cron sweep would be worse than the user re-saving.
     private static func write(_ store: LoopEngineProjectStore, to url: URL) {
+        guard mayOverwrite(url) else { return }
         do {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try encoder().encode(store).write(to: url, options: .atomic)
+            // A quarantine notice stays until the next clean load; the others
+            // describe a state this write just proved is over.
+            if case .quarantined? = LoopStoreNotices.shared.notice(forFile: url) {} else {
+                LoopStoreNotices.shared.clear(forFile: url)
+            }
         } catch {
             NSLog("LoopEngineConfigStore: write failed at \(url.path): \(error.localizedDescription)")
         }

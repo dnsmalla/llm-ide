@@ -275,6 +275,17 @@ final class LlmIdeAPIClient: @unchecked Sendable {
         try await send(path: path, method: "POST", body: body, authenticated: authenticated)
     }
 
+    /// POST with a per-request timeout. `URLRequest.timeoutInterval` is an idle
+    /// timer; for a non-streaming endpoint that answers only when the work is
+    /// done, it is effectively the total — so a caller whose server-side work
+    /// is bounded by its own deadline sets this ABOVE that deadline, and the
+    /// server's timeout error (not a client-side cut) is what surfaces.
+    func post<B: Encodable, T: Decodable>(_ path: String, body: B, authenticated: Bool,
+                                          timeout: TimeInterval) async throws -> T {
+        try await send(path: path, method: "POST", body: body, authenticated: authenticated,
+                       timeout: timeout)
+    }
+
     func put<B: Encodable, T: Decodable>(_ path: String, body: B, authenticated: Bool) async throws -> T {
         try await send(path: path, method: "PUT", body: body, authenticated: authenticated)
     }
@@ -331,11 +342,13 @@ final class LlmIdeAPIClient: @unchecked Sendable {
     struct EmptyBody: Encodable {}
 
     func send<B: Encodable, T: Decodable>(
-        path: String, method: String, body: B?, authenticated: Bool, isRetry: Bool = false
+        path: String, method: String, body: B?, authenticated: Bool, isRetry: Bool = false,
+        timeout: TimeInterval? = nil
     ) async throws -> T {
         guard let url = URL(string: baseURL + path) else { throw APIError.invalidURL }
         var req = URLRequest(url: url)
         req.httpMethod = method
+        if let timeout { req.timeoutInterval = timeout }
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         if authenticated {
@@ -380,7 +393,8 @@ final class LlmIdeAPIClient: @unchecked Sendable {
                 if hasRefresh {
                     let ok = await store.attemptRefresh(via: self)
                     if ok {
-                        return try await send(path: path, method: method, body: body, authenticated: authenticated, isRetry: true)
+                        return try await send(path: path, method: method, body: body, authenticated: authenticated, isRetry: true,
+                                              timeout: timeout)
                     }
                 }
             }

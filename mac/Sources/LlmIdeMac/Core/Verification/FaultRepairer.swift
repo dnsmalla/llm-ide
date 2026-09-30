@@ -11,22 +11,76 @@ protocol FaultRepairer: AnyObject {
     /// when the agent has finished editing (or made no change). Throws
     /// only on transport/CLI failure — "made no edit" is not an error
     /// (the caller re-verifies to decide the verdict).
-    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL) async throws
+    ///
+    /// Returns the agent run's result (reply, changed paths, …) so a caller
+    /// can keep what the agent said it did.
+    /// - Parameter timeout: Wall-clock budget for the agent run; `nil` = the
+    ///   server's default.
+    @discardableResult
+    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL,
+                timeout: TimeInterval?) async throws -> LoopAgentResult
+
+    /// Same, on a chosen model (`nil` = the app's default). Defaults to the
+    /// model-less call for conformers that predate model tiers.
+    @discardableResult
+    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL,
+                timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult
 }
 
-/// Production adapter — sends a structured repair instruction through
-/// the same code-assist surface the rest of the app uses. The agent has
-/// write tools in this deployment, so it can edit the repo directly.
-final class AgentFaultRepairer: FaultRepairer {
-    private let api: LlmIdeAPIClient
-    private let language: String
+extension FaultRepairer {
+    @discardableResult
+    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL,
+                timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult {
+        try await repair(fault: fault, failureOutput: failureOutput, repoRoot: repoRoot, timeout: timeout)
+    }
+}
 
-    init(api: LlmIdeAPIClient, language: String = "en") {
-        self.api = api
-        self.language = language
+/// Wraps one fault repair so the caller can check what it changed.
+///
+/// `RegressionRunner` hands the guard the repo root and the repair to run; the
+/// guard runs it (it may retry it, snapshot the tree around it, revert what it
+/// touched) and returns `true` to keep the repair — the fault is then
+/// re-verified — or `false` when it rejected the repair, in which case the
+/// fault is recorded `.repairFailed` WITHOUT re-verifying (a re-verify after a
+/// rejected edit to a test would observe the pass the edit bought). Errors
+/// from the repair propagate. A closure, not a Loop type, because Core must
+/// never import a feature: the Loop's protected-path guard is passed in.
+///
+/// The guard calls `repair` with the agent-run timeout it allows (the Loop
+/// bounds it by the stage timeout and the run's remaining time budget) and
+/// gets back the agent's result — its reported changed paths are part of
+/// what the guard checks.
+typealias FaultRepairGuard = @MainActor (
+    _ repoRoot: URL,
+    _ repair: (_ timeout: TimeInterval?) async throws -> LoopAgentResult
+) async throws -> Bool
+
+/// Production adapter — sends a structured repair instruction as a headless,
+/// confined agent run (`LoopAgentRunning` → POST /kb/loop/agent-run) rooted
+/// at `repoRoot`, so the agent can actually edit files there (and only there).
+/// It used to go through `/code-assist` with no agent context, which the
+/// server answers with no tools at all — no repair could edit anything.
+final class AgentFaultRepairer: FaultRepairer {
+    private let agent: LoopAgentRunning
+
+    init(agent: LoopAgentRunning) {
+        self.agent = agent
     }
 
-    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL) async throws {
+    convenience init(api: LlmIdeAPIClient, language: String = "en") {
+        self.init(agent: APILoopAgentRunner(api: api, language: language))
+    }
+
+    @discardableResult
+    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL,
+                timeout: TimeInterval?) async throws -> LoopAgentResult {
+        try await repair(fault: fault, failureOutput: failureOutput, repoRoot: repoRoot,
+                         timeout: timeout, model: nil)
+    }
+
+    @discardableResult
+    func repair(fault: FaultReport, failureOutput: String, repoRoot: URL,
+                timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult {
         let prompt = """
         A previously-fixed fault has regressed. Fix it in the codebase at \(repoRoot.path).
 
@@ -37,14 +91,12 @@ final class AgentFaultRepairer: FaultRepairer {
         \(String(fault.response.prefix(4_000)))
 
         The verify command now FAILS with this output:
-        \(String(failureOutput.prefix(4_000)))
+        \(TestFailureExtractor.repairExcerpt(failureOutput, budget: 12_000))
 
         Edit the code so the verify command passes again. Make the minimal
         change required. Do not modify the verify command itself.
         """
-        _ = try await api.codeAssist(
-            message: prompt, language: language, model: nil,
-            history: [], attachments: [], agentContext: nil
-        )
+        return try await agent.run(message: prompt, skills: [], repoRoot: repoRoot, extraRoots: [],
+                                   timeout: timeout, model: model)
     }
 }

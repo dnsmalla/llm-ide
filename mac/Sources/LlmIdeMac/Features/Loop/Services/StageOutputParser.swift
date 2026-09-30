@@ -22,14 +22,26 @@ public enum StageOutputParser {
         let group: Int
     }
 
-    /// Ordered most-specific first. Every pattern is anchored on wording that
-    /// only appears in that runner's summary line, so two runners' output in one
-    /// log (e.g. a `make test` that runs both) cannot cross-match.
+    /// XCTest: "Executed 12 tests, with 3 failures (0 unexpected) in 0.5 seconds"
+    /// (with skips: "…, with 1 test skipped and 3 failures"). XCTest prints one
+    /// such line PER SUITE; only the one right after the run-wide
+    /// "Test Suite 'All tests' / 'Selected tests' passed|failed" header is the
+    /// total. A per-suite line is never used as the score: when the run
+    /// crashed (or the total was elided) the count is UNKNOWN, not partial.
+    private static let xctestLine =
+        #"Executed \d+ tests?, with (?:\d+ tests? skipped and )?(\d+) failures?"#
+    private static let xctestTotal =
+        #"Test Suite '(?:All|Selected) tests' (?:passed|failed)[^\n]*\n\s*"# + xctestLine
+    /// swift-testing: "✘ Test run with 12 tests [in 3 suites] failed after 0.5
+    /// seconds with 3 issues." and, on success, "... passed after ...".
+    private static let swiftTestingFailed =
+        #"Test run with \d+ tests?(?: in \d+ suites?)? failed after .*? with (\d+) issues?"#
+    private static let swiftTestingPassed =
+        #"Test run with \d+ tests?(?: in \d+ suites?)? passed after"#
+
+    /// Other runners, ordered most-specific first. Every pattern is anchored on
+    /// wording that only appears in that runner's summary line.
     private static let patterns: [Pattern] = [
-        // XCTest: "Executed 12 tests, with 3 failures (0 unexpected) in 0.5 seconds"
-        Pattern(regex: #"Executed \d+ tests?, with (\d+) failures?"#, group: 1),
-        // swift-testing: "Test run with 12 tests failed after 0.5 seconds with 3 issues"
-        Pattern(regex: #"Test run with \d+ tests? failed .*?with (\d+) issues?"#, group: 1),
         // node --test TAP summary: "# fail 3"
         Pattern(regex: #"(?m)^#\s*fail\s+(\d+)\s*$"#, group: 1),
         // pytest: "=== 3 failed, 9 passed in 1.2s ==="
@@ -47,7 +59,23 @@ public enum StageOutputParser {
     /// `nil`): a stage that exits non-zero while reporting `0 failures` failed
     /// for some other reason — a compile error, a crash — and the loop should
     /// know the count is genuinely zero rather than unknown.
+    ///
+    /// `swift test` runs XCTest AND swift-testing and prints a summary for
+    /// each; when both are present the failures are their SUM (returning the
+    /// XCTest number alone hid every swift-testing failure).
+    ///
+    /// Pure and not actor-bound: the runner calls it off the main actor on the
+    /// verifier's already-capped output.
     static func parseFailureCount(_ output: String) -> Int? {
+        let xctest = lastCapture(xctestTotal, group: 1, in: output)
+        // XCTest ran (per-suite lines) but reported no total: a crash or an
+        // elided tail. Any number would be a partial count — say "unknown".
+        if xctest == nil, matchCount(xctestLine, in: output) > 0 { return nil }
+        var swiftTesting = lastCapture(swiftTestingFailed, group: 1, in: output)
+        if swiftTesting == nil, matchCount(swiftTestingPassed, in: output) > 0 { swiftTesting = 0 }
+        if xctest != nil || swiftTesting != nil {
+            return (xctest ?? 0) + (swiftTesting ?? 0)
+        }
         for pattern in patterns {
             if pattern.group == 0 {
                 // Counting pattern: the number of matches IS the score.
@@ -59,12 +87,26 @@ public enum StageOutputParser {
                 return value
             }
         }
-        // XCTest and swift-testing both print a zero-failure summary on success;
-        // recognising those means a passing run scores 0 rather than nil.
-        if output.range(of: #"Executed \d+ tests?, with 0 failures"#, options: .regularExpression) != nil {
-            return 0
-        }
         return nil
+    }
+
+    /// The score the stall detector steers on: the runner's own failure count,
+    /// else the number of failing test ids extracted from a failing output, so a
+    /// runner with no recognised summary still distinguishes "2 failing -> 4
+    /// failing" (worse) from "4 -> 2" (better). `nil` when neither is available.
+    static func failureScore(_ output: String) -> Int? {
+        if let count = parseFailureCount(output) { return count }
+        let ids = TestFailureExtractor.extract(output).ids.count
+        return ids > 0 ? ids : nil
+    }
+
+    private static func lastCapture(_ regex: String, group: Int, in text: String) -> Int? {
+        guard let re = try? NSRegularExpression(pattern: regex) else { return nil }
+        let matches = re.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        guard let match = matches.last, match.numberOfRanges > group,
+              let range = Range(match.range(at: group), in: text)
+        else { return nil }
+        return Int(text[range])
     }
 
     private static func firstCapture(_ regex: String, group: Int, in text: String) -> Int? {
@@ -89,6 +131,22 @@ public enum StageOutputParser {
         else { return nil }
         return String(text[range])
     }
+
+    /// The first `limit` lines that are error REPORTS — compiler/runner
+    /// `error:` lines, `fatal error` / `Fatal error` traps, `FAIL:`-style
+    /// markers — or the first non-empty lines when none are. A bare substring
+    /// "error" is not enough: it matches test names (`testErrorHandling`) and
+    /// "0 errors" summaries. Quoted in the repair prompt when a change stopped
+    /// the tests from running, where the FIRST error is the cause.
+    static func firstErrorLines(_ output: String, limit: Int = 5) -> String {
+        let lines = output.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let errors = lines.filter { $0.range(of: errorLinePattern, options: .regularExpression) != nil }
+        return (errors.isEmpty ? lines : errors).prefix(limit).joined(separator: "\n")
+    }
+
+    private static let errorLinePattern = TestFailureExtractor.errorLinePattern
 
     /// The binary name a shell reported as missing, when `output` looks like an
     /// exit-127 "command not found" line. Handles both the bash/dash/sh phrasing

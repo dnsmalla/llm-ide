@@ -208,11 +208,26 @@ two jobs apart. Splitting them gives each its own iteration count, its own
 A stage is one step of the run (`LoopStage`). Three kinds:
 
 - **`regressionSweep`** — re-runs the `RegressionRunner` sweep over the project's
-  fault reports. Its own score is the regressed-fault count.
+  fault reports. Its own score is the failing-fault count (every fault not
+  `unchanged` or `repaired`). The sweep's own fault repairs run inside the same
+  protected-path guard and transport retry as a stage repair; a repair the
+  policy rejects is recorded `repairFailed` without being re-verified. Those
+  repairs also honour the loop's scope allowlist (`scopeGlobs`): a fault repair
+  that edits outside it is a violation, as a stage repair's would be. A fault
+  whose verify command still needs approval ends the run `needs approval`
+  instead of retrying.
 - **`shellCommand`** — an arbitrary project command (`swift test`, `npm test`).
   Requires an explicit approval in `VerifyApprovalStore` before it will ever run.
 - **`skill`** — a central skill executed as a *generate* step: it edits the tree,
-  and the verify stages decide whether that helped.
+  and the verify stages decide whether that helped. When the agent call fails
+  (retried once first only when the request provably never reached a running
+  agent — could not connect / `ECONNREFUSED`; a timeout, a dropped connection
+  or any 5xx is not retried, since the agent may already have edited) the stage is recorded
+  **errored**, and a run in which any stage's last attempt errored ends
+  `error`, never `success` — a passing verify stage does not launder it (tests
+  passing on an untouched tree, or a check passing on an earlier run's files,
+  prove nothing about this run); only that stage running cleanly in a later
+  iteration does.
 
 Which stages a default loop starts with is `LoopStageDetector`'s decision — see
 [Loops](#loops) above.
@@ -234,6 +249,22 @@ Three per-stage properties shape how a stage participates:
   build-and-test cycle and a two-second format check do not belong under one
   number.
 
+### How a shell stage runs
+
+A shell stage (and every verify command) runs through `GroupedSubprocess`: `/bin/sh -c`
+in its own **process group**, stdin from `/dev/null`. Stop, a timeout, and the
+resource guard send SIGTERM and then SIGKILL to the **whole group** (plus any
+descendant that left it), so `swift test`'s compiler and test processes stop, not
+only the shell. Output is captured as the first 64 KB plus the last 192 KB with an
+elision marker between them, and decoded leniently (a non-UTF-8 byte cannot empty
+it).
+
+When the shell exits normally, a background process it left behind that **still
+holds the output pipe** is stopped after a 2 s drain window, so the stage's result
+never waits on it. Background members that **do not** hold the pipe (for example
+`server >/dev/null 2>&1 &`) **survive** a normal exit — by design, since a stage
+may legitimately start a server for a later stage.
+
 ## Verification steers on a measured score
 
 `StageOutputParser` extracts a failing-test count from recognised runners (XCTest,
@@ -248,6 +279,47 @@ compares successive failures for that stage:
   of the failure output, which is the pre-score behaviour: identical output
   increments, different output resets. Giving up this way reports
   `repeatedFailure`.
+- **Score disappeared** (the last failure had a count, this one has none) → worse,
+  never progress: the change broke the build or the test run itself (a compile
+  error prints no summary). The next repair is always granted, even at
+  `consecutiveFailureStop`, and is told "your last change stopped the tests from
+  running" with the first error lines. Count-less failures after that stay
+  not-improved until a count returns; giving up this way reports
+  `stoppedReporting` (`given_up.stopped_reporting`).
+
+### Smarter run flow (flake gate, stop rules, stage-only re-verify)
+
+- **Flake gate.** Before the FIRST repair of a failing shell stage in a run, the
+  stage is re-run once. A pass is journalled (`flaky` on the attempt plus an
+  `agentNote`), warned in the log, counts as passed for that iteration, no repair
+  is spent, and the summary note and finish notification say "passed after a
+  re-run — possibly flaky". A re-run that fails too is journalled, and the repair
+  is shown the re-run's output when it failed differently. Timeouts and exit 127
+  skip the gate; the budget is re-checked after the re-run.
+- **Re-verify only the failed stage.** After a repair the runner starts the next
+  iteration and re-runs just that stage; each repair round is charged as one
+  iteration, so `maxIterations` still means at most `maxIterations - 1` repair
+  rounds. Only once the stage passes does the full pipeline run again (in that
+  same iteration); a code-applying stage still never re-runs in the same run and
+  still needs an enabled, non-advisory verify stage after it.
+- **Stop rules.** `consecutiveFailureStop` defaults to 3 for NEW loops (persisted
+  configs keep their value). The first no-progress verdict after one repair always
+  gets one informed repair (the attempt ledger is in its prompt). The run stops
+  early (`repeatedFailure`) when the same failure set returns after two repairs
+  with DIFFERENT diffs. A partial fix (a test fixed, another newly failing, no
+  better count, and the failing set did not grow) is neutral: the streak is
+  neither reset nor incremented.
+- **Repair model tier.** `LoopEngineConfig.repairModel` (the loop's budgets
+  editor and the new-project defaults, "Repair model"; picker fed by the live
+  model list, plus Default) is passed, for stage repairs and the regression
+  stage's fault repairs (skill stages keep the server default), to `/kb/loop/agent-run` as `model`;
+  empty means the app's default model. Each repair's timeout stays
+  min(stage/agent timeout, remaining run budget).
+
+For XCTest only the run-wide total counts — the `Executed … with M failures` line
+right after `Test Suite 'All tests'` / `'Selected tests'` — added to the
+swift-testing issue count when both frameworks ran. Output with per-suite lines but
+no total (a crash) scores as unknown, never as a partial count.
 
 The distinction between the two give-up reasons is diagnostic, and it is the whole
 reason for scoring. A hash comparison cannot tell "three failures, then three
@@ -294,20 +366,51 @@ stage is never re-verified, so the exit 0 the violation bought is never observed
 Two deliberate limits, both recorded rather than hidden:
 
 - A file that was **already dirty before** the repair is not attributed to the
-  agent. Otherwise every run started from a tree with uncommitted test edits — the
-  normal state while developing — would be blocked, and the guard would simply be
-  switched off.
+  agent merely for being dirty. Otherwise every run started from a tree with
+  uncommitted test edits — the normal state while developing — would be blocked,
+  and the guard would simply be switched off. The snapshot does record each dirty
+  path's `git hash-object`, so a repair that edits such a file *again* (or
+  restores it) is caught; under `revert` that file is left in place rather than
+  checked out (which would discard the earlier edits), and the run still blocks.
+  Rename sources count as dirty paths (a reverted source is restored with
+  `git checkout HEAD --`), and the check also runs when the agent call throws.
+  Only dirty paths that could produce a violation — protected, or outside a
+  non-empty scope allowlist — are hashed, in one `git hash-object --stdin-paths`
+  process; files over 1 MB are judged by membership alone. The attribution is
+  by content, not by author: if the user edits such an already-dirty file
+  while the repair runs, that edit is attributed to the repair.
 - When git cannot report (not a working tree, git unavailable) the check is
   **`indeterminate`, never `clean`**, is logged as a warning, and the run
   continues. Refusing to loop at all in those projects would be a worse outcome
   than an unverified repair, which is what every run did before the guard existed.
+  The guard's git probes are captured **uncapped** (their output is paths and
+  hashes); if one were ever elided anyway, the check is **`unverifiable`** and
+  fails **closed** — the run is blocked like a violation, because an incomplete
+  path list could hide exactly the protected edit.
+- **Hidden tracked files.** A tracked file marked assume-unchanged or
+  skip-worktree is invisible to `git status`, so its local content can differ
+  from HEAD with no trace. The snapshot hashes such files (when they could
+  violate); an unlisted write to one is restored from HEAD only if its pre-edit
+  content equalled HEAD's blob — otherwise it is left in place and the run
+  blocks (fail closed).
+- **Late writes.** A client abort does not stop the server-side agent instantly,
+  so after a cancelled or thrown agent call the scope check runs once more
+  ~500 ms later and the two results are unioned.
+- **Outside git — not guarded.** Edits under the project's `llm-doc/` extra
+  root (the split layout, where it sits outside the git root) are outside git:
+  they are never checked or reverted by this guard, and they persist when a
+  worktree run is discarded.
+- **Repo registration.** The Loop (and the Auto Task regression sweep's repair
+  guard) register the run's repo root with the server's allow-list before an
+  agent call. A too-broad root (`/`, the home folder, `/Users`, …) is refused on
+  both sides — the stage fails with "repo root … is too broad for a Loop agent".
 
 ## Four budgets
 
 | Budget | Field | Terminal status |
 |---|---|---|
 | Iterations | `maxIterations` (10) | `givenUp(maxIterations)` |
-| Non-improving streak per stage | `consecutiveFailureStop` (2) | `givenUp(noProgress)` / `givenUp(repeatedFailure)` / `givenUp(regressionStalled)` |
+| Non-improving streak per stage | `consecutiveFailureStop` (3 for new loops and built-in templates; 2 in older configs) | `givenUp(noProgress)` / `givenUp(repeatedFailure)` / `givenUp(regressionStalled)` |
 | Wall clock | `wallClockBudgetSeconds` (3600, `nil` = unlimited) | `givenUp(wallClockExceeded)` |
 | Repairs per stage | `maxRepairsPerStage` (3) | `givenUp(repairBudgetExhausted)` |
 
@@ -325,7 +428,7 @@ journal is what survives, written beneath the project root that already holds th
 fault reports:
 
 ```text
-system/loop-runs/index.jsonl          # one LoopRunIndexEntry per line, append-only
+system/loop-runs/index-2026-08.jsonl # one LoopRunIndexEntry per line, append-only, one file per month
 system/loop-runs/2026-08/<runId>.json # the full LoopRunRecord
 ```
 
@@ -346,7 +449,47 @@ Two invariants make it trustworthy:
   distinguishable from "the cron never ran".
 
 The index is append-only JSONL rather than a rewritten array so a crash mid-append
-costs one unparseable line — skipped on read — instead of the whole history.
+costs one unparseable line — skipped on read — instead of the whole history. The
+index rotates monthly (`index-YYYY-MM.jsonl`); an older single `index.jsonl` is still
+read, as the oldest entries, and recent runs are found by reading each file from
+its end rather than whole.
+
+### Crash-safe event log
+
+The final record is only written when a run ends, so a run also appends its
+events (`started`, iteration and stage started/finished, repair requested/replied,
+`verdict`) to a per-run JSONL as they happen, flushed per event and written off the
+main actor. The log lives **outside the project**, at
+`<Application Support>/llm-ide/loop-events/<hash of the project root path>/<runId>.jsonl`:
+`system/loop-runs/**` is a protected path for the repair scope guard, so a log
+appended to there during a repair would read as the repair editing the harness's
+own state. When the final record is written the log is deleted.
+
+At the next launch (once per project, off the main thread) and before the first run,
+a log with a `started` event but no final record becomes an `aborted` record
+("app quit or crashed") rebuilt from the stage results it had logged; a log whose
+record exists but whose index line is missing gets that line appended first.
+
+Limitation: the log folder is keyed by the project root's path. Moving or renaming
+the project folder orphans any unreconciled log of an interrupted run — it is never
+read for the new path (the run's record is not recovered), and the orphan stays in
+Application Support until removed by hand.
+
+### Run lanes and timeouts
+
+Loop runs execute on their own lane in the Auto Task service, separate from the
+other Auto Tasks: a running loop does not block them and they do not block it, while
+two loop sweeps never overlap and runs on one git root still queue (`LoopRunQueue`).
+Each lane has its own Stop. The Loop page also shows a lane run of the loop it is
+open on — "Running (started from phone)" or "(started from schedule)" in the live
+header — routes its Stop to the lane, and disables Run until that run ends
+(`LoopRunService.laneRuns`, fed by `LoopRunnerProvider`). A stage with no `timeoutSeconds` inherits the app
+defaults (Loop page → New project defaults: 30 min shell, 20 min agent; 0 = no
+limit), every shell stage, agent call and regression-sweep verify is clamped to the
+run's remaining wall-clock budget, and once the budget is used up no repair starts.
+At run start, leftover loop worktrees no live run owns are pruned (clean ones whose
+commits are already in the main checkout; dirty or divergent ones are kept and
+logged).
 
 ## Output
 

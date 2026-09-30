@@ -32,6 +32,9 @@ protocol RegressionJudge: AnyObject {
 
 @MainActor
 final class RegressionRunner: ObservableObject {
+    /// Model the fault repairs run on (`nil` = the app's default). Set per run
+    /// by the Loop from its config.
+    var repairModel: String?
     enum Verdict: Equatable {
         case pending
         case unchanged
@@ -39,6 +42,10 @@ final class RegressionRunner: ObservableObject {
         case repaired                 // verify failed → repaired → re-verify passed
         case repairFailed(String)     // repaired but re-verify still failing
         case needsApproval            // has a verify command not yet approved on this machine
+        /// Verify failed and a repair was requested, but no protected-path
+        /// guard was supplied, so no repair ran — an unguarded agent edit
+        /// could rewrite the test it is meant to satisfy. Needs attention.
+        case repairSkipped(String)
         /// CLI / network error — surfaces in the UI as "couldn't run".
         case failed(String)           // couldn't run the check
     }
@@ -86,6 +93,18 @@ final class RegressionRunner: ObservableObject {
     private let repairer: FaultRepairer?
     private let approvals: VerifyApprovalStore
     private var verifyTimeout: TimeInterval
+    /// The enclosing run's time budget end (Loop), for the sweep in flight.
+    /// nil = unbounded. Verify timeouts are clamped to what is left, and once
+    /// it passes, remaining faults are not checked and no repair starts.
+    private var sweepDeadline: Date?
+
+    private func verifyTimeoutNow() -> TimeInterval {
+        guard let sweepDeadline else { return verifyTimeout }
+        let left = max(1, sweepDeadline.timeIntervalSinceNow)
+        return verifyTimeout > 0 ? min(verifyTimeout, left) : left
+    }
+
+    private var deadlinePassed: Bool { (sweepDeadline?.timeIntervalSinceNow ?? 1) <= 0 }
     /// Optional handle to the app's config so completed runs can
     /// publish their summary to the menu-bar pill. Set once after
     /// init by the owning view (since @EnvironmentObject is not
@@ -148,11 +167,17 @@ final class RegressionRunner: ObservableObject {
     /// (`<project>/code/<repo>`). `gitRoot == nil` means no working tree is
     /// resolvable, so command-backed faults are skipped rather than run in the
     /// wrong cwd (answer-compare faults still run — they need no repo).
+    ///   - repairGuard: when set, every repair runs through it (see
+    ///     `FaultRepairGuard`); a rejected repair is recorded `.repairFailed`.
     func run(faultsRoot: URL, gitRoot: URL?, only: Set<URL>? = nil,
              autoReopen requestedAutoReopen: Bool = false,
-             attemptRepair: Bool = false) async {
+             attemptRepair: Bool = false,
+             repairGuard: FaultRepairGuard? = nil,
+             deadline: Date? = nil) async {
         guard !running else { return }
         running = true
+        sweepDeadline = deadline
+        defer { sweepDeadline = nil }
         // Auto-reopen mutates files on disk. The exact-match verdict is a
         // heuristic; without a semantic judge to confirm textual drift is a
         // real regression, reopening would corrupt fault files on every
@@ -188,13 +213,19 @@ final class RegressionRunner: ObservableObject {
         for (idx, pair) in fixed.enumerated() {
             if Task.isCancelled { appendLog(.warn, "Run cancelled"); break }
             let (url, fault) = pair
+            if deadlinePassed {
+                results[idx].verdict = .failed("run time budget exhausted before this fault was checked")
+                appendLog(.warn, "[\(idx + 1)/\(fixed.count)] skipped · the run's time budget is used up")
+                continue
+            }
             let preview = String(fault.prompt.prefix(60))
             appendLog(.info, "[\(idx + 1)/\(fixed.count)] \(preview)")
             if let cmd = fault.verify, !cmd.isEmpty, let verifier {
                 await runCommandFault(idx: idx, url: url, command: cmd,
                                       verifier: verifier, gitRoot: gitRoot,
                                       attemptRepair: attemptRepair,
-                                      autoReopen: requestedAutoReopen)
+                                      autoReopen: requestedAutoReopen,
+                                      repairGuard: repairGuard)
             } else {
                 await runAnswerCompareFault(idx: idx, fault: fault, url: url, autoReopen: autoReopen)
             }
@@ -222,7 +253,8 @@ final class RegressionRunner: ObservableObject {
     private func runCommandFault(idx: Int, url: URL, command: String,
                                  verifier: FaultVerifier, gitRoot: URL?,
                                  attemptRepair: Bool,
-                                 autoReopen reopenOnRegression: Bool) async {
+                                 autoReopen reopenOnRegression: Bool,
+                                 repairGuard: FaultRepairGuard? = nil) async {
         // Verify commands + git ops need a working tree. None resolved (a
         // project with no cloned repo) → skip rather than run in the wrong cwd.
         guard let repoRoot = gitRoot else {
@@ -236,7 +268,7 @@ final class RegressionRunner: ObservableObject {
             return
         }
         do {
-            let first = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeout)
+            let first = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeoutNow())
             if first.exitCode == 0 {
                 results[idx].verdict = .unchanged
                 appendLog(.info, "  → verify passed")
@@ -253,13 +285,37 @@ final class RegressionRunner: ObservableObject {
                 }
                 return
             }
+            if deadlinePassed {
+                results[idx].verdict = .repairSkipped("the run's time budget is used up, so no repair ran")
+                appendLog(.warn, "  → REGRESSED · repair skipped (time budget used up)")
+                return
+            }
+            // A repair only ever runs inside a protected-path guard: without
+            // one the agent could edit the failing test and the re-verify
+            // would certify the rigged pass.
+            guard let repairGuard else {
+                results[idx].verdict = .repairSkipped("no protected-path guard was supplied, so no repair ran")
+                appendLog(.warn, "  → REGRESSED · repair skipped (no protected-path guard)")
+                if reopenOnRegression, (try? store.updateFaultStatus(at: url, to: .open)) != nil {
+                    results[idx].autoReopened = true
+                }
+                return
+            }
             // Snapshot already-dirty paths so Discard only reverts files the
             // repair itself introduced — never the user's pre-existing edits.
             let dirtyBefore = Set((try? store.gitDiff(at: repoRoot).changedPaths) ?? [])
             appendLog(.info, "  → repairing…")
             let fault = try store.loadFault(at: url)
-            try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot)
-            let second = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeout)
+            let kept = try await repairGuard(repoRoot) { timeout in
+                try await repairer.repair(fault: fault, failureOutput: first.output, repoRoot: repoRoot,
+                                          timeout: timeout, model: repairModel)
+            }
+            guard kept else {
+                results[idx].verdict = .repairFailed("repair rejected: it touched a protected or out-of-scope path")
+                appendLog(.error, "  → repair rejected (protected/out-of-scope path) · not re-verified")
+                return
+            }
+            let second = try await verifier.verify(command: command, repoRoot: repoRoot, timeout: verifyTimeoutNow())
             if second.exitCode == 0 {
                 results[idx].verdict = .repaired
                 let changedAfter = (try? store.gitDiff(at: repoRoot).changedPaths) ?? []

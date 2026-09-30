@@ -601,15 +601,24 @@ struct AutoCodeView: View {
                     .font(Typography.title)
                     .foregroundStyle(theme.current.text)
                 Spacer()
+                // The loop task runs on its own lane: its state is
+                // `isLoopRunning`, and it has its own Stop.
+                let isLoop = task == .loopEngineering
+                let running = isLoop ? autoCode.isLoopRunning : autoCode.currentTask == task
                 Button { autoCode.runSingle(task) } label: {
-                    Label(autoCode.currentTask == task
-                          ? (autoCode.currentStep ?? "Running…")
-                          : "Run",
-                          systemImage: autoCode.currentTask == task ? "ellipsis.circle" : "play.fill")
+                    Label(running ? (isLoop ? "Running loop…" : (autoCode.currentStep ?? "Running…")) : "Run",
+                          systemImage: running ? "ellipsis.circle" : "play.fill")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(autoCode.isRunning)
+                .disabled(isLoop ? autoCode.isLoopRunning : autoCode.isRunning)
+                if isLoop && autoCode.isLoopRunning {
+                    Button { autoCode.cancelLoopLane() } label: {
+                        Label("Stop", systemImage: "stop.fill")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)

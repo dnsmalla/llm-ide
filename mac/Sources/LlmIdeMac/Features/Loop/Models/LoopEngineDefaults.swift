@@ -16,12 +16,16 @@ import Foundation
 enum LoopEngineDefaults {
     private static let storeKey = "loopEngineDefaults"
 
+    /// `consecutiveFailureStop` for a NEW loop. 2 stopped a run before the
+    /// informed second repair could help; persisted configs keep their value.
+    static let newLoopFailureStop = 3
+
     /// The stored defaults, or `LoopEngineConfig`'s own values when nothing has
     /// been saved. `stages` is always empty — see `save`.
     static func load(defaults: UserDefaults = .standard) -> LoopEngineConfig {
         guard let data = defaults.data(forKey: storeKey),
               var config = try? JSONDecoder().decode(LoopEngineConfig.self, from: data)
-        else { return LoopEngineConfig(stages: []) }
+        else { return LoopEngineConfig(stages: [], consecutiveFailureStop: newLoopFailureStop) }
         config.stages = []
         return config
     }
@@ -51,5 +55,33 @@ enum LoopEngineDefaults {
         var config = load(defaults: defaults)
         config.stages = stages
         return config
+    }
+
+    // MARK: - Default stage timeouts
+
+    /// App-wide ceilings for a stage with no `timeoutSeconds` of its own. Kept
+    /// outside `LoopEngineConfig` (so `loop.json` stays unchanged and every
+    /// persisted file still decodes) and applied by the runner at run time.
+    /// 0 means "no limit".
+    struct StageTimeouts: Equatable {
+        var shellSeconds: Int
+        var agentSeconds: Int
+        static let standard = StageTimeouts(shellSeconds: 30 * 60, agentSeconds: 20 * 60)
+    }
+
+    private static let shellTimeoutKey = "loopDefaultShellTimeoutSeconds"
+    private static let agentTimeoutKey = "loopDefaultAgentTimeoutSeconds"
+
+    static func stageTimeouts(defaults: UserDefaults = .standard) -> StageTimeouts {
+        func read(_ key: String, _ fallback: Int) -> Int {
+            defaults.object(forKey: key) == nil ? fallback : max(0, defaults.integer(forKey: key))
+        }
+        return StageTimeouts(shellSeconds: read(shellTimeoutKey, StageTimeouts.standard.shellSeconds),
+                             agentSeconds: read(agentTimeoutKey, StageTimeouts.standard.agentSeconds))
+    }
+
+    static func saveStageTimeouts(_ value: StageTimeouts, defaults: UserDefaults = .standard) {
+        defaults.set(max(0, value.shellSeconds), forKey: shellTimeoutKey)
+        defaults.set(max(0, value.agentSeconds), forKey: agentTimeoutKey)
     }
 }
