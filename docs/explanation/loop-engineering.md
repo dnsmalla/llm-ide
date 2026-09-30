@@ -223,8 +223,11 @@ A stage is one step of the run (`LoopStage`). Three kinds:
   (retried once first only when the request provably never reached a running
   agent — could not connect / `ECONNREFUSED`; a timeout, a dropped connection
   or any 5xx is not retried, since the agent may already have edited) the stage is recorded
-  **errored**, and a run with an errored stage and no passing blocking verify
-  stage in its final iteration ends `error`, never `success`.
+  **errored**, and a run in which any stage's last attempt errored ends
+  `error`, never `success` — a passing verify stage does not launder it (tests
+  passing on an untouched tree, or a check passing on an earlier run's files,
+  prove nothing about this run); only that stage running cleanly in a later
+  iteration does.
 
 Which stages a default loop starts with is `LoopStageDetector`'s decision — see
 [Loops](#loops) above.

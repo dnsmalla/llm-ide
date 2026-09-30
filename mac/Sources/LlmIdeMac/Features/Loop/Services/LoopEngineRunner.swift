@@ -1531,10 +1531,9 @@ final class LoopEngineRunner: ObservableObject {
                 return .terminate(.aborted)
             }
             // ERRORED, not failed: the agent never ran (or never answered). The
-            // stage still proceeds so a later verify stage can decide — but
-            // `honestVerdict` ends the run `.error` unless a verify stage passes
-            // in the final iteration, so a dead backend can no longer report
-            // `.success` for a loop that did nothing.
+            // stage still proceeds (a later iteration may retry it cleanly), but
+            // `honestVerdict` ends the run `.error` unless this stage later ran
+            // cleanly — a passing verify stage does not launder a dead backend.
             stageStates[stage.id] = .errored
             record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
                    passed: false, output: error.localizedDescription, score: nil,
@@ -1691,39 +1690,36 @@ final class LoopEngineRunner: ObservableObject {
     ///
     /// A skill stage whose agent call errored used to `.proceed`, so a Plan or
     /// Docs loop (skill stages only) against a dead backend reported
-    /// `.success` having done nothing. Rule: when ANY stage errored this run
-    /// and NO blocking verify stage (shell command, regression sweep or
-    /// in-app artifact check) passed in the final iteration, the run ends
-    /// `.error`. A passing artifact check is evidence for a generate loop: it
-    /// proves the files exist, within their caps, with resolving citations —
-    /// but it is NOT evidence for a code edit (`LoopStage.lacksVerifyAfter`). A passing verify stage in
-    /// the final iteration is real evidence and keeps the verdict; statuses
-    /// other than `.success` / `.givenUp` (blocked, aborted, needs approval,
-    /// error) already say something more specific and are kept.
+    /// `.success` having done nothing. Rule: when ANY stage's LAST attempt in
+    /// the run errored (skill, code-apply or generate — the agent never ran or
+    /// never answered) and that stage never later ran cleanly, the run ends
+    /// `.error`. A passing verify stage does NOT launder it: tests passing on
+    /// an untouched tree, or an artifact check passing on files left by an
+    /// earlier run, say nothing about work this run never did. An errored
+    /// stage that ran cleanly in a later iteration does not block success.
+    /// Statuses other than `.success` / `.givenUp` (blocked, aborted, needs
+    /// approval, error) already say something more specific and are kept.
     nonisolated static func honestVerdict(_ status: LoopEngineStatus,
                                           iterations: [LoopIterationRecord]) -> LoopEngineStatus {
         switch status {
         case .success, .givenUp: break
         default: return status
         }
-        let errored = iterations.flatMap(\.attempts).filter { $0.errored == true }
-        guard let first = errored.first else { return status }
-        let verifyPassed = iterations.last?.attempts.contains { attempt in
-            (attempt.kind == .shellCommand || attempt.kind == .regressionSweep
-                || attempt.kind == .artifactCheck)
-                && attempt.passed && attempt.severity != .advisory
-        } ?? false
-        guard !verifyPassed else { return status }
-        var names: [String] = []
-        for attempt in errored where !names.contains(attempt.stageName) {
-            names.append(attempt.stageName)
+        // Each stage's last attempt of the run, in first-seen order.
+        var order: [String] = []
+        var last: [String: LoopStageAttempt] = [:]
+        for attempt in iterations.flatMap(\.attempts) {
+            if last[attempt.stageId] == nil { order.append(attempt.stageId) }
+            last[attempt.stageId] = attempt
         }
-        let quoted = names.map { "\"\($0)\"" }.joined(separator: ", ")
+        let unrecovered = order.compactMap { last[$0] }.filter { $0.errored == true }
+        guard let first = unrecovered.first else { return status }
+        let quoted = unrecovered.map { "\"\($0.stageName)\"" }.joined(separator: ", ")
         // A give-up is folded in, not lost: the reader still sees why the run
         // stopped, alongside the reason that verdict cannot be trusted.
         let givenUp: String
         if case .givenUp = status { givenUp = " — run \(status.summary)" } else { givenUp = "" }
-        return .error("\(quoted) errored and no verify stage passed\(givenUp): \(first.outputTail.prefix(200))")
+        return .error("\(quoted) errored and never ran cleanly this run\(givenUp): \(first.outputTail.prefix(200))")
     }
 
     private func withScopeGuard(stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,

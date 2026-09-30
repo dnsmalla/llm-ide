@@ -107,3 +107,53 @@ final class LoopFinalFixTests: XCTestCase {
         XCTAssertEqual(skills.calls, [], "preflight stops before any agent call")
     }
 }
+
+// MARK: - Item 2: a passing verify stage does not launder an errored stage
+
+@MainActor
+final class LoopHonestVerdictTests: XCTestCase {
+    private func attempt(_ id: String, _ kind: LoopStage.Kind, passed: Bool,
+                         errored: Bool? = nil) -> LoopStageAttempt {
+        LoopStageAttempt(stageId: id, stageName: id, kind: kind, severity: .blocking,
+                         startedAt: Date(), durationSeconds: 0, exitCode: nil, passed: passed,
+                         outputTail: errored == true ? "connection refused" : "", outputHash: nil,
+                         score: nil, errored: errored)
+    }
+
+    func testErroredApplyWithPassingTestsIsError() {
+        let iterations = [LoopIterationRecord(index: 1, attempts: [
+            attempt("Refactor Apply", .skill, passed: false, errored: true),
+            attempt("Test", .shellCommand, passed: true),
+        ])]
+        let verdict = LoopEngineRunner.honestVerdict(.success, iterations: iterations)
+        guard case .error(let message) = verdict else { return XCTFail("got \(verdict)") }
+        XCTAssertTrue(message.contains("\"Refactor Apply\""), message)
+    }
+
+    func testErroredThenCleanSkillWithPassingVerifyIsSuccess() {
+        let iterations = [
+            LoopIterationRecord(index: 1, attempts: [
+                attempt("Fix", .skill, passed: false, errored: true),
+                attempt("Test", .shellCommand, passed: false),
+            ]),
+            LoopIterationRecord(index: 2, attempts: [
+                attempt("Fix", .skill, passed: true),
+                attempt("Test", .shellCommand, passed: true),
+            ]),
+        ]
+        XCTAssertEqual(LoopEngineRunner.honestVerdict(.success, iterations: iterations), .success)
+    }
+
+    func testCleanThenErroredSkillIsError() {
+        let iterations = [
+            LoopIterationRecord(index: 1, attempts: [attempt("Fix", .skill, passed: true)]),
+            LoopIterationRecord(index: 2, attempts: [
+                attempt("Fix", .skill, passed: false, errored: true),
+                attempt("Test", .shellCommand, passed: true),
+            ]),
+        ]
+        guard case .error = LoopEngineRunner.honestVerdict(.success, iterations: iterations) else {
+            return XCTFail("the last attempt errored")
+        }
+    }
+}

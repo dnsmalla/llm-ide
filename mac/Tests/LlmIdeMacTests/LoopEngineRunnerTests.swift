@@ -1235,9 +1235,10 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(skill.callCount, 2)   // ran once per iteration, before the regression gate
     }
 
-    /// A skill that throws a transport error must NOT end the run — it's logged
-    /// and the verify stages still decide.
-    func testSkillStageErrorIsNonFatal() async {
+    /// A skill that throws must NOT abort the run on the spot — it's logged and
+    /// the verify stages still run — but a passing verify stage does not
+    /// launder it: the stage never ran cleanly, so the run ends `.error`.
+    func testSkillStageErrorIsNonFatalButNotLaundered() async {
         let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
         let repairer = StubRepairer()
         let skill = StubSkillExecutor()
@@ -1254,7 +1255,9 @@ final class LoopEngineRunnerTests: XCTestCase {
             approvals: makeApprovals(approve: [("t1", "swift test")])
         )
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
-        XCTAssertEqual(result, .success)     // verify stage still passed despite the skill error
+        guard case .error(let message)? = result else { return XCTFail("got \(String(describing: result))") }
+        XCTAssertTrue(message.contains("\"Fix\" errored"), message)
+        XCTAssertEqual(verifier.calls, ["swift test"], "the verify stage still ran")
         XCTAssertEqual(skill.callCount, 1)
     }
 
@@ -3106,7 +3109,9 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(result, .success)
     }
 
-    func testErroredSkillWithAPassingBlockingCheckIsStillSuccess() async throws {
+    /// A second Plan run whose skill errored: the check passes on the FIRST
+    /// run's stale files, which says nothing about this run — `.error`.
+    func testErroredSkillWithAPassingCheckOnStaleFilesIsError() async throws {
         let repo = try makeTempRepo()
         try "ok\n".write(to: repo.appendingPathComponent("PLAN.md"), atomically: true, encoding: .utf8)
         let runner = makeRunner(
@@ -3114,7 +3119,8 @@ final class LoopEngineRunnerTests: XCTestCase {
             stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
             skillExecutor: WritingSkillExecutor { _ in throw SkillError() }, approvals: makeApprovals())
         let result = await runner.run(config: artifactConfig(), faultsRoot: repo, gitRoot: repo)
-        XCTAssertEqual(result, .success)
+        guard case .error(let message)? = result else { return XCTFail("got \(String(describing: result))") }
+        XCTAssertTrue(message.contains("never ran cleanly"), message)
         // Advisory checks are not evidence.
         let advisory = await makeRunner(
             verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
