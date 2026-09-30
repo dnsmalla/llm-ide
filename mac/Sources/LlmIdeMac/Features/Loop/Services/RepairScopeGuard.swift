@@ -58,8 +58,11 @@ enum RepairScopeCheck: Equatable {
 ///    `system/loop-runs/`. Editing the fault list is a direct way to make a
 ///    regression sweep pass.
 protocol RepairScopeGuarding: AnyObject {
-    /// Opaque token describing the working tree before a repair.
-    func snapshot(gitRoot: URL) async -> RepairScopeSnapshot
+    /// Opaque token describing the working tree before a repair. The globs
+    /// say which already-dirty paths are worth content-hashing: only one that
+    /// is protected, or outside a non-empty scope allowlist, can ever produce
+    /// a violation.
+    func snapshot(gitRoot: URL, protectedGlobs: [String], scopeGlobs: [String]) async -> RepairScopeSnapshot
     /// What changed since `snapshot`, and whether any of it is protected.
     func check(since snapshot: RepairScopeSnapshot, gitRoot: URL, protectedGlobs: [String]) async -> RepairScopeCheck
     /// Restores `paths` to their committed state. Returns `nil` on success, or a
@@ -121,44 +124,71 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
         self.timeout = timeout
     }
 
+    /// Snapshot with the default protected set and no scope allowlist.
     func snapshot(gitRoot: URL) async -> RepairScopeSnapshot {
+        await snapshot(gitRoot: gitRoot, protectedGlobs: Self.defaultProtectedGlobs, scopeGlobs: [])
+    }
+
+    func snapshot(gitRoot: URL, protectedGlobs: [String],
+                  scopeGlobs: [String]) async -> RepairScopeSnapshot {
         switch await dirtyPaths(gitRoot: gitRoot) {
         case .success(let paths):
+            let worth = paths.filter {
+                Self.canViolate($0, protectedGlobs: protectedGlobs, scopeGlobs: scopeGlobs)
+            }
             return RepairScopeSnapshot(dirtyPaths: paths, usable: true, reason: nil,
-                                       contentHashes: await hashes(of: paths, gitRoot: gitRoot))
+                                       contentHashes: await hashes(of: worth, gitRoot: gitRoot))
         case .failure(let reason):
             return .unusable(reason)
         }
+    }
+
+    /// Whether an edit to `path` could be a violation: it is protected, or a
+    /// non-empty scope allowlist (blank rows ignored, as in the runner) does
+    /// not cover it. Hashing anything else is wasted work.
+    static func canViolate(_ path: String, protectedGlobs: [String], scopeGlobs: [String]) -> Bool {
+        if protectedGlobs.contains(where: { GlobMatch.matches(path: path, pattern: $0) }) { return true }
+        let scope = scopeGlobs.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return !scope.isEmpty && !scope.contains { GlobMatch.matches(path: path, pattern: $0) }
     }
 
     /// The hash recorded for a dirty path that does not exist on disk (a
     /// deletion, a rename source). Not a valid object id, so it never equals one.
     static let missingHash = "<missing>"
 
-    /// `git hash-object` for each path, batched. Best-effort: a batch whose
-    /// output does not line up with its input is left out, so those paths fall
-    /// back to membership-only checking rather than being guessed at.
+    /// Files larger than this are not hashed; they are judged by dirty-set
+    /// membership alone, so one huge fixture cannot make every repair slow.
+    static let maxHashedFileBytes = 1_000_000
+
+    /// `git hash-object` for each path, in ONE process (`--stdin-paths`).
+    /// Best-effort: output that does not line up with the input is dropped,
+    /// so those paths fall back to membership-only checking rather than being
+    /// guessed at; a path containing a newline cannot travel through stdin
+    /// and is skipped the same way.
     private func hashes(of paths: Set<String>, gitRoot: URL) async -> [String: String] {
         var out: [String: String] = [:]
         var present: [String] = []
-        for path in paths.sorted() {
-            var isDir: ObjCBool = false
-            let exists = FileManager.default.fileExists(
-                atPath: gitRoot.appendingPathComponent(path).path, isDirectory: &isDir)
-            if !exists { out[path] = Self.missingHash } else if !isDir.boolValue { present.append(path) }
-        }
-        var start = 0
-        while start < present.count {
-            let batch = Array(present[start..<min(start + 100, present.count)])
-            start += batch.count
-            guard case .success(let output) = await run(
-                "git hash-object -- \(Self.shellQuoted(batch))", gitRoot: gitRoot) else { continue }
-            let lines = output.split(whereSeparator: \.isNewline).map {
-                $0.trimmingCharacters(in: .whitespaces)
+        for path in paths.sorted() where !path.contains("\n") {
+            let file = gitRoot.appendingPathComponent(path).path
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: file) else {
+                if !FileManager.default.fileExists(atPath: file) { out[path] = Self.missingHash }
+                continue
             }
-            guard lines.count == batch.count else { continue }
-            for (path, hash) in zip(batch, lines) { out[path] = hash }
+            guard attrs[.type] as? FileAttributeType == .typeRegular,
+                  let size = attrs[.size] as? NSNumber,
+                  size.intValue <= Self.maxHashedFileBytes else { continue }
+            present.append(path)
         }
+        guard !present.isEmpty else { return out }
+        // `printf` is a shell builtin: the list travels in the one command
+        // string, and git reads it on stdin — one process however many paths.
+        let command = "printf '%s\\n' \(Self.shellQuoted(present)) | git hash-object --stdin-paths"
+        guard case .success(let output) = await run(command, gitRoot: gitRoot) else { return out }
+        let lines = output.split(whereSeparator: \.isNewline).map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        guard lines.count == present.count else { return out }
+        for (path, hash) in zip(present, lines) { out[path] = hash }
         return out
     }
 
@@ -214,18 +244,39 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
         // tracked ones restored with checkout. If the probe itself fails,
         // fall back to treating everything as tracked (the old behaviour) so
         // a tracked-only revert still works.
+        //
+        // Tracked paths are restored from HEAD (`git checkout HEAD --`), not
+        // from the index: a staged rename or deletion has already removed the
+        // path from the index, so a plain `git checkout --` of a rename SOURCE
+        // failed with "did not match" and the moved-away test stayed gone.
+        // A path that exists only in the index (staged as added, or a rename
+        // destination) is not in HEAD, so checkout HEAD would fail on it; it is
+        // new — the edit created it — and is removed with `git rm -f`.
         var untracked: Set<String> = []
+        var indexOnly: Set<String> = []
         if case .success(let output) = await run(
             "git status --porcelain --untracked-files=all -- \(Self.shellQuoted(paths))", gitRoot: gitRoot) {
-            untracked = Set(StatusParser.parse(porcelain: output)
-                .filter { $0.status == .untracked }.map(\.path))
+            for change in StatusParser.parse(porcelain: output) {
+                switch change.status {
+                case .untracked: untracked.insert(change.path)
+                case .added where change.staged: indexOnly.insert(change.path)
+                case .renamed where change.staged: indexOnly.insert(change.path)
+                default: break
+                }
+            }
         }
-        let tracked = paths.filter { !untracked.contains($0) }
         let added = paths.filter { untracked.contains($0) }
+        let staged = paths.filter { indexOnly.contains($0) && !untracked.contains($0) }
+        let tracked = paths.filter { !untracked.contains($0) && !indexOnly.contains($0) }
 
         var failures: [String] = []
+        if !staged.isEmpty,
+           case .failure(let reason) = await run("git rm -q -f -- \(Self.shellQuoted(staged))",
+                                                 gitRoot: gitRoot) {
+            failures.append(reason)
+        }
         if !tracked.isEmpty,
-           case .failure(let reason) = await run("git checkout -- \(Self.shellQuoted(tracked))",
+           case .failure(let reason) = await run("git checkout HEAD -- \(Self.shellQuoted(tracked))",
                                                  gitRoot: gitRoot) {
             failures.append(reason)
         }

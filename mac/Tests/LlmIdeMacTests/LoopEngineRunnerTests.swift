@@ -188,7 +188,8 @@ final class LoopEngineRunnerTests: XCTestCase {
         var dirtyBefore: Set<String> = []
         private(set) var checkCount = 0
         init(result: RepairScopeCheck = .clean(changedPaths: [])) { self.result = result }
-        func snapshot(gitRoot: URL) async -> RepairScopeSnapshot {
+        func snapshot(gitRoot: URL, protectedGlobs: [String],
+                      scopeGlobs: [String]) async -> RepairScopeSnapshot {
             RepairScopeSnapshot(dirtyPaths: dirtyBefore, usable: true, reason: nil)
         }
         func check(since snapshot: RepairScopeSnapshot, gitRoot: URL,
@@ -2530,16 +2531,90 @@ final class LoopEngineRunnerTests: XCTestCase {
             skillExecutor: skill, approvals: makeApprovals(approve: [("t1", "swift test")]))
         let result = await runner.run(config: skillThenTestConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
 
-        guard case .error = result else { return XCTFail("got \(String(describing: result))") }
+        guard case .error(let message) = result else { return XCTFail("got \(String(describing: result))") }
+        XCTAssertTrue(message.contains("given up (max iterations)"), message)
     }
 
-    func testRepairTransportBlipIsRetriedOnce() async {
+    /// A 502 may come from mid-run — the agent may already have edited — so
+    /// it is not retried; the repair error ends the run.
+    /// A skill that errors only in iteration 1 does not taint a run whose
+    /// final iteration's verify passes.
+    func testSkillErrorInAnEarlierIterationDoesNotFailAVerifiedRun() async {
+        let skill = StubSkillExecutor()
+        skill.queuedErrors = [SkillError()]
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return callIndex == 0 ? VerifyOutcome(exitCode: 1, output: "boom") : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: skillThenTestConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(runner.iteration, 2)
+        XCTAssertEqual(skill.callCount, 2)
+    }
+
+    /// An apply stage that ERRORED applied nothing, so the retry iteration
+    /// must run it again rather than skip it as "already applied".
+    func testErroredCodeApplyIsRetriedNextIteration() async {
+        let skill = StubSkillExecutor()
+        skill.queuedErrors = [SkillError()]
+        var callIndex = 0
+        let verifier = StubVerifier { _ in
+            defer { callIndex += 1 }
+            return callIndex == 0 ? VerifyOutcome(exitCode: 1, output: "boom") : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 0,
+                      skillId: "skills/refactor-apply"),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1)
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skill, approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(skill.callCount, 2, "the errored apply ran again in iteration 2")
+        XCTAssertFalse(runner.log.contains { $0.text.contains("already applied") })
+    }
+
+    func testRepair5xxIsNotRetried() async {
         final class FlakyRepairer: LoopStageRepairer {
             var calls = 0
             func repair(stageName: String, command: String?, failureOutput: String,
                         evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
                 calls += 1
-                if calls == 1 { throw APIError.http(status: 502, code: "BAD_GATEWAY", message: "x", details: nil) }
+                throw APIError.http(status: 502, code: "INTERNAL_ERROR", message: "x", details: nil)
+            }
+        }
+        let repairer = FlakyRepairer()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0)
+        ], maxIterations: 3, consecutiveFailureStop: 5)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "boom") },
+            stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        guard case .error = result else { return XCTFail("got \(String(describing: result))") }
+        XCTAssertEqual(repairer.calls, 1)
+    }
+
+    func testRepairThatCouldNotConnectIsRetriedOnce() async {
+        final class FlakyRepairer: LoopStageRepairer {
+            var calls = 0
+            func repair(stageName: String, command: String?, failureOutput: String,
+                        evidence: RepairEvidence?, repoRoot: URL) async throws -> LoopAgentResult {
+                calls += 1
+                if calls == 1 { throw APIError.network(NSError(domain: NSPOSIXErrorDomain, code: Int(ECONNREFUSED))) }
                 return LoopAgentResult()
             }
         }
@@ -2562,14 +2637,29 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(repairer.calls, 2)
     }
 
+    /// Retry only what provably never reached a running agent.
     func testIsRetryableTransportClassifiesErrors() {
         typealias R = LoopEngineRunner
+        func posix(_ code: Int32) -> Error { APIError.network(NSError(domain: NSPOSIXErrorDomain, code: Int(code))) }
+        func http(_ status: Int, _ code: String) -> Error {
+            APIError.http(status: status, code: code, message: "", details: nil)
+        }
+        // Never connected — retried.
         XCTAssertTrue(R.isRetryableTransport(APIError.network(URLError(.cannotConnectToHost))))
-        XCTAssertTrue(R.isRetryableTransport(APIError.network(URLError(.networkConnectionLost))))
-        XCTAssertTrue(R.isRetryableTransport(APIError.network(URLError(.timedOut))))
-        XCTAssertTrue(R.isRetryableTransport(APIError.http(status: 500, code: "X", message: "", details: nil)))
-        XCTAssertFalse(R.isRetryableTransport(APIError.http(status: 504, code: "AGENT_RUN_TIMEOUT", message: "", details: nil)))
-        XCTAssertFalse(R.isRetryableTransport(APIError.http(status: 400, code: "BAD", message: "", details: nil)))
+        XCTAssertTrue(R.isRetryableTransport(posix(ECONNREFUSED)))
+        // Timeouts — the agent may be running.
+        XCTAssertFalse(R.isRetryableTransport(APIError.network(URLError(.timedOut))))
+        XCTAssertFalse(R.isRetryableTransport(posix(ETIMEDOUT)))
+        // A dropped connection on a single non-streaming POST — may be mid-run.
+        XCTAssertFalse(R.isRetryableTransport(APIError.network(URLError(.networkConnectionLost))))
+        XCTAssertFalse(R.isRetryableTransport(posix(ECONNRESET)))
+        // Every 5xx.
+        XCTAssertFalse(R.isRetryableTransport(http(500, "X")))
+        XCTAssertFalse(R.isRetryableTransport(http(502, "INTERNAL_ERROR")))
+        XCTAssertFalse(R.isRetryableTransport(http(503, "NO_KEY")))
+        XCTAssertFalse(R.isRetryableTransport(http(504, "AGENT_RUN_TIMEOUT")))
+        // Other shapes.
+        XCTAssertFalse(R.isRetryableTransport(http(400, "BAD")))
         XCTAssertFalse(R.isRetryableTransport(APIError.network(URLError(.cancelled))))
         XCTAssertFalse(R.isRetryableTransport(APIError.agent(message: "nope")))
         XCTAssertFalse(R.isRetryableTransport(SkillError()))

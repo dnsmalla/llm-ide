@@ -648,10 +648,15 @@ final class LoopEngineRunner: ObservableObject {
                     stageStates[stage.id] = .passed
                     decision = .proceed
                 case .skill:
-                    if stage.appliesCode { codeAppliedStageIDs.insert(stage.id) }
                     decision = await runSkillStage(
                         stage, config: config, gitRoot: runGitRoot,
                         goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
+                    // Only an apply that actually RAN counts as applied: an
+                    // errored one (the agent never answered) applied nothing,
+                    // so the retry must run it again, not skip it as done.
+                    if stage.appliesCode, stageStates[stage.id] != .errored {
+                        codeAppliedStageIDs.insert(stage.id)
+                    }
                 }
 
                 switch decision {
@@ -703,7 +708,9 @@ final class LoopEngineRunner: ObservableObject {
         // a fault whose test the repair just edited.
         var findings: [(verdict: RepairScopeVerdict, violations: [String], changed: [String])] = []
         let repairGuard: FaultRepairGuard = { [weak self] repoRoot, repair in
-            guard let self else { try await repair(); return true }
+            // Fail closed: with the runner gone there is no guard to run the
+            // repair inside, so it is rejected, never run unguarded.
+            guard let self else { return false }
             let guarded = await self.withScopeGuard(stage: stage, config: config, gitRoot: repoRoot,
                                                     scopeGlobs: scopeGlobs) {
                 try await self.withTransportRetry(stage: stage) { try await repair() }
@@ -1151,34 +1158,33 @@ final class LoopEngineRunner: ObservableObject {
         return false
     }
 
-    /// A transient transport failure worth ONE retry: the backend refused or
-    /// dropped the connection, the request timed out, or it answered 5xx.
-    /// Never a 504 / `AGENT_RUN_TIMEOUT`: that agent already spent its whole
-    /// time budget, and re-running it would double the wait for the same
-    /// answer. Never a Stop.
+    /// A failure worth ONE retry: the request provably never reached a
+    /// running agent, so re-sending it cannot run the agent twice. That is
+    /// only "could not connect" — the backend was not listening
+    /// (`NSURLErrorCannotConnectToHost`, `ECONNREFUSED`).
+    ///
+    /// Deliberately NOT retried, because the agent may already have run and
+    /// edited the tree: a timeout (`NSURLErrorTimedOut`, `ETIMEDOUT`), any 5xx
+    /// (a 502 `INTERNAL_ERROR` can come from mid-run; a 503 `NO_KEY` will not
+    /// change on a retry; a 504 `AGENT_RUN_TIMEOUT` spent its whole budget),
+    /// and a dropped connection (`NSURLErrorNetworkConnectionLost`,
+    /// `ECONNRESET`) — `/kb/loop/agent-run` is one non-streaming POST, so a
+    /// connection lost before the response is not evidence the agent never
+    /// started. Never a Stop.
     nonisolated static func isRetryableTransport(_ error: Error) -> Bool {
         if isCancellation(error) { return false }
-        switch error {
-        case APIError.network(let inner):
-            let ns = inner as NSError
-            if ns.domain == NSURLErrorDomain {
-                return [NSURLErrorCannotConnectToHost, NSURLErrorNetworkConnectionLost,
-                        NSURLErrorTimedOut].contains(ns.code)
-            }
-            if ns.domain == NSPOSIXErrorDomain {
-                return [Int(ECONNREFUSED), Int(ECONNRESET), Int(ETIMEDOUT)].contains(ns.code)
-            }
-            return false
-        case APIError.http(let status, let code, _, _):
-            return (500...599).contains(status) && status != 504 && code != "AGENT_RUN_TIMEOUT"
-        default:
-            return false
+        guard case APIError.network(let inner) = error else { return false }
+        let ns = inner as NSError
+        switch ns.domain {
+        case NSURLErrorDomain: return ns.code == NSURLErrorCannotConnectToHost
+        case NSPOSIXErrorDomain: return ns.code == Int(ECONNREFUSED)
+        default: return false
         }
     }
 
     /// Runs an agent call, retrying it once after `transportRetryDelay` when
-    /// it fails with `isRetryableTransport`. One blip of the local backend (a
-    /// restart, a dropped keep-alive) must not end a run or error a stage.
+    /// it fails with `isRetryableTransport`. A backend that was restarting for
+    /// a moment must not end a run or error a stage.
     private func withTransportRetry<T>(stage: LoopStage,
                                        _ call: () async throws -> T) async throws -> T {
         do {
@@ -1220,7 +1226,11 @@ final class LoopEngineRunner: ObservableObject {
             names.append(attempt.stageName)
         }
         let quoted = names.map { "\"\($0)\"" }.joined(separator: ", ")
-        return .error("\(quoted) errored and no verify stage passed: \(first.outputTail.prefix(200))")
+        // A give-up is folded in, not lost: the reader still sees why the run
+        // stopped, alongside the reason that verdict cannot be trusted.
+        let givenUp: String
+        if case .givenUp = status { givenUp = " — run \(status.summary)" } else { givenUp = "" }
+        return .error("\(quoted) errored and no verify stage passed\(givenUp): \(first.outputTail.prefix(200))")
     }
 
     private func withScopeGuard(stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
@@ -1231,7 +1241,8 @@ final class LoopEngineRunner: ObservableObject {
             return .completed(.notChecked, violations: [], changed: [])
         }
 
-        let before = await scopeGuard.snapshot(gitRoot: gitRoot)
+        let before = await scopeGuard.snapshot(gitRoot: gitRoot, protectedGlobs: config.protectedGlobs,
+                                               scopeGlobs: scopeGlobs)
         var thrown: Error?
         do { try await edit() } catch { thrown = error }
         let checked = await checkScope(since: before, stage: stage, config: config,

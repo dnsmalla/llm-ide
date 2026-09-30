@@ -192,7 +192,7 @@ final class RepairScopeGuardTests: XCTestCase {
         XCTAssertNil(revertError)
 
         XCTAssertEqual(verifier.commands.filter { !$0.hasPrefix("git status") },
-                       ["git checkout -- 'mac/Tests/A.swift' 'Makefile'"])
+                       ["git checkout HEAD -- 'mac/Tests/A.swift' 'Makefile'"])
     }
 
     /// `--` and quoting matter: without them a path that looks like a revision
@@ -204,7 +204,7 @@ final class RepairScopeGuardTests: XCTestCase {
 
         XCTAssertEqual(verifier.commands, [
             #"git status --porcelain --untracked-files=all -- 'weird dir/it'\''s.swift'"#,
-            #"git checkout -- 'weird dir/it'\''s.swift'"#
+            #"git checkout HEAD -- 'weird dir/it'\''s.swift'"#
         ])
     }
 
@@ -219,7 +219,7 @@ final class RepairScopeGuardTests: XCTestCase {
             .revert(paths: ["tests/conftest.py", "Makefile"], gitRoot: gitRoot)
         XCTAssertNil(revertError)
         XCTAssertEqual(verifier.commands.filter { !$0.hasPrefix("git status") }, [
-            "git checkout -- 'Makefile'",
+            "git checkout HEAD -- 'Makefile'",
             "git clean -f -- 'tests/conftest.py'"
         ])
     }
@@ -413,4 +413,87 @@ final class RepairScopeGuardTests: XCTestCase {
         let check = await guardUnderTest.check(since: before, gitRoot: root, protectedGlobs: globs)
         XCTAssertEqual(check, .violated(paths: ["tests/test_a.py"], allChangedPaths: ["tests/test_a.py"]))
     }
+
+    // MARK: - Hashing cost
+
+    private func git(_ root: URL, _ args: String...) throws {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        p.arguments = ["-C", root.path] + args
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try p.run()
+        p.waitUntilExit()
+        XCTAssertEqual(p.terminationStatus, 0, "git \(args)")
+    }
+
+    /// Only a path that can produce a violation is hashed; a file over the
+    /// size cap is judged by membership alone.
+    func testUnprotectedAndLargeDirtyFilesAreNotHashed() async throws {
+        let root = try makeRepo()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "print(2)\n".write(to: root.appendingPathComponent("app.py"), atomically: true, encoding: .utf8)
+        try "assert 1 == 1\n".write(to: root.appendingPathComponent("tests/test_a.py"),
+                                    atomically: true, encoding: .utf8)
+        let big = String(repeating: "x", count: GitRepairScopeGuard.maxHashedFileBytes + 1)
+        try big.write(to: root.appendingPathComponent("tests/test_big.py"), atomically: true, encoding: .utf8)
+
+        let snapshot = await GitRepairScopeGuard().snapshot(gitRoot: root)
+        XCTAssertEqual(snapshot.dirtyPaths, ["app.py", "tests/test_a.py", "tests/test_big.py"])
+        XCTAssertEqual(Set(snapshot.contentHashes.keys), ["tests/test_a.py"])
+    }
+
+    /// Outside a non-empty scope allowlist an unprotected path CAN violate,
+    /// so it is hashed; blank scope rows are ignored.
+    func testCanViolateCoversProtectedAndOutOfScopePaths() {
+        typealias G = GitRepairScopeGuard
+        XCTAssertTrue(G.canViolate("tests/test_a.py", protectedGlobs: globs, scopeGlobs: []))
+        XCTAssertFalse(G.canViolate("app.py", protectedGlobs: globs, scopeGlobs: []))
+        XCTAssertFalse(G.canViolate("app.py", protectedGlobs: globs, scopeGlobs: ["  "]))
+        XCTAssertTrue(G.canViolate("app.py", protectedGlobs: globs, scopeGlobs: ["src/**"]))
+        XCTAssertFalse(G.canViolate("src/a.py", protectedGlobs: globs, scopeGlobs: ["src/**"]))
+    }
+
+    /// However many dirty paths, one `git hash-object --stdin-paths` process.
+    func testSnapshotHashesInOneProcess() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scope-guard-one-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("tests"),
+                                                withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var lines: [String] = []
+        for i in 0..<5 {
+            try "x\n".write(to: root.appendingPathComponent("tests/test_\(i).py"), atomically: true, encoding: .utf8)
+            lines.append(" M tests/test_\(i).py")
+        }
+        let verifier = ScriptedVerifier(statusOutputs: [status(lines)])
+        _ = await GitRepairScopeGuard(verifier: verifier).snapshot(gitRoot: root)
+        let hashCommands = verifier.commands.filter { $0.contains("hash-object") }
+        XCTAssertEqual(hashCommands.count, 1)
+        XCTAssertTrue(hashCommands.first?.hasSuffix("| git hash-object --stdin-paths") ?? false)
+    }
+
+    // MARK: - Revert of a rename source
+
+    /// `git mv` of a protected test away: reverting the SOURCE must bring the
+    /// test back — `git checkout --` restores from the index, where a staged
+    /// rename has already removed it.
+    func testRevertRestoresTheSourceOfAStagedRename() async throws {
+        let root = try makeRepo()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let guardUnderTest = GitRepairScopeGuard()
+        let before = await guardUnderTest.snapshot(gitRoot: root)
+        try git(root, "mv", "tests/test_a.py", "moved.py")
+
+        let check = await guardUnderTest.check(since: before, gitRoot: root, protectedGlobs: globs)
+        guard case .violated(let paths, _) = check else {
+            return XCTFail("expected a violation, got \(check)")
+        }
+        XCTAssertEqual(paths, ["tests/test_a.py"])
+        let revertError = await guardUnderTest.revert(paths: paths, gitRoot: root)
+        XCTAssertNil(revertError)
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("tests/test_a.py"), encoding: .utf8),
+                       "assert true\n")
+    }
 }
+
