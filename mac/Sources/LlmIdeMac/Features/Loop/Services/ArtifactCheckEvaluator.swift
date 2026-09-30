@@ -26,12 +26,25 @@ enum ArtifactCheckEvaluator {
 
     /// Directories never walked when expanding a glob.
     private static let skippedDirs: Set<String> = [".git", "node_modules", ".build", ".swiftpm", "DerivedData"]
-    private static let citationExtensions: Set<String> = [
-        "swift", "mjs", "cjs", "js", "ts", "tsx", "jsx", "json", "md", "yml", "yaml", "sh", "py",
-        "toml", "plist", "html", "css", "sql", "txt", "c", "h", "m", "rs", "go", "kt", "java",
-    ]
 
-    nonisolated static func evaluate(_ spec: ArtifactCheckSpec, roots: Roots) -> Result {
+    /// Line counts memoised for ONE evaluation (a file is often named by both a
+    /// line limit and a citation).
+    private final class LineCounter {
+        private var cache: [String: Int] = [:]
+        func count(_ url: URL) -> Int {
+            if let hit = cache[url.path] { return hit }
+            let n = ArtifactCheckEvaluator.lineCount(url)
+            cache[url.path] = n
+            return n
+        }
+    }
+
+    /// `stages` are the loop's ENABLED stages; the spec's output rules follow
+    /// their current Outputs (see `ArtifactCheckSpec.resolved`).
+    nonisolated static func evaluate(_ rawSpec: ArtifactCheckSpec, roots: Roots,
+                                     stages: [LoopStage] = []) -> Result {
+        let spec = rawSpec.resolved(against: stages)
+        let lines = LineCounter()
         var failures: [String] = []
         let fm = FileManager.default
 
@@ -55,7 +68,7 @@ enum ArtifactCheckEvaluator {
                 }
             }
             for file in files where !limit.excludes.contains(where: { GlobMatch.matches(path: file.rel, pattern: $0) }) {
-                let count = lineCount(file.url)
+                let count = lines.count(file.url)
                 if count > limit.maxLines {
                     failures.append("\(file.rel): \(count) lines (limit \(limit.maxLines))")
                 }
@@ -70,7 +83,7 @@ enum ArtifactCheckEvaluator {
                         let url = base.appendingPathComponent(rel)
                         guard seen.insert(url.path).inserted,
                               let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-                        for bad in unresolvedCitations(in: text, repo: roots.repo) {
+                        for bad in unresolvedCitations(in: text, repo: roots.repo, lineCount: lines.count) {
                             failures.append("\(rel): citation does not resolve: `\(bad)`")
                         }
                     }
@@ -84,7 +97,9 @@ enum ArtifactCheckEvaluator {
     /// resolve under `repo`. A bare symbol name is not a path citation and is
     /// ignored; so is anything that is clearly not a repo path (URL, absolute,
     /// home-relative, template, glob).
-    nonisolated static func unresolvedCitations(in markdown: String, repo: URL) -> [String] {
+    nonisolated static func unresolvedCitations(in markdown: String, repo: URL,
+                                                lineCount: ((URL) -> Int)? = nil) -> [String] {
+        let countLines = lineCount ?? { ArtifactCheckEvaluator.lineCount($0) }
         let fm = FileManager.default
         var bad: [String] = []
         var seen = Set<String>()
@@ -93,10 +108,13 @@ enum ArtifactCheckEvaluator {
             if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") { inFence.toggle(); continue }
             if inFence { continue }
             for token in backticked(String(line)) {
-                guard let (path, lineNo) = pathCitation(token), seen.insert(token).inserted else { continue }
+                guard let (path, lineNo) = pathCitation(token, repo: repo), seen.insert(token).inserted else { continue }
                 let url = repo.appendingPathComponent(path)
-                guard fm.fileExists(atPath: url.path) else { bad.append(token); continue }
-                if let lineNo, lineCount(url) < lineNo { bad.append(token) }
+                var isDir: ObjCBool = false
+                let exists = fm.fileExists(atPath: url.path, isDirectory: &isDir)
+                if !exists { bad.append(token); continue }
+                // `path:line` on a directory is not a line citation.
+                if let lineNo, !isDir.boolValue, countLines(url) < lineNo { bad.append(token) }
             }
         }
         return bad
@@ -115,8 +133,13 @@ enum ArtifactCheckEvaluator {
         return out
     }
 
-    /// `(path, line?)` when `token` is shaped like a repo path citation.
-    private nonisolated static func pathCitation(_ token: String) -> (String, Int?)? {
+    /// `(path, line?)` when `token` is a path citation: its FIRST path segment
+    /// exists under `repo` (or, for a bare name, the file exists at the root).
+    /// That rule is what keeps branch names (`origin/main`), MIME types
+    /// (`application/json`) and npm scopes (`@anthropic-ai/sdk`) from being
+    /// mistaken for repo paths, while a path into a real top-level directory
+    /// that is missing further down is still caught.
+    private nonisolated static func pathCitation(_ token: String, repo: URL) -> (String, Int?)? {
         var body = token.trimmingCharacters(in: .whitespaces)
         guard !body.isEmpty, !body.contains(where: { " *<>{}$()|\\\"'".contains($0) }),
               !body.hasPrefix("/"), !body.hasPrefix("~"), !body.contains("://") else { return nil }
@@ -125,22 +148,19 @@ enum ArtifactCheckEvaluator {
             let tail = body[body.index(after: colon)...]
             // `path:12` or `path:12-20` — only the start line is checked.
             let head = tail.split(separator: "-").first.map(String.init) ?? ""
-            if let n = Int(head), !head.isEmpty {
-                line = n
-                body = String(body[..<colon])
-            } else {
-                return nil
-            }
+            guard let n = Int(head), !head.isEmpty else { return nil }
+            line = n
+            body = String(body[..<colon])
         }
         if body.hasPrefix("./") { body.removeFirst(2) }
-        guard !body.isEmpty, !body.contains("..") else { return nil }
-        let ext = (body as NSString).pathExtension.lowercased()
-        let looksLikePath = body.contains("/") || citationExtensions.contains(ext)
-        guard looksLikePath, body.allSatisfy({ $0.isLetter || $0.isNumber || "._-/@+".contains($0) }) else { return nil }
+        guard !body.isEmpty, !body.contains(".."),
+              body.allSatisfy({ $0.isLetter || $0.isNumber || "._-/@+".contains($0) }) else { return nil }
+        let first = body.split(separator: "/", omittingEmptySubsequences: true).first.map(String.init) ?? body
+        guard FileManager.default.fileExists(atPath: repo.appendingPathComponent(first).path) else { return nil }
         return (body, line)
     }
 
-    private nonisolated static func lineCount(_ url: URL) -> Int {
+    fileprivate nonisolated static func lineCount(_ url: URL) -> Int {
         guard let data = try? Data(contentsOf: url), !data.isEmpty else { return 0 }
         var n = data.reduce(0) { $1 == 0x0A ? $0 + 1 : $0 }
         if data.last != 0x0A { n += 1 }

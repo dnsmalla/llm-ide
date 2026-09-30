@@ -340,7 +340,7 @@ struct NewLoopWizardView: View {
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             case .artifactCheck:
-                Text(s.check?.summary ?? "Checks generated files in-app (existence, line caps, citations).")
+                Text(s.check?.summary(resolvedAgainst: stages.filter(\.enabled)) ?? "Checks generated files in-app (existence, line caps, citations).")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             case .unsupported:

@@ -3105,4 +3105,22 @@ final class LoopEngineRunnerTests: XCTestCase {
         let result = await runner.run(config: artifactConfig(severity: .advisory), faultsRoot: repo, gitRoot: repo)
         XCTAssertEqual(result, .success)
     }
+
+    func testErroredSkillWithAPassingBlockingCheckIsStillSuccess() async throws {
+        let repo = try makeTempRepo()
+        try "ok\n".write(to: repo.appendingPathComponent("PLAN.md"), atomically: true, encoding: .utf8)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: WritingSkillExecutor { _ in throw SkillError() }, approvals: makeApprovals())
+        let result = await runner.run(config: artifactConfig(), faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(result, .success)
+        // Advisory checks are not evidence.
+        let advisory = await makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: WritingSkillExecutor { _ in throw SkillError() }, approvals: makeApprovals())
+            .run(config: artifactConfig(severity: .advisory), faultsRoot: repo, gitRoot: repo)
+        if case .error = advisory {} else { XCTFail("advisory check must not vouch for an errored skill: \(advisory)") }
+    }
 }

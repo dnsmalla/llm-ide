@@ -503,6 +503,12 @@ struct LoopEngineView: View {
                       : "Disabled — the runner skips this stage")
                 stageMenu(stage, position: position, count: stages.count)
             }
+            if !stage.enabled, stage.disabledByDetection == true {
+                Label("Disabled: no test command detected — re-enabled automatically when one is found.",
+                      systemImage: "exclamationmark.triangle")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.accent4)
+            }
             if LoopStageDetector.updateAvailable(for: stage) {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.triangle.2.circlepath")
@@ -701,7 +707,7 @@ struct LoopEngineView: View {
             } else if stage.wrappedValue.kind == .artifactCheck {
                 Text("Checked in-app after the generate stages; a failure re-runs them with the findings.")
                     .font(Typography.caption).foregroundStyle(t.textMuted)
-                Text(stage.wrappedValue.check?.summary ?? "no checks configured")
+                Text(stage.wrappedValue.check?.summary(resolvedAgainst: stages.filter(\.enabled)) ?? "no checks configured")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(t.textMuted)
             } else if stage.wrappedValue.kind == .skill {
@@ -1519,6 +1525,8 @@ struct LoopEngineView: View {
     private func setStageEnabled(_ stage: LoopStage, _ enabled: Bool) {
         guard let index = stages.firstIndex(where: { $0.id == stage.id }) else { return }
         stages[index].enabled = enabled
+        // A manual toggle takes the stage out of detection's hands.
+        stages[index].disabledByDetection = nil
     }
 
     /// Kick off a run through `LoopRunService` — the Run button and the

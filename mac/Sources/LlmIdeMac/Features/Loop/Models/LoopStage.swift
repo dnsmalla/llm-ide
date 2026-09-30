@@ -125,6 +125,11 @@ public struct LoopStage: Identifiable, Codable, Equatable {
     /// to (`LoopStageDetector.upgradingDefaultRevisions`); `nil` on a stage
     /// saved before revisions existed, which reads as revision 1.
     public var defaultRevision: Int? = nil
+    /// Set when detection (not the user) disabled this stage — Refactor Apply
+    /// when its test tooling disappeared. Only a stage still carrying it is
+    /// re-enabled automatically when detection returns; any manual toggle
+    /// clears it. `nil` otherwise (omitted from the file).
+    public var disabledByDetection: Bool? = nil
 
     // Explicit memberwise initializer (preserved for existing call sites)
     public init(id: String = UUID().uuidString, name: String, kind: Kind, command: String? = nil, order: Int,
@@ -156,7 +161,7 @@ public struct LoopStage: Identifiable, Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, kind, command, order, skillId, targetPath, outputPath, prompt, isDefault
-        case enabled, defaultKey, severity, timeoutSeconds, detectedCommand, check, defaultRevision
+        case enabled, defaultKey, severity, timeoutSeconds, detectedCommand, check, defaultRevision, disabledByDetection
     }
 
     /// Every field added after the first shipped version MUST be decoded with
@@ -196,6 +201,7 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         detectedCommand = try container.decodeIfPresent(String.self, forKey: .detectedCommand)
         check = try container.decodeIfPresent(ArtifactCheckSpec.self, forKey: .check)
         defaultRevision = try container.decodeIfPresent(Int.self, forKey: .defaultRevision)
+        disabledByDetection = try container.decodeIfPresent(Bool.self, forKey: .disabledByDetection)
     }
 
     /// An `.unsupported` stage writes back its original JSON untouched;
@@ -224,6 +230,7 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         try c.encodeIfPresent(detectedCommand, forKey: .detectedCommand)
         try c.encodeIfPresent(check, forKey: .check)
         try c.encodeIfPresent(defaultRevision, forKey: .defaultRevision)
+        try c.encodeIfPresent(disabledByDetection, forKey: .disabledByDetection)
     }
 }
 

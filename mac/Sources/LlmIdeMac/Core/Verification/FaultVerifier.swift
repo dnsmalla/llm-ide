@@ -80,6 +80,12 @@ struct ShellFaultVerifier: FaultVerifier {
                 : CappedOutputBuffer(headLimit: .max, tailLimit: 0)
             // CI=1: most test runners (jest, react-scripts, vitest) start a
             // watcher on a terminal and exit on CI; a stage must never wait.
+            // SCOPE: this reaches EVERY command this verifier runs — Loop shell
+            // stages, Auto Task and fault verify commands, and the git probes.
+            // Effects: `jest --ci` semantics (no snapshot writes), tools that
+            // gate on CI (husky skips hooks; some CLIs go non-interactive).
+            // A command that needs a different value sets it itself
+            // (`CI=0 cmd`).
             proc = try GroupedSubprocess.launch(shellCommand: command, directory: repoRoot,
                                                 output: buffer, environment: ["CI": "1"])
         } catch {

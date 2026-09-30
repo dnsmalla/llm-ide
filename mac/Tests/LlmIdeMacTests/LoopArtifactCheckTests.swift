@@ -58,10 +58,13 @@ final class LoopArtifactCheckTests: XCTestCase {
 
     func testCitationsResolveAgainstTheRepoRoot() throws {
         try write("src/real.swift", lines: 10)
+        try write("extension/kb/db.mjs", lines: 12)
         try write("docs/page.md", text: """
-            Uses `src/real.swift`, `src/real.swift:9`, bare symbol `searchCodeIndex`, `docs/page.md`.
-            Broken: `src/gone.swift`, `src/real.swift:99`, `nope/dir/file.mjs:3`.
-            Not a path: `obj.method`, `https://x.io/a.js`, `git status`.
+            Uses `src/real.swift`, `src/real.swift:9`, `extension/kb/db.mjs:10`, bare symbol `searchCodeIndex`, `docs/page.md`.
+            Broken: `src/gone.swift`, `src/real.swift:99`, `extension/kb/gone.mjs:3`.
+            Not citations: `feat/loop-reliability`, `origin/main`, `application/json`,
+            `@anthropic-ai/sdk`, `graph.mjs`, `obj.method`, `https://x.io/a.js`, `git status`,
+            `src:5` (directory, not a line citation).
             ```
             `src/inside-fence.swift`
             ```
@@ -71,14 +74,62 @@ final class LoopArtifactCheckTests: XCTestCase {
         XCTAssertEqual(r.failures.count, 3, "\(r.failures)")
         XCTAssertTrue(r.failures.contains { $0.contains("`src/gone.swift`") })
         XCTAssertTrue(r.failures.contains { $0.contains("`src/real.swift:99`") })
-        XCTAssertTrue(r.failures.contains { $0.contains("`nope/dir/file.mjs:3`") })
+        XCTAssertTrue(r.failures.contains { $0.contains("`extension/kb/gone.mjs:3`") })
+    }
+
+    // MARK: output-following rules
+
+    private func plan(index: String? = nil, director: String? = nil) -> [LoopStage] {
+        var d = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.plan, gitRoot: root)
+        if let index { d[0].outputPath = index }
+        if let director { d[1].outputPath = director }
+        return d.filter { $0.kind == .skill }
+    }
+
+    func testPlanCheckFollowsAnEditedOutputAndCapsAreaPages() throws {
+        try write("p/INDEX2.md", lines: 301)
+        try write("p/PLAN2.md", lines: 10)
+        try write("p/areas/a.md", lines: 251)
+        let stages = plan(index: "p/INDEX2.md", director: "p/PLAN2.md")
+        let r = ArtifactCheckEvaluator.evaluate(LoopStageDetector.planCheckSpec,
+                                                roots: .init(repo: root, project: project), stages: stages)
+        XCTAssertEqual(Set(r.failures), ["p/INDEX2.md: 301 lines (limit 300)", "p/areas/a.md: 251 lines (limit 250)"])
+        // The default location is irrelevant once the Output moved.
+        XCTAssertFalse(r.failures.contains { $0.contains("llm-doc/plans/INDEX.md") })
+        let missing = ArtifactCheckEvaluator.evaluate(LoopStageDetector.planCheckSpec,
+                                                      roots: .init(repo: root, project: project), stages: plan())
+        XCTAssertEqual(Set(missing.failures), ["missing: llm-doc/plans/INDEX.md", "missing: llm-doc/plans/PLAN.md"])
+    }
+
+    func testPersistedSpecStaysStableAndSummaryShowsResolvedPaths() throws {
+        let spec = LoopStageDetector.planCheckSpec
+        XCTAssertEqual(spec, LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.plan, gitRoot: root).last?.check)
+        let summary = spec.summary(resolvedAgainst: plan(index: "p/INDEX2.md"))
+        XCTAssertTrue(summary.contains("p/INDEX2.md"), summary)
+    }
+
+    func testDocCheckUsesTheWriterOutputDirectoryAndExemptsTheIndex() throws {
+        var stages = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.docs, gitRoot: root)
+            .filter { $0.kind == .skill }
+        stages[0].outputPath = "d/INDEX.md"
+        stages[1].outputPath = "d/pages"
+        try write("d/INDEX.md", lines: 290)
+        try write("d/pages/a.md", lines: 251)
+        try write("d/pages/b.md", text: "see `nope-top-level/x.swift` and `d/pages/zz.md`\n")
+        let r = ArtifactCheckEvaluator.evaluate(LoopStageDetector.docCheckSpec,
+                                                roots: .init(repo: root, project: nil), stages: stages)
+        XCTAssertEqual(r.failures.count, 2, "\(r.failures)")
+        XCTAssertTrue(r.failures.contains("d/pages/a.md: 251 lines (limit 250)"))
+        XCTAssertTrue(r.failures.contains { $0.contains("`d/pages/zz.md`") })
     }
 
     func testValidTreePasses() throws {
         try write("llm-doc/docs/INDEX.md", lines: 10)
         try write("src/x.swift")
         try write("llm-doc/docs/a.md", text: "see `src/x.swift:1`\n")
-        XCTAssertTrue(eval(LoopStageDetector.docCheckSpec).passed)
+        let stages = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.docs, gitRoot: root)
+        XCTAssertTrue(ArtifactCheckEvaluator.evaluate(LoopStageDetector.docCheckSpec,
+                                                      roots: .init(repo: root, project: nil), stages: stages).passed)
     }
 
     // MARK: stage model
@@ -114,8 +165,8 @@ final class LoopArtifactCheckTests: XCTestCase {
         XCTAssertEqual(docs.last?.id, "docs/doc-check")
         XCTAssertEqual(plan.last?.kind, .artifactCheck)
         XCTAssertEqual(docs.last?.severity, .blocking)
-        XCTAssertEqual(plan.last?.check?.lineLimits.map(\.maxLines), [300, 250])
-        XCTAssertEqual(docs.last?.check?.citationGlobs, ["llm-doc/docs/**/*.md"])
+        XCTAssertEqual(plan.last?.check?.outputRules.map(\.maxLines), [300, 250])
+        XCTAssertEqual(docs.last?.check?.outputRules.last?.citations, true)
     }
 
     // MARK: detection
@@ -140,6 +191,9 @@ final class LoopArtifactCheckTests: XCTestCase {
         XCTAssertTrue(LoopStageDetector.isWatchScript("jest --watch"))
         XCTAssertTrue(LoopStageDetector.isWatchScript("vitest --watchAll"))
         XCTAssertFalse(LoopStageDetector.isWatchScript("jest --ci"))
+        XCTAssertFalse(LoopStageDetector.isWatchScript("jest --watch=false"))
+        XCTAssertFalse(LoopStageDetector.isWatchScript("jest --watchAll=false"))
+        XCTAssertTrue(LoopStageDetector.isWatchScript("jest --watch=true"))
         try write("package.json", text: #"{"scripts":{"test":"jest --watch"}}"#)
         XCTAssertNil(LoopStageDetector.detectTestCommand(gitRoot: root))
         try write("package.json", text: #"{"scripts":{"test":"node --test"}}"#)
@@ -177,6 +231,7 @@ final class LoopArtifactCheckTests: XCTestCase {
         let apply = loops[0].config.stages.first { $0.defaultKey == "refactor-apply" }
         XCTAssertEqual(apply?.enabled, false)
         XCTAssertEqual(changes.map(\.kind), [.disabledRefactorApply])
+        XCTAssertEqual(apply?.disabledByDetection, true)
         XCTAssertTrue(loops[0].config.stages.contains { $0.defaultKey == "refactor-test" },
                       "the test stage itself is never dropped")
     }
@@ -187,6 +242,40 @@ final class LoopArtifactCheckTests: XCTestCase {
             in: [loop], gitRoot: root, eligibleStageIDs: ["refactor/refactor-test"])
         XCTAssertEqual(loops, [loop])
         XCTAssertTrue(changes.isEmpty)
+    }
+
+    func testRefactorApplyIsReEnabledWhenDetectionReturnsOnlyIfStillMarked() throws {
+        try write("Makefile", text: "test:\n\tx\n")
+        var loop = refactorLoop(testCommand: "make test", detected: "make test")
+        loop.config.stages[0].enabled = false
+        loop.config.stages[0].disabledByDetection = true
+        let (on, changes) = LoopStageDetector.revalidatingTestStages(
+            in: [loop], gitRoot: root, eligibleStageIDs: ["refactor/refactor-test"])
+        XCTAssertEqual(on[0].config.stages[0].enabled, true)
+        XCTAssertNil(on[0].config.stages[0].disabledByDetection)
+        XCTAssertEqual(changes.map(\.kind), [.reenabledRefactorApply])
+        // A manual disable (no mark) stays disabled.
+        loop.config.stages[0].disabledByDetection = nil
+        let (off, none) = LoopStageDetector.revalidatingTestStages(
+            in: [loop], gitRoot: root, eligibleStageIDs: ["refactor/refactor-test"])
+        XCTAssertEqual(off[0].config.stages[0].enabled, false)
+        XCTAssertTrue(none.isEmpty)
+    }
+
+    func testRevisionEqualityComparesDetectedCommandToItsOwnDetection() {
+        var (cat, old) = catalog()
+        old.command = "history-value"            // what the history recorded
+        cat.history["doc-index"]![1] = old
+        var persisted = old
+        persisted.command = "make test"
+        persisted.detectedCommand = "make test"   // own detection: unedited
+        let (up, _) = LoopStageDetector.upgradingDefaultRevisions(
+            in: [docsLoop(with: persisted)], gitRoot: root, catalog: cat)
+        XCTAssertEqual(up[0].config.stages[0].defaultRevision, 2)
+        persisted.command = "edited by user"      // diverged from its detection
+        let (kept, _) = LoopStageDetector.upgradingDefaultRevisions(
+            in: [docsLoop(with: persisted)], gitRoot: root, catalog: cat)
+        XCTAssertNil(kept[0].config.stages[0].defaultRevision)
     }
 
     // MARK: versioned defaults

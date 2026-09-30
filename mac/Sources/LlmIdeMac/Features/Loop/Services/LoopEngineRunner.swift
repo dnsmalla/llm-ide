@@ -714,7 +714,7 @@ final class LoopEngineRunner: ObservableObject {
                 case .artifactCheck:
                     decision = await runArtifactCheckStage(
                         stage, config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
-                        progress: &progress)
+                        stages: orderedStages, progress: &progress)
                 case .unsupported:
                     // Filtered out of `orderedStages` above; fail closed if one
                     // ever gets here — an unknown stage kind is never run.
@@ -1407,7 +1407,7 @@ final class LoopEngineRunner: ObservableObject {
     /// budget, and the same no-progress rule as every other stage (the failing
     /// item count is its score). Code-applying stages still run at most once.
     private func runArtifactCheckStage(_ stage: LoopStage, config: LoopEngineConfig,
-                                       faultsRoot: URL, gitRoot: URL,
+                                       faultsRoot: URL, gitRoot: URL, stages: [LoopStage],
                                        progress: inout ProgressWatch) async -> StageDecision {
         guard let spec = stage.check else {
             stageStates[stage.id] = .failed
@@ -1417,7 +1417,7 @@ final class LoopEngineRunner: ObservableObject {
         let roots = ArtifactCheckEvaluator.Roots(repo: gitRoot, project: faultsRoot)
         // File IO off the main actor.
         let result = await Task.detached(priority: .utility) {
-            ArtifactCheckEvaluator.evaluate(spec, roots: roots)
+            ArtifactCheckEvaluator.evaluate(spec, roots: roots, stages: stages)
         }.value
         let duration = Date().timeIntervalSince(startedAt)
         if Task.isCancelled {
@@ -1688,8 +1688,11 @@ final class LoopEngineRunner: ObservableObject {
     /// A skill stage whose agent call errored used to `.proceed`, so a Plan or
     /// Docs loop (skill stages only) against a dead backend reported
     /// `.success` having done nothing. Rule: when ANY stage errored this run
-    /// and NO blocking verify stage (shell command or regression sweep) passed
-    /// in the final iteration, the run ends `.error`. A passing verify stage in
+    /// and NO blocking verify stage (shell command, regression sweep or
+    /// in-app artifact check) passed in the final iteration, the run ends
+    /// `.error`. A passing artifact check is evidence for a generate loop: it
+    /// proves the files exist, within their caps, with resolving citations —
+    /// but it is NOT evidence for a code edit (`LoopStage.lacksVerifyAfter`). A passing verify stage in
     /// the final iteration is real evidence and keeps the verdict; statuses
     /// other than `.success` / `.givenUp` (blocked, aborted, needs approval,
     /// error) already say something more specific and are kept.
@@ -1702,7 +1705,8 @@ final class LoopEngineRunner: ObservableObject {
         let errored = iterations.flatMap(\.attempts).filter { $0.errored == true }
         guard let first = errored.first else { return status }
         let verifyPassed = iterations.last?.attempts.contains { attempt in
-            (attempt.kind == .shellCommand || attempt.kind == .regressionSweep)
+            (attempt.kind == .shellCommand || attempt.kind == .regressionSweep
+                || attempt.kind == .artifactCheck)
                 && attempt.passed && attempt.severity != .advisory
         } ?? false
         guard !verifyPassed else { return status }

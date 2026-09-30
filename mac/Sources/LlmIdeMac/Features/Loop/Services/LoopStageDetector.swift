@@ -419,7 +419,7 @@ public enum LoopStageDetector {
 
     /// True for a test script that starts a watcher instead of exiting.
     static func isWatchScript(_ script: String) -> Bool {
-        script.range(of: #"(^|\s)--watch(All)?(\s|=|$)"#, options: .regularExpression) != nil
+        script.range(of: #"(^|\s)--watch(All)?(=(true|1))?(\s|$)"#, options: .regularExpression) != nil
     }
 
     private static func detectTestCommandUncached(gitRoot: URL) -> String? {
@@ -729,23 +729,33 @@ public enum LoopStageDetector {
         ]
     }
 
-    /// The Plan loop's blocking check: both artifacts exist, within their caps.
-    /// Plan files live under the project's llm-doc/, which may be outside the
-    /// repo, hence the project-root fallback.
+    /// The Plan loop's blocking check. It follows the generate stages' editable
+    /// Outputs at run time (`ArtifactCheckSpec.OutputRule`): the structure
+    /// index exists within 300 lines, the master plan within 250 plus every
+    /// `areas/` page beside it. Plan files live under the project's llm-doc/,
+    /// which may be outside the repo, hence the project-root fallback.
     static let planCheckSpec = ArtifactCheckSpec(
-        requiredPaths: ["llm-doc/plans/INDEX.md", "llm-doc/plans/PLAN.md"],
-        lineLimits: [.init(glob: "llm-doc/plans/INDEX.md", maxLines: 300),
-                     .init(glob: "llm-doc/plans/PLAN.md", maxLines: 250)],
-        projectRootFallback: true)
+        projectRootFallback: true,
+        outputRules: [
+            .init(stage: "plan-structure-index", skillId: "skills/plan-structure-index",
+                  shape: .file, maxLines: 300),
+            .init(stage: "plan-director", skillId: "skills/plan-director",
+                  shape: .file, maxLines: 250, subGlob: "areas/**/*.md"),
+        ])
 
-    /// The Doc Optimization loop's blocking check: the index exists, pages stay
-    /// within 250 lines (the index within 300) and every citation resolves.
-    /// Docs live in the repo (see `docResolvePathsRule`), so no project fallback.
+    /// The Doc Optimization loop's blocking check, following the doc stages'
+    /// Outputs: the index exists within 300 lines; every page under the writer's
+    /// Output directory stays within 250 (the index exempt); citations resolve in
+    /// the index and the pages. Docs live in the repo (see `docResolvePathsRule`),
+    /// so no project fallback.
     static let docCheckSpec = ArtifactCheckSpec(
-        requiredPaths: ["llm-doc/docs/INDEX.md"],
-        lineLimits: [.init(glob: "llm-doc/docs/INDEX.md", maxLines: 300),
-                     .init(glob: "llm-doc/docs/**/*.md", maxLines: 250, excludes: ["llm-doc/docs/INDEX.md"])],
-        citationGlobs: ["llm-doc/docs/**/*.md"])
+        outputRules: [
+            .init(stage: "doc-index", skillId: "skills/doc-structure-index",
+                  shape: .file, maxLines: 300, citations: true),
+            .init(stage: "doc-writer", skillId: "skills/doc-writer",
+                  shape: .directory, maxLines: 250, subGlob: "**/*.md",
+                  excludeStages: ["doc-index"], citations: true),
+        ])
 
     // MARK: Refactoring + Doc Optimization stage prompts
     //
@@ -1218,6 +1228,9 @@ public enum LoopStageDetector {
             /// Test stage, so the loop's Refactor Apply stage was DISABLED: code
             /// must never be edited without a verify stage that can run.
             case disabledRefactorApply
+            /// Detection returned, so a Refactor Apply that detection disabled
+            /// was enabled again.
+            case reenabledRefactorApply
             /// A default stage was brought to a newer shipped revision.
             case upgradedDefault(revision: Int)
             // There is deliberately no `removed` case: a nil detection never
@@ -1329,15 +1342,28 @@ public enum LoopStageDetector {
             }
             // Paired rule: a Refactoring loop whose auto-detected Test stage has
             // lost its tooling must not keep an ENABLED Refactor Apply — it
-            // would edit code with nothing able to verify it.
-            if detected == nil,
-               let test = kept.first(where: { $0.defaultKey == "refactor-test" && isEligible($0) }),
-               test.detectedCommand != nil, test.detectedCommand == test.command,
-               let applyIndex = kept.firstIndex(where: { $0.defaultKey == "refactor-apply" && $0.enabled }) {
-                kept[applyIndex].enabled = false
-                changes.append(RevalidationChange(loopName: loop.name, stageName: kept[applyIndex].name,
-                                                   kind: .disabledRefactorApply))
-                mutated = true
+            // would edit code with nothing able to verify it. The disable is
+            // marked (`disabledByDetection`) so it is visible on the card and
+            // undone automatically — only while still marked — when detection
+            // returns; a manual toggle clears the mark.
+            if let test = kept.first(where: { $0.defaultKey == "refactor-test" && isEligible($0) }),
+               test.detectedCommand != nil, test.detectedCommand == test.command {
+                if detected == nil,
+                   let i = kept.firstIndex(where: { $0.defaultKey == "refactor-apply" && $0.enabled }) {
+                    kept[i].enabled = false
+                    kept[i].disabledByDetection = true
+                    changes.append(RevalidationChange(loopName: loop.name, stageName: kept[i].name,
+                                                       kind: .disabledRefactorApply))
+                    mutated = true
+                } else if detected != nil,
+                          let i = kept.firstIndex(where: {
+                              $0.defaultKey == "refactor-apply" && !$0.enabled && $0.disabledByDetection == true }) {
+                    kept[i].enabled = true
+                    kept[i].disabledByDetection = nil
+                    changes.append(RevalidationChange(loopName: loop.name, stageName: kept[i].name,
+                                                       kind: .reenabledRefactorApply))
+                    mutated = true
+                }
             }
             guard mutated else { return loop }
             var updated = loop

@@ -228,6 +228,9 @@ enum LoopEngineConfigStore {
             case .disabledRefactorApply:
                 NSLog("LoopEngineConfigStore: [%@ / %@] no test tooling detected, disabling the code-applying stage",
                       change.loopName, change.stageName)
+            case .reenabledRefactorApply:
+                NSLog("LoopEngineConfigStore: [%@ / %@] test tooling detected again, re-enabling the code-applying stage",
+                      change.loopName, change.stageName)
             case let .upgradedDefault(revision):
                 NSLog("LoopEngineConfigStore: [%@ / %@] default stage upgraded to revision %d",
                       change.loopName, change.stageName, revision)

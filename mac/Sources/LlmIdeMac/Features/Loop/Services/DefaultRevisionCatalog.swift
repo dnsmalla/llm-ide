@@ -67,9 +67,14 @@ extension LoopStageDetector {
                       let def = defaults.first(where: { $0.defaultKey == key }) else { return stage }
                 let target = catalog.current(key)
                 let revision = stage.defaultRevision ?? 1
-                guard revision < target,
-                      let old = catalog.history[key]?[revision],
-                      stage.hasSameDefaultContent(as: old) else { return stage }
+                guard revision < target, var old = catalog.history[key]?[revision] else { return stage }
+                // Equality is EXACT over `kind`, `skillId`, `targetPath`,
+                // `outputPath`, `prompt` and `check`. A detected command
+                // differs per repo, so a stage carrying `detectedCommand` is
+                // compared against its OWN recorded detection (never the
+                // history value): the command is unedited iff it still equals it.
+                if let detected = stage.detectedCommand { old.command = detected }
+                guard stage.hasSameDefaultContent(as: old) else { return stage }
                 var upgraded = stage.adoptingDefaultContent(of: def)
                 upgraded.defaultRevision = target
                 changes.append(RevalidationChange(loopName: loop.name, stageName: stage.name,
