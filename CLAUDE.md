@@ -12,11 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Initial setup (install deps, verify tools, enable git hooks)
 ./setup.sh
 
-# Extension development
+# Extension development (other scripts: extension/package.json)
 cd extension
-npm run dev           # Vite dev server with hot reload
-npm run build         # TypeScript check + production build
-npm run type-check    # TypeScript type checking only
 npm run server        # Start the local Node server (127.0.0.1:3456)
 
 # macOS app development
@@ -25,37 +22,16 @@ swift build           # Build the app
 LLMIDE_KEYCHAIN_BACKEND=memory swift test   # Run the tests (XCTest + swift-testing) — see Running Tests
 make build-mac-lite   # Build lite app: excludes Graph, Explorer, Gantt, Issues, DocGen, Terminal; leaves Chat, Auto Tasks, Mobile Sync, Live Capture, Library
 make build-mac-min    # Build minimum app: Chat only (excludes all 7 excludable features: Graph, Explorer, Gantt/Issues, DocGen, Terminal, Auto Tasks, Mobile Sync)
-./build_app.sh        # Legacy build script (use `swift build` instead)
 
-# Testing
+# Testing (lint/format/docs targets: see Makefile)
 make test             # Run extension tests (Node test runner)
 make test-mac         # Run macOS app tests (sets the memory keychain for you)
-npm test              # Extension tests directly
 make regression       # Pre-push regression gate
-
-# Linting & Formatting
-make lint             # Check linting and formatting
-make format           # Auto-format and fix linting issues
-npm run lint          # ESLint with max-warnings 0
-npm run lint:fix      # Auto-fix ESLint issues
-
-# Documentation
-make docs-serve       # Start mkdocs dev server (localhost:8000)
-make docs-build       # Production docs build with strict mode
-make docs-check       # Validate all docs (links, frontmatter, API coverage)
 ```
 
 ### Running Tests
 
 ```bash
-# Extension tests (Node built-in test runner)
-cd extension && npm test                           # All tests
-node --test tests/**/*.test.{ts,mjs}              # Direct test invocation
-npm run test:watch                                # Watch mode
-
-# Single test file
-node --test tests/auth-routes.test.mjs
-
 # macOS app tests (XCTest + swift-testing). ALWAYS set the memory keychain
 # (make test-mac does): without it KeychainStore uses the real login keychain,
 # and from a terminal a SecItem call blocks in securityd waiting for a prompt
@@ -283,80 +259,7 @@ On a source checkout with a Swift toolchain, Settings → Workspace shows a **Bu
 
 ## Mobile Control System
 
-LLM-IDE includes a native mobile companion: the **Mac app** runs a WebSocket server on `:3006` by default (configurable in Settings → Mobile Control; if busy, the next free port up to +9 binds automatically and Bonjour `_llmide._tcp` + the pairing QR advertise the actual port; PIN pairing), and the **iOS app** in `ios_app/` connects as a client. Chat requests are proxied to the local backend at `http://127.0.0.1:3456`.
-
-> The external Node `computer-agent` (`auto_swift_aicontrol`) is **retired**. Remote desktop / screen streaming / input injection were cancelled; the iPhone is a chat/explorer/auto-tasks companion only.
-
-### Architecture
-
-```
-iPhone App (SwiftUI, ios_app/)
-    │ Bonjour + WebSocket + PIN auth
-    ▼
-LLM-IDE Mac app (native NWListener WebSocket on :3006)
-    │ MobileControlManager.handleInbound
-    ├──► LLM-IDE Chat → LlmIdeAPIClient (:3456)
-    ├──► Explorer sessions → ChatSessionStore
-    ├──► Auto Tasks → AutoCodeUpdateService / AutoTaskSettings
-    └──► Loop → the loopEngineering auto task + LoopRunJournal
-        │
-        ▼
-LLM-IDE Server (Node.js @ :3456)
-    └── Main backend server
-```
-
-`MobileControlManager` dispatches Auto Tasks and Loop requests through `MobileFeatureBridge` protocol — when either feature is compiled out (via `LLMIDE_FEATURES`), the phone receives a degrade reply instead of routing to the feature's service.
-
-**Build-time exclusion:** Mobile Control is excludable at build time via the `mobile_sync` feature (settings key `LLMIDE_FEATURES=…`). When excluded, the 15-file mobile unit (MobileControlManager, WebSocket server, Bonjour advertiser, PIN cache, bridges, and iPhone pairing UI) is removed entirely, along with the SharedProtocol product dependency (iOS wire types). The core `MobileFeatureBridge` protocol stays in-tree to support dynamic downgrades when other features are excluded (Phase 2d).
-
-### Quick Start
-
-```bash
-# Terminal 1: Start LLM-IDE server
-cd ~/llm-ide/extension && node server.mjs
-
-# Terminal 2: Mac app — Settings → Mobile Control → Start
-# (or launch LlmIdeMac with mobile control auto-start enabled)
-
-# Terminal 3: iOS app (Xcode)
-cd ~/llm-ide/ios_app && open MyApp.xcodeproj
-# Run on physical iPhone (same Wi-Fi or Tailscale)
-```
-
-### Features
-
-- **LLM-IDE Chat** — Ask questions from iPhone (streamed via Mac → :3456)
-- **Explorer** — List and chat with Mac explorer sessions
-- **Auto Tasks** — Toggle and inspect scheduled auto-code tasks
-- **Loop** — Start/stop the active project's Loop — the whole run or a single stage — watch the live log, read finished runs (control only; stages and budgets are edited on the Mac)
-- **Device Discovery** — Bonjour/mDNS (`_llmide._tcp`) or Direct IP + PIN
-- **PIN Authentication** — 6-digit PIN + QR code (`llmide://pair?…`). Pairing trades the PIN for a **per-device token** (`MobilePairedDeviceStore`, hashed on disk; the phone keeps it in its Keychain) and the PIN **rotates** right after; the phone reconnects with the token. Settings → Mobile Control lists paired devices with **Revoke**. The PIN is one-time (rotates on every successful pairing); older phones (no `deviceId`) still pair but get no token and must re-pair with the new PIN
-
-### Permissions Required
-
-- **macOS**: None for mobile chat (Accessibility/Screen Recording are for caption capture elsewhere, not mobile pairing)
-- **iOS**: Local Network (Bonjour discovery)
-
-### Documentation
-
-- **Quick Start**: `docs/mobile/quick-start.md`
-- **Verification**: `docs/mobile/verification.md`
-- **Loopback check**: `scripts/mobile/verify-native-pairing.swift`
-
-### Key Files (Mac)
-
-```
-mac/Sources/LlmIdeMac/Features/MobileControl/Services/
-├── MobileControlManager.swift   # WebSocket dispatch + backend proxy
-├── MobileWebSocketServer.swift  # NWListener on :3006
-├── MobileBonjourAdvertiser.swift
-└── MobilePin.swift              # Pairing PIN (Keychain)
-
-ios_app/SharedProtocol/          # Codable wire types (Mac + iOS)
-ios_app/MyApp/Services/
-├── ConnectionService.swift      # WebSocket client + pairing
-└── DeviceDiscovery.swift        # Bonjour browser
-```
+Mac app ↔ iPhone companion (WebSocket `:3006`, Bonjour, PIN pairing). Details: [`mac/Sources/LlmIdeMac/Features/MobileControl/CLAUDE.md`](mac/Sources/LlmIdeMac/Features/MobileControl/CLAUDE.md) and `docs/mobile/quick-start.md`.
 
 ## Entry Points for Development
 
@@ -392,28 +295,7 @@ ios_app/MyApp/Services/
 
 ## Testing Checklist
 
-Before merging caption/transcript/LLM changes, run through this against a real meeting:
-
-### Caption Fidelity
-- [ ] Short Japanese captions (`はい。`) appear
-- [ ] Long multi-sentence captions appear as ONE line
-- [ ] Same speaker continuous updates stay on one line
-- [ ] Different speakers produce different lines with real names
-- [ ] Combined-speaker labels stripped to just speaker
-- [ ] UI text does NOT appear (toolbar, clocks, meeting ID, effects)
-- [ ] Works when extension loaded AFTER Meet tab opened
-- [ ] Works on Teams and Zoom web
-
-### LLM Output
-- [ ] Primary language change → Notes/chat respond in that language
-- [ ] Questions H2 headings localized (対立/要確認/要説明)
-- [ ] DOCX export produces correct font (MS Gothic for JA)
-- [ ] Stale server shows yellow "restart" banner
-
-### Security
-- [ ] `GET http://evil.example/` does NOT reach server (CORS)
-- [ ] Setting `serverUrl` to evil URL rejected by `isSafeServerUrl()`
-- [ ] Meeting with `<<<END>>>` spoken does not break AI output
+Before merging caption/transcript/LLM changes, run the real-meeting checklist in [`extension/CLAUDE.md`](extension/CLAUDE.md).
 
 ## Documentation
 
