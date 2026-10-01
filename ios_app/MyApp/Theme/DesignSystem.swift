@@ -11,6 +11,10 @@ public struct DesignSystem {
     /// follows the system appearance.
     public struct Colors {
         public static let primary          = Color(light: "#2E7D8F", dark: "#66B8D1")
+        /// Foreground on a `primary` fill. White on the light-mode teal, but the
+        /// dark-mode `primary` is a pale cyan where white text is ~2:1 — so it
+        /// flips to a near-black teal there.
+        public static let onPrimary        = Color(light: "#FFFFFF", dark: "#0B1F26")
         public static let primaryDark      = Color(light: "#21606E", dark: "#4DA0BB")
         public static let primaryLight     = Color(light: "#DDEEF1", dark: "#182E33")
         public static let background       = Color(light: "#F7F7FA", dark: "#12141C")

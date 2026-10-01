@@ -13,12 +13,14 @@ struct LoopView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var loopStore: LoopStore
     @Environment(\.dismiss) private var dismiss
+    /// True when hosted by the tab shell (no own stack, no "Done").
+    var embedded: Bool = false
 
     private var isConnected: Bool { connection.connectionStatus == .connected }
     private var state: LoopState? { loopStore.state }
 
     var body: some View {
-        NavigationStack {
+        OptionalNavigationStack(embedded: embedded) {
             List {
                 if !isConnected || state == nil {
                     emptyState
@@ -47,8 +49,10 @@ struct LoopView: View {
             .navigationTitle("Loop")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { dismiss() }
+                if !embedded {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Done") { dismiss() }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -70,9 +74,20 @@ struct LoopView: View {
 
     private var emptyState: some View {
         Section {
-            Text(isConnected ? "Loading loop status…" : "Connect to your Mac to control the loop.")
-                .font(DesignSystem.Typography.footnoteFont)
-                .foregroundColor(DesignSystem.Colors.textTertiary)
+            if isConnected {
+                HStack(spacing: DesignSystem.Spacing.sm) {
+                    ProgressView()
+                    Text("Loading loop status…")
+                        .font(DesignSystem.Typography.footnoteFont)
+                        .foregroundColor(DesignSystem.Colors.textTertiary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DesignSystem.Spacing.md)
+            } else {
+                Text("Connect to your Mac to control the loop.")
+                    .font(DesignSystem.Typography.footnoteFont)
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+            }
         }
     }
 
@@ -124,16 +139,21 @@ struct LoopView: View {
                     loopStore.start()
                 } label: {
                     Label("Start", systemImage: "play.fill")
+                        .foregroundColor(DesignSystem.Colors.onPrimary)
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .disabled(s.running || !isConnected)
 
                 Button {
                     loopStore.stop()
                 } label: {
                     Label("Stop", systemImage: "stop.fill")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
                 .disabled(!s.running || !isConnected)
             }
             .padding(.vertical, 2)

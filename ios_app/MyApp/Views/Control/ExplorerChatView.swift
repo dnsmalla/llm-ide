@@ -10,11 +10,23 @@ struct ExplorerChatView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var explorerStore: ExplorerChatStore
     @Environment(\.dismiss) private var dismiss
+    /// True when hosted by the tab shell (no own stack, no "Done").
+    var embedded: Bool = false
 
-    @State private var inputText: String = ""
-    @State private var pendingFiles: [ChatFileText] = []
-    @State private var pendingRefs: [ExploreWorkspaceRef] = []
-    @State private var pendingSkills: [ExploreSkillRef] = []
+    /// Composer state lives outside the view (see `ExplorerDraft`).
+    @ObservedObject var draft: ExplorerDraft
+    private var inputText: String {
+        get { draft.text } nonmutating set { draft.text = newValue }
+    }
+    private var pendingFiles: [ChatFileText] {
+        get { draft.files } nonmutating set { draft.files = newValue }
+    }
+    private var pendingRefs: [ExploreWorkspaceRef] {
+        get { draft.refs } nonmutating set { draft.refs = newValue }
+    }
+    private var pendingSkills: [ExploreSkillRef] {
+        get { draft.skills } nonmutating set { draft.skills = newValue }
+    }
     @State private var showSessionPicker: Bool = false
     @State private var showFilePicker: Bool = false
     @State private var showMacSearch: Bool = false
@@ -27,7 +39,7 @@ struct ExplorerChatView: View {
     private var hasSession: Bool { explorerStore.exploreCurrent != nil }
 
     var body: some View {
-        NavigationStack {
+        OptionalNavigationStack(embedded: embedded) {
             VStack(spacing: 0) {
                 if !isConnected {
                     StatusBanner(.connection(isConnecting: connection.connectionStatus == .connecting))
@@ -44,8 +56,10 @@ struct ExplorerChatView: View {
             .navigationTitle(explorerStore.exploreCurrent?.title ?? "Explorer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { dismiss() }
+                if !embedded {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Done") { dismiss() }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -289,7 +303,7 @@ struct ExplorerChatView: View {
             if !pendingSkills.isEmpty || !pendingRefs.isEmpty || !pendingFiles.isEmpty { attachmentChips }
             Divider()
             ChatInputBar(
-                text: $inputText,
+                text: $draft.text,
                 placeholder: inputPlaceholder,
                 canSend: canSend,
                 isFocused: $isInputFocused,
@@ -429,14 +443,14 @@ struct ExplorerChatView: View {
 
     private var macSkillSearchSheet: some View {
         MacSkillSearchSheet(
-            pendingSkills: $pendingSkills,
+            pendingSkills: $draft.skills,
             onDismiss: { showMacSkills = false }
         )
     }
 
     private var macWorkspaceSearchSheet: some View {
         MacWorkspaceSearchSheet(
-            pendingRefs: $pendingRefs,
+            pendingRefs: $draft.refs,
             onDismiss: { showMacSearch = false }
         )
     }

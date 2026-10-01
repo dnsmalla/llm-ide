@@ -10,11 +10,12 @@ struct SettingsView: View {
 
                 // Connection card
                 VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
-                    Text("Connection")
-                        .font(DesignSystem.Typography.titleFont.weight(.bold))
-                        .foregroundColor(DesignSystem.Colors.textPrimary)
+                    Text("CONNECTION")
+                        .font(DesignSystem.Typography.footnoteFont.weight(.semibold))
+                        .foregroundColor(DesignSystem.Colors.textTertiary)
+                        .padding(.leading, DesignSystem.Spacing.xs)
 
-                    if connectionStore.hasDevice {
+                    if connectionStore.hasDevice || connection.isDemo {
                         VStack(spacing: 0) {
                             HStack(spacing: DesignSystem.Spacing.md) {
                                 ZStack {
@@ -26,7 +27,7 @@ struct SettingsView: View {
                                         .foregroundColor(statusColor)
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(connectionStore.deviceIP)
+                                    Text(connection.isDemo ? "Demo Mac" : connectionStore.deviceIP)
                                         .font(DesignSystem.Typography.bodyFont
                                             .weight(.semibold).monospaced())
                                         .foregroundColor(DesignSystem.Colors.textPrimary)
@@ -40,11 +41,35 @@ struct SettingsView: View {
                                     }
                                 }
                                 Spacer()
-                                Text(":\(connectionStore.devicePort)")
+                                Text(connection.isDemo ? "sample data" : ":\(connectionStore.devicePort)")
                                     .font(DesignSystem.Typography.footnoteFont.monospaced())
                                     .foregroundColor(DesignSystem.Colors.textTertiary)
                             }
                             .padding(DesignSystem.Spacing.md)
+
+                            Divider().padding(.horizontal, DesignSystem.Spacing.md)
+
+                            Button {
+                                if connection.connectionStatus == .disconnected {
+                                    connection.connectDirect(ip: connectionStore.deviceIP,
+                                                             port: connectionStore.devicePort,
+                                                             pin: connectionStore.devicePIN)
+                                } else {
+                                    connection.closeConnection()
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: connection.connectionStatus == .disconnected
+                                          ? "arrow.clockwise" : "wifi.slash")
+                                    Text(connection.connectionStatus == .disconnected
+                                         ? "Reconnect" : "Close connection")
+                                        .font(DesignSystem.Typography.bodyFont.weight(.medium))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(DesignSystem.Spacing.md)
+                                .foregroundColor(DesignSystem.Colors.primary)
+                            }
+                            .buttonStyle(.plain)
 
                             Divider().padding(.horizontal, DesignSystem.Spacing.md)
 
@@ -68,14 +93,6 @@ struct SettingsView: View {
                         .cornerRadius(DesignSystem.Layout.cornerRadiusL)
                         .shadow(color: .black.opacity(DesignSystem.Layout.shadowOpacity),
                                 radius: DesignSystem.Layout.shadowRadius, x: 0, y: 2)
-                    } else {
-                        Text("No Mac connected. Open the main screen to connect.")
-                            .font(DesignSystem.Typography.bodyFont)
-                            .foregroundColor(DesignSystem.Colors.textSecondary)
-                            .padding(DesignSystem.Spacing.md)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(DesignSystem.Colors.surface)
-                            .cornerRadius(DesignSystem.Layout.cornerRadiusL)
                     }
                 }
 

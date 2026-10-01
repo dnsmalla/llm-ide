@@ -79,5 +79,8 @@ final class MobileFeatureBridgeTests: XCTestCase {
         ]
         XCTAssertEqual(MobileControlManager.autoTaskMessageTypes, expectedAutoTaskTypes)
         XCTAssertEqual(MobileControlManager.loopMessageTypes, expectedLoopTypes)
+        XCTAssertEqual(MobileControlManager.generationMessageTypes, [
+            "generation_options_list", "generation_run", "llmdoc_list", "llmdoc_read",
+        ])
     }
 }

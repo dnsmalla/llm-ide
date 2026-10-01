@@ -19,6 +19,10 @@ final class AutoTaskStore: ObservableObject {
     @Published var autoTaskLogGroups: [AutoTaskTaskLogs] = []
     /// Navigate to the live run-log screen after starting a task from iPhone.
     @Published var isRunLogPresented = false
+    /// True while `AutoTaskView` is on screen. The run log is auto-pushed onto it when a run
+    /// starts; with the view now living in a tab (and rebuilt on segment switches) a log reply
+    /// arriving while it is NOT shown must not leave the push armed for the next visit.
+    var autoTaskViewVisible = false
     /// Which task tab to focus on the run-log screen (nil = follow Mac current).
     @Published var focusedLogTaskId: String?
     /// Transient confirmation of one-shot actions (auto-task acks); auto-clears.
@@ -407,7 +411,7 @@ final class AutoTaskStore: ObservableObject {
         // Auto-present ONCE per run. Re-asserting it on every log reply meant
         // backing out during a run put the screen straight back within ~1s —
         // the user was trapped in the run log until the run finished.
-        if reply.currentTask != nil, autoTaskState?.isRunning == true, !hasAutoPresentedRun {
+        if autoTaskViewVisible, reply.currentTask != nil, autoTaskState?.isRunning == true, !hasAutoPresentedRun {
             hasAutoPresentedRun = true
             isRunLogPresented = true
         }

@@ -83,6 +83,9 @@ final class MobileControlManager {
     /// Feature bridge for `loop_*` messages — nil when Loop is compiled out
     /// or not yet wired (see `routeToFeatureBridge`).
     var loopBridge: MobileFeatureBridge?
+    /// Feature bridge for `generation_*` / `llmdoc_*` messages — nil when
+    /// Doc Gen is compiled out or not yet wired (see `routeToFeatureBridge`).
+    var generationBridge: MobileFeatureBridge?
     /// Mac Settings + workspace — used to run iPhone explore prompts with the
     /// same model/provider and agent context as the desktop Explorer panel.
     var config: AppConfig?
@@ -378,6 +381,7 @@ final class MobileControlManager {
         mobilePushCancellables.removeAll()
         autoTaskBridge?.removePushObservers()
         loopBridge?.removePushObservers()
+        generationBridge?.removePushObservers()
         onMobileClientDisconnected()
         server?.stop()
         server = nil
@@ -527,6 +531,15 @@ final class MobileControlManager {
         MobileProtocol.Tag.loopHistory,
     ]
 
+    /// Feature message types the generation bridge owns (Doc Gen / Visual runs
+    /// and the read-only `llm-doc/` browser). Pinned by `MobileFeatureBridgeTests`.
+    static let generationMessageTypes: Set<String> = [
+        MobileProtocol.Tag.generationOptionsList,
+        MobileProtocol.Tag.generationRun,
+        MobileProtocol.Tag.llmDocList,
+        MobileProtocol.Tag.llmDocRead,
+    ]
+
     /// Route an auto-task/loop message type to its installed feature bridge.
     /// Returns `true` when `type` belongs to either feature's message set —
     /// the caller (the `handleInbound` switch) must NOT fall through to the
@@ -549,7 +562,39 @@ final class MobileControlManager {
             }
             return loopBridge.handle(type: type, data: data)
         }
+        if Self.generationMessageTypes.contains(type) {
+            guard let generationBridge else {
+                replyGenerationUnavailable(type: type, data: data)
+                return true
+            }
+            return generationBridge.handle(type: type, data: data)
+        }
         return false
+    }
+
+    /// The generation bridge slot is nil. Unlike the other bridges, the phone waits on a reply
+    /// shaped for each message (run → result, list → listing, …) keyed by its own id/path, so a
+    /// generic `CommandError(commandId: <type>)` would leave its spinner running.
+    private func replyGenerationUnavailable(type: String, data: Data?) {
+        let why = "Doc Gen isn't available on this Mac right now. Make sure LLM-IDE is fully open and a project is active."
+        append(.stderr, "\(type): Doc Gen not installed")
+        func field(_ key: String) -> String? {
+            guard let data, let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            return obj[key] as? String
+        }
+        switch type {
+        case MobileProtocol.Tag.generationRun:
+            reply(GenerationResult(commandId: field("commandId") ?? type, ok: false, error: why))
+        case MobileProtocol.Tag.generationOptionsList:
+            reply(GenerationOptions(available: false, projectName: nil, templates: [], commands: [],
+                                    saveFolder: "llm-doc/generated"))
+        case MobileProtocol.Tag.llmDocList:
+            reply(LlmDocListing(path: field("path") ?? "", entries: [], error: why))
+        case MobileProtocol.Tag.llmDocRead:
+            reply(LlmDocFile(path: field("path") ?? "", text: nil, error: why))
+        default:
+            reply(CommandError(commandId: type, message: "Doc Gen not installed"))
+        }
     }
 
     /// A feature bridge slot is nil (the feature is compiled out, or not yet
@@ -1137,6 +1182,7 @@ final class MobileControlManager {
 
         autoTaskBridge?.installPushObservers()
         loopBridge?.installPushObservers()
+        generationBridge?.installPushObservers()
     }
 
     /// Push a fresh Mac status snapshot when backend or project context changes.

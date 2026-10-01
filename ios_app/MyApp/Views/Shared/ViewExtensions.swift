@@ -34,3 +34,23 @@ extension Date {
         return formatter.localizedString(for: self, relativeTo: Date())
     }
 }
+
+// MARK: — Embeddable navigation
+
+/// Wraps `content` in its own `NavigationStack` unless it is hosted inside one
+/// already. The Chat / Explorer / Auto Tasks / Loop screens used to be
+/// presented as sheets (each owning a stack and a "Done" button); in the tab
+/// shell they sit inside a stack the shell owns, and `embedded` tells them to
+/// contribute their title and toolbar to it instead of nesting a second one.
+struct OptionalNavigationStack<Content: View>: View {
+    let embedded: Bool
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        if embedded {
+            content()
+        } else {
+            NavigationStack { content() }
+        }
+    }
+}

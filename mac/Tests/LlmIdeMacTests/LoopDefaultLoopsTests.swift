@@ -490,11 +490,17 @@ final class LoopDefaultLoopsTests: XCTestCase {
         ])
     }
 
+    /// Every default loop a throwaway repo gets. Self-Heal is deliberately absent: its verify
+    /// stage is gated on the app's own checkout (`isAppSourceRoot`), so no temp repo has it.
+    private var defaultLoopKeysInAnyRepo: [String] {
+        LoopDefaultLoopKey.all.filter { $0 != LoopDefaultLoopKey.selfHeal }
+    }
+
     func testLegacyAggregateLoopSplitsIntoTheDefaultLoops() throws {
         try writeLlmIdeLayout()
         let migrated = LoopStageDetector.ensureDefaultLoops(in: legacyAggregateStore(), gitRoot: repo).store
         XCTAssertEqual(Set(migrated.loops.compactMap(\.defaultKey)),
-                       Set(LoopDefaultLoopKey.all))
+                       Set(defaultLoopKeysInAnyRepo))
         // The aggregate loop SURVIVES as the project's editable loop — the
         // built-ins cannot be deleted, so removing it would leave nowhere to
         // put work of the user's own. Its stages simply moved to the loops
@@ -660,7 +666,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
         let store = LoopStageDetector.ensureDefaultLoops(
             in: LoopEngineProjectStore(loops: []), gitRoot: repo).store
         XCTAssertEqual(store.loops.compactMap(\.defaultKey).sorted(),
-                       LoopDefaultLoopKey.all.sorted(),
+                       defaultLoopKeysInAnyRepo.sorted(),
                        "every default loop still exists — it is only unscheduled")
         XCTAssertTrue(store.scheduledLoops.isEmpty)
     }

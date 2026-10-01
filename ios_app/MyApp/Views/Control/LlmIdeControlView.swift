@@ -12,6 +12,8 @@ struct LlmIdeControlView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var llmIdeStore: LlmIdeChatStore
     @Environment(\.dismiss) private var dismiss
+    /// True when hosted by the tab shell (no own stack, no "Done").
+    var embedded: Bool = false
 
     @StateObject private var speech = SpeechRecognizer()
     @State private var inputText: String = ""
@@ -23,6 +25,9 @@ struct LlmIdeControlView: View {
     /// Guards the trash action — it also wipes the Mac's shared transcript.
     @State private var showClearConfirm = false
     @State private var showFilePicker = false
+    @State private var showGenerate = false
+    @State private var generateSurface = "doc"
+    @State private var showDocs = false
     @FocusState private var isInputFocused: Bool
 
     /// Max images per send; the bridge caps a frame at 8 MiB so this keeps us
@@ -32,9 +37,9 @@ struct LlmIdeControlView: View {
     private var isConnected: Bool { connection.connectionStatus == .connected }
 
     var body: some View {
-        NavigationStack {
+        OptionalNavigationStack(embedded: embedded) {
             VStack(spacing: 0) {
-                if !isConnected {
+                if !isConnected && !embedded {
                     StatusBanner(.connection(isConnecting: connection.connectionStatus == .connecting))
                 }
                 if let err = connection.errorMessage {
@@ -46,21 +51,28 @@ struct LlmIdeControlView: View {
             .background(DesignSystem.Colors.background.ignoresSafeArea())
             .animation(.easeInOut(duration: 0.2), value: isConnected)
             .animation(.easeInOut(duration: 0.2), value: connection.errorMessage)
-            .navigationTitle("llm-agent")
+            .navigationTitle("Chat")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { dismiss() }
+                if !embedded {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Done") { dismiss() }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
+                    Menu {
+                        Button { showDocs = true } label: {
+                            Label("Generated docs", systemImage: "folder")
+                        }
                         // This also clears the MAC's shared transcript
                         // (LlmIdeChatHistoryClear) and cannot be undone, so it
-                        // must not be a single unconfirmed tap.
-                        showClearConfirm = true
-                    } label: { Image(systemName: "trash") }
-                    .disabled(llmIdeStore.llmIdeMessages.isEmpty)
-                    .accessibilityLabel("Clear chat history")
+                        // sits behind a menu AND a confirmation.
+                        Button(role: .destructive) {
+                            showClearConfirm = true
+                        } label: { Label("Clear chat history", systemImage: "trash") }
+                            .disabled(llmIdeStore.llmIdeMessages.isEmpty)
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityLabel("Chat options")
                 }
                 if llmIdeStore.isStreaming {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -128,6 +140,13 @@ struct LlmIdeControlView: View {
                 }
             }
             .onDisappear { speech.cancel() }
+            .sheet(isPresented: $showGenerate) { GenerateSheet(surface: generateSurface) }
+            .sheet(isPresented: $showDocs) {
+                NavigationStack {
+                    LlmDocBrowserView()
+                        .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Done") { showDocs = false } } }
+                }
+            }
         }
     }
 
@@ -226,6 +245,13 @@ struct LlmIdeControlView: View {
                     }
                     Button { showFilePicker = true } label: {
                         Label("Files…", systemImage: "doc.text")
+                    }
+                    Divider()
+                    Button { generateSurface = "doc"; showGenerate = true } label: {
+                        Label("Generate Doc…", systemImage: "doc.richtext")
+                    }
+                    Button { generateSurface = "visual"; showGenerate = true } label: {
+                        Label("Generate Visual…", systemImage: "rectangle.on.rectangle.angled")
                     }
                 } label: {
                     Image(systemName: "paperclip")

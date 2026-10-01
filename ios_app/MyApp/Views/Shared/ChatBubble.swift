@@ -119,7 +119,7 @@ struct ChatBubble: View {
                                 // as markup.
                                 Text(message.text)
                                     .font(DesignSystem.Typography.bodyFont)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(DesignSystem.Colors.onPrimary)
                                     .textSelection(.enabled)
                             } else if isStreaming {
                                 Text(message.text)

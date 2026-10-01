@@ -140,8 +140,14 @@ public struct LlmIdeMacApp: App {
         projectStoreInstance._apiClient = client
 
         self._config = StateObject(wrappedValue: cfg)
-        self._templateStore = StateObject(wrappedValue: DocTemplateStore())
-        self._commandStore = StateObject(wrappedValue: DocCommandStore())
+        // Built here (not inside StateObject's autoclosure) so the SAME instances reach the phone's
+        // generation bridge at launch — a Mac that starts mobile control at login with no window
+        // opened would otherwise answer "Doc Gen not installed" until the first `.task` ran.
+        let docTemplateStore = DocTemplateStore()
+        let docCommandStore = DocCommandStore()
+        FeatureCatalog.provideGenerationStores(templates: docTemplateStore, commands: docCommandStore)
+        self._templateStore = StateObject(wrappedValue: docTemplateStore)
+        self._commandStore = StateObject(wrappedValue: docCommandStore)
         self._docGenOutputStore = StateObject(wrappedValue: DocGenOutputStore())
         self._session = StateObject(wrappedValue: store)
         self._capture = StateObject(wrappedValue: orchestrator)

@@ -495,3 +495,13 @@ final class ExplorerChatStore: ObservableObject {
         }
     }
 }
+
+/// Unsent Explorer composer state (text + attachments). Owned by the Project
+/// tab, not by `ExplorerChatView`, so switching to Auto Tasks / Loop and back
+/// — which rebuilds the view — doesn't discard what was being typed.
+final class ExplorerDraft: ObservableObject {
+    @Published var text: String = ""
+    @Published var files: [ChatFileText] = []
+    @Published var refs: [ExploreWorkspaceRef] = []
+    @Published var skills: [ExploreSkillRef] = []
+}
