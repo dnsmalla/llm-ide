@@ -46,6 +46,7 @@ struct LlmIdeControlView: View {
                     StatusBanner(.error(message: err) { connection.errorMessage = nil })
                 }
                 chatTranscript
+                pinnedToolApproval
                 inputBar
             }
             .background(DesignSystem.Colors.background.ignoresSafeArea())
@@ -210,14 +211,7 @@ struct LlmIdeControlView: View {
     /// expression in reasonable time").
     @ViewBuilder
     private var approvalSlot: some View {
-        if let tool = llmIdeStore.pendingToolApproval {
-            ToolApprovalCard(request: tool) { allow in
-                llmIdeStore.submitToolApproval(allow: allow)
-                haptic(allow ? .medium : .light)
-            }
-            .id(tool.requestId)
-            .transition(.opacity)
-        } else if let request = llmIdeStore.pendingApproval {
+        if let request = llmIdeStore.pendingApproval {
             ApprovalQuestionCard(request: request) { selection in
                 llmIdeStore.submitApproval(selection: selection)
                 haptic(.light)
@@ -229,6 +223,22 @@ struct LlmIdeControlView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// A tool/edit permission prompt is blocking and time-sensitive, so it is pinned above the
+    /// composer (its buttons can never scroll away) rather than sitting inside the transcript.
+    @ViewBuilder
+    private var pinnedToolApproval: some View {
+        if let tool = llmIdeStore.pendingToolApproval {
+            ToolApprovalCard(request: tool) { allow in
+                llmIdeStore.submitToolApproval(allow: allow)
+                haptic(allow ? .medium : .light)
+            }
+            .id(tool.requestId)
+            .padding(.horizontal, DesignSystem.Spacing.md)
+            .padding(.bottom, DesignSystem.Spacing.xs)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 

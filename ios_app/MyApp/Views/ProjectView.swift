@@ -204,6 +204,9 @@ private struct SectionChips: View {
                 .padding(.horizontal, DesignSystem.Spacing.md)
             }
             .onChange(of: selection) { value in withAnimation { proxy.scrollTo(value, anchor: .center) } }
+            // Coming back to the tab (or opening it on a later section) must show the selected chip,
+            // not leave it scrolled out of view. After layout, so the anchor exists.
+            .onAppear { DispatchQueue.main.async { proxy.scrollTo(selection, anchor: .center) } }
         }
     }
 }

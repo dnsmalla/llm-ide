@@ -16,31 +16,12 @@ struct ToolApprovalCard: View {
                     .font(DesignSystem.Typography.headlineFont)
                     .foregroundColor(DesignSystem.Colors.textPrimary)
             }
-            if let summary = request.summary, !summary.isEmpty {
-                Text(summary).font(DesignSystem.Typography.footnoteFont)
-                    .foregroundColor(DesignSystem.Colors.textSecondary)
+            // The change itself can be long; it scrolls so the buttons below never leave the screen.
+            ScrollView {
+                VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) { details }
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let path = request.filePath {
-                Label(path, systemImage: "doc")
-                    .font(DesignSystem.Typography.footnoteFont.monospaced())
-                    .foregroundColor(DesignSystem.Colors.textSecondary)
-            }
-            if request.overwrites == true {
-                Label("This replaces a file that already exists.", systemImage: "exclamationmark.triangle.fill")
-                    .font(DesignSystem.Typography.footnoteFont).foregroundColor(.orange)
-            }
-            if request.replaceAll == true {
-                Label("Replaces ALL occurrences, not just one.", systemImage: "exclamationmark.triangle.fill")
-                    .font(DesignSystem.Typography.footnoteFont).foregroundColor(.orange)
-            }
-            if let old = request.oldString { block(old, tint: DesignSystem.Colors.danger, label: "Remove") }
-            if let new = request.newString { block(new, tint: DesignSystem.Colors.success, label: "Add") }
-            if let preview = request.contentPreview { block(preview, tint: DesignSystem.Colors.success, label: "New file") }
-            if let command = request.command { block(command, tint: DesignSystem.Colors.textSecondary, label: "Command") }
-            if request.truncated {
-                Label("Long change — only the start is shown here.", systemImage: "scissors")
-                    .font(DesignSystem.Typography.captionFont).foregroundColor(DesignSystem.Colors.textTertiary)
-            }
+            .frame(maxHeight: 260)
             HStack(spacing: DesignSystem.Spacing.sm) {
                 Button(role: .destructive) { onAnswer(false) } label: {
                     Text("Deny").font(.callout.weight(.semibold)).frame(maxWidth: .infinity)
@@ -58,6 +39,35 @@ struct ToolApprovalCard: View {
         .overlay(RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM)
             .stroke(DesignSystem.Colors.primary.opacity(0.5), lineWidth: 1))
         .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var details: some View {
+        if let summary = request.summary, !summary.isEmpty {
+            Text(summary).font(DesignSystem.Typography.footnoteFont)
+                .foregroundColor(DesignSystem.Colors.textSecondary)
+        }
+        if let path = request.filePath {
+            Label(path, systemImage: "doc")
+                .font(DesignSystem.Typography.footnoteFont.monospaced())
+                .foregroundColor(DesignSystem.Colors.textSecondary)
+        }
+        if request.overwrites == true {
+            Label("This replaces a file that already exists.", systemImage: "exclamationmark.triangle.fill")
+                .font(DesignSystem.Typography.footnoteFont).foregroundColor(.orange)
+        }
+        if request.replaceAll == true {
+            Label("Replaces ALL occurrences, not just one.", systemImage: "exclamationmark.triangle.fill")
+                .font(DesignSystem.Typography.footnoteFont).foregroundColor(.orange)
+        }
+        if let old = request.oldString { block(old, tint: DesignSystem.Colors.danger, label: "Remove") }
+        if let new = request.newString { block(new, tint: DesignSystem.Colors.success, label: "Add") }
+        if let preview = request.contentPreview { block(preview, tint: DesignSystem.Colors.success, label: "New file") }
+        if let command = request.command { block(command, tint: DesignSystem.Colors.textSecondary, label: "Command") }
+        if request.truncated {
+            Label("Long change — only the start is shown here.", systemImage: "scissors")
+                .font(DesignSystem.Typography.captionFont).foregroundColor(DesignSystem.Colors.textTertiary)
+        }
     }
 
     private var icon: String {
