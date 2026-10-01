@@ -7,8 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1B2C3D4E5F60718293A4B04 /* ProjectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B03 /* ProjectView.swift */; };
+		A1B2C3D4E5F60718293A4B02 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B01 /* RootTabView.swift */; };
 		060280FFDE8EBB4735C43370 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1050205A71E402C9809036C3 /* LoginView.swift */; };
-		26AD1F92FC290B7312532929 /* MobileHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4D30A5062ADB194BE689A2 /* MobileHomeView.swift */; };
 		B7C8D9E0F1A203040B7C8D01 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C8D9E0F1A203040B7C8D02 /* QRScannerView.swift */; };
 		C0DE10A2B3C4D5E6F7081902 /* LlmIdeControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE10A2B3C4D5E6F7081903 /* LlmIdeControlView.swift */; };
 		E5F6A7B8C9D0E1F2A3B4C501 /* ExplorerChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C502 /* ExplorerChatView.swift */; };
@@ -47,12 +48,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A1B2C3D4E5F60718293A4B03 /* ProjectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B01 /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
 		0F05147F87FAE3E4689CB880 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		A1C0FF1CE0000000000000P1 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		1050205A71E402C9809036C3 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		237B2E48D363E5FB9B47CB07 /* MyApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		39CD17436AE4D69811BA8EDA /* MyAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyAppApp.swift; sourceTree = "<group>"; };
-		5D4D30A5062ADB194BE689A2 /* MobileHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileHomeView.swift; sourceTree = "<group>"; };
 		B7C8D9E0F1A203040B7C8D02 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 		C0DE10A2B3C4D5E6F7081903 /* LlmIdeControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlmIdeControlView.swift; sourceTree = "<group>"; };
 		E5F6A7B8C9D0E1F2A3B4C502 /* ExplorerChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExplorerChatView.swift; sourceTree = "<group>"; };
@@ -147,6 +149,8 @@
 			isa = PBXGroup;
 			children = (
 				995B956852311CF170F73894 /* ContentView.swift */,
+				A1B2C3D4E5F60718293A4B03 /* ProjectView.swift */,
+				A1B2C3D4E5F60718293A4B01 /* RootTabView.swift */,
 				FBF0C3A7B83040815C36CDAF /* Auth */,
 				99D8815DC559E39FCBCE47AC /* Control */,
 				03E5A5BF3226A37D6AB86BB9 /* Settings */,
@@ -159,7 +163,6 @@
 		99D8815DC559E39FCBCE47AC /* Control */ = {
 			isa = PBXGroup;
 			children = (
-				5D4D30A5062ADB194BE689A2 /* MobileHomeView.swift */,
 				B7C8D9E0F1A203040B7C8D02 /* QRScannerView.swift */,
 				C0DE10A2B3C4D5E6F7081903 /* LlmIdeControlView.swift */,
 				E5F6A7B8C9D0E1F2A3B4C502 /* ExplorerChatView.swift */,
@@ -310,6 +313,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				B6CF935AF507506E25C1EA4A /* ContentView.swift in Sources */,
+				A1B2C3D4E5F60718293A4B04 /* ProjectView.swift in Sources */,
+				A1B2C3D4E5F60718293A4B02 /* RootTabView.swift in Sources */,
 				A1B2C3D4E5F607890A1B2C01 /* ConnectionStore.swift in Sources */,
 				C9D0E1F2A3B405060C9D0E01 /* SpeechRecognizer.swift in Sources */,
 				A7B80010CC00000000000001 /* ConnectionService.swift in Sources */,
@@ -324,7 +329,6 @@
 				AC1BAD40D67DE71FEE09690F /* HelpView.swift in Sources */,
 				060280FFDE8EBB4735C43370 /* LoginView.swift in Sources */,
 				FCA16A9A87B1018E6AC5A76C /* MyAppApp.swift in Sources */,
-				26AD1F92FC290B7312532929 /* MobileHomeView.swift in Sources */,
 				B7C8D9E0F1A203040B7C8D01 /* QRScannerView.swift in Sources */,
 				C0DE10A2B3C4D5E6F7081902 /* LlmIdeControlView.swift in Sources */,
 				E5F6A7B8C9D0E1F2A3B4C501 /* ExplorerChatView.swift in Sources */,

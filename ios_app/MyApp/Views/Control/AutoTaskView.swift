@@ -13,12 +13,14 @@ struct AutoTaskView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var autoTaskStore: AutoTaskStore
     @Environment(\.dismiss) private var dismiss
+    /// True when hosted by the tab shell (no own stack, no "Done").
+    var embedded: Bool = false
 
     private var isConnected: Bool { connection.connectionStatus == .connected }
     private var state: AutoTaskState? { autoTaskStore.autoTaskState }
 
     var body: some View {
-        NavigationStack {
+        OptionalNavigationStack(embedded: embedded) {
             List {
                 if !isConnected || state == nil {
                     emptyState
@@ -45,8 +47,10 @@ struct AutoTaskView: View {
             .navigationTitle("Auto Tasks")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { dismiss() }
+                if !embedded {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Done") { dismiss() }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

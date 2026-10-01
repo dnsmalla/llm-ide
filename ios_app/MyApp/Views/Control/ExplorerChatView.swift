@@ -10,6 +10,8 @@ struct ExplorerChatView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var explorerStore: ExplorerChatStore
     @Environment(\.dismiss) private var dismiss
+    /// True when hosted by the tab shell (no own stack, no "Done").
+    var embedded: Bool = false
 
     @State private var inputText: String = ""
     @State private var pendingFiles: [ChatFileText] = []
@@ -27,7 +29,7 @@ struct ExplorerChatView: View {
     private var hasSession: Bool { explorerStore.exploreCurrent != nil }
 
     var body: some View {
-        NavigationStack {
+        OptionalNavigationStack(embedded: embedded) {
             VStack(spacing: 0) {
                 if !isConnected {
                     StatusBanner(.connection(isConnecting: connection.connectionStatus == .connecting))
@@ -44,8 +46,10 @@ struct ExplorerChatView: View {
             .navigationTitle(explorerStore.exploreCurrent?.title ?? "Explorer")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { dismiss() }
+                if !embedded {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Done") { dismiss() }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

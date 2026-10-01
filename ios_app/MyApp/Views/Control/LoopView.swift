@@ -13,12 +13,14 @@ struct LoopView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var loopStore: LoopStore
     @Environment(\.dismiss) private var dismiss
+    /// True when hosted by the tab shell (no own stack, no "Done").
+    var embedded: Bool = false
 
     private var isConnected: Bool { connection.connectionStatus == .connected }
     private var state: LoopState? { loopStore.state }
 
     var body: some View {
-        NavigationStack {
+        OptionalNavigationStack(embedded: embedded) {
             List {
                 if !isConnected || state == nil {
                     emptyState
@@ -47,8 +49,10 @@ struct LoopView: View {
             .navigationTitle("Loop")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { dismiss() }
+                if !embedded {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Done") { dismiss() }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

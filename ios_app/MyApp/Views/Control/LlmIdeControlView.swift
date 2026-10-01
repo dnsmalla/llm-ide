@@ -12,6 +12,8 @@ struct LlmIdeControlView: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var llmIdeStore: LlmIdeChatStore
     @Environment(\.dismiss) private var dismiss
+    /// True when hosted by the tab shell (no own stack, no "Done").
+    var embedded: Bool = false
 
     @StateObject private var speech = SpeechRecognizer()
     @State private var inputText: String = ""
@@ -32,7 +34,7 @@ struct LlmIdeControlView: View {
     private var isConnected: Bool { connection.connectionStatus == .connected }
 
     var body: some View {
-        NavigationStack {
+        OptionalNavigationStack(embedded: embedded) {
             VStack(spacing: 0) {
                 if !isConnected {
                     StatusBanner(.connection(isConnecting: connection.connectionStatus == .connecting))
@@ -46,11 +48,13 @@ struct LlmIdeControlView: View {
             .background(DesignSystem.Colors.background.ignoresSafeArea())
             .animation(.easeInOut(duration: 0.2), value: isConnected)
             .animation(.easeInOut(duration: 0.2), value: connection.errorMessage)
-            .navigationTitle("llm-agent")
+            .navigationTitle("Chat")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { dismiss() }
+                if !embedded {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Done") { dismiss() }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

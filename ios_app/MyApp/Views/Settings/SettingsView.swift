@@ -48,6 +48,30 @@ struct SettingsView: View {
 
                             Divider().padding(.horizontal, DesignSystem.Spacing.md)
 
+                            Button {
+                                if connection.connectionStatus == .disconnected {
+                                    connection.connectDirect(ip: connectionStore.deviceIP,
+                                                             port: connectionStore.devicePort,
+                                                             pin: connectionStore.devicePIN)
+                                } else {
+                                    connection.closeConnection()
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: connection.connectionStatus == .disconnected
+                                          ? "arrow.clockwise" : "wifi.slash")
+                                    Text(connection.connectionStatus == .disconnected
+                                         ? "Reconnect" : "Close connection")
+                                        .font(DesignSystem.Typography.bodyFont.weight(.medium))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(DesignSystem.Spacing.md)
+                                .foregroundColor(DesignSystem.Colors.primary)
+                            }
+                            .buttonStyle(.plain)
+
+                            Divider().padding(.horizontal, DesignSystem.Spacing.md)
+
                             Button(role: .destructive) {
                                 connection.disconnect()
                                 connectionStore.clear()

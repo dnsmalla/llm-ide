@@ -1,0 +1,121 @@
+import SwiftUI
+import SharedProtocol
+
+/// Everything tied to the Mac's active project, one tab: a status header and a
+/// segmented switch between Explorer, Auto Tasks and Loop. The three screens
+/// are the same views the old sheets showed, hosted inline; the stack here
+/// supplies their nav bar (title + actions).
+struct ProjectView: View {
+    let deviceName: String
+    @EnvironmentObject var autoTaskStore: AutoTaskStore
+    @EnvironmentObject var loopStore: LoopStore
+
+    enum Section: String, CaseIterable, Identifiable {
+        case explorer = "Explorer"
+        case autoTasks = "Auto Tasks"
+        case loop = "Loop"
+        var id: String { rawValue }
+    }
+    @State private var section: Section = .explorer
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                switch section {
+                case .explorer:  ExplorerChatView(embedded: true)
+                case .autoTasks: AutoTaskView(embedded: true)
+                case .loop:      LoopView(embedded: true)
+                }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) {
+                    ProjectHeader(deviceName: deviceName, section: $section)
+                    Picker("Section", selection: $section) {
+                        ForEach(Section.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, DesignSystem.Spacing.md)
+                    .padding(.bottom, DesignSystem.Spacing.sm)
+                    Divider()
+                }
+                .background(DesignSystem.Colors.background)
+            }
+        }
+    }
+}
+
+private struct ProjectHeader: View {
+    let deviceName: String
+    @Binding var section: ProjectView.Section
+    @EnvironmentObject var macStatusStore: MacStatusStore
+    @EnvironmentObject var autoTaskStore: AutoTaskStore
+    @EnvironmentObject var loopStore: LoopStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(projectName)
+                    .font(DesignSystem.Typography.title2Font.weight(.bold))
+                    .foregroundColor(DesignSystem.Colors.textPrimary)
+                    .lineLimit(1)
+                Spacer()
+                statusDot("Backend", up: macStatusStore.macStatus?.backendUp == true)
+                statusDot("Mobile", up: macStatusStore.macStatus?.mobileControlUp == true)
+            }
+            if let branch = macStatusStore.macStatus?.gitBranch, !branch.isEmpty {
+                Label(branch, systemImage: "arrow.triangle.branch")
+                    .font(DesignSystem.Typography.captionFont)
+                    .foregroundColor(DesignSystem.Colors.textSecondary)
+                    .lineLimit(1)
+            }
+            if autoTaskStore.autoTaskState?.isRunning == true {
+                liveRow("Auto Task running", detail: autoTaskStore.autoTaskState?.currentStep, target: .autoTasks)
+            }
+            if loopStore.state?.running == true {
+                liveRow("Loop running", detail: nil, target: .loop)
+            }
+        }
+        .padding(.horizontal, DesignSystem.Spacing.md)
+        .padding(.top, DesignSystem.Spacing.sm)
+        .padding(.bottom, DesignSystem.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var projectName: String {
+        if let name = macStatusStore.macStatus?.projectName, !name.isEmpty { return name }
+        return deviceName
+    }
+
+    private func statusDot(_ label: String, up: Bool) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(up ? DesignSystem.Colors.success : DesignSystem.Colors.danger)
+                .frame(width: 7, height: 7)
+            Text(label)
+                .font(DesignSystem.Typography.captionFont.weight(.medium))
+                .foregroundColor(DesignSystem.Colors.textSecondary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label) \(up ? "up" : "down")")
+    }
+
+    private func liveRow(_ title: String, detail: String?, target: ProjectView.Section) -> some View {
+        Button { section = target } label: {
+            HStack(spacing: 6) {
+                ProgressView().scaleEffect(0.7)
+                Text(title).font(DesignSystem.Typography.captionFont.weight(.semibold))
+                if let detail, !detail.isEmpty {
+                    Text("· \(detail)").lineLimit(1)
+                        .font(DesignSystem.Typography.captionFont)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption2)
+            }
+            .foregroundColor(DesignSystem.Colors.primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(DesignSystem.Colors.primaryLight, in: RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusS))
+        }
+        .buttonStyle(.plain)
+    }
+}
