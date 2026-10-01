@@ -149,6 +149,7 @@ if mobileIncluded {
         "LlmDocBrowserTests.swift",
         "PhoneAccessTests.swift",
         "MobileUsageBridgeTests.swift",
+        "MobileProjectBridgeTests.swift",
         "PairingThrottleTests.swift",
         "MobilePairedDeviceStoreTests.swift",
         "MobileExploreIndexStoreTests.swift",

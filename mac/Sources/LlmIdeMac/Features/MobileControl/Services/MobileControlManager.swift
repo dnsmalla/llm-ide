@@ -97,6 +97,9 @@ final class MobileControlManager {
     /// The Mac-side switches deciding what the phone may do (Settings → Mobile Control → Phone access).
     let phoneAccess = PhoneAccessSettings()
 
+    /// Kept so the shell can inject the "is a run active?" guard (see `MobileProjectBridge.busyReason`).
+    var projectBridge: MobileProjectBridge?
+
     /// A bridge registered through `register(...)` rather than a dedicated slot: it owns a set of
     /// message types, advertises capabilities (each optionally behind a `PhoneAccess` switch that
     /// must be ON for the capability to be offered), and gets the same push-observer lifecycle.

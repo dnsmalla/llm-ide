@@ -8,6 +8,11 @@ import SharedProtocol
 extension MobileControlManager {
     func registerPhoneToolBridges() {
         guard registeredBridges.isEmpty else { return }   // idempotent across boot paths
+        let projects = MobileProjectBridge(manager: self)
+        projectBridge = projects
+        register(bridge: projects,
+                 messageTypes: [MobileProtocol.Tag.projectList, MobileProtocol.Tag.projectSwitch],
+                 capabilities: [(name: MobileProtocol.Capability.projects, gate: .projectSwitch)])
         register(bridge: MobileUsageBridge(manager: self),
                  messageTypes: [MobileProtocol.Tag.usageGet],
                  capabilities: [(name: MobileProtocol.Capability.usage, gate: nil)])

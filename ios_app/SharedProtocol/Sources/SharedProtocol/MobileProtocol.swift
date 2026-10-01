@@ -32,6 +32,7 @@ public enum MobileProtocol {
         public static let llmDoc = "llm_doc"
         public static let activity = "activity"
         public static let usage = "usage"
+        public static let projects = "projects"
 
         /// What a Mac that sends NO capability list is assumed to serve: everything that shipped
         /// before the handshake existed. Doc Gen and the llm-doc browser came after it, so a
@@ -133,6 +134,11 @@ public enum MobileProtocol {
 
         // Mac → phone: the capability list changed mid-session (a Phone Access switch was flipped).
         public static let macCapabilities = "mac_capabilities"
+
+        // MARK: Projects — see ProjectMessages.swift
+        public static let projectList = "project_list"
+        public static let projectState = "project_state"
+        public static let projectSwitch = "project_switch"
 
         // MARK: Usage & limits — see UsageMessages.swift
         public static let usageGet = "usage_get"

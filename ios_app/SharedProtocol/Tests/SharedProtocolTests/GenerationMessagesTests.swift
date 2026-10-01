@@ -71,4 +71,13 @@ final class GenerationMessagesTests: XCTestCase {
         XCTAssertEqual(MobileProtocol.Tag.usageGet, "usage_get")
         XCTAssertFalse(MobileProtocol.Capability.legacy.contains(MobileProtocol.Capability.usage))
     }
+
+    func testProjectStateRoundTripsWithoutPaths() throws {
+        let state = ProjectState(active: ProjectInfo(id: "a", name: "A"),
+                                 projects: [ProjectInfo(id: "a", name: "A", lastOpenedAt: 3)], error: "busy")
+        XCTAssertEqual(try roundTrip(state), state)
+        XCTAssertEqual(MobileProtocol.Tag.projectSwitch, "project_switch")
+        let json = String(data: try JSONEncoder().encode(state), encoding: .utf8)!
+        XCTAssertFalse(json.contains("path"))
+    }
 }
