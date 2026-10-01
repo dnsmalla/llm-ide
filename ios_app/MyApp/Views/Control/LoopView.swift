@@ -74,9 +74,20 @@ struct LoopView: View {
 
     private var emptyState: some View {
         Section {
-            Text(isConnected ? "Loading loop status…" : "Connect to your Mac to control the loop.")
-                .font(DesignSystem.Typography.footnoteFont)
-                .foregroundColor(DesignSystem.Colors.textTertiary)
+            if isConnected {
+                HStack(spacing: DesignSystem.Spacing.sm) {
+                    ProgressView()
+                    Text("Loading loop status…")
+                        .font(DesignSystem.Typography.footnoteFont)
+                        .foregroundColor(DesignSystem.Colors.textTertiary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DesignSystem.Spacing.md)
+            } else {
+                Text("Connect to your Mac to control the loop.")
+                    .font(DesignSystem.Typography.footnoteFont)
+                    .foregroundColor(DesignSystem.Colors.textTertiary)
+            }
         }
     }
 

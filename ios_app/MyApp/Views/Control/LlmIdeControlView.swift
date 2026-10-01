@@ -36,7 +36,7 @@ struct LlmIdeControlView: View {
     var body: some View {
         OptionalNavigationStack(embedded: embedded) {
             VStack(spacing: 0) {
-                if !isConnected {
+                if !isConnected && !embedded {
                     StatusBanner(.connection(isConnecting: connection.connectionStatus == .connecting))
                 }
                 if let err = connection.errorMessage {
