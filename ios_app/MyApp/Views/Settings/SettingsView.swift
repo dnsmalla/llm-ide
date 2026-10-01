@@ -93,14 +93,6 @@ struct SettingsView: View {
                         .cornerRadius(DesignSystem.Layout.cornerRadiusL)
                         .shadow(color: .black.opacity(DesignSystem.Layout.shadowOpacity),
                                 radius: DesignSystem.Layout.shadowRadius, x: 0, y: 2)
-                    } else {
-                        Text("No Mac connected. Open the main screen to connect.")
-                            .font(DesignSystem.Typography.bodyFont)
-                            .foregroundColor(DesignSystem.Colors.textSecondary)
-                            .padding(DesignSystem.Spacing.md)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(DesignSystem.Colors.surface)
-                            .cornerRadius(DesignSystem.Layout.cornerRadiusL)
                     }
                 }
 

@@ -17,12 +17,13 @@ struct ProjectView: View {
         var id: String { rawValue }
     }
     @State private var section: Section = .explorer
+    @StateObject private var explorerDraft = ExplorerDraft()
 
     var body: some View {
         NavigationStack {
             Group {
                 switch section {
-                case .explorer:  ExplorerChatView(embedded: true)
+                case .explorer:  ExplorerChatView(embedded: true, draft: explorerDraft)
                 case .autoTasks: AutoTaskView(embedded: true)
                 case .loop:      LoopView(embedded: true)
                 }

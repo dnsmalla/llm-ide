@@ -16,6 +16,10 @@ struct AutoTaskView: View {
     /// True when hosted by the tab shell (no own stack, no "Done").
     var embedded: Bool = false
 
+    private struct SetupTarget { let id: String; let label: String }
+    @State private var setupTarget: SetupTarget?
+    @State private var showSetup = false
+
     private var isConnected: Bool { connection.connectionStatus == .connected }
     private var state: AutoTaskState? { autoTaskStore.autoTaskState }
 
@@ -69,6 +73,13 @@ struct AutoTaskView: View {
                 if status == .connected {
                     autoTaskStore.refreshAll()
                     autoTaskStore.autoTaskSetupList()
+                }
+            }
+            .navigationDestination(isPresented: $showSetup) {
+                if let target = setupTarget {
+                    AutoTaskSetupView(taskId: target.id, taskLabel: target.label)
+                        .environmentObject(connection)
+                        .environmentObject(autoTaskStore)
                 }
             }
             .navigationDestination(isPresented: $autoTaskStore.isRunLogPresented) {
@@ -293,10 +304,12 @@ struct AutoTaskView: View {
                 }
                 .toggleStyle(.switch)
 
-                NavigationLink {
-                    AutoTaskSetupView(taskId: task.id, taskLabel: task.label)
-                        .environmentObject(connection)
-                        .environmentObject(autoTaskStore)
+                // A Button + programmatic push, not a NavigationLink: inside a
+                // List row a NavigationLink adds its own disclosure chevron,
+                // which sat between the controls and read as clutter.
+                Button {
+                    setupTarget = SetupTarget(id: task.id, label: task.label)
+                    showSetup = true
                 } label: {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 17))
