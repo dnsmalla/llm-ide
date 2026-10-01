@@ -16,6 +16,7 @@ struct RootTabView: View {
     @EnvironmentObject var usageStore: UsageStore
     @EnvironmentObject var projectsStore: ProjectsStore
     @EnvironmentObject var generationStore: GenerationStore
+    @EnvironmentObject var sourceControlStore: SourceControlStore
 
     enum Tab: Hashable { case chat, project, activity, settings }
     @State private var selection: Tab = .chat
@@ -68,6 +69,7 @@ struct RootTabView: View {
         // cached about the old one — templates, doc listings, loop/task snapshots — is stale.
         .onChange(of: macStatusStore.macStatus?.projectName) { _ in
             generationStore.invalidateProjectScopedCaches()
+            sourceControlStore.invalidate()
             refreshMacData()
         }
     }

@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B81BB19ACDDFCCC66E2B3AD3 /* SourceControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71BB19ACDDFCCC66E2B3AD3 /* SourceControlView.swift */; };
+		B82063D02ABAAFACBBC6D329 /* SourceControlStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B72063D02ABAAFACBBC6D329 /* SourceControlStore.swift */; };
 		B8B42519A1A96C933AE2D988 /* ToolApprovalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7B42519A1A96C933AE2D988 /* ToolApprovalCard.swift */; };
 		B844E78C8A04CBBC2EE5DB89 /* SelfHealView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B744E78C8A04CBBC2EE5DB89 /* SelfHealView.swift */; };
 		B8A5D3BB4EB0F568E4E19FC6 /* SelfHealStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A5D3BB4EB0F568E4E19FC6 /* SelfHealStore.swift */; };
@@ -60,6 +62,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B71BB19ACDDFCCC66E2B3AD3 /* SourceControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceControlView.swift; sourceTree = "<group>"; };
+		B72063D02ABAAFACBBC6D329 /* SourceControlStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceControlStore.swift; sourceTree = "<group>"; };
 		B7B42519A1A96C933AE2D988 /* ToolApprovalCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolApprovalCard.swift; sourceTree = "<group>"; };
 		B744E78C8A04CBBC2EE5DB89 /* SelfHealView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfHealView.swift; sourceTree = "<group>"; };
 		B7A5D3BB4EB0F568E4E19FC6 /* SelfHealStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfHealStore.swift; sourceTree = "<group>"; };
@@ -187,6 +191,7 @@
 		99D8815DC559E39FCBCE47AC /* Control */ = {
 			isa = PBXGroup;
 			children = (
+				B71BB19ACDDFCCC66E2B3AD3 /* SourceControlView.swift */,
 				B744E78C8A04CBBC2EE5DB89 /* SelfHealView.swift */,
 				B7C5B0ED4B97C3F47DBB9827 /* ProjectSwitcherSheet.swift */,
 				B7CC02D68D4369B858A43C3C /* UsageView.swift */,
@@ -232,6 +237,7 @@
 		D5B9C62ACB1A2174374B7BC4 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				B72063D02ABAAFACBBC6D329 /* SourceControlStore.swift */,
 				B7A5D3BB4EB0F568E4E19FC6 /* SelfHealStore.swift */,
 				B7D103617AE1194F58F35BC3 /* ProjectsStore.swift */,
 				B71B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift */,
@@ -349,6 +355,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				B6CF935AF507506E25C1EA4A /* ContentView.swift in Sources */,
+				B81BB19ACDDFCCC66E2B3AD3 /* SourceControlView.swift in Sources */,
+				B82063D02ABAAFACBBC6D329 /* SourceControlStore.swift in Sources */,
 				B8B42519A1A96C933AE2D988 /* ToolApprovalCard.swift in Sources */,
 				B844E78C8A04CBBC2EE5DB89 /* SelfHealView.swift in Sources */,
 				B8A5D3BB4EB0F568E4E19FC6 /* SelfHealStore.swift in Sources */,

@@ -161,9 +161,7 @@ struct SelfHealDetailView: View {
                 } else if let text = diff.diff {
                     if diff.truncated { Label("Long diff — showing the first part.", systemImage: "scissors")
                         .font(DesignSystem.Typography.captionFont).foregroundColor(DesignSystem.Colors.textTertiary) }
-                    ScrollView(.horizontal) {
-                        Text(text).font(DesignSystem.Typography.codeFont).textSelection(.enabled)
-                    }
+                    DiffTextView(text: text)
                 }
             } else {
                 Button { store.loadDiff(for: current) } label: { Label("Review the diff", systemImage: "doc.text.magnifyingglass") }

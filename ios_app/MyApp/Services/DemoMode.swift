@@ -88,6 +88,7 @@ final class DemoResponder {
                            capabilities: [MobileProtocol.Capability.chat, MobileProtocol.Capability.explorer,
                                           MobileProtocol.Capability.activity, MobileProtocol.Capability.usage,
                                           MobileProtocol.Capability.projects, MobileProtocol.Capability.selfHeal,
+                                          MobileProtocol.Capability.sourceControl,
                                           MobileProtocol.Capability.autoTasks, MobileProtocol.Capability.loop,
                                           MobileProtocol.Capability.generation, MobileProtocol.Capability.llmDoc]))
 
@@ -263,6 +264,21 @@ final class DemoResponder {
                 .init(id: "r-2", startedAt: Date().addingTimeInterval(-93_600).timeIntervalSince1970, durationSeconds: 903, iterationsUsed: 5, statusCode: "givenUp", statusSummary: "Regression sweep still failing after 5 iterations", trigger: "schedule"),
                 .init(id: "r-1", startedAt: Date().addingTimeInterval(-180_000).timeIntervalSince1970, durationSeconds: 268, iterationsUsed: 1, statusCode: "success", statusSummary: "All stages green", trigger: "desktop"),
             ]))
+
+        // MARK: Source Control
+        case MobileProtocol.Tag.scmStatusList:
+            send(ScmState(isRepo: true, branch: "feat/phone-capabilities", ahead: 3, behind: 0, hasUpstream: true,
+                          files: [.init(path: "ios_app/MyApp/Views/ProjectView.swift", status: "modified", staged: true),
+                                  .init(path: "mac/Sources/LlmIdeMac/Features/MobileControl/Services/PhoneGit.swift", status: "added", staged: true),
+                                  .init(path: "README.md", status: "modified", staged: false),
+                                  .init(path: "notes/todo.md", status: "untracked", staged: false)],
+                          filesTruncated: false,
+                          commits: [.init(sha: "ef08814f", author: "dnsmalla", relativeDate: "2 hours ago", subject: "feat(ios): permission card for tool and edit requests"),
+                                    .init(sha: "32eedf3e", author: "dnsmalla", relativeDate: "2 hours ago", subject: "feat(mac): relay tool/edit permission prompts (opt-in)")],
+                          error: nil))
+        case MobileProtocol.Tag.scmDiff:
+            send(ScmDiffResult(path: obj["path"] as? String ?? "", staged: obj["staged"] as? Bool ?? false,
+                               diff: "@@ -10,4 +10,6 @@ struct Example {\n     let a = 1\n-    let b = 2\n+    let b = 3\n+    let c = 4\n     func run() {}"))
 
         // MARK: Self-Heal
         case MobileProtocol.Tag.selfHealList:

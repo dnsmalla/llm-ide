@@ -16,6 +16,7 @@ struct ProjectView: View {
         case autoTasks = "Auto Tasks"
         case loop = "Loop"
         case docs = "Docs"
+        case git = "Git"
         case selfHeal = "Self-Heal"
         var id: String { rawValue }
 
@@ -26,6 +27,7 @@ struct ProjectView: View {
             case .autoTasks: return MobileProtocol.Capability.autoTasks
             case .loop:      return MobileProtocol.Capability.loop
             case .docs:      return MobileProtocol.Capability.llmDoc
+            case .git:       return MobileProtocol.Capability.sourceControl
             case .selfHeal:  return MobileProtocol.Capability.selfHeal
             }
         }
@@ -46,6 +48,7 @@ struct ProjectView: View {
                 case .autoTasks: AutoTaskView(embedded: true)
                 case .loop:      LoopView(embedded: true)
                 case .docs:      LlmDocBrowserView()
+                case .git:       SourceControlView()
                 case .selfHeal:  SelfHealView()
                 }
             }
