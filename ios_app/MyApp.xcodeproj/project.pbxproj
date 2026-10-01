@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B8CC02D68D4369B858A43C3C /* UsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7CC02D68D4369B858A43C3C /* UsageView.swift */; };
+		B81B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift */; };
 		A1B2C3D4E5F60718293A4D04 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4D03 /* ActivityView.swift */; };
 		A1B2C3D4E5F60718293A4D02 /* ActivityFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4D01 /* ActivityFeedStore.swift */; };
 		A1B2C3D4E5F60718293A4C06 /* GenerateSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C05 /* GenerateSheet.swift */; };
@@ -53,6 +55,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B7CC02D68D4369B858A43C3C /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
+		B71B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageStore.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4D03 /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4D01 /* ActivityFeedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedStore.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4C05 /* GenerateSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerateSheet.swift; sourceTree = "<group>"; };
@@ -173,6 +177,7 @@
 		99D8815DC559E39FCBCE47AC /* Control */ = {
 			isa = PBXGroup;
 			children = (
+				B7CC02D68D4369B858A43C3C /* UsageView.swift */,
 				A1B2C3D4E5F60718293A4D03 /* ActivityView.swift */,
 				A1B2C3D4E5F60718293A4C05 /* GenerateSheet.swift */,
 				A1B2C3D4E5F60718293A4C03 /* LlmDocBrowserView.swift */,
@@ -214,6 +219,7 @@
 		D5B9C62ACB1A2174374B7BC4 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				B71B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift */,
 				A1B2C3D4E5F60718293A4D01 /* ActivityFeedStore.swift */,
 				A1B2C3D4E5F60718293A4C01 /* GenerationStore.swift */,
 				A1B2C3D4E5F607890A1B2C02 /* ConnectionStore.swift */,
@@ -328,6 +334,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				B6CF935AF507506E25C1EA4A /* ContentView.swift in Sources */,
+				B8CC02D68D4369B858A43C3C /* UsageView.swift in Sources */,
+				B81B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift in Sources */,
 				A1B2C3D4E5F60718293A4D04 /* ActivityView.swift in Sources */,
 				A1B2C3D4E5F60718293A4D02 /* ActivityFeedStore.swift in Sources */,
 				A1B2C3D4E5F60718293A4C06 /* GenerateSheet.swift in Sources */,

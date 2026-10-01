@@ -101,6 +101,27 @@ struct SettingsView: View {
                     }
                 }
 
+                if connection.supports(MobileProtocol.Capability.usage) {
+                    NavigationLink { UsageView() } label: {
+                        HStack(spacing: DesignSystem.Spacing.md) {
+                            Image(systemName: "gauge.with.dots.needle.67percent")
+                                .font(.system(size: 20))
+                                .foregroundColor(DesignSystem.Colors.primary)
+                            Text("Usage & limits")
+                                .font(DesignSystem.Typography.bodyFont.weight(.medium))
+                                .foregroundColor(DesignSystem.Colors.textPrimary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(DesignSystem.Colors.textTertiary)
+                        }
+                        .padding(DesignSystem.Spacing.md)
+                        .background(DesignSystem.Colors.surface)
+                        .cornerRadius(DesignSystem.Layout.cornerRadiusL)
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 // Help
                 NavigationLink {
                     HelpView()

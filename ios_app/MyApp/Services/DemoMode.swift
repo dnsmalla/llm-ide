@@ -86,7 +86,7 @@ final class DemoResponder {
             send(Connected(deviceName: Self.macName, token: nil, deviceId: nil,
                            protocolVersion: MobileProtocol.protocolVersion,
                            capabilities: [MobileProtocol.Capability.chat, MobileProtocol.Capability.explorer,
-                                          MobileProtocol.Capability.activity,
+                                          MobileProtocol.Capability.activity, MobileProtocol.Capability.usage,
                                           MobileProtocol.Capability.autoTasks, MobileProtocol.Capability.loop,
                                           MobileProtocol.Capability.generation, MobileProtocol.Capability.llmDoc]))
 
@@ -250,6 +250,19 @@ final class DemoResponder {
                 .init(id: "r-2", startedAt: Date().addingTimeInterval(-93_600).timeIntervalSince1970, durationSeconds: 903, iterationsUsed: 5, statusCode: "givenUp", statusSummary: "Regression sweep still failing after 5 iterations", trigger: "schedule"),
                 .init(id: "r-1", startedAt: Date().addingTimeInterval(-180_000).timeIntervalSince1970, durationSeconds: 268, iterationsUsed: 1, statusCode: "success", statusSummary: "All stages green", trigger: "desktop"),
             ]))
+
+        // MARK: Usage
+        case MobileProtocol.Tag.usageGet:
+            send(UsageState(
+                provider: "anthropic", status: "ok", statusReason: nil, activeModel: "opus",
+                models: [.init(name: "Opus", pct: 62, state: "ok", detail: "62 of 100 runs · Daily · 62%",
+                               resetsAt: Date().addingTimeInterval(7_200).timeIntervalSince1970),
+                         .init(name: "Sonnet", pct: 91, state: "warning", detail: "91 of 100 runs · Daily · 91%"),
+                         .init(name: "Haiku", pct: nil, state: "ok", detail: "34 runs · Daily · no cap")],
+                subscription: [.init(name: "Session (5h)", pct: 38, state: "ok", detail: "38% used",
+                                     resetsAt: Date().addingTimeInterval(9_000).timeIntervalSince1970),
+                               .init(name: "Weekly (7d)", pct: 71, state: "ok", detail: "71% used")],
+                subscriptionNote: nil, permissionMode: "review", error: nil))
 
         // MARK: Activity
         case MobileProtocol.Tag.activityList:

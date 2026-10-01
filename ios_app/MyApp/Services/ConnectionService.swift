@@ -138,6 +138,7 @@ final class ConnectionService: ObservableObject {
     weak var macStatusStore: MacStatusStore?
     weak var generationStore: GenerationStore?
     weak var activityStore: ActivityFeedStore?
+    weak var usageStore: UsageStore?
     /// Set at app launch so `Connected.deviceName` can update persisted pairing info.
     weak var connectionStore: ConnectionStore?
 
@@ -284,6 +285,7 @@ final class ConnectionService: ObservableObject {
         macStatusStore?.resetForNewDevice()
         generationStore?.resetForNewDevice()
         activityStore?.resetForNewDevice()
+        usageStore?.resetForNewDevice()
         // The next Mac may serve a different feature set; forget this one's until it says.
         macCapabilities = nil
         macProtocolVersion = nil
@@ -620,6 +622,13 @@ final class ConnectionService: ObservableObject {
             autoTaskStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "loop_state", "loop_ack", "loop_history_reply":
             loopStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
+        case "mac_capabilities":
+            // The Mac's Phone access switches changed mid-session.
+            if let update = try? JSONDecoder().decode(MacCapabilities.self, from: data) {
+                macCapabilities = Set(update.capabilities)
+            }
+        case "usage_state":
+            usageStore?.handleInbound(type: "usage_state", data: data)
         case "activity_state":
             activityStore?.handleInbound(type: "activity_state", data: data)
         case "generation_options", "generation_result", "llmdoc_listing", "llmdoc_file":

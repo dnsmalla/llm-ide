@@ -13,6 +13,7 @@ struct RootTabView: View {
     @EnvironmentObject var loopStore: LoopStore
     @EnvironmentObject var macStatusStore: MacStatusStore
     @EnvironmentObject var activityStore: ActivityFeedStore
+    @EnvironmentObject var usageStore: UsageStore
 
     enum Tab: Hashable { case chat, project, activity, settings }
     @State private var selection: Tab = .chat
@@ -70,6 +71,7 @@ struct RootTabView: View {
         loopStore.refreshAll()
         explorerStore.exploreListSessions()
         if connection.supports(MobileProtocol.Capability.activity) { activityStore.refresh() }
+        usageStore.refresh()
     }
 
     private func actionToast(_ message: String) -> some View {
@@ -98,6 +100,7 @@ struct ContextBar: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var connectionStore: ConnectionStore
     @EnvironmentObject var macStatusStore: MacStatusStore
+    @EnvironmentObject var usageStore: UsageStore
 
     private var projectLabel: String {
         if let name = macStatusStore.macStatus?.projectName, !name.isEmpty { return name }
@@ -135,6 +138,15 @@ struct ContextBar: View {
                 .font(DesignSystem.Typography.captionFont.weight(.semibold))
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+            }
+            if let mode = UsageStore.permissionLabel(usageStore.permissionMode) {
+                Text(mode.text)
+                    .font(DesignSystem.Typography.captionFont.weight(.semibold))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .foregroundColor(mode.isRisky ? .white : DesignSystem.Colors.textSecondary)
+                    .background(mode.isRisky ? DesignSystem.Colors.danger : DesignSystem.Colors.surfaceSecondary,
+                                in: Capsule())
+                    .accessibilityLabel("Mac permission mode: \(mode.text)")
             }
             StatusPill(status: connection.connectionStatus)
         }
