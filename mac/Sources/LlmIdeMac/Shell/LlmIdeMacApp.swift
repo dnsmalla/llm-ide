@@ -292,6 +292,7 @@ public struct LlmIdeMacApp: App {
                     // hydrated list within the same .task tick.
                     templateStore.bootstrap()
                     commandStore.bootstrap()
+                    FeatureCatalog.provideGenerationStores(templates: templateStore, commands: commandStore)
                     docGenOutputStore.bootstrap()
                     // The kit's default templates/commands. Fire-and-forget:
                     // the store already serves its disk cache, so a failed or

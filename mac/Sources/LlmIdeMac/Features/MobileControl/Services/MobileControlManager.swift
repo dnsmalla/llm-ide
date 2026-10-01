@@ -83,6 +83,9 @@ final class MobileControlManager {
     /// Feature bridge for `loop_*` messages — nil when Loop is compiled out
     /// or not yet wired (see `routeToFeatureBridge`).
     var loopBridge: MobileFeatureBridge?
+    /// Feature bridge for `generation_*` / `llmdoc_*` messages — nil when
+    /// Doc Gen is compiled out or not yet wired (see `routeToFeatureBridge`).
+    var generationBridge: MobileFeatureBridge?
     /// Mac Settings + workspace — used to run iPhone explore prompts with the
     /// same model/provider and agent context as the desktop Explorer panel.
     var config: AppConfig?
@@ -378,6 +381,7 @@ final class MobileControlManager {
         mobilePushCancellables.removeAll()
         autoTaskBridge?.removePushObservers()
         loopBridge?.removePushObservers()
+        generationBridge?.removePushObservers()
         onMobileClientDisconnected()
         server?.stop()
         server = nil
@@ -527,6 +531,15 @@ final class MobileControlManager {
         MobileProtocol.Tag.loopHistory,
     ]
 
+    /// Feature message types the generation bridge owns (Doc Gen / Visual runs
+    /// and the read-only `llm-doc/` browser). Pinned by `MobileFeatureBridgeTests`.
+    static let generationMessageTypes: Set<String> = [
+        MobileProtocol.Tag.generationOptionsList,
+        MobileProtocol.Tag.generationRun,
+        MobileProtocol.Tag.llmDocList,
+        MobileProtocol.Tag.llmDocRead,
+    ]
+
     /// Route an auto-task/loop message type to its installed feature bridge.
     /// Returns `true` when `type` belongs to either feature's message set —
     /// the caller (the `handleInbound` switch) must NOT fall through to the
@@ -548,6 +561,13 @@ final class MobileControlManager {
                 return true
             }
             return loopBridge.handle(type: type, data: data)
+        }
+        if Self.generationMessageTypes.contains(type) {
+            guard let generationBridge else {
+                replyFeatureUnavailable(feature: "Doc Gen", commandId: type)
+                return true
+            }
+            return generationBridge.handle(type: type, data: data)
         }
         return false
     }
@@ -1137,6 +1157,7 @@ final class MobileControlManager {
 
         autoTaskBridge?.installPushObservers()
         loopBridge?.installPushObservers()
+        generationBridge?.installPushObservers()
     }
 
     /// Push a fresh Mac status snapshot when backend or project context changes.

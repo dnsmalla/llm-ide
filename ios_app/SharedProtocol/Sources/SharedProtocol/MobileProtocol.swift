@@ -96,5 +96,15 @@ public enum MobileProtocol {
         public static let loopAck = "loop_ack"
         public static let loopHistory = "loop_history"
         public static let loopHistoryReply = "loop_history_reply"
+
+        // MARK: Doc Gen / Visual + llm-doc browser — see GenerationMessages.swift
+        public static let generationOptionsList = "generation_options_list"
+        public static let generationOptions = "generation_options"
+        public static let generationRun = "generation_run"
+        public static let generationResult = "generation_result"
+        public static let llmDocList = "llmdoc_list"
+        public static let llmDocListing = "llmdoc_listing"
+        public static let llmDocRead = "llmdoc_read"
+        public static let llmDocFile = "llmdoc_file"
     }
 }

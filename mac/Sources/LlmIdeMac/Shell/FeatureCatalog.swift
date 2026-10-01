@@ -555,6 +555,35 @@ enum FeatureCatalog {
     #if FEATURE_MOBILE
     private static var mobileControlManager: MobileControlManager?
     #endif
+    #if FEATURE_DOCGEN && FEATURE_MOBILE
+    private static var generationTemplates: DocTemplateStore?
+    private static var generationCommands: DocCommandStore?
+    #endif
+
+    /// Hand the Doc Gen template/command stores to the phone bridge. The
+    /// stores are SwiftUI `@StateObject`s owned by the app root, so they reach
+    /// here from its first `.task` — and `bootMobile` may run before or after
+    /// that, so both call `wireGenerationBridge()`, which is idempotent.
+    /// A no-op unless Doc Gen AND Mobile are both compiled in; otherwise the
+    /// manager's slot stays nil and the phone is told "Doc Gen not installed".
+    static func provideGenerationStores(templates: DocTemplateStore, commands: DocCommandStore) {
+        #if FEATURE_DOCGEN && FEATURE_MOBILE
+        generationTemplates = templates
+        generationCommands = commands
+        wireGenerationBridge()
+        #endif
+    }
+
+    private static func wireGenerationBridge() {
+        #if FEATURE_DOCGEN && FEATURE_MOBILE
+        guard let mobile = mobileControlManager,
+              let templates = generationTemplates,
+              let commands = generationCommands,
+              mobile.generationBridge == nil else { return }
+        mobile.generationBridge = MobileGenerationBridge(
+            manager: mobile, templates: templates, commands: commands)
+        #endif
+    }
 
     /// Build + wire the Mobile Control stack (native WebSocket server +
     /// Bonjour advertiser + PIN pairing) and register `MobileModule`. No-op
@@ -584,6 +613,7 @@ enum FeatureCatalog {
             autoStart: { config.mobileControlAutoStart }))
 
         wireMobileFeatureBridges()
+        wireGenerationBridge()
         #endif
     }
 
