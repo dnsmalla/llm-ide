@@ -12,6 +12,7 @@ struct MyAppApp: App {
     @StateObject private var generationStore: GenerationStore
     @StateObject private var activityStore: ActivityFeedStore
     @StateObject private var usageStore: UsageStore
+    @StateObject private var projectsStore: ProjectsStore
 
     init() {
         // ConnectionService is created first; each feature store is wired to it
@@ -32,6 +33,7 @@ struct MyAppApp: App {
         _generationStore = StateObject(wrappedValue: GenerationStore(connection: connection))
         _activityStore = StateObject(wrappedValue: ActivityFeedStore(connection: connection))
         _usageStore = StateObject(wrappedValue: UsageStore(connection: connection))
+        _projectsStore = StateObject(wrappedValue: ProjectsStore(connection: connection))
     }
 
     var body: some Scene {
@@ -47,6 +49,7 @@ struct MyAppApp: App {
                 .environmentObject(generationStore)
                 .environmentObject(activityStore)
                 .environmentObject(usageStore)
+                .environmentObject(projectsStore)
         }
     }
 }

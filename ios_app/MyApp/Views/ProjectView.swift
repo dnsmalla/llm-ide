@@ -81,14 +81,30 @@ private struct ProjectHeader: View {
     @EnvironmentObject var macStatusStore: MacStatusStore
     @EnvironmentObject var autoTaskStore: AutoTaskStore
     @EnvironmentObject var loopStore: LoopStore
+    @EnvironmentObject var connection: ConnectionService
+    @State private var showSwitcher = false
+
+    private var canSwitch: Bool { connection.supports(MobileProtocol.Capability.projects) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
             HStack(spacing: DesignSystem.Spacing.sm) {
-                Text(projectName)
-                    .font(DesignSystem.Typography.headlineFont.weight(.bold))
-                    .foregroundColor(DesignSystem.Colors.textPrimary)
-                    .lineLimit(1)
+                Button { showSwitcher = true } label: {
+                    HStack(spacing: 4) {
+                        Text(projectName)
+                            .font(DesignSystem.Typography.headlineFont.weight(.bold))
+                            .foregroundColor(DesignSystem.Colors.textPrimary)
+                            .lineLimit(1)
+                        if canSwitch {
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundColor(DesignSystem.Colors.textTertiary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSwitch)
+                .accessibilityLabel(canSwitch ? "Project \(projectName). Switch project" : "Project \(projectName)")
                 if let branch = macStatusStore.macStatus?.gitBranch, !branch.isEmpty {
                     Label(branch, systemImage: "arrow.triangle.branch")
                         .font(DesignSystem.Typography.captionFont)
@@ -110,6 +126,7 @@ private struct ProjectHeader: View {
         .padding(.top, DesignSystem.Spacing.xs)
         .padding(.bottom, DesignSystem.Spacing.xs)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .sheet(isPresented: $showSwitcher) { ProjectSwitcherSheet() }
     }
 
     private var projectName: String {

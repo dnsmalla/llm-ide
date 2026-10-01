@@ -87,6 +87,7 @@ final class DemoResponder {
                            protocolVersion: MobileProtocol.protocolVersion,
                            capabilities: [MobileProtocol.Capability.chat, MobileProtocol.Capability.explorer,
                                           MobileProtocol.Capability.activity, MobileProtocol.Capability.usage,
+                                          MobileProtocol.Capability.projects,
                                           MobileProtocol.Capability.autoTasks, MobileProtocol.Capability.loop,
                                           MobileProtocol.Capability.generation, MobileProtocol.Capability.llmDoc]))
 
@@ -251,6 +252,16 @@ final class DemoResponder {
                 .init(id: "r-1", startedAt: Date().addingTimeInterval(-180_000).timeIntervalSince1970, durationSeconds: 268, iterationsUsed: 1, statusCode: "success", statusSummary: "All stages green", trigger: "desktop"),
             ]))
 
+        // MARK: Projects
+        case MobileProtocol.Tag.projectList:
+            send(projectState())
+
+        case MobileProtocol.Tag.projectSwitch:
+            if let id = obj["id"] as? String, demoProjects.contains(where: { $0.id == id }) {
+                demoActiveProject = id
+            }
+            send(projectState())
+
         // MARK: Usage
         case MobileProtocol.Tag.usageGet:
             send(UsageState(
@@ -322,6 +333,16 @@ final class DemoResponder {
     // MARK: — Snapshots
 
     private var demoUnread = 2
+    private let demoProjects: [ProjectInfo] = [
+        .init(id: "p-llmide", name: "llm-ide", lastOpenedAt: Date().timeIntervalSince1970 - 60),
+        .init(id: "p-notes", name: "meeting-notes", lastOpenedAt: Date().timeIntervalSince1970 - 86_400),
+        .init(id: "p-site", name: "marketing-site", lastOpenedAt: Date().timeIntervalSince1970 - 259_200),
+    ]
+    private var demoActiveProject = "p-llmide"
+
+    private func projectState() -> ProjectState {
+        ProjectState(active: demoProjects.first { $0.id == demoActiveProject }, projects: demoProjects)
+    }
 
     private func activityState() -> ActivityState {
         let now = Date().timeIntervalSince1970

@@ -14,6 +14,8 @@ struct RootTabView: View {
     @EnvironmentObject var macStatusStore: MacStatusStore
     @EnvironmentObject var activityStore: ActivityFeedStore
     @EnvironmentObject var usageStore: UsageStore
+    @EnvironmentObject var projectsStore: ProjectsStore
+    @EnvironmentObject var generationStore: GenerationStore
 
     enum Tab: Hashable { case chat, project, activity, settings }
     @State private var selection: Tab = .chat
@@ -62,6 +64,12 @@ struct RootTabView: View {
         .onChange(of: connection.connectionStatus) { status in
             if status == .connected { refreshMacData() }
         }
+        // The Mac opened another project (from the phone, or at the keyboard): everything the phone
+        // cached about the old one — templates, doc listings, loop/task snapshots — is stale.
+        .onChange(of: macStatusStore.macStatus?.projectName) { _ in
+            generationStore.invalidateProjectScopedCaches()
+            refreshMacData()
+        }
     }
 
     private func refreshMacData() {
@@ -72,6 +80,7 @@ struct RootTabView: View {
         explorerStore.exploreListSessions()
         if connection.supports(MobileProtocol.Capability.activity) { activityStore.refresh() }
         usageStore.refresh()
+        projectsStore.refresh()
     }
 
     private func actionToast(_ message: String) -> some View {

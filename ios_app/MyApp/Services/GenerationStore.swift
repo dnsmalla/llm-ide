@@ -145,6 +145,14 @@ final class GenerationStore: ObservableObject {
         finishRun()
     }
 
+    /// Templates, commands, save folder and `llm-doc` listings belong to the Mac's ACTIVE project.
+    func invalidateProjectScopedCaches() {
+        options = nil
+        optionsError = nil
+        listings = [:]
+        files = [:]
+    }
+
     func resetForNewDevice() {
         options = nil
         optionsError = nil
