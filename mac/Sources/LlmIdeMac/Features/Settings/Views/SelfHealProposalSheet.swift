@@ -8,6 +8,7 @@ struct SelfHealProposalSheet: View {
     let incidents: [Incident]
     @Environment(\.dismiss) private var dismiss
     @State private var diff = ""
+    @State private var diffLoaded = false
     @State private var failure: String?
     @State private var working = false
 
@@ -37,6 +38,7 @@ struct SelfHealProposalSheet: View {
                     }, onSuccess: { SelfHealProposalService.markApplied(proposal, store: .shared) })
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(!diffLoaded)
             }
             .disabled(working)
         }
@@ -44,15 +46,21 @@ struct SelfHealProposalSheet: View {
         .frame(minWidth: 640, minHeight: 480)
         .task {
             let p = proposal
-            let text = await Task.detached { (try? SelfHealProposalService.diff(p)) ?? "" }.value
-            diff = text.isEmpty ? "(no changes)" : text
+            do {
+                let text = try await Task.detached { try SelfHealProposalService.diff(p) }.value
+                if text.isEmpty {
+                    diff = "(no changes)"
+                } else {
+                    diff = text
+                    diffLoaded = true
+                }
+            } catch {
+                failure = error.localizedDescription
+            }
         }
     }
 
-    // `gitWork` runs off the main actor so a slow `git apply`/`discard` never
-    // blocks the UI; `onSuccess` and the failure path hop back to the main
-    // actor to touch `IncidentStore`/dismiss, since this view's state and
-    // `SelfHealProposalService`'s store helpers are main-actor-isolated.
+    // gitWork runs off the main actor (a slow git call must not block the UI); onSuccess/failure hop back to touch main-actor-isolated state.
     private func run(gitWork: @escaping @Sendable () throws -> Void, onSuccess: @escaping @MainActor () -> Void) {
         working = true
         Task.detached {

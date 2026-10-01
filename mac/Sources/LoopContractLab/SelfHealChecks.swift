@@ -358,9 +358,34 @@ func runSelfHealCoreChecks() {
     }
 
     do {
-        // A broken pipe while writing a large patch (>64 KB) must not crash the
-        // process: stdin writes happen off the drain queues, and apply refusing
-        // early (empty stdout before stdin finishes) must stay non-fatal.
+        // Discard must tolerate a worktree already removed by hand (e.g. deleted outside the app).
+        func git(_ args: [String], _ dir: URL) -> String {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.arguments = ["-c", "user.name=lab", "-c", "user.email=lab@example.invalid"] + args
+            p.currentDirectoryURL = dir
+            let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+            try? p.run(); p.waitUntilExit()
+            return String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        }
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("gone-\(UUID().uuidString)")
+        let main = base.appendingPathComponent("main"), wt = base.appendingPathComponent("wt")
+        try? FileManager.default.createDirectory(at: main, withIntermediateDirectories: true)
+        _ = git(["init", "-q"], main)
+        try? "one\n".write(to: main.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8)
+        _ = git(["add", "."], main); _ = git(["commit", "-qm", "init"], main)
+        _ = git(["worktree", "add", "-q", "-b", "heal/gone", wt.path, "HEAD"], main)
+        let proposal = IncidentProposal(mainRepo: main.path, worktreePath: wt.path, branch: "heal/gone", baseCommit: "")
+        try? FileManager.default.removeItem(at: wt)
+        let discardThrew = (try? SelfHealProposalService.discard(proposal)) == nil
+        expect(!discardThrew, "discard does not throw when the worktree is already gone")
+        let branches = git(["branch", "--list", "heal/gone"], main)
+        expect(branches.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, "the branch is still cleaned up")
+        try? FileManager.default.removeItem(at: base)
+    }
+
+    do {
+        // Proves the deadlock fix: a >200 KB patch through stdin completes and lands intact.
         func git(_ args: [String], _ dir: URL) {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
@@ -386,7 +411,53 @@ func runSelfHealCoreChecks() {
         expect(bigDiff.utf8.count > 200_000, "the generated patch exceeds 200 KB")
         let appliedBig = (try? SelfHealProposalService.apply(proposal)) != nil
         expect(appliedBig, "a >200 KB patch applies without deadlocking on stdin/stdout")
+        let landedSize = (try? FileManager.default.attributesOfItem(atPath: main.appendingPathComponent("big.txt").path)[.size] as? Int) ?? nil
+        expect(landedSize == bigContent.utf8.count, "the applied file lands in main at the expected size")
         try? SelfHealProposalService.discard(proposal)
+        try? FileManager.default.removeItem(at: base)
+    }
+
+    do {
+        // apply() against a directory with none of the patched files present still
+        // throws cleanly rather than crashing — but measured (see fix report): `git
+        // apply` fully buffers stdin before validating file existence, so this case
+        // alone never reaches the SIGPIPE path; the dedicated regression for that is
+        // the `--bogus-flag` check below, which reproduces a git exit BEFORE it
+        // reads any of a large stdin payload.
+        func git(_ args: [String], _ dir: URL) {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.arguments = ["-c", "user.name=lab", "-c", "user.email=lab@example.invalid"] + args
+            p.currentDirectoryURL = dir
+            p.standardOutput = Pipe(); p.standardError = Pipe()
+            try? p.run(); p.waitUntilExit()
+        }
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("brokenpipe-\(UUID().uuidString)")
+        let src = base.appendingPathComponent("src"), wt = base.appendingPathComponent("wt"), notGit = base.appendingPathComponent("not-git")
+        try? FileManager.default.createDirectory(at: src, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: notGit, withIntermediateDirectories: true)
+        git(["init", "-q"], src)
+        try? "one\n".write(to: src.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8)
+        git(["add", "."], src); git(["commit", "-qm", "init"], src)
+        let head = (try? SelfHealProposalService.git(["rev-parse", "HEAD"], in: src))
+            .flatMap { String(data: $0, encoding: .utf8) }?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        git(["worktree", "add", "-q", "-b", "heal/brokenpipe", wt.path, "HEAD"], src)
+        let bigContent = "one\n" + String(repeating: "line of generated content\n", count: 10_000)
+        try? bigContent.write(to: wt.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8)
+        let brokenProposal = IncidentProposal(mainRepo: notGit.path, worktreePath: wt.path,
+                                              branch: "heal/brokenpipe", baseCommit: head)
+        let threw = (try? SelfHealProposalService.apply(brokenProposal)) == nil
+        expect(threw, "apply against a target missing the patched file throws instead of crashing")
+        git(["worktree", "remove", "--force", wt.path], src)
+
+        // Deterministic SIGPIPE regression: an unrecognized flag makes git print
+        // usage and exit before it ever reads stdin, so without F_SETNOSIGPIPE the
+        // write below kills the whole process (confirmed by temporarily reverting
+        // the fix: the process dies mid-write and this assertion never runs).
+        let bigPatch = Data(repeating: 0x78, count: 5 * 1024 * 1024)
+        let sigpipeThrew = (try? SelfHealProposalService.git(["apply", "--bogus-flag-xyz", "-"],
+                                                             in: notGit, input: bigPatch)) == nil
+        expect(sigpipeThrew, "a git process that exits before reading a large stdin payload throws, not crashes")
         try? FileManager.default.removeItem(at: base)
     }
 }

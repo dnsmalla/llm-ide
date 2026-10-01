@@ -22,7 +22,7 @@ struct SelfHealSettingsSection: View {
                                            by: { $0.proposal! })
                 if !proposals.isEmpty {
                     Divider()
-                    ForEach(Array(proposals.keys), id: \.worktreePath) { proposal in
+                    ForEach(proposals.keys.sorted { $0.worktreePath < $1.worktreePath }, id: \.worktreePath) { proposal in
                         HStack {
                             Text("Proposed fix · \(proposals[proposal]?.count ?? 0) incident(s)")
                                 .font(.system(size: 11, weight: .medium))

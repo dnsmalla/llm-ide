@@ -10,7 +10,12 @@ public enum SelfHealProposalService {
 
     public static func discard(_ proposal: IncidentProposal) throws {
         let main = URL(fileURLWithPath: proposal.mainRepo)
-        try git(["worktree", "remove", "--force", proposal.worktreePath], in: main)
+        // A worktree already removed by hand must not block marking the proposal discarded.
+        if FileManager.default.fileExists(atPath: proposal.worktreePath) {
+            try git(["worktree", "remove", "--force", proposal.worktreePath], in: main)
+        } else {
+            _ = try? git(["worktree", "prune"], in: main)
+        }
         _ = try? git(["branch", "-D", proposal.branch], in: main)
     }
 
@@ -51,11 +56,7 @@ public enum SelfHealProposalService {
         }
     }
 
-    // Stdout/stderr drains start BEFORE stdin is written, and stdin is written
-    // on its own queue: `git apply` can refuse (and close stdin/exit) before
-    // consuming a large patch, so writing stdin synchronously up front risked
-    // a deadlock (git blocks on a full stdout/stderr pipe while we block on
-    // stdin) and a broken-pipe write would otherwise be fatal mid-write.
+    // Drains start before stdin is written, and stdin is written on its own queue, to avoid a deadlock if git exits early.
     @discardableResult
     public static func git(_ args: [String], in dir: URL, input: Data? = nil) throws -> Data {
         let process = Process()
@@ -66,7 +67,12 @@ public enum SelfHealProposalService {
         process.standardOutput = out
         process.standardError = err
         let inPipe = Pipe()
-        if input != nil { process.standardInput = inPipe }
+        if input != nil {
+            process.standardInput = inPipe
+            // Without this, the kernel's default SIGPIPE action kills the process on a broken
+            // pipe before `write(contentsOf:)` can return EPIPE, so `try?` alone would not help.
+            _ = fcntl(inPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        }
         try process.run()
 
         var outData = Data()
