@@ -146,6 +146,12 @@ func runSelfHealCoreChecks() {
         IncidentRecorder.record(source: .log, category: "API", message: "late log line from the run", stack: nil,
                                 at: during, into: store, eligible: true)
         expect(store.incidents.count == 1, "a log line timestamped inside a suppression window is dropped later too")
+
+        let staleToken = IncidentRecorder.beginSuppression()
+        IncidentRecorder.record(source: .log, category: "API", message: "after an unended window expires",
+                                stack: nil, at: Date().addingTimeInterval(5 * 3600), into: store, eligible: true)
+        expect(store.incidents.count == 2, "an unended suppression window expires after 4 hours")
+        IncidentRecorder.endSuppression(staleToken)
         try? FileManager.default.removeItem(at: file)
     }
 }

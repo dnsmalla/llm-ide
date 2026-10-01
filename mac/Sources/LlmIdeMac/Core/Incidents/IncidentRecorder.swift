@@ -27,11 +27,14 @@ public enum IncidentRecorder {
     // Windows, not a flag: os_log lines are read up to a minute later and carry their own timestamps.
     @MainActor private static var windows: [(id: UUID, start: Date, end: Date?)] = []
 
+    // A run that never calls endSuppression (crash, hang) must not suppress forever.
+    private static let maxOpenWindow: TimeInterval = 4 * 3600
+
     @MainActor
     public static func beginSuppression() -> UUID {
         let id = UUID()
         windows.append((id, Date(), nil))
-        windows.removeAll { ($0.end ?? .distantFuture) < Date().addingTimeInterval(-3600) }
+        windows.removeAll { ($0.end ?? $0.start.addingTimeInterval(maxOpenWindow)) < Date().addingTimeInterval(-3600) }
         return id
     }
 
@@ -43,6 +46,6 @@ public enum IncidentRecorder {
 
     @MainActor
     public static func isSuppressed(at date: Date) -> Bool {
-        windows.contains { date >= $0.start && date <= ($0.end ?? .distantFuture) }
+        windows.contains { date >= $0.start && date <= ($0.end ?? $0.start.addingTimeInterval(maxOpenWindow)) }
     }
 }
