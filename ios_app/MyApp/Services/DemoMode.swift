@@ -86,6 +86,7 @@ final class DemoResponder {
             send(Connected(deviceName: Self.macName, token: nil, deviceId: nil,
                            protocolVersion: MobileProtocol.protocolVersion,
                            capabilities: [MobileProtocol.Capability.chat, MobileProtocol.Capability.explorer,
+                                          MobileProtocol.Capability.activity,
                                           MobileProtocol.Capability.autoTasks, MobileProtocol.Capability.loop,
                                           MobileProtocol.Capability.generation, MobileProtocol.Capability.llmDoc]))
 
@@ -250,6 +251,14 @@ final class DemoResponder {
                 .init(id: "r-1", startedAt: Date().addingTimeInterval(-180_000).timeIntervalSince1970, durationSeconds: 268, iterationsUsed: 1, statusCode: "success", statusSummary: "All stages green", trigger: "desktop"),
             ]))
 
+        // MARK: Activity
+        case MobileProtocol.Tag.activityList:
+            send(activityState())
+
+        case MobileProtocol.Tag.activityMarkSeen:
+            demoUnread = 0
+            send(activityState())
+
         // MARK: Doc Gen / Visual + llm-doc
         case MobileProtocol.Tag.generationOptionsList:
             send(GenerationOptions(
@@ -298,6 +307,19 @@ final class DemoResponder {
     }
 
     // MARK: — Snapshots
+
+    private var demoUnread = 2
+
+    private func activityState() -> ActivityState {
+        let now = Date().timeIntervalSince1970
+        return ActivityState(entries: [
+            .init(id: 5, kind: "loop_engineering_done", title: "Loop finished — all stages green", createdAt: now - 420),
+            .init(id: 4, kind: "meeting_added", title: "Meeting added: Sprint planning", createdAt: now - 3_600),
+            .init(id: 3, kind: "model_fallback", title: "Switched to the fallback model (usage limit)", createdAt: now - 20_000),
+            .init(id: 2, kind: "email_fetched", title: "3 new emails ingested", createdAt: now - 90_000),
+            .init(id: 1, kind: "regression_done", title: "Regression sweep passed (676 tests)", createdAt: now - 180_000),
+        ], unread: demoUnread)
+    }
 
     private func macStatus() -> MacStatus {
         MacStatus(projectName: "llm-ide", gitBranch: "main", workspacePath: "~/llm-ide",

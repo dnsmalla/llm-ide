@@ -12,8 +12,9 @@ struct RootTabView: View {
     @EnvironmentObject var autoTaskStore: AutoTaskStore
     @EnvironmentObject var loopStore: LoopStore
     @EnvironmentObject var macStatusStore: MacStatusStore
+    @EnvironmentObject var activityStore: ActivityFeedStore
 
-    enum Tab: Hashable { case chat, project, settings }
+    enum Tab: Hashable { case chat, project, activity, settings }
     @State private var selection: Tab = .chat
 
     private var isConnected: Bool { connection.connectionStatus == .connected }
@@ -34,6 +35,13 @@ struct RootTabView: View {
                 .tabItem { Label("Project", systemImage: "folder.fill") }
                 .badge(explorerStore.pendingApproval == nil ? 0 : 1)
                 .tag(Tab.project)
+
+            if connection.supports(MobileProtocol.Capability.activity) {
+                ActivityView()
+                    .tabItem { Label("Activity", systemImage: "bell.fill") }
+                    .badge(activityStore.unread)
+                    .tag(Tab.activity)
+            }
 
             NavigationStack { SettingsView() }
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
@@ -61,6 +69,7 @@ struct RootTabView: View {
         autoTaskStore.refreshAll()
         loopStore.refreshAll()
         explorerStore.exploreListSessions()
+        if connection.supports(MobileProtocol.Capability.activity) { activityStore.refresh() }
     }
 
     private func actionToast(_ message: String) -> some View {
