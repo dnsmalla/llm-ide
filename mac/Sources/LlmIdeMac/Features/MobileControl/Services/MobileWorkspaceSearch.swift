@@ -166,7 +166,7 @@ enum MobileWorkspaceSearch {
         return false
     }
 
-    private static func isDenied(relPath: String, name: String) -> Bool {
+    static func isDenied(relPath: String, name: String) -> Bool {
         if relPath.split(separator: "/").contains(where: { $0 == ".git" || $0 == ".ssh" }) { return true }
         if denyBasenames.contains(name) || name.hasPrefix(".env.") { return true }
         if let ext = name.split(separator: ".").last.map({ ".\($0.lowercased())" }),

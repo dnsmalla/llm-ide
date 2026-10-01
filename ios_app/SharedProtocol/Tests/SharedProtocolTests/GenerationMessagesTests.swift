@@ -102,4 +102,13 @@ final class GenerationMessagesTests: XCTestCase {
         XCTAssertFalse(json.lowercased().contains("always"), "always-allow persists a rule and stays on the Mac")
         XCTAssertEqual(MobileProtocol.Tag.toolApprovalAnswer, "tool_approval_answer")
     }
+
+    func testSourceControlMessagesRoundTrip() throws {
+        let state = ScmState(isRepo: true, branch: "main", ahead: 1, behind: 2, hasUpstream: true,
+                             files: [ScmFile(path: "a", status: "modified", staged: true)], filesTruncated: false,
+                             commits: [ScmCommit(sha: "abc", author: "a", relativeDate: "now", subject: "s")], error: nil)
+        XCTAssertEqual(try roundTrip(state), state)
+        XCTAssertEqual(try roundTrip(ScmDiffRequest(path: "a", staged: false)).path, "a")
+        XCTAssertEqual(MobileProtocol.Tag.scmDiffResult, "scm_diff_result")
+    }
 }

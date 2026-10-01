@@ -24,6 +24,9 @@ extension MobileControlManager {
         // registration exists only to advertise the capability behind its switch.
         register(bridge: NoMessagesBridge(), messageTypes: [],
                  capabilities: [(name: MobileProtocol.Capability.toolApprovals, gate: .toolApprovals)])
+        register(bridge: MobileSourceControlBridge(manager: self),
+                 messageTypes: [MobileProtocol.Tag.scmStatusList, MobileProtocol.Tag.scmDiff],
+                 capabilities: [(name: MobileProtocol.Capability.sourceControl, gate: .sourceControlRead)])
         register(bridge: MobileUsageBridge(manager: self),
                  messageTypes: [MobileProtocol.Tag.usageGet],
                  capabilities: [(name: MobileProtocol.Capability.usage, gate: nil)])
