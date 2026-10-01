@@ -2,8 +2,10 @@ import SwiftUI
 
 /// The steps the agent took before answering, as compact rows above the
 /// reply — the professional form of what used to be raw `<<<TOOL_CALL>>>`
-/// JSON streaming into the bubble. Read-only and non-interactive: it is a
-/// record of what happened, not a control.
+/// JSON streaming into the bubble. A record of what happened; the one
+/// interaction is double-clicking a row to reveal that step's tool input
+/// and output (the Ctrl+O gesture from Claude Code), when the v2 wire
+/// carried them — legacy steps have neither and stay inert.
 ///
 /// Bounded on purpose. A v2 turn can run thirty-odd tools before it says a
 /// word, and rendered as a plain stack that pushed the reply — and every
@@ -20,6 +22,10 @@ struct ToolActivityList: View {
     /// inline. The escape hatch for reading a long run end to end without
     /// fighting a nested scroller.
     @State private var expanded = false
+    /// Steps whose detail (tool args + result) is open, toggled per row by
+    /// double-click. A set, not a single id: comparing two steps' outputs
+    /// side by side is the point of expanding them.
+    @State private var expandedStepIds: Set<UUID> = []
 
     /// Rows shown before the list starts scrolling instead of growing.
     private static let visibleRowCount = 5
@@ -85,25 +91,84 @@ struct ToolActivityList: View {
     private var rows: some View {
         VStack(alignment: .leading, spacing: Self.rowSpacing) {
             ForEach(steps) { step in
-                HStack(spacing: 6) {
-                    Image(systemName: step.icon)
-                        .font(.system(size: 10))
-                        .foregroundStyle(theme.current.textMuted)
-                        .frame(width: 12, alignment: .center)
-                    // The trailing "…" belongs to the live status line, not to a
-                    // finished step — a completed action reads as "Read X", and
-                    // leaving the ellipsis makes every past step look stuck.
-                    Text(Self.rowLabel(step.label))
-                        .font(.system(size: 11))
-                        .foregroundStyle(theme.current.textMuted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 0)
-                }
-                .frame(height: Self.rowHeight)
-                .id(step.id)
+                stepRow(step)
+                    .id(step.id)
             }
         }
+    }
+
+    @ViewBuilder
+    private func stepRow(_ step: ChatMessage.ToolStep) -> some View {
+        let hasDetail = Self.hasDetail(step)
+        let isOpen = expandedStepIds.contains(step.id)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Image(systemName: step.icon)
+                    .font(.system(size: 10))
+                    .foregroundStyle(theme.current.textMuted)
+                    .frame(width: 12, alignment: .center)
+                // The trailing "…" belongs to the live status line, not to a
+                // finished step — a completed action reads as "Read X", and
+                // leaving the ellipsis makes every past step look stuck.
+                Text(Self.rowLabel(step.label))
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.current.textMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if hasDetail {
+                    Image(systemName: isOpen ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 7, weight: .semibold))
+                        .foregroundStyle(theme.current.textMuted.opacity(0.6))
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(height: Self.rowHeight)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                guard hasDetail else { return }
+                if isOpen {
+                    expandedStepIds.remove(step.id)
+                } else {
+                    expandedStepIds.insert(step.id)
+                }
+            }
+            .help(hasDetail ? "Double-click to show this step's input and output" : "")
+            if isOpen {
+                stepDetail(step)
+            }
+        }
+    }
+
+    /// A row only answers double-click when the wire gave it something to
+    /// show — legacy-engine steps carry neither args nor output.
+    static func hasDetail(_ step: ChatMessage.ToolStep) -> Bool {
+        (step.args?.isEmpty == false) || (step.resultText?.isEmpty == false)
+    }
+
+    private func stepDetail(_ step: ChatMessage.ToolStep) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if let args = step.args, !args.isEmpty {
+                Text(args)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(theme.current.textMuted)
+                    .lineLimit(8)
+                    .textSelection(.enabled)
+            }
+            if let result = step.resultText, !result.isEmpty {
+                Text(result)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(step.isError == true
+                                     ? theme.current.danger
+                                     : theme.current.textMuted)
+                    .lineLimit(30)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(6)
+        .frame(maxWidth: 720, alignment: .leading)
+        .background(theme.current.surface2)
+        .cornerRadius(4)
+        .padding(.leading, 18)
     }
 
     /// Exposed for the row-label test: the ellipsis strip is the one piece of

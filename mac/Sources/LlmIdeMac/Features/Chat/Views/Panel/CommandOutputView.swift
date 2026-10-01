@@ -19,6 +19,8 @@ struct BashResultDisplay {
 /// Collapsible command-output block: always shows the command line and a
 /// status glyph; output collapses to the first few lines with a "Show full
 /// output" toggle, so a long build/test log doesn't dominate the transcript.
+/// Double-clicking the block toggles the same expansion (the Ctrl+O gesture
+/// from Claude Code); the button remains as the discoverable affordance.
 struct CommandOutputView: View {
     let display: BashResultDisplay
     @EnvironmentObject var theme: ThemeStore
@@ -80,5 +82,15 @@ struct CommandOutputView: View {
         .frame(maxWidth: 720, alignment: .leading)
         .background(theme.current.surface2)
         .cornerRadius(6)
+        .contentShape(Rectangle())
+        // Double-click on selectable text selects a word instead, so the
+        // gesture mainly serves the chrome (padding, status row, background);
+        // the "Show full output" button stays as the always-working path.
+        .onTapGesture(count: 2) {
+            if outputLines.count > collapsedLineCount { expanded.toggle() }
+        }
+        .help(outputLines.count > collapsedLineCount
+              ? "Double-click to \(expanded ? "collapse" : "expand") the output"
+              : "")
     }
 }
