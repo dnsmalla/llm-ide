@@ -24,6 +24,24 @@ enum PhoneRedaction {
         return (out.joined(separator: "\n"), truncated)
     }
 
+    /// For SOURCE CODE shown in the file viewer: scrubs known token shapes (GitHub/AWS/Anthropic keys,
+    /// bearer tokens…) but, unlike `lines`, leaves `key = value` text alone — redacting every
+    /// `token: String` would mangle ordinary code. Same per-line bounding.
+    nonisolated static func code(_ raw: String, maxChars: Int, maxLine: Int = PhoneRedaction.maxLine) -> (text: String, truncated: Bool) {
+        var out: [String] = []
+        var total = 0
+        var truncated = false
+        for line in raw.split(separator: "\n", omittingEmptySubsequences: false) {
+            var text = String(line.prefix(maxLine))
+            if line.count > maxLine { text += " …[line truncated]"; truncated = true }
+            text = SecretRedactor.redact(text)
+            total += text.count + 1
+            if total > maxChars { truncated = true; break }
+            out.append(text)
+        }
+        return (out.joined(separator: "\n"), truncated)
+    }
+
     /// Short single-string form for errors and notes.
     nonisolated static func short(_ s: String, limit: Int = 300) -> String {
         IncidentRedactor.redact(String(s.prefix(2_000)), limit: limit)

@@ -37,6 +37,9 @@ public enum MobileProtocol {
         public static let selfHealApply = "self_heal_apply"
         public static let toolApprovals = "tool_approvals"
         public static let sourceControl = "source_control"
+        public static let files = "files"
+        public static let issues = "issues"
+        public static let issueComment = "issue_comment"
 
         /// What a Mac that sends NO capability list is assumed to serve: everything that shipped
         /// before the handshake existed. Doc Gen and the llm-doc browser came after it, so a
@@ -138,6 +141,19 @@ public enum MobileProtocol {
 
         // Mac → phone: the capability list changed mid-session (a Phone Access switch was flipped).
         public static let macCapabilities = "mac_capabilities"
+
+        // MARK: Project files (read-only) — see FilesMessages.swift
+        public static let filesList = "files_list"
+        public static let filesListing = "files_listing"
+        public static let filesRead = "files_read"
+        public static let filesFile = "files_file"
+
+        // MARK: Issues — see IssuesMessages.swift
+        public static let issuesList = "issues_list"
+        public static let issuesState = "issues_state"
+        public static let issueGet = "issue_get"
+        public static let issueDetail = "issue_detail"
+        public static let issueCommentPost = "issue_comment_post"
 
         // MARK: Source Control (read-only) — see SourceControlMessages.swift
         public static let scmStatusList = "scm_status_list"

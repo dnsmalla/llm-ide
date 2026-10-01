@@ -24,6 +24,14 @@ extension MobileControlManager {
         // registration exists only to advertise the capability behind its switch.
         register(bridge: NoMessagesBridge(), messageTypes: [],
                  capabilities: [(name: MobileProtocol.Capability.toolApprovals, gate: .toolApprovals)])
+        register(bridge: MobileFilesBridge(manager: self),
+                 messageTypes: [MobileProtocol.Tag.filesList, MobileProtocol.Tag.filesRead],
+                 capabilities: [(name: MobileProtocol.Capability.files, gate: .fileBrowse)])
+        register(bridge: MobileIssuesBridge(manager: self),
+                 messageTypes: [MobileProtocol.Tag.issuesList, MobileProtocol.Tag.issueGet,
+                                MobileProtocol.Tag.issueCommentPost],
+                 capabilities: [(name: MobileProtocol.Capability.issues, gate: .issuesRead),
+                                (name: MobileProtocol.Capability.issueComment, gate: .issueComment)])
         register(bridge: MobileSourceControlBridge(manager: self),
                  messageTypes: [MobileProtocol.Tag.scmStatusList, MobileProtocol.Tag.scmDiff],
                  capabilities: [(name: MobileProtocol.Capability.sourceControl, gate: .sourceControlRead)])

@@ -829,7 +829,7 @@ final class MobileControlManager {
     }
 
     /// Active explorer code root — same precedence as `ExplorerView.root`.
-    private func mobileWorkspaceURL() -> URL? {
+    func mobileWorkspaceURL() -> URL? {
         guard let config, let projectStore else { return nil }
         if let code = projectStore.activeProjectCodeDir { return code }
         return WorkspaceRoot.resolve(config: config, projectStore: projectStore)

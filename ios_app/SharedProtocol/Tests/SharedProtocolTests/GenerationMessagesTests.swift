@@ -111,4 +111,14 @@ final class GenerationMessagesTests: XCTestCase {
         XCTAssertEqual(try roundTrip(ScmDiffRequest(path: "a", staged: false)).path, "a")
         XCTAssertEqual(MobileProtocol.Tag.scmDiffResult, "scm_diff_result")
     }
+
+    func testFilesAndIssuesMessagesRoundTrip() throws {
+        XCTAssertEqual(try roundTrip(FilesListing(path: "a", entries: [FileEntry(name: "x", isDirectory: false, size: 1)])).entries.count, 1)
+        XCTAssertEqual(try roundTrip(FilesFile(path: "a", text: "t", truncated: true)).truncated, true)
+        let detail = IssueDetail(number: 1, title: "t", state: "opened", body: nil, labels: ["l"], author: "a", assignees: [],
+                                 comments: [IssueNote(id: "1", author: "a", body: "b", createdAt: "c")], webUrl: nil, canComment: true)
+        XCTAssertEqual(try roundTrip(detail), detail)
+        XCTAssertEqual(try roundTrip(IssueCommentPost(number: 3, body: "hi")).body, "hi")
+        XCTAssertNotEqual(MobileProtocol.Tag.issueCommentPost, MobileProtocol.Capability.issueComment)
+    }
 }
