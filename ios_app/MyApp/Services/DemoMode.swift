@@ -83,7 +83,11 @@ final class DemoResponder {
             // The demo "pairs" instantly, and issues NO token: a token would be
             // written to the Keychain and would let a later launch try to
             // reconnect to a Mac that does not exist.
-            send(Connected(deviceName: Self.macName, token: nil, deviceId: nil))
+            send(Connected(deviceName: Self.macName, token: nil, deviceId: nil,
+                           protocolVersion: MobileProtocol.protocolVersion,
+                           capabilities: [MobileProtocol.Capability.chat, MobileProtocol.Capability.explorer,
+                                          MobileProtocol.Capability.autoTasks, MobileProtocol.Capability.loop,
+                                          MobileProtocol.Capability.generation, MobileProtocol.Capability.llmDoc]))
 
         case MobileProtocol.Tag.heartbeat:
             sendRaw(["type": MobileProtocol.Tag.heartbeatAck])

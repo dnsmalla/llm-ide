@@ -1,4 +1,5 @@
 import SwiftUI
+import SharedProtocol
 
 struct SettingsView: View {
     @EnvironmentObject var connectionStore: ConnectionStore
@@ -46,6 +47,10 @@ struct SettingsView: View {
                                     .foregroundColor(DesignSystem.Colors.textTertiary)
                             }
                             .padding(DesignSystem.Spacing.md)
+
+                            Divider().padding(.horizontal, DesignSystem.Spacing.md)
+
+                            macFeatures
 
                             Divider().padding(.horizontal, DesignSystem.Spacing.md)
 
@@ -150,6 +155,34 @@ struct SettingsView: View {
         .background(DesignSystem.Colors.background)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
+    }
+
+    /// What the paired Mac says it can do, so a missing tab is explained rather than mysterious.
+    @ViewBuilder
+    private var macFeatures: some View {
+        if let caps = connection.macCapabilities {
+            let labels: [(String, String)] = [
+                (MobileProtocol.Capability.chat, "Chat"), (MobileProtocol.Capability.explorer, "Explorer"),
+                (MobileProtocol.Capability.autoTasks, "Auto Tasks"), (MobileProtocol.Capability.loop, "Loop"),
+                (MobileProtocol.Capability.generation, "Doc Gen"), (MobileProtocol.Capability.llmDoc, "Docs"),
+            ]
+            let missing = labels.filter { !caps.contains($0.0) }.map(\.1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Mac features")
+                    .font(DesignSystem.Typography.footnoteFont.weight(.semibold))
+                    .foregroundColor(DesignSystem.Colors.textSecondary)
+                Text(labels.filter { caps.contains($0.0) }.map(\.1).joined(separator: " · "))
+                    .font(DesignSystem.Typography.footnoteFont)
+                    .foregroundColor(DesignSystem.Colors.textPrimary)
+                if !missing.isEmpty {
+                    Text("Not available on this Mac: \(missing.joined(separator: ", ")). Update LLM-IDE on the Mac to unlock them.")
+                        .font(DesignSystem.Typography.captionFont)
+                        .foregroundColor(DesignSystem.Colors.textTertiary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(DesignSystem.Spacing.md)
+        }
     }
 
     private var appVersion: String {

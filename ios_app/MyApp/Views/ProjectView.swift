@@ -17,8 +17,23 @@ struct ProjectView: View {
         case loop = "Loop"
         case docs = "Docs"
         var id: String { rawValue }
+
+        /// The `MobileProtocol.Capability` this segment needs from the Mac.
+        var capability: String {
+            switch self {
+            case .explorer:  return MobileProtocol.Capability.explorer
+            case .autoTasks: return MobileProtocol.Capability.autoTasks
+            case .loop:      return MobileProtocol.Capability.loop
+            case .docs:      return MobileProtocol.Capability.llmDoc
+            }
+        }
     }
     @State private var section: Section = .explorer
+
+    /// The segments this Mac actually serves. Explorer is chat, always there.
+    private var visibleSections: [Section] {
+        Section.allCases.filter { connection.supports($0.capability) }
+    }
     @StateObject private var explorerDraft = ExplorerDraft()
 
     var body: some View {
@@ -33,6 +48,11 @@ struct ProjectView: View {
             }
             // The header's "running" rows read these snapshots, and Loop stops polling when its
             // segment goes away — so re-read them whenever the Project tab is shown.
+            // A Mac that doesn't serve the open segment (older build, or a different Mac was
+            // paired) must not leave the tab on a screen that can never load.
+            .onChange(of: connection.macCapabilities) { _ in
+                if !visibleSections.contains(section) { section = .explorer }
+            }
             .onAppear {
                 guard connection.connectionStatus == .connected else { return }
                 loopStore.refreshAll()
@@ -42,7 +62,7 @@ struct ProjectView: View {
                 VStack(spacing: 0) {
                     ProjectHeader(deviceName: deviceName, section: $section)
                     Picker("Section", selection: $section) {
-                        ForEach(Section.allCases) { Text($0.rawValue).tag($0) }
+                        ForEach(visibleSections) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
                     .padding(.horizontal, DesignSystem.Spacing.md)

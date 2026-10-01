@@ -112,6 +112,17 @@ func removeTrailingEmptyAssistant(_ list: inout [ChatMessage]) {
 final class ConnectionService: ObservableObject {
     @Published var connectionStatus: ConnectionStatus = .disconnected
     @Published var errorMessage: String?
+    /// What the paired Mac says it serves (`Connected.capabilities`), or nil before the first
+    /// `connected` frame of this pairing. A Mac that sends no list is a pre-handshake Mac and
+    /// gets `Capability.legacy`, so screens for newer features hide instead of spinning.
+    @Published private(set) var macCapabilities: Set<String>?
+    @Published private(set) var macProtocolVersion: Int?
+
+    /// Whether to offer a feature. Optimistic until the first handshake so tabs don't flicker
+    /// in after launch; after it, exactly what the Mac advertised.
+    func supports(_ capability: String) -> Bool {
+        macCapabilities?.contains(capability) ?? true
+    }
 
     enum ConnectionStatus {
         case disconnected, connecting, connected
@@ -271,6 +282,9 @@ final class ConnectionService: ObservableObject {
         loopStore?.resetForNewDevice()
         macStatusStore?.resetForNewDevice()
         generationStore?.resetForNewDevice()
+        // The next Mac may serve a different feature set; forget this one's until it says.
+        macCapabilities = nil
+        macProtocolVersion = nil
     }
 
     /// Enter demo mode: no socket, no network, no stored credential. Drives
@@ -514,6 +528,10 @@ final class ConnectionService: ObservableObject {
             reconnectAttempt = 0
             // The demo issues no token and must not write a device name to
             // UserDefaults — nothing about a fake Mac may outlive the session.
+            if let connected = try? JSONDecoder().decode(Connected.self, from: data) {
+                macProtocolVersion = connected.protocolVersion ?? 1
+                macCapabilities = connected.capabilities.map(Set.init) ?? MobileProtocol.Capability.legacy
+            }
             if !isDemo, let connected = try? JSONDecoder().decode(Connected.self, from: data) {
                 connectionStore?.updateDeviceName(connected.deviceName)
                 // First pairing: the Mac traded our PIN for a token. Keep it;

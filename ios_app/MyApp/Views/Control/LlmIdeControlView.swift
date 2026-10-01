@@ -61,8 +61,10 @@ struct LlmIdeControlView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Button { showDocs = true } label: {
-                            Label("Generated docs", systemImage: "folder")
+                        if connection.supports(MobileProtocol.Capability.llmDoc) {
+                            Button { showDocs = true } label: {
+                                Label("Generated docs", systemImage: "folder")
+                            }
                         }
                         // This also clears the MAC's shared transcript
                         // (LlmIdeChatHistoryClear) and cannot be undone, so it
@@ -246,12 +248,14 @@ struct LlmIdeControlView: View {
                     Button { showFilePicker = true } label: {
                         Label("Files…", systemImage: "doc.text")
                     }
-                    Divider()
-                    Button { generateSurface = "doc"; showGenerate = true } label: {
-                        Label("Generate Doc…", systemImage: "doc.richtext")
-                    }
-                    Button { generateSurface = "visual"; showGenerate = true } label: {
-                        Label("Generate Visual…", systemImage: "rectangle.on.rectangle.angled")
+                    if connection.supports(MobileProtocol.Capability.generation) {
+                        Divider()
+                        Button { generateSurface = "doc"; showGenerate = true } label: {
+                            Label("Generate Doc…", systemImage: "doc.richtext")
+                        }
+                        Button { generateSurface = "visual"; showGenerate = true } label: {
+                            Label("Generate Visual…", systemImage: "rectangle.on.rectangle.angled")
+                        }
                     }
                 } label: {
                     Image(systemName: "paperclip")
