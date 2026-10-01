@@ -139,16 +139,21 @@ struct LoopView: View {
                     loopStore.start()
                 } label: {
                     Label("Start", systemImage: "play.fill")
+                        .foregroundColor(DesignSystem.Colors.onPrimary)
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .disabled(s.running || !isConnected)
 
                 Button {
                     loopStore.stop()
                 } label: {
                     Label("Stop", systemImage: "stop.fill")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
                 .disabled(!s.running || !isConnected)
             }
             .padding(.vertical, 2)

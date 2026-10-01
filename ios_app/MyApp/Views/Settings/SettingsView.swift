@@ -10,11 +10,12 @@ struct SettingsView: View {
 
                 // Connection card
                 VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
-                    Text("Connection")
-                        .font(DesignSystem.Typography.titleFont.weight(.bold))
-                        .foregroundColor(DesignSystem.Colors.textPrimary)
+                    Text("CONNECTION")
+                        .font(DesignSystem.Typography.footnoteFont.weight(.semibold))
+                        .foregroundColor(DesignSystem.Colors.textTertiary)
+                        .padding(.leading, DesignSystem.Spacing.xs)
 
-                    if connectionStore.hasDevice {
+                    if connectionStore.hasDevice || connection.isDemo {
                         VStack(spacing: 0) {
                             HStack(spacing: DesignSystem.Spacing.md) {
                                 ZStack {
@@ -26,7 +27,7 @@ struct SettingsView: View {
                                         .foregroundColor(statusColor)
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(connectionStore.deviceIP)
+                                    Text(connection.isDemo ? "Demo Mac" : connectionStore.deviceIP)
                                         .font(DesignSystem.Typography.bodyFont
                                             .weight(.semibold).monospaced())
                                         .foregroundColor(DesignSystem.Colors.textPrimary)
@@ -40,7 +41,7 @@ struct SettingsView: View {
                                     }
                                 }
                                 Spacer()
-                                Text(":\(connectionStore.devicePort)")
+                                Text(connection.isDemo ? "sample data" : ":\(connectionStore.devicePort)")
                                     .font(DesignSystem.Typography.footnoteFont.monospaced())
                                     .foregroundColor(DesignSystem.Colors.textTertiary)
                             }

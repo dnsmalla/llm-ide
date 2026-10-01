@@ -53,20 +53,20 @@ private struct ProjectHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(spacing: DesignSystem.Spacing.sm) {
                 Text(projectName)
-                    .font(DesignSystem.Typography.title2Font.weight(.bold))
+                    .font(DesignSystem.Typography.headlineFont.weight(.bold))
                     .foregroundColor(DesignSystem.Colors.textPrimary)
                     .lineLimit(1)
-                Spacer()
+                if let branch = macStatusStore.macStatus?.gitBranch, !branch.isEmpty {
+                    Label(branch, systemImage: "arrow.triangle.branch")
+                        .font(DesignSystem.Typography.captionFont)
+                        .foregroundColor(DesignSystem.Colors.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
                 statusDot("Backend", up: macStatusStore.macStatus?.backendUp == true)
                 statusDot("Mobile", up: macStatusStore.macStatus?.mobileControlUp == true)
-            }
-            if let branch = macStatusStore.macStatus?.gitBranch, !branch.isEmpty {
-                Label(branch, systemImage: "arrow.triangle.branch")
-                    .font(DesignSystem.Typography.captionFont)
-                    .foregroundColor(DesignSystem.Colors.textSecondary)
-                    .lineLimit(1)
             }
             if autoTaskStore.autoTaskState?.isRunning == true {
                 liveRow("Auto Task running", detail: autoTaskStore.autoTaskState?.currentStep, target: .autoTasks)
@@ -76,8 +76,8 @@ private struct ProjectHeader: View {
             }
         }
         .padding(.horizontal, DesignSystem.Spacing.md)
-        .padding(.top, DesignSystem.Spacing.sm)
-        .padding(.bottom, DesignSystem.Spacing.sm)
+        .padding(.top, DesignSystem.Spacing.xs)
+        .padding(.bottom, DesignSystem.Spacing.xs)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

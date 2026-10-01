@@ -57,14 +57,16 @@ struct LlmIdeControlView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
+                    Menu {
                         // This also clears the MAC's shared transcript
                         // (LlmIdeChatHistoryClear) and cannot be undone, so it
-                        // must not be a single unconfirmed tap.
-                        showClearConfirm = true
-                    } label: { Image(systemName: "trash") }
-                    .disabled(llmIdeStore.llmIdeMessages.isEmpty)
-                    .accessibilityLabel("Clear chat history")
+                        // sits behind a menu AND a confirmation.
+                        Button(role: .destructive) {
+                            showClearConfirm = true
+                        } label: { Label("Clear chat history", systemImage: "trash") }
+                            .disabled(llmIdeStore.llmIdeMessages.isEmpty)
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityLabel("Chat options")
                 }
                 if llmIdeStore.isStreaming {
                     ToolbarItem(placement: .topBarTrailing) {
