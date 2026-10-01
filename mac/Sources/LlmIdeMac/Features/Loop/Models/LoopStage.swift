@@ -38,6 +38,11 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         /// `check`. A build that predates this kind reads it as `.unsupported`
         /// (kept verbatim, never run).
         case artifactCheck
+        /// Self-Heal Phase 2: picks up to `SelfHealSettings.maxPerRun()` new,
+        /// non-environmental incidents and writes `SelfHealBatch.relativePath`
+        /// at the run's git root for the fix agent to answer. No shell, no
+        /// agent call of its own.
+        case incidentTriage
         /// A kind this build does not know (written by a newer build). The
         /// stage is kept verbatim in `rawJSON`, written back unchanged on
         /// save, shown as unsupported, and NEVER run.

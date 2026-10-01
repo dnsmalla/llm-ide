@@ -206,4 +206,45 @@ func runSelfHealCoreChecks() {
         od.removePersistentDomain(forName: orderSuite)
         try? FileManager.default.removeItem(at: file)
     }
+
+    // Triage selection + batch render/parse
+    MainActor.assumeIsolated {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("tri-\(UUID().uuidString).json")
+        let store = IncidentStore(fileURL: file)
+        @MainActor func add(_ msg: String, times: Int) -> String {
+            let id = IncidentSignature.make(source: "log", category: "t", message: msg, stack: nil)
+            for _ in 0..<times {
+                store.upsert(Incident(id: id, source: .log, category: "t", message: msg, stack: nil,
+                                      firstSeen: Date(), lastSeen: Date()))
+            }
+            return id
+        }
+        let offline = add("The Internet connection appears to be offline.", times: 9)
+        let bugA = add("Index out of range in A", times: 5)
+        let bugB = add("nil unwrap in B", times: 3)
+        _ = add("nil unwrap in C", times: 1)
+        let picked = SelfHealBatch.select(from: store, max: 2)
+        expect(picked.map(\.id) == [bugA, bugB], "triage skips environmental incidents and caps at max, most frequent first")
+        expect(store.incidents.first { $0.id == offline }?.status == .ignored, "environmental incidents are ignored with a reason")
+        expect(store.incidents.first { $0.id == bugA }?.status == .fixing, "selected incidents move to fixing")
+
+        let md = SelfHealBatch.render(picked)
+        expect(md.contains(bugA) && md.contains("## Results"), "the batch lists each incident id and a results section")
+        let answered = md + "\n- \(bugA): fixed — guarded the index\n- \(bugB): cannot-reproduce — path unreachable\n"
+        let results = SelfHealBatch.parseResults(answered)
+        expect(results[bugA] == .init(verdict: .fixed, reason: "guarded the index"), "parse reads a fixed verdict and reason")
+        expect(results[bugB]?.verdict == .cannotReproduce, "parse reads cannot-reproduce")
+        expect(SelfHealBatch.parseResults(md).isEmpty, "an unanswered batch has no results")
+        try? FileManager.default.removeItem(at: file)
+    }
+}
+
+func runSelfHealLoopChecks() async {
+    #if FEATURE_AUTOTASK
+    print("self-heal: loop")
+    let original = LoopStage(name: "Triage", kind: .incidentTriage, order: 0)
+    let data = try? JSONEncoder().encode(original)
+    let stage = data.flatMap { try? JSONDecoder().decode(LoopStage.self, from: $0) }
+    expect(stage?.kind == .incidentTriage, "the incidentTriage kind round-trips through loop.json")
+    #endif
 }

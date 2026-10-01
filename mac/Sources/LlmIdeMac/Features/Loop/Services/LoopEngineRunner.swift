@@ -218,6 +218,10 @@ final class LoopEngineRunner: ObservableObject {
     /// The last failed artifact check's message, handed to the generate (skill)
     /// stages of the retry so they fix what it found. Cleared when the check passes.
     private var artifactCheckFeedback: String?
+    /// The triage stage's selected batch for this run, kept so a retried
+    /// iteration re-uses it instead of selecting (and growing) a fresh one.
+    /// Reset per run.
+    private var selfHealBatch: [Incident]?
 
     /// Accumulated journal state for the in-flight run. Instance state rather
     /// than a `run`-local `var` only because the per-stage helpers below append
@@ -506,6 +510,7 @@ final class LoopEngineRunner: ObservableObject {
         flakeCheckedStages = []
         flakyStages = []
         artifactCheckFeedback = nil
+        selfHealBatch = nil
         // Must be reset per run, not only in the defer: a run that ended while
         // paused would otherwise leave `paused == true`, and the NEXT run
         // would hold at its first stage boundary forever with no visible
@@ -636,7 +641,7 @@ final class LoopEngineRunner: ObservableObject {
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
-            case .regressionSweep, .unsupported:
+            case .regressionSweep, .unsupported, .incidentTriage:
                 break
             }
         }
@@ -728,6 +733,8 @@ final class LoopEngineRunner: ObservableObject {
                     decision = await runArtifactCheckStage(
                         stage, config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                         stages: orderedStages, progress: &progress)
+                case .incidentTriage:
+                    decision = runTriageStage(stage, gitRoot: runGitRoot)
                 case .unsupported:
                     // Filtered out of `orderedStages` above; fail closed if one
                     // ever gets here — an unknown stage kind is never run.
@@ -1469,6 +1476,38 @@ final class LoopEngineRunner: ObservableObject {
         artifactCheckFeedback = message
         appendLog(.info, "  [\(stage.name)] re-running the generate stages with the findings")
         return .retryIteration
+    }
+
+    /// Self-Heal Phase 2: selects a batch of new incidents and writes it for
+    /// the fix agent. Re-runs of the same run keep the first batch — selecting
+    /// again would grow it (and re-mark more incidents `.fixing`) every
+    /// iteration instead of giving the fix agent a stable target.
+    private func runTriageStage(_ stage: LoopStage, gitRoot: URL) -> StageDecision {
+        let startedAt = Date()
+        let batch = selfHealBatch ?? SelfHealBatch.select(from: .shared, max: SelfHealSettings.maxPerRun())
+        selfHealBatch = batch
+        guard !batch.isEmpty else {
+            stageStates[stage.id] = .passed
+            appendLog(.info, "  [\(stage.name)] no new incidents — nothing to fix")
+            record(stage, startedAt: startedAt, duration: 0, exitCode: nil, passed: true,
+                   output: "no new incidents", score: nil)
+            return .terminate(.success)
+        }
+        let file = gitRoot.appendingPathComponent(SelfHealBatch.relativePath)
+        do {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try SelfHealBatch.render(batch).write(to: file, atomically: true, encoding: .utf8)
+        } catch {
+            stageStates[stage.id] = .failed
+            record(stage, startedAt: startedAt, duration: 0, exitCode: nil, passed: false,
+                   output: error.localizedDescription, score: nil)
+            return .terminate(.error("Could not write \(SelfHealBatch.relativePath): \(error.localizedDescription)"))
+        }
+        stageStates[stage.id] = .passed
+        appendLog(.info, "  [\(stage.name)] \(batch.count) incident(s) → \(SelfHealBatch.relativePath)")
+        record(stage, startedAt: startedAt, duration: Date().timeIntervalSince(startedAt), exitCode: nil,
+               passed: true, output: batch.map(\.id).joined(separator: ", "), score: nil)
+        return .proceed
     }
 
     private func runSkillStage(_ stage: LoopStage, config: LoopEngineConfig,

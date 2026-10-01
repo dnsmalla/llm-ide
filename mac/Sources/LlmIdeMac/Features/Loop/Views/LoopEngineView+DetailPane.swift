@@ -159,6 +159,8 @@ extension LoopEngineView {
             return detail
         case .artifactCheck:
             return stage.check?.summary(resolvedAgainst: stages.filter(\.enabled)) ?? "no checks configured"
+        case .incidentTriage:
+            return "picks up to \(SelfHealSettings.maxPerRun()) new incidents → \(SelfHealBatch.relativePath)"
         case .unsupported:
             return "unsupported stage kind — kept as-is, never run"
         }

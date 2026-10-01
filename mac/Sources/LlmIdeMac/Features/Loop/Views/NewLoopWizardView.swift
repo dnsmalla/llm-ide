@@ -254,6 +254,7 @@ struct NewLoopWizardView: View {
         case .regressionSweep: "Regression"
         case .skill: "New Skill Stage"
         case .artifactCheck: "Artifact Check"
+        case .incidentTriage: "Triage"
         case .unsupported: "Unsupported stage"
         }
         stages.append(LoopStage(name: name, kind: kind,
@@ -341,6 +342,10 @@ struct NewLoopWizardView: View {
                     .foregroundStyle(t.textMuted)
             case .artifactCheck:
                 Text(s.check?.summary(resolvedAgainst: stages.filter(\.enabled)) ?? "Checks generated files in-app (existence, line caps, citations).")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+            case .incidentTriage:
+                Text("Self-Heal incident triage — picks up to \(SelfHealSettings.maxPerRun()) new incidents into \(SelfHealBatch.relativePath).")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             case .unsupported:
