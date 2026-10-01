@@ -15,6 +15,8 @@ struct MyAppApp: App {
     @StateObject private var projectsStore: ProjectsStore
     @StateObject private var selfHealStore: SelfHealStore
     @StateObject private var sourceControlStore: SourceControlStore
+    @StateObject private var filesStore: FilesStore
+    @StateObject private var issuesStore: IssuesStore
 
     init() {
         // ConnectionService is created first; each feature store is wired to it
@@ -38,6 +40,8 @@ struct MyAppApp: App {
         _projectsStore = StateObject(wrappedValue: ProjectsStore(connection: connection))
         _selfHealStore = StateObject(wrappedValue: SelfHealStore(connection: connection))
         _sourceControlStore = StateObject(wrappedValue: SourceControlStore(connection: connection))
+        _filesStore = StateObject(wrappedValue: FilesStore(connection: connection))
+        _issuesStore = StateObject(wrappedValue: IssuesStore(connection: connection))
     }
 
     var body: some Scene {
@@ -56,6 +60,8 @@ struct MyAppApp: App {
                 .environmentObject(projectsStore)
                 .environmentObject(selfHealStore)
                 .environmentObject(sourceControlStore)
+                .environmentObject(filesStore)
+                .environmentObject(issuesStore)
         }
     }
 }

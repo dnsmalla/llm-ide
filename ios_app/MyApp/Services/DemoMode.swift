@@ -89,6 +89,7 @@ final class DemoResponder {
                                           MobileProtocol.Capability.activity, MobileProtocol.Capability.usage,
                                           MobileProtocol.Capability.projects, MobileProtocol.Capability.selfHeal,
                                           MobileProtocol.Capability.sourceControl,
+                                          MobileProtocol.Capability.files, MobileProtocol.Capability.issues,
                                           MobileProtocol.Capability.autoTasks, MobileProtocol.Capability.loop,
                                           MobileProtocol.Capability.generation, MobileProtocol.Capability.llmDoc]))
 
@@ -264,6 +265,40 @@ final class DemoResponder {
                 .init(id: "r-2", startedAt: Date().addingTimeInterval(-93_600).timeIntervalSince1970, durationSeconds: 903, iterationsUsed: 5, statusCode: "givenUp", statusSummary: "Regression sweep still failing after 5 iterations", trigger: "schedule"),
                 .init(id: "r-1", startedAt: Date().addingTimeInterval(-180_000).timeIntervalSince1970, durationSeconds: 268, iterationsUsed: 1, statusCode: "success", statusSummary: "All stages green", trigger: "desktop"),
             ]))
+
+        // MARK: Files
+        case MobileProtocol.Tag.filesList:
+            let path = obj["path"] as? String ?? ""
+            switch path {
+            case "":
+                send(FilesListing(path: "", entries: [.init(name: "Sources", isDirectory: true, size: 0),
+                                                       .init(name: "README.md", isDirectory: false, size: 812),
+                                                       .init(name: "Package.swift", isDirectory: false, size: 1_204)]))
+            case "Sources":
+                send(FilesListing(path: path, entries: [.init(name: "App.swift", isDirectory: false, size: 2_048)]))
+            default:
+                send(FilesListing(path: path, entries: [], error: "Folder not found."))
+            }
+        case MobileProtocol.Tag.filesRead:
+            let path = obj["path"] as? String ?? ""
+            send(FilesFile(path: path, text: path.hasSuffix(".md") ? "# Demo project\n\nA sample README shown from the Mac." :
+                "import SwiftUI\n\n@main\nstruct DemoApp: App {\n    var body: some Scene {\n        WindowGroup { Text(\"Hello\") }\n    }\n}"))
+
+        // MARK: Issues
+        case MobileProtocol.Tag.issuesList:
+            let state = obj["state"] as? String ?? "opened"
+            send(IssuesState(available: true, provider: "GitHub", state: state, issues: [
+                .init(number: 42, title: "Loop stage paths resolve to the wrong worktree", state: "opened", labels: ["bug", "loop"], assignee: "dnsmalla", commentCount: 3, updatedAt: "2026-10-01T09:00:00Z"),
+                .init(number: 41, title: "Add Doc Gen templates from the phone", state: "opened", labels: ["enhancement"], assignee: nil, commentCount: 0, updatedAt: "2026-09-30T09:00:00Z"),
+                .init(number: 37, title: "Quick chat uses a stale model list", state: "closed", labels: ["bug"], assignee: "dnsmalla", commentCount: 5, updatedAt: "2026-09-28T09:00:00Z"),
+            ].filter { state == "all" || $0.state == state }))
+        case MobileProtocol.Tag.issueGet:
+            let n = obj["number"] as? Int ?? 0
+            send(IssueDetail(number: n, title: "Loop stage paths resolve to the wrong worktree", state: "opened",
+                             body: "When a skill stage runs in a throwaway worktree the path rewrite uses the **main** checkout.\n\nSteps:\n1. Start the Regression loop\n2. Watch the stage log",
+                             labels: ["bug", "loop"], author: "amy", assignees: ["dnsmalla"],
+                             comments: [.init(id: "c1", author: "dnsmalla", body: "Reproduced on main.", createdAt: "2026-10-01T09:00:00Z")],
+                             webUrl: "https://github.com/example/repo/issues/42", canComment: false))
 
         // MARK: Source Control
         case MobileProtocol.Tag.scmStatusList:
