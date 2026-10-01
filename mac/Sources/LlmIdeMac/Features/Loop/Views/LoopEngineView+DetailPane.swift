@@ -108,7 +108,7 @@ extension LoopEngineView {
             Text(stage.name)
                 .font(Typography.body)
                 .foregroundStyle(stage.id == selectedStageId ? t.accent : t.text)
-            badge(stage.kind == .skill ? "generate" : "verify",
+            badge(stage.kind == .skill ? "generate" : stage.kind == .incidentTriage ? "triage" : "verify",
                   color: stage.kind == .skill ? t.accent2 : t.accent)
             if !stage.enabled {
                 badge("off", color: t.textMuted)

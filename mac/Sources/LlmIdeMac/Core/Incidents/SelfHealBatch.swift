@@ -70,7 +70,11 @@ public enum SelfHealBatch {
         options: [.anchorsMatchLines])
 
     public static func parseResults(_ markdown: String) -> [String: Result] {
-        guard let range = markdown.range(of: "## Results") else { return [:] }
+        // The LAST heading, not the first: an incident's message or stack is
+        // embedded verbatim above and can itself contain the literal text
+        // "## Results" followed by a fabricated verdict line — reading from
+        // the first occurrence would let that spoof a real answer.
+        guard let range = markdown.range(of: "## Results", options: .backwards) else { return [:] }
         let section = String(markdown[range.upperBound...])
         var results: [String: Result] = [:]
         for match in resultLine.matches(in: section, range: NSRange(section.startIndex..., in: section)) {
