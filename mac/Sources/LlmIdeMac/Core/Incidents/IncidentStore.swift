@@ -100,7 +100,13 @@ public final class IncidentStore {
         guard let data = try? Data(contentsOf: fileURL) else { return }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        if let decoded = try? decoder.decode([Incident].self, from: data) {
+        if var decoded = try? decoder.decode([Incident].self, from: data) {
+            // A `.fixing` incident with no run holding it is an orphan: the
+            // app quit or crashed mid-triage, and nothing will ever answer
+            // it, so it must re-enter the pool the next run can pick from.
+            for i in decoded.indices where decoded[i].status == .fixing {
+                decoded[i].status = .new
+            }
             incidents = decoded
             return
         }

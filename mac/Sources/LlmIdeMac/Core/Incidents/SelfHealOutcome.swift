@@ -10,7 +10,8 @@ public enum SelfHealOutcome {
     @MainActor
     @discardableResult
     public static func apply(batch: [Incident], results: [String: SelfHealBatch.Result], runSucceeded: Bool,
-                             agentDown: Bool, proposal: IncidentProposal?, store: IncidentStore) -> Int {
+                             agentDown: Bool, runAborted: Bool = false,
+                             proposal: IncidentProposal?, store: IncidentStore) -> Int {
         var proposed = 0
         for incident in batch {
             let result = results[incident.id]
@@ -24,7 +25,7 @@ public enum SelfHealOutcome {
                 case (.environmental?, _, _):
                     item.status = .ignored
                     item.note = "environment: \(result?.reason ?? "")"
-                case _ where agentDown:
+                case _ where agentDown || runAborted:
                     item.status = .new
                 default:
                     item.attempts += 1

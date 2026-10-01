@@ -534,9 +534,6 @@ final class LoopEngineRunner: ObservableObject {
         flakyStages = []
         artifactCheckFeedback = nil
         selfHealBatch = nil
-        if loopId == LoopStageDetector.defaultLoopId(LoopDefaultLoopKey.selfHeal) {
-            selfHealSuppression = IncidentRecorder.beginSuppression()
-        }
         // Must be reset per run, not only in the defer: a run that ended while
         // paused would otherwise leave `paused == true`, and the NEXT run
         // would hold at its first stage boundary forever with no visible
@@ -588,6 +585,12 @@ final class LoopEngineRunner: ObservableObject {
         // Preflighting them anyway would let a disabled stage's missing
         // command or approval block a run it takes no part in.
         let orderedStages = LoopStage.runOrder(config.stages.filter { $0.enabled && $0.kind != .unsupported })
+        // Keyed on the stage list, not `loopId`: a duplicated Self-Heal loop
+        // (new id) or a wizard-built loop that happens to include a Triage
+        // stage must still suppress its own errors from feeding back in.
+        if orderedStages.contains(where: { $0.kind == .incidentTriage }) {
+            selfHealSuppression = IncidentRecorder.beginSuppression()
+        }
         let disabledCount = config.stages.count - orderedStages.count
         guard !orderedStages.isEmpty else {
             // Two different user errors, two different fixes — "enable one"
@@ -2199,18 +2202,22 @@ final class LoopEngineRunner: ObservableObject {
         default: break
         }
         let agentDown = errored && stageStates.values.contains(.errored)
+        let aborted = terminal == .aborted
         let proposal = currentWorktreeLease.map {
             IncidentProposal(mainRepo: $0.mainRepo.path, worktreePath: $0.worktreePath.path,
                              branch: $0.branch, baseCommit: $0.baseCommit)
         }
         let proposed = SelfHealOutcome.apply(batch: batch, results: SelfHealBatch.parseResults(markdown),
-                                             runSucceeded: succeeded, agentDown: agentDown,
+                                             runSucceeded: succeeded, agentDown: agentDown, runAborted: aborted,
                                              proposal: proposal, store: .shared)
         try? FileManager.default.removeItem(at: batchFile.deletingLastPathComponent())
         appendLog(.info, "Self-Heal · \(proposed) fix(es) proposed from \(batch.count) incident(s)")
         // Borrowed symlinks keep a no-fix worktree "dirty"; remove it here so it is not retained.
+        // `discard` shells out to `git worktree remove` on a full checkout —
+        // seconds, not milliseconds — so it must not block this @MainActor method.
         if proposed == 0, let proposal {
-            try? SelfHealProposalService.discard(proposal)
+            let proposalCopy = proposal
+            _ = await Task.detached { try? SelfHealProposalService.discard(proposalCopy) }.value
         }
     }
 

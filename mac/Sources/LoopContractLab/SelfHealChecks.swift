@@ -286,6 +286,33 @@ func runSelfHealCoreChecks() {
         _ = SelfHealOutcome.apply(batch: [notVerified], results: [notVerified.id: .init(verdict: .fixed, reason: "r")],
                                   runSucceeded: false, agentDown: false, proposal: proposal, store: store)
         expect(status(notVerified) == .new, "a fix that did not pass verification is not proposed")
+
+        let abortedOne = make("aborted run")
+        _ = SelfHealOutcome.apply(batch: [abortedOne], results: [:], runSucceeded: false, agentDown: false,
+                                  runAborted: true, proposal: nil, store: store)
+        expect(status(abortedOne) == .new && store.incidents.first { $0.id == abortedOne.id }?.attempts == 0,
+               "an aborted run does not consume an attempt")
+
+        let blocked = make("blocked run")
+        _ = SelfHealOutcome.apply(batch: [blocked], results: [:], runSucceeded: false, agentDown: false,
+                                  runAborted: false, proposal: nil, store: store)
+        expect(status(blocked) == .new && store.incidents.first { $0.id == blocked.id }?.attempts == 1,
+               "a blocked run still costs an attempt")
+        try? FileManager.default.removeItem(at: file)
+    }
+
+    MainActor.assumeIsolated {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("out-\(UUID().uuidString).json")
+        let store = IncidentStore(fileURL: file)
+        let orphan = Incident(id: IncidentSignature.make(source: "log", category: "t", message: "orphan", stack: nil),
+                              source: .log, category: "t", message: "orphan", stack: nil,
+                              firstSeen: Date(), lastSeen: Date(), status: .fixing)
+        store.upsert(orphan)
+        store.update(id: orphan.id) { $0.status = .fixing }
+        store.flush()
+        let reopened = IncidentStore(fileURL: file)
+        expect(reopened.incidents.first { $0.id == orphan.id }?.status == .new,
+               "a fixing incident orphaned by a quit returns to new on load")
         try? FileManager.default.removeItem(at: file)
     }
 }
