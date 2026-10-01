@@ -109,4 +109,43 @@ func runSelfHealCoreChecks() {
         expect(triage.candidatesForTriage().map(\.id) == [many.id, few.id], "triage candidates are new incidents, most frequent first")
         try? FileManager.default.removeItem(at: dir)
     }
+
+    // AppSourceRoot: the plist value is the mac/ dir; the git root is its parent.
+    let existing: Set<String> = ["/r/llm-ide/mac/Package.swift", "/r/llm-ide/.git"]
+    expect(AppSourceRoot.gitRoot(plistValue: "/r/llm-ide/mac", fileExists: existing.contains)?.path == "/r/llm-ide",
+           "source root resolves to the parent of the mac/ dir")
+    expect(AppSourceRoot.gitRoot(plistValue: nil, fileExists: existing.contains) == nil, "a release build has no source root")
+    expect(AppSourceRoot.gitRoot(plistValue: "/r/other/mac", fileExists: existing.contains) == nil,
+           "a plist value without Package.swift is rejected")
+
+    // SelfHealSettings
+    let suite = "selfheal-\(UUID().uuidString)"
+    let d = UserDefaults(suiteName: suite)!
+    expect(SelfHealSettings.isEnabled(d) && SelfHealSettings.maxPerRun(d) == 5, "settings default to on and 5 per run")
+    d.set(99, forKey: SelfHealSettings.maxPerRunKey)
+    expect(SelfHealSettings.maxPerRun(d) == 20, "maxPerRun is clamped to 20")
+    d.removePersistentDomain(forName: suite)
+
+    // Recorder
+    MainActor.assumeIsolated {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("rec-\(UUID().uuidString).json")
+        let store = IncidentStore(fileURL: file)
+        IncidentRecorder.record(source: .log, category: "API", message: "token=abc boom 1", stack: nil,
+                                at: Date(), into: store, eligible: true)
+        expect(store.incidents.count == 1 && !store.incidents[0].message.contains("abc"),
+               "the recorder redacts before storing")
+        IncidentRecorder.record(source: .log, category: "API", message: "other", stack: nil,
+                                at: Date(), into: store, eligible: false)
+        expect(store.incidents.count == 1, "nothing is recorded when ineligible")
+        let token = IncidentRecorder.beginSuppression()
+        let during = Date()
+        IncidentRecorder.record(source: .log, category: "API", message: "during self-heal", stack: nil,
+                                at: during, into: store, eligible: true)
+        IncidentRecorder.endSuppression(token)
+        expect(store.incidents.count == 1, "nothing is recorded while a Self-Heal run is active")
+        IncidentRecorder.record(source: .log, category: "API", message: "late log line from the run", stack: nil,
+                                at: during, into: store, eligible: true)
+        expect(store.incidents.count == 1, "a log line timestamped inside a suppression window is dropped later too")
+        try? FileManager.default.removeItem(at: file)
+    }
 }
