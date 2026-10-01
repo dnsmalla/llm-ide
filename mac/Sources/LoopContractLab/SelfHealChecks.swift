@@ -40,6 +40,11 @@ func runSelfHealCoreChecks() {
     expect(IncidentClassifier.environmentalReason(message: "Operation not permitted") == "permission", "EPERM is environmental")
     expect(IncidentClassifier.environmentalReason(message: "write failed: No space left on device") == "disk", "ENOSPC is environmental")
     expect(IncidentClassifier.environmentalReason(message: "Request was cancelled") == "cancelled", "user cancel is environmental")
+    expect(IncidentClassifier.environmentalReason(message: "The request timed out.") == "offline", "a URLError-style timeout is environmental")
+    expect(IncidentClassifier.environmentalReason(message: "git status timed out after 30s — possible deadlock") == nil,
+           "an internal timeout is a code bug, not environmental")
+    expect(IncidentClassifier.environmentalReason(message: "operation cancelled: fatal assertion in diff parser") == nil,
+           "an internal cancellation wording is a code bug, not environmental")
     expect(IncidentClassifier.environmentalReason(message: "Usage: /model <name>") == "usage", "slash-command usage text is not a bug")
     expect(IncidentClassifier.environmentalReason(message: "Index out of range in ChatEngine.swift") == nil,
            "a code bug is not environmental")

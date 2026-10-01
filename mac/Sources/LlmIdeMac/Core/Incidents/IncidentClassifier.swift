@@ -4,11 +4,12 @@ import Foundation
 public enum IncidentClassifier {
     private static let rules: [(reason: String, needles: [String])] = [
         ("offline", ["appears to be offline", "could not connect to the server", "network connection was lost",
-                     "nsurlerrordomain code=-1009", "nsurlerrordomain code=-1004", "timed out"]),
+                     "nsurlerrordomain code=-1009", "nsurlerrordomain code=-1004", "the request timed out"]),
         ("auth", ["http 401", "http 403", "status 401", "status 403", "unauthorized", "forbidden", "not signed in"]),
         ("permission", ["operation not permitted", "permission denied", "eperm", "eacces"]),
         ("disk", ["no space left on device", "enospc"]),
-        ("cancelled", ["cancelled", "canceled", "cancellationerror"]),
+        ("cancelled", ["request was cancelled", "operation was cancelled", "cancellationerror",
+                       "cancelled by user", "user cancelled"]),
     ]
 
     public static func environmentalReason(message: String) -> String? {
