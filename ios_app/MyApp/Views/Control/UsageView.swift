@@ -69,6 +69,9 @@ struct UsageView: View {
         }
         .refreshable { store.refresh() }
         .task { store.refresh() }
+        .onChange(of: connection.connectionStatus) { status in
+            if status == .connected, store.state == nil { store.refresh() }
+        }
     }
 
     private func permissionRow(_ raw: String) -> some View {

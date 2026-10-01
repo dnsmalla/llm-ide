@@ -110,7 +110,17 @@ func removeTrailingEmptyAssistant(_ list: inout [ChatMessage]) {
 /// can route inbound frames to the right store.
 @MainActor
 final class ConnectionService: ObservableObject {
-    @Published var connectionStatus: ConnectionStatus = .disconnected
+    @Published var connectionStatus: ConnectionStatus = .disconnected {
+        didSet {
+            // The Mac cancels a phone's turns when its connection drops, so a question or tool prompt
+            // raised on the old connection can never be answered — a card left up would accept a tap
+            // and look approved when nothing was.
+            if connectionStatus != .connected, oldValue == .connected {
+                llmIdeStore?.clearPendingPrompts()
+                explorerStore?.clearPendingPrompts()
+            }
+        }
+    }
     @Published var errorMessage: String?
     /// What the paired Mac says it serves (`Connected.capabilities`), or nil before the first
     /// `connected` frame of this pairing. A Mac that sends no list is a pre-handshake Mac and

@@ -63,6 +63,9 @@ struct SelfHealView: View {
         }
         .refreshable { store.refresh() }
         .task { store.refresh() }
+        .onChange(of: connection.connectionStatus) { status in
+            if status == .connected, store.state == nil { store.refresh() }
+        }
     }
 
     private func row(_ i: SelfHealIncident) -> some View {
@@ -155,16 +158,8 @@ struct SelfHealDetailView: View {
         Section("Proposed fix") {
             if let branch = current.branch { Label(branch, systemImage: "arrow.triangle.branch")
                 .font(DesignSystem.Typography.footnoteFont) }
-            if let diff = store.diffs[current.id] {
-                if let error = diff.error {
-                    Text(error).font(DesignSystem.Typography.footnoteFont).foregroundColor(DesignSystem.Colors.danger)
-                } else if let text = diff.diff {
-                    if diff.truncated { Label("Long diff — showing the first part.", systemImage: "scissors")
-                        .font(DesignSystem.Typography.captionFont).foregroundColor(DesignSystem.Colors.textTertiary) }
-                    DiffTextView(text: text)
-                }
-            } else {
-                Button { store.loadDiff(for: current) } label: { Label("Review the diff", systemImage: "doc.text.magnifyingglass") }
+            NavigationLink { SelfHealDiffScreen(incident: current) } label: {
+                Label("Review the diff", systemImage: "doc.text.magnifyingglass")
             }
         }
     }
@@ -181,12 +176,13 @@ struct SelfHealDetailView: View {
             if current.status == "proposed" && current.hasProposal {
                 if canApply {
                     Button { confirmApply = true } label: { Label("Apply to checkout…", systemImage: "square.and.arrow.down") }
+                    Button(role: .destructive) { confirmDiscard = true } label: { Label("Discard proposal…", systemImage: "trash") }
                 } else {
-                    Label("Applying is off. Enable “Apply Self-Heal fixes” in the Mac's Settings → Mobile Control → Phone access.",
+                    // The Mac refuses both without the switch, so don't offer a button that can only fail.
+                    Label("Applying and discarding are off. Enable “Apply or discard Self-Heal fixes” in the Mac's Settings → Mobile Control → Phone access.",
                           systemImage: "lock")
                         .font(DesignSystem.Typography.footnoteFont).foregroundColor(DesignSystem.Colors.textTertiary)
                 }
-                Button(role: .destructive) { confirmDiscard = true } label: { Label("Discard proposal…", systemImage: "trash") }
             }
         } footer: {
             if current.status == "proposed" {
@@ -194,5 +190,42 @@ struct SelfHealDetailView: View {
             }
         }
         .disabled(store.isBusy)
+    }
+}
+
+/// A proposal's diff on its own screen: a diff scrolls both ways, which fights a `List` row.
+struct SelfHealDiffScreen: View {
+    let incident: SelfHealIncident
+    @EnvironmentObject var store: SelfHealStore
+    @EnvironmentObject var connection: ConnectionService
+
+    var body: some View {
+        let diff = store.diffs[incident.id]
+        ScrollView {
+            if let diff {
+                if let error = diff.error {
+                    Text(error).font(DesignSystem.Typography.footnoteFont).foregroundColor(DesignSystem.Colors.danger)
+                        .padding(DesignSystem.Spacing.md)
+                } else if let text = diff.diff {
+                    VStack(alignment: .leading, spacing: DesignSystem.Spacing.xs) {
+                        if diff.truncated {
+                            Label("Long diff — showing the first part.", systemImage: "scissors")
+                                .font(DesignSystem.Typography.captionFont).foregroundColor(DesignSystem.Colors.textTertiary)
+                        }
+                        DiffTextView(text: text)
+                    }
+                    .padding(DesignSystem.Spacing.sm)
+                }
+            } else {
+                ProgressView().padding(.top, 60).frame(maxWidth: .infinity)
+            }
+        }
+        .background(DesignSystem.Colors.background.ignoresSafeArea())
+        .navigationTitle("Proposed fix")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { if diff == nil || diff?.error != nil { store.loadDiff(for: incident) } }
+        .onChange(of: connection.connectionStatus) { status in
+            if status == .connected, store.diffs[incident.id] == nil { store.loadDiff(for: incident) }
+        }
     }
 }

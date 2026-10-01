@@ -63,7 +63,7 @@ struct ProjectView: View {
             // A Mac that doesn't serve the open segment (older build, or a different Mac was
             // paired) must not leave the tab on a screen that can never load.
             .onChange(of: connection.macCapabilities) { _ in
-                if !visibleSections.contains(section) { section = .explorer }
+                if !visibleSections.contains(section) { section = visibleSections.first ?? .explorer }
             }
             .onAppear {
                 guard connection.connectionStatus == .connected else { return }
@@ -156,7 +156,7 @@ private struct ProjectHeader: View {
     }
 
     private func liveRow(_ title: String, detail: String?, target: ProjectView.Section) -> some View {
-        Button { section = target } label: {
+        Button { if connection.supports(target.capability) { section = target } } label: {
             HStack(spacing: 6) {
                 ProgressView().scaleEffect(0.7)
                 Text(title).font(DesignSystem.Typography.captionFont.weight(.semibold))

@@ -58,6 +58,9 @@ struct ActivityView: View {
                 }
             }
             .refreshable { store.refresh() }
+            .onChange(of: connection.connectionStatus) { status in
+                if status == .connected, !store.loaded { store.refresh() }
+            }
             .onAppear {
                 unreadAtOpen = store.unread
                 store.refresh()

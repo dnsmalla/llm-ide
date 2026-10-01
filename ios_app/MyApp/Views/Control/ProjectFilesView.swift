@@ -84,7 +84,7 @@ struct FileContentView: View {
     private var file: FilesFile? { store.files[path] }
 
     var body: some View {
-        ScrollView([.vertical, .horizontal]) {
+        ScrollView {
             if let file {
                 if let error = file.error {
                     Text(error).font(DesignSystem.Typography.footnoteFont).foregroundColor(DesignSystem.Colors.textTertiary)
@@ -122,15 +122,12 @@ struct FileContentView: View {
     }
 
     private func codeBody(_ text: String) -> some View {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        return LazyVStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                HStack(alignment: .top, spacing: 8) {
-                    Text("\(index + 1)").foregroundColor(DesignSystem.Colors.textTertiary).frame(minWidth: 34, alignment: .trailing)
-                    Text(line.isEmpty ? " " : String(line)).foregroundColor(DesignSystem.Colors.textPrimary).textSelection(.enabled)
-                }
-                .font(DesignSystem.Typography.codeFont)
+        ChunkedLinesView(text: text, chunk: 500) { index, line in
+            HStack(alignment: .top, spacing: 8) {
+                Text("\(index + 1)").foregroundColor(DesignSystem.Colors.textTertiary).frame(minWidth: 34, alignment: .trailing)
+                Text(line.isEmpty ? " " : line).foregroundColor(DesignSystem.Colors.textPrimary).textSelection(.enabled)
             }
+            .font(DesignSystem.Typography.codeFont)
         }
     }
 }

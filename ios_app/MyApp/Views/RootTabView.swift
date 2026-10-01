@@ -67,15 +67,30 @@ struct RootTabView: View {
         .onChange(of: connection.connectionStatus) { status in
             if status == .connected { refreshMacData() }
         }
-        // The Mac opened another project (from the phone, or at the keyboard): everything the phone
-        // cached about the old one — templates, doc listings, loop/task snapshots — is stale.
-        .onChange(of: macStatusStore.macStatus?.projectName) { _ in
-            generationStore.invalidateProjectScopedCaches()
-            sourceControlStore.invalidate()
-            filesStore.invalidateAll()
-            issuesStore.invalidate()
+        // The Mac opened another project (from the phone or at the keyboard): everything the phone cached
+        // about the old one is stale. Keyed on the project id as well as the name — two projects can share
+        // a folder name — and the screens are re-requested, since their `.task` already ran.
+        .onChange(of: macStatusStore.macStatus?.projectName) { _ in projectDidChange() }
+        .onChange(of: projectsStore.active?.id) { _ in projectDidChange() }
+        // A Phone access switch flipped on the Mac, or a different Mac was paired.
+        .onChange(of: connection.macCapabilities) { _ in
+            if selection == .activity, !connection.supports(MobileProtocol.Capability.activity) { selection = .chat }
+            if !connection.supports(MobileProtocol.Capability.usage) { usageStore.resetForNewDevice() }
+            if !connection.supports(MobileProtocol.Capability.activity) { activityStore.resetForNewDevice() }
             refreshMacData()
         }
+    }
+
+    private func projectDidChange() {
+        generationStore.invalidateProjectScopedCaches()
+        sourceControlStore.invalidate()
+        filesStore.invalidateAll()
+        issuesStore.invalidate()
+        refreshMacData()
+        sourceControlStore.refresh()
+        issuesStore.refresh()
+        filesStore.list("")
+        if connection.supports(MobileProtocol.Capability.llmDoc) { generationStore.list("") }
     }
 
     private func refreshMacData() {

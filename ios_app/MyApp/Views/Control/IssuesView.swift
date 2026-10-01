@@ -60,6 +60,9 @@ struct IssuesView: View {
         }
         .refreshable { store.refresh() }
         .task { store.refresh() }
+        .onChange(of: connection.connectionStatus) { status in
+            if status == .connected, store.list == nil { store.refresh() }
+        }
     }
 
     private func row(_ i: IssueSummary) -> some View {
@@ -89,6 +92,7 @@ struct IssueDetailView: View {
     let number: Int
     let fallback: IssueSummary
     @EnvironmentObject var store: IssuesStore
+    @EnvironmentObject var connection: ConnectionService
     @State private var draft = ""
 
     private var detail: IssueDetail? { store.details[number] }
@@ -144,6 +148,13 @@ struct IssueDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { store.loadDetail(number) }
         .refreshable { store.loadDetail(number) }
+        .onChange(of: connection.connectionStatus) { status in
+            if status == .connected, store.details[number] == nil { store.loadDetail(number) }
+        }
+        // Keep what was typed until the Mac confirms the post; only a success clears it.
+        .onChange(of: store.details[number]?.message) { message in
+            if message == "Comment posted." { draft = "" }
+        }
     }
 
     @ViewBuilder
@@ -155,7 +166,6 @@ struct IssueDetailView: View {
                     let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { return }
                     store.post(text, to: number)
-                    draft = ""
                     haptic(.light)
                 } label: {
                     if store.isPosting { ProgressView() } else { Label("Post comment", systemImage: "paperplane") }

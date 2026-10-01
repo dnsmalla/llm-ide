@@ -64,6 +64,9 @@ final class FilesStore: ObservableObject {
     func invalidateAll() {
         listings = [:]
         files = [:]
+        // A timer armed for the old project must not write an error into the new one's cache.
+        watchdogs.values.forEach { $0.cancel() }
+        watchdogs = [:]
     }
 
     func resetForNewDevice() {

@@ -43,12 +43,16 @@ final class ProjectsStore: ObservableObject {
     func handleInbound(type: String, data: Data) {
         guard type == MobileProtocol.Tag.projectState,
               let s = try? JSONDecoder().decode(ProjectState.self, from: data) else { return }
+        let switched = active != nil && s.active?.id != active?.id
         active = s.active
         projects = s.projects
         error = s.error
         loaded = true
         isSwitching = false
         watchdog?.cancel()
+        // The Mac pushes its status on a project change, but asking costs nothing and the phone's
+        // project name/branch are what the rest of the app keys its caches on.
+        if switched { connection?.macStatusStore?.requestMacStatus() }
     }
 
     func resetForNewDevice() {

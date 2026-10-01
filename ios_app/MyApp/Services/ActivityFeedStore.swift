@@ -22,6 +22,7 @@ final class ActivityFeedStore: ObservableObject {
     func refresh() {
         guard connection?.connectionStatus == .connected else { return }
         connection?.sendEncodable(ActivityList())
+        loadError = nil
         watchdog?.cancel()
         watchdog = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 8_000_000_000)

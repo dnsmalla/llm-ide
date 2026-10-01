@@ -12,6 +12,7 @@ final class SelfHealStore: ObservableObject {
 
     weak var connection: ConnectionService?
     private var watchdog: Task<Void, Never>?
+    private var busyTimer: Task<Void, Never>?
 
     init(connection: ConnectionService) {
         self.connection = connection
@@ -22,6 +23,7 @@ final class SelfHealStore: ObservableObject {
         guard connection?.connectionStatus == .connected,
               connection?.supports(MobileProtocol.Capability.selfHeal) == true else { return }
         connection?.sendEncodable(SelfHealList())
+        loadError = nil
         watchdog?.cancel()
         watchdog = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 8_000_000_000)
@@ -35,9 +37,12 @@ final class SelfHealStore: ObservableObject {
         guard !isBusy else { return }
         isBusy = true
         connection?.sendEncodable(SelfHealAction(incidentId: incident.id, action: action))
-        // Apply/discard run git on the Mac; allow a while before giving the phone its screen back.
-        Task { [weak self] in
+        // Apply/discard run git on the Mac; allow a while before giving the phone its screen back. Held
+        // so an earlier action's timer can't re-enable the buttons under a later one.
+        busyTimer?.cancel()
+        busyTimer = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 60_000_000_000)
+            guard !Task.isCancelled else { return }
             self?.isBusy = false
         }
     }
@@ -55,6 +60,7 @@ final class SelfHealStore: ObservableObject {
                 state = s
                 loadError = nil
                 isBusy = false
+                busyTimer?.cancel()
                 watchdog?.cancel()
             }
         case MobileProtocol.Tag.selfHealDiffResult:

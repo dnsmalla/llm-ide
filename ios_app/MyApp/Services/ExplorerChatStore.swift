@@ -209,6 +209,12 @@ final class ExplorerChatStore: ObservableObject {
     /// Handle `explore_session_*` frames that refresh sessions / load history.
     /// Answer the parked tool prompt. The card comes down at once; the Mac re-checks the request id
     /// against the turn's live prompt and the Phone access switch, and says so if it refuses.
+    /// Drop any question / tool prompt: its turn is gone (connection lost or reset).
+    func clearPendingPrompts() {
+        pendingApproval = nil
+        pendingToolApproval = nil
+    }
+
     func submitToolApproval(allow: Bool) {
         guard let request = pendingToolApproval else { return }
         connection?.sendEncodable(ToolApprovalAnswer(

@@ -196,7 +196,7 @@ struct SettingsView: View {
                     .font(DesignSystem.Typography.footnoteFont)
                     .foregroundColor(DesignSystem.Colors.textPrimary)
                 if !missing.isEmpty {
-                    Text("Not available on this Mac: \(missing.joined(separator: ", ")). Update LLM-IDE on the Mac to unlock them.")
+                    Text("Off or not supported on this Mac: \(missing.joined(separator: ", ")). Turn it on in the Mac's Settings → Mobile Control → Phone access, or update LLM-IDE on the Mac.")
                         .font(DesignSystem.Typography.captionFont)
                         .foregroundColor(DesignSystem.Colors.textTertiary)
                 }

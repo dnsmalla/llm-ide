@@ -6,7 +6,13 @@ import SharedProtocol
 /// "always allow" here — that persists a rule and stays a Mac decision.
 struct ToolApprovalCard: View {
     let request: ToolApprovalRequest
+    /// False while the link to the Mac is down: a tap would carry a request id the Mac no longer knows.
+    var enabled: Bool = true
     let onAnswer: (Bool) -> Void
+
+    /// A change cut for the phone can't be reviewed here, so it can't be allowed here (the Mac refuses
+    /// too). Denying is always possible.
+    private var canAllow: Bool { enabled && !request.truncated }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignSystem.Spacing.sm) {
@@ -27,12 +33,21 @@ struct ToolApprovalCard: View {
                     Text("Deny").font(.callout.weight(.semibold)).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .disabled(!enabled)
                 Button { onAnswer(true) } label: {
                     Text("Allow once").font(.callout.weight(.semibold)).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(!canAllow)
             }
             .controlSize(.large)
+            if request.truncated {
+                Text("Too long to review on the phone — deny, or approve it on the Mac.")
+                    .font(DesignSystem.Typography.captionFont).foregroundColor(DesignSystem.Colors.textTertiary)
+            } else if !enabled {
+                Text("Reconnecting… answer when the Mac is back.")
+                    .font(DesignSystem.Typography.captionFont).foregroundColor(DesignSystem.Colors.textTertiary)
+            }
         }
         .padding(DesignSystem.Spacing.md)
         .background(DesignSystem.Colors.surface, in: RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusM))

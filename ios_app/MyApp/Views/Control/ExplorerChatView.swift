@@ -302,7 +302,7 @@ struct ExplorerChatView: View {
     @ViewBuilder
     private var pinnedToolApproval: some View {
         if let tool = explorerStore.pendingToolApproval {
-            ToolApprovalCard(request: tool) { allow in
+            ToolApprovalCard(request: tool, enabled: connection.connectionStatus == .connected) { allow in
                 explorerStore.submitToolApproval(allow: allow)
                 haptic(allow ? .medium : .light)
             }

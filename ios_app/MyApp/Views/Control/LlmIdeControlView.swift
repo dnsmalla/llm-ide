@@ -231,7 +231,7 @@ struct LlmIdeControlView: View {
     @ViewBuilder
     private var pinnedToolApproval: some View {
         if let tool = llmIdeStore.pendingToolApproval {
-            ToolApprovalCard(request: tool) { allow in
+            ToolApprovalCard(request: tool, enabled: connection.connectionStatus == .connected) { allow in
                 llmIdeStore.submitToolApproval(allow: allow)
                 haptic(allow ? .medium : .light)
             }

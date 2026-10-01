@@ -55,6 +55,10 @@ struct SourceControlView: View {
         }
         .refreshable { store.refresh() }
         .task { store.refresh() }
+        // Opened while offline? Ask again once the link is back instead of spinning forever.
+        .onChange(of: connection.connectionStatus) { status in
+            if status == .connected, store.state == nil { store.refresh() }
+        }
     }
 
     private func branchSection(_ s: ScmState) -> some View {
@@ -142,6 +146,7 @@ struct SourceControlView: View {
 struct ScmDiffView: View {
     let file: ScmFile
     @EnvironmentObject var store: SourceControlStore
+    @EnvironmentObject var connection: ConnectionService
 
     var body: some View {
         let result = store.diffs[SourceControlStore.key(file.path, file.staged)]
@@ -168,35 +173,66 @@ struct ScmDiffView: View {
         .navigationTitle((file.path as NSString).lastPathComponent)
         .navigationBarTitleDisplayMode(.inline)
         .task { if result == nil || result?.error != nil { store.loadDiff(file) } }
+        .onChange(of: connection.connectionStatus) { status in
+            if status == .connected, store.diffs[SourceControlStore.key(file.path, file.staged)] == nil { store.loadDiff(file) }
+        }
     }
 }
 
-/// A unified diff with added/removed/hunk lines coloured. Lines scroll sideways rather than wrap,
-/// so indentation stays readable.
+/// Renders long text a chunk of lines at a time. A `LazyVStack` inside a scroll view that also scrolls
+/// sideways is not lazy (its nearest scroll axis is the horizontal one), so laying out a 100k-character
+/// diff or a 5 000-line file at once froze the screen; instead the first chunk is shown and the rest is
+/// one tap away.
+struct ChunkedLinesView<Row: View>: View {
+    let text: String
+    var chunk = 400
+    @ViewBuilder let row: (Int, String) -> Row
+    @State private var lines: [String] = []
+    @State private var shown = 400
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(lines.prefix(shown).enumerated()), id: \.offset) { index, line in
+                        row(index, line)
+                    }
+                }
+            }
+            if lines.count > shown {
+                Button("Show \(min(chunk, lines.count - shown)) more lines (\(lines.count - shown) left)") { shown += chunk }
+                    .font(DesignSystem.Typography.footnoteFont.weight(.semibold))
+                    .padding(.vertical, DesignSystem.Spacing.sm)
+            }
+        }
+        // Split once per text, not on every body evaluation.
+        .task(id: text.hashValue) {
+            lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            shown = chunk
+        }
+    }
+}
+
+/// A unified diff with added/removed/hunk lines coloured, shown in chunks (see `ChunkedLinesView`).
 struct DiffTextView: View {
     let text: String
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
-                    Text(line.isEmpty ? " " : String(line))
-                        .font(DesignSystem.Typography.codeFont)
-                        .foregroundColor(Self.color(for: line))
-                        .padding(.horizontal, 6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Self.background(for: line))
-                        .textSelection(.enabled)
-                }
-            }
+        ChunkedLinesView(text: text) { _, line in
+            Text(line.isEmpty ? " " : line)
+                .font(DesignSystem.Typography.codeFont)
+                .foregroundColor(Self.color(for: line))
+                .padding(.horizontal, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Self.background(for: line))
+                .textSelection(.enabled)
         }
     }
 
-    private static func color(for line: Substring) -> Color {
-        if line.hasPrefix("@@") { return DesignSystem.Colors.primary }
-        return DesignSystem.Colors.textPrimary
+    private static func color(for line: String) -> Color {
+        line.hasPrefix("@@") ? DesignSystem.Colors.primary : DesignSystem.Colors.textPrimary
     }
-    private static func background(for line: Substring) -> Color {
+    private static func background(for line: String) -> Color {
         if line.hasPrefix("+++") || line.hasPrefix("---") { return .clear }
         if line.hasPrefix("+") { return DesignSystem.Colors.success.opacity(0.14) }
         if line.hasPrefix("-") { return DesignSystem.Colors.danger.opacity(0.14) }

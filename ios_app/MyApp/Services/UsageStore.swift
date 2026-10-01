@@ -23,6 +23,7 @@ final class UsageStore: ObservableObject {
         guard connection?.connectionStatus == .connected,
               connection?.supports(MobileProtocol.Capability.usage) == true else { return }
         connection?.sendEncodable(UsageGet())
+        loadError = nil
         watchdog?.cancel()
         watchdog = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 10_000_000_000)

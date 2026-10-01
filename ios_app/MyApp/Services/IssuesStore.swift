@@ -13,6 +13,7 @@ final class IssuesStore: ObservableObject {
 
     weak var connection: ConnectionService?
     private var watchdog: Task<Void, Never>?
+    private var postTimer: Task<Void, Never>?
 
     init(connection: ConnectionService) {
         self.connection = connection
@@ -23,6 +24,7 @@ final class IssuesStore: ObservableObject {
         guard connection?.connectionStatus == .connected,
               connection?.supports(MobileProtocol.Capability.issues) == true else { return }
         connection?.sendEncodable(IssuesList(state: filter))
+        loadError = nil
         watchdog?.cancel()
         watchdog = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 10_000_000_000)
@@ -48,9 +50,12 @@ final class IssuesStore: ObservableObject {
         guard !isPosting else { return }
         isPosting = true
         connection?.sendEncodable(IssueCommentPost(number: number, body: body))
-        // The Mac answers with the refreshed issue; give up on a silent Mac.
-        Task { [weak self] in
+        // The Mac answers with the refreshed issue; give up on a silent Mac. Held so a later post
+        // isn't cut short by an earlier post's timer.
+        postTimer?.cancel()
+        postTimer = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 20_000_000_000)
+            guard !Task.isCancelled else { return }
             self?.isPosting = false
         }
     }
@@ -68,6 +73,7 @@ final class IssuesStore: ObservableObject {
             if let d = try? decoder.decode(IssueDetail.self, from: data) {
                 details[d.number] = d
                 isPosting = false
+                postTimer?.cancel()
             }
         default:
             break
