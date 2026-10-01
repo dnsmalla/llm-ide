@@ -271,14 +271,31 @@ func runSelfHealLoopChecks() async {
         try? p.run(); p.waitUntilExit()
         return String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     }
-    // A plain async wrapper around the lab's own `git()` helper, passed
-    // explicitly rather than relying on `create`'s default `runGit` — the
-    // default argument is a closure synthesized inside `LlmIdeMacLib` and
-    // evaluating it from this separate module's non-actor-isolated caller
-    // trips a Swift concurrency runtime assertion (`swift_task_dealloc`,
-    // reproduced locally), unrelated to the worktree logic under test here.
+    // A plain async wrapper around the lab's own `git()` helper. Used for the
+    // explicit-closure checks below so they stay hermetic (no dependency on
+    // `RepoManager`/`AppConfig`); the separate `defaultRunGitCheck` below
+    // exercises the real default-argument path production actually takes.
     func labRunGit(_ args: [String], _ dir: URL) async throws -> String {
         git(args, dir)
+    }
+    // `LoopWorktreeManager.create`'s production call sites never pass `runGit`
+    // — they rely on its default, which now resolves `defaultRunGit` inside
+    // the function body (see the doc comment on `createIfPossible`) rather
+    // than as a function-reference default argument value: the latter form
+    // previously miscompiled into a non-isolated thunk and crashed every run
+    // with `swift_task_dealloc: freed pointer was not the last allocation`
+    // (confirmed via `lldb`). This check calls the default path for real, from
+    // a `@MainActor` context, so a regression back to that crash is caught here.
+    @MainActor
+    func defaultRunGitCheck(_ repo: URL) async {
+        let lease = try? await LoopWorktreeManager.create(mainRepo: repo, faultsRoot: repo,
+                                                           requireCleanMain: false)
+        expect(lease != nil, "the default runGit argument (no override) creates a worktree without crashing")
+        if let lease {
+            let content = try? String(contentsOf: lease.worktreePath.appendingPathComponent("a.txt"), encoding: .utf8)
+            expect(content == "v1", "the default path's worktree also has HEAD's content")
+            _ = git(["worktree", "remove", "--force", lease.worktreePath.path], repo)
+        }
     }
     let repo = FileManager.default.temporaryDirectory.appendingPathComponent("wt-\(UUID().uuidString)")
     try? FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
@@ -298,6 +315,7 @@ func runSelfHealLoopChecks() async {
         expect(content == "v1", "the worktree has HEAD's content, not the main checkout's uncommitted change")
         _ = git(["worktree", "remove", "--force", lenient.worktreePath.path], repo)
     }
+    await defaultRunGitCheck(repo)
     let minimal = LoopEngineConfig(stages: [LoopStage(name: "Test", kind: .regressionSweep, order: 0)])
     var legacyJSON = (try? JSONSerialization.jsonObject(
         with: JSONEncoder().encode(minimal))) as? [String: Any] ?? [:]

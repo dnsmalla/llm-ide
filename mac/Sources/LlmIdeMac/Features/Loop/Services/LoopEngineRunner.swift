@@ -496,6 +496,11 @@ final class LoopEngineRunner: ObservableObject {
             if let lease = worktreeLease {
                 await LoopWorktreeManager.finish(lease)
             }
+            // The success defer below (which also clears this) never registers
+            // on this early-exit path, so clear it here too: otherwise a run
+            // cancelled while queued leaves `currentWorktreeLease` pointing at
+            // a worktree `finish` just removed, and Task 9 would read a stale lease.
+            currentWorktreeLease = nil
             if error is CancellationError {
                 // An explicit stop while still queued is still an abort — the
                 // user cancelled, same as line ~460 for mid-run cancellation.

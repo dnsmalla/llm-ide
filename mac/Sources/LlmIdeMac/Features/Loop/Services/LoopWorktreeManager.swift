@@ -38,8 +38,18 @@ public enum LoopWorktreeManager {
 
     /// Best-effort worktree creation. Returns `nil` when git refuses (dirty tree,
     /// missing git, etc.) so the caller can fall back to the FIFO queue.
-    public static func createIfPossible(mainRepo: URL, faultsRoot: URL, requireCleanMain: Bool = true,
-                                 runGit: @escaping ([String], URL) async throws -> String = defaultRunGit) async -> Lease? {
+    ///
+    /// - Parameter runGit: `nil` (the default) resolves to `defaultRunGit` at
+    ///   the call site inside this function's body, not as a function-reference
+    ///   default argument value. A `@MainActor` static async function used
+    ///   directly as a default argument of type `([String], URL) async throws
+    ///   -> String` miscompiled into a non-isolated thunk that crashed every
+    ///   run with `swift_task_dealloc: freed pointer was not the last
+    ///   allocation` (reproduced via `lldb`, Swift 5 language mode on a
+    ///   Swift 6 toolchain) — this resolve-in-body form sidesteps that thunk
+    ///   entirely.
+    static func createIfPossible(mainRepo: URL, faultsRoot: URL, requireCleanMain: Bool = true,
+                                 runGit: (([String], URL) async throws -> String)? = nil) async -> Lease? {
         do {
             return try await create(mainRepo: mainRepo, faultsRoot: faultsRoot,
                                     requireCleanMain: requireCleanMain, runGit: runGit)
@@ -53,8 +63,11 @@ public enum LoopWorktreeManager {
     ///   though the main checkout has local changes. Used by loops that must
     ///   never edit the main checkout and must never refuse one just because
     ///   it is dirty — see `LoopEngineConfig.alwaysUseWorktree`.
+    /// - Parameter runGit: see `createIfPossible`'s note on why this resolves
+    ///   `defaultRunGit` inside the body rather than as a default argument value.
     public static func create(mainRepo: URL, faultsRoot: URL, requireCleanMain: Bool = true,
-                       runGit: @escaping ([String], URL) async throws -> String = defaultRunGit) async throws -> Lease {
+                       runGit: (([String], URL) async throws -> String)? = nil) async throws -> Lease {
+        let runGit = runGit ?? { try await defaultRunGit($0, at: $1) }
         _ = try await runGit(["rev-parse", "--is-inside-work-tree"], mainRepo)
         if requireCleanMain {
             let status = try await runGit(["status", "--porcelain"], mainRepo)
@@ -185,7 +198,7 @@ public enum LoopWorktreeManager {
         }
     }
 
-    public static func defaultRunGit(_ args: [String], at cwd: URL) async throws -> String {
+    private static func defaultRunGit(_ args: [String], at cwd: URL) async throws -> String {
         try await RepoManager().runGit(args, at: cwd)
     }
 
