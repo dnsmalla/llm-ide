@@ -640,5 +640,51 @@ func runSelfHealLoopChecks() async {
     LoopStageDetector.appSourceRoot = { AppSourceRoot.gitRoot }
     try? FileManager.default.removeItem(at: llmIde)
     try? FileManager.default.removeItem(at: other)
+
+    // The verify script's prepare step must leave the worktree readable by `git status`, or the scope guard goes blind.
+    func run(_ tool: String, _ args: [String], _ dir: URL, env: [String: String] = [:]) -> (status: Int32, out: String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: tool)
+        p.arguments = args
+        p.currentDirectoryURL = dir
+        p.environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
+        let out = Pipe(); p.standardOutput = out; p.standardError = out
+        try? p.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return (p.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+    }
+    let gitArgs = ["-c", "user.name=lab", "-c", "user.email=lab@example.invalid", "-c", "protocol.file.allow=always"]
+    let base = FileManager.default.temporaryDirectory.appendingPathComponent("shv-\(UUID().uuidString)")
+    let sub = base.appendingPathComponent("sub"), mainRepo = base.appendingPathComponent("main")
+    let wt = base.appendingPathComponent("wt")
+    for dir in [sub, mainRepo] { try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
+    _ = run("/usr/bin/git", gitArgs + ["init", "-q"], sub)
+    try? "s".write(to: sub.appendingPathComponent("s.txt"), atomically: true, encoding: .utf8)
+    _ = run("/usr/bin/git", gitArgs + ["add", "."], sub); _ = run("/usr/bin/git", gitArgs + ["commit", "-qm", "s"], sub)
+    _ = run("/usr/bin/git", gitArgs + ["init", "-q"], mainRepo)
+    let scriptSource = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .appendingPathComponent("../../Scripts/self-heal-verify.sh").standardizedFileURL
+    let verifyScriptDir = mainRepo.appendingPathComponent("mac/Scripts")
+    try? FileManager.default.createDirectory(at: verifyScriptDir, withIntermediateDirectories: true)
+    try? FileManager.default.copyItem(at: scriptSource, to: verifyScriptDir.appendingPathComponent("self-heal-verify.sh"))
+    _ = run("/usr/bin/git", gitArgs + ["add", "."], mainRepo); _ = run("/usr/bin/git", gitArgs + ["commit", "-qm", "a"], mainRepo)
+    _ = run("/usr/bin/git", gitArgs + ["submodule", "add", "-q", sub.path, ".skills"], mainRepo)
+    _ = run("/usr/bin/git", gitArgs + ["commit", "-qm", "sm"], mainRepo)
+    _ = run("/usr/bin/git", gitArgs + ["worktree", "add", "-q", "-b", "heal/shv", wt.path, "HEAD"], mainRepo)
+    // A gitdir file left in the worktree by an earlier iteration must not survive the next prepare.
+    try? FileManager.default.createDirectory(at: wt.appendingPathComponent(".skills"), withIntermediateDirectories: true)
+    try? "gitdir: ../../nowhere".write(to: wt.appendingPathComponent(".skills/.git"), atomically: true, encoding: .utf8)
+    let prepared = run("/bin/bash", ["mac/Scripts/self-heal-verify.sh"], wt, env: ["SELF_HEAL_PREPARE_ONLY": "1"])
+    expect(prepared.status == 0, "the verify script's prepare step succeeds in a worktree (\(prepared.out.prefix(200)))")
+    expect(FileManager.default.fileExists(atPath: wt.appendingPathComponent(".skills/s.txt").path),
+           "the prepare step brings the submodule's files into the worktree")
+    try? FileManager.default.createDirectory(at: wt.appendingPathComponent("mac/Scripts"), withIntermediateDirectories: true)
+    try? "x".write(to: wt.appendingPathComponent("mac/Scripts/evil.sh"), atomically: true, encoding: .utf8)
+    let status = run("/usr/bin/git", ["status", "--porcelain", "--untracked-files=all"], wt)
+    expect(status.status == 0 && status.out.contains("mac/Scripts/evil.sh"),
+           "after the prepare step git status still works and sees a protected-path edit")
+    _ = run("/usr/bin/git", ["worktree", "remove", "--force", wt.path], mainRepo)
+    try? FileManager.default.removeItem(at: base)
     #endif
 }

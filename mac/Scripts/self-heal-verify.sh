@@ -14,16 +14,18 @@ borrow() {
   rm -rf "${here:?}/$rel"
   ln -s "$main/$rel" "$here/$rel"
 }
-# Copied, not linked: a build inside a symlinked package would write into the main checkout's .build.
+# Copied without .git: a symlinked or gitdir-carrying submodule makes `git status` fail, blinding the scope guard.
 copy() {
   local rel="$1"
   [ -d "$main/$rel" ] || return 0
   if [ -L "$here/$rel" ]; then rm -f "${here:?}/$rel"; fi
   mkdir -p "$here/$rel"
-  rsync -a --delete --exclude .build "$main/$rel/" "$here/$rel/"
+  rm -rf "${here:?}/$rel/.git"
+  rsync -a --delete --exclude .git --exclude .build "$main/$rel/" "$here/$rel/"
 }
 borrow extension/node_modules
-borrow .skills
+copy .skills
 copy mac/LocalPackages/graph-kit
+[ "${SELF_HEAL_PREPARE_ONLY:-}" = 1 ] && exit 0
 cd "$here"
 exec make regression
