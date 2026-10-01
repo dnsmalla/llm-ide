@@ -349,6 +349,14 @@ func runSelfHealLoopChecks() async {
     }
     expect(!LoopStageDetector.defaultLoops(gitRoot: other).contains { $0.defaultKey == LoopDefaultLoopKey.selfHeal },
            "any other project gets no Self-Heal loop")
+    let otherScriptDir = other.appendingPathComponent("mac/Scripts")
+    try? FileManager.default.createDirectory(at: otherScriptDir, withIntermediateDirectories: true)
+    try? "#!/bin/sh\n".write(to: otherScriptDir.appendingPathComponent("self-heal-verify.sh"), atomically: true, encoding: .utf8)
+    let otherStage = LoopStage(name: "Verify", kind: .shellCommand, command: LoopStageDetector.selfHealVerifyCommand,
+                               order: 0, isDefault: true, defaultKey: "self-heal-verify")
+    expect(!LoopStageApproval.isApproved(otherStage, command: LoopStageDetector.selfHealVerifyCommand,
+                                         repo: other, approvals: approvals, fresh: true),
+           "another repo's self-heal-verify script is never auto-approved")
     LoopStageDetector.appSourceRoot = { nil }
     expect(!LoopStageDetector.defaultLoops(gitRoot: llmIde).contains { $0.defaultKey == LoopDefaultLoopKey.selfHeal },
            "a release build gets no Self-Heal loop")

@@ -131,6 +131,10 @@ public enum LoopStageDetector {
         case "test", "regression-test", "refactor-test":
             return detectTestCommand(gitRoot: gitRoot)
         case "self-heal-verify":
+            // Gated on the LLM-IDE checkout, not just the script's presence —
+            // otherwise any repo shipping this script name would auto-approve
+            // running it, bypassing the first-run approval click entirely.
+            guard isAppSourceRoot(gitRoot) else { return nil }
             let script = gitRoot.appendingPathComponent("mac/Scripts/self-heal-verify.sh").path
             return FileManager.default.fileExists(atPath: script) ? selfHealVerifyCommand : nil
         default:
