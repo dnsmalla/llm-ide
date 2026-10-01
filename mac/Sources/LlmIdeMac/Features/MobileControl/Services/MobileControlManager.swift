@@ -87,13 +87,17 @@ final class MobileControlManager {
     /// Doc Gen is compiled out or not yet wired (see `routeToFeatureBridge`).
     var generationBridge: MobileFeatureBridge? { didSet { refreshCapabilities() } }
 
+    /// Feature bridge for `activity_*` messages (the bell's feed). Wired whenever Mobile is built.
+    var activityBridge: MobileFeatureBridge? { didSet { refreshCapabilities() } }
+
     /// What this Mac advertises in `Connected.capabilities`. A locked snapshot, not a read of the
     /// bridge slots, because the server asks from its own queue while the slots are main-actor.
     private let capabilityBox = CapabilityBox()
 
     /// Pure so a test can pin it: chat and Explorer are always served; each bridge-backed
     /// feature appears only when its bridge is wired, mirroring `routeToFeatureBridge`.
-    nonisolated static func capabilities(autoTasks: Bool, loop: Bool, generation: Bool) -> [String] {
+    nonisolated static func capabilities(autoTasks: Bool, loop: Bool, generation: Bool,
+                                         activity: Bool = false) -> [String] {
         var caps = [MobileProtocol.Capability.chat, MobileProtocol.Capability.explorer]
         if autoTasks { caps.append(MobileProtocol.Capability.autoTasks) }
         if loop { caps.append(MobileProtocol.Capability.loop) }
@@ -101,13 +105,15 @@ final class MobileControlManager {
             caps.append(MobileProtocol.Capability.generation)
             caps.append(MobileProtocol.Capability.llmDoc)
         }
+        if activity { caps.append(MobileProtocol.Capability.activity) }
         return caps
     }
 
     private func refreshCapabilities() {
         capabilityBox.value = Self.capabilities(autoTasks: autoTaskBridge != nil,
                                                 loop: loopBridge != nil,
-                                                generation: generationBridge != nil)
+                                                generation: generationBridge != nil,
+                                                activity: activityBridge != nil)
     }
     /// Mac Settings + workspace — used to run iPhone explore prompts with the
     /// same model/provider and agent context as the desktop Explorer panel.
@@ -406,6 +412,7 @@ final class MobileControlManager {
         autoTaskBridge?.removePushObservers()
         loopBridge?.removePushObservers()
         generationBridge?.removePushObservers()
+        activityBridge?.removePushObservers()
         onMobileClientDisconnected()
         server?.stop()
         server = nil
@@ -564,6 +571,12 @@ final class MobileControlManager {
         MobileProtocol.Tag.llmDocRead,
     ]
 
+    /// Feature message types the activity bridge owns. Pinned by `MobileFeatureBridgeTests`.
+    static let activityMessageTypes: Set<String> = [
+        MobileProtocol.Tag.activityList,
+        MobileProtocol.Tag.activityMarkSeen,
+    ]
+
     /// Route an auto-task/loop message type to its installed feature bridge.
     /// Returns `true` when `type` belongs to either feature's message set —
     /// the caller (the `handleInbound` switch) must NOT fall through to the
@@ -585,6 +598,14 @@ final class MobileControlManager {
                 return true
             }
             return loopBridge.handle(type: type, data: data)
+        }
+        if Self.activityMessageTypes.contains(type) {
+            guard let activityBridge else {
+                // Reply-shaped so the phone's feed stops loading instead of waiting on a CommandError.
+                reply(ActivityState(entries: [], unread: 0))
+                return true
+            }
+            return activityBridge.handle(type: type, data: data)
         }
         if Self.generationMessageTypes.contains(type) {
             guard let generationBridge else {
@@ -1207,6 +1228,7 @@ final class MobileControlManager {
         autoTaskBridge?.installPushObservers()
         loopBridge?.installPushObservers()
         generationBridge?.installPushObservers()
+        activityBridge?.installPushObservers()
     }
 
     /// Push a fresh Mac status snapshot when backend or project context changes.
@@ -1226,6 +1248,7 @@ final class MobileControlManager {
         _ = autoTaskBridge?.handle(type: MobileProtocol.Tag.autoTaskList, data: nil)
         _ = autoTaskBridge?.handle(type: MobileProtocol.Tag.autoTaskLogsList, data: nil)
         pushExploreSessionListIfPaired()
+        _ = activityBridge?.handle(type: MobileProtocol.Tag.activityList, data: nil)
         Task { await pushMacStatusIfPaired() }
     }
 

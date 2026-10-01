@@ -53,4 +53,13 @@ final class GenerationMessagesTests: XCTestCase {
         XCTAssertFalse(MobileProtocol.Capability.legacy.contains(MobileProtocol.Capability.generation))
         XCTAssertTrue(MobileProtocol.Capability.legacy.contains(MobileProtocol.Capability.loop))
     }
+
+    func testActivityStateRoundTripsAndTagsAreStable() throws {
+        let state = ActivityState(entries: [ActivityEntry(id: 7, kind: nil, title: "t", createdAt: 5)], unread: 1)
+        XCTAssertEqual(try roundTrip(state), state)
+        XCTAssertEqual(MobileProtocol.Tag.activityState, "activity_state")
+        XCTAssertEqual(MobileProtocol.Tag.activityList, "activity_list")
+        XCTAssertEqual(MobileProtocol.Tag.activityMarkSeen, "activity_mark_seen")
+        XCTAssertFalse(MobileProtocol.Capability.legacy.contains(MobileProtocol.Capability.activity))
+    }
 }

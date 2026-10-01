@@ -30,6 +30,7 @@ public enum MobileProtocol {
         public static let loop = "loop"
         public static let generation = "generation"
         public static let llmDoc = "llm_doc"
+        public static let activity = "activity"
 
         /// What a Mac that sends NO capability list is assumed to serve: everything that shipped
         /// before the handshake existed. Doc Gen and the llm-doc browser came after it, so a
@@ -128,5 +129,10 @@ public enum MobileProtocol {
         public static let llmDocListing = "llmdoc_listing"
         public static let llmDocRead = "llmdoc_read"
         public static let llmDocFile = "llmdoc_file"
+
+        // MARK: Activity feed — see ActivityMessages.swift
+        public static let activityList = "activity_list"
+        public static let activityState = "activity_state"
+        public static let activityMarkSeen = "activity_mark_seen"
     }
 }

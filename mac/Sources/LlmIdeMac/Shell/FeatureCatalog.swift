@@ -596,6 +596,7 @@ enum FeatureCatalog {
                            api: LlmIdeAPIClient,
                            projectStore: ProjectStore,
                            backend: BackendManager,
+                           activity: ActivityStore,
                            registry: FeatureRegistry) {
         #if FEATURE_MOBILE
         let manager = MobileControlManager()
@@ -606,6 +607,7 @@ enum FeatureCatalog {
         manager.projectStore = projectStore
         manager.backendManager = backend
         mobileControlManager = manager
+        manager.activityBridge = MobileActivityBridge(manager: manager, store: activity)
 
         registry.register(module: MobileModule(
             manager: manager,
