@@ -324,5 +324,36 @@ func runSelfHealLoopChecks() async {
     let decoded = try? JSONDecoder().decode(LoopEngineConfig.self, from: legacyData)
     expect(decoded?.alwaysUseWorktree == false, "an older loop.json decodes alwaysUseWorktree as false")
     try? FileManager.default.removeItem(at: repo)
+
+    let llmIde = FileManager.default.temporaryDirectory.appendingPathComponent("sh-\(UUID().uuidString)")
+    let scriptDir = llmIde.appendingPathComponent("mac/Scripts")
+    try? FileManager.default.createDirectory(at: scriptDir, withIntermediateDirectories: true)
+    try? "#!/bin/sh\n".write(to: scriptDir.appendingPathComponent("self-heal-verify.sh"), atomically: true, encoding: .utf8)
+    let other = FileManager.default.temporaryDirectory.appendingPathComponent("other-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+
+    LoopStageDetector.appSourceRoot = { llmIde }
+    let loops = LoopStageDetector.defaultLoops(gitRoot: llmIde)
+    let heal = loops.first { $0.defaultKey == LoopDefaultLoopKey.selfHeal }
+    expect(heal != nil, "the LLM-IDE checkout gets a Self-Heal loop")
+    expect(heal?.runsOnSchedule == true && heal?.config.alwaysUseWorktree == true && heal?.config.maxIterations == 3,
+           "Self-Heal runs on the schedule, always in a worktree, with 3 iterations")
+    expect(heal?.config.stages.map(\.kind) == [.incidentTriage, .skill, .shellCommand], "Self-Heal is triage → fix → verify")
+    let verify = heal?.config.stages.last
+    let approvals = VerifyApprovalStore(defaults: UserDefaults(suiteName: "sh-\(UUID().uuidString)")!)
+    if let verify, let command = verify.command {
+        expect(LoopStageApproval.isApproved(verify, command: command, repo: llmIde, approvals: approvals, fresh: true),
+               "the Self-Heal verify stage runs without a first-run approval")
+    } else {
+        expect(false, "the Self-Heal verify stage has a command")
+    }
+    expect(!LoopStageDetector.defaultLoops(gitRoot: other).contains { $0.defaultKey == LoopDefaultLoopKey.selfHeal },
+           "any other project gets no Self-Heal loop")
+    LoopStageDetector.appSourceRoot = { nil }
+    expect(!LoopStageDetector.defaultLoops(gitRoot: llmIde).contains { $0.defaultKey == LoopDefaultLoopKey.selfHeal },
+           "a release build gets no Self-Heal loop")
+    LoopStageDetector.appSourceRoot = { AppSourceRoot.gitRoot }
+    try? FileManager.default.removeItem(at: llmIde)
+    try? FileManager.default.removeItem(at: other)
     #endif
 }

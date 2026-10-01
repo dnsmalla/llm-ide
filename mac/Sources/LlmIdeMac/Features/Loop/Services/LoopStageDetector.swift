@@ -19,6 +19,16 @@ import Foundation
 /// no detectable test tooling gets Regression alone — exactly what such a repo
 /// got before the split.
 public enum LoopStageDetector {
+    public static let selfHealVerifyCommand = "bash mac/Scripts/self-heal-verify.sh"
+    /// Test seam: which checkout is LLM-IDE's own.
+    nonisolated(unsafe) public static var appSourceRoot: () -> URL? = { AppSourceRoot.gitRoot }
+
+    static func isAppSourceRoot(_ gitRoot: URL) -> Bool {
+        guard let root = appSourceRoot() else { return false }
+        return root.resolvingSymlinksInPath().standardizedFileURL.path
+            == gitRoot.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
     /// The PRE-SPLIT flat catalogue of default stages, each marked
     /// `isDefault = true`. It is deliberately still the legacy nine and does
     /// NOT include the Regression loop's own `regression-test` verify stage
@@ -120,6 +130,9 @@ public enum LoopStageDetector {
         switch key {
         case "test", "regression-test", "refactor-test":
             return detectTestCommand(gitRoot: gitRoot)
+        case "self-heal-verify":
+            let script = gitRoot.appendingPathComponent("mac/Scripts/self-heal-verify.sh").path
+            return FileManager.default.fileExists(atPath: script) ? selfHealVerifyCommand : nil
         default:
             return systemCheckStages(gitRoot: gitRoot).first(where: { $0.key == key })?.command
         }
@@ -667,6 +680,9 @@ public enum LoopStageDetector {
         "doc-index": LoopDefaultLoopKey.docs,
         "doc-writer": LoopDefaultLoopKey.docs,
         "doc-check": LoopDefaultLoopKey.docs,
+        "self-heal-triage": LoopDefaultLoopKey.selfHeal,
+        "self-heal-fix": LoopDefaultLoopKey.selfHeal,
+        "self-heal-verify": LoopDefaultLoopKey.selfHeal,
     ]
 
     /// The Plan loop's two generate stages: refresh the structure indexes,
@@ -975,10 +991,34 @@ public enum LoopStageDetector {
         case LoopDefaultLoopKey.docs:
             guard gitRoot != nil else { return [] }
             return docStages()
+        case LoopDefaultLoopKey.selfHeal:
+            guard let gitRoot, isAppSourceRoot(gitRoot),
+                  let verify = detectedDefaultCommand(forKey: "self-heal-verify", gitRoot: gitRoot) else { return [] }
+            return [
+                LoopStage(name: "Triage", kind: .incidentTriage, order: 0,
+                          isDefault: true, defaultKey: "self-heal-triage"),
+                LoopStage(name: "Investigate & Fix", kind: .skill, order: 1,
+                          skillId: "skills/systematic-debugging",
+                          targetPath: SelfHealBatch.relativePath, outputPath: ".",
+                          prompt: selfHealFixPrompt, isDefault: true, defaultKey: "self-heal-fix"),
+                LoopStage(name: "Verify", kind: .shellCommand, command: verify, order: 2,
+                          isDefault: true, defaultKey: "self-heal-verify", detectedCommand: verify),
+            ]
         default:
             return []
         }
     }
+
+    // Verbatim batch path and fix-agent instructions — keep in sync with
+    // `SelfHealBatch.relativePath` (Task 6): the fix agent reads exactly what
+    // the Triage stage wrote and answers it in place.
+    private static let selfHealFixPrompt = """
+    Read \(SelfHealBatch.relativePath). For every incident: reproduce or trace it to its root cause in this \
+    repository first, then make the smallest change that fixes that cause. Never weaken, skip or delete a test. \
+    If an incident is caused by the environment (network, permissions, missing tools) or you cannot find a code \
+    cause, change nothing for it. Finish by writing exactly one line per incident under "## Results" in that file: \
+    `- <id>: fixed|environmental|cannot-reproduce — <one-line reason>`.
+    """
 
     /// Display name of a default loop.
     static func defaultLoopName(_ loopKey: String) -> String {
@@ -989,6 +1029,7 @@ public enum LoopStageDetector {
         case LoopDefaultLoopKey.plan: return "Plan"
         case LoopDefaultLoopKey.refactor: return "Refactoring"
         case LoopDefaultLoopKey.docs: return "Doc Optimization"
+        case LoopDefaultLoopKey.selfHeal: return "Self-Heal"
         default: return loopKey
         }
     }
@@ -1025,6 +1066,9 @@ public enum LoopStageDetector {
                         + "people, agents and the code graph are pointed at the right code.",
                     "llm-doc/docs/INDEX.md lists every area, every listed page exists within 250 lines, and "
                         + "every code citation resolves to a real file or symbol.")
+        case LoopDefaultLoopKey.selfHeal:
+            return ("Turn errors the app recorded into reviewed fixes, one root cause at a time.",
+                    "Every incident in the batch has a Results line, and the regression gate passes in the worktree.")
         default:
             return nil
         }
@@ -1037,16 +1081,22 @@ public enum LoopStageDetector {
     /// `isPrimary` is left `false` on every one of them: exactly-one-Primary is
     /// `ensureDefaultLoops`'s invariant to keep, and it is the only path that
     /// should build a project's loop list.
-    static func defaultLoops(gitRoot: URL?, defaults: UserDefaults = .standard) -> [LoopDefinition] {
+    public static func defaultLoops(gitRoot: URL?, defaults: UserDefaults = .standard) -> [LoopDefinition] {
         LoopDefaultLoopKey.all.compactMap { key in
             let stages = defaultStages(forLoop: key, gitRoot: gitRoot)
             guard !stages.isEmpty else { return nil }
             let contract = defaultLoopContract(key)
+            var config = LoopEngineDefaults.newConfig(stages: stages, defaults: defaults)
+            if key == LoopDefaultLoopKey.selfHeal {
+                config.maxIterations = 3
+                config.alwaysUseWorktree = true
+            }
             return LoopDefinition(id: defaultLoopId(key), name: defaultLoopName(key),
                                   goal: contract?.goal,
                                   acceptanceCriteria: contract?.acceptance,
                                   defaultKey: key,
-                                  config: LoopEngineDefaults.newConfig(stages: stages, defaults: defaults))
+                                  runsOnSchedule: key == LoopDefaultLoopKey.selfHeal,
+                                  config: config)
         }
     }
 

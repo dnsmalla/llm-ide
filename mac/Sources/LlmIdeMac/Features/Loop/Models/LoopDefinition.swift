@@ -157,9 +157,13 @@ public enum LoopDefaultLoopKey {
     /// The doc-optimization loop: index the codebase's areas, then write a
     /// generated, code-cited doc tree under `llm-doc/docs/`.
     public static let docs = "docs"
+    /// The Self-Heal loop: triage recorded incidents, fix the root cause of
+    /// each, then verify in an isolated worktree. Created only on the LLM-IDE
+    /// checkout itself (`LoopStageDetector.isAppSourceRoot`).
+    public static let selfHeal = "self-heal"
 
     /// Creation/display order.
-    public static let all = [regression, test, systemCheck, plan, refactor, docs]
+    public static let all = [regression, test, systemCheck, plan, refactor, docs, selfHeal]
 
     /// Default loops that are never run by the scheduled `.loopEngineering`
     /// Auto Task, whatever their `runsOnSchedule` says. The Refactoring loop
