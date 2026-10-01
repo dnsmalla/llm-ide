@@ -146,7 +146,7 @@ extension LoopEngineView {
             guard let gitRoot = activeGitRootURL else { return display }
             // Approval is a real precondition, not a nicety: an unapproved stage
             // stops the run in preflight before any iteration.
-            return approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: raw)
+            return LoopStageApproval.isApproved(stage, command: raw, repo: gitRoot, approvals: approvals)
                 ? display
                 : "\(display) — needs approval"
         case .skill:

@@ -97,6 +97,10 @@ struct LoopEngineView: View {
     // (loop switch and back): the callback wrote into the torn-down view's
     // state box while the live page kept nil.
     @State private var didRejectLastRun = false
+    /// What the Approve-all dialog shows and approves — frozen at tap time so
+    /// a re-render (config reload, project switch, cache expiry) cannot change
+    /// the list between showing it and approving it.
+    @State private var approveAllSnapshot: (gitRoot: URL, items: [(stageId: String, name: String, command: String)])?
     @State private var skillCatalog: [LlmIdeAPIClient.SkillLibraryEntry] = []
     @State private var skillsLoaded = false
     @State private var pastRuns: [LoopRunIndexEntry] = []
@@ -364,7 +368,7 @@ struct LoopEngineView: View {
                stage.kind == .shellCommand,
                let command = stage.command,
                let gitRoot = activeGitRootURL,
-               !approvals.isStageApproved(repo: gitRoot, stageId: stage.id, command: command) {
+               !LoopStageApproval.isApproved(stage, command: command, repo: gitRoot, approvals: approvals) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(.orange)
@@ -562,7 +566,7 @@ struct LoopEngineView: View {
     }
 
     private var toolbar: some View {
-        RunnerObserver(runner: runner) { toolbarContent }
+        RunnerObserver(runner: runner) { approveAllDialog(toolbarContent) }
     }
 
     /// A phone/schedule run of THIS loop on the Auto Task lane — shown in the
@@ -587,6 +591,9 @@ struct LoopEngineView: View {
             .disabled(runner.running || runner.waitingInQueue || isStartPending || laneRun != nil
                       || !stages.contains(where: \.enabled) || activeGitRootURL == nil)
             .help(laneRun.map { "\($0.label) — stop it before running from here." } ?? "")
+            if !runner.running, let gitRoot = activeGitRootURL {
+                approveAllButton(gitRoot: gitRoot)
+            }
             if let lane = laneRun, !runner.running {
                 Button("Stop") { stopRun() }
                     .controlSize(.small)
@@ -648,6 +655,44 @@ struct LoopEngineView: View {
         }
         .padding(.horizontal, Spacing.lg)
         .padding(.vertical, Spacing.sm)
+    }
+
+    /// Approves every enabled shell stage that would stop the run in preflight,
+    /// after a dialog listing each exact command — the same consent the
+    /// per-stage button asks for, given once.
+    @ViewBuilder
+    private func approveAllButton(gitRoot: URL) -> some View {
+        let pending = LoopStageApproval.pending(stages, repo: gitRoot, approvals: approvals)
+        if !pending.isEmpty {
+            Button("Approve \(pending.count) command\(pending.count == 1 ? "" : "s")…") {
+                approveAllSnapshot = (gitRoot, pending.map { ($0.stage.id, $0.stage.name, $0.command) })
+            }
+            .controlSize(.small)
+            .help("These stages stop the run until approved on this machine")
+        }
+    }
+
+    /// Attached to the always-present toolbar, not the button: the button
+    /// vanishes when a run starts, and a dialog dismissed that way can skip
+    /// the binding's setter and resurface later with a stale list.
+    private func approveAllDialog<Content: View>(_ content: Content) -> some View {
+        content
+            .confirmationDialog("Run these commands on this machine?",
+                                isPresented: Binding(get: { approveAllSnapshot != nil },
+                                                     set: { if !$0 { approveAllSnapshot = nil } }),
+                                titleVisibility: .visible) {
+                Button("Approve all") {
+                    if let snapshot = approveAllSnapshot {
+                        for item in snapshot.items {
+                            approvals.approveStage(repo: snapshot.gitRoot, stageId: item.stageId, command: item.command)
+                        }
+                    }
+                    approveAllSnapshot = nil
+                }
+                Button("Cancel", role: .cancel) { approveAllSnapshot = nil }
+            } message: {
+                Text((approveAllSnapshot?.items ?? []).map { "\($0.name): \($0.command)" }.joined(separator: "\n"))
+            }
     }
 
     /// A binding to the stage with `id`, looked up on every access. A binding
@@ -722,13 +767,15 @@ struct LoopEngineView: View {
                         // button claiming to enable while only approving would
                         // leave a disabled stage silently skipped.
                         let approved = approvals.isStageApproved(repo: gitRoot, stageId: stage.wrappedValue.id, command: command)
-                        Button(approved ? "Approved" : "Approve command") {
+                        let isDetectedDefault = !approved
+                            && LoopStageApproval.isDetectedDefault(stage.wrappedValue, command: command, repo: gitRoot)
+                        Button(approved ? "Approved" : isDetectedDefault ? "Default — no approval needed" : "Approve command") {
                             approvals.approveStage(repo: gitRoot, stageId: stage.wrappedValue.id, command: command)
                             selectedStageId = stage.wrappedValue.id
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                        .disabled(approved)
+                        .disabled(approved || isDetectedDefault)
                     } else {
                         Text("Enter a command for this stage.")
                             .font(Typography.caption).foregroundStyle(t.textMuted)

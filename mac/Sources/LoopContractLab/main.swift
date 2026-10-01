@@ -462,6 +462,57 @@ do {
     expect(noteUnrecognised.isUnrecognised == true,
            "and DOES fire the once-per-run side effect, unlike every case above")
 }
+
+// MARK: - Default stages run without a first-run approval
+
+do {
+    let suite = "loop-contract-lab-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let approvals = VerifyApprovalStore(defaults: defaults)
+
+    let defaultTest = LoopStage(id: "test/test", name: "Test", kind: .shellCommand, command: "swift test",
+                                order: 0, isDefault: true, defaultKey: "test")
+    expect(LoopStageApproval.isApproved(defaultTest, command: "swift test", repo: swiftRoot, approvals: approvals),
+           "an unedited default stage runs with no approval on record")
+    expect(LoopStageApproval.isApproved(defaultTest, command: "swift test", repo: swiftRoot,
+                                        approvals: approvals, fresh: true),
+           "the runner's fresh re-detection agrees with the cached view check")
+    expect(LoopStageApproval.pending([defaultTest], repo: swiftRoot, approvals: approvals).isEmpty,
+           "an unedited default is not listed for approval")
+
+    var edited = defaultTest
+    edited.command = "swift test && curl https://example.invalid"
+    expect(!LoopStageApproval.isApproved(edited, command: edited.command!, repo: swiftRoot, approvals: approvals),
+           "an edited default command still needs approval")
+    expect(LoopStageApproval.pending([edited], repo: swiftRoot, approvals: approvals).map(\.command) == [edited.command!],
+           "the edited command is listed for approval with its exact text")
+
+    let userStage = LoopStage(id: "mine", name: "Mine", kind: .shellCommand, command: "swift test", order: 0)
+    expect(!LoopStageApproval.isApproved(userStage, command: "swift test", repo: swiftRoot, approvals: approvals),
+           "a user-added stage is never auto-approved, even with the detected command")
+
+    let spoofed = LoopStage(id: "x", name: "Backend", kind: .shellCommand, command: "rm -rf ~",
+                            order: 0, isDefault: true, defaultKey: "backend")
+    expect(!LoopStageApproval.isApproved(spoofed, command: "rm -rf ~", repo: bareRoot, approvals: approvals),
+           "a loop.json claiming a default key cannot pre-approve its own command")
+
+    let noTooling = LoopStage(id: "test/test", name: "Test", kind: .shellCommand, command: "swift test",
+                              order: 0, isDefault: true, defaultKey: "test")
+    expect(!LoopStageApproval.isApproved(noTooling, command: "swift test", repo: bareRoot, approvals: approvals),
+           "a default key only passes when this checkout actually detects that command")
+
+    var disabled = edited
+    disabled.enabled = false
+    expect(LoopStageApproval.pending([disabled], repo: swiftRoot, approvals: approvals).isEmpty,
+           "a disabled stage never asks for approval")
+
+    for item in LoopStageApproval.pending([edited, userStage], repo: swiftRoot, approvals: approvals) {
+        approvals.approveStage(repo: swiftRoot, stageId: item.stage.id, command: item.command)
+    }
+    expect(LoopStageApproval.pending([edited, userStage], repo: swiftRoot, approvals: approvals).isEmpty,
+           "approving the pending list clears it")
+}
 #else
 print("  skipped — Loop is excluded from this build (auto_tasks not in LLMIDE_FEATURES)")
 #endif

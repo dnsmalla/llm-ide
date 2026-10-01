@@ -113,6 +113,18 @@ public enum LoopStageDetector {
         return checks
     }
 
+    /// The command this build itself generates for a default shell stage's
+    /// `defaultKey` in `gitRoot`, or nil when the key has no detected command.
+    /// Recomputed from the checkout, never read from `loop.json`.
+    static func detectedDefaultCommand(forKey key: String, gitRoot: URL) -> String? {
+        switch key {
+        case "test", "regression-test", "refactor-test":
+            return detectTestCommand(gitRoot: gitRoot)
+        default:
+            return systemCheckStages(gitRoot: gitRoot).first(where: { $0.key == key })?.command
+        }
+    }
+
     /// The command `swift test` used to be, before the Mac-app stage got the
     /// memory keychain. `migratingMacAppCommand` matches it EXACTLY.
     static let legacyMacAppCommand = "cd mac && swift test"

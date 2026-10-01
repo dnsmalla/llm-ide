@@ -604,7 +604,8 @@ final class LoopEngineRunner: ObservableObject {
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
-                guard approvals.isStageApproved(repo: approvalRepo, stageId: stage.id, command: command) else {
+                guard LoopStageApproval.isApproved(stage, command: command, repo: approvalRepo,
+                                                   approvals: approvals, fresh: true) else {
                     appendLog(.warn, "  [\(stage.name)] needs approval: \(command)")
                     return await finish(.needsApproval(stageName: stage.name),
                                         config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,

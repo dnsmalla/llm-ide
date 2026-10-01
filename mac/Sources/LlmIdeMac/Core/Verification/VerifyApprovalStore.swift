@@ -8,11 +8,11 @@
 import Foundation
 import CryptoKit
 
-final class VerifyApprovalStore {
+public final class VerifyApprovalStore {
     private let defaults: UserDefaults
     private static let key = "regressionApprovedVerifyHashes"
 
-    init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
     }
 
@@ -29,7 +29,7 @@ final class VerifyApprovalStore {
     /// Stage commands reuse the same repo+faultFile+command hash scheme as
     /// fault verify commands, distinguished by a "loopstage:<id>" faultFile
     /// so the two approval spaces never collide.
-    func isStageApproved(repo: URL, stageId: String, command: String) -> Bool {
+    public func isStageApproved(repo: URL, stageId: String, command: String) -> Bool {
         isApproved(repo: repo, faultFile: "loopstage:\(stageId)", command: command)
     }
 
@@ -38,7 +38,7 @@ final class VerifyApprovalStore {
     /// ever called from RegressionView's "Approve & enable" button). The
     /// LoopEngineRunner that later consumes `isStageApproved` must never call
     /// this itself — that would make the gate a no-op.
-    func approveStage(repo: URL, stageId: String, command: String) {
+    public func approveStage(repo: URL, stageId: String, command: String) {
         approve(repo: repo, faultFile: "loopstage:\(stageId)", command: command)
     }
 
