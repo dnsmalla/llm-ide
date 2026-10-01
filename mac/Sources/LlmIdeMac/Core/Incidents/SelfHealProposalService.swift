@@ -63,6 +63,12 @@ public enum SelfHealProposalService {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = args
         process.currentDirectoryURL = dir
+        // An inherited repo override would point every call at some other repository.
+        var env = ProcessInfo.processInfo.environment
+        for key in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"] {
+            env.removeValue(forKey: key)
+        }
+        process.environment = env
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
