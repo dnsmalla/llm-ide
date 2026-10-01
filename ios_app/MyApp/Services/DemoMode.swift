@@ -100,7 +100,19 @@ final class DemoResponder {
         // MARK: llm-ide chat
         case MobileProtocol.Tag.llmIdeChat:
             guard let commandId = obj["commandId"] as? String else { return }
+            if (obj["text"] as? String ?? "").lowercased().contains("permission") {
+                send(ToolApprovalRequest(
+                    commandId: commandId, requestId: "demo-tool-1", toolName: "Edit",
+                    summary: "Edit ChatEngine.swift", filePath: "~/llm-ide/Sources/Chat/Engine.swift",
+                    oldString: "let ids = items.map(\\.id)", newString: "let ids = items.compactMap(\\.id)",
+                    contentPreview: nil, command: nil, truncated: false, replaceAll: nil, overwrites: nil))
+                return
+            }
             stream(commandId: commandId, reply: Self.reply(to: obj["text"] as? String ?? ""))
+
+        case MobileProtocol.Tag.toolApprovalAnswer:
+            send(ApprovalCleared(commandId: obj["commandId"] as? String ?? "",
+                                 requestId: obj["requestId"] as? String ?? "", reason: nil))
 
         case MobileProtocol.Tag.llmIdeChatHistoryList:
             send(LlmIdeChatHistoryReply(messages: [

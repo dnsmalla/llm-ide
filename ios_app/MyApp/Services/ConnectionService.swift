@@ -645,7 +645,7 @@ final class ConnectionService: ObservableObject {
             macStatusStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "llmide_chat_history_reply", "llmide_chat_history_clear_ack":
             llmIdeStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
-        case "approval_request", "approval_cleared":
+        case "approval_request", "approval_cleared", "tool_approval_request":
             // Both surfaces can be parked on a question; each store checks the
             // frame's commandId against its own, exactly as with `output`.
             let type = json["type"] as? String ?? ""

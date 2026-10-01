@@ -174,6 +174,10 @@ struct LlmIdeControlView: View {
                 }
                 .padding(DesignSystem.Spacing.md)
             }
+            .onChange(of: llmIdeStore.pendingToolApproval?.requestId) { id in
+                guard let id else { return }
+                withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .bottom) }
+            }
             .onChange(of: llmIdeStore.pendingApproval?.requestId) { id in
                 guard let id else { return }
                 withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .bottom) }
@@ -206,7 +210,14 @@ struct LlmIdeControlView: View {
     /// expression in reasonable time").
     @ViewBuilder
     private var approvalSlot: some View {
-        if let request = llmIdeStore.pendingApproval {
+        if let tool = llmIdeStore.pendingToolApproval {
+            ToolApprovalCard(request: tool) { allow in
+                llmIdeStore.submitToolApproval(allow: allow)
+                haptic(allow ? .medium : .light)
+            }
+            .id(tool.requestId)
+            .transition(.opacity)
+        } else if let request = llmIdeStore.pendingApproval {
             ApprovalQuestionCard(request: request) { selection in
                 llmIdeStore.submitApproval(selection: selection)
                 haptic(.light)

@@ -19,6 +19,8 @@ final class LlmIdeChatStore: ObservableObject {
     /// fast path, and typing is for when none of them is what you mean.
     /// Nil whenever nothing is waiting on an answer.
     @Published var pendingApproval: ApprovalRequest?
+    /// A tool/edit permission prompt relayed from the Mac (only when its "Phone access" switch is on).
+    @Published var pendingToolApproval: ToolApprovalRequest?
     /// Why the last question went away without this phone answering it
     /// ("Answered on the Mac", "no longer open"). Shown once, then cleared.
     @Published var approvalNotice: String?
@@ -130,6 +132,16 @@ final class LlmIdeChatStore: ObservableObject {
         approvalNotice = nil
     }
 
+    /// Answer the parked tool prompt. The card comes down at once; the Mac re-checks the request id
+    /// against the turn's live prompt and the Phone access switch, and says so if it refuses.
+    func submitToolApproval(allow: Bool) {
+        guard let request = pendingToolApproval else { return }
+        connection?.sendEncodable(ToolApprovalAnswer(
+            commandId: request.commandId, requestId: request.requestId, allow: allow))
+        pendingToolApproval = nil
+        approvalNotice = nil
+    }
+
     func handleInbound(type: String, data: Data) {
         switch type {
         case "llmide_chat_history_reply":
@@ -153,14 +165,27 @@ final class LlmIdeChatStore: ObservableObject {
                 approvalNotice = nil
                 pendingApproval = request
             }
+        case MobileProtocol.Tag.toolApprovalRequest:
+            // Same ownership rule as questions: only the surface whose turn this is.
+            if let request = try? JSONDecoder().decode(ToolApprovalRequest.self, from: data),
+               ownsCommand(request.commandId) {
+                approvalNotice = nil
+                pendingApproval = nil
+                pendingToolApproval = request
+            }
         case MobileProtocol.Tag.approvalCleared:
             // Only for the card actually on screen: a late clear for an older
             // question must not take down a NEWER one the agent has since
             // asked — nor one belonging to the other surface.
-            if let cleared = try? JSONDecoder().decode(ApprovalCleared.self, from: data),
-               pendingApproval?.requestId == cleared.requestId {
-                pendingApproval = nil
-                approvalNotice = cleared.reason
+            if let cleared = try? JSONDecoder().decode(ApprovalCleared.self, from: data) {
+                if pendingApproval?.requestId == cleared.requestId {
+                    pendingApproval = nil
+                    approvalNotice = cleared.reason
+                }
+                if pendingToolApproval?.requestId == cleared.requestId {
+                    pendingToolApproval = nil
+                    approvalNotice = cleared.reason
+                }
             }
         case "llmide_chat_history_clear_ack":
             if (try? JSONDecoder().decode(LlmIdeChatHistoryClearAck.self, from: data))?.ok == true {
@@ -231,6 +256,7 @@ final class LlmIdeChatStore: ObservableObject {
             // to THIS turn so a `done` for one command can't take down a
             // question the other surface is showing.
             if let id = commandId, pendingApproval?.commandId == id { pendingApproval = nil }
+            if let id = commandId, pendingToolApproval?.commandId == id { pendingToolApproval = nil }
             if let id = commandId {
                 llmIdeCommandIds.remove(id)
                 approvalPausedCommandIds.remove(id)
@@ -247,7 +273,9 @@ final class LlmIdeChatStore: ObservableObject {
             llmIdeCommandIds.remove(commandId)
             approvalPausedCommandIds.remove(commandId)
             if currentCommandId == commandId { currentCommandId = nil }
+            if pendingToolApproval?.commandId == commandId { pendingToolApproval = nil }
         } else {
+            pendingToolApproval = nil
             // No id = the whole connection went down (ConnectionService
             // .disconnect). Every in-flight turn is dead, so drop them all:
             // leaving orphans behind means a later Stop cancels a command that
@@ -269,6 +297,8 @@ final class LlmIdeChatStore: ObservableObject {
         llmIdeCommandIds.removeAll()
         approvalPausedCommandIds.removeAll()
         currentCommandId = nil
+        pendingApproval = nil
+        pendingToolApproval = nil
         llmIdeMessages.removeAll()
     }
 

@@ -282,7 +282,14 @@ struct ExplorerChatView: View {
     /// inside the type-checker's budget.
     @ViewBuilder
     private var approvalSlot: some View {
-        if let request = explorerStore.pendingApproval {
+        if let tool = explorerStore.pendingToolApproval {
+            ToolApprovalCard(request: tool) { allow in
+                explorerStore.submitToolApproval(allow: allow)
+                haptic(allow ? .medium : .light)
+            }
+            .id(tool.requestId)
+            .transition(.opacity)
+        } else if let request = explorerStore.pendingApproval {
             ApprovalQuestionCard(request: request) { selection in
                 explorerStore.submitApproval(selection: selection)
             }
