@@ -189,6 +189,21 @@ func runSelfHealCoreChecks() {
         CrashIncidentImporter.importCrashes([("c1", "*** Terminating app: boom\nframe 1")], defaults: d) { msg, _ in recorded.append(msg) }
         expect(recorded == ["*** Terminating app: boom"], "a crash file is recorded once, with its first line as the message")
         d.removePersistentDomain(forName: suite)
+
+        // The recorded-id list stays ORDERED (not a Set) so a >50-id truncation
+        // never drops and re-records an already-seen crash.
+        let orderSuite = "crash-order-\(UUID().uuidString)"
+        let od = UserDefaults(suiteName: orderSuite)!
+        var orderRecorded = 0
+        let all60 = (0..<60).map { (id: "c\($0)", contents: "*** Terminating app: \($0)\nframe 1") }
+        CrashIncidentImporter.importCrashes(all60, defaults: od) { _, _ in orderRecorded += 1 }
+        expect(orderRecorded == 60, "importing 60 fresh crash ids records all 60")
+        let last10 = Array(all60.suffix(10))
+        CrashIncidentImporter.importCrashes(last10, defaults: od) { _, _ in orderRecorded += 1 }
+        expect(orderRecorded == 60, "the 50 most recent crash ids survive across launches")
+        expect(od.stringArray(forKey: CrashIncidentImporter.recordedKey) == (10..<60).map { "c\($0)" },
+               "the persisted id list keeps insertion order after truncating to 50")
+        od.removePersistentDomain(forName: orderSuite)
         try? FileManager.default.removeItem(at: file)
     }
 }
