@@ -7,6 +7,7 @@ struct SelfHealSettingsSection: View {
     @EnvironmentObject private var theme: ThemeStore
     @AppStorage(SelfHealSettings.enabledKey) private var isEnabled = true
     @AppStorage(SelfHealSettings.maxPerRunKey) private var maxPerRun = 5
+    @State private var reviewing: IncidentProposal?
     private let store = IncidentStore.shared
 
     var body: some View {
@@ -17,6 +18,19 @@ struct SelfHealSettingsSection: View {
                 Text("The Self-Heal loop runs on the Loop schedule, fixes in an isolated worktree, and never changes this checkout until you apply a proposal.")
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
+                let proposals = Dictionary(grouping: store.incidents.filter { $0.status == .proposed && $0.proposal != nil },
+                                           by: { $0.proposal! })
+                if !proposals.isEmpty {
+                    Divider()
+                    ForEach(Array(proposals.keys), id: \.worktreePath) { proposal in
+                        HStack {
+                            Text("Proposed fix · \(proposals[proposal]?.count ?? 0) incident(s)")
+                                .font(.system(size: 11, weight: .medium))
+                            Spacer()
+                            Button("Review…") { reviewing = proposal }.controlSize(.small)
+                        }
+                    }
+                }
                 Divider()
                 let recent = store.incidents.sorted { $0.lastSeen > $1.lastSeen }.prefix(50)
                 if recent.isEmpty {
@@ -28,6 +42,9 @@ struct SelfHealSettingsSection: View {
                     row(incident)
                 }
             }
+        }
+        .sheet(item: $reviewing) { proposal in
+            SelfHealProposalSheet(proposal: proposal, incidents: store.incidents.filter { $0.proposal == proposal })
         }
     }
 

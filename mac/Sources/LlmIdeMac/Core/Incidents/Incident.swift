@@ -4,11 +4,13 @@ public enum IncidentSource: String, Codable, CaseIterable, Sendable { case ui, l
 
 public enum IncidentStatus: String, Codable, Sendable { case new, fixing, proposed, ignored, needsHuman, fixed }
 
-public struct IncidentProposal: Codable, Equatable, Sendable {
+public struct IncidentProposal: Codable, Equatable, Hashable, Identifiable, Sendable {
     public var mainRepo: String
     public var worktreePath: String
     public var branch: String
     public var baseCommit: String
+
+    public var id: String { worktreePath }
 
     public init(mainRepo: String, worktreePath: String, branch: String, baseCommit: String) {
         self.mainRepo = mainRepo

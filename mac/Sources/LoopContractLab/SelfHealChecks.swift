@@ -315,6 +315,80 @@ func runSelfHealCoreChecks() {
                "a fixing incident orphaned by a quit returns to new on load")
         try? FileManager.default.removeItem(at: file)
     }
+
+    do {
+        func git(_ args: [String], _ dir: URL) {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.arguments = ["-c", "user.name=lab", "-c", "user.email=lab@example.invalid"] + args
+            p.currentDirectoryURL = dir
+            p.standardOutput = Pipe(); p.standardError = Pipe()
+            try? p.run(); p.waitUntilExit()
+        }
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("prop-\(UUID().uuidString)")
+        let main = base.appendingPathComponent("main"), wt = base.appendingPathComponent("wt")
+        try? FileManager.default.createDirectory(at: main, withIntermediateDirectories: true)
+        git(["init", "-q"], main)
+        try? "one\n".write(to: main.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8)
+        git(["add", "."], main); git(["commit", "-qm", "init"], main)
+        let head = (try? SelfHealProposalService.git(["rev-parse", "HEAD"], in: main))
+            .flatMap { String(data: $0, encoding: .utf8) }?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        git(["worktree", "add", "-q", "-b", "heal/x", wt.path, "HEAD"], main)
+        try? "two\n".write(to: wt.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8)
+        try? FileManager.default.createDirectory(at: wt.appendingPathComponent(".self-heal"), withIntermediateDirectories: true)
+        try? "batch".write(to: wt.appendingPathComponent(".self-heal/BATCH.md"), atomically: true, encoding: .utf8)
+        let proposal = IncidentProposal(mainRepo: main.path, worktreePath: wt.path, branch: "heal/x", baseCommit: head)
+
+        let diff = (try? SelfHealProposalService.diff(proposal)) ?? ""
+        expect(diff.contains("+two") && !diff.contains("BATCH.md"), "the proposal diff shows the fix and excludes .self-heal")
+
+        try? "main moved\n".write(to: main.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8)
+        let refused = (try? SelfHealProposalService.apply(proposal)) == nil
+        let untouched = (try? String(contentsOf: main.appendingPathComponent("f.txt"), encoding: .utf8)) == "main moved\n"
+        expect(refused && untouched, "apply refuses a patch that no longer fits and leaves the main checkout untouched")
+
+        git(["checkout", "--", "f.txt"], main)
+        let applied = (try? SelfHealProposalService.apply(proposal)) != nil
+        let content = try? String(contentsOf: main.appendingPathComponent("f.txt"), encoding: .utf8)
+        expect(applied && content == "two\n", "apply writes the fix into the main checkout without committing")
+
+        try? SelfHealProposalService.discard(proposal)
+        expect(!FileManager.default.fileExists(atPath: wt.path), "discard removes the worktree")
+        try? FileManager.default.removeItem(at: base)
+    }
+
+    do {
+        // A broken pipe while writing a large patch (>64 KB) must not crash the
+        // process: stdin writes happen off the drain queues, and apply refusing
+        // early (empty stdout before stdin finishes) must stay non-fatal.
+        func git(_ args: [String], _ dir: URL) {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.arguments = ["-c", "user.name=lab", "-c", "user.email=lab@example.invalid"] + args
+            p.currentDirectoryURL = dir
+            p.standardOutput = Pipe(); p.standardError = Pipe()
+            try? p.run(); p.waitUntilExit()
+        }
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("bigpatch-\(UUID().uuidString)")
+        let main = base.appendingPathComponent("main"), wt = base.appendingPathComponent("wt")
+        try? FileManager.default.createDirectory(at: main, withIntermediateDirectories: true)
+        git(["init", "-q"], main)
+        try? "one\n".write(to: main.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8)
+        git(["add", "."], main); git(["commit", "-qm", "init"], main)
+        let head = (try? SelfHealProposalService.git(["rev-parse", "HEAD"], in: main))
+            .flatMap { String(data: $0, encoding: .utf8) }?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        git(["worktree", "add", "-q", "-b", "heal/big", wt.path, "HEAD"], main)
+        let bigContent = String(repeating: "line of generated content\n", count: 10_000)
+        try? bigContent.write(to: wt.appendingPathComponent("big.txt"), atomically: true, encoding: .utf8)
+        let proposal = IncidentProposal(mainRepo: main.path, worktreePath: wt.path, branch: "heal/big", baseCommit: head)
+
+        let bigDiff = (try? SelfHealProposalService.diff(proposal)) ?? ""
+        expect(bigDiff.utf8.count > 200_000, "the generated patch exceeds 200 KB")
+        let appliedBig = (try? SelfHealProposalService.apply(proposal)) != nil
+        expect(appliedBig, "a >200 KB patch applies without deadlocking on stdin/stdout")
+        try? SelfHealProposalService.discard(proposal)
+        try? FileManager.default.removeItem(at: base)
+    }
 }
 
 func runSelfHealLoopChecks() async {
