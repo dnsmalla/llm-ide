@@ -62,10 +62,20 @@ func runSelfHealCoreChecks() {
         let store = IncidentStore(fileURL: file)
         for _ in 0..<1000 { store.upsert(draft("storm")) }
         expect(store.incidents.count == 1 && store.incidents[0].count == 1000, "an error storm stays one incident")
-        expect(store.saveCount <= 1, "an error storm does not write the file per event")
         store.flush()
         let reloaded = IncidentStore(fileURL: file)
         expect(reloaded.incidents.first?.count == 1000, "flush persists and a new store reloads it")
+
+        // Debounce timing: saveDelay short enough to observe within a RunLoop spin,
+        // long enough that 1,000 synchronous upserts land inside one debounce window.
+        let stormStore = IncidentStore(fileURL: dir.appendingPathComponent("storm.json"), saveDelay: .milliseconds(50))
+        for _ in 0..<1000 { stormStore.upsert(draft("storm")) }
+        expect(stormStore.incidents.count == 1 && stormStore.incidents[0].count == 1000, "a debounced storm stays one incident")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        expect(stormStore.saveCount == 1, "an error storm is saved once, not once per event")
+        for _ in 0..<1000 { stormStore.upsert(draft("storm")) }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        expect(stormStore.saveCount == 2, "the next burst is debounced again")
 
         let p = draft("proposed one")
         store.upsert(p)
