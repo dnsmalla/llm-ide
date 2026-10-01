@@ -32,6 +32,11 @@ enum LoopEngineStatus: Equatable {
         /// violation sets before reporting: `paths` never says which rule a
         /// given entry broke.
         case repairOutOfScope(stageName: String, paths: [String])
+        /// `LoopEngineConfig.alwaysUseWorktree` could not get an isolated
+        /// worktree. Blocked rather than given up because the alternative —
+        /// running in the main checkout — is the one thing this loop promises
+        /// never to do.
+        case worktreeRequired(reason: String)
     }
 
     case success
@@ -62,6 +67,7 @@ extension LoopEngineStatus {
             let list = paths.prefix(3).joined(separator: ", ")
             let more = paths.count > 3 ? " (+\(paths.count - 3) more)" : ""
             return "blocked — repair for \"\(name)\" touched a protected or out-of-scope path(s): \(list)\(more)"
+        case .blocked(.worktreeRequired(let reason)): return "blocked — \(reason)"
         case .needsApproval(let name): return "needs approval: \(name)"
         case .error(let msg): return "error: \(msg)"
         case .aborted: return "aborted"
@@ -84,6 +90,7 @@ extension LoopEngineStatus {
         case .givenUp(.repairBudgetExhausted): return "given_up.repair_budget"
         case .givenUp(.stoppedReporting): return "given_up.stopped_reporting"
         case .blocked(.repairOutOfScope): return "blocked.repair_out_of_scope"
+        case .blocked(.worktreeRequired): return "blocked.worktree_required"
         case .needsApproval: return "needs_approval"
         case .error: return "error"
         case .aborted: return "aborted"

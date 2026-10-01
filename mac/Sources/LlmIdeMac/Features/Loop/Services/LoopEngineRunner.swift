@@ -35,6 +35,9 @@ final class LoopEngineRunner: ObservableObject {
     /// True while this instance is waiting in `LoopRunQueue` for another run
     /// on the same git root to finish.
     @Published private(set) var waitingInQueue = false
+    /// Live lease for the in-flight run's worktree, when it has one — read by
+    /// Task 9's incident-triage stage, which must never edit the main checkout.
+    private(set) var currentWorktreeLease: LoopWorktreeManager.Lease?
     @Published private(set) var log: [LoopLogLine] = []
     @Published private(set) var status: LoopEngineStatus?
     @Published private(set) var iteration = 0
@@ -445,12 +448,25 @@ final class LoopEngineRunner: ObservableObject {
         var runGitRoot = mainGitRoot
         var lockRootKey = mainRootKey
         var worktreeLease: LoopWorktreeManager.Lease?
+        var worktreeRequiredFailure: String?
 
         for note in await LoopWorktreeManager.pruneStale(mainRepo: mainGitRoot, faultsRoot: faultsRoot) {
             appendLog(.info, "Worktree cleanup · \(note)")
         }
 
-        if config.useWorktreesForConcurrentRuns && LoopRunQueue.willWait(rootKey: mainRootKey) {
+        if config.alwaysUseWorktree {
+            do {
+                let lease = try await LoopWorktreeManager.create(mainRepo: mainGitRoot, faultsRoot: faultsRoot,
+                                                                 requireCleanMain: false)
+                worktreeLease = lease
+                runGitRoot = lease.worktreePath
+                lockRootKey = runGitRoot.resolvingSymlinksInPath().path
+                appendLog(.info, "Isolated worktree \(lease.worktreePath.lastPathComponent)")
+            } catch {
+                // Never fall back to the main checkout: this loop promises to leave it untouched.
+                worktreeRequiredFailure = "This loop needs an isolated worktree: \(error.localizedDescription)"
+            }
+        } else if config.useWorktreesForConcurrentRuns && LoopRunQueue.willWait(rootKey: mainRootKey) {
             if let lease = await LoopWorktreeManager.createIfPossible(mainRepo: mainGitRoot,
                                                                       faultsRoot: faultsRoot) {
                 worktreeLease = lease
@@ -460,6 +476,7 @@ final class LoopEngineRunner: ObservableObject {
                           "Parallel run · isolated worktree \(lease.worktreePath.lastPathComponent)")
             }
         }
+        currentWorktreeLease = worktreeLease
 
         if worktreeLease == nil && LoopRunQueue.willWait(rootKey: mainRootKey) {
             let ahead = LoopRunQueue.queuedCount(rootKey: mainRootKey)
@@ -551,6 +568,7 @@ final class LoopEngineRunner: ObservableObject {
             if let lease = worktreeLease {
                 Task { await LoopWorktreeManager.finish(lease) }
             }
+            currentWorktreeLease = nil
         }
 
         // Shell commands and repairs run in `runGitRoot`; approvals stay keyed to
@@ -572,6 +590,13 @@ final class LoopEngineRunner: ObservableObject {
                 : "Every stage is disabled — enable at least one"
             appendLog(.warn, "Loop not run · \(reason)")
             return await finish(.error(reason),
+                                config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
+                                projectId: projectId, startedAt: startedAt,
+                                loopId: loopId, loopName: loopName)
+        }
+        if let failure = worktreeRequiredFailure {
+            appendLog(.error, "Loop not run · \(failure)")
+            return await finish(.blocked(reason: .worktreeRequired(reason: failure)),
                                 config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                                 projectId: projectId, startedAt: startedAt,
                                 loopId: loopId, loopName: loopName)

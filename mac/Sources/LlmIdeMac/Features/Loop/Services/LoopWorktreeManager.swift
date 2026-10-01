@@ -6,16 +6,16 @@ import Foundation
 /// the main working tree is redirected into a managed worktree instead, so
 /// repairs never race in one checkout.
 @MainActor
-enum LoopWorktreeManager {
+public enum LoopWorktreeManager {
 
-    struct Lease: Equatable, Sendable {
-        let mainRepo: URL
-        let worktreePath: URL
-        let branch: String
-        let baseCommit: String
+    public struct Lease: Equatable, Sendable {
+        public let mainRepo: URL
+        public let worktreePath: URL
+        public let branch: String
+        public let baseCommit: String
     }
 
-    enum Error: Swift.Error, Equatable {
+    public enum Error: Swift.Error, Equatable {
         case notAGitRepository
         case dirtyWorkingTree
         case worktreePathExists
@@ -38,21 +38,29 @@ enum LoopWorktreeManager {
 
     /// Best-effort worktree creation. Returns `nil` when git refuses (dirty tree,
     /// missing git, etc.) so the caller can fall back to the FIFO queue.
-    static func createIfPossible(mainRepo: URL, faultsRoot: URL,
-                                 runGit: ([String], URL) async throws -> String = defaultRunGit) async -> Lease? {
+    public static func createIfPossible(mainRepo: URL, faultsRoot: URL, requireCleanMain: Bool = true,
+                                 runGit: @escaping ([String], URL) async throws -> String = defaultRunGit) async -> Lease? {
         do {
-            return try await create(mainRepo: mainRepo, faultsRoot: faultsRoot, runGit: runGit)
+            return try await create(mainRepo: mainRepo, faultsRoot: faultsRoot,
+                                    requireCleanMain: requireCleanMain, runGit: runGit)
         } catch {
             return nil
         }
     }
 
-    static func create(mainRepo: URL, faultsRoot: URL,
-                       runGit: ([String], URL) async throws -> String = defaultRunGit) async throws -> Lease {
+    /// - Parameter requireCleanMain: When `false`, a worktree is still cut from
+    ///   `HEAD` (never from the dirty working tree's uncommitted content) even
+    ///   though the main checkout has local changes. Used by loops that must
+    ///   never edit the main checkout and must never refuse one just because
+    ///   it is dirty — see `LoopEngineConfig.alwaysUseWorktree`.
+    public static func create(mainRepo: URL, faultsRoot: URL, requireCleanMain: Bool = true,
+                       runGit: @escaping ([String], URL) async throws -> String = defaultRunGit) async throws -> Lease {
         _ = try await runGit(["rev-parse", "--is-inside-work-tree"], mainRepo)
-        let status = try await runGit(["status", "--porcelain"], mainRepo)
-        guard status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw Error.dirtyWorkingTree
+        if requireCleanMain {
+            let status = try await runGit(["status", "--porcelain"], mainRepo)
+            guard status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw Error.dirtyWorkingTree
+            }
         }
         let baseCommit = try await runGit(["rev-parse", "HEAD"], mainRepo)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -177,7 +185,7 @@ enum LoopWorktreeManager {
         }
     }
 
-    private static func defaultRunGit(_ args: [String], at cwd: URL) async throws -> String {
+    public static func defaultRunGit(_ args: [String], at cwd: URL) async throws -> String {
         try await RepoManager().runGit(args, at: cwd)
     }
 

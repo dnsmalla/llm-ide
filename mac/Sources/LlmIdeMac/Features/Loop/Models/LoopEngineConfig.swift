@@ -59,6 +59,13 @@ public struct LoopEngineConfig: Codable, Equatable {
     /// the main repo path, and worktrees with changes are retained for review.
     public var useWorktreesForConcurrentRuns: Bool = false
 
+    /// Always run this loop in an isolated worktree cut from HEAD, even on a
+    /// dirty main checkout, and never fall back to editing the main checkout
+    /// when a worktree cannot be made. Off by default — most loops still want
+    /// to repair the checkout the user is looking at. Self-Heal turns this on
+    /// so an uncommitted submodule pointer or in-progress edit never blocks it.
+    public var alwaysUseWorktree: Bool = false
+
     /// The full protected set this config enforces.
     var protectedGlobs: [String] {
         GitRepairScopeGuard.defaultProtectedGlobs + extraProtectedGlobs
@@ -73,14 +80,14 @@ public struct LoopEngineConfig: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case stages, maxIterations, consecutiveFailureStop
         case wallClockBudgetSeconds, maxRepairsPerStage, protectedPathPolicy, extraProtectedGlobs
-        case writeSummaryNote, useWorktreesForConcurrentRuns, repairModel
+        case writeSummaryNote, useWorktreesForConcurrentRuns, repairModel, alwaysUseWorktree
     }
 
     public init(stages: [LoopStage], maxIterations: Int = 10, consecutiveFailureStop: Int = 2,
          wallClockBudgetSeconds: Double? = nil, maxRepairsPerStage: Int = 3,
          protectedPathPolicy: ProtectedPathPolicy = .revert, extraProtectedGlobs: [String] = [],
          writeSummaryNote: Bool = false, useWorktreesForConcurrentRuns: Bool = false,
-         repairModel: String? = nil) {
+         repairModel: String? = nil, alwaysUseWorktree: Bool = false) {
         self.stages = stages
         self.maxIterations = maxIterations
         self.consecutiveFailureStop = consecutiveFailureStop
@@ -91,6 +98,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         self.writeSummaryNote = writeSummaryNote
         self.useWorktreesForConcurrentRuns = useWorktreesForConcurrentRuns
         self.repairModel = repairModel
+        self.alwaysUseWorktree = alwaysUseWorktree
     }
 
     /// Same rule as `LoopStage.init(from:)`: every field added after the first
@@ -117,6 +125,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         useWorktreesForConcurrentRuns = try container.decodeIfPresent(
             Bool.self, forKey: .useWorktreesForConcurrentRuns) ?? false
         repairModel = try container.decodeIfPresent(String.self, forKey: .repairModel)
+        alwaysUseWorktree = try container.decodeIfPresent(Bool.self, forKey: .alwaysUseWorktree) ?? false
     }
 
     /// Hand-written so `wallClockBudgetSeconds` is encoded as an explicit JSON
@@ -137,6 +146,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         try container.encode(writeSummaryNote, forKey: .writeSummaryNote)
         try container.encode(useWorktreesForConcurrentRuns, forKey: .useWorktreesForConcurrentRuns)
         try container.encodeIfPresent(repairModel, forKey: .repairModel)
+        try container.encode(alwaysUseWorktree, forKey: .alwaysUseWorktree)
     }
 
     /// Whether an auto-detected stage list is safe to persist as the

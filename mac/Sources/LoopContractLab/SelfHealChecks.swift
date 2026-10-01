@@ -260,5 +260,51 @@ func runSelfHealLoopChecks() async {
     let data = try? JSONEncoder().encode(original)
     let stage = data.flatMap { try? JSONDecoder().decode(LoopStage.self, from: $0) }
     expect(stage?.kind == .incidentTriage, "the incidentTriage kind round-trips through loop.json")
+
+    // Forced worktree tolerates a dirty main checkout (Task 7).
+    func git(_ args: [String], _ dir: URL) -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        p.arguments = ["-c", "user.name=lab", "-c", "user.email=lab@example.invalid"] + args
+        p.currentDirectoryURL = dir
+        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+        try? p.run(); p.waitUntilExit()
+        return String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    }
+    // A plain async wrapper around the lab's own `git()` helper, passed
+    // explicitly rather than relying on `create`'s default `runGit` — the
+    // default argument is a closure synthesized inside `LlmIdeMacLib` and
+    // evaluating it from this separate module's non-actor-isolated caller
+    // trips a Swift concurrency runtime assertion (`swift_task_dealloc`,
+    // reproduced locally), unrelated to the worktree logic under test here.
+    func labRunGit(_ args: [String], _ dir: URL) async throws -> String {
+        git(args, dir)
+    }
+    let repo = FileManager.default.temporaryDirectory.appendingPathComponent("wt-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+    _ = git(["init", "-q"], repo)
+    try? "v1".write(to: repo.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+    _ = git(["add", "."], repo); _ = git(["commit", "-qm", "init"], repo)
+    try? "dirty".write(to: repo.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+
+    let strictFailed = (try? await LoopWorktreeManager.create(mainRepo: repo, faultsRoot: repo,
+                                                              runGit: labRunGit)) == nil
+    let lenient = try? await LoopWorktreeManager.create(mainRepo: repo, faultsRoot: repo,
+                                                        requireCleanMain: false, runGit: labRunGit)
+    expect(strictFailed, "the default still refuses a dirty main checkout")
+    expect(lenient != nil, "requireCleanMain: false cuts a worktree from HEAD despite a dirty main checkout")
+    if let lenient {
+        let content = try? String(contentsOf: lenient.worktreePath.appendingPathComponent("a.txt"), encoding: .utf8)
+        expect(content == "v1", "the worktree has HEAD's content, not the main checkout's uncommitted change")
+        _ = git(["worktree", "remove", "--force", lenient.worktreePath.path], repo)
+    }
+    let minimal = LoopEngineConfig(stages: [LoopStage(name: "Test", kind: .regressionSweep, order: 0)])
+    var legacyJSON = (try? JSONSerialization.jsonObject(
+        with: JSONEncoder().encode(minimal))) as? [String: Any] ?? [:]
+    legacyJSON.removeValue(forKey: "alwaysUseWorktree")
+    let legacyData = (try? JSONSerialization.data(withJSONObject: legacyJSON)) ?? Data()
+    let decoded = try? JSONDecoder().decode(LoopEngineConfig.self, from: legacyData)
+    expect(decoded?.alwaysUseWorktree == false, "an older loop.json decodes alwaysUseWorktree as false")
+    try? FileManager.default.removeItem(at: repo)
     #endif
 }
