@@ -225,6 +225,7 @@ final class LoopEngineRunner: ObservableObject {
     /// iteration re-uses it instead of selecting (and growing) a fresh one.
     /// Reset per run.
     private var selfHealBatch: [Incident]?
+    private var selfHealSuppression: UUID?
 
     /// Accumulated journal state for the in-flight run. Instance state rather
     /// than a `run`-local `var` only because the per-stage helpers below append
@@ -533,6 +534,9 @@ final class LoopEngineRunner: ObservableObject {
         flakyStages = []
         artifactCheckFeedback = nil
         selfHealBatch = nil
+        if loopId == LoopStageDetector.defaultLoopId(LoopDefaultLoopKey.selfHeal) {
+            selfHealSuppression = IncidentRecorder.beginSuppression()
+        }
         // Must be reset per run, not only in the defer: a run that ended while
         // paused would otherwise leave `paused == true`, and the NEXT run
         // would hold at its first stage boundary forever with no visible
@@ -2144,6 +2148,14 @@ final class LoopEngineRunner: ObservableObject {
         if case .error(let message) = terminal {
             IncidentRecorder.record(source: .ui, category: "loop", message: message)
         }
+        if let token = selfHealSuppression {
+            IncidentRecorder.endSuppression(token)
+            selfHealSuppression = nil
+        }
+        if let batch = selfHealBatch {
+            selfHealBatch = nil
+            await writeBackSelfHeal(batch: batch, terminal: terminal, gitRoot: gitRoot)
+        }
         status = terminal
         appendLog(logLevel(for: terminal), "Loop finished · \(terminal.summary)")
 
@@ -2171,6 +2183,35 @@ final class LoopEngineRunner: ObservableObject {
             }
         }
         return terminal
+    }
+
+    /// Reads back the fix agent's verdicts and updates each batched incident
+    /// accordingly, then removes the `.self-heal` scratch directory so it
+    /// does not linger in the (worktree or main) checkout across runs.
+    private func writeBackSelfHeal(batch: [Incident], terminal: LoopEngineStatus, gitRoot: URL) async {
+        let batchFile = gitRoot.appendingPathComponent(SelfHealBatch.relativePath)
+        let markdown = (try? String(contentsOf: batchFile, encoding: .utf8)) ?? ""
+        var succeeded = false
+        var errored = false
+        switch terminal {
+        case .success: succeeded = true
+        case .error: errored = true
+        default: break
+        }
+        let agentDown = errored && stageStates.values.contains(.errored)
+        let proposal = currentWorktreeLease.map {
+            IncidentProposal(mainRepo: $0.mainRepo.path, worktreePath: $0.worktreePath.path,
+                             branch: $0.branch, baseCommit: $0.baseCommit)
+        }
+        let proposed = SelfHealOutcome.apply(batch: batch, results: SelfHealBatch.parseResults(markdown),
+                                             runSucceeded: succeeded, agentDown: agentDown,
+                                             proposal: proposal, store: .shared)
+        try? FileManager.default.removeItem(at: batchFile.deletingLastPathComponent())
+        appendLog(.info, "Self-Heal · \(proposed) fix(es) proposed from \(batch.count) incident(s)")
+        // Borrowed symlinks keep a no-fix worktree "dirty"; remove it here so it is not retained.
+        if proposed == 0, let proposal {
+            try? SelfHealProposalService.discard(proposal)
+        }
     }
 
     // MARK: - Helpers

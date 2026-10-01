@@ -251,6 +251,43 @@ func runSelfHealCoreChecks() {
                "the genuine answer after the real Results section is read, not the spoofed one")
         try? FileManager.default.removeItem(at: file)
     }
+
+    MainActor.assumeIsolated {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("out-\(UUID().uuidString).json")
+        let store = IncidentStore(fileURL: file)
+        @MainActor func make(_ msg: String, attempts: Int = 0) -> Incident {
+            let i = Incident(id: IncidentSignature.make(source: "log", category: "t", message: msg, stack: nil),
+                             source: .log, category: "t", message: msg, stack: nil,
+                             firstSeen: Date(), lastSeen: Date(), attempts: attempts, status: .fixing)
+            store.upsert(i); store.update(id: i.id) { $0.status = .fixing; $0.attempts = attempts }
+            return i
+        }
+        let fixed = make("fixed one"), env = make("env one"), failed = make("failed one"), last = make("last try", attempts: 2)
+        let proposal = IncidentProposal(mainRepo: "/m", worktreePath: "/w", branch: "b", baseCommit: "c")
+        let n = SelfHealOutcome.apply(batch: [fixed, env, failed, last],
+                                      results: [fixed.id: .init(verdict: .fixed, reason: "r"),
+                                                env.id: .init(verdict: .environmental, reason: "net")],
+                                      runSucceeded: true, agentDown: false, proposal: proposal, store: store)
+        @MainActor func status(_ i: Incident) -> IncidentStatus? { store.incidents.first { $0.id == i.id }?.status }
+        expect(n == 1 && status(fixed) == .proposed && store.incidents.first { $0.id == fixed.id }?.proposal == proposal,
+               "a fixed verdict on a passing run becomes a proposal")
+        expect(status(env) == .ignored, "an environmental verdict is ignored")
+        expect(status(failed) == .new && store.incidents.first { $0.id == failed.id }?.attempts == 1,
+               "an unanswered incident goes back to new with one more attempt")
+        expect(status(last) == .needsHuman, "the third failed attempt needs a human")
+
+        let again = make("agent down")
+        _ = SelfHealOutcome.apply(batch: [again], results: [:], runSucceeded: false, agentDown: true,
+                                  proposal: nil, store: store)
+        expect(status(again) == .new && store.incidents.first { $0.id == again.id }?.attempts == 0,
+               "a dead agent does not consume an attempt")
+
+        let notVerified = make("fixed but verify failed")
+        _ = SelfHealOutcome.apply(batch: [notVerified], results: [notVerified.id: .init(verdict: .fixed, reason: "r")],
+                                  runSucceeded: false, agentDown: false, proposal: proposal, store: store)
+        expect(status(notVerified) == .new, "a fix that did not pass verification is not proposed")
+        try? FileManager.default.removeItem(at: file)
+    }
 }
 
 func runSelfHealLoopChecks() async {
