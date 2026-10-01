@@ -608,6 +608,7 @@ enum FeatureCatalog {
         manager.backendManager = backend
         mobileControlManager = manager
         manager.activityBridge = MobileActivityBridge(manager: manager, store: activity)
+        manager.registerPhoneToolBridges()
 
         registry.register(module: MobileModule(
             manager: manager,

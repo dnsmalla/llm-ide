@@ -100,6 +100,10 @@ struct MobileControlSettingsSection: View {
 
                     Divider().padding(.vertical, 4)
 
+                    phoneAccessBlock
+
+                    Divider().padding(.vertical, 4)
+
                     featuresBlock
                 }
             }
@@ -624,6 +628,31 @@ struct MobileControlSettingsSection: View {
     }
 
     // MARK: - Features
+
+    /// What the paired phone may do. Everything that edits files, posts as you or approves a tool
+    /// starts OFF; the phone is told immediately when a switch changes (its screens appear/disappear).
+    private var phoneAccessBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Phone access")
+                .font(Typography.section)
+                .foregroundStyle(theme.current.textMuted)
+            Text("Decide what a paired iPhone can do. The Mac checks these on every request.")
+                .font(Typography.caption)
+                .foregroundStyle(theme.current.textMuted)
+            ForEach(PhoneAccess.allCases) { access in
+                Toggle(isOn: Binding(
+                    get: { mobile.phoneAccess.isAllowed(access) },
+                    set: { mobile.phoneAccess.set(access, $0) }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(access.title).font(Typography.body).foregroundStyle(theme.current.text)
+                        Text(access.detail).font(Typography.caption).foregroundStyle(theme.current.textMuted)
+                    }
+                }
+                .toggleStyle(.switch)
+            }
+        }
+    }
 
     private var featuresBlock: some View {
         VStack(alignment: .leading, spacing: 2) {

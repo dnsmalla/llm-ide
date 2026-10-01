@@ -94,6 +94,34 @@ final class MobileControlManager {
     /// bridge slots, because the server asks from its own queue while the slots are main-actor.
     private let capabilityBox = CapabilityBox()
 
+    /// The Mac-side switches deciding what the phone may do (Settings → Mobile Control → Phone access).
+    let phoneAccess = PhoneAccessSettings()
+
+    /// A bridge registered through `register(...)` rather than a dedicated slot: it owns a set of
+    /// message types, advertises capabilities (each optionally behind a `PhoneAccess` switch that
+    /// must be ON for the capability to be offered), and gets the same push-observer lifecycle.
+    struct RegisteredBridge {
+        let bridge: MobileFeatureBridge
+        let messageTypes: Set<String>
+        let capabilities: [(name: String, gate: PhoneAccess?)]
+    }
+    private(set) var registeredBridges: [RegisteredBridge] = []
+
+    func register(bridge: MobileFeatureBridge, messageTypes: Set<String>,
+                  capabilities: [(name: String, gate: PhoneAccess?)]) {
+        registeredBridges.append(RegisteredBridge(bridge: bridge, messageTypes: messageTypes,
+                                                  capabilities: capabilities))
+        refreshCapabilities()
+    }
+
+    /// Capabilities contributed by registered bridges, honouring each one's switch.
+    nonisolated static func registeredCapabilities(_ entries: [RegisteredBridge],
+                                                   isAllowed: (PhoneAccess) -> Bool) -> [String] {
+        entries.flatMap { $0.capabilities }
+            .filter { $0.gate.map(isAllowed) ?? true }
+            .map(\.name)
+    }
+
     /// Pure so a test can pin it: chat and Explorer are always served; each bridge-backed
     /// feature appears only when its bridge is wired, mirroring `routeToFeatureBridge`.
     nonisolated static func capabilities(autoTasks: Bool, loop: Bool, generation: Bool,
@@ -110,10 +138,20 @@ final class MobileControlManager {
     }
 
     private func refreshCapabilities() {
-        capabilityBox.value = Self.capabilities(autoTasks: autoTaskBridge != nil,
-                                                loop: loopBridge != nil,
-                                                generation: generationBridge != nil,
-                                                activity: activityBridge != nil)
+        let caps = Self.capabilities(autoTasks: autoTaskBridge != nil,
+                                     loop: loopBridge != nil,
+                                     generation: generationBridge != nil,
+                                     activity: activityBridge != nil)
+            + Self.registeredCapabilities(registeredBridges, isAllowed: { phoneAccess.isAllowed($0) })
+        let changed = capabilityBox.value != caps
+        capabilityBox.value = caps
+        // A phone already connected learned the old list at pairing; tell it about the new one.
+        if changed, mobileClientPaired { reply(MacCapabilities(capabilities: caps)) }
+    }
+
+    /// Wire the access switches to the capability list. Called once from `init`-time setup.
+    func installPhoneAccessObserver() {
+        phoneAccess.onChange = { [weak self] in self?.refreshCapabilities() }
     }
     /// Mac Settings + workspace — used to run iPhone explore prompts with the
     /// same model/provider and agent context as the desktop Explorer panel.
@@ -195,6 +233,7 @@ final class MobileControlManager {
 
     init() {
         pairedDevices = pairedDeviceStore.all
+        installPhoneAccessObserver()
         // The registry must be able to see this pool — see
         // `explorerMobileEngineResolver` and `ExternalEngineHolder`. Set here
         // rather than at first use: `switchDisplayedSession` consults the
@@ -413,6 +452,7 @@ final class MobileControlManager {
         loopBridge?.removePushObservers()
         generationBridge?.removePushObservers()
         activityBridge?.removePushObservers()
+        registeredBridges.forEach { $0.bridge.removePushObservers() }
         onMobileClientDisconnected()
         server?.stop()
         server = nil
@@ -606,6 +646,9 @@ final class MobileControlManager {
                 return true
             }
             return activityBridge.handle(type: type, data: data)
+        }
+        if let entry = registeredBridges.first(where: { $0.messageTypes.contains(type) }) {
+            return entry.bridge.handle(type: type, data: data)
         }
         if Self.generationMessageTypes.contains(type) {
             guard let generationBridge else {
@@ -1229,6 +1272,7 @@ final class MobileControlManager {
         loopBridge?.installPushObservers()
         generationBridge?.installPushObservers()
         activityBridge?.installPushObservers()
+        registeredBridges.forEach { $0.bridge.installPushObservers() }
     }
 
     /// Push a fresh Mac status snapshot when backend or project context changes.

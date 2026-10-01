@@ -62,4 +62,13 @@ final class GenerationMessagesTests: XCTestCase {
         XCTAssertEqual(MobileProtocol.Tag.activityMarkSeen, "activity_mark_seen")
         XCTAssertFalse(MobileProtocol.Capability.legacy.contains(MobileProtocol.Capability.activity))
     }
+
+    func testUsageStateRoundTrips() throws {
+        let state = UsageState(provider: "anthropic", status: "ok", statusReason: nil, activeModel: "opus",
+                               models: [UsageMeter(name: "Opus", pct: 5, state: "ok", detail: "d")],
+                               subscription: [], subscriptionNote: "n", permissionMode: "review", error: nil)
+        XCTAssertEqual(try roundTrip(state), state)
+        XCTAssertEqual(MobileProtocol.Tag.usageGet, "usage_get")
+        XCTAssertFalse(MobileProtocol.Capability.legacy.contains(MobileProtocol.Capability.usage))
+    }
 }

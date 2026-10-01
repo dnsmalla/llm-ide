@@ -72,6 +72,15 @@ public struct Connected: Codable, Equatable {
     }
 }
 
+/// Server → phone: what this Mac serves CHANGED while connected — the user flipped a switch in
+/// Settings → Mobile Control → Phone access. Same strings as `Connected.capabilities`.
+public struct MacCapabilities: Codable, Equatable {
+    public let type = MobileProtocol.Tag.macCapabilities
+    public let capabilities: [String]
+    public init(capabilities: [String]) { self.capabilities = capabilities }
+    private enum CodingKeys: String, CodingKey { case type, capabilities }
+}
+
 /// Server → client: the Mac is closing THIS connection on purpose, and why.
 /// Sent to a paired client just before the socket is cancelled, so the phone
 /// can tell "another device took over" or "this device was revoked in
