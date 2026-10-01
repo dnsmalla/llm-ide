@@ -131,6 +131,9 @@ struct MenuBarChatView: View {
             Task {
                 await completion.loadMetaIfNeeded()
             }
+            Task {
+                await QuickChatContext.ensureLiveModelsLoaded(config: config, api: api)
+            }
             // No `viewModel.loadHistory()`/history-poll here anymore, and no
             // transcript-changed notification observer below either (that
             // notification is gone entirely now). Both used

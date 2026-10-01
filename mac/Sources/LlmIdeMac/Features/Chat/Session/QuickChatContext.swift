@@ -176,6 +176,15 @@ struct QuickChatContext {
         return defaultModelId.isEmpty ? nil : defaultModelId
     }
 
+    /// Claude's model list comes only from `LiveModelCache`; without this the
+    /// cache stays empty until the full Code Assistant panel is opened.
+    @MainActor
+    static func ensureLiveModelsLoaded(config: AppConfig, api: LlmIdeAPIClient) async {
+        guard AICliTool(rawValue: config.activeCLI) == .claudeCode || config.activeCLI.isEmpty else { return }
+        guard let models = try? await api.listProviderModels(ClaudeCLI.provider), !models.isEmpty else { return }
+        LiveModelCache.store(models, for: ClaudeCLI.provider)
+    }
+
     /// Install the `.quick` engine's transport closure: project context,
     /// language, provider, the engine-owned model, and the read-only `ask`
     /// mode. Also wires the three approval-decision closures — see below.

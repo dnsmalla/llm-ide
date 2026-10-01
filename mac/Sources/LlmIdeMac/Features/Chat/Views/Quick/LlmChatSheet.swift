@@ -121,6 +121,9 @@ struct LlmChatSheet: View {
             QuickChatContext.attach(engine, config: config, projectStore: projectStore)
             wireEngine()
             inputFocused = true
+            Task {
+                await QuickChatContext.ensureLiveModelsLoaded(config: config, api: api)
+            }
         }
         .onChange(of: draft) { _, newValue in
             // Typing again retires the last refusal — but NOT the restore
