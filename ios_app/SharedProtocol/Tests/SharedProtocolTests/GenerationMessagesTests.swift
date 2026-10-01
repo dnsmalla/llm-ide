@@ -39,4 +39,18 @@ final class GenerationMessagesTests: XCTestCase {
                     MobileProtocol.Tag.llmDocRead, MobileProtocol.Tag.llmDocFile]
         XCTAssertEqual(Set(tags).count, tags.count)
     }
+
+    func testConnectedCarriesCapabilitiesAndDecodesAnOlderMacFrame() throws {
+        let c = Connected(deviceName: "Mac", protocolVersion: MobileProtocol.protocolVersion,
+                          capabilities: [MobileProtocol.Capability.chat, MobileProtocol.Capability.generation])
+        XCTAssertEqual(try roundTrip(c), c)
+        // A Mac from before the handshake sends neither field.
+        let old = Data(#"{"type":"connected","deviceName":"Old Mac"}"#.utf8)
+        let decoded = try JSONDecoder().decode(Connected.self, from: old)
+        XCTAssertNil(decoded.capabilities)
+        XCTAssertNil(decoded.protocolVersion)
+        // …and an older PHONE must tolerate extra fields it doesn't know (default Codable ignores them).
+        XCTAssertFalse(MobileProtocol.Capability.legacy.contains(MobileProtocol.Capability.generation))
+        XCTAssertTrue(MobileProtocol.Capability.legacy.contains(MobileProtocol.Capability.loop))
+    }
 }

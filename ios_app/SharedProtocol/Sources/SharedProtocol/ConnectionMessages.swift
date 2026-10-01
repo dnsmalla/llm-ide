@@ -54,12 +54,22 @@ public struct Connected: Codable, Equatable {
     public let deviceName: String
     public let token: String?
     public let deviceId: String?
-    public init(deviceName: String, token: String? = nil, deviceId: String? = nil) {
+    /// `MobileProtocol.protocolVersion` of the Mac. Absent from an older Mac.
+    public let protocolVersion: Int?
+    /// `MobileProtocol.Capability` strings this Mac serves right now. Absent from an older Mac —
+    /// the phone then assumes `Capability.legacy`. Optional so either side can upgrade first.
+    public let capabilities: [String]?
+    public init(deviceName: String, token: String? = nil, deviceId: String? = nil,
+                protocolVersion: Int? = nil, capabilities: [String]? = nil) {
         self.deviceName = deviceName
         self.token = token
         self.deviceId = deviceId
+        self.protocolVersion = protocolVersion
+        self.capabilities = capabilities
     }
-    private enum CodingKeys: String, CodingKey { case type, deviceName, token, deviceId }
+    private enum CodingKeys: String, CodingKey {
+        case type, deviceName, token, deviceId, protocolVersion, capabilities
+    }
 }
 
 /// Server → client: the Mac is closing THIS connection on purpose, and why.

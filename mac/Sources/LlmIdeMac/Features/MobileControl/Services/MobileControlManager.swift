@@ -79,13 +79,36 @@ final class MobileControlManager {
 
     /// Feature bridge for `auto_task_*` messages — nil when Auto Tasks is
     /// compiled out or not yet wired (see `routeToFeatureBridge`).
-    var autoTaskBridge: MobileFeatureBridge?
+    var autoTaskBridge: MobileFeatureBridge? { didSet { refreshCapabilities() } }
     /// Feature bridge for `loop_*` messages — nil when Loop is compiled out
     /// or not yet wired (see `routeToFeatureBridge`).
-    var loopBridge: MobileFeatureBridge?
+    var loopBridge: MobileFeatureBridge? { didSet { refreshCapabilities() } }
     /// Feature bridge for `generation_*` / `llmdoc_*` messages — nil when
     /// Doc Gen is compiled out or not yet wired (see `routeToFeatureBridge`).
-    var generationBridge: MobileFeatureBridge?
+    var generationBridge: MobileFeatureBridge? { didSet { refreshCapabilities() } }
+
+    /// What this Mac advertises in `Connected.capabilities`. A locked snapshot, not a read of the
+    /// bridge slots, because the server asks from its own queue while the slots are main-actor.
+    private let capabilityBox = CapabilityBox()
+
+    /// Pure so a test can pin it: chat and Explorer are always served; each bridge-backed
+    /// feature appears only when its bridge is wired, mirroring `routeToFeatureBridge`.
+    nonisolated static func capabilities(autoTasks: Bool, loop: Bool, generation: Bool) -> [String] {
+        var caps = [MobileProtocol.Capability.chat, MobileProtocol.Capability.explorer]
+        if autoTasks { caps.append(MobileProtocol.Capability.autoTasks) }
+        if loop { caps.append(MobileProtocol.Capability.loop) }
+        if generation {
+            caps.append(MobileProtocol.Capability.generation)
+            caps.append(MobileProtocol.Capability.llmDoc)
+        }
+        return caps
+    }
+
+    private func refreshCapabilities() {
+        capabilityBox.value = Self.capabilities(autoTasks: autoTaskBridge != nil,
+                                                loop: loopBridge != nil,
+                                                generation: generationBridge != nil)
+    }
     /// Mac Settings + workspace — used to run iPhone explore prompts with the
     /// same model/provider and agent context as the desktop Explorer panel.
     var config: AppConfig?
@@ -279,7 +302,8 @@ final class MobileControlManager {
             },
             onBindFailed: { [weak self] error in
                 Task { @MainActor [weak self] in self?.reportMobileBindFailure(error) }
-            }
+            },
+            capabilities: { [capabilityBox] in capabilityBox.value }
         )
         do {
             try server.start()
@@ -1609,5 +1633,18 @@ extension ChatTurn {
     /// client-only `id`, surface the role as its raw string ("user"/"assistant").
     init(from t: LlmIdeAPIClient.CodeAssistTurn) {
         self.init(role: t.role.rawValue, content: t.content)
+    }
+}
+
+
+/// A lock-protected `[String]` the manager updates on the main actor and the WebSocket server
+/// reads from its own queue when it builds the `Connected` reply.
+final class CapabilityBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = MobileControlManager.capabilities(autoTasks: false, loop: false, generation: false)
+
+    var value: [String] {
+        get { lock.lock(); defer { lock.unlock() }; return stored }
+        set { lock.lock(); stored = newValue; lock.unlock() }
     }
 }

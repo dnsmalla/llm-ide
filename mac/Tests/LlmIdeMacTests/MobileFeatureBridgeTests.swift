@@ -83,4 +83,15 @@ final class MobileFeatureBridgeTests: XCTestCase {
             "generation_options_list", "generation_run", "llmdoc_list", "llmdoc_read",
         ])
     }
+
+    /// The capability list is what the phone uses to decide which tabs to show, so it must follow
+    /// exactly which bridges are wired — not what was compiled in.
+    func testAdvertisedCapabilitiesFollowTheWiredBridges() {
+        XCTAssertEqual(MobileControlManager.capabilities(autoTasks: false, loop: false, generation: false),
+                       ["chat", "explorer"])
+        XCTAssertEqual(MobileControlManager.capabilities(autoTasks: true, loop: true, generation: false),
+                       ["chat", "explorer", "auto_tasks", "loop"])
+        XCTAssertEqual(MobileControlManager.capabilities(autoTasks: false, loop: false, generation: true),
+                       ["chat", "explorer", "generation", "llm_doc"])
+    }
 }

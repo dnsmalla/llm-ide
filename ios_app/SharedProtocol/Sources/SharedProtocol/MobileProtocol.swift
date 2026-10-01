@@ -15,6 +15,28 @@ public enum MobileProtocol {
     /// Drop the connection if no heartbeat is received within this window.
     public static let heartbeatTimeout: TimeInterval = 25
 
+    /// Wire revision the Mac advertises in `Connected.protocolVersion`. Bumped only when a
+    /// capability is added that a phone may want to branch on; additive optional fields never
+    /// need a bump (see `Connected`). 1 = the implicit pre-handshake protocol (field absent).
+    public static let protocolVersion = 2
+
+    /// Features a Mac can serve, advertised in `Connected.capabilities` so the phone shows only
+    /// what the paired Mac supports instead of a screen that spins against an older Mac.
+    /// Strings, not an enum: an older phone must ignore a capability it has never heard of.
+    public enum Capability {
+        public static let chat = "chat"
+        public static let explorer = "explorer"
+        public static let autoTasks = "auto_tasks"
+        public static let loop = "loop"
+        public static let generation = "generation"
+        public static let llmDoc = "llm_doc"
+
+        /// What a Mac that sends NO capability list is assumed to serve: everything that shipped
+        /// before the handshake existed. Doc Gen and the llm-doc browser came after it, so a
+        /// legacy Mac is NOT assumed to have them.
+        public static let legacy: Set<String> = [chat, explorer, autoTasks, loop]
+    }
+
     /// Single source of truth for every message `type` discriminator on the
     /// wire. Structs reference these constants from their `let type = …` so the
     /// tag string lives in exactly one place. The on-the-wire value is the raw
