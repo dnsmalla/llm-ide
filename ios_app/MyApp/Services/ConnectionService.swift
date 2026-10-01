@@ -125,6 +125,7 @@ final class ConnectionService: ObservableObject {
     weak var autoTaskStore: AutoTaskStore?
     weak var loopStore: LoopStore?
     weak var macStatusStore: MacStatusStore?
+    weak var generationStore: GenerationStore?
     /// Set at app launch so `Connected.deviceName` can update persisted pairing info.
     weak var connectionStore: ConnectionStore?
 
@@ -269,6 +270,7 @@ final class ConnectionService: ObservableObject {
         autoTaskStore?.resetForNewDevice()
         loopStore?.resetForNewDevice()
         macStatusStore?.resetForNewDevice()
+        generationStore?.resetForNewDevice()
     }
 
     /// Enter demo mode: no socket, no network, no stored credential. Drives
@@ -598,6 +600,8 @@ final class ConnectionService: ObservableObject {
             autoTaskStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "loop_state", "loop_ack", "loop_history_reply":
             loopStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
+        case "generation_options", "generation_result", "llmdoc_listing", "llmdoc_file":
+            generationStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "mac_status":
             macStatusStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "llmide_chat_history_reply", "llmide_chat_history_clear_ack":
@@ -622,6 +626,8 @@ final class ConnectionService: ObservableObject {
                 if err.message != "Cancelled" {
                     if let cid, cid.hasPrefix("loop_") {
                         loopStore?.handleCommandError(err.message)
+                    } else if let cid, cid.hasPrefix("gen_") {
+                        generationStore?.handleCommandError(err.message, commandId: cid)
                     } else if let cid, cid.hasPrefix("auto_task") {
                         autoTaskStore?.handleCommandError(err.message, commandId: cid)
                     } else if let cid, cid.hasPrefix("explore_") {

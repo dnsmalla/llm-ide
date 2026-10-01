@@ -246,6 +246,48 @@ final class DemoResponder {
                 .init(id: "r-1", startedAt: Date().addingTimeInterval(-180_000).timeIntervalSince1970, durationSeconds: 268, iterationsUsed: 1, statusCode: "success", statusSummary: "All stages green", trigger: "desktop"),
             ]))
 
+        // MARK: Doc Gen / Visual + llm-doc
+        case MobileProtocol.Tag.generationOptionsList:
+            send(GenerationOptions(
+                available: true, projectName: "llm-ide",
+                templates: [.init(id: "t-meeting", name: "Meeting Summary", surface: "doc"),
+                            .init(id: "t-adr", name: "Decision Record", surface: "doc"),
+                            .init(id: "t-sprint", name: "Sprint Review", surface: "visual")],
+                commands: [.init(id: "c-sum", name: "Summarize", surface: "doc")],
+                saveFolder: "llm-doc/generated"))
+
+        case MobileProtocol.Tag.generationRun:
+            guard let commandId = obj["commandId"] as? String else { return }
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                self?.send(GenerationResult(
+                    commandId: commandId, ok: true, title: "meeting-summary-doc",
+                    markdown: "# Meeting Summary (demo)\n\nCanned output — in demo mode nothing is generated.\n\n- Decision: ship the tab shell\n- Next: polish Doc Gen on the phone",
+                    savedPath: "generated/meeting-summary-doc.md"))
+            }
+
+        case MobileProtocol.Tag.llmDocList:
+            let path = obj["path"] as? String ?? ""
+            let now = Date().timeIntervalSince1970
+            switch path {
+            case "":
+                send(LlmDocListing(path: "", entries: [
+                    .init(name: "generated", isDirectory: true, size: 0, modified: now),
+                    .init(name: "plans", isDirectory: true, size: 0, modified: now - 86_400)]))
+            case "generated":
+                send(LlmDocListing(path: path, entries: [
+                    .init(name: "meeting-summary-doc.md", isDirectory: false, size: 412, modified: now - 600)]))
+            case "plans":
+                send(LlmDocListing(path: path, entries: [
+                    .init(name: "INDEX.md", isDirectory: false, size: 1_830, modified: now - 86_400)]))
+            default:
+                send(LlmDocListing(path: path, entries: [], error: "Folder not found."))
+            }
+
+        case MobileProtocol.Tag.llmDocRead:
+            let path = obj["path"] as? String ?? ""
+            send(LlmDocFile(path: path, text: "# \((path as NSString).lastPathComponent) (demo)\n\nSample document from `llm-doc/`. On a paired Mac this is the real file."))
+
         default:
             break
         }

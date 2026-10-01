@@ -25,6 +25,9 @@ struct LlmIdeControlView: View {
     /// Guards the trash action — it also wipes the Mac's shared transcript.
     @State private var showClearConfirm = false
     @State private var showFilePicker = false
+    @State private var showGenerate = false
+    @State private var generateSurface = "doc"
+    @State private var showDocs = false
     @FocusState private var isInputFocused: Bool
 
     /// Max images per send; the bridge caps a frame at 8 MiB so this keeps us
@@ -58,6 +61,9 @@ struct LlmIdeControlView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Button { showDocs = true } label: {
+                            Label("Generated docs", systemImage: "folder")
+                        }
                         // This also clears the MAC's shared transcript
                         // (LlmIdeChatHistoryClear) and cannot be undone, so it
                         // sits behind a menu AND a confirmation.
@@ -134,6 +140,13 @@ struct LlmIdeControlView: View {
                 }
             }
             .onDisappear { speech.cancel() }
+            .sheet(isPresented: $showGenerate) { GenerateSheet(surface: generateSurface) }
+            .sheet(isPresented: $showDocs) {
+                NavigationStack {
+                    LlmDocBrowserView()
+                        .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Done") { showDocs = false } } }
+                }
+            }
         }
     }
 
@@ -232,6 +245,13 @@ struct LlmIdeControlView: View {
                     }
                     Button { showFilePicker = true } label: {
                         Label("Files…", systemImage: "doc.text")
+                    }
+                    Divider()
+                    Button { generateSurface = "doc"; showGenerate = true } label: {
+                        Label("Generate Doc…", systemImage: "doc.richtext")
+                    }
+                    Button { generateSurface = "visual"; showGenerate = true } label: {
+                        Label("Generate Visual…", systemImage: "rectangle.on.rectangle.angled")
                     }
                 } label: {
                     Image(systemName: "paperclip")

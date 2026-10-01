@@ -14,6 +14,7 @@ struct ProjectView: View {
         case explorer = "Explorer"
         case autoTasks = "Auto Tasks"
         case loop = "Loop"
+        case docs = "Docs"
         var id: String { rawValue }
     }
     @State private var section: Section = .explorer
@@ -26,6 +27,7 @@ struct ProjectView: View {
                 case .explorer:  ExplorerChatView(embedded: true, draft: explorerDraft)
                 case .autoTasks: AutoTaskView(embedded: true)
                 case .loop:      LoopView(embedded: true)
+                case .docs:      LlmDocBrowserView()
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
