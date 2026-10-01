@@ -90,4 +90,16 @@ final class GenerationMessagesTests: XCTestCase {
         XCTAssertEqual(try roundTrip(SelfHealDiffResult(incidentId: "x", diff: "d", truncated: true)).truncated, true)
         XCTAssertFalse(MobileProtocol.Capability.legacy.contains(MobileProtocol.Capability.selfHealApply))
     }
+
+    func testToolApprovalMessagesRoundTripAndHaveNoAlwaysAllow() throws {
+        let req = ToolApprovalRequest(commandId: "c", requestId: "r", toolName: "Edit", summary: nil, filePath: "~/a",
+                                      oldString: "o", newString: "n", contentPreview: nil, command: nil,
+                                      truncated: true, replaceAll: true, overwrites: nil)
+        XCTAssertEqual(try roundTrip(req), req)
+        let answer = ToolApprovalAnswer(commandId: "c", requestId: "r", allow: false)
+        XCTAssertEqual(try roundTrip(answer), answer)
+        let json = String(data: try JSONEncoder().encode(answer), encoding: .utf8)!
+        XCTAssertFalse(json.lowercased().contains("always"), "always-allow persists a rule and stays on the Mac")
+        XCTAssertEqual(MobileProtocol.Tag.toolApprovalAnswer, "tool_approval_answer")
+    }
 }

@@ -20,8 +20,21 @@ extension MobileControlManager {
                                 MobileProtocol.Tag.selfHealDiff],
                  capabilities: [(name: MobileProtocol.Capability.selfHeal, gate: nil),
                                 (name: MobileProtocol.Capability.selfHealApply, gate: .selfHealApply)])
+        // Tool prompts ride the existing chat arms (no message types of their own to route), so this
+        // registration exists only to advertise the capability behind its switch.
+        register(bridge: NoMessagesBridge(), messageTypes: [],
+                 capabilities: [(name: MobileProtocol.Capability.toolApprovals, gate: .toolApprovals)])
         register(bridge: MobileUsageBridge(manager: self),
                  messageTypes: [MobileProtocol.Tag.usageGet],
                  capabilities: [(name: MobileProtocol.Capability.usage, gate: nil)])
     }
+}
+
+/// A bridge that serves no message types; lets a capability be advertised (behind a Phone access
+/// switch) for behaviour implemented elsewhere in the manager.
+@MainActor
+final class NoMessagesBridge: MobileFeatureBridge {
+    func handle(type: String, data: Data?) -> Bool { false }
+    func installPushObservers() {}
+    func removePushObservers() {}
 }

@@ -547,6 +547,13 @@ final class MobileControlManager {
             }
         case MobileProtocol.Tag.llmIdeCancel:
             handleLlmIdeCancel(data: data)
+        case MobileProtocol.Tag.toolApprovalAnswer:
+            if let answer = try? decoder.decode(ToolApprovalAnswer.self, from: data) {
+                Task { await handleToolApprovalAnswer(answer) }
+            } else {
+                append(.stderr, "tool_approval_answer decode failed")
+                replyDecodeFailure(data, what: "tool approval answer")
+            }
         case MobileProtocol.Tag.approvalAnswer:
             if let answer = try? decoder.decode(ApprovalAnswer.self, from: data) {
                 Task { await handleApprovalAnswer(answer) }
@@ -1368,6 +1375,15 @@ final class MobileControlManager {
         // phone runs read-only modes, so one should never park — and if one
         // ever did, an allow button on a surface with no diff view is not a
         // decision anyone should be asked to make from a phone.
+        if approval.kind == "ToolApproval" {
+            // Relayed only when the Mac user switched on "Approve or deny tool and edit requests".
+            // Otherwise it stays parked on the Mac exactly as before (the Mac chip's mode decides).
+            guard phoneAccess.isAllowed(.toolApprovals) else { return }
+            pendingPhoneApprovals[commandId] = (engine, approval.requestId)
+            let request = await Task.detached { MobileToolApproval.request(from: approval, commandId: commandId) }.value
+            await server?.send(request)
+            return
+        }
         guard approval.kind == "AskUserQuestion", !approval.questions.isEmpty else { return }
         pendingPhoneApprovals[commandId] = (engine, approval.requestId)
         await server?.send(ApprovalRequest(
@@ -1387,6 +1403,36 @@ final class MobileControlManager {
     /// Routed to the engine holding the approval rather than a remembered
     /// one: by the time an answer arrives the turn may have moved on, and
     /// `submitApproval` no-ops when the requestId it holds is not this one.
+    /// Pure so a test can pin every refusal: the switch must (still) be on, the answer must name the
+    /// request this turn is parked on, and that request must be a tool prompt.
+    nonisolated static func toolAnswerRefusal(switchOn: Bool, pendingRequestId: String?, pendingKind: String?,
+                                              answerRequestId: String) -> String? {
+        guard switchOn else { return PhoneAccess.toolApprovals.deniedMessage }
+        guard let pendingRequestId, pendingRequestId == answerRequestId, pendingKind == "ToolApproval" else {
+            return "That request is no longer open."
+        }
+        return nil
+    }
+
+    private func handleToolApprovalAnswer(_ answer: ToolApprovalAnswer) async {
+        let entry = pendingPhoneApprovals[answer.commandId]
+        let pending = entry?.engine.pendingApproval
+        if let why = Self.toolAnswerRefusal(
+            switchOn: phoneAccess.isAllowed(.toolApprovals),
+            pendingRequestId: entry.flatMap { $0.requestId == answer.requestId ? pending?.approval.requestId : nil },
+            pendingKind: pending?.approval.kind, answerRequestId: answer.requestId) {
+            // Refused: the prompt (if any) stays parked on the Mac for its owner to decide.
+            await server?.send(ApprovalCleared(commandId: answer.commandId, requestId: answer.requestId, reason: why))
+            return
+        }
+        guard let entry, let pending else { return }
+        append(.info, "tool approval from phone: \(answer.allow ? "allow" : "deny") \(pending.approval.toolName ?? "tool")")
+        await entry.engine.submitToolDecision(action: answer.allow ? "allow" : "deny")
+        pendingPhoneApprovals.removeValue(forKey: answer.commandId)
+        await server?.send(ApprovalCleared(commandId: answer.commandId, requestId: answer.requestId,
+                                           reason: pending.lastError))
+    }
+
     private func handleApprovalAnswer(_ answer: ApprovalAnswer) async {
         guard let entry = pendingPhoneApprovals[answer.commandId],
               entry.requestId == answer.requestId,
