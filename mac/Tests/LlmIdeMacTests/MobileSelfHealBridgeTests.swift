@@ -24,7 +24,9 @@ final class MobileSelfHealBridgeTests: XCTestCase {
         if case .refuse = decide(.ignore, status: "proposed") {} else { XCTFail() }
         XCTAssertEqual(decide(.retry, status: "ignored"), .allow)
         if case .refuse = decide(.retry, status: "fixing") {} else { XCTFail() }
-        XCTAssertEqual(decide(.discard, status: "proposed", apply: false), .allow, "discard needs no switch")
+        XCTAssertEqual(decide(.discard, status: "proposed"), .allow)
+        XCTAssertEqual(decide(.discard, status: "proposed", apply: false), .refuse(PhoneAccess.selfHealApply.deniedMessage),
+                       "discard deletes the proposal, so it needs the switch too")
     }
 
     func testStateIsCappedRedactedAndPathFree() throws {

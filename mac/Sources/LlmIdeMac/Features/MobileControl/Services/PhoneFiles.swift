@@ -18,8 +18,20 @@ enum PhoneFiles {
         return !MobileWorkspaceSearch.isDenied(relPath: relative, name: name)
     }
 
+    /// A symlink inside the project can point at something this filter hides (`notes.txt -> .env`,
+    /// `cfg -> .git`). `LlmDocBrowser.resolve` only proves the target is inside the root, so the
+    /// RESOLVED path gets the same visibility test as the name the phone used.
+    static func resolvedVisible(_ url: URL, root: URL) -> Bool {
+        let realRoot = root.resolvingSymlinksInPath().standardizedFileURL.path
+        let real = url.resolvingSymlinksInPath().standardizedFileURL.path
+        if real == realRoot { return true }
+        guard real.hasPrefix(realRoot + "/") else { return false }
+        return isVisible(String(real.dropFirst(realRoot.count + 1)))
+    }
+
     static func list(root: URL, relative: String) -> FilesListing {
-        guard isVisible(relative), let dir = LlmDocBrowser.resolve(relative, under: root) else {
+        guard isVisible(relative), let dir = LlmDocBrowser.resolve(relative, under: root),
+              resolvedVisible(dir, root: root) else {
             return FilesListing(path: relative, entries: [], error: "That folder isn't available on the phone.")
         }
         var isDir: ObjCBool = false
@@ -33,7 +45,8 @@ enum PhoneFiles {
         for url in urls {
             let name = url.lastPathComponent
             let child = relative.isEmpty ? name : relative + "/" + name
-            guard isVisible(child), LlmDocBrowser.resolve(child, under: root) != nil else { continue }
+            guard isVisible(child), LlmDocBrowser.resolve(child, under: root) != nil,
+                  resolvedVisible(url, root: root) else { continue }
             let values = try? url.resourceValues(forKeys: Set(keys))
             let directory = values?.isDirectory ?? false
             entries.append(FileEntry(name: name, isDirectory: directory, size: directory ? 0 : (values?.fileSize ?? 0)))
@@ -46,12 +59,14 @@ enum PhoneFiles {
     }
 
     static func read(root: URL, relative: String) -> FilesFile {
-        guard !relative.isEmpty, isVisible(relative), let url = LlmDocBrowser.resolve(relative, under: root) else {
+        guard !relative.isEmpty, isVisible(relative), let url = LlmDocBrowser.resolve(relative, under: root),
+              resolvedVisible(url, root: root) else {
             return FilesFile(path: relative, text: nil, error: "That file isn't available on the phone.")
         }
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue,
-              let handle = try? FileHandle(forReadingFrom: url) else {
+        // Regular files only: opening a FIFO with no writer blocks the thread forever.
+        let real = url.resolvingSymlinksInPath()
+        guard (try? real.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true,
+              let handle = try? FileHandle(forReadingFrom: real) else {
             return FilesFile(path: relative, text: nil, error: "File not found.")
         }
         defer { try? handle.close() }

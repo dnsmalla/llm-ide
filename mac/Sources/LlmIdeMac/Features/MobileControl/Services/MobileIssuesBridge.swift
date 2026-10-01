@@ -17,11 +17,17 @@ final class MobileIssuesBridge: MobileFeatureBridge {
             Task { @MainActor [weak self] in await self?.sendList(state: state) }
             return true
         case MobileProtocol.Tag.issueGet:
-            guard let req = try? manager?.decoder.decode(IssueGet.self, from: data ?? Data()) else { return true }
+            guard let req = try? manager?.decoder.decode(IssueGet.self, from: data ?? Data()) else {
+                manager?.reply(Self.failure(number: 0, "The Mac could not read this request."))
+                return true
+            }
             Task { @MainActor [weak self] in await self?.sendDetail(number: req.number) }
             return true
         case MobileProtocol.Tag.issueCommentPost:
-            guard let req = try? manager?.decoder.decode(IssueCommentPost.self, from: data ?? Data()) else { return true }
+            guard let req = try? manager?.decoder.decode(IssueCommentPost.self, from: data ?? Data()) else {
+                manager?.reply(Self.failure(number: 0, "The Mac could not read this request."))
+                return true
+            }
             Task { @MainActor [weak self] in await self?.post(req) }
             return true
         default:
@@ -30,6 +36,12 @@ final class MobileIssuesBridge: MobileFeatureBridge {
     }
     func installPushObservers() {}
     func removePushObservers() {}
+
+    /// An `IssueDetail` that only carries an error, for every path that has nothing else to say.
+    static func failure(number: Int, _ message: String) -> IssueDetail {
+        IssueDetail(number: number, title: "", state: "", body: nil, labels: [], author: "", assignees: [],
+                    comments: [], webUrl: nil, canComment: false, error: message)
+    }
 
     private func emptyList(_ state: String, error: String?) -> IssuesState {
         IssuesState(available: false, provider: nil, state: state, issues: [], error: error)
@@ -86,7 +98,10 @@ final class MobileIssuesBridge: MobileFeatureBridge {
     }
 
     private func post(_ req: IssueCommentPost) async {
-        guard let manager, let config = manager.config, let target = PhoneIssues.target(config: config) else { return }
+        guard let manager else { return }
+        guard let config = manager.config, let target = PhoneIssues.target(config: config) else {
+            return manager.reply(Self.failure(number: req.number, "No GitHub or GitLab project is connected on the Mac."))
+        }
         if let why = PhoneIssues.commentRefusal(switchOn: manager.phoneAccess.isAllowed(.issueComment), body: req.body) {
             return await sendDetail(number: req.number, error: why)
         }

@@ -12,6 +12,10 @@ final class MobileActivityBridge: MobileFeatureBridge {
     weak var manager: MobileControlManager?
     private let store: ActivityStore
     private var observing = false
+    /// Bumped on every install/remove. A tracking callback armed under an older generation is stale and
+    /// must neither push nor re-arm — otherwise a quick disconnect/reconnect leaves two live chains and
+    /// every change is pushed twice (then three times…).
+    private var generation = 0
 
     /// How many entries cross the wire; the Mac keeps up to 500 in memory.
     static let maxEntries = 50
@@ -49,18 +53,20 @@ final class MobileActivityBridge: MobileFeatureBridge {
     func installPushObservers() {
         guard !observing else { return }
         observing = true
-        observe()
+        generation += 1
+        observe(generation: generation)
     }
 
     func removePushObservers() {
-        // Observation has no cancel handle; the flag makes the next change a no-op that doesn't re-arm.
+        // Observation has no cancel handle; the generation bump makes the pending callback a no-op.
         observing = false
+        generation += 1
     }
 
     // MARK: - Helpers
 
-    private func observe() {
-        guard observing else { return }
+    private func observe(generation armed: Int) {
+        guard observing, armed == generation else { return }
         withObservationTracking {
             _ = store.lastId
             _ = store.unreadCount
@@ -68,9 +74,9 @@ final class MobileActivityBridge: MobileFeatureBridge {
         } onChange: { [weak self] in
             // onChange fires BEFORE the new values land; hop so pushState reads them.
             Task { @MainActor [weak self] in
-                guard let self, self.observing else { return }
+                guard let self, self.observing, armed == self.generation else { return }
                 self.pushState()
-                self.observe()
+                self.observe(generation: armed)
             }
         }
     }

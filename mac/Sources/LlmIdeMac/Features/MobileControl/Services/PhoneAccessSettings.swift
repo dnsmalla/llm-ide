@@ -30,7 +30,7 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
         case .sourceControlRead: return "See Source Control (branch, changes, diffs, log)"
         case .issuesRead:        return "See issues"
         case .issueComment:      return "Comment on issues"
-        case .selfHealApply:     return "Apply Self-Heal fixes to this checkout"
+        case .selfHealApply:     return "Apply or discard Self-Heal fixes"
         case .toolApprovals:     return "Approve or deny tool and edit requests"
         }
     }
@@ -42,7 +42,7 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
         case .sourceControlRead: return "Read-only. Nothing is committed, pushed or discarded from the phone."
         case .issuesRead:        return "Uses the Mac's GitHub/GitLab sign-in; tokens never leave the Mac."
         case .issueComment:      return "Posts as you. Closing, editing and deleting stay on the Mac."
-        case .selfHealApply:     return "Changes files in your working copy (never commits). Review and discard need no switch."
+        case .selfHealApply:     return "Apply patches the LLM-IDE source checkout (never commits); discard deletes the proposal. Viewing, ignoring and retrying need no switch."
         case .toolApprovals:     return "Lets the phone answer a running chat's permission prompts, one tap each."
         }
     }

@@ -64,7 +64,7 @@ final class MobileProjectBridge: MobileFeatureBridge {
                                    activeId: store.activeProject?.bundle.id,
                                    allowed: manager.phoneAccess.isAllowed(.projectSwitch),
                                    isExporting: store.isExporting,
-                                   busyReason: busyReason?())
+                                   busyReason: busyReason?() ?? manager.phoneWorkReason)
         switch decision {
         case .refuse(let why):
             manager.reply(currentState(error: why))

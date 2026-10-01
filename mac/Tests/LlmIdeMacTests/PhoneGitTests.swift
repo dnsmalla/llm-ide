@@ -105,4 +105,51 @@ final class PhoneGitTests: XCTestCase {
         XCTAssertTrue(s.filesTruncated)
         XCTAssertEqual(s.commits.count, PhoneGit.maxCommits)
     }
+
+    func testAFileNamedLikeAGlobIsNotExpandedIntoOtherFiles() async throws {
+        try "hello\n".write(to: root.appendingPathComponent("*"), atomically: true, encoding: .utf8)
+        _ = try git(["add", "--", "*"]); _ = try git(["commit", "-q", "-m", "star"])
+        try "hello\nworld\n".write(to: root.appendingPathComponent("*"), atomically: true, encoding: .utf8)
+        let r = await PhoneGit.diff(path: "*", staged: false, root: root, run: run)
+        XCTAssertTrue(r.diff?.contains("+world") == true)
+        XCTAssertFalse(r.diff?.contains("a.txt") == true, "`diff -- *` must not pull in every other changed file")
+    }
+
+    func testAStagedRenameOfASecretIsRefused() async throws {
+        try "TOKEN=1\n".write(to: root.appendingPathComponent("prod.pem"), atomically: true, encoding: .utf8)
+        _ = try git(["add", "-f", "prod.pem"]); _ = try git(["commit", "-q", "-m", "key"])
+        _ = try git(["mv", "prod.pem", "config.txt"])
+        let r = await PhoneGit.diff(path: "config.txt", staged: true, root: root, run: run)
+        XCTAssertNil(r.diff, "the renamed file's diff is the secret's contents")
+        XCTAssertNotNil(r.error)
+    }
+
+    func testALargeNonAsciiUntrackedFileIsTextNotBinary() async throws {
+        try String(repeating: "あ", count: 120_000).write(to: root.appendingPathComponent("jp.txt"), atomically: true, encoding: .utf8)
+        let r = await PhoneGit.diff(path: "jp.txt", staged: false, root: root, run: run)
+        XCTAssertNotEqual(r.diff, "Binary file — not shown.")
+        XCTAssertTrue(r.truncated)
+    }
+
+    func testAnUntrackedSymlinkToASecretIsRefused() async throws {
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("innocent.txt"),
+                                                   withDestinationURL: root.appendingPathComponent(".env"))
+        let r = await PhoneGit.diff(path: "innocent.txt", staged: false, root: root, run: run)
+        XCTAssertNil(r.diff)
+    }
+
+    func testEveryPhoneGitCommandCarriesTheHardeningFlags() async {
+        var seen: [[String]] = []
+        let spy: GitRun = { args in
+            seen.append(args)
+            return args.contains("status") ? " M a.txt\n" : ""
+        }
+        _ = await PhoneGit.state(hasGitDir: true, run: spy)
+        _ = await PhoneGit.diff(path: "a.txt", staged: false, root: root, run: spy)
+        XCTAssertFalse(seen.isEmpty)
+        for args in seen {
+            XCTAssertTrue(args.starts(with: PhoneGit.base), "\(args) must start with the hardening flags")
+        }
+        XCTAssertTrue(seen.contains { $0.contains("diff") && $0.contains("--no-textconv") && $0.contains("--no-ext-diff") })
+    }
 }

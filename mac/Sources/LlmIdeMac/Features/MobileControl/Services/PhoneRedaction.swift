@@ -13,7 +13,9 @@ enum PhoneRedaction {
         var out: [String] = []
         var total = 0
         var truncated = false
+        var inKey = false
         for line in raw.split(separator: "\n", omittingEmptySubsequences: false) {
+            if privateKeyLine(line, inKey: &inKey, into: &out) { continue }
             var text = String(line.prefix(maxLine))
             if line.count > maxLine { text += " …[line truncated]"; truncated = true }
             text = IncidentRedactor.redact(text, limit: maxLine + 40)
@@ -31,7 +33,9 @@ enum PhoneRedaction {
         var out: [String] = []
         var total = 0
         var truncated = false
+        var inKey = false
         for line in raw.split(separator: "\n", omittingEmptySubsequences: false) {
+            if privateKeyLine(line, inKey: &inKey, into: &out) { continue }
             var text = String(line.prefix(maxLine))
             if line.count > maxLine { text += " …[line truncated]"; truncated = true }
             text = SecretRedactor.redact(text)
@@ -40,6 +44,23 @@ enum PhoneRedaction {
             out.append(text)
         }
         return (out.joined(separator: "\n"), truncated)
+    }
+
+    /// PEM private keys have no `key=value` shape, so neither redactor catches them. Everything from
+    /// a `-----BEGIN … PRIVATE KEY-----` line through its `-----END` line is replaced by one marker.
+    /// Returns true when the line was consumed (swallowed or replaced).
+    nonisolated private static func privateKeyLine(_ line: Substring, inKey: inout Bool, into out: inout [String]) -> Bool {
+        if inKey {
+            if line.contains("-----END") { inKey = false }
+            return true
+        }
+        let head = line.prefix(200)
+        if head.contains("-----BEGIN"), head.contains("PRIVATE KEY") {
+            out.append("[REDACTED PRIVATE KEY]")
+            if !line.contains("-----END") { inKey = true }
+            return true
+        }
+        return false
     }
 
     /// Short single-string form for errors and notes.

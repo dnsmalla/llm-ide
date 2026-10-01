@@ -155,7 +155,32 @@ final class MobileControlManager {
 
     /// Wire the access switches to the capability list. Called once from `init`-time setup.
     func installPhoneAccessObserver() {
-        phoneAccess.onChange = { [weak self] in self?.refreshCapabilities() }
+        phoneAccess.onChange = { [weak self] in
+            self?.refreshCapabilities()
+            self?.sweepToolApprovalsIfOff()
+        }
+    }
+
+    /// Turning "Approve or deny tool and edit requests" off takes any tool prompt currently on the phone
+    /// down (the prompt itself stays parked on the Mac), instead of leaving a card that can only be refused.
+    private func sweepToolApprovalsIfOff() {
+        guard !phoneAccess.isAllowed(.toolApprovals) else { return }
+        for (commandId, entry) in pendingPhoneApprovals
+        where entry.engine.pendingApproval?.approval.kind == "ToolApproval" {
+            pendingPhoneApprovals.removeValue(forKey: commandId)
+            truncatedToolRequestIds.remove(entry.requestId)
+            Task { await server?.send(ApprovalCleared(
+                commandId: commandId, requestId: entry.requestId,
+                reason: "Tool requests can no longer be approved from the phone.")) }
+        }
+    }
+
+    /// Work started from the phone that a project switch or a Self-Heal apply must not pull the rug from
+    /// (a running chat/agent turn, a prompt waiting for an answer). Independent of which features are built.
+    var phoneWorkReason: String? {
+        if !pendingPhoneApprovals.isEmpty { return "A phone chat is waiting for an answer on the Mac. Answer it first." }
+        if !mobileInflightTasks.isEmpty { return "A request from the phone is still running on the Mac. Wait for it to finish." }
+        return nil
     }
     /// Mac Settings + workspace — used to run iPhone explore prompts with the
     /// same model/provider and agent context as the desktop Explorer panel.
@@ -187,6 +212,9 @@ final class MobileControlManager {
     /// `explore_chat` on whichever the resolver picked (shared or off-screen).
     /// Looking the engine up again at answer time would find the wrong one.
     private var pendingPhoneApprovals: [String: (engine: ChatEngine, requestId: String)] = [:]
+    /// Tool prompts whose shown content was cut (by the server or by `MobileToolApproval`): the phone
+    /// cannot allow what it could not read, so the Mac refuses `allow` for these.
+    private var truncatedToolRequestIds: Set<String> = []
     /// Which phone command installed each engine's `onExternalApproval` hook.
     /// The hook is a single slot per engine, so `endPhoneApprovals` may only
     /// clear it when it still belongs to the command that is ending — see
@@ -1316,6 +1344,7 @@ final class MobileControlManager {
         // Union, not assignment: a command the phone already cancelled is out
         // of `mobileInflightTasks` but its task may still be finishing, and
         // it must keep its flag until that task's own finish prunes it.
+        truncatedToolRequestIds.removeAll()
         mobileCancelledCommandIds.formUnion(mobileInflightTasks.keys)
         for entry in mobileInflightTasks.values { entry.task.cancel() }
         mobileInflightTasks.removeAll()
@@ -1381,6 +1410,7 @@ final class MobileControlManager {
             guard phoneAccess.isAllowed(.toolApprovals) else { return }
             pendingPhoneApprovals[commandId] = (engine, approval.requestId)
             let request = await Task.detached { MobileToolApproval.request(from: approval, commandId: commandId) }.value
+            if request.truncated { truncatedToolRequestIds.insert(approval.requestId) }
             await server?.send(request)
             return
         }
@@ -1426,6 +1456,15 @@ final class MobileControlManager {
             return
         }
         guard let entry, let pending else { return }
+        if answer.allow, truncatedToolRequestIds.contains(answer.requestId) {
+            // Denying is always fine; allowing a change that could not be shown in full is not. The
+            // prompt stays parked on the Mac for someone who can read all of it.
+            await server?.send(ApprovalCleared(
+                commandId: answer.commandId, requestId: answer.requestId,
+                reason: "That change was too long to review on the phone — approve it on the Mac."))
+            return
+        }
+        truncatedToolRequestIds.remove(answer.requestId)
         append(.info, "tool approval from phone: \(answer.allow ? "allow" : "deny") \(pending.approval.toolName ?? "tool")")
         await entry.engine.submitToolDecision(action: answer.allow ? "allow" : "deny")
         pendingPhoneApprovals.removeValue(forKey: answer.commandId)
@@ -1437,7 +1476,10 @@ final class MobileControlManager {
         guard let entry = pendingPhoneApprovals[answer.commandId],
               entry.requestId == answer.requestId,
               let pending = entry.engine.pendingApproval,
-              pending.approval.requestId == answer.requestId else {
+              pending.approval.requestId == answer.requestId,
+              // A TOOL prompt is answered only through `tool_approval_answer` (which checks the switch):
+              // this question path posts no action, which the server reads as a deny.
+              pending.approval.kind == "AskUserQuestion" else {
             // Already answered, expired, or belongs to another turn. Tell the
             // phone rather than leaving its card up waiting for a reply that
             // is never coming.

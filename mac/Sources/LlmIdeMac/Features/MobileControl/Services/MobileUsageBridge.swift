@@ -7,8 +7,11 @@ import SharedProtocol
 @MainActor
 final class MobileUsageBridge: MobileFeatureBridge {
     weak var manager: MobileControlManager?
-    private var cached: (at: Date, state: UsageState)?
+    private var cached: (at: Date, provider: String, state: UsageState)?
     private var inFlight = false
+    /// A request that arrived while one was running: answer again when it finishes, so a phone that
+    /// re-asked (or reconnected) mid-flight is not left waiting.
+    private var askedAgain = false
     /// Mirrors `ModelLimitsPanel.subscriptionUsageSuppressed`: after a missing login, a Keychain
     /// refusal or an expired session, stop asking — each retry can re-raise a macOS Keychain prompt.
     private var subscriptionNote: String?
@@ -35,13 +38,17 @@ final class MobileUsageBridge: MobileFeatureBridge {
         guard let manager else { return }
         // The permission chip is a UserDefaults read, so it is always fresh even when meters are cached.
         let mode = Self.currentPermissionMode()
-        if let cached, Date().timeIntervalSince(cached.at) < Self.cacheSeconds {
+        let currentProvider = manager.config.map { (AICliTool(rawValue: $0.activeCLI) ?? .claudeCode).provider }
+        if let cached, cached.provider == currentProvider, Date().timeIntervalSince(cached.at) < Self.cacheSeconds {
             manager.reply(Self.withMode(cached.state, mode))
             return
         }
-        guard !inFlight else { return }
+        guard !inFlight else { askedAgain = true; return }
         inFlight = true
-        defer { inFlight = false }
+        defer {
+            inFlight = false
+            if askedAgain { askedAgain = false; Task { @MainActor [weak self] in await self?.respond() } }
+        }
 
         guard let api = manager.api, let config = manager.config else {
             manager.reply(Self.emptyState(mode: mode, error: "The Mac isn't ready yet — its backend isn't connected."))
@@ -74,7 +81,8 @@ final class MobileUsageBridge: MobileFeatureBridge {
         let state = Self.state(provider: provider, summary: summary, subscription: subscription,
                                subscriptionNote: subscription == nil ? subscriptionNote : nil,
                                permissionMode: mode, error: error)
-        cached = (Date(), state)
+        // A failed read is not cached: the next ask should try again, not replay the error for 30 s.
+        if error == nil { cached = (Date(), provider, state) }
         manager.reply(state)
     }
 

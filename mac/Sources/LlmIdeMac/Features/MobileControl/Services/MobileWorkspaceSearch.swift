@@ -10,10 +10,17 @@ enum MobileWorkspaceSearch {
     static let maxReadBytes = 200_000
     static let maxFolderLines = 400
 
+    // All lowercase: macOS volumes are case-insensitive by default, so `ID_RSA` and `.ENV` are the same
+    // files as `id_rsa` and `.env` and must be denied the same way (callers lowercase before comparing).
     private static let denyBasenames: Set<String> = [
-        ".env", ".npmrc", ".netrc", "id_rsa", "id_ed25519", "id_dsa", ".pgpass"
+        ".env", ".npmrc", ".netrc", "id_rsa", "id_ed25519", "id_dsa", "id_ecdsa", ".pgpass", ".git-credentials",
+        ".pypirc", ".htpasswd", "credentials.json", "service-account.json", "googleservice-info.plist",
     ]
-    private static let denyExtensions: Set<String> = [".pem", ".key", ".p12", ".pfx", ".keystore"]
+    private static let denyExtensions: Set<String> = [
+        ".pem", ".key", ".p12", ".pfx", ".keystore", ".p8", ".jks", ".kdbx", ".gpg", ".ppk", ".tfstate", ".tfvars",
+    ]
+    /// Directories that hold credentials; nothing under one is ever shown.
+    private static let denyDirectories: Set<String> = [".git", ".ssh", ".aws", ".gnupg", ".kube", ".docker"]
 
     // MARK: - Search
 
@@ -167,10 +174,10 @@ enum MobileWorkspaceSearch {
     }
 
     static func isDenied(relPath: String, name: String) -> Bool {
-        if relPath.split(separator: "/").contains(where: { $0 == ".git" || $0 == ".ssh" }) { return true }
-        if denyBasenames.contains(name) || name.hasPrefix(".env.") { return true }
-        if let ext = name.split(separator: ".").last.map({ ".\($0.lowercased())" }),
-           denyExtensions.contains(ext) { return true }
+        let lowerName = name.lowercased()
+        if relPath.lowercased().split(separator: "/").contains(where: { denyDirectories.contains(String($0)) }) { return true }
+        if denyBasenames.contains(lowerName) || lowerName.hasPrefix(".env.") { return true }
+        if let ext = lowerName.split(separator: ".").last.map({ ".\($0)" }), denyExtensions.contains(ext) { return true }
         return false
     }
 }

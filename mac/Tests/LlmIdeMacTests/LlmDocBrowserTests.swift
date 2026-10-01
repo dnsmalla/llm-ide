@@ -74,4 +74,11 @@ final class LlmDocBrowserTests: XCTestCase {
     func testRelativePathIsNilOutsideRoot() {
         XCTAssertNil(MobileGenerationBridge.relativePath(of: tmp.appendingPathComponent("secret.md"), under: root))
     }
+
+    func testTheExtensionRuleAppliesToTheResolvedFileNotTheLinkName() throws {
+        try "SECRET".write(to: root.appendingPathComponent("real.env"), atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("x.md"),
+                                                   withDestinationURL: root.appendingPathComponent("real.env"))
+        XCTAssertNil(LlmDocBrowser.read(root: root, relative: "x.md").text, "x.md -> real.env must not read as a doc")
+    }
 }

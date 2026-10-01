@@ -81,4 +81,42 @@ final class PhoneFilesTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 5)
         XCTAssertTrue(f.truncated)
     }
+
+    func testASymlinkToAHiddenTargetIsNotServedOrListed() throws {
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("notes.txt"),
+                                                   withDestinationURL: root.appendingPathComponent(".env"))
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("cfg"),
+                                                   withDestinationURL: root.appendingPathComponent(".git"))
+        XCTAssertNil(PhoneFiles.read(root: root, relative: "notes.txt").text, "notes.txt -> .env must not leak")
+        XCTAssertNil(PhoneFiles.read(root: root, relative: "cfg/config").text, "cfg -> .git must not leak")
+        let names = PhoneFiles.list(root: root, relative: "").entries.map(\.name)
+        XCTAssertFalse(names.contains("notes.txt") || names.contains("cfg"))
+    }
+
+    func testSecretNamesAreDeniedInAnyCase() throws {
+        try write("keys/ID_RSA", "-----BEGIN-----\n")
+        try write("keys/Server.PEM", "x\n")
+        try write("deploy/prod.tfstate", "{}\n")
+        for path in ["keys/ID_RSA", "keys/Server.PEM", "deploy/prod.tfstate"] {
+            XCTAssertNotNil(PhoneFiles.read(root: root, relative: path).error, path)
+        }
+        XCTAssertFalse(PhoneFiles.list(root: root, relative: "keys").entries.map(\.name).contains("ID_RSA"))
+    }
+
+    func testPrivateKeyBlocksAreRedactedEvenInAnOrdinaryFile() throws {
+        try write("src/embedded.txt", "before\n-----BEGIN RSA PRIVATE KEY-----\nMIIEabc\ndef\n-----END RSA PRIVATE KEY-----\nafter\n")
+        let text = PhoneFiles.read(root: root, relative: "src/embedded.txt").text ?? ""
+        XCTAssertTrue(text.contains("before") && text.contains("after"))
+        XCTAssertTrue(text.contains("[REDACTED PRIVATE KEY]"))
+        XCTAssertFalse(text.contains("MIIEabc"))
+    }
+
+    func testRegularFilesOnly() throws {
+        let fifo = root.appendingPathComponent("pipe.txt").path
+        XCTAssertEqual(mkfifo(fifo, 0o600), 0)
+        let started = Date()
+        let f = PhoneFiles.read(root: root, relative: "pipe.txt")     // would block forever on open() if attempted
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2)
+        XCTAssertNil(f.text)
+    }
 }

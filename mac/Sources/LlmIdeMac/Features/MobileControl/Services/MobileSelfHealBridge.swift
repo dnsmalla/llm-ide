@@ -15,6 +15,9 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
     /// Injected by the shell (the loop guards live in a feature that may be compiled out).
     var busyReason: (() -> String?)?
     private var observing = false
+    /// Incident ids with an apply/discard in progress. The incident stays `proposed` until the git work
+    /// finishes, so without this a double-tap runs apply twice, or discard under a running apply.
+    private var inFlight: Set<String> = []
 
     static let maxIncidents = 50
     static let maxMessage = 300
@@ -88,6 +91,9 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
             return (status == "ignored" || status == "needsHuman") ? .allow
                 : .refuse("Only an ignored or needs-attention incident can be retried.")
         case .discard:
+            // Destructive and not undoable (the branch and worktree are deleted), so it needs the same
+            // switch as apply — not just bookkeeping like ignore/retry.
+            guard applyAllowed else { return .refuse(PhoneAccess.selfHealApply.deniedMessage) }
             guard status == "proposed", hasProposal else { return .refuse("There is no proposal to discard.") }
             return .allow
         case .apply:
@@ -108,8 +114,12 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
         let decision = Self.decide(action: req.action, status: incident.status.rawValue,
                                    hasProposal: incident.proposal != nil,
                                    applyAllowed: manager.phoneAccess.isAllowed(.selfHealApply),
-                                   busyReason: busyReason?())
+                                   busyReason: busyReason?() ?? manager.phoneWorkReason)
         if case .refuse(let why) = decision { push(error: why); return }
+        if req.action == .apply || req.action == .discard {
+            guard !inFlight.contains(incident.id) else { push(error: "That proposal is already being processed."); return }
+            inFlight.insert(incident.id)
+        }
 
         switch req.action {
         case .ignore:
@@ -122,6 +132,7 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
         case .discard:
             guard let proposal = incident.proposal else { return }
             Task { @MainActor [weak self] in
+                defer { self?.inFlight.remove(incident.id) }
                 do {
                     try await Task.detached { try SelfHealProposalService.discard(proposal) }.value
                     SelfHealProposalService.markDiscarded(proposal, store: store)
@@ -134,6 +145,7 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
             guard let proposal = incident.proposal else { return }
             manager.append(.info, "selfheal apply (phone) \(incident.id)")
             Task { @MainActor [weak self] in
+                defer { self?.inFlight.remove(incident.id) }
                 do {
                     try await Task.detached { try SelfHealProposalService.apply(proposal) }.value
                     // A leftover worktree is not an error — same as the Mac sheet.
