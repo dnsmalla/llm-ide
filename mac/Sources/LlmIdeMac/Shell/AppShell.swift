@@ -118,6 +118,12 @@ struct AppShell: View {
         .onAppear {
             applyDeepLink(deepLink.pendingEvent)
             crashReportStore.scanForPendingCrashes()
+            CrashIncidentImporter.importCrashes(
+                crashReportStore.pendingCrashes.map { (id: $0.id, contents: crashReportStore.contents(of: $0)) }
+            ) { message, stack in
+                IncidentRecorder.record(source: .crash, category: "crash", message: message, stack: stack)
+            }
+            OSLogIncidentSource.start()
         }
         .onChange(of: deepLink.pendingEvent) { _, new in applyDeepLink(new) }
         .onChange(of: registry.activeFeatures) { _, _ in

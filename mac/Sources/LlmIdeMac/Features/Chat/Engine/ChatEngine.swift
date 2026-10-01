@@ -88,7 +88,13 @@ final class ChatEngine {
     /// (`applyPendingEdit`, `autoChainPendingAction`, `/model`) and the
     /// transcript's error bubble clears it on dismiss — exactly as they did
     /// when this was the panel's own `@State var error`.
-    var error: String?
+    var error: String? {
+        didSet {
+            if oldValue == nil, let error {
+                IncidentRecorder.record(source: .ui, category: "chat", message: error)
+            }
+        }
+    }
     /// Messages the user submitted while a turn was running, in FIFO order; they
     /// auto-send one per turn as the current run finishes (or is stopped).
     var queued: [QueuedMessage] = []

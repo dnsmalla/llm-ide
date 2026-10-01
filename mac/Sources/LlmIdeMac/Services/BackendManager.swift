@@ -922,10 +922,26 @@ final class BackendManager {
         }
     }
 
+    private var stderrParser = ServerStderrIncidentParser()
+    private var stderrFlush: Task<Void, Never>?
+
     private func append(_ text: String, stream: BackendLogLine.Stream) {
         log.append(.init(timestamp: Date(), text: text, stream: stream))
         if log.count > maxLogLines {
             log.removeFirst(log.count - maxLogLines)
+        }
+        guard stream == .stderr else { return }
+        for report in stderrParser.feed(text) {
+            IncidentRecorder.record(source: .server, category: "server", message: report.message, stack: report.stack)
+        }
+        // A trace's last frame has no following line to close it; settle after 2 s of quiet.
+        stderrFlush?.cancel()
+        stderrFlush = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, let self else { return }
+            for report in self.stderrParser.flush() {
+                IncidentRecorder.record(source: .server, category: "server", message: report.message, stack: report.stack)
+            }
         }
     }
 

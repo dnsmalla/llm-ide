@@ -2072,6 +2072,9 @@ final class LoopEngineRunner: ObservableObject {
     private func finish(_ terminal: LoopEngineStatus, config: LoopEngineConfig,
                         faultsRoot: URL, gitRoot: URL, projectId: String?,
                         startedAt: Date, loopId: String, loopName: String) async -> LoopEngineStatus {
+        if case .error(let message) = terminal {
+            IncidentRecorder.record(source: .ui, category: "loop", message: message)
+        }
         status = terminal
         appendLog(logLevel(for: terminal), "Loop finished · \(terminal.summary)")
 

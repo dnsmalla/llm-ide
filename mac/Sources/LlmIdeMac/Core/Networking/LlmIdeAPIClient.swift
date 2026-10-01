@@ -426,6 +426,11 @@ final class LlmIdeAPIClient: @unchecked Sendable {
                 // Redact before surfacing — an upstream/provider body can echo a
                 // token (e.g. "Bad credentials for ghp_…", "Bearer …").
                 let msg = SecretRedactor.redact(rawMsg)
+                if http.statusCode >= 500 {
+                    IncidentRecorder.record(source: .server,
+                                            category: "\(method) \(IncidentSignature.normalizeEndpoint(path))",
+                                            message: "HTTP \(http.statusCode): \(msg)")
+                }
                 throw APIError.http(status: http.statusCode, code: code, message: msg, details: nil)
             }
 

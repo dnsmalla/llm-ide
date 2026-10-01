@@ -154,4 +154,41 @@ func runSelfHealCoreChecks() {
         IncidentRecorder.endSuppression(staleToken)
         try? FileManager.default.removeItem(at: file)
     }
+
+    // Server stderr parsing
+    var parser = ServerStderrIncidentParser()
+    var reports = parser.feed("server listening on 3456")
+    reports += parser.feed("TypeError: Cannot read properties of undefined (reading 'x')")
+    reports += parser.feed("    at handler (/r/extension/routes/chat.mjs:10:5)")
+    reports += parser.feed("    at next (/r/extension/server.mjs:99:1)")
+    reports += parser.feed("GET /health 200")
+    expect(reports.count == 1 && reports[0].message.hasPrefix("TypeError")
+           && reports[0].stack?.contains("routes/chat.mjs") == true,
+           "an error line and its frames become one report, closed by the next normal line")
+    _ = parser.feed("Error: second")
+    expect(parser.flush().map(\.message) == ["Error: second"], "flush emits a pending report")
+    expect(parser.feed("plain info line").isEmpty, "ordinary stderr is not an incident")
+
+    // os_log ingestion
+    MainActor.assumeIsolated {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("log-\(UUID().uuidString).json")
+        let store = IncidentStore(fileURL: file)
+        OSLogIncidentSource.ingest([
+            LogLine(date: Date(), subsystem: "com.llmide.macapp", category: "API", message: "decode failed"),
+            LogLine(date: Date(), subsystem: "com.llmide.macapp", category: "Incidents", message: "store save failed"),
+            LogLine(date: Date(), subsystem: "com.apple.foo", category: "x", message: "not ours"),
+        ], into: store, eligible: true)
+        expect(store.incidents.map(\.category) == ["API"],
+               "os_log ingestion keeps our subsystems and skips the Incidents category")
+
+        // Crash import records each crash file once across launches.
+        let suite = "crash-\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: suite)!
+        var recorded: [String] = []
+        CrashIncidentImporter.importCrashes([("c1", "*** Terminating app: boom\nframe 1")], defaults: d) { msg, _ in recorded.append(msg) }
+        CrashIncidentImporter.importCrashes([("c1", "*** Terminating app: boom\nframe 1")], defaults: d) { msg, _ in recorded.append(msg) }
+        expect(recorded == ["*** Terminating app: boom"], "a crash file is recorded once, with its first line as the message")
+        d.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: file)
+    }
 }
