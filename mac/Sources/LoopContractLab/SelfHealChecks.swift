@@ -48,4 +48,55 @@ func runSelfHealCoreChecks() {
     expect(IncidentClassifier.environmentalReason(message: "Usage: /model <name>") == "usage", "slash-command usage text is not a bug")
     expect(IncidentClassifier.environmentalReason(message: "Index out of range in ChatEngine.swift") == nil,
            "a code bug is not environmental")
+
+    // Incident store
+    MainActor.assumeIsolated {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("selfheal-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appendingPathComponent("incidents.json")
+        func draft(_ msg: String, at date: Date = Date()) -> Incident {
+            Incident(id: IncidentSignature.make(source: "log", category: "t", message: msg, stack: nil),
+                     source: .log, category: "t", message: msg, stack: nil, firstSeen: date, lastSeen: date)
+        }
+
+        let store = IncidentStore(fileURL: file)
+        for _ in 0..<1000 { store.upsert(draft("storm")) }
+        expect(store.incidents.count == 1 && store.incidents[0].count == 1000, "an error storm stays one incident")
+        expect(store.saveCount <= 1, "an error storm does not write the file per event")
+        store.flush()
+        let reloaded = IncidentStore(fileURL: file)
+        expect(reloaded.incidents.first?.count == 1000, "flush persists and a new store reloads it")
+
+        let p = draft("proposed one")
+        store.upsert(p)
+        store.update(id: p.id) { $0.status = .proposed }
+        store.upsert(draft("proposed one"))
+        expect(store.incidents.first { $0.id == p.id }?.status == .proposed, "a proposed incident recurring stays proposed")
+        store.update(id: p.id) { $0.status = .fixed }
+        store.upsert(draft("proposed one"))
+        let reopened = store.incidents.first { $0.id == p.id }
+        expect(reopened?.status == .new && reopened?.attempts == 1, "a fixed incident recurring reopens with an attempt")
+
+        let capStore = IncidentStore(fileURL: dir.appendingPathComponent("cap.json"))
+        let old = draft("keep me fixing", at: Date(timeIntervalSince1970: 0))
+        capStore.upsert(old)
+        capStore.update(id: old.id) { $0.status = .fixing }
+        for i in 0..<IncidentStore.cap + 5 {
+            capStore.upsert(draft("filler \(String(repeating: "x", count: i + 1))", at: Date(timeIntervalSince1970: Double(i + 1))))
+        }
+        expect(capStore.incidents.count == IncidentStore.cap, "the store is capped")
+        expect(capStore.incidents.contains { $0.id == old.id }, "eviction never drops a fixing incident")
+
+        try? "{not json".write(to: dir.appendingPathComponent("bad.json"), atomically: true, encoding: .utf8)
+        let recovered = IncidentStore(fileURL: dir.appendingPathComponent("bad.json"))
+        let archived = (try? FileManager.default.contentsOfDirectory(atPath: dir.path))?.contains { $0.hasPrefix("bad.json.corrupt-") } == true
+        expect(recovered.incidents.isEmpty && archived, "a corrupt file is archived and the store starts empty")
+
+        let triage = IncidentStore(fileURL: dir.appendingPathComponent("t.json"))
+        let few = draft("few"); triage.upsert(few)
+        let many = draft("many"); for _ in 0..<3 { triage.upsert(many) }
+        let done = draft("done"); triage.upsert(done); triage.update(id: done.id) { $0.status = .ignored }
+        expect(triage.candidatesForTriage().map(\.id) == [many.id, few.id], "triage candidates are new incidents, most frequent first")
+        try? FileManager.default.removeItem(at: dir)
+    }
 }
