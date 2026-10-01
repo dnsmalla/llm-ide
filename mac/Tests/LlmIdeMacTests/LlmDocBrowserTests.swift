@@ -55,4 +55,23 @@ final class LlmDocBrowserTests: XCTestCase {
         let saved = root.appendingPathComponent("generated/a.md")
         XCTAssertEqual(MobileGenerationBridge.relativePath(of: saved, under: root), "generated/a.md")
     }
+
+    func testSafeFileBaseIsVisibleAndWritable() {
+        XCTAssertEqual(MobileGenerationBridge.safeFileBase(".hidden-doc"), "hidden-doc")
+        XCTAssertEqual(MobileGenerationBridge.safeFileBase("a/b:c-doc"), "a-b-c-doc")
+        XCTAssertEqual(MobileGenerationBridge.safeFileBase("x\ny\u{0}z"), "xyz")
+        XCTAssertEqual(MobileGenerationBridge.safeFileBase("..."), "generated-doc")
+        XCTAssertLessThanOrEqual(MobileGenerationBridge.safeFileBase(String(repeating: "あ", count: 300)).utf8.count, 200)
+    }
+
+    func testEnvelopeValueRecoversTheIdFromAnUndecodableBody() {
+        let data = Data(#"{"type":"generation_run","commandId":"gen_1","sources":"wrong shape"}"#.utf8)
+        XCTAssertEqual(MobileGenerationBridge.envelopeValue("commandId", in: data), "gen_1")
+        XCTAssertNil(MobileGenerationBridge.envelopeValue("commandId", in: Data("nope".utf8)))
+        XCTAssertNil(MobileGenerationBridge.envelopeValue("commandId", in: nil))
+    }
+
+    func testRelativePathIsNilOutsideRoot() {
+        XCTAssertNil(MobileGenerationBridge.relativePath(of: tmp.appendingPathComponent("secret.md"), under: root))
+    }
 }

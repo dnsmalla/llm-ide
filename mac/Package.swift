@@ -146,6 +146,7 @@ if mobileIncluded {
         "MobileWebSocketServerRoutingTests.swift",
         "MobileControlPortTests.swift",
         "MobileFeatureBridgeTests.swift",
+        "LlmDocBrowserTests.swift",
         "PairingThrottleTests.swift",
         "MobilePairedDeviceStoreTests.swift",
         "MobileExploreIndexStoreTests.swift",
