@@ -16,6 +16,7 @@ struct ProjectView: View {
         case autoTasks = "Auto Tasks"
         case loop = "Loop"
         case docs = "Docs"
+        case selfHeal = "Self-Heal"
         var id: String { rawValue }
 
         /// The `MobileProtocol.Capability` this segment needs from the Mac.
@@ -25,6 +26,7 @@ struct ProjectView: View {
             case .autoTasks: return MobileProtocol.Capability.autoTasks
             case .loop:      return MobileProtocol.Capability.loop
             case .docs:      return MobileProtocol.Capability.llmDoc
+            case .selfHeal:  return MobileProtocol.Capability.selfHeal
             }
         }
     }
@@ -44,6 +46,7 @@ struct ProjectView: View {
                 case .autoTasks: AutoTaskView(embedded: true)
                 case .loop:      LoopView(embedded: true)
                 case .docs:      LlmDocBrowserView()
+                case .selfHeal:  SelfHealView()
                 }
             }
             // The header's "running" rows read these snapshots, and Loop stops polling when its
@@ -61,12 +64,8 @@ struct ProjectView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 VStack(spacing: 0) {
                     ProjectHeader(deviceName: deviceName, section: $section)
-                    Picker("Section", selection: $section) {
-                        ForEach(visibleSections) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, DesignSystem.Spacing.md)
-                    .padding(.bottom, DesignSystem.Spacing.sm)
+                    SectionChips(sections: visibleSections, selection: $section)
+                        .padding(.bottom, DesignSystem.Spacing.sm)
                     Divider()
                 }
                 .background(DesignSystem.Colors.background)
@@ -165,5 +164,37 @@ private struct ProjectHeader: View {
             .background(DesignSystem.Colors.primaryLight, in: RoundedRectangle(cornerRadius: DesignSystem.Layout.cornerRadiusS))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Scrollable section switcher. The Project tab outgrew a segmented control (it can't scroll and
+/// truncates at 5+ items), so sections are capsules in a horizontal scroll that keeps the selected
+/// one in view.
+private struct SectionChips: View {
+    let sections: [ProjectView.Section]
+    @Binding var selection: ProjectView.Section
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DesignSystem.Spacing.xs) {
+                    ForEach(sections) { section in
+                        Button { selection = section; haptic(.light) } label: {
+                            Text(section.rawValue)
+                                .font(DesignSystem.Typography.subheadlineFont.weight(.semibold))
+                                .padding(.horizontal, 14).padding(.vertical, 7)
+                                .foregroundColor(selection == section ? DesignSystem.Colors.onPrimary : DesignSystem.Colors.textSecondary)
+                                .background(selection == section ? DesignSystem.Colors.primary : DesignSystem.Colors.surfaceSecondary,
+                                            in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .id(section)
+                        .accessibilityAddTraits(selection == section ? .isSelected : [])
+                    }
+                }
+                .padding(.horizontal, DesignSystem.Spacing.md)
+            }
+            .onChange(of: selection) { value in withAnimation { proxy.scrollTo(value, anchor: .center) } }
+        }
     }
 }

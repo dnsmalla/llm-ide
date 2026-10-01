@@ -140,6 +140,7 @@ final class ConnectionService: ObservableObject {
     weak var activityStore: ActivityFeedStore?
     weak var usageStore: UsageStore?
     weak var projectsStore: ProjectsStore?
+    weak var selfHealStore: SelfHealStore?
     /// Set at app launch so `Connected.deviceName` can update persisted pairing info.
     weak var connectionStore: ConnectionStore?
 
@@ -288,6 +289,7 @@ final class ConnectionService: ObservableObject {
         activityStore?.resetForNewDevice()
         usageStore?.resetForNewDevice()
         projectsStore?.resetForNewDevice()
+        selfHealStore?.resetForNewDevice()
         // The next Mac may serve a different feature set; forget this one's until it says.
         macCapabilities = nil
         macProtocolVersion = nil
@@ -629,6 +631,8 @@ final class ConnectionService: ObservableObject {
             if let update = try? JSONDecoder().decode(MacCapabilities.self, from: data) {
                 macCapabilities = Set(update.capabilities)
             }
+        case "selfheal_state", "selfheal_diff_result":
+            selfHealStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "project_state":
             projectsStore?.handleInbound(type: "project_state", data: data)
         case "usage_state":

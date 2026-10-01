@@ -87,7 +87,7 @@ final class DemoResponder {
                            protocolVersion: MobileProtocol.protocolVersion,
                            capabilities: [MobileProtocol.Capability.chat, MobileProtocol.Capability.explorer,
                                           MobileProtocol.Capability.activity, MobileProtocol.Capability.usage,
-                                          MobileProtocol.Capability.projects,
+                                          MobileProtocol.Capability.projects, MobileProtocol.Capability.selfHeal,
                                           MobileProtocol.Capability.autoTasks, MobileProtocol.Capability.loop,
                                           MobileProtocol.Capability.generation, MobileProtocol.Capability.llmDoc]))
 
@@ -252,6 +252,16 @@ final class DemoResponder {
                 .init(id: "r-1", startedAt: Date().addingTimeInterval(-180_000).timeIntervalSince1970, durationSeconds: 268, iterationsUsed: 1, statusCode: "success", statusSummary: "All stages green", trigger: "desktop"),
             ]))
 
+        // MARK: Self-Heal
+        case MobileProtocol.Tag.selfHealList:
+            send(selfHealState())
+        case MobileProtocol.Tag.selfHealAction:
+            demoSelfHealResolved = true
+            send(selfHealState(message: "Ignored (demo)."))
+        case MobileProtocol.Tag.selfHealDiff:
+            send(SelfHealDiffResult(incidentId: obj["incidentId"] as? String ?? "",
+                                    diff: "--- a/Sources/Chat/Engine.swift\n+++ b/Sources/Chat/Engine.swift\n@@ -41,3 +41,4 @@\n-    let ids = items.map(\\.id)\n+    let ids = items.compactMap(\\.id)\n     process(ids)"))
+
         // MARK: Projects
         case MobileProtocol.Tag.projectList:
             send(projectState())
@@ -333,6 +343,20 @@ final class DemoResponder {
     // MARK: — Snapshots
 
     private var demoUnread = 2
+    private var demoSelfHealResolved = false
+
+    private func selfHealState(message: String? = nil) -> SelfHealState {
+        let now = Date().timeIntervalSince1970
+        return SelfHealState(incidents: [
+            .init(id: "a1b2c3d4e5f60718", source: "crash", category: "EXC_BAD_ACCESS", message: "Fatal error: Index out of range in ChatEngine.process",
+                  count: 3, status: demoSelfHealResolved ? "ignored" : "proposed", note: "Replaced map with compactMap.",
+                  lastSeen: now - 900, hasProposal: !demoSelfHealResolved, branch: "self-heal/a1b2c3"),
+            .init(id: "0f1e2d3c4b5a6978", source: "log", category: "network", message: "Request to /kb/graph timed out after 30s",
+                  count: 12, status: "needsHuman", note: "Could not reproduce locally.", lastSeen: now - 7_200, hasProposal: false, branch: nil),
+            .init(id: "1122334455667788", source: "ui", category: "decode", message: "Couldn't decode LoopState: missing key 'queuedCount'",
+                  count: 1, status: "fixed", note: nil, lastSeen: now - 90_000, hasProposal: false, branch: nil),
+        ], canApply: false, enabled: true, message: message)
+    }
     private let demoProjects: [ProjectInfo] = [
         .init(id: "p-llmide", name: "llm-ide", lastOpenedAt: Date().timeIntervalSince1970 - 60),
         .init(id: "p-notes", name: "meeting-notes", lastOpenedAt: Date().timeIntervalSince1970 - 86_400),
