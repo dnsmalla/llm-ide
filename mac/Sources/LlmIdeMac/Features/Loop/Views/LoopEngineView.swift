@@ -151,6 +151,8 @@ struct LoopEngineView: View {
     /// When enabled, a run that would queue on the main checkout uses an
     /// isolated git worktree instead.
     @State var useWorktreesForConcurrentRuns = false
+    // No UI toggle: carried through so a save or Run never drops Self-Heal's worktree guarantee.
+    @State private var alwaysUseWorktree = false
     /// Filename of the most recent run-summary note, for the Output section's
     /// "last written" line. Read from disk rather than the note index so an
     /// unindexed/hand-deleted note cannot make the row lie.
@@ -1490,7 +1492,8 @@ struct LoopEngineView: View {
             extraProtectedGlobs: extraProtectedGlobs,
             writeSummaryNote: writeSummaryNote,
             useWorktreesForConcurrentRuns: useWorktreesForConcurrentRuns,
-            repairModel: repairModel)
+            repairModel: repairModel,
+            alwaysUseWorktree: alwaysUseWorktree)
     }
 
     /// The full `LoopDefinition` this page currently represents — `currentConfig`
@@ -1540,6 +1543,7 @@ struct LoopEngineView: View {
             extraProtectedGlobs = ensuredConfig.extraProtectedGlobs
             writeSummaryNote = ensuredConfig.writeSummaryNote
             useWorktreesForConcurrentRuns = ensuredConfig.useWorktreesForConcurrentRuns
+            alwaysUseWorktree = ensuredConfig.alwaysUseWorktree
             loopName = existing.name
             isPrimaryLoop = existing.isPrimary
             goal = existing.goal ?? ""
@@ -1596,6 +1600,7 @@ struct LoopEngineView: View {
         extraProtectedGlobs = seed.extraProtectedGlobs
         writeSummaryNote = seed.writeSummaryNote
         useWorktreesForConcurrentRuns = seed.useWorktreesForConcurrentRuns
+        alwaysUseWorktree = seed.alwaysUseWorktree
         // Reset the loop-identity/contract state too — without this, closing
         // a project that had a loop with a Goal set and opening one with no
         // config yet would leave that Goal text displayed against the new,
@@ -1940,6 +1945,7 @@ struct LoopEngineView: View {
         extraProtectedGlobs = applied.extraProtectedGlobs
         writeSummaryNote = applied.writeSummaryNote
         useWorktreesForConcurrentRuns = applied.useWorktreesForConcurrentRuns
+        alwaysUseWorktree = applied.alwaysUseWorktree
         // Stage ids are regenerated on apply, so the old selection no longer exists.
         selectedStageId = nil
     }

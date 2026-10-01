@@ -455,7 +455,13 @@ final class LoopEngineRunner: ObservableObject {
             appendLog(.info, "Worktree cleanup · \(note)")
         }
 
-        if config.alwaysUseWorktree {
+        let selfHealSkip = config.isSelfHealRun
+            ? LoopEngineConfig.selfHealSkipReason(isEnabled: SelfHealSettings.isEnabled(),
+                                                  isAppSourceRoot: LoopStageDetector.isAppSourceRoot(mainGitRoot))
+            : nil
+        if selfHealSkip != nil {
+            // Ends below as a no-op success: no worktree, no LLM call.
+        } else if config.requiresWorktree {
             do {
                 let lease = try await LoopWorktreeManager.create(mainRepo: mainGitRoot, faultsRoot: faultsRoot,
                                                                  requireCleanMain: false)
@@ -602,6 +608,13 @@ final class LoopEngineRunner: ObservableObject {
                 : "Every stage is disabled — enable at least one"
             appendLog(.warn, "Loop not run · \(reason)")
             return await finish(.error(reason),
+                                config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
+                                projectId: projectId, startedAt: startedAt,
+                                loopId: loopId, loopName: loopName)
+        }
+        if let skip = selfHealSkip {
+            appendLog(.info, "Loop not run · \(skip)")
+            return await finish(.success,
                                 config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                                 projectId: projectId, startedAt: startedAt,
                                 loopId: loopId, loopName: loopName)
@@ -1521,6 +1534,13 @@ final class LoopEngineRunner: ObservableObject {
     /// iteration instead of giving the fix agent a stable target.
     private func runTriageStage(_ stage: LoopStage, gitRoot: URL) -> StageDecision {
         let startedAt = Date()
+        // Last line of defence: triage must never hand incidents to an agent editing the main checkout.
+        guard currentWorktreeLease != nil else {
+            stageStates[stage.id] = .failed
+            let reason = "Self-Heal triage needs an isolated worktree; refusing to run in the main checkout"
+            record(stage, startedAt: startedAt, duration: 0, exitCode: nil, passed: false, output: reason, score: nil)
+            return .terminate(.blocked(reason: .worktreeRequired(reason: reason)))
+        }
         let batch = selfHealBatch ?? SelfHealBatch.select(from: .shared, max: SelfHealSettings.maxPerRun())
         selfHealBatch = batch
         guard !batch.isEmpty else {
@@ -2203,21 +2223,48 @@ final class LoopEngineRunner: ObservableObject {
         }
         let agentDown = errored && stageStates.values.contains(.errored)
         let aborted = terminal == .aborted
-        let proposal = currentWorktreeLease.map {
+        let leaseProposal = currentWorktreeLease.map {
             IncidentProposal(mainRepo: $0.mainRepo.path, worktreePath: $0.worktreePath.path,
                              branch: $0.branch, baseCommit: $0.baseCommit)
+        }
+        var proposal = leaseProposal
+        // A "fixed" verdict with no actual change must not become an empty proposal.
+        if succeeded, let candidate = leaseProposal {
+            let hasChanges = await Task.detached {
+                !(((try? SelfHealProposalService.diff(candidate)) ?? "").isEmpty)
+            }.value
+            if !hasChanges {
+                proposal = nil
+                appendLog(.info, "Self-Heal · the run left no changes — nothing to propose")
+            }
         }
         let proposed = SelfHealOutcome.apply(batch: batch, results: SelfHealBatch.parseResults(markdown),
                                              runSucceeded: succeeded, agentDown: agentDown, runAborted: aborted,
                                              proposal: proposal, store: .shared)
         try? FileManager.default.removeItem(at: batchFile.deletingLastPathComponent())
         appendLog(.info, "Self-Heal · \(proposed) fix(es) proposed from \(batch.count) incident(s)")
-        // Borrowed symlinks keep a no-fix worktree "dirty"; remove it here so it is not retained.
-        // `discard` shells out to `git worktree remove` on a full checkout —
-        // seconds, not milliseconds — so it must not block this @MainActor method.
-        if proposed == 0, let proposal {
-            let proposalCopy = proposal
-            _ = await Task.detached { try? SelfHealProposalService.discard(proposalCopy) }.value
+        guard let leaseProposal else { return }
+        // Both branches touch a full checkout — seconds of disk work — so neither may block this @MainActor method.
+        if proposed == 0 {
+            // Borrowed symlinks keep a no-fix worktree "dirty"; remove it here so it is not retained.
+            let failure = await Task.detached { () -> String? in
+                do { try SelfHealProposalService.discard(leaseProposal); return nil } catch { return error.localizedDescription }
+            }.value
+            if let failure {
+                appendLog(.info, "Self-Heal · could not remove worktree \(leaseProposal.worktreePath): \(failure)")
+            }
+        } else {
+            // A retained proposal only needs its sources; the build output is gigabytes.
+            let root = URL(fileURLWithPath: leaseProposal.worktreePath)
+            await Task.detached {
+                for build in ["mac/.build", "mac/LocalPackages/graph-kit/.build"] {
+                    let dir = root.appendingPathComponent(build)
+                    // An older worktree may still symlink graph-kit into the main checkout.
+                    let parent = dir.deletingLastPathComponent().path
+                    guard (try? FileManager.default.destinationOfSymbolicLink(atPath: parent)) == nil else { continue }
+                    try? FileManager.default.removeItem(at: dir)
+                }
+            }.value
         }
     }
 

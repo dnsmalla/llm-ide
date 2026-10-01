@@ -1,3 +1,4 @@
+import OSLog
 import SwiftUI
 
 /// Review sheet for a single Self-Heal proposal: shows the diff (excluding
@@ -11,6 +12,7 @@ struct SelfHealProposalSheet: View {
     @State private var diffLoaded = false
     @State private var failure: String?
     @State private var working = false
+    private static let log = Logger(subsystem: "com.llmide.macapp", category: "Incidents")
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -34,7 +36,12 @@ struct SelfHealProposalSheet: View {
                 Button("Apply to this checkout") {
                     run(gitWork: {
                         try SelfHealProposalService.apply(proposal)
-                        try? SelfHealProposalService.discard(proposal)
+                        do {
+                            try SelfHealProposalService.discard(proposal)
+                        } catch {
+                            // .info, not .error: a leftover worktree is not an incident to self-heal.
+                            Self.log.info("Self-Heal: could not remove worktree \(proposal.worktreePath, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                        }
                     }, onSuccess: { SelfHealProposalService.markApplied(proposal, store: .shared) })
                 }
                 .buttonStyle(.borderedProminent)

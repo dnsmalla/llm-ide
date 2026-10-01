@@ -1006,7 +1006,8 @@ public enum LoopStageDetector {
                           targetPath: SelfHealBatch.relativePath, outputPath: ".",
                           prompt: selfHealFixPrompt, isDefault: true, defaultKey: "self-heal-fix"),
                 LoopStage(name: "Verify", kind: .shellCommand, command: verify, order: 2,
-                          isDefault: true, defaultKey: "self-heal-verify", detectedCommand: verify),
+                          isDefault: true, defaultKey: "self-heal-verify", timeoutSeconds: 5400,
+                          detectedCommand: verify),
             ]
         default:
             return []
@@ -1094,6 +1095,8 @@ public enum LoopStageDetector {
             if key == LoopDefaultLoopKey.selfHeal {
                 config.maxIterations = 3
                 config.alwaysUseWorktree = true
+                // The verify stage executes these, and incident text the fix agent reads is untrusted.
+                config.extraProtectedGlobs = ["mac/Scripts/**", "scripts/**", "**/*.sh"]
             }
             return LoopDefinition(id: defaultLoopId(key), name: defaultLoopName(key),
                                   goal: contract?.goal,

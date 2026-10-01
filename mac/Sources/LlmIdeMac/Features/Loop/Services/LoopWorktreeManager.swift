@@ -110,8 +110,10 @@ public enum LoopWorktreeManager {
     /// advanced is retained for review. Git/status failures also retain it:
     /// cleanup must fail safe because deleting a Loop's repairs is worse than
     /// leaving an extra checkout on disk.
+    /// - Parameter runGit: resolved in the body — see `createIfPossible`.
     static func finish(_ lease: Lease,
-                       runGit: ([String], URL) async throws -> String = defaultRunGit) async {
+                       runGit: (([String], URL) async throws -> String)? = nil) async {
+        let runGit = runGit ?? { try await defaultRunGit($0, at: $1) }
         decrementActive(mainRepo: lease.mainRepo)
         liveLeasePaths.remove(key(lease.worktreePath))
         guard FileManager.default.fileExists(atPath: lease.worktreePath.path) else { return }
@@ -137,7 +139,8 @@ public enum LoopWorktreeManager {
     /// human-readable line per removal or keep, for the run log.
     @discardableResult
     static func pruneStale(mainRepo: URL, faultsRoot: URL,
-                           runGit: ([String], URL) async throws -> String = defaultRunGit) async -> [String] {
+                           runGit: (([String], URL) async throws -> String)? = nil) async -> [String] {
+        let runGit = runGit ?? { try await defaultRunGit($0, at: $1) }
         let parent = worktreeParent(mainRepo: mainRepo, faultsRoot: faultsRoot)
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: parent.path) else {
             return []

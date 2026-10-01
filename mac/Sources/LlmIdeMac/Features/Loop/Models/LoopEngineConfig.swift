@@ -66,6 +66,24 @@ public struct LoopEngineConfig: Codable, Equatable {
     /// so an uncommitted submodule pointer or in-progress edit never blocks it.
     public var alwaysUseWorktree: Bool = false
 
+    /// Any enabled stage belongs to Self-Heal — keyed on the stages, not the
+    /// flag, so a hand-edited loop.json, a template or "Run this stage only"
+    /// cannot drop the guarantees below.
+    public var isSelfHealRun: Bool {
+        stages.contains { $0.enabled && ($0.kind == .incidentTriage || $0.defaultKey?.hasPrefix("self-heal-") == true) }
+    }
+
+    /// Self-Heal must never edit the main checkout, whatever the flag says.
+    public var requiresWorktree: Bool { alwaysUseWorktree || isSelfHealRun }
+
+    /// Why a Self-Heal run ends at once (successfully, without a worktree or
+    /// an LLM call), or nil when it may proceed.
+    public static func selfHealSkipReason(isEnabled: Bool, isAppSourceRoot: Bool) -> String? {
+        if !isEnabled { return "Self-Heal is off" }
+        if !isAppSourceRoot { return "not the LLM-IDE checkout" }
+        return nil
+    }
+
     /// The full protected set this config enforces.
     var protectedGlobs: [String] {
         GitRepairScopeGuard.defaultProtectedGlobs + extraProtectedGlobs
