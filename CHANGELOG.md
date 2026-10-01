@@ -5,6 +5,24 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+
+- **iPhone app redesign + much more from the Mac.** Chat is the first screen; project work lives in a
+  Project tab (Explorer, Auto Tasks, Loop, Docs, Files, Git, Issues, Self-Heal) with a project switcher;
+  a new Activity tab mirrors the bell; Settings has Usage & limits. The phone can run Doc Gen / Visual
+  (saved to `llm-doc/generated/`), browse `llm-doc/`, read project files and git status/diffs, read issues,
+  review Self-Heal proposals, and answer tool/edit permission prompts.
+- **Settings → Mobile Control → Phone access.** Every capability that edits files, posts as you or
+  approves a tool (apply/discard Self-Heal fixes, comment on issues, approve tool requests) is a Mac-side
+  switch, **off by default**; read-only/reversible ones (files, git, issues, project switch) default on.
+  The Mac re-checks the switch on every request and tells the phone when one changes.
+- Wire protocol: `Connected` now carries `protocolVersion` and `capabilities`, and `mac_capabilities` is
+  pushed when a switch changes, so a phone only shows what its Mac serves. New message families are
+  additive; an older Mac or phone ignores them.
+- Phone reads are bounded and safe by construction: paths resolve inside the project (symlink targets
+  are re-checked), dotfiles/secret names/PEM keys are never shown, git runs with literal pathspecs and no
+  textconv/fsmonitor, and all redaction is line-bounded (`PhoneRedaction`).
+
 ### Changed
 
 - Loop reliability (Mac app). Loop agent runs are headless and confined to the
