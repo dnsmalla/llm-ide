@@ -60,7 +60,7 @@ struct LlmDocBrowserView: View {
                     .accessibilityLabel("Refresh")
             }
         }
-        .task { if listing == nil { store.list(path) } }
+        .task { if listing == nil || listing?.error != nil { store.list(path) } }
         .onChange(of: connection.connectionStatus) { status in
             if status == .connected { reload() }
         }
@@ -136,7 +136,8 @@ struct LlmDocFileView: View {
                 }
             }
         }
-        .task { if file == nil { store.read(path) } }
+        .task { if file == nil || file?.error != nil { store.read(path) } }
+        .refreshable { store.invalidate(path); store.read(path) }
     }
 }
 

@@ -21,8 +21,13 @@ struct GenerateSheet: View {
     private var isConnected: Bool { connection.connectionStatus == .connected }
     private var templates: [GenerationChoice] { store.options?.templates.filter { $0.surface == surface } ?? [] }
     private var commands: [GenerationChoice] { store.options?.commands.filter { $0.surface == surface } ?? [] }
+    private var selectedTemplate: GenerationChoice? { templates.first { $0.id == templateId } }
+    private var selectedCommand: GenerationChoice? { commands.first { $0.id == commandId } }
+    /// Resolved against the CURRENT lists: an id left over from before a refresh (the Mac's
+    /// project or templates changed) must not count as a selection.
     private var canGenerate: Bool {
-        isConnected && !store.isRunning && !files.isEmpty && (templateId != nil || commandId != nil)
+        isConnected && !store.isRunning && !files.isEmpty
+            && (selectedTemplate != nil || selectedCommand != nil)
     }
 
     var body: some View {
@@ -85,10 +90,8 @@ struct GenerateSheet: View {
                         } else {
                             Button {
                                 haptic(.medium)
-                                store.run(surface: surface,
-                                          template: templates.first { $0.id == templateId },
-                                          command: commands.first { $0.id == commandId },
-                                          prompt: prompt, sources: files)
+                                store.run(surface: surface, template: selectedTemplate,
+                                          command: selectedCommand, prompt: prompt, sources: files)
                             } label: {
                                 Text("Generate").font(DesignSystem.Typography.bodyFont.weight(.semibold))
                                     .frame(maxWidth: .infinity)
@@ -127,7 +130,13 @@ struct GenerateSheet: View {
                 }
             }
             .onChange(of: surface) { _ in templateId = nil; commandId = nil }
-            .task { if store.options == nil { store.refreshOptions() } }
+            // Every time the sheet opens, not only the first: the Mac's project (and so its
+            // templates, and whether there is a project at all) may have changed since.
+            .task { store.refreshOptions() }
+            .onChange(of: store.options) { _ in
+                if templateId != nil, selectedTemplate == nil { templateId = nil }
+                if commandId != nil, selectedCommand == nil { commandId = nil }
+            }
             .onChange(of: connection.connectionStatus) { status in
                 if status == .connected { store.refreshOptions() }
             }

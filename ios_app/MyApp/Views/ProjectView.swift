@@ -9,6 +9,7 @@ struct ProjectView: View {
     let deviceName: String
     @EnvironmentObject var autoTaskStore: AutoTaskStore
     @EnvironmentObject var loopStore: LoopStore
+    @EnvironmentObject var connection: ConnectionService
 
     enum Section: String, CaseIterable, Identifiable {
         case explorer = "Explorer"
@@ -29,6 +30,13 @@ struct ProjectView: View {
                 case .loop:      LoopView(embedded: true)
                 case .docs:      LlmDocBrowserView()
                 }
+            }
+            // The header's "running" rows read these snapshots, and Loop stops polling when its
+            // segment goes away — so re-read them whenever the Project tab is shown.
+            .onAppear {
+                guard connection.connectionStatus == .connected else { return }
+                loopStore.refreshAll()
+                autoTaskStore.refreshAll()
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 VStack(spacing: 0) {

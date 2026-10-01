@@ -63,7 +63,9 @@ struct AutoTaskView: View {
                         .accessibilityLabel("Refresh auto tasks")
                 }
             }
+            .onDisappear { autoTaskStore.autoTaskViewVisible = false }
             .onAppear {
+                autoTaskStore.autoTaskViewVisible = true
                 autoTaskStore.refreshAll()
                 // Pre-fetch so tapping a task's ⚙ opens on real settings
                 // instead of a spinner.

@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import SharedProtocol
 
 /// State + send/handle logic for Doc Gen / Visual runs and the read-only
@@ -20,6 +21,7 @@ final class GenerationStore: ObservableObject {
     private var activeRunId: String?
     private var runWatchdog: Task<Void, Never>?
     private var requestWatchdogs: [String: Task<Void, Never>] = [:]
+    private var statusCancellable: AnyCancellable?
 
     /// A run is one blocking request on the Mac (up to ~4 minutes) with no
     /// progress signal, so the phone allows a little longer before giving up.
@@ -30,14 +32,26 @@ final class GenerationStore: ObservableObject {
     init(connection: ConnectionService) {
         self.connection = connection
         connection.generationStore = self
+        // A run in flight when the link drops will never get its result; say so now instead of
+        // leaving the spinner up for the full run timeout.
+        statusCancellable = connection.$connectionStatus
+            .removeDuplicates()
+            .sink { [weak self] status in
+                guard status != .connected, let self, self.isRunning else { return }
+                self.runError = "Lost the connection to your Mac. The run may still finish there — check Docs."
+                self.finishRun()
+            }
     }
+
+    private var isConnected: Bool { connection?.connectionStatus == .connected }
 
     // MARK: — Senders
 
     func refreshOptions() {
+        guard isConnected else { return }
         connection?.sendEncodable(GenerationOptionsList())
         watch("options") { [weak self] in
-            guard let self, self.options == nil else { return }
+            guard let self, self.options == nil, self.isConnected else { return }
             self.optionsError = Self.oldMacMessage
         }
     }
@@ -68,17 +82,19 @@ final class GenerationStore: ObservableObject {
     }
 
     func list(_ path: String) {
+        guard isConnected else { return }
         connection?.sendEncodable(LlmDocList(path: path))
         watch("list:\(path)") { [weak self] in
-            guard let self, self.listings[path] == nil else { return }
+            guard let self, self.listings[path] == nil, self.isConnected else { return }
             self.listings[path] = LlmDocListing(path: path, entries: [], error: Self.oldMacMessage)
         }
     }
 
     func read(_ path: String) {
+        guard isConnected else { return }
         connection?.sendEncodable(LlmDocRead(path: path))
         watch("read:\(path)") { [weak self] in
-            guard let self, self.files[path] == nil else { return }
+            guard let self, self.files[path] == nil, self.isConnected else { return }
             self.files[path] = LlmDocFile(path: path, text: nil, error: Self.oldMacMessage)
         }
     }
@@ -98,24 +114,24 @@ final class GenerationStore: ObservableObject {
             if let o = try? decoder.decode(GenerationOptions.self, from: data) {
                 options = o
                 optionsError = nil
-                requestWatchdogs["options"]?.cancel()
+                clearWatchdog("options")
             }
         case MobileProtocol.Tag.generationResult:
             guard let r = try? decoder.decode(GenerationResult.self, from: data),
                   r.commandId == activeRunId else { return }
             if r.ok { result = r } else { runError = r.error ?? "Generation failed." }
             // A new file landed in llm-doc/generated — any cached view of it is stale.
-            if r.savedPath != nil { invalidate(""); invalidate("generated") }
+            if let saved = r.savedPath { invalidate(""); invalidate("generated"); invalidate(saved) }
             finishRun()
         case MobileProtocol.Tag.llmDocListing:
             if let l = try? decoder.decode(LlmDocListing.self, from: data) {
                 listings[l.path] = l
-                requestWatchdogs["list:\(l.path)"]?.cancel()
+                clearWatchdog("list:\(l.path)")
             }
         case MobileProtocol.Tag.llmDocFile:
             if let f = try? decoder.decode(LlmDocFile.self, from: data) {
                 files[f.path] = f
-                requestWatchdogs["read:\(f.path)"]?.cancel()
+                clearWatchdog("read:\(f.path)")
             }
         default:
             break
@@ -124,7 +140,7 @@ final class GenerationStore: ObservableObject {
 
     /// A wire error carrying one of our command ids ("gen_…").
     func handleCommandError(_ message: String, commandId: String) {
-        guard commandId == activeRunId else { return }
+        guard commandId == activeRunId || (commandId == MobileProtocol.Tag.generationRun && isRunning) else { return }
         runError = message
         finishRun()
     }
@@ -139,6 +155,12 @@ final class GenerationStore: ObservableObject {
         finishRun()
         requestWatchdogs.values.forEach { $0.cancel() }
         requestWatchdogs = [:]
+    }
+
+    /// Forget finished watchdog handles so the table doesn't grow one key per path browsed.
+    private func clearWatchdog(_ key: String) {
+        requestWatchdogs[key]?.cancel()
+        requestWatchdogs[key] = nil
     }
 
     // MARK: — Helpers

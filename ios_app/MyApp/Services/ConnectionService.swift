@@ -626,7 +626,7 @@ final class ConnectionService: ObservableObject {
                 if err.message != "Cancelled" {
                     if let cid, cid.hasPrefix("loop_") {
                         loopStore?.handleCommandError(err.message)
-                    } else if let cid, cid.hasPrefix("gen_") {
+                    } else if let cid, cid.hasPrefix("gen_") || cid == "generation_run" {
                         generationStore?.handleCommandError(err.message, commandId: cid)
                     } else if let cid, cid.hasPrefix("auto_task") {
                         autoTaskStore?.handleCommandError(err.message, commandId: cid)
