@@ -42,6 +42,9 @@ struct SettingsView: View {
                             AgentSdkSettingsSection(api: api)
                             ProvidersSettingsSection(api: api)
                             CustomProvidersSection(api: api)
+                            if AppSourceRoot.gitRoot != nil {
+                                SelfHealSettingsSection()
+                            }
                         }
                     }
 
