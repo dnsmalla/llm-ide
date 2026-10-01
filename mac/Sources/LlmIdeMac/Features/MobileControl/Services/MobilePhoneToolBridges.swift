@@ -13,6 +13,13 @@ extension MobileControlManager {
         register(bridge: projects,
                  messageTypes: [MobileProtocol.Tag.projectList, MobileProtocol.Tag.projectSwitch],
                  capabilities: [(name: MobileProtocol.Capability.projects, gate: .projectSwitch)])
+        let selfHeal = MobileSelfHealBridge(manager: self)
+        selfHealBridge = selfHeal
+        register(bridge: selfHeal,
+                 messageTypes: [MobileProtocol.Tag.selfHealList, MobileProtocol.Tag.selfHealAction,
+                                MobileProtocol.Tag.selfHealDiff],
+                 capabilities: [(name: MobileProtocol.Capability.selfHeal, gate: nil),
+                                (name: MobileProtocol.Capability.selfHealApply, gate: .selfHealApply)])
         register(bridge: MobileUsageBridge(manager: self),
                  messageTypes: [MobileProtocol.Tag.usageGet],
                  capabilities: [(name: MobileProtocol.Capability.usage, gate: nil)])

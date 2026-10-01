@@ -742,17 +742,19 @@ enum FeatureCatalog {
         loopBridge.runService = loopRunService
         mobile.loopBridge = loopBridge
         // A project switch rebuilds the app environment under any running auto task or loop.
-        mobile.projectBridge?.busyReason = { [weak service, weak mobile] in
+        let runGuard: () -> String? = { [weak service, weak mobile] in
             if let service, service.isRunning || service.isLoopRunning || service.hasScheduledRun {
-                return "An auto task or loop is running on the Mac. Wait for it to finish, or stop it, then switch."
+                return "An auto task or loop is running on the Mac. Wait for it to finish, or stop it, then try again."
             }
             if let mobile, let cfg = mobile.config, let store = mobile.projectStore,
                let root = WorkspaceRoot.context(config: cfg, projectStore: store)?.gitRoot,
                LoopEngineRunner.isRunActive(gitRoot: root) {
-                return "A loop is running on the Mac. Wait for it to finish, or stop it, then switch."
+                return "A loop is running on the Mac. Wait for it to finish, or stop it, then try again."
             }
             return nil
         }
+        mobile.projectBridge?.busyReason = runGuard
+        mobile.selfHealBridge?.busyReason = runGuard
         #endif
     }
 }

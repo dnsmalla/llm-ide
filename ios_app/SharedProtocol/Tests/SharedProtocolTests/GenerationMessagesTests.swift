@@ -80,4 +80,14 @@ final class GenerationMessagesTests: XCTestCase {
         let json = String(data: try JSONEncoder().encode(state), encoding: .utf8)!
         XCTAssertFalse(json.contains("path"))
     }
+
+    func testSelfHealMessagesRoundTrip() throws {
+        let i = SelfHealIncident(id: "0123456789abcdef", source: "crash", category: "c", message: "m", count: 2,
+                                 status: "proposed", note: nil, lastSeen: 1, hasProposal: true, branch: "b")
+        let state = SelfHealState(incidents: [i], canApply: false, enabled: true, message: "ok")
+        XCTAssertEqual(try roundTrip(state), state)
+        XCTAssertEqual(try roundTrip(SelfHealAction(incidentId: "x", action: .apply)).action, .apply)
+        XCTAssertEqual(try roundTrip(SelfHealDiffResult(incidentId: "x", diff: "d", truncated: true)).truncated, true)
+        XCTAssertFalse(MobileProtocol.Capability.legacy.contains(MobileProtocol.Capability.selfHealApply))
+    }
 }

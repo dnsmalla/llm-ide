@@ -99,6 +99,7 @@ final class MobileControlManager {
 
     /// Kept so the shell can inject the "is a run active?" guard (see `MobileProjectBridge.busyReason`).
     var projectBridge: MobileProjectBridge?
+    var selfHealBridge: MobileSelfHealBridge?
 
     /// A bridge registered through `register(...)` rather than a dedicated slot: it owns a set of
     /// message types, advertises capabilities (each optionally behind a `PhoneAccess` switch that
