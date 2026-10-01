@@ -182,6 +182,7 @@ public struct LlmIdeMacApp: App {
             api: client,
             projectStore: projectStoreInstance,
             backend: backend,
+            activity: activity,
             registry: featureRegistry)
         // Builds the entire Auto Task / Loop stack (scheduler, settings,
         // templates, skills, log store, on-disk histories) and registers

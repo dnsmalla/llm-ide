@@ -48,6 +48,7 @@ struct ExplorerChatView: View {
                     StatusBanner(.error(message: err) { connection.errorMessage = nil })
                 }
                 chatTranscript
+                pinnedToolApproval
                 inputBar
             }
             .background(DesignSystem.Colors.background.ignoresSafeArea())
@@ -293,6 +294,22 @@ struct ExplorerChatView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// A tool/edit permission prompt is blocking and time-sensitive, so it is pinned above the
+    /// composer (its buttons can never scroll away) rather than sitting inside the transcript.
+    @ViewBuilder
+    private var pinnedToolApproval: some View {
+        if let tool = explorerStore.pendingToolApproval {
+            ToolApprovalCard(request: tool, enabled: connection.connectionStatus == .connected) { allow in
+                explorerStore.submitToolApproval(allow: allow)
+                haptic(allow ? .medium : .light)
+            }
+            .id(tool.requestId)
+            .padding(.horizontal, DesignSystem.Spacing.md)
+            .padding(.bottom, DesignSystem.Spacing.xs)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 

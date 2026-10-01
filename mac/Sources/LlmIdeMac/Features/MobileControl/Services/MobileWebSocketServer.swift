@@ -47,6 +47,10 @@ final class MobileWebSocketServer: @unchecked Sendable {
     private let onPinConsumed: () -> Void
     private let onClientDisconnected: () -> Void
     private let onBindFailed: (Error) -> Void
+    /// `MobileProtocol.Capability` strings to advertise in `Connected`, read at pairing time so
+    /// bridges wired after the server started are still reported. Called on the server queue, so
+    /// it must be thread-safe. Empty ⇒ the field is omitted (the pre-handshake wire shape).
+    private let capabilities: () -> [String]
     /// Fired once per successful bind with the port that actually took —
     /// which may be a fallback candidate, so the caller must advertise THIS
     /// value (Bonjour, pairing QR, the settings Port row), never the base.
@@ -104,7 +108,9 @@ final class MobileWebSocketServer: @unchecked Sendable {
          onPinConsumed: @escaping () -> Void = {},
          onClientDisconnected: @escaping () -> Void = {},
          onListening: @escaping (Int) -> Void = { _ in },
-         onBindFailed: @escaping (Error) -> Void = { _ in }) {
+         onBindFailed: @escaping (Error) -> Void = { _ in },
+         capabilities: @escaping () -> [String] = { [] }) {
+        self.capabilities = capabilities
         self.basePort = port
         // Never slide past 65535: a base of 65527+ with the port busy used to
         // reach 65536 and trap in `UInt16(currentPort)` on the listener queue.
@@ -494,7 +500,7 @@ final class MobileWebSocketServer: @unchecked Sendable {
                 return
             }
             throttle.registerSuccess(host: host)
-            admit(conn, deviceId: deviceId, reply: Connected(deviceName: deviceName))
+            admit(conn, deviceId: deviceId, reply: makeConnected())
             return
         }
         if validatePin(pairing.pin) {
@@ -506,9 +512,9 @@ final class MobileWebSocketServer: @unchecked Sendable {
             // omits `deviceId` (and so never shows up in Settings) cannot be
             // reused. A legacy phone still pairs — with the PIN shown at that
             // moment — and has to re-pair next time.
-            var reply = Connected(deviceName: deviceName)
+            var reply = makeConnected()
             if let deviceId, let token = issueToken(deviceId, pairing.deviceName ?? "") {
-                reply = Connected(deviceName: deviceName, token: token, deviceId: deviceId)
+                reply = makeConnected(token: token, deviceId: deviceId)
             }
             admit(conn, deviceId: reply.token != nil ? deviceId : nil, reply: reply)
             onPinConsumed()
@@ -525,6 +531,14 @@ final class MobileWebSocketServer: @unchecked Sendable {
     }
 
     /// Promote an authenticated challenger to THE client. Must run on `queue`.
+    /// The `Connected` reply, stamped with the wire revision and what this Mac serves.
+    private func makeConnected(token: String? = nil, deviceId: String? = nil) -> Connected {
+        let caps = capabilities()
+        return Connected(deviceName: deviceName, token: token, deviceId: deviceId,
+                         protocolVersion: caps.isEmpty ? nil : MobileProtocol.protocolVersion,
+                         capabilities: caps.isEmpty ? nil : caps)
+    }
+
     private func admit(_ conn: NWConnection, deviceId: String?, reply: Connected) {
         // NOW the incumbent may be replaced — after proven credentials, never
         // before. Its handler is cleared first so the cancellation below can't

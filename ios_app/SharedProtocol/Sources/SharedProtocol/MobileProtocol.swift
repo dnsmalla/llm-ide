@@ -15,6 +15,38 @@ public enum MobileProtocol {
     /// Drop the connection if no heartbeat is received within this window.
     public static let heartbeatTimeout: TimeInterval = 25
 
+    /// Wire revision the Mac advertises in `Connected.protocolVersion`. Bumped only when a
+    /// capability is added that a phone may want to branch on; additive optional fields never
+    /// need a bump (see `Connected`). 1 = the implicit pre-handshake protocol (field absent).
+    public static let protocolVersion = 2
+
+    /// Features a Mac can serve, advertised in `Connected.capabilities` so the phone shows only
+    /// what the paired Mac supports instead of a screen that spins against an older Mac.
+    /// Strings, not an enum: an older phone must ignore a capability it has never heard of.
+    public enum Capability {
+        public static let chat = "chat"
+        public static let explorer = "explorer"
+        public static let autoTasks = "auto_tasks"
+        public static let loop = "loop"
+        public static let generation = "generation"
+        public static let llmDoc = "llm_doc"
+        public static let activity = "activity"
+        public static let usage = "usage"
+        public static let projects = "projects"
+        public static let selfHeal = "self_heal"
+        public static let selfHealApply = "self_heal_apply"
+        public static let toolApprovals = "tool_approvals"
+        public static let sourceControl = "source_control"
+        public static let files = "files"
+        public static let issues = "issues"
+        public static let issueComment = "issue_comment"
+
+        /// What a Mac that sends NO capability list is assumed to serve: everything that shipped
+        /// before the handshake existed. Doc Gen and the llm-doc browser came after it, so a
+        /// legacy Mac is NOT assumed to have them.
+        public static let legacy: Set<String> = [chat, explorer, autoTasks, loop]
+    }
+
     /// Single source of truth for every message `type` discriminator on the
     /// wire. Structs reference these constants from their `let type = …` so the
     /// tag string lives in exactly one place. The on-the-wire value is the raw
@@ -106,5 +138,52 @@ public enum MobileProtocol {
         public static let llmDocListing = "llmdoc_listing"
         public static let llmDocRead = "llmdoc_read"
         public static let llmDocFile = "llmdoc_file"
+
+        // Mac → phone: the capability list changed mid-session (a Phone Access switch was flipped).
+        public static let macCapabilities = "mac_capabilities"
+
+        // MARK: Project files (read-only) — see FilesMessages.swift
+        public static let filesList = "files_list"
+        public static let filesListing = "files_listing"
+        public static let filesRead = "files_read"
+        public static let filesFile = "files_file"
+
+        // MARK: Issues — see IssuesMessages.swift
+        public static let issuesList = "issues_list"
+        public static let issuesState = "issues_state"
+        public static let issueGet = "issue_get"
+        public static let issueDetail = "issue_detail"
+        public static let issueCommentPost = "issue_comment_post"
+
+        // MARK: Source Control (read-only) — see SourceControlMessages.swift
+        public static let scmStatusList = "scm_status_list"
+        public static let scmState = "scm_state"
+        public static let scmDiff = "scm_diff"
+        public static let scmDiffResult = "scm_diff_result"
+
+        // Tool/edit permission prompts relayed to the phone — see ToolApprovalMessages.swift
+        public static let toolApprovalRequest = "tool_approval_request"
+        public static let toolApprovalAnswer = "tool_approval_answer"
+
+        // MARK: Self-Heal — see SelfHealMessages.swift
+        public static let selfHealList = "selfheal_list"
+        public static let selfHealState = "selfheal_state"
+        public static let selfHealAction = "selfheal_action"
+        public static let selfHealDiff = "selfheal_diff"
+        public static let selfHealDiffResult = "selfheal_diff_result"
+
+        // MARK: Projects — see ProjectMessages.swift
+        public static let projectList = "project_list"
+        public static let projectState = "project_state"
+        public static let projectSwitch = "project_switch"
+
+        // MARK: Usage & limits — see UsageMessages.swift
+        public static let usageGet = "usage_get"
+        public static let usageState = "usage_state"
+
+        // MARK: Activity feed — see ActivityMessages.swift
+        public static let activityList = "activity_list"
+        public static let activityState = "activity_state"
+        public static let activityMarkSeen = "activity_mark_seen"
     }
 }

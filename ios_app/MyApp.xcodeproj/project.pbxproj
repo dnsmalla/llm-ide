@@ -7,6 +7,21 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B8E7E06723DFD873F6F52622 /* IssuesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E7E06723DFD873F6F52622 /* IssuesView.swift */; };
+		B8A378FC4603B8A143E0A85D /* ProjectFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A378FC4603B8A143E0A85D /* ProjectFilesView.swift */; };
+		B856102E665E3C684611EF8D /* IssuesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B756102E665E3C684611EF8D /* IssuesStore.swift */; };
+		B8404713EF12A5B94AC7E89B /* FilesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7404713EF12A5B94AC7E89B /* FilesStore.swift */; };
+		B81BB19ACDDFCCC66E2B3AD3 /* SourceControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71BB19ACDDFCCC66E2B3AD3 /* SourceControlView.swift */; };
+		B82063D02ABAAFACBBC6D329 /* SourceControlStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B72063D02ABAAFACBBC6D329 /* SourceControlStore.swift */; };
+		B8B42519A1A96C933AE2D988 /* ToolApprovalCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7B42519A1A96C933AE2D988 /* ToolApprovalCard.swift */; };
+		B844E78C8A04CBBC2EE5DB89 /* SelfHealView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B744E78C8A04CBBC2EE5DB89 /* SelfHealView.swift */; };
+		B8A5D3BB4EB0F568E4E19FC6 /* SelfHealStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A5D3BB4EB0F568E4E19FC6 /* SelfHealStore.swift */; };
+		B8C5B0ED4B97C3F47DBB9827 /* ProjectSwitcherSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7C5B0ED4B97C3F47DBB9827 /* ProjectSwitcherSheet.swift */; };
+		B8D103617AE1194F58F35BC3 /* ProjectsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7D103617AE1194F58F35BC3 /* ProjectsStore.swift */; };
+		B8CC02D68D4369B858A43C3C /* UsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7CC02D68D4369B858A43C3C /* UsageView.swift */; };
+		B81B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B71B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift */; };
+		A1B2C3D4E5F60718293A4D04 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4D03 /* ActivityView.swift */; };
+		A1B2C3D4E5F60718293A4D02 /* ActivityFeedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4D01 /* ActivityFeedStore.swift */; };
 		A1B2C3D4E5F60718293A4C06 /* GenerateSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C05 /* GenerateSheet.swift */; };
 		A1B2C3D4E5F60718293A4C04 /* LlmDocBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C03 /* LlmDocBrowserView.swift */; };
 		A1B2C3D4E5F60718293A4C02 /* GenerationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C01 /* GenerationStore.swift */; };
@@ -51,6 +66,21 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B7E7E06723DFD873F6F52622 /* IssuesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssuesView.swift; sourceTree = "<group>"; };
+		B7A378FC4603B8A143E0A85D /* ProjectFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFilesView.swift; sourceTree = "<group>"; };
+		B756102E665E3C684611EF8D /* IssuesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssuesStore.swift; sourceTree = "<group>"; };
+		B7404713EF12A5B94AC7E89B /* FilesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesStore.swift; sourceTree = "<group>"; };
+		B71BB19ACDDFCCC66E2B3AD3 /* SourceControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceControlView.swift; sourceTree = "<group>"; };
+		B72063D02ABAAFACBBC6D329 /* SourceControlStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceControlStore.swift; sourceTree = "<group>"; };
+		B7B42519A1A96C933AE2D988 /* ToolApprovalCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolApprovalCard.swift; sourceTree = "<group>"; };
+		B744E78C8A04CBBC2EE5DB89 /* SelfHealView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfHealView.swift; sourceTree = "<group>"; };
+		B7A5D3BB4EB0F568E4E19FC6 /* SelfHealStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfHealStore.swift; sourceTree = "<group>"; };
+		B7C5B0ED4B97C3F47DBB9827 /* ProjectSwitcherSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSwitcherSheet.swift; sourceTree = "<group>"; };
+		B7D103617AE1194F58F35BC3 /* ProjectsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectsStore.swift; sourceTree = "<group>"; };
+		B7CC02D68D4369B858A43C3C /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
+		B71B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageStore.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4D03 /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4D01 /* ActivityFeedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityFeedStore.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4C05 /* GenerateSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerateSheet.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4C03 /* LlmDocBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlmDocBrowserView.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4C01 /* GenerationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationStore.swift; sourceTree = "<group>"; };
@@ -169,6 +199,13 @@
 		99D8815DC559E39FCBCE47AC /* Control */ = {
 			isa = PBXGroup;
 			children = (
+				B7E7E06723DFD873F6F52622 /* IssuesView.swift */,
+				B7A378FC4603B8A143E0A85D /* ProjectFilesView.swift */,
+				B71BB19ACDDFCCC66E2B3AD3 /* SourceControlView.swift */,
+				B744E78C8A04CBBC2EE5DB89 /* SelfHealView.swift */,
+				B7C5B0ED4B97C3F47DBB9827 /* ProjectSwitcherSheet.swift */,
+				B7CC02D68D4369B858A43C3C /* UsageView.swift */,
+				A1B2C3D4E5F60718293A4D03 /* ActivityView.swift */,
 				A1B2C3D4E5F60718293A4C05 /* GenerateSheet.swift */,
 				A1B2C3D4E5F60718293A4C03 /* LlmDocBrowserView.swift */,
 				B7C8D9E0F1A203040B7C8D02 /* QRScannerView.swift */,
@@ -188,6 +225,7 @@
 		BED26F2058E088C33DE5B086 /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				B7B42519A1A96C933AE2D988 /* ToolApprovalCard.swift */,
 				F0A1B2C3D4E5F607180A0001 /* ChatBubble.swift */,
 				F0A1B2C3D4E5F607180A00A1 /* ApprovalQuestionCard.swift */,
 				F0A1B2C3D4E5F607180A000B /* ChatMarkdown.swift */,
@@ -209,6 +247,13 @@
 		D5B9C62ACB1A2174374B7BC4 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				B756102E665E3C684611EF8D /* IssuesStore.swift */,
+				B7404713EF12A5B94AC7E89B /* FilesStore.swift */,
+				B72063D02ABAAFACBBC6D329 /* SourceControlStore.swift */,
+				B7A5D3BB4EB0F568E4E19FC6 /* SelfHealStore.swift */,
+				B7D103617AE1194F58F35BC3 /* ProjectsStore.swift */,
+				B71B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift */,
+				A1B2C3D4E5F60718293A4D01 /* ActivityFeedStore.swift */,
 				A1B2C3D4E5F60718293A4C01 /* GenerationStore.swift */,
 				A1B2C3D4E5F607890A1B2C02 /* ConnectionStore.swift */,
 				C9D0E1F2A3B405060C9D0E02 /* SpeechRecognizer.swift */,
@@ -322,6 +367,21 @@
 			buildActionMask = 2147483647;
 			files = (
 				B6CF935AF507506E25C1EA4A /* ContentView.swift in Sources */,
+				B8E7E06723DFD873F6F52622 /* IssuesView.swift in Sources */,
+				B8A378FC4603B8A143E0A85D /* ProjectFilesView.swift in Sources */,
+				B856102E665E3C684611EF8D /* IssuesStore.swift in Sources */,
+				B8404713EF12A5B94AC7E89B /* FilesStore.swift in Sources */,
+				B81BB19ACDDFCCC66E2B3AD3 /* SourceControlView.swift in Sources */,
+				B82063D02ABAAFACBBC6D329 /* SourceControlStore.swift in Sources */,
+				B8B42519A1A96C933AE2D988 /* ToolApprovalCard.swift in Sources */,
+				B844E78C8A04CBBC2EE5DB89 /* SelfHealView.swift in Sources */,
+				B8A5D3BB4EB0F568E4E19FC6 /* SelfHealStore.swift in Sources */,
+				B8C5B0ED4B97C3F47DBB9827 /* ProjectSwitcherSheet.swift in Sources */,
+				B8D103617AE1194F58F35BC3 /* ProjectsStore.swift in Sources */,
+				B8CC02D68D4369B858A43C3C /* UsageView.swift in Sources */,
+				B81B0441A9A9F3E9BEC3AAB4 /* UsageStore.swift in Sources */,
+				A1B2C3D4E5F60718293A4D04 /* ActivityView.swift in Sources */,
+				A1B2C3D4E5F60718293A4D02 /* ActivityFeedStore.swift in Sources */,
 				A1B2C3D4E5F60718293A4C06 /* GenerateSheet.swift in Sources */,
 				A1B2C3D4E5F60718293A4C04 /* LlmDocBrowserView.swift in Sources */,
 				A1B2C3D4E5F60718293A4C02 /* GenerationStore.swift in Sources */,

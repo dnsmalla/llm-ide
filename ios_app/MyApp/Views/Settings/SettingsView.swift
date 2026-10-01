@@ -1,4 +1,5 @@
 import SwiftUI
+import SharedProtocol
 
 struct SettingsView: View {
     @EnvironmentObject var connectionStore: ConnectionStore
@@ -49,6 +50,10 @@ struct SettingsView: View {
 
                             Divider().padding(.horizontal, DesignSystem.Spacing.md)
 
+                            macFeatures
+
+                            Divider().padding(.horizontal, DesignSystem.Spacing.md)
+
                             Button {
                                 if connection.connectionStatus == .disconnected {
                                     connection.connectDirect(ip: connectionStore.deviceIP,
@@ -94,6 +99,27 @@ struct SettingsView: View {
                         .shadow(color: .black.opacity(DesignSystem.Layout.shadowOpacity),
                                 radius: DesignSystem.Layout.shadowRadius, x: 0, y: 2)
                     }
+                }
+
+                if connection.supports(MobileProtocol.Capability.usage) {
+                    NavigationLink { UsageView() } label: {
+                        HStack(spacing: DesignSystem.Spacing.md) {
+                            Image(systemName: "gauge.with.dots.needle.67percent")
+                                .font(.system(size: 20))
+                                .foregroundColor(DesignSystem.Colors.primary)
+                            Text("Usage & limits")
+                                .font(DesignSystem.Typography.bodyFont.weight(.medium))
+                                .foregroundColor(DesignSystem.Colors.textPrimary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(DesignSystem.Colors.textTertiary)
+                        }
+                        .padding(DesignSystem.Spacing.md)
+                        .background(DesignSystem.Colors.surface)
+                        .cornerRadius(DesignSystem.Layout.cornerRadiusL)
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 // Help
@@ -150,6 +176,34 @@ struct SettingsView: View {
         .background(DesignSystem.Colors.background)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
+    }
+
+    /// What the paired Mac says it can do, so a missing tab is explained rather than mysterious.
+    @ViewBuilder
+    private var macFeatures: some View {
+        if let caps = connection.macCapabilities {
+            let labels: [(String, String)] = [
+                (MobileProtocol.Capability.chat, "Chat"), (MobileProtocol.Capability.explorer, "Explorer"),
+                (MobileProtocol.Capability.autoTasks, "Auto Tasks"), (MobileProtocol.Capability.loop, "Loop"),
+                (MobileProtocol.Capability.generation, "Doc Gen"), (MobileProtocol.Capability.llmDoc, "Docs"),
+            ]
+            let missing = labels.filter { !caps.contains($0.0) }.map(\.1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Mac features")
+                    .font(DesignSystem.Typography.footnoteFont.weight(.semibold))
+                    .foregroundColor(DesignSystem.Colors.textSecondary)
+                Text(labels.filter { caps.contains($0.0) }.map(\.1).joined(separator: " · "))
+                    .font(DesignSystem.Typography.footnoteFont)
+                    .foregroundColor(DesignSystem.Colors.textPrimary)
+                if !missing.isEmpty {
+                    Text("Off or not supported on this Mac: \(missing.joined(separator: ", ")). Turn it on in the Mac's Settings → Mobile Control → Phone access, or update LLM-IDE on the Mac.")
+                        .font(DesignSystem.Typography.captionFont)
+                        .foregroundColor(DesignSystem.Colors.textTertiary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(DesignSystem.Spacing.md)
+        }
     }
 
     private var appVersion: String {

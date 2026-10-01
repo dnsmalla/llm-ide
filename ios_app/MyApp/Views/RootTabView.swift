@@ -12,8 +12,15 @@ struct RootTabView: View {
     @EnvironmentObject var autoTaskStore: AutoTaskStore
     @EnvironmentObject var loopStore: LoopStore
     @EnvironmentObject var macStatusStore: MacStatusStore
+    @EnvironmentObject var activityStore: ActivityFeedStore
+    @EnvironmentObject var usageStore: UsageStore
+    @EnvironmentObject var projectsStore: ProjectsStore
+    @EnvironmentObject var generationStore: GenerationStore
+    @EnvironmentObject var sourceControlStore: SourceControlStore
+    @EnvironmentObject var filesStore: FilesStore
+    @EnvironmentObject var issuesStore: IssuesStore
 
-    enum Tab: Hashable { case chat, project, settings }
+    enum Tab: Hashable { case chat, project, activity, settings }
     @State private var selection: Tab = .chat
 
     private var isConnected: Bool { connection.connectionStatus == .connected }
@@ -35,6 +42,13 @@ struct RootTabView: View {
                 .badge(explorerStore.pendingApproval == nil ? 0 : 1)
                 .tag(Tab.project)
 
+            if connection.supports(MobileProtocol.Capability.activity) {
+                ActivityView()
+                    .tabItem { Label("Activity", systemImage: "bell.fill") }
+                    .badge(activityStore.unread)
+                    .tag(Tab.activity)
+            }
+
             NavigationStack { SettingsView() }
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(Tab.settings)
@@ -53,6 +67,30 @@ struct RootTabView: View {
         .onChange(of: connection.connectionStatus) { status in
             if status == .connected { refreshMacData() }
         }
+        // The Mac opened another project (from the phone or at the keyboard): everything the phone cached
+        // about the old one is stale. Keyed on the project id as well as the name — two projects can share
+        // a folder name — and the screens are re-requested, since their `.task` already ran.
+        .onChange(of: macStatusStore.macStatus?.projectName) { _ in projectDidChange() }
+        .onChange(of: projectsStore.active?.id) { _ in projectDidChange() }
+        // A Phone access switch flipped on the Mac, or a different Mac was paired.
+        .onChange(of: connection.macCapabilities) { _ in
+            if selection == .activity, !connection.supports(MobileProtocol.Capability.activity) { selection = .chat }
+            if !connection.supports(MobileProtocol.Capability.usage) { usageStore.resetForNewDevice() }
+            if !connection.supports(MobileProtocol.Capability.activity) { activityStore.resetForNewDevice() }
+            refreshMacData()
+        }
+    }
+
+    private func projectDidChange() {
+        generationStore.invalidateProjectScopedCaches()
+        sourceControlStore.invalidate()
+        filesStore.invalidateAll()
+        issuesStore.invalidate()
+        refreshMacData()
+        sourceControlStore.refresh()
+        issuesStore.refresh()
+        filesStore.list("")
+        if connection.supports(MobileProtocol.Capability.llmDoc) { generationStore.list("") }
     }
 
     private func refreshMacData() {
@@ -61,6 +99,9 @@ struct RootTabView: View {
         autoTaskStore.refreshAll()
         loopStore.refreshAll()
         explorerStore.exploreListSessions()
+        if connection.supports(MobileProtocol.Capability.activity) { activityStore.refresh() }
+        usageStore.refresh()
+        projectsStore.refresh()
     }
 
     private func actionToast(_ message: String) -> some View {
@@ -89,6 +130,7 @@ struct ContextBar: View {
     @EnvironmentObject var connection: ConnectionService
     @EnvironmentObject var connectionStore: ConnectionStore
     @EnvironmentObject var macStatusStore: MacStatusStore
+    @EnvironmentObject var usageStore: UsageStore
 
     private var projectLabel: String {
         if let name = macStatusStore.macStatus?.projectName, !name.isEmpty { return name }
@@ -126,6 +168,15 @@ struct ContextBar: View {
                 .font(DesignSystem.Typography.captionFont.weight(.semibold))
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+            }
+            if let mode = UsageStore.permissionLabel(usageStore.permissionMode) {
+                Text(mode.text)
+                    .font(DesignSystem.Typography.captionFont.weight(.semibold))
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .foregroundColor(mode.isRisky ? .white : DesignSystem.Colors.textSecondary)
+                    .background(mode.isRisky ? DesignSystem.Colors.danger : DesignSystem.Colors.surfaceSecondary,
+                                in: Capsule())
+                    .accessibilityLabel("Mac permission mode: \(mode.text)")
             }
             StatusPill(status: connection.connectionStatus)
         }

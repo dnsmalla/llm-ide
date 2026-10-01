@@ -1,0 +1,70 @@
+import Foundation
+
+/// Redaction for text that is about to leave the Mac for the phone (diffs, file contents, issue
+/// bodies, error text). Wraps `IncidentRedactor`, whose regexes backtrack quadratically on one huge
+/// unbroken token — a single 200 000-character line took ~7 minutes — so every entry point here
+/// cuts its input into bounded lines FIRST. Callers should still run it off the main actor.
+enum PhoneRedaction {
+    static let maxLine = 2_000
+
+    /// Line-by-line redaction with a per-line cap and a total cap. Returns the text and whether
+    /// anything was cut.
+    nonisolated static func lines(_ raw: String, maxChars: Int, maxLine: Int = PhoneRedaction.maxLine) -> (text: String, truncated: Bool) {
+        var out: [String] = []
+        var total = 0
+        var truncated = false
+        var inKey = false
+        for line in raw.split(separator: "\n", omittingEmptySubsequences: false) {
+            if privateKeyLine(line, inKey: &inKey, into: &out) { continue }
+            var text = String(line.prefix(maxLine))
+            if line.count > maxLine { text += " …[line truncated]"; truncated = true }
+            text = IncidentRedactor.redact(text, limit: maxLine + 40)
+            total += text.count + 1
+            if total > maxChars { truncated = true; break }
+            out.append(text)
+        }
+        return (out.joined(separator: "\n"), truncated)
+    }
+
+    /// For SOURCE CODE shown in the file viewer: scrubs known token shapes (GitHub/AWS/Anthropic keys,
+    /// bearer tokens…) but, unlike `lines`, leaves `key = value` text alone — redacting every
+    /// `token: String` would mangle ordinary code. Same per-line bounding.
+    nonisolated static func code(_ raw: String, maxChars: Int, maxLine: Int = PhoneRedaction.maxLine) -> (text: String, truncated: Bool) {
+        var out: [String] = []
+        var total = 0
+        var truncated = false
+        var inKey = false
+        for line in raw.split(separator: "\n", omittingEmptySubsequences: false) {
+            if privateKeyLine(line, inKey: &inKey, into: &out) { continue }
+            var text = String(line.prefix(maxLine))
+            if line.count > maxLine { text += " …[line truncated]"; truncated = true }
+            text = SecretRedactor.redact(text)
+            total += text.count + 1
+            if total > maxChars { truncated = true; break }
+            out.append(text)
+        }
+        return (out.joined(separator: "\n"), truncated)
+    }
+
+    /// PEM private keys have no `key=value` shape, so neither redactor catches them. Everything from
+    /// a `-----BEGIN … PRIVATE KEY-----` line through its `-----END` line is replaced by one marker.
+    /// Returns true when the line was consumed (swallowed or replaced).
+    nonisolated private static func privateKeyLine(_ line: Substring, inKey: inout Bool, into out: inout [String]) -> Bool {
+        if inKey {
+            if line.contains("-----END") { inKey = false }
+            return true
+        }
+        let head = line.prefix(200)
+        if head.contains("-----BEGIN"), head.contains("PRIVATE KEY") {
+            out.append("[REDACTED PRIVATE KEY]")
+            if !line.contains("-----END") { inKey = true }
+            return true
+        }
+        return false
+    }
+
+    /// Short single-string form for errors and notes.
+    nonisolated static func short(_ s: String, limit: Int = 300) -> String {
+        IncidentRedactor.redact(String(s.prefix(2_000)), limit: limit)
+    }
+}

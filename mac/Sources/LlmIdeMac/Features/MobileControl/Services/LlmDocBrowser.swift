@@ -68,9 +68,12 @@ enum LlmDocBrowser {
               textExtensions.contains(url.pathExtension.lowercased()) else {
             return LlmDocFile(path: relative, text: nil, error: "That isn't a readable document in llm-doc.")
         }
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue,
-              let handle = try? FileHandle(forReadingFrom: url) else {
+        // The extension rule must hold for the file actually opened, not just the name the phone used
+        // (`x.md -> ../.env`), and only regular files are opened (a FIFO would block the thread).
+        let real = url.resolvingSymlinksInPath()
+        guard textExtensions.contains(real.pathExtension.lowercased()),
+              (try? real.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true,
+              let handle = try? FileHandle(forReadingFrom: real) else {
             return LlmDocFile(path: relative, text: nil, error: "File not found.")
         }
         defer { try? handle.close() }

@@ -10,6 +10,13 @@ struct MyAppApp: App {
     @StateObject private var loopStore: LoopStore
     @StateObject private var macStatusStore: MacStatusStore
     @StateObject private var generationStore: GenerationStore
+    @StateObject private var activityStore: ActivityFeedStore
+    @StateObject private var usageStore: UsageStore
+    @StateObject private var projectsStore: ProjectsStore
+    @StateObject private var selfHealStore: SelfHealStore
+    @StateObject private var sourceControlStore: SourceControlStore
+    @StateObject private var filesStore: FilesStore
+    @StateObject private var issuesStore: IssuesStore
 
     init() {
         // ConnectionService is created first; each feature store is wired to it
@@ -28,6 +35,13 @@ struct MyAppApp: App {
         _loopStore = StateObject(wrappedValue: LoopStore(connection: connection))
         _macStatusStore = StateObject(wrappedValue: MacStatusStore(connection: connection))
         _generationStore = StateObject(wrappedValue: GenerationStore(connection: connection))
+        _activityStore = StateObject(wrappedValue: ActivityFeedStore(connection: connection))
+        _usageStore = StateObject(wrappedValue: UsageStore(connection: connection))
+        _projectsStore = StateObject(wrappedValue: ProjectsStore(connection: connection))
+        _selfHealStore = StateObject(wrappedValue: SelfHealStore(connection: connection))
+        _sourceControlStore = StateObject(wrappedValue: SourceControlStore(connection: connection))
+        _filesStore = StateObject(wrappedValue: FilesStore(connection: connection))
+        _issuesStore = StateObject(wrappedValue: IssuesStore(connection: connection))
     }
 
     var body: some Scene {
@@ -41,6 +55,13 @@ struct MyAppApp: App {
                 .environmentObject(loopStore)
                 .environmentObject(macStatusStore)
                 .environmentObject(generationStore)
+                .environmentObject(activityStore)
+                .environmentObject(usageStore)
+                .environmentObject(projectsStore)
+                .environmentObject(selfHealStore)
+                .environmentObject(sourceControlStore)
+                .environmentObject(filesStore)
+                .environmentObject(issuesStore)
         }
     }
 }

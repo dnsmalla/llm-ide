@@ -83,7 +83,15 @@ final class DemoResponder {
             // The demo "pairs" instantly, and issues NO token: a token would be
             // written to the Keychain and would let a later launch try to
             // reconnect to a Mac that does not exist.
-            send(Connected(deviceName: Self.macName, token: nil, deviceId: nil))
+            send(Connected(deviceName: Self.macName, token: nil, deviceId: nil,
+                           protocolVersion: MobileProtocol.protocolVersion,
+                           capabilities: [MobileProtocol.Capability.chat, MobileProtocol.Capability.explorer,
+                                          MobileProtocol.Capability.activity, MobileProtocol.Capability.usage,
+                                          MobileProtocol.Capability.projects, MobileProtocol.Capability.selfHeal,
+                                          MobileProtocol.Capability.sourceControl,
+                                          MobileProtocol.Capability.files, MobileProtocol.Capability.issues,
+                                          MobileProtocol.Capability.autoTasks, MobileProtocol.Capability.loop,
+                                          MobileProtocol.Capability.generation, MobileProtocol.Capability.llmDoc]))
 
         case MobileProtocol.Tag.heartbeat:
             sendRaw(["type": MobileProtocol.Tag.heartbeatAck])
@@ -94,7 +102,19 @@ final class DemoResponder {
         // MARK: llm-ide chat
         case MobileProtocol.Tag.llmIdeChat:
             guard let commandId = obj["commandId"] as? String else { return }
+            if (obj["text"] as? String ?? "").lowercased().contains("permission") {
+                send(ToolApprovalRequest(
+                    commandId: commandId, requestId: "demo-tool-1", toolName: "Edit",
+                    summary: "Edit ChatEngine.swift", filePath: "~/llm-ide/Sources/Chat/Engine.swift",
+                    oldString: "let ids = items.map(\\.id)", newString: "let ids = items.compactMap(\\.id)",
+                    contentPreview: nil, command: nil, truncated: false, replaceAll: nil, overwrites: nil))
+                return
+            }
             stream(commandId: commandId, reply: Self.reply(to: obj["text"] as? String ?? ""))
+
+        case MobileProtocol.Tag.toolApprovalAnswer:
+            send(ApprovalCleared(commandId: obj["commandId"] as? String ?? "",
+                                 requestId: obj["requestId"] as? String ?? "", reason: nil))
 
         case MobileProtocol.Tag.llmIdeChatHistoryList:
             send(LlmIdeChatHistoryReply(messages: [
@@ -246,6 +266,96 @@ final class DemoResponder {
                 .init(id: "r-1", startedAt: Date().addingTimeInterval(-180_000).timeIntervalSince1970, durationSeconds: 268, iterationsUsed: 1, statusCode: "success", statusSummary: "All stages green", trigger: "desktop"),
             ]))
 
+        // MARK: Files
+        case MobileProtocol.Tag.filesList:
+            let path = obj["path"] as? String ?? ""
+            switch path {
+            case "":
+                send(FilesListing(path: "", entries: [.init(name: "Sources", isDirectory: true, size: 0),
+                                                       .init(name: "README.md", isDirectory: false, size: 812),
+                                                       .init(name: "Package.swift", isDirectory: false, size: 1_204)]))
+            case "Sources":
+                send(FilesListing(path: path, entries: [.init(name: "App.swift", isDirectory: false, size: 2_048)]))
+            default:
+                send(FilesListing(path: path, entries: [], error: "Folder not found."))
+            }
+        case MobileProtocol.Tag.filesRead:
+            let path = obj["path"] as? String ?? ""
+            send(FilesFile(path: path, text: path.hasSuffix(".md") ? "# Demo project\n\nA sample README shown from the Mac." :
+                "import SwiftUI\n\n@main\nstruct DemoApp: App {\n    var body: some Scene {\n        WindowGroup { Text(\"Hello\") }\n    }\n}"))
+
+        // MARK: Issues
+        case MobileProtocol.Tag.issuesList:
+            let state = obj["state"] as? String ?? "opened"
+            send(IssuesState(available: true, provider: "GitHub", state: state, issues: [
+                .init(number: 42, title: "Loop stage paths resolve to the wrong worktree", state: "opened", labels: ["bug", "loop"], assignee: "dnsmalla", commentCount: 3, updatedAt: "2026-10-01T09:00:00Z"),
+                .init(number: 41, title: "Add Doc Gen templates from the phone", state: "opened", labels: ["enhancement"], assignee: nil, commentCount: 0, updatedAt: "2026-09-30T09:00:00Z"),
+                .init(number: 37, title: "Quick chat uses a stale model list", state: "closed", labels: ["bug"], assignee: "dnsmalla", commentCount: 5, updatedAt: "2026-09-28T09:00:00Z"),
+            ].filter { state == "all" || $0.state == state }))
+        case MobileProtocol.Tag.issueGet:
+            let n = obj["number"] as? Int ?? 0
+            send(IssueDetail(number: n, title: "Loop stage paths resolve to the wrong worktree", state: "opened",
+                             body: "When a skill stage runs in a throwaway worktree the path rewrite uses the **main** checkout.\n\nSteps:\n1. Start the Regression loop\n2. Watch the stage log",
+                             labels: ["bug", "loop"], author: "amy", assignees: ["dnsmalla"],
+                             comments: [.init(id: "c1", author: "dnsmalla", body: "Reproduced on main.", createdAt: "2026-10-01T09:00:00Z")],
+                             webUrl: "https://github.com/example/repo/issues/42", canComment: false))
+
+        // MARK: Source Control
+        case MobileProtocol.Tag.scmStatusList:
+            send(ScmState(isRepo: true, branch: "feat/phone-capabilities", ahead: 3, behind: 0, hasUpstream: true,
+                          files: [.init(path: "ios_app/MyApp/Views/ProjectView.swift", status: "modified", staged: true),
+                                  .init(path: "mac/Sources/LlmIdeMac/Features/MobileControl/Services/PhoneGit.swift", status: "added", staged: true),
+                                  .init(path: "README.md", status: "modified", staged: false),
+                                  .init(path: "notes/todo.md", status: "untracked", staged: false)],
+                          filesTruncated: false,
+                          commits: [.init(sha: "ef08814f", author: "dnsmalla", relativeDate: "2 hours ago", subject: "feat(ios): permission card for tool and edit requests"),
+                                    .init(sha: "32eedf3e", author: "dnsmalla", relativeDate: "2 hours ago", subject: "feat(mac): relay tool/edit permission prompts (opt-in)")],
+                          error: nil))
+        case MobileProtocol.Tag.scmDiff:
+            send(ScmDiffResult(path: obj["path"] as? String ?? "", staged: obj["staged"] as? Bool ?? false,
+                               diff: "@@ -10,4 +10,6 @@ struct Example {\n     let a = 1\n-    let b = 2\n+    let b = 3\n+    let c = 4\n     func run() {}"))
+
+        // MARK: Self-Heal
+        case MobileProtocol.Tag.selfHealList:
+            send(selfHealState())
+        case MobileProtocol.Tag.selfHealAction:
+            demoSelfHealResolved = true
+            send(selfHealState(message: "Ignored (demo)."))
+        case MobileProtocol.Tag.selfHealDiff:
+            send(SelfHealDiffResult(incidentId: obj["incidentId"] as? String ?? "",
+                                    diff: "--- a/Sources/Chat/Engine.swift\n+++ b/Sources/Chat/Engine.swift\n@@ -41,3 +41,4 @@\n-    let ids = items.map(\\.id)\n+    let ids = items.compactMap(\\.id)\n     process(ids)"))
+
+        // MARK: Projects
+        case MobileProtocol.Tag.projectList:
+            send(projectState())
+
+        case MobileProtocol.Tag.projectSwitch:
+            if let id = obj["id"] as? String, demoProjects.contains(where: { $0.id == id }) {
+                demoActiveProject = id
+            }
+            send(projectState())
+
+        // MARK: Usage
+        case MobileProtocol.Tag.usageGet:
+            send(UsageState(
+                provider: "anthropic", status: "ok", statusReason: nil, activeModel: "opus",
+                models: [.init(name: "Opus", pct: 62, state: "ok", detail: "62 of 100 runs · Daily · 62%",
+                               resetsAt: Date().addingTimeInterval(7_200).timeIntervalSince1970),
+                         .init(name: "Sonnet", pct: 91, state: "warning", detail: "91 of 100 runs · Daily · 91%"),
+                         .init(name: "Haiku", pct: nil, state: "ok", detail: "34 runs · Daily · no cap")],
+                subscription: [.init(name: "Session (5h)", pct: 38, state: "ok", detail: "38% used",
+                                     resetsAt: Date().addingTimeInterval(9_000).timeIntervalSince1970),
+                               .init(name: "Weekly (7d)", pct: 71, state: "ok", detail: "71% used")],
+                subscriptionNote: nil, permissionMode: "review", error: nil))
+
+        // MARK: Activity
+        case MobileProtocol.Tag.activityList:
+            send(activityState())
+
+        case MobileProtocol.Tag.activityMarkSeen:
+            demoUnread = 0
+            send(activityState())
+
         // MARK: Doc Gen / Visual + llm-doc
         case MobileProtocol.Tag.generationOptionsList:
             send(GenerationOptions(
@@ -294,6 +404,43 @@ final class DemoResponder {
     }
 
     // MARK: — Snapshots
+
+    private var demoUnread = 2
+    private var demoSelfHealResolved = false
+
+    private func selfHealState(message: String? = nil) -> SelfHealState {
+        let now = Date().timeIntervalSince1970
+        return SelfHealState(incidents: [
+            .init(id: "a1b2c3d4e5f60718", source: "crash", category: "EXC_BAD_ACCESS", message: "Fatal error: Index out of range in ChatEngine.process",
+                  count: 3, status: demoSelfHealResolved ? "ignored" : "proposed", note: "Replaced map with compactMap.",
+                  lastSeen: now - 900, hasProposal: !demoSelfHealResolved, branch: "self-heal/a1b2c3"),
+            .init(id: "0f1e2d3c4b5a6978", source: "log", category: "network", message: "Request to /kb/graph timed out after 30s",
+                  count: 12, status: "needsHuman", note: "Could not reproduce locally.", lastSeen: now - 7_200, hasProposal: false, branch: nil),
+            .init(id: "1122334455667788", source: "ui", category: "decode", message: "Couldn't decode LoopState: missing key 'queuedCount'",
+                  count: 1, status: "fixed", note: nil, lastSeen: now - 90_000, hasProposal: false, branch: nil),
+        ], canApply: false, enabled: true, message: message)
+    }
+    private let demoProjects: [ProjectInfo] = [
+        .init(id: "p-llmide", name: "llm-ide", lastOpenedAt: Date().timeIntervalSince1970 - 60),
+        .init(id: "p-notes", name: "meeting-notes", lastOpenedAt: Date().timeIntervalSince1970 - 86_400),
+        .init(id: "p-site", name: "marketing-site", lastOpenedAt: Date().timeIntervalSince1970 - 259_200),
+    ]
+    private var demoActiveProject = "p-llmide"
+
+    private func projectState() -> ProjectState {
+        ProjectState(active: demoProjects.first { $0.id == demoActiveProject }, projects: demoProjects)
+    }
+
+    private func activityState() -> ActivityState {
+        let now = Date().timeIntervalSince1970
+        return ActivityState(entries: [
+            .init(id: 5, kind: "loop_engineering_done", title: "Loop finished — all stages green", createdAt: now - 420),
+            .init(id: 4, kind: "meeting_added", title: "Meeting added: Sprint planning", createdAt: now - 3_600),
+            .init(id: 3, kind: "model_fallback", title: "Switched to the fallback model (usage limit)", createdAt: now - 20_000),
+            .init(id: 2, kind: "email_fetched", title: "3 new emails ingested", createdAt: now - 90_000),
+            .init(id: 1, kind: "regression_done", title: "Regression sweep passed (676 tests)", createdAt: now - 180_000),
+        ], unread: demoUnread)
+    }
 
     private func macStatus() -> MacStatus {
         MacStatus(projectName: "llm-ide", gitBranch: "main", workspacePath: "~/llm-ide",

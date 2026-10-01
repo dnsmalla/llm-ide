@@ -20,6 +20,8 @@ final class ExplorerChatStore: ObservableObject {
     /// bound to a project, so it is where planning happens and where the
     /// agent asks most.
     @Published var pendingApproval: ApprovalRequest?
+    /// A tool/edit permission prompt relayed from the Mac (only when its "Phone access" switch is on).
+    @Published var pendingToolApproval: ToolApprovalRequest?
     /// Why the last question went away without this phone answering it.
     @Published var approvalNotice: String?
     /// True while waiting for Mac to return a session id / history (auto-provision).
@@ -205,6 +207,22 @@ final class ExplorerChatStore: ObservableObject {
     }
 
     /// Handle `explore_session_*` frames that refresh sessions / load history.
+    /// Answer the parked tool prompt. The card comes down at once; the Mac re-checks the request id
+    /// against the turn's live prompt and the Phone access switch, and says so if it refuses.
+    /// Drop any question / tool prompt: its turn is gone (connection lost or reset).
+    func clearPendingPrompts() {
+        pendingApproval = nil
+        pendingToolApproval = nil
+    }
+
+    func submitToolApproval(allow: Bool) {
+        guard let request = pendingToolApproval else { return }
+        connection?.sendEncodable(ToolApprovalAnswer(
+            commandId: request.commandId, requestId: request.requestId, allow: allow))
+        pendingToolApproval = nil
+        approvalNotice = nil
+    }
+
     func handleInbound(type: String, data: Data) {
         switch type {
         case MobileProtocol.Tag.approvalRequest:
@@ -217,11 +235,24 @@ final class ExplorerChatStore: ObservableObject {
                 approvalNotice = nil
                 pendingApproval = request
             }
-        case MobileProtocol.Tag.approvalCleared:
-            if let cleared = try? JSONDecoder().decode(ApprovalCleared.self, from: data),
-               pendingApproval?.requestId == cleared.requestId {
+        case MobileProtocol.Tag.toolApprovalRequest:
+            // Same ownership rule as questions: only the surface whose turn this is.
+            if let request = try? JSONDecoder().decode(ToolApprovalRequest.self, from: data),
+               ownsCommand(request.commandId) {
+                approvalNotice = nil
                 pendingApproval = nil
-                approvalNotice = cleared.reason
+                pendingToolApproval = request
+            }
+        case MobileProtocol.Tag.approvalCleared:
+            if let cleared = try? JSONDecoder().decode(ApprovalCleared.self, from: data) {
+                if pendingApproval?.requestId == cleared.requestId {
+                    pendingApproval = nil
+                    approvalNotice = cleared.reason
+                }
+                if pendingToolApproval?.requestId == cleared.requestId {
+                    pendingToolApproval = nil
+                    approvalNotice = cleared.reason
+                }
             }
         case "explore_session_list":
             if let list = try? JSONDecoder().decode(ExploreSessionList.self, from: data) {
@@ -329,6 +360,7 @@ final class ExplorerChatStore: ObservableObject {
                 if currentCommandId == id { currentCommandId = nil }
                 // The turn is over, so its question can no longer be answered.
                 if pendingApproval?.commandId == id { pendingApproval = nil }
+                if pendingToolApproval?.commandId == id { pendingToolApproval = nil }
             }
         }
     }
@@ -340,7 +372,9 @@ final class ExplorerChatStore: ObservableObject {
             exploreCommandIds.remove(commandId)
             approvalPausedCommandIds.remove(commandId)
             if currentCommandId == commandId { currentCommandId = nil }
+            if pendingToolApproval?.commandId == commandId { pendingToolApproval = nil }
         } else {
+            pendingToolApproval = nil
             // Connection-wide failure: every in-flight turn is dead. Orphans
             // left here would make a later Stop cancel a corpse and let a
             // replayed frame append into a live transcript.
@@ -369,6 +403,8 @@ final class ExplorerChatStore: ObservableObject {
         exploreCommandIds.removeAll()
         approvalPausedCommandIds.removeAll()
         currentCommandId = nil
+        pendingApproval = nil
+        pendingToolApproval = nil
         pendingSend = nil
         loadingSessionId = nil
         exploreCurrent = nil

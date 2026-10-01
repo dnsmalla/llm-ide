@@ -79,13 +79,109 @@ final class MobileControlManager {
 
     /// Feature bridge for `auto_task_*` messages — nil when Auto Tasks is
     /// compiled out or not yet wired (see `routeToFeatureBridge`).
-    var autoTaskBridge: MobileFeatureBridge?
+    var autoTaskBridge: MobileFeatureBridge? { didSet { refreshCapabilities() } }
     /// Feature bridge for `loop_*` messages — nil when Loop is compiled out
     /// or not yet wired (see `routeToFeatureBridge`).
-    var loopBridge: MobileFeatureBridge?
+    var loopBridge: MobileFeatureBridge? { didSet { refreshCapabilities() } }
     /// Feature bridge for `generation_*` / `llmdoc_*` messages — nil when
     /// Doc Gen is compiled out or not yet wired (see `routeToFeatureBridge`).
-    var generationBridge: MobileFeatureBridge?
+    var generationBridge: MobileFeatureBridge? { didSet { refreshCapabilities() } }
+
+    /// Feature bridge for `activity_*` messages (the bell's feed). Wired whenever Mobile is built.
+    var activityBridge: MobileFeatureBridge? { didSet { refreshCapabilities() } }
+
+    /// What this Mac advertises in `Connected.capabilities`. A locked snapshot, not a read of the
+    /// bridge slots, because the server asks from its own queue while the slots are main-actor.
+    private let capabilityBox = CapabilityBox()
+
+    /// The Mac-side switches deciding what the phone may do (Settings → Mobile Control → Phone access).
+    let phoneAccess = PhoneAccessSettings()
+
+    /// Kept so the shell can inject the "is a run active?" guard (see `MobileProjectBridge.busyReason`).
+    var projectBridge: MobileProjectBridge?
+    var selfHealBridge: MobileSelfHealBridge?
+
+    /// A bridge registered through `register(...)` rather than a dedicated slot: it owns a set of
+    /// message types, advertises capabilities (each optionally behind a `PhoneAccess` switch that
+    /// must be ON for the capability to be offered), and gets the same push-observer lifecycle.
+    struct RegisteredBridge {
+        let bridge: MobileFeatureBridge
+        let messageTypes: Set<String>
+        let capabilities: [(name: String, gate: PhoneAccess?)]
+    }
+    private(set) var registeredBridges: [RegisteredBridge] = []
+
+    func register(bridge: MobileFeatureBridge, messageTypes: Set<String>,
+                  capabilities: [(name: String, gate: PhoneAccess?)]) {
+        registeredBridges.append(RegisteredBridge(bridge: bridge, messageTypes: messageTypes,
+                                                  capabilities: capabilities))
+        refreshCapabilities()
+    }
+
+    /// Capabilities contributed by registered bridges, honouring each one's switch.
+    nonisolated static func registeredCapabilities(_ entries: [RegisteredBridge],
+                                                   isAllowed: (PhoneAccess) -> Bool) -> [String] {
+        entries.flatMap { $0.capabilities }
+            .filter { $0.gate.map(isAllowed) ?? true }
+            .map(\.name)
+    }
+
+    /// Pure so a test can pin it: chat and Explorer are always served; each bridge-backed
+    /// feature appears only when its bridge is wired, mirroring `routeToFeatureBridge`.
+    nonisolated static func capabilities(autoTasks: Bool, loop: Bool, generation: Bool,
+                                         activity: Bool = false) -> [String] {
+        var caps = [MobileProtocol.Capability.chat, MobileProtocol.Capability.explorer]
+        if autoTasks { caps.append(MobileProtocol.Capability.autoTasks) }
+        if loop { caps.append(MobileProtocol.Capability.loop) }
+        if generation {
+            caps.append(MobileProtocol.Capability.generation)
+            caps.append(MobileProtocol.Capability.llmDoc)
+        }
+        if activity { caps.append(MobileProtocol.Capability.activity) }
+        return caps
+    }
+
+    private func refreshCapabilities() {
+        let caps = Self.capabilities(autoTasks: autoTaskBridge != nil,
+                                     loop: loopBridge != nil,
+                                     generation: generationBridge != nil,
+                                     activity: activityBridge != nil)
+            + Self.registeredCapabilities(registeredBridges, isAllowed: { phoneAccess.isAllowed($0) })
+        let changed = capabilityBox.value != caps
+        capabilityBox.value = caps
+        // A phone already connected learned the old list at pairing; tell it about the new one.
+        if changed, mobileClientPaired { reply(MacCapabilities(capabilities: caps)) }
+    }
+
+    /// Wire the access switches to the capability list. Called once from `init`-time setup.
+    func installPhoneAccessObserver() {
+        phoneAccess.onChange = { [weak self] in
+            self?.refreshCapabilities()
+            self?.sweepToolApprovalsIfOff()
+        }
+    }
+
+    /// Turning "Approve or deny tool and edit requests" off takes any tool prompt currently on the phone
+    /// down (the prompt itself stays parked on the Mac), instead of leaving a card that can only be refused.
+    private func sweepToolApprovalsIfOff() {
+        guard !phoneAccess.isAllowed(.toolApprovals) else { return }
+        for (commandId, entry) in pendingPhoneApprovals
+        where entry.engine.pendingApproval?.approval.kind == "ToolApproval" {
+            pendingPhoneApprovals.removeValue(forKey: commandId)
+            truncatedToolRequestIds.remove(entry.requestId)
+            Task { await server?.send(ApprovalCleared(
+                commandId: commandId, requestId: entry.requestId,
+                reason: "Tool requests can no longer be approved from the phone.")) }
+        }
+    }
+
+    /// Work started from the phone that a project switch or a Self-Heal apply must not pull the rug from
+    /// (a running chat/agent turn, a prompt waiting for an answer). Independent of which features are built.
+    var phoneWorkReason: String? {
+        if !pendingPhoneApprovals.isEmpty { return "A phone chat is waiting for an answer on the Mac. Answer it first." }
+        if !mobileInflightTasks.isEmpty { return "A request from the phone is still running on the Mac. Wait for it to finish." }
+        return nil
+    }
     /// Mac Settings + workspace — used to run iPhone explore prompts with the
     /// same model/provider and agent context as the desktop Explorer panel.
     var config: AppConfig?
@@ -116,6 +212,9 @@ final class MobileControlManager {
     /// `explore_chat` on whichever the resolver picked (shared or off-screen).
     /// Looking the engine up again at answer time would find the wrong one.
     private var pendingPhoneApprovals: [String: (engine: ChatEngine, requestId: String)] = [:]
+    /// Tool prompts whose shown content was cut (by the server or by `MobileToolApproval`): the phone
+    /// cannot allow what it could not read, so the Mac refuses `allow` for these.
+    private var truncatedToolRequestIds: Set<String> = []
     /// Which phone command installed each engine's `onExternalApproval` hook.
     /// The hook is a single slot per engine, so `endPhoneApprovals` may only
     /// clear it when it still belongs to the command that is ending — see
@@ -166,6 +265,7 @@ final class MobileControlManager {
 
     init() {
         pairedDevices = pairedDeviceStore.all
+        installPhoneAccessObserver()
         // The registry must be able to see this pool — see
         // `explorerMobileEngineResolver` and `ExternalEngineHolder`. Set here
         // rather than at first use: `switchDisplayedSession` consults the
@@ -279,7 +379,8 @@ final class MobileControlManager {
             },
             onBindFailed: { [weak self] error in
                 Task { @MainActor [weak self] in self?.reportMobileBindFailure(error) }
-            }
+            },
+            capabilities: { [capabilityBox] in capabilityBox.value }
         )
         do {
             try server.start()
@@ -382,6 +483,8 @@ final class MobileControlManager {
         autoTaskBridge?.removePushObservers()
         loopBridge?.removePushObservers()
         generationBridge?.removePushObservers()
+        activityBridge?.removePushObservers()
+        registeredBridges.forEach { $0.bridge.removePushObservers() }
         onMobileClientDisconnected()
         server?.stop()
         server = nil
@@ -472,6 +575,13 @@ final class MobileControlManager {
             }
         case MobileProtocol.Tag.llmIdeCancel:
             handleLlmIdeCancel(data: data)
+        case MobileProtocol.Tag.toolApprovalAnswer:
+            if let answer = try? decoder.decode(ToolApprovalAnswer.self, from: data) {
+                Task { await handleToolApprovalAnswer(answer) }
+            } else {
+                append(.stderr, "tool_approval_answer decode failed")
+                replyDecodeFailure(data, what: "tool approval answer")
+            }
         case MobileProtocol.Tag.approvalAnswer:
             if let answer = try? decoder.decode(ApprovalAnswer.self, from: data) {
                 Task { await handleApprovalAnswer(answer) }
@@ -540,6 +650,12 @@ final class MobileControlManager {
         MobileProtocol.Tag.llmDocRead,
     ]
 
+    /// Feature message types the activity bridge owns. Pinned by `MobileFeatureBridgeTests`.
+    static let activityMessageTypes: Set<String> = [
+        MobileProtocol.Tag.activityList,
+        MobileProtocol.Tag.activityMarkSeen,
+    ]
+
     /// Route an auto-task/loop message type to its installed feature bridge.
     /// Returns `true` when `type` belongs to either feature's message set —
     /// the caller (the `handleInbound` switch) must NOT fall through to the
@@ -561,6 +677,17 @@ final class MobileControlManager {
                 return true
             }
             return loopBridge.handle(type: type, data: data)
+        }
+        if Self.activityMessageTypes.contains(type) {
+            guard let activityBridge else {
+                // Reply-shaped so the phone's feed stops loading instead of waiting on a CommandError.
+                reply(ActivityState(entries: [], unread: 0))
+                return true
+            }
+            return activityBridge.handle(type: type, data: data)
+        }
+        if let entry = registeredBridges.first(where: { $0.messageTypes.contains(type) }) {
+            return entry.bridge.handle(type: type, data: data)
         }
         if Self.generationMessageTypes.contains(type) {
             guard let generationBridge else {
@@ -730,7 +857,7 @@ final class MobileControlManager {
     }
 
     /// Active explorer code root — same precedence as `ExplorerView.root`.
-    private func mobileWorkspaceURL() -> URL? {
+    func mobileWorkspaceURL() -> URL? {
         guard let config, let projectStore else { return nil }
         if let code = projectStore.activeProjectCodeDir { return code }
         return WorkspaceRoot.resolve(config: config, projectStore: projectStore)
@@ -1183,6 +1310,8 @@ final class MobileControlManager {
         autoTaskBridge?.installPushObservers()
         loopBridge?.installPushObservers()
         generationBridge?.installPushObservers()
+        activityBridge?.installPushObservers()
+        registeredBridges.forEach { $0.bridge.installPushObservers() }
     }
 
     /// Push a fresh Mac status snapshot when backend or project context changes.
@@ -1202,6 +1331,7 @@ final class MobileControlManager {
         _ = autoTaskBridge?.handle(type: MobileProtocol.Tag.autoTaskList, data: nil)
         _ = autoTaskBridge?.handle(type: MobileProtocol.Tag.autoTaskLogsList, data: nil)
         pushExploreSessionListIfPaired()
+        _ = activityBridge?.handle(type: MobileProtocol.Tag.activityList, data: nil)
         Task { await pushMacStatusIfPaired() }
     }
 
@@ -1214,6 +1344,7 @@ final class MobileControlManager {
         // Union, not assignment: a command the phone already cancelled is out
         // of `mobileInflightTasks` but its task may still be finishing, and
         // it must keep its flag until that task's own finish prunes it.
+        truncatedToolRequestIds.removeAll()
         mobileCancelledCommandIds.formUnion(mobileInflightTasks.keys)
         for entry in mobileInflightTasks.values { entry.task.cancel() }
         mobileInflightTasks.removeAll()
@@ -1273,6 +1404,16 @@ final class MobileControlManager {
         // phone runs read-only modes, so one should never park — and if one
         // ever did, an allow button on a surface with no diff view is not a
         // decision anyone should be asked to make from a phone.
+        if approval.kind == "ToolApproval" {
+            // Relayed only when the Mac user switched on "Approve or deny tool and edit requests".
+            // Otherwise it stays parked on the Mac exactly as before (the Mac chip's mode decides).
+            guard phoneAccess.isAllowed(.toolApprovals) else { return }
+            pendingPhoneApprovals[commandId] = (engine, approval.requestId)
+            let request = await Task.detached { MobileToolApproval.request(from: approval, commandId: commandId) }.value
+            if request.truncated { truncatedToolRequestIds.insert(approval.requestId) }
+            await server?.send(request)
+            return
+        }
         guard approval.kind == "AskUserQuestion", !approval.questions.isEmpty else { return }
         pendingPhoneApprovals[commandId] = (engine, approval.requestId)
         await server?.send(ApprovalRequest(
@@ -1292,11 +1433,53 @@ final class MobileControlManager {
     /// Routed to the engine holding the approval rather than a remembered
     /// one: by the time an answer arrives the turn may have moved on, and
     /// `submitApproval` no-ops when the requestId it holds is not this one.
+    /// Pure so a test can pin every refusal: the switch must (still) be on, the answer must name the
+    /// request this turn is parked on, and that request must be a tool prompt.
+    nonisolated static func toolAnswerRefusal(switchOn: Bool, pendingRequestId: String?, pendingKind: String?,
+                                              answerRequestId: String) -> String? {
+        guard switchOn else { return PhoneAccess.toolApprovals.deniedMessage }
+        guard let pendingRequestId, pendingRequestId == answerRequestId, pendingKind == "ToolApproval" else {
+            return "That request is no longer open."
+        }
+        return nil
+    }
+
+    private func handleToolApprovalAnswer(_ answer: ToolApprovalAnswer) async {
+        let entry = pendingPhoneApprovals[answer.commandId]
+        let pending = entry?.engine.pendingApproval
+        if let why = Self.toolAnswerRefusal(
+            switchOn: phoneAccess.isAllowed(.toolApprovals),
+            pendingRequestId: entry.flatMap { $0.requestId == answer.requestId ? pending?.approval.requestId : nil },
+            pendingKind: pending?.approval.kind, answerRequestId: answer.requestId) {
+            // Refused: the prompt (if any) stays parked on the Mac for its owner to decide.
+            await server?.send(ApprovalCleared(commandId: answer.commandId, requestId: answer.requestId, reason: why))
+            return
+        }
+        guard let entry, let pending else { return }
+        if answer.allow, truncatedToolRequestIds.contains(answer.requestId) {
+            // Denying is always fine; allowing a change that could not be shown in full is not. The
+            // prompt stays parked on the Mac for someone who can read all of it.
+            await server?.send(ApprovalCleared(
+                commandId: answer.commandId, requestId: answer.requestId,
+                reason: "That change was too long to review on the phone — approve it on the Mac."))
+            return
+        }
+        truncatedToolRequestIds.remove(answer.requestId)
+        append(.info, "tool approval from phone: \(answer.allow ? "allow" : "deny") \(pending.approval.toolName ?? "tool")")
+        await entry.engine.submitToolDecision(action: answer.allow ? "allow" : "deny")
+        pendingPhoneApprovals.removeValue(forKey: answer.commandId)
+        await server?.send(ApprovalCleared(commandId: answer.commandId, requestId: answer.requestId,
+                                           reason: pending.lastError))
+    }
+
     private func handleApprovalAnswer(_ answer: ApprovalAnswer) async {
         guard let entry = pendingPhoneApprovals[answer.commandId],
               entry.requestId == answer.requestId,
               let pending = entry.engine.pendingApproval,
-              pending.approval.requestId == answer.requestId else {
+              pending.approval.requestId == answer.requestId,
+              // A TOOL prompt is answered only through `tool_approval_answer` (which checks the switch):
+              // this question path posts no action, which the server reads as a deny.
+              pending.approval.kind == "AskUserQuestion" else {
             // Already answered, expired, or belongs to another turn. Tell the
             // phone rather than leaving its card up waiting for a reply that
             // is never coming.
@@ -1609,5 +1792,18 @@ extension ChatTurn {
     /// client-only `id`, surface the role as its raw string ("user"/"assistant").
     init(from t: LlmIdeAPIClient.CodeAssistTurn) {
         self.init(role: t.role.rawValue, content: t.content)
+    }
+}
+
+
+/// A lock-protected `[String]` the manager updates on the main actor and the WebSocket server
+/// reads from its own queue when it builds the `Connected` reply.
+final class CapabilityBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = MobileControlManager.capabilities(autoTasks: false, loop: false, generation: false)
+
+    var value: [String] {
+        get { lock.lock(); defer { lock.unlock() }; return stored }
+        set { lock.lock(); stored = newValue; lock.unlock() }
     }
 }

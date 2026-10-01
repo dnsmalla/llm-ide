@@ -110,8 +110,29 @@ func removeTrailingEmptyAssistant(_ list: inout [ChatMessage]) {
 /// can route inbound frames to the right store.
 @MainActor
 final class ConnectionService: ObservableObject {
-    @Published var connectionStatus: ConnectionStatus = .disconnected
+    @Published var connectionStatus: ConnectionStatus = .disconnected {
+        didSet {
+            // The Mac cancels a phone's turns when its connection drops, so a question or tool prompt
+            // raised on the old connection can never be answered — a card left up would accept a tap
+            // and look approved when nothing was.
+            if connectionStatus != .connected, oldValue == .connected {
+                llmIdeStore?.clearPendingPrompts()
+                explorerStore?.clearPendingPrompts()
+            }
+        }
+    }
     @Published var errorMessage: String?
+    /// What the paired Mac says it serves (`Connected.capabilities`), or nil before the first
+    /// `connected` frame of this pairing. A Mac that sends no list is a pre-handshake Mac and
+    /// gets `Capability.legacy`, so screens for newer features hide instead of spinning.
+    @Published private(set) var macCapabilities: Set<String>?
+    @Published private(set) var macProtocolVersion: Int?
+
+    /// Whether to offer a feature. Optimistic until the first handshake so tabs don't flicker
+    /// in after launch; after it, exactly what the Mac advertised.
+    func supports(_ capability: String) -> Bool {
+        macCapabilities?.contains(capability) ?? true
+    }
 
     enum ConnectionStatus {
         case disconnected, connecting, connected
@@ -126,6 +147,13 @@ final class ConnectionService: ObservableObject {
     weak var loopStore: LoopStore?
     weak var macStatusStore: MacStatusStore?
     weak var generationStore: GenerationStore?
+    weak var activityStore: ActivityFeedStore?
+    weak var usageStore: UsageStore?
+    weak var projectsStore: ProjectsStore?
+    weak var selfHealStore: SelfHealStore?
+    weak var sourceControlStore: SourceControlStore?
+    weak var filesStore: FilesStore?
+    weak var issuesStore: IssuesStore?
     /// Set at app launch so `Connected.deviceName` can update persisted pairing info.
     weak var connectionStore: ConnectionStore?
 
@@ -271,6 +299,16 @@ final class ConnectionService: ObservableObject {
         loopStore?.resetForNewDevice()
         macStatusStore?.resetForNewDevice()
         generationStore?.resetForNewDevice()
+        activityStore?.resetForNewDevice()
+        usageStore?.resetForNewDevice()
+        projectsStore?.resetForNewDevice()
+        selfHealStore?.resetForNewDevice()
+        sourceControlStore?.resetForNewDevice()
+        filesStore?.resetForNewDevice()
+        issuesStore?.resetForNewDevice()
+        // The next Mac may serve a different feature set; forget this one's until it says.
+        macCapabilities = nil
+        macProtocolVersion = nil
     }
 
     /// Enter demo mode: no socket, no network, no stored credential. Drives
@@ -514,6 +552,10 @@ final class ConnectionService: ObservableObject {
             reconnectAttempt = 0
             // The demo issues no token and must not write a device name to
             // UserDefaults — nothing about a fake Mac may outlive the session.
+            if let connected = try? JSONDecoder().decode(Connected.self, from: data) {
+                macProtocolVersion = connected.protocolVersion ?? 1
+                macCapabilities = connected.capabilities.map(Set.init) ?? MobileProtocol.Capability.legacy
+            }
             if !isDemo, let connected = try? JSONDecoder().decode(Connected.self, from: data) {
                 connectionStore?.updateDeviceName(connected.deviceName)
                 // First pairing: the Mac traded our PIN for a token. Keep it;
@@ -600,13 +642,32 @@ final class ConnectionService: ObservableObject {
             autoTaskStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "loop_state", "loop_ack", "loop_history_reply":
             loopStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
+        case "mac_capabilities":
+            // The Mac's Phone access switches changed mid-session.
+            if let update = try? JSONDecoder().decode(MacCapabilities.self, from: data) {
+                macCapabilities = Set(update.capabilities)
+            }
+        case "files_listing", "files_file":
+            filesStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
+        case "issues_state", "issue_detail":
+            issuesStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
+        case "scm_state", "scm_diff_result":
+            sourceControlStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
+        case "selfheal_state", "selfheal_diff_result":
+            selfHealStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
+        case "project_state":
+            projectsStore?.handleInbound(type: "project_state", data: data)
+        case "usage_state":
+            usageStore?.handleInbound(type: "usage_state", data: data)
+        case "activity_state":
+            activityStore?.handleInbound(type: "activity_state", data: data)
         case "generation_options", "generation_result", "llmdoc_listing", "llmdoc_file":
             generationStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "mac_status":
             macStatusStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
         case "llmide_chat_history_reply", "llmide_chat_history_clear_ack":
             llmIdeStore?.handleInbound(type: json["type"] as? String ?? "", data: data)
-        case "approval_request", "approval_cleared":
+        case "approval_request", "approval_cleared", "tool_approval_request":
             // Both surfaces can be parked on a question; each store checks the
             // frame's commandId against its own, exactly as with `output`.
             let type = json["type"] as? String ?? ""
