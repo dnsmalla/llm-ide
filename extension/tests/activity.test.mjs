@@ -58,6 +58,34 @@ test('model_fallback is an allowed activity kind and round-trips', async () => {
   assert.equal(listActivity(db, userId, {})[0].kind, 'model_fallback');
 });
 
+test('loop_engineering_done is an allowed activity kind and round-trips', async () => {
+  await freshDb();
+  const { getDb } = await import('../kb/db.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const { recordActivity, listActivity } = await import('../kb/activity.mjs');
+  const db = getDb();
+  const { id: userId } = registerUser(db, { email: 'u-led@example.com', password: 'pw-12345678' });
+  const rowId = recordActivity(db, { userId, kind: 'loop_engineering_done', title: 'Loop finished: success' });
+  assert.equal(typeof rowId, 'number');
+  assert.equal(listActivity(db, userId, {})[0].kind, 'loop_engineering_done');
+});
+
+// The Mac app and the server share this allow-list ("Swift mirrors this" in
+// kb/activity.mjs). A kind only the Mac knows is rejected with HTTP 400 on every
+// report, silently: the app only logs "activity report failed". This pins the
+// two lists together so that cannot recur.
+test('every ActivityKind the Mac app sends is accepted by the server allow-list', async () => {
+  const { ACTIVITY_KINDS } = await import('../kb/activity.mjs');
+  const swiftPath = path.join(__dirname, '../../mac/Sources/LlmIdeMac/Services/ActivityStore.swift');
+  const swift = fs.readFileSync(swiftPath, 'utf8');
+  const block = swift.match(/enum ActivityKind: String, CaseIterable \{([\s\S]*?)\n\}/);
+  assert.ok(block, 'enum ActivityKind not found in ActivityStore.swift — update this test if it moved');
+  const macKinds = [...block[1].matchAll(/case \w+\s*=\s*"([a-z_]+)"/g)].map((m) => m[1]);
+  assert.ok(macKinds.length >= 10, `parsed too few Mac kinds (${macKinds.length}) — the pattern is broken`);
+  const rejected = macKinds.filter((kind) => !ACTIVITY_KINDS.has(kind));
+  assert.deepEqual(rejected, [], `the Mac sends kinds the server rejects with HTTP 400: ${rejected.join(', ')}`);
+});
+
 test('recordActivity rejects an unknown kind (no insert, returns null)', async () => {
   await freshDb();
   const { getDb } = await import('../kb/db.mjs');

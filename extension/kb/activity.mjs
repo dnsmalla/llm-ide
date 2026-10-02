@@ -10,6 +10,7 @@ import { redact } from '../core/redact-object.mjs';
 export const ACTIVITY_KINDS = new Set([
   'knowledge_updated',
   'regression_done',
+  'loop_engineering_done',
   'issue_created',
   'comment_added',
   'dispatch_issue_created',
