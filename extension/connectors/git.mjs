@@ -8,7 +8,10 @@
 
 import fsp from 'fs/promises';
 import path from 'path';
-import { ingestSources, deleteSourcesByPrefix, getDb, MAX_INGEST_BATCH } from '../kb/db.mjs';
+import { createHash } from 'crypto';
+import {
+  ingestSources, deleteSourcesByRef, sourceContentHashes, getDb, MAX_INGEST_BATCH,
+} from '../kb/db.mjs';
 
 const TEXT_EXT = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
@@ -107,9 +110,18 @@ export async function indexLocalRepo(userId, repoPath, opts = {}) {
   const replace = opts.replace !== false;
   const walk = typeof opts.walk === 'function' ? opts.walk : walkAsync;
 
+  // Incremental: each file's rows carry its content hash, so a re-index
+  // rewrites only files whose bytes changed (and removes deleted ones) instead
+  // of wiping and re-inserting the whole repo — every chunk was thousands of
+  // FTS writes under the only writer, and a fresh id, on every project open.
+  const prefix = `${absRoot}${path.sep}`;
+  const known = replace ? sourceContentHashes(userId, 'code', prefix) : new Map();
+  const seen = new Set();
+  const changedRefs = [];
   const items = [];
   let filesScanned = 0;
   let filesIndexed = 0;
+  let unchanged = 0;
 
   for await (const filePath of walk(absRoot)) {
     filesScanned += 1;
@@ -121,6 +133,10 @@ export async function indexLocalRepo(userId, repoPath, opts = {}) {
     let buf;
     try { buf = await fsp.readFile(filePath); } catch { continue; }
     if (isProbablyBinary(buf)) continue;
+    seen.add(filePath);
+    const contentHash = createHash('sha1').update(buf).digest('hex');
+    if (known.get(filePath) === contentHash) { unchanged += 1; filesIndexed += 1; continue; }
+    changedRefs.push(filePath);
     const text = buf.toString('utf8');
     const rel = path.relative(absRoot, filePath);
     const chunks = chunkLines(text);
@@ -137,18 +153,23 @@ export async function indexLocalRepo(userId, repoPath, opts = {}) {
           ext,
           startLine: c.startLine,
           endLine: c.endLine,
+          contentHash,
         },
       });
     });
     filesIndexed += 1;
   }
 
-  // Wipe-then-insert in ONE transaction, after the walk has finished: the old
-  // order deleted first and walked asynchronously, so an error or crash
-  // mid-walk left the repo with no code index at all. Ref prefix is the abs
-  // path so two different roots don't clobber each other.
+  // All writes in ONE transaction, after the walk has finished: deleting first
+  // and walking asynchronously meant an error or crash mid-walk left the repo
+  // with no code index at all. Refs are absolute paths, so two different roots
+  // don't clobber each other.
+  const removedRefs = [...known.keys()].filter((ref) => !seen.has(ref));
   const written = getDb().transaction(() => {
-    if (replace) deleteSourcesByPrefix(userId, 'code', `${absRoot}${path.sep}`);
+    if (replace) {
+      for (const ref of changedRefs) deleteSourcesByRef(userId, 'code', ref);
+      for (const ref of removedRefs) deleteSourcesByRef(userId, 'code', ref);
+    }
     // ingestSources caps a single call; slice inside the same transaction.
     let total = 0;
     for (let i = 0; i < items.length; i += MAX_INGEST_BATCH) {
@@ -156,5 +177,10 @@ export async function indexLocalRepo(userId, repoPath, opts = {}) {
     }
     return total;
   })();
-  return { repo: absRoot, filesScanned, filesIndexed, chunks: written };
+  // filesIndexed keeps its meaning (files now in the index); filesWritten is
+  // how many of them this run actually rewrote.
+  return {
+    repo: absRoot, filesScanned, filesIndexed, filesWritten: changedRefs.length, unchanged,
+    removed: replace ? removedRefs.length : 0, chunks: written,
+  };
 }
