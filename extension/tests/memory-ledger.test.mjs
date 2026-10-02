@@ -23,7 +23,7 @@ for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) fs.rmSync(f, { force: t
 
 const db = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
-const { recordMemoryLedger, memoryLedgerFor } = await import('../kb/memory-ledger.mjs');
+const { recordMemoryLedger, memoryLedgerFor, ledgerKey, pruneMemoryLedger } = await import('../kb/memory-ledger.mjs');
 const { rankFactsByRelevance } = await import('../graphkit/memory.mjs');
 const writer = await import('../graphkit/memory-writer.mjs');
 const persist = await import('../llm_agent/runtime/memory-persist.mjs');
@@ -42,7 +42,7 @@ test('a fact is recorded once and every later mention confirms it', () => {
   const U = newUser('confirm');
   recordMemoryLedger(U, ROOT, { confirmed: ['[convention|pnpm] uses pnpm (t:2026-09-01)'], chatSessionId: 'chat-a' });
   recordMemoryLedger(U, ROOT, { confirmed: ['[convention|pnpm] uses pnpm workspaces'], chatSessionId: 'chat-b' });
-  const row = memoryLedgerFor(U, ROOT).get('#pnpm');
+  const row = memoryLedgerFor(U, ROOT).get(ledgerKey('[convention|pnpm] anything'));
   assert.equal(row.category, 'convention');
   assert.equal(row.confirmations, 2, 'a restatement (even reworded under the same id) is a confirmation');
   assert.equal(row.sourceChatSession, 'chat-a', 'the chat that FIRST taught it is kept');
@@ -55,9 +55,9 @@ test('a superseded fact is marked, not deleted, and a later confirmation revives
   const U = newUser('supersede');
   recordMemoryLedger(U, ROOT, { confirmed: ['the server binds to :3456'] });
   recordMemoryLedger(U, ROOT, { removed: ['The server binds to :3456'] });
-  assert.equal(memoryLedgerFor(U, ROOT).get('server binds to :3456').status, 'superseded');
+  assert.equal(memoryLedgerFor(U, ROOT).get(ledgerKey('the server binds to :3456')).status, 'superseded');
   recordMemoryLedger(U, ROOT, { confirmed: ['the server binds to :3456'] });
-  assert.equal(memoryLedgerFor(U, ROOT).get('server binds to :3456').status, 'active');
+  assert.equal(memoryLedgerFor(U, ROOT).get(ledgerKey('the server binds to :3456')).status, 'active');
 });
 
 test('the ledger is scoped per user and per repo, and goes with the user', () => {
@@ -73,8 +73,8 @@ test('the ledger is scoped per user and per repo, and goes with the user', () =>
 test('equal relevance: the more recently confirmed fact ranks first, then the more confirmed one', () => {
   const facts = ['old but reconfirmed fact (t:2026-01-01)', 'newer unconfirmed fact (t:2026-06-01)'];
   const ledger = new Map([
-    ['old but reconfirmed fact', { lastConfirmedAt: '2026-09-30 10:00:00', confirmations: 5, status: 'active' }],
-    ['newer unconfirmed fact', { lastConfirmedAt: '2026-06-01 10:00:00', confirmations: 1, status: 'active' }],
+    [ledgerKey(facts[0]), { lastConfirmedAt: '2026-09-30 10:00:00', confirmations: 5, status: 'active' }],
+    [ledgerKey(facts[1]), { lastConfirmedAt: '2026-06-01 10:00:00', confirmations: 1, status: 'active' }],
   ]);
   assert.deepEqual(rankFactsByRelevance(facts, { userMessage: '', ledger })[0], facts[0]);
   assert.deepEqual(rankFactsByRelevance(facts, { userMessage: '' })[0], facts[1], 'without a ledger: the stamp, as before');
@@ -99,9 +99,45 @@ test('persistTurnMemory: restating a stored fact leaves the file untouched and c
     assert.equal(fs.readFileSync(file, 'utf8'), before, 'the file is not rewritten for a restatement');
     assert.deepEqual(writer.readChatMemoryFacts(root).length, 1);
     const real = fs.realpathSync(root);
-    const row = memoryLedgerFor(U, real).get('tests run with node --test') ?? memoryLedgerFor(U, root).get('tests run with node --test');
+    const key = ledgerKey('Tests run with node --test');
+    const row = memoryLedgerFor(U, real).get(key) ?? memoryLedgerFor(U, root).get(key);
     assert.equal(row?.confirmations, 2);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// Review fixes on the ledger itself.
+test('the ledger never stores fact TEXT — an untagged fact\'s key is its text, so it is hashed', () => {
+  const U = newUser('hash');
+  recordMemoryLedger(U, ROOT, { confirmed: ['The deploy password lives in 1Password'] });
+  const raw = db.getDb().prepare('SELECT * FROM project_memory_ledger WHERE user_id = ?').all(U);
+  assert.equal(raw.length, 1);
+  assert.doesNotMatch(JSON.stringify(raw), /password/i);
+});
+
+test('a fact revised AND listed as superseded in the same turn stays active', () => {
+  const U = newUser('same-turn');
+  recordMemoryLedger(U, ROOT, {
+    confirmed: ['[tooling|server-port] the server binds to :4000'],
+    removed: ['[tooling|server-port] the server binds to :3456'],
+  });
+  assert.equal(memoryLedgerFor(U, ROOT).get(ledgerKey('[tooling|server-port] x')).status, 'active');
+});
+
+test('rows for facts no longer in the file (viewer delete, eviction) are pruned', () => {
+  const U = newUser('prune');
+  recordMemoryLedger(U, ROOT, { confirmed: ['kept fact', 'deleted in the viewer'] });
+  pruneMemoryLedger(U, ROOT, ['kept fact (t:2026-10-02)']);
+  const keys = [...memoryLedgerFor(U, ROOT).keys()];
+  assert.deepEqual(keys, [ledgerKey('kept fact')]);
+});
+
+test('timestamps are local time, like the file\'s (t:YYYY-MM-DD) stamps', () => {
+  const U = newUser('local');
+  recordMemoryLedger(U, ROOT, { confirmed: ['local fact'] });
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  const today = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  assert.equal(memoryLedgerFor(U, ROOT).get(ledgerKey('local fact')).lastConfirmedAt.slice(0, 10), today);
 });

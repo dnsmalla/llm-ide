@@ -28,8 +28,8 @@ import { homedir } from 'node:os';
 import { userRepoAllowlist } from '../kb/db.mjs';
 import { config } from '../core/config.mjs';
 import { parseChatMemoryFacts } from './memory-writer.mjs';
-import { factStamp, factIndex } from '../core/fact-key.mjs';
-import { memoryLedgerFor } from '../kb/memory-ledger.mjs';
+import { factStamp } from '../core/fact-key.mjs';
+import { memoryLedgerFor, ledgerKey } from '../kb/memory-ledger.mjs';
 import { termTokens } from '../core/text-tokens.mjs';
 import { memoryDir, legacyMemoryDir, systemDir, graphIndexFile, SYSTEM_DIR } from './paths.mjs';
 
@@ -331,7 +331,7 @@ export function scoreFactsByRelevance(facts, { userMessage = '', ledger = null }
     }
     // '' sorts below any real YYYY-MM-DD under localeCompare, which is how
     // an unstamped legacy fact ends up last among equally-relevant facts.
-    const seen = ledger?.get(factIndex(fact));
+    const seen = ledger ? ledger.get(ledgerKey(fact)) : undefined;
     const stamp = factStamp(fact) || '';
     const confirmedDay = typeof seen?.lastConfirmedAt === 'string' ? seen.lastConfirmedAt.slice(0, 10) : '';
     return {
