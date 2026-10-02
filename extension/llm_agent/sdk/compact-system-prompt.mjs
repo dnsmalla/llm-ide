@@ -1,14 +1,28 @@
 // A compact base system prompt for the v2 engine, used instead of the SDK's
 // `claude_code` preset when LLMIDE_V2_COMPACT_PROMPT=1.
 //
-// Why: the preset is ~26k of the ~30k tokens every model call pays (measured:
-// a bare "hi" turn wrote ~30k tokens to the prompt cache), and an agent turn
-// re-reads it on every hop. Built-in tools still bring their own
-// descriptions, so this only has to carry what the preset taught beyond them:
-// how to work in a repository, what never to do unasked, how to report.
+// Why: the preset plus built-in tools is the largest fixed cost every model
+// call pays, and an agent turn re-reads it on every hop. Re-measured
+// 2026-10-02 (SDK 0.3.283, Haiku, bare "hi"): ~11.4k total with the preset vs
+// ~5.9k with this prompt, so it saves ~5.5k per call. The older "~26k of ~30k"
+// figure no longer holds. Execute mode's larger built-in tool set is ~17.6k on
+// Haiku (~23.7k on Sonnet 5, whose tokenizer counts more) before any MCP
+// server; a user's two MCP servers added ~6.7k (Haiku) / ~8.8k (Sonnet 5).
+//
+// Built-in tools still bring their own descriptions, so this only has to carry
+// what the preset taught beyond them: how to work in a repository, what never
+// to do unasked, how to report.
 //
 // OFF by default: the preset encodes a lot of tuned behaviour, so this ships
-// as an opt-in to compare on real tasks before it could become the default.
+// as an opt-in. Measured 2026-10-02 on Sonnet 5 (3-4 runs per cell, a small
+// fixture and one repo question; not a benchmark):
+//   - per hop it is cheaper (~12-14k vs ~16-18k);
+//   - fixing failing tests (edit + Bash): ~16% fewer total tokens than the
+//     preset, same hop count, 4/4 fixed;
+//   - read-only search: the model took 10-15 hops vs 5-6 with the preset, so
+//     the total was ~55% HIGHER. A short "stay efficient" section did not
+//     fix this (hops 7-20). Do not make it the default without a prompt that
+//     bounds exploration.
 
 import { existsSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';

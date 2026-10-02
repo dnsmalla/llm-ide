@@ -768,7 +768,8 @@ export function buildEngineOptions(
     // chat's MODE — persona, pipeline stage skill — and a mode switch within
     // one resumed session must reach the model, which a snapshot would freeze.
     // LLMIDE_V2_COMPACT_PROMPT=1: a compact LLM-IDE base prompt instead of the
-    // ~26k-token preset (compact-system-prompt.mjs). The static base sits before
+    // claude_code preset (~5.5k tokens smaller per call; see
+    // compact-system-prompt.mjs for the measurement). The static base sits before
     // the SDK's cache boundary; the working directory and the same append follow.
     systemPrompt: compactPromptEnabled()
       ? {
