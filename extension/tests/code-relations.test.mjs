@@ -151,3 +151,8 @@ test('path: ./-prefixed, repo-relative or absolute picks the symbol, past the fi
     assert.equal(out.ambiguous, undefined, p);
   }
 });
+
+test('impact across repos names each affected file with its repo, so identical paths stay distinct', () => {
+  const out = handleCodeRelations({ symbol: 'core', relation: 'impact' }, pctx());
+  assert.deepEqual(out.affectedFiles, ['api/src/b.ts', 'web/src/z.ts']);
+});

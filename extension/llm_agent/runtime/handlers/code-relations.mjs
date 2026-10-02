@@ -129,7 +129,7 @@ export function handleCodeRelations(args, ctx) {
     try { return staleGraphs(ctx.userId, repoIds, Number.isFinite(ctx.freshnessCacheMs) ? ctx.freshnessCacheMs : 30_000); }
     catch { return []; }
   })();
-  const seedPaths = new Set(symbol.map((s) => s.path));
+  const seedPaths = new Set(symbol.map((s) => (s.repo ? `${s.repo}/${s.path}` : s.path)));
   const out = {
     symbol,
     relation,
@@ -137,8 +137,12 @@ export function handleCodeRelations(args, ctx) {
     results,
     ...(seeds.length > 1 ? { ambiguous: true } : {}),
     ...(hits.length >= MAX_RESULTS ? { truncated: true } : {}),
+    // Repo-qualified when several repos are involved: two repos' `src/index.ts`
+    // are two files to check, and a seed's own path must not hide another
+    // repo's file of the same name.
     ...(relation === 'impact'
-      ? { affectedFiles: [...new Set(results.map((r) => r.path))].filter((p) => !seedPaths.has(p)).sort() }
+      ? { affectedFiles: [...new Set(results.map((r) => (r.repo ? `${r.repo}/${r.path}` : r.path)))]
+        .filter((p) => !seedPaths.has(p)).sort() }
       : {}),
     hint: [
       results.length === 0
