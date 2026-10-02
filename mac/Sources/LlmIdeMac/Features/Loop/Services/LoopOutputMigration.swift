@@ -2,23 +2,30 @@ import Foundation
 
 /// Moves the files the Plan, Refactoring and Doc Optimization loops generated
 /// under the old layout (`llm-doc/plans/INDEX.md`, `llm-doc/refactor/…`,
-/// `llm-doc/docs/…`) to `llm-doc/loop/<key>/` (`LoopOutputLayout`), at the moment
-/// a project's stored stages are brought forward to stage revision 2.
+/// `llm-doc/docs/…`) to `llm-doc/loop/<key>/` (`LoopOutputLayout`).
+///
+/// **The rule is about the stage's CURRENT Output, not about a transition.** A
+/// stage whose Output is now the new default owns the new location; whatever the
+/// old default location still holds of the files that stage generated is
+/// stranded and is moved. That is what makes it work when there was no saved
+/// `loop.json` to compare with, after a crash between saving and moving, and
+/// after the UI's "reset to default". A stage the user edited (its Output is not
+/// the new default) plans nothing, and `DefaultRevisionCatalog` upgrades a loop's
+/// coupled stages all-or-nothing, so one edited stage keeps its whole loop where
+/// it was.
 ///
 /// **Conservative on purpose — these are the user's files.**
-/// - Only the paths a moved stage OWNS are touched: the Plan loop's `INDEX.md`,
-///   `PLAN.md` and `areas/`, the refactor plan, and the Doc loop's output
-///   directory (the stage's own Output, which `Doc Check` treats as wholly
-///   generated). Everything else in `llm-doc/plans/` — plans saved from chat or
-///   exported from the knowledge base — is never read or moved.
-/// - A stage the user EDITED is not upgraded (see `DefaultRevisionCatalog`), so
-///   it produces no move: a move is planned only for a stage whose saved Output
-///   was exactly the old default and whose ensured Output is exactly the new one.
+/// - Only paths a stage OWNS are touched: the Plan loop's `INDEX.md`, `PLAN.md`
+///   and `areas/`, the refactor plan, and the doc tree. Everything else in
+///   `llm-doc/plans/` — plans saved from chat or exported from the knowledge base
+///   — is never read or moved. The doc tree is moved only when its `INDEX.md`
+///   exists, the mark of a tree the Doc loop generated.
 /// - Move, never copy; never overwrite (an existing destination is skipped);
-///   never follow a symbolic link; both ends must stay inside the root the file
-///   was found under (the repo for docs, otherwise the root the runner resolved).
-/// - Idempotent: after a move the saved stage already holds the new Output, so
-///   the next load plans nothing.
+///   never follow or move a symbolic link; directories are moved file by file, so
+///   no link nested in a tree can travel; both ends must stay inside the root the
+///   file was found under (the repo for docs, otherwise the root the runner
+///   resolved).
+/// - Idempotent: once moved, the old location is empty and nothing is planned.
 public enum LoopOutputMigration {
     public struct Move: Equatable {
         public enum Kind: Equatable { case file, directory }
@@ -28,13 +35,17 @@ public enum LoopOutputMigration {
         /// The root both `source` and `destination` must stay inside.
         public let boundary: URL
         public let stageKey: String
+        /// For a directory: a child that must exist for the tree to count as generated.
+        public let requiredChild: String?
     }
 
     public enum Outcome: Equatable {
         case moved
-        /// The old location does not exist (nothing was generated there yet).
+        /// Some entries moved; `skipped` stayed (a name already at the destination, or a link).
+        case partiallyMoved(skipped: Int)
+        /// The old location does not exist (nothing was generated there).
         case nothingToMove
-        /// The new location already holds a file of the same name; left untouched.
+        /// The new location already holds the same name(s); left untouched.
         case destinationExists
         case refused(String)
         case failed(String)
@@ -44,18 +55,19 @@ public enum LoopOutputMigration {
         let legacy: String
         let current: String
         let kind: Move.Kind
+        var requiredChild: String?
     }
 
-    /// The Output a stage's move is keyed on: saved == `legacy` and ensured == `current`.
-    private static let primaryOutput: [String: (legacy: String, current: String)] = [
-        "plan-structure-index": (LoopOutputLayout.Legacy.planIndex, LoopOutputLayout.planIndex),
-        "plan-director": (LoopOutputLayout.Legacy.planMaster, LoopOutputLayout.planMaster),
-        "refactor-plan": (LoopOutputLayout.Legacy.refactorPlan, LoopOutputLayout.refactorPlan),
-        "doc-index": (LoopOutputLayout.Legacy.docsIndex, LoopOutputLayout.docsIndex),
-        "doc-writer": (LoopOutputLayout.Legacy.docsDir, LoopOutputLayout.docsDir),
+    /// The Output a stage must have for its entries to be moved: the new default.
+    private static let currentOutput: [String: String] = [
+        "plan-structure-index": LoopOutputLayout.planIndex,
+        "plan-director": LoopOutputLayout.planMaster,
+        "refactor-plan": LoopOutputLayout.refactorPlan,
+        "doc-index": LoopOutputLayout.docsIndex,
+        "doc-writer": LoopOutputLayout.docsDir,
     ]
 
-    /// The known generated paths a moved stage owns.
+    /// The known generated paths a stage owns.
     private static func entries(forStageKey key: String) -> [Entry] {
         typealias L = LoopOutputLayout
         switch key {
@@ -69,24 +81,22 @@ public enum LoopOutputMigration {
         case "doc-index":
             return [Entry(legacy: L.Legacy.docsIndex, current: L.docsIndex, kind: .file)]
         case "doc-writer":
-            return [Entry(legacy: L.Legacy.docsDir, current: L.docsDir, kind: .directory)]
+            return [Entry(legacy: L.Legacy.docsDir, current: L.docsDir, kind: .directory,
+                          requiredChild: "INDEX.md")]
         default:
             return []
         }
     }
 
-    /// The moves implied by the stages that changed from `saved` to `ensured`.
-    /// Pure: touches nothing on disk.
-    public static func moves(saved: LoopEngineProjectStore, ensured: LoopEngineProjectStore,
-                             gitRoot: URL, projectRoot: URL) -> [Move] {
+    /// The moves implied by the default stages that now write the new layout.
+    /// Pure: touches nothing on disk. Safe to call on every load — when nothing is
+    /// stranded every move reports `nothingToMove`.
+    public static func moves(ensured: LoopEngineProjectStore, gitRoot: URL, projectRoot: URL) -> [Move] {
         var result: [Move] = []
+        var seen = Set<String>()
         for loop in ensured.loops {
-            guard let savedLoop = saved.loops.first(where: { $0.id == loop.id }) else { continue }
             for stage in loop.config.stages {
-                guard let key = stage.defaultKey, let primary = primaryOutput[key],
-                      stage.outputPath == primary.current,
-                      let before = savedLoop.config.stages.first(where: { $0.id == stage.id }),
-                      before.outputPath == primary.legacy else { continue }
+                guard stage.isDefault, let key = stage.defaultKey, stage.outputPath == currentOutput[key] else { continue }
                 for entry in entries(forStageKey: key) {
                     // Resolved exactly as the runner resolved it when it wrote the
                     // file, so the move looks in the root the file is really in.
@@ -97,13 +107,21 @@ public enum LoopOutputMigration {
                     // The repo sits inside the project in the clone-into-code layout,
                     // so test the repo first.
                     let boundary = LoopStagePaths.isInside(source, roots: [gitRoot]) ? gitRoot : projectRoot
-                    result.append(Move(source: source,
-                                       destination: boundary.appendingPathComponent(entry.current),
-                                       kind: entry.kind, boundary: boundary, stageKey: key))
+                    let move = Move(source: source,
+                                    destination: boundary.appendingPathComponent(entry.current),
+                                    kind: entry.kind, boundary: boundary, stageKey: key,
+                                    requiredChild: entry.requiredChild)
+                    // Two loops sharing a default key must not plan the same move twice.
+                    if seen.insert(move.source.path + "→" + move.destination.path).inserted { result.append(move) }
                 }
             }
         }
-        return result
+        // Trees first. A tree is recognised by a marker file inside it (the doc
+        // tree's INDEX.md), and the stage that writes that file moves it too — if
+        // the single-file move ran first, the marker would be gone and the rest of
+        // the tree would be left behind. Moving the tree moves the marker with it,
+        // and the later single-file move then finds nothing to do.
+        return result.filter { $0.kind == .directory } + result.filter { $0.kind == .file }
     }
 
     /// Carries the moves out. Never throws: every outcome is reported.
@@ -130,38 +148,48 @@ public enum LoopOutputMigration {
                 return .moved
             case .directory:
                 guard sourceType == .typeDirectory else { return .refused("the source is not a directory") }
-                return try merge(move.source, into: move.destination, fileManager: fm) ? .moved : .destinationExists
+                if let marker = move.requiredChild,
+                   fileType(of: move.source.appendingPathComponent(marker), fileManager: fm) != .typeRegular {
+                    return .nothingToMove
+                }
+                let result = try merge(move.source, into: move.destination, fileManager: fm)
+                if result.moved == 0 { return result.skipped == 0 ? .nothingToMove : .destinationExists }
+                return result.skipped == 0 ? .moved : .partiallyMoved(skipped: result.skipped)
             }
         } catch {
             return .failed(error.localizedDescription)
         }
     }
 
-    /// Moves each entry of `source` into `destination`, merging directories and
-    /// skipping any name that already exists there. Removes `source` once it is
-    /// empty. Returns whether anything moved.
-    private static func merge(_ source: URL, into destination: URL, fileManager fm: FileManager) throws -> Bool {
-        try fm.createDirectory(at: destination, withIntermediateDirectories: true)
-        var movedAny = false
+    /// Moves each file of `source` into `destination`, FILE BY FILE (a directory is
+    /// created and recursed into, never renamed whole — so a symbolic link nested
+    /// anywhere in the tree cannot travel with it). A name that already exists at
+    /// the destination, and every link, stays and is counted as skipped. `source`
+    /// is removed only once it is empty, and only with a NON-recursive `rmdir`: a
+    /// file that appeared in the meantime must survive.
+    private static func merge(_ source: URL, into destination: URL,
+                              fileManager fm: FileManager) throws -> (moved: Int, skipped: Int) {
+        var moved = 0
+        var skipped = 0
         for name in try fm.contentsOfDirectory(atPath: source.path) {
             let from = source.appendingPathComponent(name)
             let to = destination.appendingPathComponent(name)
-            guard let type = fileType(of: from, fileManager: fm), type != .typeSymbolicLink else { continue }
-            switch (type, fileType(of: to, fileManager: fm)) {
-            case (_, nil):
+            switch (fileType(of: from, fileManager: fm), fileType(of: to, fileManager: fm)) {
+            case (.typeRegular?, nil):
+                try fm.createDirectory(at: destination, withIntermediateDirectories: true)
                 try fm.moveItem(at: from, to: to)
-                movedAny = true
-            case (.typeDirectory, .typeDirectory?):
-                if try merge(from, into: to, fileManager: fm) { movedAny = true }
+                moved += 1
+            case (.typeDirectory?, nil), (.typeDirectory?, .typeDirectory?):
+                let inner = try merge(from, into: to, fileManager: fm)
+                moved += inner.moved
+                skipped += inner.skipped
             default:
-                continue
+                // A link, a special file, or a name already taken at the destination.
+                skipped += 1
             }
         }
-        if (try? fm.contentsOfDirectory(atPath: source.path))?.isEmpty == true {
-            try fm.removeItem(at: source)
-            movedAny = true
-        }
-        return movedAny
+        _ = rmdir(source.path)
+        return (moved, skipped)
     }
 
     /// The item's type WITHOUT following a symbolic link, or nil when it does not exist.

@@ -236,6 +236,10 @@ enum LoopEngineConfigStore {
                       change.loopName, change.stageName, revision)
             }
         }
+        // On EVERY load, not only when the settings changed: a project with no saved
+        // loop.json, a crash after saving, or a "reset to default" all leave generated
+        // files in the old place. Cheap when nothing is stranded (a few stats).
+        migrateGeneratedOutputs(ensured: ensured, projectRoot: projectRoot, gitRoot: gitRoot)
         // Only where there is a file to write the result to — see the helper.
         let unscheduled = projectRoot != nil && normalizeScheduleOptIn(&ensured)
         // `unscheduled` implies `ensured != saved` (a flag was flipped on a
@@ -247,25 +251,26 @@ enum LoopEngineConfigStore {
             || LoopEngineConfig.shouldPersist(ensured.loops.flatMap(\.config.stages))
         if worthKeeping {
             save(ensured, projectRoot: projectRoot, projectId: projectId, defaults: defaults)
-            migrateGeneratedOutputs(saved: saved, ensured: ensured, projectRoot: projectRoot, gitRoot: gitRoot)
         }
         return ensured
     }
 
-    /// A default stage the ensure step just moved to the `llm-doc/loop/<key>/`
-    /// layout (`LoopOutputLayout`) leaves its previously generated files behind in
-    /// the old place. Move exactly those files after the new settings are saved.
-    /// Fail-soft and logged: the stages already point at the new location, so a
-    /// file that cannot move is simply regenerated there by the next run.
-    private static func migrateGeneratedOutputs(saved: LoopEngineProjectStore?, ensured: LoopEngineProjectStore,
+    /// A default stage that now writes the `llm-doc/loop/<key>/` layout
+    /// (`LoopOutputLayout`) may have left files it generated in the old place.
+    /// Move exactly those (`LoopOutputMigration`). Fail-soft and logged: the stages
+    /// already point at the new location, so a file that cannot move is simply
+    /// regenerated there by the next run.
+    private static func migrateGeneratedOutputs(ensured: LoopEngineProjectStore,
                                                 projectRoot: URL?, gitRoot: URL?) {
-        guard let saved, let projectRoot, let gitRoot else { return }
-        let moves = LoopOutputMigration.moves(saved: saved, ensured: ensured,
-                                              gitRoot: gitRoot, projectRoot: projectRoot)
+        guard let projectRoot, let gitRoot else { return }
+        let moves = LoopOutputMigration.moves(ensured: ensured, gitRoot: gitRoot, projectRoot: projectRoot)
         for (move, outcome) in LoopOutputMigration.perform(moves) {
             switch outcome {
             case .moved:
                 NSLog("LoopEngineConfigStore: moved generated output %@ -> %@", move.source.path, move.destination.path)
+            case let .partiallyMoved(skipped):
+                NSLog("LoopEngineConfigStore: moved most of %@ -> %@, left %d entries in place (name taken or a link)",
+                      move.source.path, move.destination.path, skipped)
             case .nothingToMove:
                 break
             case .destinationExists:

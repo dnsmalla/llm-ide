@@ -128,10 +128,33 @@ func runLoopOutputLayoutChecks() {
     expect(stage("plan-director", in: keptEdits)?.outputPath == "my/own/PLAN.md"
            && stage("plan-director", in: keptEdits)?.defaultRevision == nil,
            "an edited stage keeps the user's output and stays below the current revision (the UI offers a reset)")
-    expect(stage("plan-structure-index", in: keptEdits)?.outputPath == "llm-doc/loop/plan/INDEX.md",
-           "the unedited stages next to it still move")
+    expect(stage("plan-structure-index", in: keptEdits)?.outputPath == "llm-doc/plans/INDEX.md"
+           && stage("plan-structure-index", in: keptEdits)?.defaultRevision == nil,
+           "its unedited partner stays with it: a loop's moved stages are upgraded all-or-nothing")
+    expect(keptEdits.loops.first { $0.defaultKey == LoopDefaultLoopKey.plan }?.acceptanceCriteria == legacyPlanAcceptance,
+           "…and the loop's acceptance text is not rewritten to a folder the loop does not write")
+    expect(stage("refactor-plan", in: keptEdits)?.outputPath == "llm-doc/loop/refactor/REFACTOR.md"
+           && stage("doc-index", in: keptEdits)?.outputPath == "llm-doc/loop/docs/INDEX.md",
+           "other loops with no edits still move")
     expect(keptEdits.loops.first { $0.defaultKey == LoopDefaultLoopKey.docs }?.acceptanceCriteria
            == "My own acceptance: llm-doc/docs/INDEX.md plus a human review.",
            "an edited acceptance text is the user's and is left exactly as written")
+
+    // 5. Editing only a PROMPT also blocks the whole loop (content equality is exact).
+    var promptEdited = legacyStore(from: fresh.loops)
+    for index in promptEdited.loops.indices {
+        for stageIndex in promptEdited.loops[index].config.stages.indices
+        where promptEdited.loops[index].config.stages[stageIndex].defaultKey == "doc-index" {
+            promptEdited.loops[index].config.stages[stageIndex].prompt =
+                (promptEdited.loops[index].config.stages[stageIndex].prompt ?? "") + " Keep it short."
+        }
+    }
+    let (keptPrompt, _) = LoopStageDetector.ensureDefaultLoops(in: promptEdited, gitRoot: root)
+    expect(stage("doc-index", in: keptPrompt)?.outputPath == "llm-doc/docs/INDEX.md"
+           && stage("doc-writer", in: keptPrompt)?.outputPath == "llm-doc/docs"
+           && stage("doc-writer", in: keptPrompt)?.targetPath == "llm-doc/docs/INDEX.md",
+           "an edited Doc Index prompt keeps the doc writer reading the index it still writes")
+    expect(keptPrompt.loops.first { $0.defaultKey == LoopDefaultLoopKey.docs }?.acceptanceCriteria == legacyDocsAcceptance,
+           "…and the docs loop's acceptance text keeps naming the old location")
 }
 #endif
