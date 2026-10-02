@@ -51,14 +51,21 @@ extension LoopEngineView {
     /// Re-inspects the active project. `@MainActor` because this view is not
     /// main-actor isolated and the results are written to @State.
     @MainActor
-    func refreshEnvironmentStatus() async {
+    func refreshEnvironmentStatus(clearing: Bool = false) async {
+        if clearing { environmentStatus = nil }
         guard let gitRoot = activeGitRootURL else {
+            environmentInspectionToken += 1
+            isInspectingEnvironment = false
             environmentStatus = nil
             return
         }
+        environmentInspectionToken += 1
+        let token = environmentInspectionToken
         isInspectingEnvironment = true
-        defer { isInspectingEnvironment = false }
         let facts = await ProjectEnvironmentInspector.inspect(repoRoot: gitRoot)
+        // A newer run owns the in-progress flag and the result.
+        guard token == environmentInspectionToken else { return }
+        isInspectingEnvironment = false
         // The user may have switched project (or this task been cancelled)
         // while the commands ran: a stale answer must not be shown under
         // another project.

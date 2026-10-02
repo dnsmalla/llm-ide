@@ -203,6 +203,9 @@ struct LoopEngineView: View {
     /// the project changes and on demand; never persisted.
     @State var environmentStatus: ProjectEnvironmentStatus?
     @State var isInspectingEnvironment = false
+    /// Identifies the latest inspection; only the run holding the current token
+    /// may clear the in-progress flag or store a result.
+    @State var environmentInspectionToken = 0
 
     /// How many past runs the history list shows. One constant, so the header's
     /// "latest N" badge cannot claim a different cap than `loadPastRuns`
@@ -254,10 +257,9 @@ struct LoopEngineView: View {
             }.value
         }
         .task(id: reloadKey) {
-            // Cleared first so a previous project's answer is never shown while
-            // this project is being inspected.
-            environmentStatus = nil
-            await refreshEnvironmentStatus()
+            // Cleared first (inside the call) so a previous project's answer is
+            // never shown while this project is being inspected.
+            await refreshEnvironmentStatus(clearing: true)
         }
         .task(id: reloadKey) {
             selectedStageId = nil
