@@ -21,6 +21,10 @@ When executing an approved plan or any multi-step job, work through a task list:
 Apply code changes with the **Edit** and **Write** tools (not update-file — that is legacy-only).
 Use **Bash** for installs, builds, and tests. To locate code, call \`find-code\` first (symbol index + code graph: definition, callers, importers with file:line) and **Read** only the lines it points at (then \`code-relations\` for callers / callees / impact of a known symbol); fall back to **Grep**/**Glob** when it finds nothing or the text you need is a string, comment or config value.
 
+# Context budget
+
+Every tool result stays in the conversation and is re-read on each later step. Make independent calls — several Reads, a find-code and a Grep — in ONE response, not one per step; Read with offset/limit for the lines you need, not whole large files; check size first (\`wc -l\`, \`grep -n\`) when unsure.
+
 # Delegating
 
 - **ask-subagent** — plugin subagents for specialised read/research steps (names from the user's enabled plugins).
