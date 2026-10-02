@@ -44,6 +44,7 @@ import {
   buildUserPluginDelivery,
 } from '../skills/index.mjs';
 import { composeSystemContext, composeRecentContext } from '../internal/context/compose.mjs';
+import { sdkSubprocessEnv } from './subprocess-env.mjs';
 import { contentHash, emptyDelivered, deliveredFor, commitDelivered, forgetDelivered } from './turn-context.mjs';
 import { usageBaselineFor, recordUsageBaseline, usageDelta } from './usage-baseline.mjs';
 import { buildSessionTaskPromptBlock } from '../runtime/task-session-context.mjs';
@@ -1405,7 +1406,8 @@ export async function runAgentV2Turn(
     canUseTool,
     maxTurns: MAX_TURNS,
     ...(maxBudgetUsd ? { maxBudgetUsd } : {}),
-    // `env` REPLACES the subprocess environment — always spread process.env.
+    // `env` REPLACES the subprocess environment — always start from
+    // sdkSubprocessEnv() (process.env minus the server's own secrets/config).
     // The key (when one resolved) and the per-user engine home ride along in
     // the SAME composed env. The engine home rides ONLY for users with a
     // first-party key (see sdkHome above): an ambient-auth user depends on
@@ -1434,7 +1436,7 @@ export async function runAgentV2Turn(
     // settings); this is the SDK-engine twin of the CLI path's
     // --strict-mcp-config (providers/providers.mjs).
     env: {
-      ...process.env,
+      ...sdkSubprocessEnv(),
       ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
       ...(key
         ? {

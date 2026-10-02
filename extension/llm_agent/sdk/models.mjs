@@ -15,6 +15,7 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { resolveAnthropicKey, agentSdkHomeFor } from './engine.mjs';
 
+import { sdkSubprocessEnv } from './subprocess-env.mjs';
 const CACHE_MS = 30 * 60 * 1000;
 // A failure (not logged in, a hung CLI) is remembered briefly, so each picker
 // load does not spawn a fresh CLI and wait out TIMEOUT_MS again before the
@@ -91,7 +92,7 @@ async function askSdk(userId, key, queryFn) {
       // Same isolation as a chat turn (engine.mjs): no claude.ai connectors,
       // the user's own key and home when they have one, ambient login otherwise.
       env: {
-        ...process.env,
+        ...sdkSubprocessEnv(),
         ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
         ...(key ? { ANTHROPIC_API_KEY: key, ...(sdkHome ? { CLAUDE_CONFIG_DIR: sdkHome } : {}) } : {}),
       },

@@ -1793,3 +1793,33 @@ test('effort: high for plan/assist_plan/execute, medium for ask/review/document 
   assert.equal(queryOptions.effort, 'medium');
   assert.equal(queryOptions.model, undefined, 'the model is never chosen here');
 });
+
+// The SDK subprocess runs the agent's Bash, and `env` is what Bash inherits.
+// Spreading process.env handed every approved command the server's own
+// secrets (LLMIDE_JWT_SECRET signs every user's session; LLMIDE_VAULT_KEY
+// decrypts every stored API key). Those — and the server's other LLMIDE_/
+// MEETNOTES_ config — must not reach it; the user's own environment must,
+// because their calculations and tests depend on it (licence files, conda).
+test('the SDK subprocess env drops the server\'s own secrets and keeps the user\'s environment', async () => {
+  const saved = {};
+  const plant = { LLMIDE_JWT_SECRET: 'j'.repeat(48), LLMIDE_VAULT_KEY: 'v'.repeat(48),
+    MEETNOTES_JWT_SECRET: 'm'.repeat(48), GRB_LICENSE_FILE: '/opt/gurobi/gurobi.lic' };
+  for (const [k, v] of Object.entries(plant)) { saved[k] = process.env[k]; process.env[k] = v; }
+  try {
+    let env;
+    await runAgentV2Turn({
+      message: 'hello', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
+      allowAmbientAuth: true, onEvent: () => {},
+      queryFactory: (p, o) => { env = o.env; return (async function* () {})(); },
+    }, turnInjectable);
+    assert.equal(env.LLMIDE_JWT_SECRET, undefined);
+    assert.equal(env.LLMIDE_VAULT_KEY, undefined);
+    assert.equal(env.MEETNOTES_JWT_SECRET, undefined);
+    assert.equal(env.GRB_LICENSE_FILE, '/opt/gurobi/gurobi.lic', 'the user\'s own variables still reach Bash');
+    assert.equal(env.PATH, process.env.PATH);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+});

@@ -44,6 +44,7 @@ import { readSkillInstructions } from '../skills/index.mjs';
 import { buildLoopSkillsText } from '../../core/prompt-framing.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';
 import { resolveLanguage } from '../../providers/runtime.mjs';
+import { sdkSubprocessEnv } from './subprocess-env.mjs';
 
 // The only built-ins a Loop run may see. Everything else — Bash, WebFetch,
 // WebSearch, Agent/Task, AskUserQuestion, NotebookEdit, Skill, … — is absent
@@ -486,7 +487,7 @@ export async function runLoopAgent(
     persistSession: false,
     ...(typeof model === 'string' && model ? { model } : {}),
     env: {
-      ...process.env,
+      ...sdkSubprocessEnv(),
       ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
       ...(key ? { ANTHROPIC_API_KEY: key, ...(sdkHome ? { CLAUDE_CONFIG_DIR: sdkHome } : {}) } : {}),
     },

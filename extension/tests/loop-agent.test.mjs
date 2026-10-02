@@ -233,6 +233,7 @@ test('runLoopAgent: offers file tools only — no shell, no network, no MCP, not
   assert.equal(o.persistSession, false);
   assert.equal(o.env.ENABLE_CLAUDEAI_MCP_SERVERS, 'false');
   assert.match(o.systemPrompt.append, /no shell/);
+  assert.equal(o.env.LLMIDE_JWT_SECRET, undefined, 'the server\'s own secrets never reach the subprocess');
 }));
 
 test('runLoopAgent: an edit inside repoRoot lands and is reported repo-relative; outside edits are refused and do not land', () => withKey(async () => {
