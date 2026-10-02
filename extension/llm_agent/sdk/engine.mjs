@@ -775,7 +775,7 @@ export function buildEngineOptions(
         prompt: [
           COMPACT_BASE_PROMPT,
           SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
-          compactEnvironmentBlock({ cwd: workspaceRoot }),
+          compactEnvironmentBlock({ cwd: workspaceRoot, model: typeof model === 'string' ? model : '' }),
           appendParts.join('\n\n'),
         ],
         snapshot: false,

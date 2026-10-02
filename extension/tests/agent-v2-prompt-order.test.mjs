@@ -300,11 +300,14 @@ test('LLMIDE_V2_COMPACT_PROMPT swaps the preset for a compact custom prompt; off
     const [base, boundary, ...dynamic] = sp.prompt;
     assert.equal(boundary, SYSTEM_PROMPT_DYNAMIC_BOUNDARY, 'the static base is cacheable across sessions');
     assert.ok(base.length < 8_000, `compact (got ${base.length} chars)`);
-    for (const rule of [/Read a file before you Edit it/, /do not commit or push/i, /destructive/i, /in ONE response/, /file:line/]) {
+    for (const rule of [/Read a file before you Edit it/, /do not commit or push/i, /destructive/i, /in ONE response/, /file:line/,
+      /mcp__llmide__find-code/, /malware/i]) {
       assert.match(base, rule);
     }
     const rest = dynamic.join('\n');
     assert.ok(rest.includes(process.cwd()), 'the working directory the preset used to carry');
+    assert.match(rest, /Git repository: (yes|no)/, 'and whether it is a git repo');
+    assert.match(rest, /Shell: /);
     assert.ok(rest.includes(def.append.slice(0, 200)), 'the same LLM-IDE append follows');
   } finally {
     if (saved === undefined) delete process.env.LLMIDE_V2_COMPACT_PROMPT; else process.env.LLMIDE_V2_COMPACT_PROMPT = saved;
