@@ -59,12 +59,24 @@ final class ProjectEnvironmentSetupService {
             do {
                 let process = try GroupedSubprocess.launch(
                     shellCommand: command, directory: repoRoot, environment: environment)
+                // Cancellation (user stop or sheet dismiss): `waitForExit` may throw
+                // on its own, but this `defer` ensures the process tree is stopped
+                // instead of orphaning the running `pip install`. It cannot await;
+                // `terminateTree` schedules the SIGKILL and the reaper thread still
+                // collects the exit.
+                defer { if !process.hasExited { process.terminateTree(grace: 2) } }
+
                 try await process.waitForExit()
                 lastOutput = await process.collectOutput()
                 if process.exitStatus != 0 {
                     return ProjectEnvironmentSetupResult(
                         succeeded: false, output: "$ \(command)\n\(lastOutput)")
                 }
+            } catch is CancellationError {
+                // User stopped the sheet or quit the app. The defer above stops
+                // the process. Leave the half-built .venv in place; the planner
+                // re-detects it on next run via pyvenv.cfg.
+                return ProjectEnvironmentSetupResult(succeeded: false, output: "Cancelled")
             } catch {
                 return ProjectEnvironmentSetupResult(
                     succeeded: false, output: "$ \(command)\n\(error.localizedDescription)")
