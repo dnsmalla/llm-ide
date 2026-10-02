@@ -139,11 +139,6 @@ export function writeCodeGraph(userId, repoId, cg, { source = GRAPH_SOURCE_SCIP 
 }
 
 /**
- * Delete graph rows for a repo (used by `replace`). Scoped to one producer's
- * `source` — passing null clears EVERY source for the repo, which only a
- * whole-repo teardown should do.
- */
-/**
  * Delete every producer's rows for repo_ids that are a letter-case variant of
  * `repoId` AND name the same directory on disk — the copies a
  * case-insensitive filesystem let a second spelling create. A variant that is
@@ -164,6 +159,11 @@ export function removeCaseVariantRepos(userId, repoId) {
   return variants;
 }
 
+/**
+ * Delete graph rows for a repo (used by `replace`). Scoped to one producer's
+ * `source` — passing null clears EVERY source for the repo, which only a
+ * whole-repo teardown should do.
+ */
 export function clearCodeGraph(userId, repoId, { source = GRAPH_SOURCE_SCIP } = {}) {
   requireUser(userId);
   if (source !== null) requireGraphSource(source);

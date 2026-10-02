@@ -10,7 +10,7 @@ import fs from 'node:fs/promises';
 import { canonicalPathCase } from '../core/path-case.mjs';
 import { getDb, ingestSources } from '../kb/db.mjs';
 import {
-  writeCodeGraph, clearCodeGraph, deleteScipSources, GRAPH_SOURCE_SCIP,
+  writeCodeGraph, clearCodeGraph, deleteScipSources, removeCaseVariantRepos, GRAPH_SOURCE_SCIP,
 } from '../kb/code-graph.mjs';
 import { loadScipIndex, parseScipJson } from './scip-scanner.mjs';
 
@@ -58,6 +58,7 @@ export async function indexScip(userId, repoPath, scipPath, opts = {}) {
       // Scoped to this producer — a structural graph for the same repo (written
       // by the Mac app every few minutes) must survive a SCIP re-index.
       clearCodeGraph(userId, repoId, { source: GRAPH_SOURCE_SCIP });
+      removeCaseVariantRepos(userId, repoId);
     }
     const written = ingestSources(userId, items);
     const graph = writeCodeGraph(userId, repoId, cg, { source: GRAPH_SOURCE_SCIP });
