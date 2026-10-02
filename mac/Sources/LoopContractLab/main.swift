@@ -524,6 +524,7 @@ runEnvironmentNoteChecks()
 runRepoGraphLocatorChecks()
 #if FEATURE_AUTOTASK
 runEnvironmentProblemChecks()
+runStageCommandAvailabilityChecks()
 #endif
 
 if failures.isEmpty {
