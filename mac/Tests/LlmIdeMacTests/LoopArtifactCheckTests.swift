@@ -87,12 +87,12 @@ final class LoopArtifactCheckTests: XCTestCase {
     }
 
     func testRepoParentFolderBeatsAStaleProjectCopy() throws {
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("llm-doc/plans"),
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("llm-doc/loop/plan"),
                                                 withIntermediateDirectories: true)
-        try write("llm-doc/plans/INDEX.md", under: project)
+        try write("llm-doc/loop/plan/INDEX.md", under: project)
         let r = ArtifactCheckEvaluator.evaluate(LoopStageDetector.planCheckSpec,
                                                 roots: .init(repo: root, project: project), stages: plan())
-        XCTAssertTrue(r.failures.contains("missing: llm-doc/plans/INDEX.md"), "\(r.failures)")
+        XCTAssertTrue(r.failures.contains("missing: llm-doc/loop/plan/INDEX.md"), "\(r.failures)")
     }
 
     func testPlanCheckFollowsAnEditedOutputAndCapsAreaPages() throws {
@@ -104,10 +104,10 @@ final class LoopArtifactCheckTests: XCTestCase {
                                                 roots: .init(repo: root, project: project), stages: stages)
         XCTAssertEqual(Set(r.failures), ["p/INDEX2.md: 301 lines (limit 300)", "p/areas/a.md: 251 lines (limit 250)"])
         // The default location is irrelevant once the Output moved.
-        XCTAssertFalse(r.failures.contains { $0.contains("llm-doc/plans/INDEX.md") })
+        XCTAssertFalse(r.failures.contains { $0.contains("llm-doc/loop/plan/INDEX.md") })
         let missing = ArtifactCheckEvaluator.evaluate(LoopStageDetector.planCheckSpec,
                                                       roots: .init(repo: root, project: project), stages: plan())
-        XCTAssertEqual(Set(missing.failures), ["missing: llm-doc/plans/INDEX.md", "missing: llm-doc/plans/PLAN.md"])
+        XCTAssertEqual(Set(missing.failures), ["missing: llm-doc/loop/plan/INDEX.md", "missing: llm-doc/loop/plan/PLAN.md"])
     }
 
     func testPersistedSpecStaysStableAndSummaryShowsResolvedPaths() throws {

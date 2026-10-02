@@ -72,8 +72,8 @@ final class LoopFinalFixTests: XCTestCase {
 
     func testShippedPlanLoopReachesIterationOneAndRunsItsCheck() async throws {
         let (status, journal, stages) = try await runShipped(LoopDefaultLoopKey.plan, outputs: [
-            "skills/plan-structure-index": "llm-doc/plans/INDEX.md",
-            "skills/plan-director": "llm-doc/plans/PLAN.md",
+            "skills/plan-structure-index": "llm-doc/loop/plan/INDEX.md",
+            "skills/plan-director": "llm-doc/loop/plan/PLAN.md",
         ])
         let attempts = journal.written.last?.iterations.first?.attempts ?? []
         let check = attempts.first { $0.stageId == stages.last?.id }
@@ -84,8 +84,8 @@ final class LoopFinalFixTests: XCTestCase {
 
     func testShippedDocsLoopReachesIterationOneAndRunsItsCheck() async throws {
         let (status, journal, stages) = try await runShipped(LoopDefaultLoopKey.docs, outputs: [
-            "skills/doc-structure-index": "llm-doc/docs/INDEX.md",
-            "skills/doc-writer": "llm-doc/docs/area.md",
+            "skills/doc-structure-index": "llm-doc/loop/docs/INDEX.md",
+            "skills/doc-writer": "llm-doc/loop/docs/area.md",
         ])
         let attempts = journal.written.last?.iterations.first?.attempts ?? []
         let check = attempts.first { $0.stageId == stages.last?.id }
