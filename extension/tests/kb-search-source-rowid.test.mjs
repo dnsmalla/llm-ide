@@ -94,3 +94,18 @@ test('a LIKE-only search still interleaves kinds newest first: a new meeting out
   const hits = db.search(U, { q: 'ui', limit: 5 });
   assert.equal(hits[0].kind, 'meeting', `newest first across kinds (got ${hits.map((h) => h.kind).join(',')})`);
 });
+
+test('a user purge removes their FTS rows and map rows, mapped and legacy alike', () => {
+  const V = users.registerUser(conn, {
+    email: `sr2-${Date.now()}@example.test`, password: 'CorrectHorseBattery', displayName: 'v',
+  }).id;
+  const add = (ref) => Number(conn.prepare(
+    "INSERT INTO sources (kind, ref, chunk_idx, title, body, user_id) VALUES ('code', ?, 0, ?, 'purge me', ?)",
+  ).run(ref, ref, V).lastInsertRowid);
+  const mappedId = add('/v/mapped.ts');
+  const legacyId = add('/v/legacy.ts');
+  conn.prepare('DELETE FROM search_source_rowid WHERE source_id = ?').run(legacyId);
+  db.deleteUserCascade(V);
+  assert.deepEqual([...ftsRows(mappedId), ...ftsRows(legacyId)], []);
+  assert.equal(mapped(mappedId), undefined);
+});
