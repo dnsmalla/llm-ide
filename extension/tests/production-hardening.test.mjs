@@ -63,7 +63,7 @@ test('runAgentLoop threads model and maxTokens into runClaude', async () => {
   assert.equal(stub.calls[0].opts.maxTokens, 1234);
 });
 
-test('runAgentLoop defaults: no model, maxTokens 2048', async () => {
+test('runAgentLoop defaults: no model, maxTokens 8192 (the runClaude default)', async () => {
   const stub = makeStubClaude(['done']);
   await runAgentLoop({
     skills: new Map(),
@@ -76,7 +76,7 @@ test('runAgentLoop defaults: no model, maxTokens 2048', async () => {
     handlers: {},
   });
   assert.equal(stub.calls[0].opts.model, undefined);
-  assert.equal(stub.calls[0].opts.maxTokens, 2048);
+  assert.equal(stub.calls[0].opts.maxTokens, 8192);
 });
 
 test('askSubagent: frontmatter model wins over deployment default', async () => {
