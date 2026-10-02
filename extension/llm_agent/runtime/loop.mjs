@@ -441,6 +441,11 @@ export function makeSniffingChunkHandler(outerOnChunk) {
   return { onChunk, flush };
 }
 
+// Output-token ceiling per model hop — runClaude's own default (providers/
+// runtime.mjs). Output is billed as produced, so a higher ceiling costs
+// nothing on a short reply.
+const DEFAULT_HOP_MAX_TOKENS = 8192;
+
 export async function runAgentLoop({
   skills, userMessage, history, agentContext, runClaude, kb, userId, handlers,
   maxIterations, deadlineMs, model, maxTokens, depth = 0, onProgress, onChunk,
@@ -609,7 +614,9 @@ export async function runAgentLoop({
       out = await runClaude(prompt, {
         userId,
         model,
-        maxTokens: (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : 2048,
+        // 2048 cut long answers and whole-file update-file fences off mid-way
+        // (a parse-error retry); runClaude's own default is the ceiling now.
+        maxTokens: (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : DEFAULT_HOP_MAX_TOKENS,
         signal: callSignal,
         mcpConfig,
         ...(sniff ? { onChunk: sniff.onChunk } : {}),
@@ -863,7 +870,7 @@ export async function runNativeAgentLoop({
       resp = await complete({
         messages,
         tools,
-        maxTokens: 2048,
+        maxTokens: DEFAULT_HOP_MAX_TOKENS,
         // Undefined only when the caller opted into neither a deadline nor
         // cancellation, so a long native tool-calling turn runs to completion.
         signal: callSignal,

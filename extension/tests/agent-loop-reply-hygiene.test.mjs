@@ -218,3 +218,16 @@ test('iteration-cap reply keeps the accumulated narration but is tail-capped', a
   assert.ok(result.reply.includes('narration line'),
     'the most recent narration (the tail) must be what survives the cap');
 });
+
+// The fence loop asked for at most 2048 output tokens per hop — a long
+// answer, or a whole-file update-file fence, was cut off mid-way and came
+// back as a parse-error retry. runClaude's own default (8192) is the cap now;
+// a caller that passes maxTokens still decides.
+test('a hop asks for runClaude\'s 8192-token default unless the caller sets maxTokens', async () => {
+  const seen = [];
+  const runClaude = async (prompt, opts) => { seen.push(opts.maxTokens); return 'done'; };
+  await loop({ runClaude });
+  assert.equal(seen[0], 8192);
+  await loop({ runClaude, maxTokens: 1000 });
+  assert.equal(seen[1], 1000);
+});
