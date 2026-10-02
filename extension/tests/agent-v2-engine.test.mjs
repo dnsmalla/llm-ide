@@ -1833,7 +1833,7 @@ test('every turn installs the tool-output cap as a PostToolUse hook', async () =
     allowAmbientAuth: true, onEvent: () => {},
     queryFactory: (p, o) => { hooks = o.hooks; return (async function* () {})(); },
   }, turnInjectable);
-  const entry = hooks?.PostToolUse?.find((h) => h.matcher === 'Read|Bash|Grep');
+  const entry = hooks?.PostToolUse?.find((h) => h.matcher === 'Bash|Grep');
   assert.ok(entry, 'PostToolUse carries the cap');
   assert.equal(typeof entry.hooks[0], 'function');
 });

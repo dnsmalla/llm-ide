@@ -1461,9 +1461,9 @@ export async function runAgentV2Turn(
       : {}),
     ...(pluginDelivery.sdkPlugins.length ? { plugins: pluginDelivery.sdkPlugins } : {}),
     // Plugin hooks plus the native-tool output cap (tool-output-cap.mjs): a
-    // huge Read/Bash/Grep result is re-read on every later hop, so it is
-    // trimmed before the model sees it.
-    hooks: withToolOutputCap(pluginDelivery.hooks),
+    // huge Bash/Grep result is re-read on every later hop, so it is trimmed
+    // before the model sees it (not with native plugins — see there).
+    hooks: withToolOutputCap(pluginDelivery.hooks, { nativePlugins: pluginDelivery.sdkPlugins.length }),
     mcpServers: {
       llmide: buildLlmIdeServer(userId, agentContext, message, {
         runClaude,

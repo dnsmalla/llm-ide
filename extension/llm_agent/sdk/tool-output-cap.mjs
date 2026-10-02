@@ -1,26 +1,29 @@
-// Trims oversized NATIVE tool output (Read / Bash / Grep) before the model
-// sees it — a PostToolUse hook's `updatedToolOutput`.
+// Trims oversized NATIVE tool output (Bash / Grep) before the model sees it —
+// a PostToolUse hook's `updatedToolOutput`.
 //
-// Why: every hop of an agent turn re-reads the whole context, so a single
-// 60k-char file read is paid for again on every later hop of the turn and
-// every later turn of the chat (measured on real turns: 147k–895k cached
-// tokens re-read per work turn). The SDK's own Read cap is ~25k TOKENS; these
-// caps are a few thousand, and each trim tells the model how to get the rest.
+// Why: every hop of an agent turn re-reads the whole context, so one huge
+// command or search result is paid for again on every later hop of the turn
+// and every later turn of the chat (measured on real turns: 147k–895k cached
+// tokens re-read per work turn). Each trim says how to get the rest.
 //
 // Shape-preserving: the result is the same output object with only its text
-// fields shortened, so the SDK formats it exactly as before.
-//   Read  — keeps the HEAD only, on a line boundary, and sets
-//           truncatedByTokenCap: the SDK then tells the model to continue with
-//           offset/limit. Never the middle: the SDK numbers lines from
-//           startLine, so a removed middle would misnumber everything after it.
-//   Bash  — keeps head and tail (errors and summaries sit at the end) with a
-//           note between them.
+// fields shortened, so the SDK validates and renders it exactly as before.
+//   Bash  — head and tail (errors and summaries sit at the end) with a note
+//           between, stdout and stderr sharing one budget. Never an image
+//           (stdout is then a data URI the SDK parses whole) or output that
+//           carries structured content (the SDK ignores stdout then).
 //   Grep  — content mode keeps whole leading lines and counts the rest.
+//   Read  — deliberately NOT trimmed. The SDK records the ORIGINAL read as a
+//           full view of the file, and its read-dedup answers a repeated
+//           plain Read with "unchanged — refer to your earlier result": the
+//           trimmed head, so the rest would be unreachable that way. The SDK's
+//           own Read cap (which marks a partial view properly) still applies.
 
-export const READ_CAP_CHARS = 20_000;
 export const BASH_CAP_CHARS = 12_000;
 export const GREP_CAP_CHARS = 12_000;
 const BASH_TAIL_CHARS = 4_000;
+// stderr's share when stdout is also long — the two render together.
+const BASH_STDERR_CAP_CHARS = 6_000;
 
 /** The longest prefix of `text` made of whole lines and at most `cap` chars. */
 function headLines(text, cap) {
@@ -43,15 +46,10 @@ function trimHeadTail(text, cap) {
  */
 export function capToolOutput(toolName, response) {
   if (!response || typeof response !== 'object') return null;
-  if (toolName === 'Read') {
-    const file = response.file;
-    if (response.type !== 'text' || !file || typeof file.content !== 'string' || file.content.length <= READ_CAP_CHARS) return null;
-    const content = headLines(file.content, READ_CAP_CHARS);
-    return { ...response, file: { ...file, content, numLines: content.split('\n').length, truncatedByTokenCap: true } };
-  }
   if (toolName === 'Bash') {
+    if (response.isImage || (Array.isArray(response.structuredContent) && response.structuredContent.length)) return null;
     const stdout = trimHeadTail(response.stdout, BASH_CAP_CHARS);
-    const stderr = trimHeadTail(response.stderr, BASH_CAP_CHARS);
+    const stderr = trimHeadTail(response.stderr, stdout !== null ? BASH_STDERR_CAP_CHARS : BASH_CAP_CHARS);
     if (stdout === null && stderr === null) return null;
     return { ...response, ...(stdout !== null ? { stdout } : {}), ...(stderr !== null ? { stderr } : {}) };
   }
@@ -62,6 +60,7 @@ export function capToolOutput(toolName, response) {
     return {
       ...response,
       content: `${kept}\n… [${dropped} more lines omitted by LLM-IDE to save context — narrow the pattern or the path] …`,
+      numLines: kept.split('\n').length,
     };
   }
   return null;
@@ -74,9 +73,15 @@ export async function toolOutputCapHook(input) {
 }
 
 /** The hook matcher entry for `options.hooks.PostToolUse`. */
-export const TOOL_OUTPUT_CAP_HOOK = Object.freeze({ matcher: 'Read|Bash|Grep', hooks: [toolOutputCapHook] });
+export const TOOL_OUTPUT_CAP_HOOK = Object.freeze({ matcher: 'Bash|Grep', hooks: [toolOutputCapHook] });
 
-/** `hooks` with the cap appended to PostToolUse, plugin hooks kept as they were. */
-export function withToolOutputCap(hooks = {}) {
+/**
+ * `hooks` with the cap appended to PostToolUse, plugin hooks kept as they were.
+ * Not installed when native SDK plugins are loaded (`nativePlugins` > 0): all
+ * PostToolUse hooks run on the ORIGINAL output and the last write wins, so a
+ * trim built from the unredacted original could undo a plugin's redaction.
+ */
+export function withToolOutputCap(hooks = {}, { nativePlugins = 0 } = {}) {
+  if (nativePlugins > 0) return hooks;
   return { ...hooks, PostToolUse: [...(hooks.PostToolUse || []), TOOL_OUTPUT_CAP_HOOK] };
 }

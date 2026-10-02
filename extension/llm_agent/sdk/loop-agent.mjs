@@ -474,8 +474,9 @@ export async function runLoopAgent(
     disallowedTools: [...LOOP_AGENT_DISALLOWED],
     permissionMode: 'default',
     canUseTool,
-    // + the native-tool output cap (tool-output-cap.mjs): a repair reads files
-    // to fix them, and every hop re-reads what it read.
+    // + the native-tool output cap (tool-output-cap.mjs) — a no-op for this
+    // file-tools-only agent today (it caps Bash/Grep), kept so a future shell
+    // or search tool here is capped like the chat engine's.
     hooks: withToolOutputCap({
       PreToolUse: [{ hooks: [preToolUse] }],
       PostToolUse: [{ matcher: 'Edit|Write', hooks: [postToolUse] }],
