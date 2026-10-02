@@ -41,6 +41,19 @@ public enum StageCommandAvailability {
         return "\"\(missing)\" is not installed or not on PATH (\(searched))"
     }
 
+    /// The problem of the FIRST enabled, non-advisory shell stage, or nil.
+    /// Later stages are not checked: an earlier stage may provision the
+    /// environment (create `.venv`, install tools) that they need, so they keep
+    /// the runtime exit-127 path. Advisory stages never gate.
+    public static func firstProblem(in orderedStages: [LoopStage], repoRoot: URL,
+                                    inherited: [String: String])
+        -> (stageId: String, stageName: String, problem: String)? {
+        guard let first = orderedStages.first(where: {
+            $0.kind == .shellCommand && $0.severity != .advisory
+        }), let problem = problem(for: first, repoRoot: repoRoot, inherited: inherited) else { return nil }
+        return (first.id, first.name, problem)
+    }
+
     /// Plain command names the string starts a segment with. Undecidable
     /// words (paths, substitutions, assignments, builtins) are dropped.
     static func executableNames(in command: String) -> [String] {
@@ -56,11 +69,28 @@ public enum StageCommandAvailability {
                 .replacingOccurrences(of: "|", with: "\n")
                 .components(separatedBy: .newlines)
         }
-        return segments.compactMap { segment in
-            guard let word = segment.split(whereSeparator: \.isWhitespace).first.map(String.init),
-                  isPlainName(word), !shellWords.contains(word) else { return nil }
-            return word
+        var names: [String] = []
+        for segment in segments {
+            guard let word = segment.split(whereSeparator: \.isWhitespace).first.map(String.init) else {
+                continue
+            }
+            // Checked on the RAW word: `.` and `NAME=value` are not plain names.
+            if changesEnvironment(word) { break }
+            guard isPlainName(word), !shellWords.contains(word) else { continue }
+            names.append(word)
         }
+        return names
+    }
+
+    /// Words after which PATH may differ from the one we inspected, so every
+    /// later segment is undecidable.
+    private static let environmentChangingWords: Set<String> = [
+        "source", ".", "export", "eval", "set", "unset", "alias", "hash", "declare", "typeset",
+    ]
+
+    private static func changesEnvironment(_ word: String) -> Bool {
+        environmentChangingWords.contains(word)
+            || word.range(of: #"^[A-Za-z_][A-Za-z0-9_]*="#, options: .regularExpression) != nil
     }
 
     private static func isPlainName(_ word: String) -> Bool {

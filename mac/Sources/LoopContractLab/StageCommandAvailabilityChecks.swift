@@ -69,6 +69,18 @@ func runStageCommandAvailabilityChecks() {
     expect(missing("pushd dir && pytest") == nil,
            "pushd is a builtin and is not looked up on PATH")
 
+    // Commands that change the environment make every LATER segment undecidable.
+    expect(missing("source ~/v/bin/activate && nosuchtool") == nil,
+           "a later tool after `source` is undecidable, so it passes")
+    expect(missing(". venv/bin/activate && nosuchtool") == nil,
+           "a later tool after `.` is undecidable, so it passes")
+    expect(missing("export PATH=/x/bin:/usr/bin && nosuchtool") == nil,
+           "a later tool after `export` is undecidable, so it passes")
+    expect(missing("FOO=1; nosuchtool") == nil,
+           "a later tool after a bare assignment is undecidable, so it passes")
+    expect(missing("nosuchtool && source x") == "nosuchtool",
+           "a name BEFORE the environment-changing segment is still reported")
+
     // Stage level: the project's virtualenv is searched first.
     let tool = "llmide-no-such-tool-xyz"
     let repo = root.appendingPathComponent("repo")
@@ -91,5 +103,27 @@ func runStageCommandAvailabilityChecks() {
     let skill = LoopStage(id: "s", name: "Skill", kind: .skill, order: 0)
     expect(StageCommandAvailability.problem(for: skill, repoRoot: bare, inherited: inherited) == nil,
            "a stage without a shell command is never reported")
+
+    // firstProblem: only the first enabled, non-advisory shell stage is checked.
+    func shell(_ id: String, _ command: String, _ severity: LoopStageSeverity = .blocking) -> LoopStage {
+        LoopStage(id: id, name: "N-\(id)", kind: .shellCommand, command: command, order: 0,
+                  severity: severity)
+    }
+    let ok = "pytest"
+    func first(_ stages: [LoopStage]) -> (stageId: String, stageName: String, problem: String)? {
+        StageCommandAvailability.firstProblem(
+            in: stages, repoRoot: bare, inherited: ["PATH": path, "HOME": bare.path])
+    }
+    expect(first([shell("a", "nosuchtool", .advisory)]) == nil,
+           "an advisory stage with a missing tool is never reported")
+    expect(first([shell("a", ok), shell("b", "nosuchtool")]) == nil,
+           "a satisfied first stage means a later missing tool is not preflighted")
+    let hit = first([shell("a", "nosuchtool"), shell("b", ok)])
+    expect(hit?.stageId == "a" && hit?.stageName == "N-a" && hit?.problem.contains("nosuchtool") == true,
+           "the first blocking shell stage missing returns its id and name")
+    let skipped = first([LoopStage(id: "k", name: "Skill", kind: .skill, order: 0),
+                         shell("adv", "nosuchtool", .advisory), shell("b", "nosuchtool")])
+    expect(skipped?.stageId == "b",
+           "a non-shell and an advisory stage are skipped; the next blocking shell stage is checked")
 }
 #endif

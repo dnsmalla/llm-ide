@@ -206,6 +206,12 @@ final class LoopEngineRunner: ObservableObject {
     /// (`custom`, `cmd-a`) and a fake verifier, which this check would block.
     /// The two production construction sites turn it on.
     private let checksCommandAvailability: Bool
+
+    /// Appended to a blocked.environment detail in a worktree run. The view
+    /// hides "Set up environment…" when it sees this text: setting up the main
+    /// checkout's .venv cannot help a worktree run.
+    static let worktreeEnvironmentNote =
+        " (this run uses an isolated worktree, which has none of the main checkout's gitignored dependency folders such as .venv or node_modules)"
     /// Registers the run's main git root with the server's repo allow-list
     /// before the first agent call. nil (tests) skips registration.
     private let repoRegistrar: LoopRepoRegistering?
@@ -647,6 +653,10 @@ final class LoopEngineRunner: ObservableObject {
         // earlier stage only to discover a LATER stage is unapproved or
         // misconfigured would waste both, and per spec, needing approval
         // must not itself consume an iteration.
+        let environmentHit = checksCommandAvailability
+            ? StageCommandAvailability.firstProblem(
+                in: orderedStages, repoRoot: runGitRoot, inherited: ProcessInfo.processInfo.environment)
+            : nil
         for stage in orderedStages {
             switch stage.kind {
             case .shellCommand:
@@ -660,13 +670,11 @@ final class LoopEngineRunner: ObservableObject {
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
-                if checksCommandAvailability,
-                   let problem = StageCommandAvailability.problem(
-                       for: stage, repoRoot: runGitRoot, inherited: ProcessInfo.processInfo.environment) {
-                    // Same wording as the runtime path (exit 127) so the status
-                    // reads the same whether it was caught here or after a run.
-                    let worktreeNote = currentWorktreeLease == nil ? ""
-                        : " (this run uses an isolated worktree, which has none of the main checkout's gitignored dependency folders such as .venv or node_modules)"
+                if let hit = environmentHit, hit.stageId == stage.id {
+                    let problem = hit.problem
+                    // Same status kind as the runtime path (blocked.environment),
+                    // with its own message.
+                    let worktreeNote = currentWorktreeLease == nil ? "" : Self.worktreeEnvironmentNote
                     appendLog(.error, "  [\(stage.name)] environment problem: \(problem)\(worktreeNote) — set up the environment and run again")
                     return await finish(.blocked(reason: .environment(stageName: stage.name,
                                                                       detail: problem + worktreeNote)),
@@ -1124,12 +1132,11 @@ final class LoopEngineRunner: ObservableObject {
         if let problem = environmentProblem, (repairsUsed[stage.id] ?? 0) > 0 {
             appendLog(.warn, "  [\(stage.name)] looks like an environment problem (\(problem)), but a repair already ran — repairing in case that repair caused it")
         } else if let problem = environmentProblem {
-            let worktreeNote = currentWorktreeLease == nil ? ""
-                : " (this run uses an isolated worktree, which has none of the main checkout's gitignored dependency folders such as .venv or node_modules)"
+            let worktreeNote = currentWorktreeLease == nil ? "" : Self.worktreeEnvironmentNote
             appendLog(.warn, "  [\(stage.name)] environment problem: \(problem)\(worktreeNote) — not sending it to repair; set up the environment and run again")
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, outputHash: failureHash, score: score)
-            return .terminate(.blocked(reason: .environment(stageName: stage.name, detail: problem)))
+            return .terminate(.blocked(reason: .environment(stageName: stage.name, detail: problem + worktreeNote)))
         }
 
         let used = repairsUsed[stage.id] ?? 0
