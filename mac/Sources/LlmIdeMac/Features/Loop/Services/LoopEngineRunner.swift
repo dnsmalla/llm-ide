@@ -201,6 +201,11 @@ final class LoopEngineRunner: ObservableObject {
     private let summaryWriter: LoopRunSummaryWriting
     private let scopeGuard: RepairScopeGuarding
     private let trigger: LoopRunTrigger
+    /// Whether preflight also verifies that each shell stage's executable
+    /// exists. Off by default: tests drive the runner with fake commands
+    /// (`custom`, `cmd-a`) and a fake verifier, which this check would block.
+    /// The two production construction sites turn it on.
+    private let checksCommandAvailability: Bool
     /// Registers the run's main git root with the server's repo allow-list
     /// before the first agent call. nil (tests) skips registration.
     private let repoRegistrar: LoopRepoRegistering?
@@ -270,7 +275,9 @@ final class LoopEngineRunner: ObservableObject {
          repoRegistrar: LoopRepoRegistering? = nil,
          transportRetryDelay: TimeInterval = 2,
          defaultShellTimeout: TimeInterval = 0,
-         defaultAgentTimeout: TimeInterval = 0) {
+         defaultAgentTimeout: TimeInterval = 0,
+         checksCommandAvailability: Bool = false) {
+        self.checksCommandAvailability = checksCommandAvailability
         self.transportRetryDelay = transportRetryDelay
         self.repoRegistrar = repoRegistrar
         self.verifier = verifier
@@ -649,6 +656,20 @@ final class LoopEngineRunner: ObservableObject {
                     // string lands in.
                     appendLog(.error, "  [\(stage.name)] \(problem.detail)")
                     return await finish(.error(problem.status),
+                                        config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
+                                        projectId: projectId, startedAt: startedAt,
+                                        loopId: loopId, loopName: loopName)
+                }
+                if checksCommandAvailability,
+                   let problem = StageCommandAvailability.problem(
+                       for: stage, repoRoot: runGitRoot, inherited: ProcessInfo.processInfo.environment) {
+                    // Same wording as the runtime path (exit 127) so the status
+                    // reads the same whether it was caught here or after a run.
+                    let worktreeNote = currentWorktreeLease == nil ? ""
+                        : " (this run uses an isolated worktree, which has none of the main checkout's gitignored dependency folders such as .venv or node_modules)"
+                    appendLog(.error, "  [\(stage.name)] environment problem: \(problem)\(worktreeNote) — set up the environment and run again")
+                    return await finish(.blocked(reason: .environment(stageName: stage.name,
+                                                                      detail: problem + worktreeNote)),
                                         config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
