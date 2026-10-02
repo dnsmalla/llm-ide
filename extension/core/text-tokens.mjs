@@ -7,9 +7,11 @@
 // katakana loan words badly (トーク|ン, ビル|ド), so this uses script runs:
 //   - ASCII: the old rule, unchanged — 3+ characters, lower-cased.
 //   - Katakana: each run of 2+ characters is one token (トークン, ビルド).
-//   - Kanji: a run of 1–2 characters is a token (認証); a longer run becomes
+//   - Kanji: a run of 2 characters is a token (認証); a longer run becomes
 //     its overlapping bigrams (議事録 → 議事, 事録), so a compound still
-//     matches its parts without a dictionary.
+//     matches its parts without a dictionary. A lone kanji (何, 方, 時) is
+//     skipped: it is glue about as often as hiragana is, and every fact
+//     sharing one would outrank newer, unrelated ones.
 //   - Hiragana is skipped: in mixed text it is particles and okurigana, the
 //     glue words a stopword list removes in English.
 
@@ -26,7 +28,8 @@ export function termTokens(text) {
     const [, ascii, katakana, han] = m;
     if (ascii) out.push(ascii);
     else if (katakana) out.push(katakana);
-    else if (han.length <= 2) out.push(han);
+    else if (han.length === 1) continue;
+    else if (han.length === 2) out.push(han);
     else for (let i = 0; i + 2 <= han.length; i += 1) out.push(han.slice(i, i + 2));
   }
   return out;

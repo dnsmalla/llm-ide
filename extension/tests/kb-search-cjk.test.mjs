@@ -88,6 +88,14 @@ test('findContext (OR) retrieves a meeting from a Japanese sentence query', () =
   assert.deepEqual(ctx.meetings.map((h) => h.meeting_id), ['m1']);
 });
 
+test('a hiragana-only word is still searchable', () => {
+  reset();
+  const u = provision('hira');
+  meeting(u, 'm1', '雑談', 'わさびの話をした。', '2026-05-01');
+  meeting(u, 'm2', '定例', '予算の見直し。', '2026-05-02');
+  assert.deepEqual(ids(db.search(u, { q: 'わさび', kind: 'meeting' })), ['m1']);
+});
+
 test('LIKE wildcards in a short term are literal, not patterns', () => {
   reset();
   const u = provision('esc');

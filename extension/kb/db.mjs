@@ -123,9 +123,10 @@ export function safeJSONStringify(v) {
 // Japanese has no spaces, so a sentence reached here as ONE token — an exact
 // phrase no document contains. Its content words are the kanji and katakana
 // runs (kept whole: this is substring matching, unlike the memory ranker's
-// bigrams); hiragana between them is particles and okurigana. Tokens without
-// kana or kanji pass through unchanged.
-const JAPANESE_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+// bigrams); hiragana between them is particles and okurigana. A token with
+// no kanji or katakana — plain ASCII, Korean, or a hiragana-only word like
+// わさび — passes through unchanged.
+const JAPANESE_RE = /[\p{Script=Han}\p{Script=Katakana}]/u;
 const JAPANESE_RUN_RE = /[\p{Script=Katakana}\u30FC]{2,}|\p{Script=Han}{2,}|[\p{Script=Latin}\p{N}_]{2,}/gu;
 function splitJapaneseRuns(token) {
   if (!JAPANESE_RE.test(token)) return [token];

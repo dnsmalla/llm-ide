@@ -14,7 +14,7 @@ test('a katakana run is one token, however the word segmenter would split it', (
   assert.deepEqual(termTokens('ビルド'), ['ビルド']);
 });
 
-test('a kanji run of 1–2 characters is a token; a longer run becomes its bigrams', () => {
+test('a kanji run of 2 characters is a token; a longer run becomes its bigrams', () => {
   assert.deepEqual(termTokens('認証'), ['認証']);
   assert.deepEqual(termTokens('議事録'), ['議事', '事録']);
 });
@@ -29,4 +29,9 @@ test('mixed scripts in one string', () => {
 
 test('non-strings yield no tokens', () => {
   assert.deepEqual(termTokens(undefined), []);
+});
+
+test('a lone kanji is not a token: 何/方/時 are glue as often as hiragana is', () => {
+  assert.deepEqual(termTokens('何の使い方ですか'), []);
+  assert.deepEqual(termTokens('時間の設定'), ['時間', '設定']);
 });
