@@ -20,7 +20,7 @@ import { runAgentV2Turn, AGENT_SDK_PROVIDER } from '../llm_agent/sdk/engine.mjs'
 import { deleteSdkTranscripts } from '../llm_agent/sdk/transcripts.mjs';
 import { taskTurnResponse, makeTaskProgressEmitter } from '../llm_agent/runtime/task-session-context.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
-import { classifyCodeAssistMode, MODES, AUTO_READ_ONLY, clampToReadOnly, isAutoContinueTurn } from '../llm_agent/runtime/mode-classify.mjs';
+import { classifyCodeAssistMode, quickMode, MODES, AUTO_READ_ONLY, clampToReadOnly, isAutoContinueTurn } from '../llm_agent/runtime/mode-classify.mjs';
 import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
 import { expandSlashCommand } from '../plugins/loader.mjs';
 import { getDb } from '../kb/db.mjs';
@@ -279,7 +279,11 @@ async function handleV2Stream(req, res, userId, deps) {
     try {
       const classifyStartedAt = Date.now();
       const classified = (await deps.classifyMode(message, { userId }))?.mode;
-      recordAgentTurnPhase({ engine: 'v2', phase: 'classify', durationMs: Date.now() - classifyStartedAt });
+      // Timed only when the model was asked: a local quickMode answer takes
+      // ~0 ms and would drag the histogram toward a latency nobody waits for.
+      if (quickMode(message) === null) {
+        recordAgentTurnPhase({ engine: 'v2', phase: 'classify', durationMs: Date.now() - classifyStartedAt });
+      }
       const resolved = typeof classified === 'string' && MODES.has(classified)
         ? classified
         : (readOnly ? 'ask' : DEFAULT_MODE);

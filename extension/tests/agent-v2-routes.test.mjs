@@ -1321,3 +1321,21 @@ test('stream: a turn records first_token and total phase timings', async () => {
   assert.match(text, /llmide_agent_turn_phase_seconds_count\{engine="v2",phase="total"\} 1/);
   assert.doesNotMatch(text, /phase="classify"/, 'an explicit mode is not classified, so not timed');
 });
+
+test('stream: classify is timed only when the model was asked, not for a local quickMode answer', async () => {
+  const metrics = await import('../server/metrics.mjs');
+  const user = newUser('v2route-classify-timing@example.com');
+  const fakeTurn = async ({ onEvent }) => {
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-c', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: {} };
+  };
+  const send = (message, chat) => handleAgentV2Routes(makeReq({
+    method: 'POST', url: '/agent/v2/stream', user,
+    body: { message, mode: 'auto', agentContext: { chatSessionId: chat, workspaceRoot: WS } },
+  }), makeRes(), { runTurn: fakeTurn, classifyMode: async () => ({ mode: 'execute' }) });
+  metrics._resetForTests();
+  await send('fix the failing test', 'chat-c1');
+  assert.doesNotMatch(metrics.renderPrometheus(), /phase="classify"/, 'a local answer is not a classify latency');
+  await send('what do you think about this design?', 'chat-c2');
+  assert.match(metrics.renderPrometheus(), /llmide_agent_turn_phase_seconds_count\{engine="v2",phase="classify"\} 1/);
+});
