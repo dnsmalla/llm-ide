@@ -101,6 +101,12 @@ struct LoopEngineView: View {
     /// a re-render (config reload, project switch, cache expiry) cannot change
     /// the list between showing it and approving it.
     @State private var approveAllSnapshot: (gitRoot: URL, items: [(stageId: String, name: String, command: String)])?
+    /// The plan awaiting the user's consent for "Set up environment…".
+    /// Frozen with the repo root at tap time, like `approveAllSnapshot`.
+    @State private var environmentSetupPlan: (plan: ProjectEnvironmentSetupPlan, gitRoot: URL)?
+    @State private var isSettingUpEnvironment = false
+    /// The last setup run's outcome, shown under the toolbar until the next run.
+    @State private var environmentSetupMessage: String?
     @State private var skillCatalog: [LlmIdeAPIClient.SkillLibraryEntry] = []
     @State private var skillsLoaded = false
     @State private var pastRuns: [LoopRunIndexEntry] = []
@@ -193,6 +199,17 @@ struct LoopEngineView: View {
     /// the filesystem scan per shell stage per render.
     @State var detectedCommandCandidates: [LoopStageDetector.DetectedCommand] = []
 
+    /// Read-only environment status for the Environment section. Refreshed when
+    /// the project changes and on demand; never persisted.
+    @State var environmentStatus: ProjectEnvironmentStatus?
+    @State var isInspectingEnvironment = false
+    /// Identifies the latest inspection; only the run holding the current token
+    /// may clear the in-progress flag or store a result.
+    @State var environmentInspectionToken = 0
+    /// Whether the shown status came from an explicit interpreter check (which
+    /// runs the project's own Python) rather than file facts only.
+    @State var environmentInterpreterChecked = false
+
     /// How many past runs the history list shows. One constant, so the header's
     /// "latest N" badge cannot claim a different cap than `loadPastRuns`
     /// actually applies.
@@ -241,6 +258,12 @@ struct LoopEngineView: View {
             detectedCommandCandidates = gitRoot == nil ? [] : await Task.detached(priority: .userInitiated) {
                 LoopStageDetector.detectCommandCandidates(gitRoot: gitRoot!)
             }.value
+        }
+        .task(id: reloadKey) {
+            // Cleared first (inside the call) so a previous project's answer is
+            // never shown while this project is being inspected. File facts
+            // only: opening the page must not run repository-controlled code.
+            await refreshEnvironmentStatus(clearing: true, interpreter: false)
         }
         .task(id: reloadKey) {
             selectedStageId = nil
@@ -436,6 +459,8 @@ struct LoopEngineView: View {
                     VStack(alignment: .leading, spacing: Spacing.lg) {
                         overviewSection
                         Divider().background(t.border)
+                        environmentSection
+                        Divider().background(t.border)
                         templateSection
                         Divider().background(t.border)
                         processSection
@@ -568,7 +593,7 @@ struct LoopEngineView: View {
     }
 
     private var toolbar: some View {
-        RunnerObserver(runner: runner) { approveAllDialog(toolbarContent) }
+        RunnerObserver(runner: runner) { environmentSetupDialog(approveAllDialog(toolbarContent)) }
     }
 
     /// A phone/schedule run of THIS loop on the Auto Task lane — shown in the
@@ -591,6 +616,7 @@ struct LoopEngineView: View {
             // without it a fast double-click reached the service's refusal
             // path and reported "already busy" for a run that DID start.
             .disabled(runner.running || runner.waitingInQueue || isStartPending || laneRun != nil
+                      || isSettingUpEnvironment
                       || !stages.contains(where: \.enabled) || activeGitRootURL == nil)
             .help(laneRun.map { "\($0.label) — stop it before running from here." } ?? "")
             if !runner.running, let gitRoot = activeGitRootURL {
@@ -645,6 +671,28 @@ struct LoopEngineView: View {
                 Text(status.summary)
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
+                // Only for a missing tool/dependency, and only where a Python
+                // project declares its dependencies. The loop never installs:
+                // this is the user's explicit action.
+                // Hidden for a worktree run: the main checkout's .venv is never
+                // borrowed by a worktree, so setting it up would not help.
+                if case .blocked(.environment(_, let detail)) = status,
+                   !detail.contains(LoopEngineRunner.worktreeEnvironmentNote),
+                   let gitRoot = activeGitRootURL,
+                   let plan = ProjectEnvironmentSetupPlanner.plan(for: gitRoot) {
+                    Button(isSettingUpEnvironment ? "Setting up…" : "Set up environment…") {
+                        environmentSetupPlan = (plan: plan, gitRoot: gitRoot)
+                    }
+                    .controlSize(.small)
+                    .disabled(isSettingUpEnvironment)
+                    .help("Create \(plan.virtualEnvName)/ in this project and install its dependencies and pytest")
+                    if let message = environmentSetupMessage {
+                        Text(message)
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
+                            .lineLimit(3)
+                    }
+                }
             } else if !runner.running, didRejectLastRun {
                 // Defensive only: with the Run button disabled on
                 // `isStartPending` and startRun's own guard, the remaining
@@ -695,6 +743,41 @@ struct LoopEngineView: View {
             } message: {
                 Text((approveAllSnapshot?.items ?? []).map { "\($0.name): \($0.command)" }.joined(separator: "\n"))
             }
+    }
+
+    /// Shows exactly the commands that will run, because this installs software.
+    private func environmentSetupDialog<Content: View>(_ content: Content) -> some View {
+        content
+            .confirmationDialog("Set up this project's Python environment?",
+                                isPresented: Binding(get: { environmentSetupPlan != nil },
+                                                     set: { if !$0 { environmentSetupPlan = nil } }),
+                                titleVisibility: .visible) {
+                Button("Set up") { startEnvironmentSetup() }
+                Button("Cancel", role: .cancel) { environmentSetupPlan = nil }
+            } message: {
+                Text(environmentSetupPlan?.plan.summary ?? "")
+            }
+    }
+
+    private func startEnvironmentSetup() {
+        guard let snapshot = environmentSetupPlan else { return }
+        let (plan, gitRoot) = (snapshot.plan, snapshot.gitRoot)
+        environmentSetupPlan = nil
+        isSettingUpEnvironment = true
+        environmentSetupMessage = nil
+        Task { @MainActor in
+            let result = await ProjectEnvironmentSetupService().run(plan, in: gitRoot)
+            isSettingUpEnvironment = false
+            environmentSetupMessage = result.succeeded
+                ? "Environment is ready — run the loop again."
+                : "Setup failed — \(String(result.output.suffix(300)))"
+            // The click on "Set up" was the approval to run the project's Python.
+            // Skipped when the user switched project meanwhile: no click approved running
+            // the OTHER project's Python.
+            if result.succeeded, activeGitRootURL == gitRoot {
+                await refreshEnvironmentStatus(interpreter: true)
+            }
+        }
     }
 
     /// A binding to the stage with `id`, looked up on every access. A binding
@@ -1667,6 +1750,10 @@ struct LoopEngineView: View {
         // "Run this stage only" lives in a menu the disable doesn't cover.
         guard !runService.isRunning(projectId: projectId, loopId: loopId),
               runService.laneRun(projectId: projectId, loopId: loopId) == nil else { return }
+        // A pip install into the project's venv is in flight; running now
+        // would race it.
+        guard !isSettingUpEnvironment else { return }
+        environmentSetupMessage = nil
         // Only after every refusal path: a refused start must not close the
         // journal record the user was reading.
         clearPastRunInspection()
