@@ -528,6 +528,7 @@ runStageCommandAvailabilityChecks()
 runProjectEnvironmentSetupChecks()
 runProjectEnvironmentAssessorChecks()
 await runProjectEnvironmentInspectorChecks()
+runLoopOutputLayoutChecks()
 #endif
 
 if failures.isEmpty {

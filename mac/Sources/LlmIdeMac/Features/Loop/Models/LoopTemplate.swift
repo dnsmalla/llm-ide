@@ -271,8 +271,8 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                 // an Input/Output edit, not a prompt rewrite.
                 LoopStage(name: "Structure Index", kind: .skill, order: 0,
                           skillId: "skills/plan-structure-index",
-                          targetPath: "llm-doc/plans",
-                          outputPath: "llm-doc/plans/INDEX.md",
+                          targetPath: LoopOutputLayout.collectedPlansDir,
+                          outputPath: LoopOutputLayout.planIndex,
                           prompt: "Refresh the plan structure index: read every plan in the Input directory and "
                               + "rewrite only the drifted sections of the Output index file, creating it if "
                               + "missing. Resolve relative paths against the repo root first, then the project "
@@ -285,8 +285,8 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                               + "candidates (files over 500 lines), rows marked status proposed."),
                 LoopStage(name: "Plan Director", kind: .skill, order: 1,
                           skillId: "skills/plan-director",
-                          targetPath: "llm-doc/plans",
-                          outputPath: "llm-doc/plans/PLAN.md",
+                          targetPath: LoopOutputLayout.collectedPlansDir,
+                          outputPath: LoopOutputLayout.planMaster,
                           prompt: "Consolidate every plan in the Input directory into the master plan at the "
                               + "Output path: a hierarchy of areas → file plans → function plans, each entry with "
                               + "a stable task ID, a status, and links back to its source plan and its "
@@ -318,11 +318,11 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                 LoopStage(name: "Refactor Plan", kind: .skill, order: 0,
                           skillId: "skills/refactor-planner",
                           targetPath: ".",
-                          outputPath: "llm-doc/refactor/REFACTOR.md",
+                          outputPath: LoopOutputLayout.refactorPlan,
                           prompt: LoopStageDetector.refactorPlanPrompt),
                 LoopStage(name: "Refactor Apply", kind: .skill, order: 1,
                           skillId: "skills/refactor-apply",
-                          targetPath: "llm-doc/refactor/REFACTOR.md",
+                          targetPath: LoopOutputLayout.refactorPlan,
                           outputPath: ".",
                           prompt: LoopStageDetector.refactorApplyPrompt),
                 LoopStage(name: "Test", kind: .shellCommand,
@@ -333,24 +333,24 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
 
     /// The Doc Optimization default loop's recipe (`LoopDefaultLoopKey.docs`):
     /// refresh the doc index, then write the generated, code-cited pages under
-    /// `llm-doc/docs/`. Generate-only like `planDirector`, so `maxIterations`
+    /// `llm-doc/loop/docs/`. Generate-only like `planDirector`, so `maxIterations`
     /// is a backstop.
     static let docOptimization = LoopTemplate(
         id: UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000AB")!,
         name: "Doc Optimization",
-        summary: "Index the codebase's areas, then write a generated doc tree under llm-doc/docs/ "
+        summary: "Index the codebase's areas, then write a generated doc tree under llm-doc/loop/docs/ "
             + "whose every code claim is cited so the code graph can link it.",
         config: LoopEngineConfig(
             stages: [
                 LoopStage(name: "Doc Index", kind: .skill, order: 0,
                           skillId: "skills/doc-structure-index",
                           targetPath: ".",
-                          outputPath: "llm-doc/docs/INDEX.md",
+                          outputPath: LoopOutputLayout.docsIndex,
                           prompt: LoopStageDetector.docIndexPrompt),
                 LoopStage(name: "Doc Writer", kind: .skill, order: 1,
                           skillId: "skills/doc-writer",
-                          targetPath: "llm-doc/docs/INDEX.md",
-                          outputPath: "llm-doc/docs",
+                          targetPath: LoopOutputLayout.docsIndex,
+                          outputPath: LoopOutputLayout.docsDir,
                           prompt: LoopStageDetector.docWriterPrompt),
                 LoopStage(name: "Doc Check", kind: .artifactCheck, order: 2,
                           check: LoopStageDetector.docCheckSpec)

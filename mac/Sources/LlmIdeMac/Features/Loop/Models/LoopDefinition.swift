@@ -151,11 +151,11 @@ public enum LoopDefaultLoopKey {
     /// hierarchical master plan (the "plan director").
     public static let plan = "plan"
     /// The refactoring loop: write a batched, behaviour-preserving refactor
-    /// plan (`llm-doc/refactor/REFACTOR.md`), apply ONE batch of it, then run
+    /// plan (`llm-doc/loop/refactor/REFACTOR.md`), apply ONE batch of it, then run
     /// the project's tests. Manual only — see `manualOnly`.
     public static let refactor = "refactor"
     /// The doc-optimization loop: index the codebase's areas, then write a
-    /// generated, code-cited doc tree under `llm-doc/docs/`.
+    /// generated, code-cited doc tree under `llm-doc/loop/docs/`.
     public static let docs = "docs"
     /// The Self-Heal loop: triage recorded incidents, fix the root cause of
     /// each, then verify in an isolated worktree. Created only on the LLM-IDE

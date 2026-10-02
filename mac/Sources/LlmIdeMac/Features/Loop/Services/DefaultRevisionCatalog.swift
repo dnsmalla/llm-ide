@@ -17,7 +17,49 @@ struct DefaultRevisionCatalog {
     /// `history[key][revision]` = the content shipped at that revision.
     var history: [String: [Int: LoopStage]] = [:]
 
-    static let shipped = DefaultRevisionCatalog()
+    /// Revision 2 moved the generated output of the Plan, Refactoring and Doc
+    /// Optimization loops under `llm-doc/loop/<key>/` (`LoopOutputLayout`).
+    static let shipped = DefaultRevisionCatalog(
+        currentRevisions: Dictionary(uniqueKeysWithValues:
+            LoopOutputLayout.movedStageKeys.map { ($0, LoopOutputLayout.revision) }),
+        history: [
+            "plan-structure-index": [1: LoopStage(
+                name: "Structure Index", kind: .skill, order: 0,
+                skillId: "skills/plan-structure-index",
+                targetPath: LoopOutputLayout.collectedPlansDir,
+                outputPath: LoopOutputLayout.Legacy.planIndex,
+                prompt: LoopStageDetector.planStructureIndexPrompt)],
+            "plan-director": [1: LoopStage(
+                name: "Plan Director", kind: .skill, order: 1,
+                skillId: "skills/plan-director",
+                targetPath: LoopOutputLayout.collectedPlansDir,
+                outputPath: LoopOutputLayout.Legacy.planMaster,
+                prompt: LoopStageDetector.planDirectorPrompt)],
+            "refactor-plan": [1: LoopStage(
+                name: "Refactor Plan", kind: .skill, order: 0,
+                skillId: "skills/refactor-planner",
+                targetPath: ".",
+                outputPath: LoopOutputLayout.Legacy.refactorPlan,
+                prompt: LoopStageDetector.refactorPlanPrompt)],
+            "refactor-apply": [1: LoopStage(
+                name: "Refactor Apply", kind: .skill, order: 1,
+                skillId: "skills/refactor-apply",
+                targetPath: LoopOutputLayout.Legacy.refactorPlan,
+                outputPath: ".",
+                prompt: LoopStageDetector.refactorApplyPrompt)],
+            "doc-index": [1: LoopStage(
+                name: "Doc Index", kind: .skill, order: 0,
+                skillId: "skills/doc-structure-index",
+                targetPath: ".",
+                outputPath: LoopOutputLayout.Legacy.docsIndex,
+                prompt: LoopStageDetector.docIndexPrompt)],
+            "doc-writer": [1: LoopStage(
+                name: "Doc Writer", kind: .skill, order: 1,
+                skillId: "skills/doc-writer",
+                targetPath: LoopOutputLayout.Legacy.docsIndex,
+                outputPath: LoopOutputLayout.Legacy.docsDir,
+                prompt: LoopStageDetector.docWriterPrompt)],
+        ])
 
     func current(_ key: String) -> Int { currentRevisions[key] ?? 1 }
 }
@@ -82,10 +124,37 @@ extension LoopStageDetector {
                 mutated = true
                 return upgraded
             }
+            // The loop's goal / acceptance text names the output paths too. Bring it
+            // forward ONLY when it still equals the text the loop was created with —
+            // an edited text is the user's and nothing rewrites it.
+            if let loopKey = loop.defaultKey,
+               let movedKey = Self.contractGateStageKey[loopKey], catalog.current(movedKey) >= LoopOutputLayout.revision,
+               let legacy = legacyLoopContract(loopKey), let current = defaultLoopContract(loopKey) {
+                var textChanged = false
+                if updated.goal == legacy.goal, legacy.goal != current.goal {
+                    updated.goal = current.goal
+                    textChanged = true
+                }
+                if updated.acceptanceCriteria == legacy.acceptance, legacy.acceptance != current.acceptance {
+                    updated.acceptanceCriteria = current.acceptance
+                    textChanged = true
+                }
+                if textChanged {
+                    changes.append(RevalidationChange(loopName: loop.name, stageName: "Goal and acceptance criteria",
+                                                       kind: .upgradedDefault(revision: LoopOutputLayout.revision)))
+                    mutated = true
+                }
+            }
             return mutated ? updated : loop
         }
         return (result, changes)
     }
+
+    /// Which moved stage gates the goal / acceptance text upgrade of a loop.
+    private static let contractGateStageKey = [
+        LoopDefaultLoopKey.plan: "plan-director",
+        LoopDefaultLoopKey.docs: "doc-writer",
+    ]
 
     /// Whether a newer shipped revision of this default exists that was not
     /// applied automatically (the user edited the stage).

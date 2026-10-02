@@ -692,7 +692,7 @@ public enum LoopStageDetector {
     /// The Plan loop's two generate stages: refresh the structure indexes,
     /// then consolidate every collected plan into the master plan. Both are
     /// `.skill` stages, so they need no shell approval and never gate the run
-    /// — the loop exists to (re)generate `llm-doc/plans/INDEX.md` and
+    /// — the loop exists to (re)generate `llm-doc/loop/plan/INDEX.md` and
     /// `PLAN.md`, not to verify anything.
     ///
     /// The `prompt` carries the whole contract on its own: the skill ids
@@ -735,38 +735,44 @@ public enum LoopStageDetector {
         [
             LoopStage(name: "Structure Index", kind: .skill, order: 0,
                       skillId: "skills/plan-structure-index",
-                      targetPath: "llm-doc/plans",
-                      outputPath: "llm-doc/plans/INDEX.md",
-                      prompt: "Refresh the plan structure index: read every plan in the Input directory and "
-                          + "rewrite only the drifted sections of the Output index file, creating it if missing. "
-                          + "Resolve relative paths against the repo root first, then the project root (the "
-                          + "directory containing system/project.json — the repo root itself, or two levels up "
-                          + "when the repo is checked out under code/). The index holds: a folder-structure index "
-                          + "of the codebase, a file index and a function index for the areas the collected plans "
-                          + "touch, and a registry of every plan file in the Input directory. With no plans yet, "
-                          + "build the index from the code itself: entry points, each area's key modules and "
-                          + "public functions, and the largest refactor candidates (files over 500 lines), rows "
-                          + "marked status proposed.",
+                      targetPath: LoopOutputLayout.collectedPlansDir,
+                      outputPath: LoopOutputLayout.planIndex,
+                      prompt: planStructureIndexPrompt,
                       isDefault: true, defaultKey: "plan-structure-index"),
             LoopStage(name: "Plan Director", kind: .skill, order: 1,
                       skillId: "skills/plan-director",
-                      targetPath: "llm-doc/plans",
-                      outputPath: "llm-doc/plans/PLAN.md",
-                      prompt: "Consolidate every plan in the Input directory into the master plan at the Output "
-                          + "path: a hierarchy of areas → file plans → function plans, each entry with a stable "
-                          + "task ID, a status, and links back to its source plan and its structure-index rows. "
-                          + "With no plans yet, derive the first master plan from the code itself via the "
-                          + "structure index: propose areas from real signals (oversized files, missing tests, "
-                          + "TODO/FIXME markers, layering violations), each area marked status proposed — future "
-                          + "plans build on these indexes. Keep every generated plan file "
-                          + "within the 250-line limit, splitting oversized areas into an areas/ folder beside "
-                          + "the Output file. Preserve existing task IDs and completed ticks; never delete or "
-                          + "rewrite the source plans.",
+                      targetPath: LoopOutputLayout.collectedPlansDir,
+                      outputPath: LoopOutputLayout.planMaster,
+                      prompt: planDirectorPrompt,
                       isDefault: true, defaultKey: "plan-director"),
             LoopStage(name: "Plan Check", kind: .artifactCheck, order: 2,
                       isDefault: true, defaultKey: "plan-check", check: planCheckSpec),
         ]
     }
+
+    /// The Plan loop's stage prompts. Named (not inline) so the revision history in
+    /// `LoopOutputLayout` / `DefaultRevisionCatalog` records the SAME text.
+    static let planStructureIndexPrompt = "Refresh the plan structure index: read every plan in the Input directory and "
+        + "rewrite only the drifted sections of the Output index file, creating it if missing. "
+        + "Resolve relative paths against the repo root first, then the project root (the "
+        + "directory containing system/project.json — the repo root itself, or two levels up "
+        + "when the repo is checked out under code/). The index holds: a folder-structure index "
+        + "of the codebase, a file index and a function index for the areas the collected plans "
+        + "touch, and a registry of every plan file in the Input directory. With no plans yet, "
+        + "build the index from the code itself: entry points, each area's key modules and "
+        + "public functions, and the largest refactor candidates (files over 500 lines), rows "
+        + "marked status proposed."
+
+    static let planDirectorPrompt = "Consolidate every plan in the Input directory into the master plan at the Output "
+        + "path: a hierarchy of areas → file plans → function plans, each entry with a stable "
+        + "task ID, a status, and links back to its source plan and its structure-index rows. "
+        + "With no plans yet, derive the first master plan from the code itself via the "
+        + "structure index: propose areas from real signals (oversized files, missing tests, "
+        + "TODO/FIXME markers, layering violations), each area marked status proposed — future "
+        + "plans build on these indexes. Keep every generated plan file "
+        + "within the 250-line limit, splitting oversized areas into an areas/ folder beside "
+        + "the Output file. Preserve existing task IDs and completed ticks; never delete or "
+        + "rewrite the source plans."
 
     /// The Plan loop's blocking check. It follows the generate stages' editable
     /// Outputs at run time (`ArtifactCheckSpec.OutputRule`): the structure
@@ -870,14 +876,14 @@ public enum LoopStageDetector {
             LoopStage(name: "Refactor Plan", kind: .skill, order: 0,
                       skillId: "skills/refactor-planner",
                       targetPath: ".",
-                      outputPath: "llm-doc/refactor/REFACTOR.md",
+                      outputPath: LoopOutputLayout.refactorPlan,
                       prompt: refactorPlanPrompt,
                       isDefault: true, defaultKey: "refactor-plan"),
         ]
         guard let testCommand = detectTestCommand(gitRoot: gitRoot) else { return stages }
         stages.append(LoopStage(name: "Refactor Apply", kind: .skill, order: 1,
                                 skillId: "skills/refactor-apply",
-                                targetPath: "llm-doc/refactor/REFACTOR.md",
+                                targetPath: LoopOutputLayout.refactorPlan,
                                 outputPath: ".",
                                 prompt: refactorApplyPrompt,
                                 isDefault: true, defaultKey: "refactor-apply"))
@@ -888,7 +894,7 @@ public enum LoopStageDetector {
     }
 
     /// The Doc Optimization loop: refresh the doc index, then write the pages
-    /// it lists — a GENERATED tree under `llm-doc/docs/` (hand-written docs are
+    /// it lists — a GENERATED tree under `llm-doc/loop/docs/` (hand-written docs are
     /// never edited) whose every code claim uses `docCitationFormat`, so the
     /// code graph can link each page to the code it explains.
     private static func docStages() -> [LoopStage] {
@@ -896,13 +902,13 @@ public enum LoopStageDetector {
             LoopStage(name: "Doc Index", kind: .skill, order: 0,
                       skillId: "skills/doc-structure-index",
                       targetPath: ".",
-                      outputPath: "llm-doc/docs/INDEX.md",
+                      outputPath: LoopOutputLayout.docsIndex,
                       prompt: docIndexPrompt,
                       isDefault: true, defaultKey: "doc-index"),
             LoopStage(name: "Doc Writer", kind: .skill, order: 1,
                       skillId: "skills/doc-writer",
-                      targetPath: "llm-doc/docs/INDEX.md",
-                      outputPath: "llm-doc/docs",
+                      targetPath: LoopOutputLayout.docsIndex,
+                      outputPath: LoopOutputLayout.docsDir,
                       prompt: docWriterPrompt,
                       isDefault: true, defaultKey: "doc-writer"),
             LoopStage(name: "Doc Check", kind: .artifactCheck, order: 2,
@@ -981,7 +987,7 @@ public enum LoopStageDetector {
             // Gated like Regression — on a resolvable working tree only. The
             // loop is generic (index the structure, consolidate whatever plans
             // exist, create the director when missing), so there is no
-            // llm-ide-style marker to require; `llm-doc/plans/` lives at the
+            // llm-ide-style marker to require; `llm-doc/loop/plan/` lives at the
             // PROJECT root, which in the clone-into-code layout is not under
             // `gitRoot` at all, so a filesystem marker here would wrongly
             // suppress the loop for exactly that layout.
@@ -1044,7 +1050,7 @@ public enum LoopStageDetector {
     /// (`LoopDefinition.goal`): a loop that states what "done" means gets
     /// repairs aimed at that, not merely at making a command exit 0. The user
     /// owns the text from then on — nothing rewrites it.
-    private static func defaultLoopContract(_ loopKey: String) -> (goal: String, acceptance: String)? {
+    static func defaultLoopContract(_ loopKey: String) -> (goal: String, acceptance: String)? {
         switch loopKey {
         case LoopDefaultLoopKey.regression:
             return ("Find the code behind each known fault and fix it for real, without weakening any test.",
@@ -1058,7 +1064,7 @@ public enum LoopStageDetector {
         case LoopDefaultLoopKey.plan:
             return ("Keep one coherent, indexed master plan: every plan collected in llm-doc/plans/ "
                         + "consolidated into a clear hierarchy whose structure indexes match the real codebase.",
-                    "llm-doc/plans/INDEX.md and PLAN.md exist, reference every active plan and the files and "
+                    "\(LoopOutputLayout.planIndex) and PLAN.md exist, reference every active plan and the files and "
                         + "functions it touches, match the current folder structure, and every plan file stays "
                         + "within the 250-line limit.")
         case LoopDefaultLoopKey.refactor:
@@ -1069,11 +1075,32 @@ public enum LoopStageDetector {
         case LoopDefaultLoopKey.docs:
             return ("Keep a generated, code-cited doc tree that explains what the code does and why, so "
                         + "people, agents and the code graph are pointed at the right code.",
-                    "llm-doc/docs/INDEX.md lists every area, every listed page exists within 250 lines, and "
+                    "\(LoopOutputLayout.docsIndex) lists every area, every listed page exists within 250 lines, and "
                         + "every code citation resolves to a real file or symbol.")
         case LoopDefaultLoopKey.selfHeal:
             return ("Turn errors the app recorded into reviewed fixes, one root cause at a time.",
                     "Every incident in the batch has a Results line, and the regression gate passes in the worktree.")
+        default:
+            return nil
+        }
+    }
+
+    /// The goal / acceptance text a default loop was created with before stage
+    /// revision 2 (the old output paths). Only a loop whose text still EQUALS this
+    /// is brought forward — the user owns an edited text and nothing rewrites it.
+    static func legacyLoopContract(_ loopKey: String) -> (goal: String, acceptance: String)? {
+        switch loopKey {
+        case LoopDefaultLoopKey.plan:
+            return ("Keep one coherent, indexed master plan: every plan collected in llm-doc/plans/ "
+                        + "consolidated into a clear hierarchy whose structure indexes match the real codebase.",
+                    "llm-doc/plans/INDEX.md and PLAN.md exist, reference every active plan and the files and "
+                        + "functions it touches, match the current folder structure, and every plan file stays "
+                        + "within the 250-line limit.")
+        case LoopDefaultLoopKey.docs:
+            return ("Keep a generated, code-cited doc tree that explains what the code does and why, so "
+                        + "people, agents and the code graph are pointed at the right code.",
+                    "llm-doc/docs/INDEX.md lists every area, every listed page exists within 250 lines, and "
+                        + "every code citation resolves to a real file or symbol.")
         default:
             return nil
         }
