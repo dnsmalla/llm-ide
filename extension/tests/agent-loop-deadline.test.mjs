@@ -220,3 +220,17 @@ test('runNativeAgentLoop: no deadlineMs passes no signal, so a slow call runs to
   assert.equal(signalSeen, undefined, 'no deadline → no signal, so nothing can interrupt the call');
   assert.equal(out.reply, 'done');
 });
+
+// The native (OpenAI-compatible) path is callOpenAI, which has no
+// halve-and-retry on a context overflow; a self-hosted model with an 8k
+// context rejects prompt + 8192. It keeps the 2048 ceiling the fence loop
+// dropped (that one goes through runClaude, which does retry).
+test('runNativeAgentLoop asks for at most 2048 output tokens per hop', async () => {
+  const seen = [];
+  const complete = async ({ maxTokens }) => {
+    seen.push(maxTokens);
+    return { content: 'done', toolCalls: [] };
+  };
+  await runNativeAgentLoop({ systemPrompt: 's', userMessage: 'm', history: [], skills: new Map(), tools: [], complete });
+  assert.equal(seen[0], 2048);
+});

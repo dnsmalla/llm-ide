@@ -441,10 +441,13 @@ export function makeSniffingChunkHandler(outerOnChunk) {
   return { onChunk, flush };
 }
 
-// Output-token ceiling per model hop — runClaude's own default (providers/
-// runtime.mjs). Output is billed as produced, so a higher ceiling costs
+// Output-token ceiling per FENCE-loop hop — runClaude's own default (providers/
+// runtime.mjs), which also halves it and retries on a context overflow. Output is billed as produced, so a higher ceiling costs
 // nothing on a short reply.
 const DEFAULT_HOP_MAX_TOKENS = 8192;
+// The native (OpenAI-compatible tool-calling) loop keeps its old ceiling —
+// see its call site.
+const NATIVE_HOP_MAX_TOKENS = 2048;
 
 export async function runAgentLoop({
   skills, userMessage, history, agentContext, runClaude, kb, userId, handlers,
@@ -870,7 +873,10 @@ export async function runNativeAgentLoop({
       resp = await complete({
         messages,
         tools,
-        maxTokens: DEFAULT_HOP_MAX_TOKENS,
+        // NOT DEFAULT_HOP_MAX_TOKENS: this path is callOpenAI, which has no
+        // overflow-and-retry, and a self-hosted OpenAI-compatible model with an
+        // 8k context rejects prompt + 8192 outright (HTTP 400 on every hop).
+        maxTokens: NATIVE_HOP_MAX_TOKENS,
         // Undefined only when the caller opted into neither a deadline nor
         // cancellation, so a long native tool-calling turn runs to completion.
         signal: callSignal,
