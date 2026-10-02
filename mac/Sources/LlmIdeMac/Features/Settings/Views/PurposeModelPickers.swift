@@ -29,7 +29,7 @@ struct PurposeModelPickers: View {
             // WARNING: a model change rewrites the prompt cache, exactly like a
             // mode change does, so switching between purposes that use
             // different models re-reads the whole context once at full price.
-            Text("Chats follow these by mode. Switching to a mode with a different model re-reads the conversation once, so use one model for modes you switch between often. A model picked in the chat composer overrides these for that chat.")
+            Text("Chats follow these by mode. Switching to a mode with a different model re-reads the conversation once, so use one model for modes you switch between often. A model picked in the chat composer overrides these until you change a model here or switch provider.")
                 .font(Typography.caption)
                 .foregroundStyle(theme.current.textMuted)
         }

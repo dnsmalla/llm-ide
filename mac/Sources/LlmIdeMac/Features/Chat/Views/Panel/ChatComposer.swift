@@ -565,7 +565,7 @@ extension CodeAssistantPanel {
                     Button(model.displayName) {
                         modelState.selectedModel = model.id
                         modelState.modelIsExplicit = true
-                        config.modelPickIsExplicit = true
+                        if !isCustom { config.modelPickIsExplicit = true }
                         // Persist the pick (the phone follows it only while no
                         // purpose model is set for its mode) so surfaces that read AppConfig —
                         // notably the iPhone chat proxy (MobileExploreBridge

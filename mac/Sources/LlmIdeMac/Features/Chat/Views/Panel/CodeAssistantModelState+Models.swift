@@ -107,14 +107,19 @@ extension CodeAssistantModelState {
     func switchProvider(_ provider: ProviderSwitch, config: AppConfig, api: LlmIdeAPIClient) {
         switch provider {
         case .builtIn(let tool):
+            // Coming back from a custom provider, or re-clicking the active one,
+            // is not a provider change: the purpose models still apply.
+            let changed = config.activeCLI != tool.rawValue
             selectedProvider = tool.rawValue
             selectedModel = tool.defaultModelId
             modelIsExplicit = false
             config.activeCLI = tool.rawValue
             config.defaultModelId = tool.defaultModelId
-            // Purpose models were picked for the previous provider.
-            config.resetPurposeModels()
-            config.modelPickIsExplicit = false
+            if changed {
+                // Purpose models were picked for the previous provider.
+                config.resetPurposeModels()
+                config.modelPickIsExplicit = false
+            }
             Task { await loadModels(for: tool, api: api) }
         case .custom(let customProvider):
             selectedProvider = "custom:\(customProvider.id)"
@@ -179,7 +184,8 @@ extension CodeAssistantModelState {
         }
         selectedModel = match.id
         modelIsExplicit = true
-        config.modelPickIsExplicit = true
+        // Persisted flag is for the built-in provider only (see handleOnAppear).
+        if !selectedProvider.starts(with: "custom:") { config.modelPickIsExplicit = true }
         if !selectedProvider.starts(with: "custom:") {
             config.defaultModelId = match.id
         }
