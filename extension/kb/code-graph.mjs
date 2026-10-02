@@ -467,6 +467,20 @@ export function hasCodeGraph(userId) {
  * on-disk path — e.g. codegen.mjs uses it to confirm which FTS-matched file
  * a task's compiler-derived symbols actually touch.
  */
+/**
+ * Symbols named exactly `title` (never file nodes), for a tool that has been
+ * given a symbol rather than a search phrase. Uses the (user_id, title) index.
+ */
+export function findSymbolsByTitle(userId, title, { repoIds = null, limit = 20 } = {}) {
+  requireUser(userId);
+  if (typeof title !== 'string' || !title) return [];
+  const scope = repoScope(repoIds);
+  return getDb().prepare(
+    `SELECT symbol_id, title, kind, repo_id, source_file, line FROM code_graph_nodes
+     WHERE user_id=? AND title=?${scope.sql} AND kind<>'file' ORDER BY source_file, line LIMIT ?`,
+  ).all(userId, title, ...scope.params, limit);
+}
+
 export function hydrateSymbols(userId, symbolIds, { repoIds = null } = {}) {
   requireUser(userId);
   if (!Array.isArray(symbolIds) || symbolIds.length === 0) return [];

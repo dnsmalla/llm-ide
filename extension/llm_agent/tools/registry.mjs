@@ -29,6 +29,7 @@ import { handleListFiles, handleReadFile, buildTrustedRoots } from '../runtime/h
 import { handleFindCode } from '../runtime/handlers/find-code.mjs';
 import { handleCheckCitations } from '../runtime/handlers/check-citations.mjs';
 import { searchKb } from '../runtime/handlers/search-kb.mjs';
+import { handleCodeRelations } from '../runtime/handlers/code-relations.mjs';
 import { tasks } from '../runtime/handlers/session-tasks.mjs';
 import { handleRunBash, resolveBashCwd } from '../runtime/handlers/run-bash.mjs';
 import { handleProjectMemory } from '../runtime/handlers/project-memory.mjs';
@@ -103,6 +104,16 @@ const ENTRIES = [
     name: 'find-code',
     kind: 'read',
     execute: (args, ctx) => handleFindCode(args, {
+      userId: ctx.userId,
+      roots: ctx.readableRoots,
+      workspaceRoot: ctx.agentContext?.workspaceRoot,
+      activeRepoRoot: ctx.agentContext?.activeRepoRoot,
+    }),
+  },
+  {
+    name: 'code-relations',
+    kind: 'read',
+    execute: (args, ctx) => handleCodeRelations(args, {
       userId: ctx.userId,
       roots: ctx.readableRoots,
       workspaceRoot: ctx.agentContext?.workspaceRoot,

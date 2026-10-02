@@ -56,7 +56,7 @@ function headCommit(repo, maxAgeMs) {
 }
 
 /** Scoped repos whose graph commit differs from HEAD (short SHAs), or []. */
-function staleGraphs(userId, repoIds, maxAgeMs) {
+export function staleGraphs(userId, repoIds, maxAgeMs) {
   if (!Array.isArray(repoIds) || repoIds.length === 0) return [];
   const out = [];
   for (const m of getCodeGraphMeta(userId, repoIds)) {
@@ -72,7 +72,7 @@ function staleGraphs(userId, repoIds, maxAgeMs) {
   return out;
 }
 
-const STALE_HINT = 'The code graph was generated from an older commit than HEAD — line numbers and recently added symbols may be out of date; confirm with a narrow read before citing them.';
+export const STALE_HINT = 'The code graph was generated from an older commit than HEAD — line numbers and recently added symbols may be out of date; confirm with a narrow read before citing them.';
 
 function clampInt(value, { min, max, fallback }) {
   const n = Number(value);
@@ -165,7 +165,7 @@ export function resolveAgentPath(rawPath, roots = [], workspaceRoot = '') {
 }
 
 /** Compact one symbol/graph row into the agent-facing shape. */
-function shapeSymbol(row, roots, workspaceRoot, extra = {}) {
+export function shapeSymbol(row, roots, workspaceRoot, extra = {}) {
   const resolved = resolveAgentPath(row.source_file, roots, workspaceRoot);
   if (!resolved) return null;
   const out = {

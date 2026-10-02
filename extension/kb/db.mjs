@@ -512,7 +512,7 @@ export { ingestSources, deleteSourcesByPrefix, deleteSourcesByRef, sourceContent
 // SCIP code-graph node+edge store + multi-hop traversal (migration 0025).
 export {
   writeCodeGraph, clearCodeGraph, deleteScipSources, expandSymbols,
-  findCodeSymbolIds, hydrateSymbols, getCodeGraphSnapshot,
+  findCodeSymbolIds, findSymbolsByTitle, hydrateSymbols, getCodeGraphSnapshot,
   graphNeighbors, searchCodeSymbols, searchCodeSymbolsByTerms, hasCodeGraph, workspaceRepoIds, resolveRepoScope, existingSymbolTitles, CONTAINS_EDGE_KIND,
   setCodeGraphMeta, getCodeGraphMeta,
 } from './code-graph.mjs';
