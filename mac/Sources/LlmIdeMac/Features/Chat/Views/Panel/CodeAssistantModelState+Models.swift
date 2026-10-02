@@ -41,6 +41,29 @@ extension CodeAssistantModelState {
         return cli == .claudeCode ? AIModel.including(selected: selectedModel, in: all) : all
     }
 
+    /// The model the NEXT turn sends and the composer chip names — one answer
+    /// for both, so the chip never labels one model while the chat sends another.
+    ///
+    /// An explicit pick wins; otherwise the Settings model for the current
+    /// mode (`PurposeModelPolicy`), skipping one this provider does not offer;
+    /// otherwise `selectedModel`. Custom providers bypass purposes: those ids
+    /// belong to the built-in provider the user set them for.
+    func effectiveModelId(config: AppConfig) -> String {
+        if modelIsExplicit || selectedProvider.starts(with: "custom:") { return selectedModel }
+        let offered = modelsForCurrentProvider()
+        let id = config.purposeModels.modelId(forMode: selectedMode.rawValue, explicit: nil) { candidate in
+            AIModel.isOffered(candidate, in: offered)
+        }
+        return id ?? selectedModel
+    }
+
+    /// `effectiveModelId`, or nil when empty — the wire sends no `model` then,
+    /// and the engine uses the account default.
+    func effectiveModelIdOrNil(config: AppConfig) -> String? {
+        let id = effectiveModelId(config: config)
+        return id.isEmpty ? nil : id
+    }
+
     /// Models for the currently selected provider, built-in or custom.
     func modelsForCurrentProvider() -> [AIModel] {
         if selectedProvider.starts(with: "custom:") {
@@ -60,6 +83,8 @@ extension CodeAssistantModelState {
             UserDefaults.standard.set(s, forKey: Self.customModelsKey)
         }
         selectedModel = id
+        modelIsExplicit = true
+        config.modelPickIsExplicit = true
         // Persist so the iPhone chat proxy forwards this model too. Only
         // reachable from the built-in "Add model…" alert, so the provider is
         // always a built-in tool — but the guard keeps that assumption local.
@@ -82,10 +107,19 @@ extension CodeAssistantModelState {
     func switchProvider(_ provider: ProviderSwitch, config: AppConfig, api: LlmIdeAPIClient) {
         switch provider {
         case .builtIn(let tool):
+            // Coming back from a custom provider, or re-clicking the active one,
+            // is not a provider change: the purpose models still apply.
+            let changed = config.activeCLI != tool.rawValue
             selectedProvider = tool.rawValue
             selectedModel = tool.defaultModelId
+            modelIsExplicit = false
             config.activeCLI = tool.rawValue
             config.defaultModelId = tool.defaultModelId
+            if changed {
+                // Purpose models were picked for the previous provider.
+                config.resetPurposeModels()
+                config.modelPickIsExplicit = false
+            }
             Task { await loadModels(for: tool, api: api) }
         case .custom(let customProvider):
             selectedProvider = "custom:\(customProvider.id)"
@@ -103,6 +137,7 @@ extension CodeAssistantModelState {
         // not an `AICliTool` value — `modelsForCurrentProvider` found no models).
         selectedProvider = activeCLI.isEmpty ? AICliTool.claudeCode.rawValue : activeCLI
         selectedModel = defaultModelId
+        modelIsExplicit = false
     }
 
     /// After the custom-provider list changed: if the selected
@@ -148,6 +183,9 @@ extension CodeAssistantModelState {
             return "No model matching \"\(query)\" for the current provider.\(available.isEmpty ? "" : " Available: \(available)")"
         }
         selectedModel = match.id
+        modelIsExplicit = true
+        // Persisted flag is for the built-in provider only (see handleOnAppear).
+        if !selectedProvider.starts(with: "custom:") { config.modelPickIsExplicit = true }
         if !selectedProvider.starts(with: "custom:") {
             config.defaultModelId = match.id
         }

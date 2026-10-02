@@ -66,8 +66,11 @@ struct ProvidersSettingsSection: View {
 
     private func setActive(_ p: ProviderCatalog.Entry) {
         guard let tool = p.tool else { return }
+        let changed = config.activeCLI != tool.rawValue
         config.activeCLI = tool.rawValue
         config.defaultModelId = tool.defaultModelId
+        // Re-clicking the active provider must not wipe the purpose picks.
+        if changed { config.resetPurposeModels(); config.modelPickIsExplicit = false }
     }
 
     /// Keep `activeCLI` pointing at a selectable provider (a stale persisted
@@ -76,6 +79,8 @@ struct ProvidersSettingsSection: View {
         guard !AICliTool.selectable.contains(where: { $0.rawValue == config.activeCLI }) else { return }
         config.activeCLI = AICliTool.claudeCode.rawValue
         config.defaultModelId = AICliTool.claudeCode.defaultModelId
+        config.resetPurposeModels()
+        config.modelPickIsExplicit = false
     }
 
     @ViewBuilder
@@ -157,6 +162,7 @@ struct ProvidersSettingsSection: View {
                         }
                         .labelsHidden().pickerStyle(.menu).fixedSize()
                     }
+                    PurposeModelPickers(options: options)
                 }
             }
 

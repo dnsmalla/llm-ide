@@ -564,7 +564,10 @@ extension CodeAssistantPanel {
                 ForEach(modelState.modelsForCurrentProvider()) { model in
                     Button(model.displayName) {
                         modelState.selectedModel = model.id
-                        // Persist the pick so surfaces that read AppConfig —
+                        modelState.modelIsExplicit = true
+                        if !isCustom { config.modelPickIsExplicit = true }
+                        // Persist the pick (the phone follows it only while no
+                        // purpose model is set for its mode) so surfaces that read AppConfig —
                         // notably the iPhone chat proxy (MobileExploreBridge
                         // reads config.defaultModelId) — forward the actually-
                         // selected model instead of the stale tool default
@@ -657,8 +660,10 @@ extension CodeAssistantPanel {
     }
 
     func currentModelDisplayName(for cli: AICliTool) -> String {
-        let models = modelState.models(for: cli)
-        let selected = modelState.selectedModel
+        // The model the next turn SENDS (a Settings purpose model while the user
+        // has not picked one), so the chip never names a different one.
+        let selected = modelState.effectiveModelId(config: config)
+        let models = AIModel.including(selected: selected, in: modelState.models(for: cli))
         // Never the FIRST model's name for a selection the list lacks: that
         // labelled one model while the chat sent another. The live-derived
         // name, else the id itself; the first model only when nothing is

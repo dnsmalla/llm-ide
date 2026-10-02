@@ -7,13 +7,17 @@ import SharedProtocol
 @MainActor
 enum MobileExploreBridge {
 
-    static func modelAndProvider(config: AppConfig?) -> (model: String?, provider: String?) {
+    /// - Parameter mode: the wire mode this turn will send, so the model comes
+    ///   from the Settings purpose for that mode (`PurposeModelPolicy`).
+    static func modelAndProvider(config: AppConfig?, mode: String) -> (model: String?, provider: String?) {
         guard let config else {
             // When config is unavailable (early app init), default to Claude
             return (nil, AICliTool.claudeCode.provider)
         }
         let cli = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
-        let model = config.defaultModelId.isEmpty ? nil : config.defaultModelId
+        let model = config.purposeModels.modelId(forMode: mode, explicit: nil) {
+            AIModel.isOffered($0, in: cli.offeredModels)
+        }
         return (model, cli.provider)
     }
 

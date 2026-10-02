@@ -439,7 +439,8 @@ final class AutoCodeUpdateService: ObservableObject {
                                                      writesFiles: persistChanges),
                               localPath: resolved.gitRoot,
                               logSuffix: task.id, logDir: logDir, logStoreId: task.id,
-                              persistChanges: persistChanges)
+                              persistChanges: persistChanges,
+                              purposeMode: persistChanges ? "execute" : "review")
         if ok {
             taskErrors.removeValue(forKey: task.id)
             logStore.append(task.id, "— run finished —")
@@ -646,7 +647,8 @@ final class AutoCodeUpdateService: ObservableObject {
                                                              projectRoot: resolved.projectRoot,
                                                              writesFiles: false),
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                      logDir: logDir, logStoreId: task.rawValue)
+                                      logDir: logDir, logStoreId: task.rawValue,
+                                      purposeMode: "review")
                 finishPromptTask(task, ok: ok)
             case .reviewDoc:
                 currentStep = "Running Review Doc"
@@ -655,7 +657,8 @@ final class AutoCodeUpdateService: ObservableObject {
                                                              projectRoot: resolved.projectRoot,
                                                              writesFiles: false),
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                      logDir: logDir, logStoreId: task.rawValue)
+                                      logDir: logDir, logStoreId: task.rawValue,
+                                      purposeMode: "review")
                 finishPromptTask(task, ok: ok)
             case .reviewConflicts:
                 currentStep = "Running Review Conflicts"
@@ -664,7 +667,8 @@ final class AutoCodeUpdateService: ObservableObject {
                                                              projectRoot: resolved.projectRoot,
                                                              writesFiles: false),
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                      logDir: logDir, logStoreId: task.rawValue)
+                                      logDir: logDir, logStoreId: task.rawValue,
+                                      purposeMode: "review")
                 finishPromptTask(task, ok: ok)
             case .generateDoc:
                 currentStep = "Generating Documentation"
@@ -673,7 +677,8 @@ final class AutoCodeUpdateService: ObservableObject {
                                                              projectRoot: resolved.projectRoot,
                                                              writesFiles: false),
                                       localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                      logDir: logDir, logStoreId: task.rawValue)
+                                      logDir: logDir, logStoreId: task.rawValue,
+                                      purposeMode: "document")
                 finishPromptTask(task, ok: ok)
             case .updateIssues:
                 currentStep = "Updating Issues"

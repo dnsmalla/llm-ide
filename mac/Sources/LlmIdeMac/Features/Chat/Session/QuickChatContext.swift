@@ -176,6 +176,16 @@ struct QuickChatContext {
         return defaultModelId.isEmpty ? nil : defaultModelId
     }
 
+    /// The model a quick chat falls back to when nothing was picked: the
+    /// Documents model from Settings (the quick chat sends mode "ask"), skipped
+    /// when the provider does not offer it, else the Default model. One place
+    /// for the send and the label, so the label never names another model.
+    static func quickChatFallbackModel(config: AppConfig, tool: AICliTool) -> String {
+        config.purposeModels.modelId(forMode: "ask", explicit: nil) {
+            AIModel.isOffered($0, in: tool.offeredModels)
+        } ?? ""
+    }
+
     /// Claude's model list comes only from `LiveModelCache`; without this the
     /// cache stays empty until the full Code Assistant panel is opened.
     @MainActor
@@ -209,7 +219,9 @@ struct QuickChatContext {
         engine.hooks.resolveTransportInput = { [weak engine] message, history, attachments, skills in
             let tool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
             let model = effectiveModelId(explicit: engine?.quickChatModelId,
-                                         defaultModelId: config.defaultModelId,
+                                         // The quick chat sends mode "ask", so its fallback is
+                                         // the Documents model from Settings, else the default.
+                                         defaultModelId: quickChatFallbackModel(config: config, tool: tool),
                                          models: tool.models)
             return ChatTransportInput(
                 message: message,
