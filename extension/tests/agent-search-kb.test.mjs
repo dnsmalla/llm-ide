@@ -65,3 +65,32 @@ test('searchKb uses the meeting id for meeting hits and the body head when no te
   assert.equal(h.snippet, 'Agenda: release planning.');
   assert.equal(h.path, undefined, 'non-code hits carry no path');
 });
+
+// Code rows carry no project tag, and one user's index holds every repo they
+// ever opened (here: five roots, including three clones of the same repo), so
+// search-kb answered from all of them. With a workspace open, code hits from
+// outside it are dropped — and the fetch over-asks so the scoped list is full.
+test('searchKb scopes code hits to the open workspace and still returns a full page', async () => {
+  const rows = [];
+  for (let i = 0; i < 15; i += 1) {
+    rows.push({ kind: 'code', entityId: 100 + i, title: `other:${i}`, body: 'b', ref: `/clones/other/f${i}.ts`, meta: { relPath: `f${i}.ts` } });
+  }
+  for (let i = 0; i < 12; i += 1) {
+    rows.push({ kind: 'code', entityId: 200 + i, title: `mine:${i}`, body: 'b', ref: `/work/proj/src/f${i}.ts`, meta: { relPath: `src/f${i}.ts` } });
+  }
+  rows.push({ kind: 'doc', entityId: 300, title: 'Box doc', body: 'b', ref: 'box://file/1', meta: {} });
+  rows.push({ kind: 'meeting', meetingId: 'm1', title: 'Sync', body: 'b' });
+  let askedFor;
+  const ctx = { userId: 'u1', workspaceRoot: '/work/proj', kb: { search: (uid, opts) => { askedFor = opts.limit; return rows.slice(0, opts.limit); } } };
+  const out = await searchKb({ query: 'f' }, ctx);
+  assert.ok(askedFor >= 30, `over-asks to fill the page after scoping (asked ${askedFor})`);
+  assert.equal(out.hits.length, 10);
+  assert.ok(out.hits.filter((h) => h.kind === 'code').every((h) => h.path.startsWith('src/')),
+    'no code hit from outside the workspace');
+});
+
+test('searchKb without a workspace is unscoped, as before', async () => {
+  const rows = [{ kind: 'code', entityId: 1, title: 't', body: 'b', ref: '/anywhere/a.ts', meta: { relPath: 'a.ts' } }];
+  const out = await searchKb({ query: 'a' }, { userId: 'u1', kb: { search: () => rows } });
+  assert.equal(out.hits.length, 1);
+});

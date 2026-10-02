@@ -123,7 +123,7 @@ const ENTRIES = [
   // wrote a near-duplicate during the P1 spike — same kb.search call, a
   // slightly richer {query, limit} schema and {hits, total} shape). One
   // execute, one name, per the spec's §4 finding.
-  { name: 'search-kb', kind: 'read', execute: (args, ctx) => searchKb(args, { kb: ctx.kb, userId: ctx.userId }) },
+  { name: 'search-kb', kind: 'read', execute: (args, ctx) => searchKb(args, { kb: ctx.kb, userId: ctx.userId, workspaceRoot: ctx.agentContext?.workspaceRoot }) },
   // Reads one SKILL.md out of the user's own library so a skill that ends by
   // naming another skill can hand over to it (runtime/plan-pipeline.mjs's
   // stage 2 is the motivating case). kind:'read' by construction — it

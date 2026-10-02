@@ -8,18 +8,35 @@
 // Fence redaction lives in ../redaction.mjs; re-exported here for
 // backward compatibility with existing importers and tests.
 import { redactFence } from '../redaction.mjs';
+import os from 'node:os';
+import path from 'node:path';
+import { canonicalPathCase } from '../../../core/path-case.mjs';
 export { redactFence };
 
+const PAGE = 10;
+// Fetched when scoping to a workspace, so dropping other repos' code still
+// leaves a full page. Code rows carry no project tag and one user's index
+// holds every repo they ever opened (clones of the same repo included).
+const SCOPED_FETCH = 40;
+
 export async function searchKb(args, ctx) {
+  const root = typeof ctx.workspaceRoot === 'string' && ctx.workspaceRoot.trim()
+    ? canonicalPathCase(expandHome(ctx.workspaceRoot.trim()))
+    : null;
   const raw = await Promise.resolve(ctx.kb.search(ctx.userId, {
     q: args.query,
     kind: null,
-    limit: 10,
+    limit: root ? SCOPED_FETCH : PAGE,
   }));
-  const list = Array.isArray(raw) ? raw : [];
+  const all = Array.isArray(raw) ? raw : [];
+  // Only CODE refs are filesystem paths; a doc's ref may be a URL (Box), and
+  // meetings have none — those are not the workspace's to filter.
+  const list = root
+    ? all.filter((h) => h.kind !== 'code' || isUnder(String(h.ref || ''), root))
+    : all;
   // kb.search rows (db.mjs hydrateSearchRows) carry `entityId`/`meetingId`,
   // the chunk text in `body`, and a code chunk's location in `meta`.
-  const hits = list.slice(0, 10).map((h) => {
+  const hits = list.slice(0, PAGE).map((h) => {
     const id = h.entityId ?? h.meetingId;
     const hit = {
       kind: redactFence(h.kind),
@@ -33,7 +50,7 @@ export async function searchKb(args, ctx) {
     }
     return hit;
   });
-  return { hits, truncated: list.length > 10 };
+  return { hits, truncated: list.length > PAGE };
 }
 
 const SNIPPET_CHARS = 360;
@@ -54,4 +71,15 @@ export function snippetFor(body, query) {
   const start = Math.max(0, at - Math.floor(SNIPPET_CHARS / 3));
   const end = Math.min(text.length, start + SNIPPET_CHARS);
   return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
+}
+
+function expandHome(p) {
+  return p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p;
+}
+
+// `ref` is a chunk's absolute file path; compared in on-disk letter case so a
+// workspace opened as ~/Desktop/llm still matches rows indexed as …/LLM.
+function isUnder(ref, root) {
+  const abs = canonicalPathCase(ref);
+  return abs === root || abs.startsWith(root + path.sep);
 }
