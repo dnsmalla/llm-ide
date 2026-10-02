@@ -174,6 +174,11 @@ for (const msg of [
   'はい、続けてください',
   'parser.ts の型エラーを修正して',
   'ログイン画面にボタンを追加して',
+  // Instructions the first documentation-noun list over-matched (review).
+  'fix the reporter crash in tests',
+  'update the reportError helper',
+  'write updated tests for the parser',
+  'fix the asterisk escaping',
 ]) {
   test(`no plan/review/document wording → execute without a model call: ${msg}`, async () => {
     const run = counting('{"mode": "plan"}');
