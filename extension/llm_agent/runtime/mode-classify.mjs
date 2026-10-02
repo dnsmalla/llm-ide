@@ -130,11 +130,33 @@ ${clipForClassifier(message)}
 <<<END>>>`;
 }
 
+// Words that COULD mean plan / assist_plan / review / document. Only their
+// absence is acted on (→ execute, no model call); their presence just asks
+// the model, so this list errs wide — a false hit costs one classifier call,
+// which is what every turn paid before. English is matched on word starts;
+// Japanese (no spaces) as substrings.
+const NON_EXECUTE_WORDS_EN = /\b(plan|planning|approach|design|architect|strateg|option|alternative|trade-?off|best way|how (would|should|do) (you|we|i)|what (would|should)|should (we|i)|recommend|suggest|propos|idea|brainstorm|review|critique|feedback|audit|bugs?\b|wrong|issue with|problem|check|inspect|look over|evaluat|assess|document|docs?\b|readme|docstring|comment|explain|describe|summar|grill|poke holes|challenge|question me|ask me|stress-?test|interrogat|work through|together)/i;
+const NON_EXECUTE_WORDS_JA = /(計画|プラン|設計|方針|方法|やり方|進め方|手順を考|検討|案|選択肢|比較|相談|提案|おすすめ|どう(すれば|したら|やって|進め)|べき|レビュー|確認して|チェック|指摘|問題点|改善点|評価|点検|監査|ドキュメント|文書|説明|README|コメント|まとめ|要約|質問して|詰めて|洗い出|一緒に)/i;
+
+/**
+ * The mode when it can be decided without a model call, else null. Pure.
+ * Only ever answers `execute`: a message with no wording that could ask for
+ * any other mode is execute whatever the model would say (it is also the
+ * default when unsure). An empty message is left to the caller's fallback.
+ */
+export function quickMode(message) {
+  if (typeof message !== 'string' || !message.trim()) return null;
+  if (NON_EXECUTE_WORDS_EN.test(message) || NON_EXECUTE_WORDS_JA.test(message)) return null;
+  return 'execute';
+}
+
 export async function classifyCodeAssistMode(message, opts = {}) {
   // `model` lets the caller classify on the TURN's own provider fast tier
   // (fastModelFor(provider)) — a codex/OpenAI chat must not force an
   // Anthropic call for its classification.
   const { _runClaude = defaultRunClaude, userId, model } = opts;
+  const quick = quickMode(message);
+  if (quick) return { mode: quick };
   try {
     const raw = await _runClaude(buildPrompt(message), { userId, model: model || MODEL, maxTokens: 128 });
     const parsed = tryParseJSON(raw);
