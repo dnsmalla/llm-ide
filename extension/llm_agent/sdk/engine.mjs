@@ -184,6 +184,18 @@ const capAttachments = selectAttachments;
 // (PROJECT_MEMORY_TOOL_CHARS) serves the depth.
 const PROJECT_MEMORY_SUMMARY_CHARS = 2_500;
 
+// Context size (tokens) at which the SDK compacts a conversation. Every hop
+// re-reads the whole context, so this bounds the cost of each hop of a long
+// chat; the SDK's own default is the model's full window (~200k).
+// LLMIDE_V2_AUTOCOMPACT_WINDOW overrides it; 0 leaves the SDK default.
+const DEFAULT_AUTOCOMPACT_WINDOW = 120_000;
+function autoCompactWindow(raw = process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW) {
+  if (raw === undefined || raw === '') return DEFAULT_AUTOCOMPACT_WINDOW;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_AUTOCOMPACT_WINDOW;
+  return n === 0 ? undefined : Math.trunc(n);
+}
+
 // Attachments are DATA: each wrapped in a <<<BEGIN>>>…<<<END>>> fence, with
 // the content's own fence sentinels neutralised by sanitizeForPrompt inside
 // selectAttachments (core/prompt-framing.mjs), so a hostile file cannot close
@@ -750,6 +762,7 @@ export function buildEngineOptions(
     // chat's MODE — persona, pipeline stage skill — and a mode switch within
     // one resumed session must reach the model, which a snapshot would freeze.
     systemPrompt: { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n'), snapshot: false },
+    ...(autoCompactWindow() ? { settings: { autoCompactWindow: autoCompactWindow() } } : {}),
     ...(typeof model === 'string' && model ? { model } : {}),
     // See effortForTurn. The runner drops it on a gateway turn.
     ...(effort ? { effort } : {}),

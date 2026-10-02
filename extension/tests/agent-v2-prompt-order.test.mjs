@@ -252,3 +252,27 @@ test('a fresh session gets the chat history once, as data; a resumed one never d
   const resumed = turn(first.meta.delivered);
   assert.doesNotMatch(resumed.prompt, /Earlier in this conversation/);
 });
+
+// Each hop re-reads the whole context, so how big a context may grow before
+// the SDK compacts it bounds the cost of every hop of a long chat. The SDK's
+// default window is the model's limit (~200k); v2 compacts at 120k unless
+// LLMIDE_V2_AUTOCOMPACT_WINDOW says otherwise (0 = the SDK's default).
+test('the auto-compact window defaults to 120k and is configurable', () => {
+  const opts = () => buildEngineOptions(
+    { userId: 'u-ac', mode: 'execute', message: 'hi', delivered: null,
+      agentContext: { workspaceRoot: process.cwd(), chatSessionId: 'chat-ac' } },
+    { ...deps, renderMemory: () => null }).queryOptions;
+  const saved = process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW;
+  try {
+    delete process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW;
+    assert.equal(opts().settings?.autoCompactWindow, 120_000);
+    process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW = '90000';
+    assert.equal(opts().settings?.autoCompactWindow, 90_000);
+    process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW = '0';
+    assert.equal(opts().settings?.autoCompactWindow, undefined, '0 leaves the SDK default');
+    process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW = 'nonsense';
+    assert.equal(opts().settings?.autoCompactWindow, 120_000);
+  } finally {
+    if (saved === undefined) delete process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW; else process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW = saved;
+  }
+});
