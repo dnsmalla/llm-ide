@@ -44,7 +44,7 @@ public struct ProjectEnvironmentFacts: Equatable {
     /// `make test` project is not blamed for a pytest that it never calls.
     var usesPytest: Bool {
         guard let command = recommendedTestCommand else { return false }
-        return command.range(of: #"(^|[\s;&|])(python3?\s+-m\s+)?pytest(\s|$)"#,
+        return command.range(of: #"(^|[\s;&|/])pytest(\s|$)"#,
                              options: .regularExpression) != nil
     }
 }
@@ -94,13 +94,19 @@ public enum ProjectEnvironmentAssessor {
                 add(.warning, "No project virtualenv (.venv/ or venv/) found — the system Python is used")
             }
             switch facts.pythonVersion {
-            case .failed, .timedOut: add(.blocking, "Python could not be run", missing: "python3")
+            case .failed: add(.blocking, "Python could not be run", missing: "python3")
+            case .timedOut: add(.warning, "Python did not answer within the time limit")
             default: break
             }
             if facts.usesPytest {
                 switch facts.pytestInstalled {
-                case .ok(let output) where output.trimmingCharacters(in: .whitespacesAndNewlines) == "False":
-                    add(.blocking, "pytest is not installed for this Python", missing: "pytest")
+                case .ok(let output):
+                    let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed == "False" {
+                        add(.blocking, "pytest is not installed for this Python", missing: "pytest")
+                    } else if trimmed != "True" {
+                        add(.warning, "Could not check whether pytest is installed")
+                    }
                 case .failed, .timedOut:
                     add(.warning, "Could not check whether pytest is installed")
                 default: break
@@ -113,12 +119,14 @@ public enum ProjectEnvironmentAssessor {
             }
             if case .failed(let output) = facts.pipCheck {
                 let lines = nonEmptyLines(of: output).prefix(pipCheckLineLimit)
-                add(.warning, "Dependency conflicts: " + lines.joined(separator: "; "))
+                if !lines.isEmpty {
+                    add(.warning, "Dependency conflicts: " + lines.joined(separator: "; "))
+                }
             }
         }
 
         let hasBlocking = findings.contains { $0.severity == .blocking }
-        let hasUnknown = [facts.pytestInstalled, facts.pytestStarts].contains(.timedOut)
+        let hasUnknown = [facts.pythonVersion, facts.pytestInstalled, facts.pytestStarts].contains(.timedOut)
         return ProjectEnvironmentStatus(
             readiness: hasBlocking ? .needsSetup : (hasUnknown ? .unknown : .ready),
             recommendedTestCommand: facts.recommendedTestCommand,

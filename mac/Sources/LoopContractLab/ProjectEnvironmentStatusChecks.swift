@@ -58,8 +58,18 @@ func runProjectEnvironmentAssessorChecks() {
            "a timed-out start check with nothing blocking is unknown")
     expect(ProjectEnvironmentAssessor.assess(facts(version: .failed("boom"))).readiness == .needsSetup,
            "Python that cannot run needs setup")
-    expect(blockingMissing(ProjectEnvironmentAssessor.assess(facts(version: .timedOut))) == ["python3"],
-           "a Python that times out is reported as missing python3")
+    let timedOutVersion = ProjectEnvironmentAssessor.assess(facts(version: .timedOut))
+    expect(timedOutVersion.readiness == .unknown,
+           "a Python that times out is unknown, not blocking")
+    expect(blockingMissing(timedOutVersion).isEmpty,
+           "a Python that times out does not create a blocking finding")
+    expect(timedOutVersion.findings.contains { $0.severity == .warning && $0.message.contains("did not answer") },
+           "a Python that times out is reported as a warning about not answering")
+
+    let versionAndStartsTimedOut = ProjectEnvironmentAssessor.assess(facts(
+        version: .timedOut, starts: .timedOut))
+    expect(versionAndStartsTimedOut.readiness == .unknown,
+           "both pythonVersion and pytestStarts timed out => unknown, not needsSetup")
 
     let swift = ProjectEnvironmentAssessor.assess(facts(
         python: false, command: "swift test", venv: nil,
@@ -80,5 +90,42 @@ func runProjectEnvironmentAssessorChecks() {
     }
     expect(ProjectEnvironmentAssessor.assess(facts(command: "run mypytestx", starts: .failed("x"))).readiness == .ready,
            "a word merely containing pytest does not count as using pytest")
+    for command in [".venv/bin/pytest -q", "./pytest"] {
+        let pathStatus = ProjectEnvironmentAssessor.assess(facts(command: command, starts: .failed("x")))
+        expect(pathStatus.readiness == .needsSetup, "\(command) counts as using pytest")
+    }
+
+    let pytestInstalledTimedOut = ProjectEnvironmentAssessor.assess(facts(
+        installed: .timedOut))
+    expect(pytestInstalledTimedOut.readiness == .unknown,
+           "pytestInstalled timed out => unknown readiness")
+    expect(pytestInstalledTimedOut.findings.contains { $0.severity == .warning && $0.message == "Could not check whether pytest is installed" },
+           "pytestInstalled timed out => warning about checking")
+
+    let pytestInstalledInvalid = ProjectEnvironmentAssessor.assess(facts(
+        installed: .ok("maybe")))
+    expect(pytestInstalledInvalid.readiness == .ready,
+           "pytestInstalled .ok(invalid-value) => ready (not blocking)")
+    expect(pytestInstalledInvalid.findings.contains { $0.severity == .warning && $0.message == "Could not check whether pytest is installed" },
+           "pytestInstalled .ok(non-boolean-string) => warning about checking")
+
+    let blankPip = ProjectEnvironmentAssessor.assess(facts(
+        pip: .failed("  \n  \n  ")))
+    expect(blankPip.findings.allSatisfy { !$0.message.contains("Dependency conflicts") },
+           "pip check with only whitespace produces no finding")
+
+    let pythonNoVenv = ProjectEnvironmentAssessor.assess(facts(
+        python: true, venv: nil, version: .ok("3.11"), installed: .ok("True"), starts: .ok("pytest")))
+    expect(pythonNoVenv.readiness == .ready,
+           "Python project with no venv but otherwise healthy => ready")
+    expect(pythonNoVenv.findings.filter { $0.severity == .warning }.count == 1,
+           "exactly one warning finding")
+    expect(pythonNoVenv.findings.contains { $0.severity == .warning && $0.message.contains("No project virtualenv") },
+           "the warning is about missing virtualenv")
+
+    let venvPytestFails = ProjectEnvironmentAssessor.assess(facts(
+        command: ".venv/bin/pytest -q", starts: .failed("ImportError: no module")))
+    expect(venvPytestFails.readiness == .needsSetup,
+           ".venv/bin/pytest command with startup failure => needsSetup")
 }
 #endif
