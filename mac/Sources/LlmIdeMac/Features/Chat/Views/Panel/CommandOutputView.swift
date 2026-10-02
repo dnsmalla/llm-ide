@@ -85,12 +85,11 @@ struct CommandOutputView: View {
         .contentShape(Rectangle())
         // Double-click on selectable text selects a word instead, so the
         // gesture mainly serves the chrome (padding, status row, background);
-        // the "Show full output" button stays as the always-working path.
+        // the "Show full output" button stays as the always-working path. No
+        // tooltip: advertising the gesture over text it doesn't land on would
+        // overstate it.
         .onTapGesture(count: 2) {
             if outputLines.count > collapsedLineCount { expanded.toggle() }
         }
-        .help(outputLines.count > collapsedLineCount
-              ? "Double-click to \(expanded ? "collapse" : "expand") the output"
-              : "")
     }
 }

@@ -37,15 +37,20 @@ struct ToolActivityList: View {
 
     private var isScrollable: Bool { steps.count > Self.visibleRowCount }
 
+    /// Exactly N closed rows — only valid while no row's detail is open,
+    /// which is why `body` drops the cap entirely in that case.
     private var cappedHeight: CGFloat {
         CGFloat(Self.visibleRowCount) * Self.rowHeight
             + CGFloat(Self.visibleRowCount - 1) * Self.rowSpacing
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        let content = VStack(alignment: .leading, spacing: 3) {
             if isScrollable { header }
-            if isScrollable && !expanded {
+            // An open detail block (~400pt) inside an 87pt scroller is
+            // unreadable, and scrollToLast would yank it off screen on the
+            // next step — so any open row renders the list inline, uncapped.
+            if isScrollable && !expanded && expandedStepIds.isEmpty {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: true) {
                         rows
@@ -64,15 +69,33 @@ struct ToolActivityList: View {
         .padding(.leading, 2)
         .padding(.bottom, 2)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Steps taken: \(steps.map(\.label).joined(separator: ", "))")
+        // The summary label replaces the children's text, which would hide an
+        // open row's args/output from VoiceOver — so it only applies while
+        // every row is closed.
+        if expandedStepIds.isEmpty {
+            content
+                .accessibilityLabel("Steps taken: \(steps.map(\.label).joined(separator: ", "))")
+        } else {
+            content
+        }
     }
+
+    /// An open row forces the list inline (see `body`), so the header must
+    /// read as expanded then too — and collapsing from that state also closes
+    /// the open rows, otherwise the click would change nothing.
+    private var isHeaderExpanded: Bool { expanded || !expandedStepIds.isEmpty }
 
     private var header: some View {
         Button {
-            expanded.toggle()
+            if isHeaderExpanded {
+                expanded = false
+                expandedStepIds.removeAll()
+            } else {
+                expanded = true
+            }
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                Image(systemName: isHeaderExpanded ? "chevron.down" : "chevron.right")
                     .font(.system(size: 8, weight: .semibold))
                 Text("\(steps.count) steps")
                     .font(.system(size: 10, weight: .medium))
@@ -82,8 +105,8 @@ struct ToolActivityList: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(expanded ? "Collapse the step list" : "Show every step")
-        .accessibilityLabel(expanded
+        .help(isHeaderExpanded ? "Collapse the step list" : "Show every step")
+        .accessibilityLabel(isHeaderExpanded
                             ? "Collapse the \(steps.count) agent steps"
                             : "Expand the \(steps.count) agent steps")
     }
@@ -102,7 +125,7 @@ struct ToolActivityList: View {
         let hasDetail = Self.hasDetail(step)
         let isOpen = expandedStepIds.contains(step.id)
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
+            let row = HStack(spacing: 6) {
                 Image(systemName: step.icon)
                     .font(.system(size: 10))
                     .foregroundStyle(theme.current.textMuted)
@@ -124,18 +147,32 @@ struct ToolActivityList: View {
             }
             .frame(height: Self.rowHeight)
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                guard hasDetail else { return }
-                if isOpen {
-                    expandedStepIds.remove(step.id)
-                } else {
-                    expandedStepIds.insert(step.id)
-                }
+            if hasDetail {
+                row
+                    .onTapGesture(count: 2) { toggleDetail(step.id) }
+                    .help("Double-click to show this step's input and output")
+                    // The non-pointer path to the same toggle: VoiceOver (and
+                    // the Accessibility Keyboard) surface this as a custom
+                    // action on the combined element.
+                    .accessibilityAction(named: isOpen
+                                         ? "Hide input and output"
+                                         : "Show input and output") {
+                        toggleDetail(step.id)
+                    }
+            } else {
+                row
             }
-            .help(hasDetail ? "Double-click to show this step's input and output" : "")
             if isOpen {
                 stepDetail(step)
             }
+        }
+    }
+
+    private func toggleDetail(_ id: UUID) {
+        if expandedStepIds.contains(id) {
+            expandedStepIds.remove(id)
+        } else {
+            expandedStepIds.insert(id)
         }
     }
 
@@ -148,20 +185,16 @@ struct ToolActivityList: View {
     private func stepDetail(_ step: ChatMessage.ToolStep) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             if let args = step.args, !args.isEmpty {
-                Text(args)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(theme.current.textMuted)
-                    .lineLimit(8)
-                    .textSelection(.enabled)
+                detailText(Self.prettyArgs(args),
+                           maxLines: 8,
+                           color: theme.current.textMuted)
             }
             if let result = step.resultText, !result.isEmpty {
-                Text(result)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(step.isError == true
-                                     ? theme.current.danger
-                                     : theme.current.textMuted)
-                    .lineLimit(30)
-                    .textSelection(.enabled)
+                detailText(result,
+                           maxLines: 40,
+                           color: step.isError == true
+                               ? theme.current.danger
+                               : theme.current.textMuted)
             }
         }
         .padding(6)
@@ -169,6 +202,59 @@ struct ToolActivityList: View {
         .background(theme.current.surface2)
         .cornerRadius(4)
         .padding(.leading, 18)
+    }
+
+    /// Truncates BEFORE building the `Text`: `lineLimit` alone still has to
+    /// lay out the whole string (up to 20k chars) on every redraw, and the
+    /// parent rebuilds this view each time the running turn appends a step.
+    /// The explicit note also makes the cut visible — a silent `lineLimit`
+    /// cut looks like the complete output when copied.
+    @ViewBuilder
+    private func detailText(_ text: String, maxLines: Int, color: Color) -> some View {
+        let (shown, note) = Self.truncate(text, maxLines: maxLines)
+        Text(shown)
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(color)
+            .textSelection(.enabled)
+        if let note {
+            Text(note)
+                .font(.system(size: 9))
+                .foregroundStyle(theme.current.textMuted.opacity(0.7))
+        }
+    }
+
+    /// A newline count alone doesn't bound the render: a 20k-char result with
+    /// no line breaks (minified JSON, one long log line) wraps into hundreds
+    /// of visual lines, so a character cap backstops the line cap.
+    static let detailMaxChars = 4000
+
+    static func truncate(_ text: String, maxLines: Int) -> (shown: String, note: String?) {
+        let lines = text.components(separatedBy: "\n")
+        let omittedLines = max(0, lines.count - maxLines)
+        var shown = omittedLines > 0
+            ? lines.prefix(maxLines).joined(separator: "\n")
+            : text
+        var note: String? = omittedLines > 0 ? "… \(omittedLines) more lines" : nil
+        if shown.count > Self.detailMaxChars {
+            shown = String(shown.prefix(Self.detailMaxChars))
+            note = "… truncated at \(Self.detailMaxChars) characters"
+        }
+        return (shown, note)
+    }
+
+    /// Tool args arrive as the model's one-line JSON; an Edit call's
+    /// old_string/new_string wraps into an unreadable block. Pretty-print when
+    /// it parses, fall back to the raw text when it doesn't. Only open rows
+    /// pay for the parse, and truncation keeps the render bounded.
+    static func prettyArgs(_ raw: String) -> String {
+        guard let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let pretty = try? JSONSerialization.data(
+                  withJSONObject: object,
+                  options: [.prettyPrinted, .sortedKeys]),
+              let text = String(data: pretty, encoding: .utf8)
+        else { return raw }
+        return text
     }
 
     /// Exposed for the row-label test: the ellipsis strip is the one piece of
