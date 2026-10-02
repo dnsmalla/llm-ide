@@ -185,16 +185,20 @@ const capAttachments = selectAttachments;
 // (PROJECT_MEMORY_TOOL_CHARS) serves the depth.
 const PROJECT_MEMORY_SUMMARY_CHARS = 2_500;
 
-// Context size (tokens) at which the SDK compacts a conversation. Every hop
-// re-reads the whole context, so this bounds the cost of each hop of a long
-// chat; the SDK's own default is the model's full window (~200k).
-// LLMIDE_V2_AUTOCOMPACT_WINDOW overrides it; 0 leaves the SDK default.
-const DEFAULT_AUTOCOMPACT_WINDOW = 120_000;
+// Context size (tokens) at which the SDK compacts a conversation — OPT-IN via
+// LLMIDE_V2_AUTOCOMPACT_WINDOW. Every hop re-reads the whole context, so a
+// smaller window bounds the cost of each hop of a long chat; but the SDK's
+// default is an "auto" value tuned per model, and a fixed one wastes a large
+// window or compacts mid-turn. The SDK accepts 100k–1M and silently DROPS
+// anything else, so an out-of-range value is rejected here with a warning.
+const AUTOCOMPACT_MIN = 100_000;
+const AUTOCOMPACT_MAX = 1_000_000;
 function autoCompactWindow(raw = process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW) {
-  if (raw === undefined || raw === '') return DEFAULT_AUTOCOMPACT_WINDOW;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) return DEFAULT_AUTOCOMPACT_WINDOW;
-  return n === 0 ? undefined : Math.trunc(n);
+  if (raw === undefined || raw === '') return undefined;
+  const n = Math.trunc(Number(raw));
+  if (Number.isFinite(n) && n >= AUTOCOMPACT_MIN && n <= AUTOCOMPACT_MAX) return n;
+  if (raw !== '0') console.warn(`LLMIDE_V2_AUTOCOMPACT_WINDOW=${raw} ignored — must be ${AUTOCOMPACT_MIN}–${AUTOCOMPACT_MAX} tokens`);
+  return undefined;
 }
 
 // Attachments are DATA: each wrapped in a <<<BEGIN>>>…<<<END>>> fence, with
