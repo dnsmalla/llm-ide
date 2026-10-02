@@ -42,7 +42,7 @@ const {
 } = await import('../kb/agent-sessions.mjs');
 const { registerDecision, abortDecisionsForSession } = await import('../llm_agent/sdk/decisions.mjs');
 const { agentSdkHomeFor } = await import('../llm_agent/sdk/engine.mjs');
-const { handleAgentV2Routes } = await import('../routes/agent-v2.mjs');
+const { handleAgentV2Routes, freshTurnHistory } = await import('../routes/agent-v2.mjs');
 
 // --- req/res doubles (from agent-sdk-spike.test.mjs; makeReq additionally
 // records close handlers so the abort test can drop the "connection"). -----
@@ -1284,4 +1284,17 @@ test('stream: a turn that throws after a tool event still records it, with no le
   assert.equal(ev[0].tool, 'Read');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM usage_ledger WHERE user_id = ?').get(user.id).n, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM usage_ledger WHERE request_id = ?').get(ev[0].turn_id).n, 0);
+});
+
+test('freshTurnHistory keeps the first user turn (the original request) even when the tail fills the budget', () => {
+  const big = (n) => 'y'.repeat(n);
+  const history = [
+    { role: 'user', content: 'Original request: port the parser to Rust.' },
+    ...Array.from({ length: 6 }, (_, i) => ({ role: i % 2 ? 'user' : 'assistant', content: big(15_000) })),
+  ];
+  const kept = freshTurnHistory({ fresh: true, history });
+  assert.equal(kept[0].content, 'Original request: port the parser to Rust.', 'the anchor survives');
+  assert.equal(kept.at(-1).content.length, 15_000, 'the newest turn is kept whole');
+  assert.ok(kept.reduce((n, t) => n + t.content.length, 0) <= 60_000);
+  assert.ok(kept.length >= 3, 'the newest turns fill the rest');
 });
