@@ -1989,7 +1989,7 @@ struct LoopEngineView: View {
         pastRunInspectLoadFailed = inspectedPastRun == nil
     }
 
-    /// Newest filename under `llm-doc/loop/`, or nil. Walks the directory rather
+    /// Newest run-summary note under `llm-doc/loop/`, or nil. Walks the directory rather
     /// than reading the note index so a note deleted by hand cannot leave the
     /// Output row claiming a file that is gone.
     private static func newestSummaryNoteName(projectRoot: URL) -> String? {
@@ -1998,7 +1998,10 @@ struct LoopEngineView: View {
             at: root, includingPropertiesForKeys: [.contentModificationDateKey])
         else { return nil }
         var newest: (name: String, at: Date)?
-        for case let url as URL in walker where url.pathExtension == "md" {
+        // Only the run-summary notes (`loop-<date>.md`, see `NoteLoopRunSummaryWriter`):
+        // `llm-doc/loop/` now also holds what the loops generate (plan/, refactor/, docs/),
+        // and those files are not summaries.
+        for case let url as URL in walker where url.pathExtension == "md" && url.lastPathComponent.hasPrefix("loop-") {
             let at = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
                 .contentModificationDate ?? .distantPast
             guard let current = newest else {

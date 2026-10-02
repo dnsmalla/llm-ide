@@ -183,7 +183,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertEqual(plan.kind, .skill)
         XCTAssertEqual(plan.skillId, "skills/refactor-planner")
         XCTAssertEqual(plan.targetPath, ".")
-        XCTAssertEqual(plan.outputPath, "llm-doc/refactor/REFACTOR.md")
+        XCTAssertEqual(plan.outputPath, "llm-doc/loop/refactor/REFACTOR.md")
         XCTAssertEqual(plan.defaultKey, "refactor-plan")
         XCTAssertTrue(plan.isDefault)
     }
@@ -198,7 +198,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertEqual(stages.map(\.kind), [.skill, .skill, .shellCommand])
         XCTAssertEqual(stages.compactMap(\.defaultKey), ["refactor-plan", "refactor-apply", "refactor-test"])
         XCTAssertEqual(stages.map(\.skillId), ["skills/refactor-planner", "skills/refactor-apply", nil])
-        XCTAssertEqual(stages[1].targetPath, "llm-doc/refactor/REFACTOR.md")
+        XCTAssertEqual(stages[1].targetPath, "llm-doc/loop/refactor/REFACTOR.md")
         XCTAssertEqual(stages[1].outputPath, ".")
         XCTAssertEqual(stages[2].command, "swift test")
         XCTAssertEqual(stages[2].detectedCommand, "swift test")
@@ -229,7 +229,8 @@ final class LoopDefaultLoopsTests: XCTestCase {
         }
         // …so the project-level scaffold no longer creates a doc tree outside the repo.
         XCTAssertFalse(ProjectScaffolder.requiredDirectories.contains("llm-doc/docs"))
-        XCTAssertTrue(ProjectScaffolder.requiredDirectories.contains("llm-doc/refactor"))
+        XCTAssertFalse(ProjectScaffolder.requiredDirectories.contains("llm-doc/loop/docs"))
+        XCTAssertTrue(ProjectScaffolder.requiredDirectories.contains("llm-doc/loop"))
     }
 
     func testDocLoopIndexesThenWritesTheGeneratedDocTree() throws {
@@ -241,8 +242,8 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertEqual(stages.map(\.kind), [.skill, .skill, .artifactCheck])
         XCTAssertEqual(stages.compactMap(\.defaultKey), ["doc-index", "doc-writer", "doc-check"])
         XCTAssertEqual(stages.compactMap(\.skillId), ["skills/doc-structure-index", "skills/doc-writer"])
-        XCTAssertEqual(stages.map(\.targetPath), [".", "llm-doc/docs/INDEX.md", nil])
-        XCTAssertEqual(stages.map(\.outputPath), ["llm-doc/docs/INDEX.md", "llm-doc/docs", nil])
+        XCTAssertEqual(stages.map(\.targetPath), [".", "llm-doc/loop/docs/INDEX.md", nil])
+        XCTAssertEqual(stages.map(\.outputPath), ["llm-doc/loop/docs/INDEX.md", "llm-doc/loop/docs", nil])
     }
 
     /// Prompts carry the contract but no path — the path lives only in the
@@ -287,7 +288,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
                        "Keep a generated, code-cited doc tree that explains what the code does and why, so "
                            + "people, agents and the code graph are pointed at the right code.")
         XCTAssertEqual(loop(LoopDefaultLoopKey.docs, in: loops)?.acceptanceCriteria,
-                       "llm-doc/docs/INDEX.md lists every area, every listed page exists within 250 lines, "
+                       "llm-doc/loop/docs/INDEX.md lists every area, every listed page exists within 250 lines, "
                            + "and every code citation resolves to a real file or symbol.")
     }
 
