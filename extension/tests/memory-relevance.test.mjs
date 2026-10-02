@@ -87,3 +87,14 @@ test('IDF: one rare-token match outranks two ubiquitous-token matches', () => {
   // Output is in relevance order — the rare-token fact must rank FIRST.
   assert.match(out.split('\n')[0], /vault rotation/, 'rare token ranks first');
 });
+
+test('a Japanese question ranks the Japanese fact that shares its terms first', () => {
+  const content = FILE([
+    'CSS のビルドは postcss で実行する',
+    '認証トークンの更新は refresh エンドポイントで行う',
+    'マイグレーションは kb/migrations にある',
+  ]);
+  const room = '- 認証トークンの更新は refresh エンドポイントで行う'.length + 5;
+  const out = selectChatMemoryFacts(content, { userMessage: '認証トークンの更新について教えて', room });
+  assert.match(out, /認証トークン/, `the overlapping fact wins the tight budget (got ${out})`);
+});

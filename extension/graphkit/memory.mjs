@@ -29,6 +29,7 @@ import { userRepoAllowlist } from '../kb/db.mjs';
 import { config } from '../core/config.mjs';
 import { parseChatMemoryFacts } from './memory-writer.mjs';
 import { factStamp } from '../core/fact-key.mjs';
+import { termTokens } from '../core/text-tokens.mjs';
 import { memoryDir, legacyMemoryDir, systemDir, graphIndexFile, SYSTEM_DIR } from './paths.mjs';
 
 // Expand a leading `~`/`~/` to the home directory. The Mac client sends
@@ -249,8 +250,7 @@ const STOPWORDS = new Set([
 
 function queryTokens(userMessage) {
   if (typeof userMessage !== 'string') return new Set();
-  const toks = userMessage.toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}/g) || [];
-  return new Set(toks.filter((t) => !STOPWORDS.has(t)));
+  return new Set(termTokens(userMessage).filter((t) => !STOPWORDS.has(t)));
 }
 
 // Rank chat-memory facts by relevance to the current question and greedily pack
@@ -307,7 +307,7 @@ export function scoreFactsByRelevance(facts, { userMessage = '' } = {}) {
   // practice, revisit this approach (e.g. an actual index) rather than
   // assuming it's still "trivial."
   const factTokenSets = facts.map(
-    (fact) => new Set(fact.toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}/g) || []),
+    (fact) => new Set(termTokens(fact)),
   );
   const idf = new Map();
   if (q.size > 0) {
