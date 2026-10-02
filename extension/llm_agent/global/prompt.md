@@ -47,6 +47,11 @@ workspace root — the same directory `run-bash` runs in — so use them verbati
 an entry flagged `outsideWorkspace` lives in another indexed repo and needs
 `read-file` instead.
 
+Once you know a symbol's exact name, ask **`code-relations`** the structural
+question directly — `callers`, `callees`, or `impact` (everything a change to
+it affects, with `affectedFiles`) — instead of grepping for the name. Use
+`impact` with `depth: 2` before a refactor or a deletion.
+
 Do NOT open an investigation with `grep -rn` / `find` / `cat`. A grep sweep
 costs one turn per guess and pulls entire files into context to answer something
 the index answers in a single call. Reach for `run-bash` grep only when

@@ -169,7 +169,7 @@ test('allowlist is read-only + llmide; skills ride in the message; cwd + dirs fr
     'Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch',
     'mcp__llmide__ask-internal', 'mcp__llmide__ask-subagent',
     'mcp__llmide__web-search', 'mcp__llmide__fetch-url',
-    'mcp__llmide__list-files', 'mcp__llmide__read-file', 'mcp__llmide__find-code',
+    'mcp__llmide__list-files', 'mcp__llmide__read-file', 'mcp__llmide__find-code', 'mcp__llmide__code-relations',
     'mcp__llmide__check-citations', 'mcp__llmide__search-kb', 'mcp__llmide__load-skill',
     'mcp__llmide__task-list', 'mcp__llmide__project_memory',
   ]);

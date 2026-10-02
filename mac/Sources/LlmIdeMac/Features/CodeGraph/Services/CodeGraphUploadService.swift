@@ -66,9 +66,12 @@ final class CodeGraphUploadService {
     /// already in flight, so the caller's task proceeds straight here — hence
     /// this guard rather than relying on the caller.
     private var isUploading = false
-    /// Newest request received while an upload was in flight, replayed once on
-    /// completion so a graph change mid-upload isn't dropped until the next tick.
-    private var pending: (graph: CGData, repoRoot: URL)?
+    /// Newest request PER REPO received while an upload was in flight, replayed
+    /// on completion so a graph change mid-upload isn't dropped until the next
+    /// tick. Keyed by repo: with every code/<repo> graphed in the background, a
+    /// single slot let one repo's stashed upload overwrite another's.
+    private var pending: [String: (graph: CGData, repoRoot: URL)] = [:]
+    private var pendingOrder: [String] = []
 
     /// Successful upload truncation state keyed by standardized repo path.
     /// Failed uploads never alter this state, because nothing was actually sent.
@@ -240,16 +243,21 @@ final class CodeGraphUploadService {
     @discardableResult
     func upload(graph: CGData, repoRoot: URL) async -> Bool {
         if isUploading {
-            pending = (graph, repoRoot)
+            let key = repoRoot.standardizedFileURL.path
+            if pending[key] == nil { pendingOrder.append(key) }
+            pending[key] = (graph, repoRoot)
             return false
         }
         isUploading = true
         let uploaded = await performUpload(graph: graph, repoRoot: repoRoot)
         isUploading = false
-        if let next = pending {
-            pending = nil
-            // Fingerprint-deduped, so replaying an unchanged graph is a no-op.
-            await upload(graph: next.graph, repoRoot: next.repoRoot)
+        if !pendingOrder.isEmpty {
+            let key = pendingOrder.removeFirst()
+            if let next = pending.removeValue(forKey: key) {
+                // Fingerprint-deduped, so replaying an unchanged graph is a
+                // no-op. Each replay drains the next stashed repo in turn.
+                await upload(graph: next.graph, repoRoot: next.repoRoot)
+            }
         }
         return uploaded
     }

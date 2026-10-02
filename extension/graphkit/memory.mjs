@@ -29,6 +29,7 @@ import { userRepoAllowlist } from '../kb/db.mjs';
 import { config } from '../core/config.mjs';
 import { parseChatMemoryFacts } from './memory-writer.mjs';
 import { factStamp } from '../core/fact-key.mjs';
+import { memoryLedgerFor, ledgerKey } from '../kb/memory-ledger.mjs';
 import { termTokens } from '../core/text-tokens.mjs';
 import { memoryDir, legacyMemoryDir, systemDir, graphIndexFile, SYSTEM_DIR } from './paths.mjs';
 
@@ -261,10 +262,10 @@ function queryTokens(userMessage) {
 // degrades to pure newest-first — which already fixes the old raw-clip that
 // kept the OLDEST facts and dropped the newest. Pure + exported for unit
 // tests. Returns a `- fact` bullet body (no header), or ''.
-export function selectChatMemoryFacts(content, { userMessage = '', room = 0 } = {}) {
+export function selectChatMemoryFacts(content, { userMessage = '', room = 0, ledger = null } = {}) {
   const facts = parseChatMemoryFacts(content);
   if (facts.length === 0 || room <= 0) return '';
-  const scored = rankFactsByRelevance(facts, { userMessage });
+  const scored = rankFactsByRelevance(facts, { userMessage, ledger });
   const chosen = [];
   let used = 0;
   for (const fact of scored) {
@@ -295,7 +296,12 @@ export function rankFactsByRelevance(facts, opts = {}) {
 
 // Same ranking with each fact's score (0 = no query-token overlap), for a
 // caller that needs to tell "relevant" from "merely next in line".
-export function scoreFactsByRelevance(facts, { userMessage = '' } = {}) {
+// `ledger` (kb/memory-ledger.mjs memoryLedgerFor, optional): among facts of
+// EQUAL relevance, the one confirmed most recently wins — its last
+// confirmation counts as recency even when the file's stamp is old (a
+// restatement deliberately leaves the file alone) — then the one confirmed
+// more often. Relevance always decides first.
+export function scoreFactsByRelevance(facts, { userMessage = '', ledger = null } = {}) {
   if (!Array.isArray(facts) || facts.length === 0) return [];
   const q = queryTokens(userMessage);
   // IDF weighting: a query token carried by few facts is far more
@@ -325,7 +331,14 @@ export function scoreFactsByRelevance(facts, { userMessage = '' } = {}) {
     }
     // '' sorts below any real YYYY-MM-DD under localeCompare, which is how
     // an unstamped legacy fact ends up last among equally-relevant facts.
-    return { fact, score, index: i, stamp: factStamp(fact) || '' };
+    const seen = ledger ? ledger.get(ledgerKey(fact)) : undefined;
+    const stamp = factStamp(fact) || '';
+    const confirmedDay = typeof seen?.lastConfirmedAt === 'string' ? seen.lastConfirmedAt.slice(0, 10) : '';
+    return {
+      fact, score, index: i,
+      stamp: confirmedDay > stamp ? confirmedDay : stamp,
+      confirmations: seen?.confirmations ?? 0,
+    };
   });
   // Most relevant first; newer wins ties. Recency is the fact's own
   // `(t:YYYY-MM-DD)` stamp (graphkit/memory-writer.mjs), NOT its position in
@@ -343,14 +356,16 @@ export function scoreFactsByRelevance(facts, { userMessage = '' } = {}) {
   // Same-day (or same-missing) stamps fall back to position, preserving the
   // previous within-day ordering.
   scored.sort((a, b) => (b.score - a.score)
-    || (a.stamp === b.stamp ? b.index - a.index : String(b.stamp).localeCompare(String(a.stamp))));
+    || (a.stamp === b.stamp
+      ? (b.confirmations - a.confirmations) || (b.index - a.index)
+      : String(b.stamp).localeCompare(String(a.stamp))));
   return scored;
 }
 
 // `stableOnly` keeps just the files that change rarely — repo.md, the
 // environment note, the graph overview — with no "(updated …)" age, for the v2
 // per-session summary that is re-sent whenever its text changes (engine.mjs).
-export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage, { stableOnly = false } = {}) {
+export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage, { stableOnly = false, userId = null } = {}) {
   if (!repo) return null;
   const root = resolveAllowedRepoRoot(repo.path, allowedRoots);
   if (!root) return null;
@@ -413,9 +428,15 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage, 
   // facts most relevant to THIS question and reserve a budget FLOOR for them so
   // a fat repo.md can't crowd them out (the old order added repo.md first with
   // the full budget, starving chat-memory within — and across — repos).
+  // The typed ledger refines the ranking (re-confirmed facts first among
+  // equals); a ledger failure must never cost the turn its memory.
+  let ledger = null;
+  if (!stableOnly && userId) {
+    try { ledger = memoryLedgerFor(userId, root); } catch { ledger = null; }
+  }
   const chatBody = stableOnly ? '' : selectChatMemoryFacts(
     readMemoryFile('chat-memory.md', CHAT_STORE_CHARS),
-    { userMessage, room: Math.min(budget, CHAT_INJECT_CHARS) },
+    { userMessage, room: Math.min(budget, CHAT_INJECT_CHARS), ledger },
   );
   const chatFloor = Math.min(Math.floor(budget * 0.5), chatBody.length);
 
@@ -511,7 +532,7 @@ export function renderGraphifyMemory(agentContext, userId, stats, userMessage = 
   for (const repo of candidates) {
     const remaining = Math.min(TOTAL_CHARS, totalChars) - totalUsed;
     if (remaining <= 500) break;
-    const block = repoMemoryBlock(repo, remaining, allowedRoots, stats, userMessage, { stableOnly });
+    const block = repoMemoryBlock(repo, remaining, allowedRoots, stats, userMessage, { stableOnly, userId });
     if (block) {
       blocks.push(block);
       totalUsed += block.length;
