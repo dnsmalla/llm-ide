@@ -128,4 +128,102 @@ func runProjectEnvironmentAssessorChecks() {
     expect(venvPytestFails.readiness == .needsSetup,
            ".venv/bin/pytest command with startup failure => needsSetup")
 }
+
+/// A project whose `.venv/bin/python` is a shell script answering the probes
+/// from `body`, so the inspector is asserted without a real Python.
+private func makeFakePythonProject(name: String, withPytestBinary: Bool, body: String) -> URL {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("loop-env-inspect-\(name)-\(UUID().uuidString)")
+    let bin = root.appendingPathComponent(".venv/bin")
+    try? FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+    try? "home = /usr/bin\n".write(to: root.appendingPathComponent(".venv/pyvenv.cfg"),
+                                   atomically: true, encoding: .utf8)
+    try? "[pytest]\n".write(to: root.appendingPathComponent("pytest.ini"), atomically: true, encoding: .utf8)
+    try? "".write(to: root.appendingPathComponent("requirements.txt"), atomically: true, encoding: .utf8)
+    func script(_ file: String, _ text: String) {
+        FileManager.default.createFile(atPath: bin.appendingPathComponent(file).path,
+                                       contents: Data(text.utf8), attributes: [.posixPermissions: 0o755])
+    }
+    script("python", "#!/bin/sh\n" + body)
+    if withPytestBinary { script("pytest", "#!/bin/sh\n") }
+    return root
+}
+
+private let fakePythonHealthy = """
+case "$*" in
+  "--version") echo "Python 9.9.9" ;;
+  *find_spec*) echo True ;;
+  *"-m pytest --version"*) echo "pytest 0.0.0" ;;
+  "-m pip check") echo "No broken requirements found." ;;
+  *) echo "unexpected: $*"; exit 2 ;;
+esac
+"""
+
+func runProjectEnvironmentInspectorChecks() async {
+    print("project environment inspector")
+    let inherited = ["PATH": "/usr/bin:/bin", "HOME": NSTemporaryDirectory()]
+
+    let healthy = makeFakePythonProject(name: "ok", withPytestBinary: true, body: fakePythonHealthy)
+    defer { try? FileManager.default.removeItem(at: healthy) }
+    let ok = await ProjectEnvironmentInspector.inspect(repoRoot: healthy, inherited: inherited, timeout: 10)
+    expect(ok.isPythonProject, "a requirements.txt project is a Python project")
+    expect(ok.recommendedTestCommand == "pytest", "pytest.ini yields the pytest command")
+    expect(ok.missingExecutable == nil, "pytest in the virtualenv's bin/ is found")
+    expect(ok.virtualEnvName == ".venv", "the virtualenv folder is named")
+    expect(ok.pythonVersion == .ok("Python 9.9.9"), "the virtualenv's Python version is read")
+    expect(ok.pytestInstalled == .ok("True"), "pytest presence is read")
+    expect(ok.pytestStarts == .ok("pytest 0.0.0"), "the pytest start check ran")
+    expect(ok.pipCheck == .ok("No broken requirements found."), "pip check ran")
+    expect(ProjectEnvironmentAssessor.assess(ok).readiness == .ready, "a healthy fake project is ready")
+
+    let broken = makeFakePythonProject(name: "broken", withPytestBinary: false, body: """
+    case "$*" in
+      "--version") echo "Python 9.9.9" ;;
+      *find_spec*) echo True ;;
+      *"-m pytest --version"*) printf 'Traceback\\nSystemError: boom\\n'; exit 1 ;;
+      "-m pip check") echo "x 1 requires y"; exit 1 ;;
+    esac
+    """)
+    defer { try? FileManager.default.removeItem(at: broken) }
+    let bad = await ProjectEnvironmentInspector.inspect(repoRoot: broken, inherited: inherited, timeout: 10)
+    expect(bad.pytestStarts == .failed("Traceback\nSystemError: boom"), "a failing start check keeps its output")
+    expect(bad.pipCheck == .failed("x 1 requires y"), "a failing pip check keeps its output")
+
+    let absent = makeFakePythonProject(name: "absent", withPytestBinary: true, body: """
+    case "$*" in
+      "--version") echo "Python 9.9.9" ;;
+      *find_spec*) echo False ;;
+      "-m pip check") echo "ok" ;;
+    esac
+    """)
+    defer { try? FileManager.default.removeItem(at: absent) }
+    let none = await ProjectEnvironmentInspector.inspect(repoRoot: absent, inherited: inherited, timeout: 10)
+    expect(none.pytestInstalled == .ok("False"), "an absent pytest is read as False")
+    expect(none.pytestStarts == .notRun, "the start check is skipped when pytest is not installed")
+
+    let slow = makeFakePythonProject(name: "slow", withPytestBinary: true, body: """
+    case "$*" in
+      "-m pip check") sleep 30 ;;
+      "--version") echo "Python 9.9.9" ;;
+      *find_spec*) echo True ;;
+      *"-m pytest --version"*) echo "pytest 0.0.0" ;;
+    esac
+    """)
+    defer { try? FileManager.default.removeItem(at: slow) }
+    let started = Date()
+    let late = await ProjectEnvironmentInspector.inspect(repoRoot: slow, inherited: inherited, timeout: 1)
+    expect(late.pipCheck == .timedOut, "a probe that exceeds the time limit is timedOut")
+    expect(late.pythonVersion == .ok("Python 9.9.9"), "the other probes still answer when one times out")
+    expect(Date().timeIntervalSince(started) < 15, "a timed-out probe does not hold up the inspection")
+
+    let swiftRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("loop-env-inspect-swift-\(UUID().uuidString)")
+    try? FileManager.default.createDirectory(at: swiftRoot, withIntermediateDirectories: true)
+    try? "".write(to: swiftRoot.appendingPathComponent("Package.swift"), atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: swiftRoot) }
+    let swift = await ProjectEnvironmentInspector.inspect(repoRoot: swiftRoot, inherited: inherited, timeout: 10)
+    expect(!swift.isPythonProject && swift.pythonVersion == .notRun && swift.pipCheck == .notRun,
+           "no Python probe runs for a project that is not Python")
+    expect(swift.recommendedTestCommand == "swift test", "a Swift package recommends swift test")
+}
 #endif

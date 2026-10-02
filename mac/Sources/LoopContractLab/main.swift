@@ -527,6 +527,7 @@ runEnvironmentProblemChecks()
 runStageCommandAvailabilityChecks()
 runProjectEnvironmentSetupChecks()
 runProjectEnvironmentAssessorChecks()
+await runProjectEnvironmentInspectorChecks()
 #endif
 
 if failures.isEmpty {
