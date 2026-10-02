@@ -1324,6 +1324,63 @@ do {
     expect(AgentV2Conformance.freshHistoryField([]).isEmpty, "an empty chat sends no history")
 }
 
+// PurposeModelPolicy: which Settings model a chat mode uses. The Mac sends one
+// `model` per turn, so the choice is made here, Mac-side, with no wire change.
+do {
+    expect(ModelPurpose(mode: "plan") == .planning && ModelPurpose(mode: "assist_plan") == .planning,
+           "plan and assist_plan are the Planning purpose")
+    expect(ModelPurpose(mode: "execute") == .coding && ModelPurpose(mode: "auto") == .coding,
+           "execute and auto are the Coding purpose (auto is classified server-side, so Coding is the safe default)")
+    expect(ModelPurpose(mode: "review") == .reviewing, "review is the Reviewing purpose")
+    expect(ModelPurpose(mode: "document") == .documents && ModelPurpose(mode: "ask") == .documents,
+           "document and ask are the Documents purpose")
+    expect(ModelPurpose(mode: "auto_read_only") == .documents,
+           "the phone's read-only auto mode answers questions, like Ask, so it is Documents")
+    expect(ModelPurpose(mode: "bogus") == nil && ModelPurpose(mode: "") == nil,
+           "an unknown mode has no purpose, so it falls back to the default model")
+
+    let policy = PurposeModelPolicy(
+        perPurpose: [.planning: "opus-x", .reviewing: "haiku-x", .coding: ""],
+        defaultModelId: "sonnet-x")
+    expect(policy.modelId(forMode: "plan") == "opus-x", "a set purpose model wins for its modes")
+    expect(policy.modelId(forMode: "assist_plan") == "opus-x", "every mode of a purpose shares its model")
+    expect(policy.modelId(forMode: "review") == "haiku-x", "Reviewing uses its own model")
+    expect(policy.modelId(forMode: "execute") == "sonnet-x", "an EMPTY purpose model means the default model")
+    expect(policy.modelId(forMode: "document") == "sonnet-x", "an unset purpose means the default model")
+    expect(policy.modelId(forMode: "bogus") == "sonnet-x", "an unknown mode means the default model")
+    expect(PurposeModelPolicy(perPurpose: [:], defaultModelId: "").modelId(forMode: "plan") == nil,
+           "nothing configured sends no model, so the engine uses the account default")
+    expect(PurposeModelPolicy(perPurpose: [.planning: "  "], defaultModelId: "d").modelId(forMode: "plan") == "d",
+           "a whitespace-only purpose model counts as empty")
+
+    expect(policy.modelId(forMode: "plan", explicit: "picked") == "picked",
+           "a model the user picked in the composer beats the purpose setting")
+    expect(policy.modelId(forMode: "plan", explicit: "") == "opus-x",
+           "an empty explicit pick follows Settings")
+    expect(policy.modelId(forMode: "plan", explicit: nil) == "opus-x", "no explicit pick follows Settings")
+    // Auto Tasks only pin a model that was set FOR the purpose; the default
+    // stays a hint to the usage chain, so an untouched install is unchanged.
+    expect(policy.purposeModelId(forMode: "plan") == "opus-x", "a purpose model is reported for its mode")
+    expect(policy.purposeModelId(forMode: "execute") == nil,
+           "an empty purpose model is NOT reported (the default is not a purpose choice)")
+    expect(policy.purposeModelId(forMode: "bogus") == nil, "an unknown mode has no purpose model")
+    // A purpose id the provider no longer offers (retired, or picked for
+    // another provider) must not be sent — the engine would reject it.
+    let offered: Set<String> = ["opus-x", "sonnet-x"]
+    expect(policy.modelId(forMode: "plan", explicit: nil, isOffered: { offered.contains($0) }) == "opus-x",
+           "an offered purpose model is used")
+    expect(policy.modelId(forMode: "review", explicit: nil, isOffered: { offered.contains($0) }) == "sonnet-x",
+           "a purpose model the provider does not offer falls back to the default model")
+    expect(policy.modelId(forMode: "plan", explicit: "picked", isOffered: { _ in false }) == "picked",
+           "an explicit composer pick is never second-guessed here")
+    expect(PurposeModelPolicy(perPurpose: [.planning: "gone"], defaultModelId: "")
+               .modelId(forMode: "plan", explicit: nil, isOffered: { _ in false }) == nil,
+           "an unoffered purpose model with no default sends no model")
+    expect(Set(ModelPurpose.allCases.map(\.settingsKey)).count == ModelPurpose.allCases.count
+           && ModelPurpose.allCases.allSatisfy { $0.settingsKey.hasPrefix("purposeModel.") },
+           "each purpose persists under its own UserDefaults key")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

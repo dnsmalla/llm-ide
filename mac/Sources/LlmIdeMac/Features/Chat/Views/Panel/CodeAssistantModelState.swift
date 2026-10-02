@@ -87,6 +87,12 @@ enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption
 @Observable
 final class CodeAssistantModelState {
     var selectedModel: String = ""
+    /// Whether the user chose `selectedModel` themselves (composer picker,
+    /// "Add model…", `/model`). While false, `effectiveModelId` follows the
+    /// per-purpose models from Settings for the current mode instead, so a
+    /// Settings change reaches an open chat — `selectedModel` alone was copied
+    /// from the default once at open and never followed it.
+    var modelIsExplicit = false
     /// Current provider: either an AICliTool rawValue ("anthropic"/"openai"/...)
     /// or "custom:uuid" for a user-registered custom provider.
     var selectedProvider: String = ""

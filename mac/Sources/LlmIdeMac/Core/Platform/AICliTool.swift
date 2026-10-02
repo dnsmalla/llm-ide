@@ -213,6 +213,25 @@ enum AICliTool: String, CaseIterable, Identifiable {
     }
 }
 
+extension AICliTool {
+    /// The models a NON-panel surface (phone bridge, Auto Tasks, quick chat) can
+    /// check a saved id against — the same set Settings offers: Claude's live
+    /// list (else the static one) plus the user's "Add model…" ids.
+    ///
+    /// Empty for every other provider: their live lists are fetched inside the
+    /// chat panel's state and are not visible here, and `AIModel.isOffered`
+    /// treats an empty list as "no opinion". Checking those against the static
+    /// list would reject a model the user legitimately added or fetched.
+    var offeredModels: [AIModel] {
+        guard self == .claudeCode else { return [] }
+        let base = LiveModelCache.models(for: provider) ?? models
+        let raw = UserDefaults.standard.string(forKey: "MEETNOTES_CUSTOM_MODELS") ?? "{}"
+        let added = (try? JSONDecoder().decode([String: [String]].self, from: Data(raw.utf8)))?[provider] ?? []
+        let known = Set(base.map(\.id))
+        return base + added.filter { !$0.isEmpty && !known.contains($0) }.map { AIModel(id: $0, displayName: $0) }
+    }
+}
+
 struct AIModel: Identifiable, Hashable, Codable {
     let id: String
     let displayName: String
@@ -245,6 +264,14 @@ struct AIModel: Identifiable, Hashable, Codable {
         if s.hasSuffix("[1m]") { s.removeLast(4) }
         if let r = s.range(of: #"-\d{8}$"#, options: .regularExpression) { s.removeSubrange(r) }
         return s
+    }
+
+    /// Whether `id` can be sent to the provider whose models are `models`. An
+    /// empty list means "not enumerated here" (Custom/GLM, or a live list not
+    /// fetched yet) — no opinion, so it is allowed. A Claude id the live list
+    /// lacks but names the same model (`including`) is still offered.
+    static func isOffered(_ id: String, in models: [AIModel]) -> Bool {
+        models.isEmpty || including(selected: id, in: models).contains(where: { $0.id == id })
     }
 
     /// `models` plus the current selection when it is a Claude id the list

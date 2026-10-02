@@ -354,6 +354,7 @@ struct CodeAssistantPanel: View {
                 voiceService.cancel()
             }
             .onChange(of: config.activeCLI) { _, _ in
+                config.modelPickIsExplicit = false
                 modelState.followDefaultProvider(activeCLI: config.activeCLI,
                                                  defaultModelId: config.defaultModelId)
             }
@@ -567,7 +568,9 @@ struct CodeAssistantPanel: View {
                 // old `codeAssistRoundTrip` did on every call.
                 agentContext: await buildAgentContext(),
                 language: prefLanguage,
-                model: modelState.selectedModel.isEmpty ? nil : modelState.selectedModel,
+                // A Settings model per purpose, resolved from the mode this turn
+                // sends; an explicit composer pick wins (see effectiveModelId).
+                model: modelState.effectiveModelIdOrNil(config: config),
                 provider: ChatTransportInput.makeProvider(
                     selectedProvider: modelState.selectedProvider),
                 mode: modelState.selectedMode.rawValue,
@@ -757,6 +760,8 @@ struct CodeAssistantPanel: View {
     func handleOnAppear() {
         wireEngine()
         modelState.customProviders = CustomProvider.loadAll()
+        // View state dies on a section switch; the persisted flag restores it.
+        modelState.modelIsExplicit = config.modelPickIsExplicit
         if modelState.selectedModel.isEmpty {
             modelState.selectedModel = config.defaultModelId.isEmpty
                 ? AICliTool.claudeCode.defaultModelId

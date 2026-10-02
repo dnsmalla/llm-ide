@@ -259,6 +259,40 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(defaultModelId, forKey: "defaultModelId") }
     }
 
+    /// Model per purpose (planning / coding / reviewing / documents). An empty
+    /// value means "use `defaultModelId`", so a fresh install behaves exactly
+    /// as before. Ids belong to the ACTIVE provider, so a provider switch
+    /// clears them (`resetPurposeModels`) just as it resets `defaultModelId`.
+    @Published var purposeModelIds: [ModelPurpose: String] {
+        didSet {
+            for purpose in ModelPurpose.allCases {
+                defaults.set(purposeModelIds[purpose] ?? "", forKey: purpose.settingsKey)
+            }
+        }
+    }
+
+    /// Whether the user's last composer model pick should beat the purpose
+    /// models. The composer's own flag lives in view state, which dies on a
+    /// section switch — without this an explicit pick silently became the
+    /// Settings model after visiting another section. Cleared by anything that
+    /// re-decides the model from Settings: a provider switch or editing a
+    /// purpose picker.
+    @Published var modelPickIsExplicit: Bool {
+        didSet { defaults.set(modelPickIsExplicit, forKey: "modelPickIsExplicit") }
+    }
+
+    /// The single place a chat mode is turned into a model — every surface
+    /// (panel, quick chat, phone bridge, Auto Tasks) asks this, never
+    /// `defaultModelId` directly, or it would ignore the Settings choice.
+    var purposeModels: PurposeModelPolicy {
+        PurposeModelPolicy(perPurpose: purposeModelIds, defaultModelId: defaultModelId)
+    }
+
+    /// Forget every per-purpose pick (they were made for another provider).
+    func resetPurposeModels() {
+        purposeModelIds = [:]
+    }
+
     /// Local mirror of the server-synced LLM output language pref.
     ///
     /// The server stays the source of truth (`/auth/me/prefs`, edited in
@@ -748,6 +782,12 @@ final class AppConfig: ObservableObject {
             // stored properties yet. Same value line ~688 just stored.
             activeCLI: defaults.string(forKey: "activeCLI") ?? AICliTool.claudeCode.rawValue,
             knownModelIds: knownModelIds)
+        // Not coerced against the live list like `defaultModelId`: the list
+        // isn't fetched yet at launch, and each send validates the id anyway.
+        self.purposeModelIds = Dictionary(uniqueKeysWithValues: ModelPurpose.allCases.map {
+            ($0, defaults.string(forKey: $0.settingsKey) ?? "")
+        })
+        self.modelPickIsExplicit = defaults.bool(forKey: "modelPickIsExplicit")
         self.lastSeenAppVersion = defaults.string(forKey: "lastSeenAppVersion") ?? ""
         if defaults.object(forKey: "lastRegressionRunAt") != nil {
             let ts = defaults.double(forKey: "lastRegressionRunAt")

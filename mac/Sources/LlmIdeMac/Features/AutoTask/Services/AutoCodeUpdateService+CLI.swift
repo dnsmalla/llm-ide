@@ -294,14 +294,24 @@ extension AutoCodeUpdateService {
     /// Ask the usage ledger which model in the active provider's same-provider
     /// chain still has budget. No API client (or a resolver error) never blocks
     /// automation — we proceed with the CLI's own default model.
-    func resolveModelForRun() async -> ModelDecision {
-        guard let api else { return .proceed(model: nil) }
-        let provider = (AICliTool(rawValue: config.activeCLI) ?? .claudeCode).provider
+    ///
+    /// - Parameter mode: the chat mode this task is equivalent to ("execute",
+    ///   "review", "document"), so the Settings model for that purpose applies.
+    ///   nil keeps the old behaviour (the default model as a hint only).
+    func resolveModelForRun(mode: String? = nil) async -> ModelDecision {
+        let tool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
+        // A model the user set FOR this purpose is a choice, unlike the default
+        // (a hint): it is pinned even when the usage chain is not engaged.
+        // Skipped when the provider does not offer it (retired / other provider).
+        let purposeModel = mode.flatMap { config.purposeModels.purposeModelId(forMode: $0) }
+            .flatMap { AIModel.isOffered($0, in: tool.offeredModels) ? $0 : nil }
+        guard let api else { return .proceed(model: purposeModel) }
+        let provider = tool.provider
         do {
-            // Pass the user's configured default model as the preferred entry
-            // point so the chain keeps it when healthy and only steps down when
-            // it's constrained (rather than always jumping to the chain top).
-            let prefer = config.defaultModelId.isEmpty ? nil : config.defaultModelId
+            // Pass the user's configured model as the preferred entry point so
+            // the chain keeps it when healthy and only steps down when it's
+            // constrained (rather than always jumping to the chain top).
+            let prefer = purposeModel ?? (config.defaultModelId.isEmpty ? nil : config.defaultModelId)
             let r = try await api.resolveUsageModel(provider: provider, prefer: prefer)
             if r.isPaused {
                 return .paused(reason: r.reason ?? "All \(provider) models have reached their usage limit.",
@@ -311,9 +321,9 @@ extension AutoCodeUpdateService {
             // is actually engaged (caps set or a quota flag fired). Otherwise
             // leave the model unset so the CLI uses its own default — enabling
             // the feature with no caps changes nothing.
-            return .proceed(model: (r.engaged == true) ? r.model : nil)
+            return .proceed(model: (r.engaged == true) ? r.model : purposeModel)
         } catch {
-            return .proceed(model: nil)
+            return .proceed(model: purposeModel)
         }
     }
 
@@ -373,7 +383,7 @@ extension AutoCodeUpdateService {
         // Auto-fallback: pick the model with remaining budget, or skip if the
         // whole provider chain is paused (every model at its limit).
         var resolvedModel: String?
-        switch await resolveModelForRun() {
+        switch await resolveModelForRun(mode: "execute") {
         case .paused(let reason, let resetAt):
             let when = resetAt.map { " Resets \($0)." } ?? ""
             let msg = "Skipped issue #\(issue.number): \(reason)\(when)"
@@ -538,8 +548,10 @@ extension AutoCodeUpdateService {
         return result
     }
 
+    /// `purposeMode`: the chat mode this task corresponds to, for the Settings
+    /// model of that purpose (nil = no purpose, the default model applies).
     func runCLI(prompt: String, localPath: String, logSuffix: String, logDir: URL,
-                logStoreId: String, persistChanges: Bool = false) async -> Bool {
+                logStoreId: String, persistChanges: Bool = false, purposeMode: String? = nil) async -> Bool {
         let cliTool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
         let cliCommand = cliTool.cliExecutable
         let components = cliCommand.split(separator: " ").map(String.init)
@@ -552,7 +564,7 @@ extension AutoCodeUpdateService {
         // Auto-fallback: pick the model with remaining budget, or skip the task
         // if the whole provider chain is paused.
         var resolvedModel: String?
-        switch await resolveModelForRun() {
+        switch await resolveModelForRun(mode: purposeMode) {
         case .paused(let reason, let resetAt):
             let when = resetAt.map { " Resets \($0)." } ?? ""
             let msg = "Skipped auto-task \(logSuffix): \(reason)\(when)"

@@ -713,7 +713,9 @@ struct MenuBarChatView: View {
 
     private var selectedModelLabel: String {
         QuickChatContext.modelLabel(modelId: engine.quickChatModelId,
-                                    defaultModelId: config.defaultModelId,
+                                    // Same fallback the send uses (QuickChatContext), or the label lies.
+                                    defaultModelId: QuickChatContext.quickChatFallbackModel(
+                                        config: config, tool: AICliTool(rawValue: config.activeCLI) ?? .claudeCode),
                                     models: modelsForPicker())
     }
 
