@@ -151,9 +151,9 @@ private func makeFakePythonProject(name: String, withPytestBinary: Bool, body: S
 
 private let fakePythonHealthy = """
 case "$*" in
-  "--version") echo "Python 9.9.9" ;;
+  "--version") echo "Python 9.9.9 dwb=$PYTHONDONTWRITEBYTECODE" ;;
   *find_spec*) echo True ;;
-  *"-m pytest --version"*) echo "pytest 0.0.0" ;;
+  "-m pytest --version --noconftest -p no:cacheprovider") echo "pytest 0.0.0" ;;
   "-m pip check") echo "No broken requirements found." ;;
   *) echo "unexpected: $*"; exit 2 ;;
 esac
@@ -170,7 +170,7 @@ func runProjectEnvironmentInspectorChecks() async {
     expect(ok.recommendedTestCommand == "pytest", "pytest.ini yields the pytest command")
     expect(ok.missingExecutable == nil, "pytest in the virtualenv's bin/ is found")
     expect(ok.virtualEnvName == ".venv", "the virtualenv folder is named")
-    expect(ok.pythonVersion == .ok("Python 9.9.9"), "the virtualenv's Python version is read")
+    expect(ok.pythonVersion == .ok("Python 9.9.9 dwb=1"), "the virtualenv's Python version is read")
     expect(ok.pytestInstalled == .ok("True"), "pytest presence is read")
     expect(ok.pytestStarts == .ok("pytest 0.0.0"), "the pytest start check ran")
     expect(ok.pipCheck == .ok("No broken requirements found."), "pip check ran")
@@ -178,9 +178,9 @@ func runProjectEnvironmentInspectorChecks() async {
 
     let broken = makeFakePythonProject(name: "broken", withPytestBinary: false, body: """
     case "$*" in
-      "--version") echo "Python 9.9.9" ;;
+      "--version") echo "Python 9.9.9 dwb=$PYTHONDONTWRITEBYTECODE" ;;
       *find_spec*) echo True ;;
-      *"-m pytest --version"*) printf 'Traceback\\nSystemError: boom\\n'; exit 1 ;;
+      "-m pytest --version --noconftest -p no:cacheprovider") printf 'Traceback\\nSystemError: boom\\n'; exit 1 ;;
       "-m pip check") echo "x 1 requires y"; exit 1 ;;
     esac
     """)
@@ -191,7 +191,7 @@ func runProjectEnvironmentInspectorChecks() async {
 
     let absent = makeFakePythonProject(name: "absent", withPytestBinary: true, body: """
     case "$*" in
-      "--version") echo "Python 9.9.9" ;;
+      "--version") echo "Python 9.9.9 dwb=$PYTHONDONTWRITEBYTECODE" ;;
       *find_spec*) echo False ;;
       "-m pip check") echo "ok" ;;
     esac
@@ -203,18 +203,26 @@ func runProjectEnvironmentInspectorChecks() async {
 
     let slow = makeFakePythonProject(name: "slow", withPytestBinary: true, body: """
     case "$*" in
-      "-m pip check") sleep 30 ;;
-      "--version") echo "Python 9.9.9" ;;
+      "-m pip check") echo $$ > "$(dirname "$0")/pid"; sleep 30 ;;
+      "--version") echo "Python 9.9.9 dwb=$PYTHONDONTWRITEBYTECODE" ;;
       *find_spec*) echo True ;;
-      *"-m pytest --version"*) echo "pytest 0.0.0" ;;
+      "-m pytest --version --noconftest -p no:cacheprovider") echo "pytest 0.0.0" ;;
     esac
     """)
     defer { try? FileManager.default.removeItem(at: slow) }
     let started = Date()
     let late = await ProjectEnvironmentInspector.inspect(repoRoot: slow, inherited: inherited, timeout: 1)
     expect(late.pipCheck == .timedOut, "a probe that exceeds the time limit is timedOut")
-    expect(late.pythonVersion == .ok("Python 9.9.9"), "the other probes still answer when one times out")
+    expect(late.pythonVersion == .ok("Python 9.9.9 dwb=1"), "the other probes still answer when one times out")
     expect(Date().timeIntervalSince(started) < 15, "a timed-out probe does not hold up the inspection")
+    let pidText = (try? String(contentsOf: slow.appendingPathComponent(".venv/bin/pid"), encoding: .utf8)) ?? ""
+    let probePid = pid_t(pidText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+    var isGone = false
+    for _ in 0..<30 where probePid > 0 {
+        if kill(probePid, 0) != 0 { isGone = true; break }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+    }
+    expect(isGone, "a timed-out probe's process tree is stopped")
 
     let swiftRoot = FileManager.default.temporaryDirectory
         .appendingPathComponent("loop-env-inspect-swift-\(UUID().uuidString)")

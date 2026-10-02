@@ -10,6 +10,10 @@ public enum ProjectEnvironmentInspector {
     /// Files that make a project a Python project.
     private static let pythonMarkers = ["requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "pytest.ini"]
 
+    /// Collects the environment facts for `repoRoot`.
+    ///
+    /// If the calling task is cancelled, no further probe is launched and the
+    /// returned facts are INCOMPLETE; callers must discard them.
     public static func inspect(repoRoot: URL,
                                inherited: [String: String] = ProcessInfo.processInfo.environment,
                                timeout: TimeInterval = 20) async -> ProjectEnvironmentFacts {
@@ -34,21 +38,28 @@ public enum ProjectEnvironmentInspector {
         facts.virtualEnvName = venv?.lastPathComponent
         let python = venv.map { "\($0.lastPathComponent)/bin/python" } ?? "python3"
 
+        guard !Task.isCancelled else { return facts }
         facts.pythonVersion = await run("\(python) --version", in: repoRoot, environment: environment, timeout: timeout)
+        guard !Task.isCancelled else { return facts }
         facts.pytestInstalled = await run(
             "\(python) -c \"import importlib.util as u; print(u.find_spec('pytest') is not None)\"",
             in: repoRoot, environment: environment, timeout: timeout)
         if case .ok(let output) = facts.pytestInstalled,
            output.trimmingCharacters(in: .whitespacesAndNewlines) == "True" {
+            guard !Task.isCancelled else { return facts }
             facts.pytestStarts = await run(
                 "\(python) -m pytest --version --noconftest -p no:cacheprovider",
                 in: repoRoot, environment: environment, timeout: timeout)
         }
+        guard !Task.isCancelled else { return facts }
         facts.pipCheck = await run("\(python) -m pip check", in: repoRoot, environment: environment, timeout: timeout)
         return facts
     }
 
     /// Runs one fixed command with a time limit. Output is trimmed and capped.
+    /// `.notRun` is returned when the task is cancelled while waiting; the
+    /// same value also means "skipped on purpose" elsewhere in the facts, so
+    /// callers must check cancellation before trusting a `.notRun`.
     private static func run(_ command: String, in directory: URL, environment: [String: String],
                             timeout: TimeInterval) async -> EnvironmentProbe {
         let process: GroupedSubprocess
