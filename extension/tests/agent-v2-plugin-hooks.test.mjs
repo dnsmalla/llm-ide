@@ -91,6 +91,18 @@ const { registerUser } = await import('../server/users.mjs');
 const { getDb } = await import('../kb/db.mjs');
 const { buildReadableRoots } = await import('../llm_agent/runtime/handlers/repo-files.mjs');
 
+const { TOOL_OUTPUT_CAP_HOOK } = await import('../llm_agent/sdk/tool-output-cap.mjs');
+// The turn's hooks minus llm-ide's own tool-output cap (present on every turn):
+// what these tests are about is which PLUGIN hooks llm-ide runs itself.
+function pluginHooksOf(hooks = {}) {
+  const out = {};
+  for (const [event, entries] of Object.entries(hooks || {})) {
+    const own = entries.filter((e) => e !== TOOL_OUTPUT_CAP_HOOK);
+    if (own.length) out[event] = own;
+  }
+  return out;
+}
+
 const WS = path.join(__dirname, '_agent-v2-hooks-ws');
 fs.mkdirSync(WS, { recursive: true });
 
@@ -125,7 +137,7 @@ test('a trusted plugin reaches the SDK as a local plugin, MCP discovery off', as
   assert.equal(options.plugins?.length, 1, 'the turn must carry the plugin');
   assert.equal(options.plugins[0].type, 'local');
   assert.equal(options.plugins[0].skipMcpDiscovery, true);
-  assert.equal(options.hooks, undefined, 'the SDK runs its hooks, so we must not too');
+  assert.deepEqual(pluginHooksOf(options.hooks), {}, 'the SDK runs its hooks, so we must not too');
 });
 
 test('turning the pref off swaps the plugin option for translated hooks', async () => {
@@ -137,7 +149,7 @@ test('turning the pref off swaps the plugin option for translated hooks', async 
   setUserPrefs(id, { nativePlugins: false });
   const options = await composeTurn(id);
   assert.equal(options.plugins, undefined, 'nothing handed to the SDK');
-  assert.deepEqual(Object.keys(options.hooks || {}), ['PreToolUse']);
+  assert.deepEqual(Object.keys(pluginHooksOf(options.hooks)), ['PreToolUse']);
 });
 
 test('an untrusted plugin reaches the SDK by neither route', async () => {
@@ -147,5 +159,5 @@ test('an untrusted plugin reaches the SDK by neither route', async () => {
   setEnabled(id, 'reviewer', true);
   const options = await composeTurn(id);
   assert.equal(options.plugins, undefined);
-  assert.equal(options.hooks, undefined);
+  assert.deepEqual(pluginHooksOf(options.hooks), {});
 });

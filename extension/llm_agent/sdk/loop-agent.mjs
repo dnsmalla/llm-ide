@@ -45,6 +45,7 @@ import { buildLoopSkillsText } from '../../core/prompt-framing.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';
 import { resolveLanguage } from '../../providers/runtime.mjs';
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
+import { withToolOutputCap } from './tool-output-cap.mjs';
 
 // The only built-ins a Loop run may see. Everything else — Bash, WebFetch,
 // WebSearch, Agent/Task, AskUserQuestion, NotebookEdit, Skill, … — is absent
@@ -473,10 +474,12 @@ export async function runLoopAgent(
     disallowedTools: [...LOOP_AGENT_DISALLOWED],
     permissionMode: 'default',
     canUseTool,
-    hooks: {
+    // + the native-tool output cap (tool-output-cap.mjs): a repair reads files
+    // to fix them, and every hop re-reads what it read.
+    hooks: withToolOutputCap({
       PreToolUse: [{ hooks: [preToolUse] }],
       PostToolUse: [{ matcher: 'Edit|Write', hooks: [postToolUse] }],
-    },
+    }),
     systemPrompt: {
       type: 'preset', preset: 'claude_code',
       append: headlessSystemAppend(root, roots.slice(1), languageLine, skillsText),

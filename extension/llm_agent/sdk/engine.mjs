@@ -46,6 +46,7 @@ import {
 } from '../skills/index.mjs';
 import { composeSystemContext, composeRecentContext } from '../internal/context/compose.mjs';
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
+import { withToolOutputCap } from './tool-output-cap.mjs';
 import { contentHash, emptyDelivered, deliveredFor, commitDelivered, forgetDelivered } from './turn-context.mjs';
 import { usageBaselineFor, recordUsageBaseline, usageDelta } from './usage-baseline.mjs';
 import { buildSessionTaskPromptBlock } from '../runtime/task-session-context.mjs';
@@ -1431,7 +1432,10 @@ export async function runAgentV2Turn(
       ? { allowedTools: [...(queryOptions.allowedTools || []), ...userMcp.allowedTools] }
       : {}),
     ...(pluginDelivery.sdkPlugins.length ? { plugins: pluginDelivery.sdkPlugins } : {}),
-    ...(Object.keys(pluginDelivery.hooks).length ? { hooks: pluginDelivery.hooks } : {}),
+    // Plugin hooks plus the native-tool output cap (tool-output-cap.mjs): a
+    // huge Read/Bash/Grep result is re-read on every later hop, so it is
+    // trimmed before the model sees it.
+    hooks: withToolOutputCap(pluginDelivery.hooks),
     mcpServers: {
       llmide: buildLlmIdeServer(userId, agentContext, message, {
         runClaude,
