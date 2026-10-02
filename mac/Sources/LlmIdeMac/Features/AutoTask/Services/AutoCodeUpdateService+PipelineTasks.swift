@@ -1011,10 +1011,11 @@ extension AutoCodeUpdateService {
                 logStore.append(.loopEngineering, "\(loop.name) stopped after \(runner.iteration) iteration(s) — \(result?.summary ?? "gave up").", level: .error)
             case .blocked:
                 // A repair edited a protected path (a test, a build file, the
-                // project's system/ state). Distinct from `.givenUp`: the agent did
-                // not fail to fix this, it tried something it is not allowed to do —
-                // so this surfaces as an error a human should read, never as a
-                // near-miss the next cron tick might get past.
+                // project's system/ state), a required worktree was unavailable,
+                // or a tool/dependency is missing from the environment. Distinct
+                // from `.givenUp`: the agent did not fail to fix this — a human
+                // has to act — so this surfaces as an error a human should read,
+                // never as a near-miss the next cron tick might get past.
                 failures.append("\(loop.name) \(result?.summary ?? "blocked")")
                 logStore.append(.loopEngineering,
                                 "\(loop.name) stopped after \(runner.iteration) iteration(s) — \(result?.summary ?? "blocked").",

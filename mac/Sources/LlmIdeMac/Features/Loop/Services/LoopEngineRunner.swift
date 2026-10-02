@@ -1088,6 +1088,23 @@ final class LoopEngineRunner: ObservableObject {
             return .proceed
         }
 
+        // A missing tool or dependency: the repair agent can only edit files,
+        // so a repair here would "fix" code that is not broken. Stop and say so.
+        // Only before this stage's first repair — after one, the missing
+        // import may be what that repair wrote, which a repair CAN undo.
+        let environmentProblem = StageOutputParser.environmentProblem(
+            exitCode: outcome.exitCode, output: outcome.output, repoRoot: gitRoot)
+        if let problem = environmentProblem, (repairsUsed[stage.id] ?? 0) > 0 {
+            appendLog(.warn, "  [\(stage.name)] looks like an environment problem (\(problem)), but a repair already ran — repairing in case that repair caused it")
+        } else if let problem = environmentProblem {
+            let worktreeNote = currentWorktreeLease == nil ? ""
+                : " (this run uses an isolated worktree, which has none of the main checkout's gitignored dependency folders such as .venv or node_modules)"
+            appendLog(.warn, "  [\(stage.name)] environment problem: \(problem)\(worktreeNote) — not sending it to repair; set up the environment and run again")
+            record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                   passed: false, output: outcome.output, outputHash: failureHash, score: score)
+            return .terminate(.blocked(reason: .environment(stageName: stage.name, detail: problem)))
+        }
+
         let used = repairsUsed[stage.id] ?? 0
         // The same failure set back after two repairs with DIFFERENT diffs: a
         // third guess at it is not worth the spend.

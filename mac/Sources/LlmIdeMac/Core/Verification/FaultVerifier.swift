@@ -86,8 +86,12 @@ struct ShellFaultVerifier: FaultVerifier {
             // gate on CI (husky skips hooks; some CLIs go non-interactive).
             // A command that needs a different value sets it itself
             // (`CI=0 cmd`).
+            // The project's virtualenv + user CLI dirs: see ProjectRuntimeEnvironment.
+            var environment = ProjectRuntimeEnvironment.overrides(
+                for: repoRoot, inherited: ProcessInfo.processInfo.environment)
+            environment["CI"] = "1"
             proc = try GroupedSubprocess.launch(shellCommand: command, directory: repoRoot,
-                                                output: buffer, environment: ["CI": "1"])
+                                                output: buffer, environment: environment)
         } catch {
             throw VerifyError.launchFailed(error.localizedDescription)
         }

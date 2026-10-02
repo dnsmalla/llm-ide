@@ -519,6 +519,10 @@ print("  skipped — Loop is excluded from this build (auto_tasks not in LLMIDE_
 
 runSelfHealCoreChecks()
 await runSelfHealLoopChecks()
+runRuntimeEnvironmentChecks()
+#if FEATURE_AUTOTASK
+runEnvironmentProblemChecks()
+#endif
 
 if failures.isEmpty {
     print("loop-contract-lab: all assertions passed")

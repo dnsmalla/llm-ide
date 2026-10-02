@@ -37,6 +37,12 @@ enum LoopEngineStatus: Equatable {
         /// running in the main checkout — is the one thing this loop promises
         /// never to do.
         case worktreeRequired(reason: String)
+        /// A stage failed because a tool or dependency is missing from the
+        /// environment it runs in (`StageOutputParser.environmentProblem`).
+        /// Blocked, not given up: no repair was attempted, because the repair
+        /// agent edits files and cannot install anything — the operator has
+        /// to set the environment up.
+        case environment(stageName: String, detail: String)
     }
 
     case success
@@ -68,6 +74,8 @@ extension LoopEngineStatus {
             let more = paths.count > 3 ? " (+\(paths.count - 3) more)" : ""
             return "blocked — repair for \"\(name)\" touched a protected or out-of-scope path(s): \(list)\(more)"
         case .blocked(.worktreeRequired(let reason)): return "blocked — \(reason)"
+        case .blocked(.environment(let name, let detail)):
+            return "blocked — \"\(name)\" cannot run in this environment: \(detail)"
         case .needsApproval(let name): return "needs approval: \(name)"
         case .error(let msg): return "error: \(msg)"
         case .aborted: return "aborted"
@@ -91,6 +99,7 @@ extension LoopEngineStatus {
         case .givenUp(.stoppedReporting): return "given_up.stopped_reporting"
         case .blocked(.repairOutOfScope): return "blocked.repair_out_of_scope"
         case .blocked(.worktreeRequired): return "blocked.worktree_required"
+        case .blocked(.environment): return "blocked.environment"
         case .needsApproval: return "needs_approval"
         case .error: return "error"
         case .aborted: return "aborted"

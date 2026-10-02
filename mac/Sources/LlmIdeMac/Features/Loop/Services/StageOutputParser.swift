@@ -169,6 +169,77 @@ public enum StageOutputParser {
         return nil
     }
 
+    /// Why a failed stage cannot pass until the operator fixes the
+    /// environment, or `nil` when the failure may be the code's.
+    ///
+    /// A repair agent edits files only — it has no shell, so it cannot install
+    /// a missing tool or package — and sending it such a failure spends a
+    /// repair "fixing" code that was never broken. Deliberately narrow: a
+    /// missing module that belongs to the project itself (a top-level
+    /// `name/`, `name.py`, or the `src/` layout of either), or a relative
+    /// Node import, is something an edit can break and an edit can fix, so it
+    /// stays `nil` and keeps going to repair.
+    public static func environmentProblem(exitCode: Int32, output: String, repoRoot: URL) -> String? {
+        guard exitCode != 0 else { return nil }
+        // Only a real 127 — the shell's own, or make reporting a recipe's — so
+        // a failing test that merely LOGS "command not found" stays a test failure.
+        if exitCode == 127 || output.contains("] Error 127") {
+            return missingCommandName(in: output).map { "\"\($0)\" is not installed or not on PATH" }
+                ?? "a command is not installed or not on PATH"
+        }
+        // Anchored to the error line itself — pytest's `E   ` prefix, the
+        // interpreter's own `python3: No module named x` — so a warning that
+        // merely mentions a missing optional module cannot hide a real failure.
+        let pythonPatterns = [
+            #"(?m)^\s*(?:E\s+)?(?:ModuleNotFoundError|ImportError): No module named '([A-Za-z_][A-Za-z0-9_.]*)'"#,
+            #"(?m)^\S*python[0-9.]*: No module named ([A-Za-z_][A-Za-z0-9_.]*)"#,
+        ]
+        if let module = pythonPatterns.lazy.compactMap({ firstStringCapture($0, group: 1, in: output) }).first,
+           let top = module.split(separator: ".").first.map(String.init),
+           !projectContains(top, pythonModule: true, repoRoot: repoRoot) {
+            return "Python module \"\(top)\" is not installed in the environment the stage runs in"
+        }
+        // Runtime resolver errors only (node, ESM, jest) — a type checker's
+        // `error TS2307` line starts with its file path and does not match.
+        let nodePattern = #"(?m)^\s*(?:(?:Uncaught )?Error(?: \[ERR_MODULE_NOT_FOUND\])?: )?Cannot find (?:module|package) '([^']+)'"#
+        if let spec = firstStringCapture(nodePattern, group: 1, in: output),
+           !isProjectNodeSpecifier(spec, repoRoot: repoRoot) {
+            return "Node package \"\(spec)\" is not installed (run the project's install step first)"
+        }
+        return nil
+    }
+
+    /// Path-alias prefixes (`@/`, `~/`, `#imports`) that always name the
+    /// project's own code, never an installed package.
+    private static let nodeAliasPrefixes = [".", "/", "@/", "~", "#"]
+
+    private static func isProjectNodeSpecifier(_ spec: String, repoRoot: URL) -> Bool {
+        if nodeAliasPrefixes.contains(where: { spec.hasPrefix($0) }) { return true }
+        // `moduleDirectories`/`baseUrl` imports like `utils/date` name a project folder.
+        guard spec.contains("/"), !spec.hasPrefix("@"),
+              let first = spec.split(separator: "/").first.map(String.init) else { return false }
+        return projectContains(first, pythonModule: false, repoRoot: repoRoot)
+    }
+
+    /// Folders skipped when looking one level down for a monorepo sub-project.
+    private static let nonProjectFolders: Set<String> = ["node_modules", "venv", "build", "dist"]
+
+    /// Whether `name` (a folder, or with `pythonModule` also `name.py`) exists
+    /// at the repo root, under `src/`, or the same one level down — the
+    /// layout of a monorepo sub-project such as `backend/myapp`.
+    private static func projectContains(_ name: String, pythonModule: Bool, repoRoot: URL) -> Bool {
+        let fm = FileManager.default
+        let children = (try? fm.contentsOfDirectory(atPath: repoRoot.path)) ?? []
+        let subprojects = children
+            .filter { !$0.hasPrefix(".") && !nonProjectFolders.contains($0) }
+            .map { repoRoot.appendingPathComponent($0) }
+        let bases = ([repoRoot] + subprojects).flatMap { [$0, $0.appendingPathComponent("src")] }
+        return bases.contains { base in
+            fm.fileExists(atPath: base.appendingPathComponent(name).path)
+                || (pythonModule && fm.fileExists(atPath: base.appendingPathComponent("\(name).py").path))
+        }
+    }
+
     /// The note `LoopEngineRunner` appends after "FAILED (exit N)" for a
     /// failed `.shellCommand` stage, in priority order: exit 127 (command
     /// not found) beats a recognised failure count, which beats a timeout,

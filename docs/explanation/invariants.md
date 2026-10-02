@@ -543,6 +543,8 @@ Design rationale lives in [Loop Engineering](loop-engineering.md); this is the o
 - **`LoopEngineDefaults` stores a stage-LESS config.** Stages are detected per project from its real test tooling, so an app-wide default stage list would override that detection; reusable stage lists are `LoopTemplate`'s job.
 - **`LoopEngineConfig` encodes `wallClockBudgetSeconds` as an explicit null, via a hand-written `encode(to:)`.** `nil` means "no time limit" and is now the DEFAULT, so absent and present-null decode identically and the distinction is no longer load-bearing; the explicit encode stays because the stored config should be self-describing, and because any *future* optional field with a non-nil default would need exactly this treatment. That is the lesson to keep: the synthesized encoder omits nil optionals, an omitted key used to mean "written before the field existed ⇒ 3600", and the two collapsed — silently restoring a chosen "no limit" as 60 minutes on the next load.
 - **An `.advisory` stage never gates.** It runs and is journalled, but must not trigger repair, count toward a stall, or fail the run — that is the only thing that makes a linter or formatter stage safe to add.
+- **Every verify command runs in the project's own environment** (`ProjectRuntimeEnvironment`, applied in `ShellFaultVerifier`): the project's `.venv`/`venv` (only with `pyvenv.cfg`) activated via `PATH` + `VIRTUAL_ENV`, and the user CLI dirs that exist, ahead of the inherited PATH. A Finder-launched app otherwise has launchd's minimal PATH, so a bare `pytest` never reached the venv. Nothing is installed here.
+- **A missing tool or dependency ends the run as `blocked.environment`, never a repair** (`StageOutputParser.environmentProblem`). The repair agent edits files and has no shell, so it cannot install anything; a repair would "fix" code that is not broken. Keep the classifier narrow: "command not found" only on a real exit 127 (or make's `Error 127`), and a missing module that is the project's OWN (top-level or `src/` package/module) or a relative Node import stays a code failure that goes to repair.
 
 ### ❌ DO NOT do these
 
@@ -554,6 +556,7 @@ Design rationale lives in [Loop Engineering](loop-engineering.md); this is the o
 - **Do NOT let an errored stage end a run as `success`.** A stage whose agent call failed (after one retry, only when the backend could not be connected to at all) is recorded `errored`; a run in which any stage's LAST attempt errored ends `error` (`LoopEngineRunner.honestVerdict`) — a passing verify stage does not launder it; only that stage running cleanly later in the same run does.
 - **Do NOT make `StageOutputParser` return `0` for unrecognised output.** `nil` and `0` drive different runner paths: `nil` means "fall back to the hash", `0` means "this runner genuinely reports zero failures" (a compile error or crash).
 - **Do NOT check the wall-clock budget during the first iteration.** A run always gets one complete pass; checking earlier turns a small budget into a no-op instead of a fast failure.
+- **Do NOT borrow the main checkout's `.venv` into a worktree run.** An editable install inside it imports the MAIN checkout's source, so the worktree's fix is tested against unfixed code and can pass for the wrong reason.
 
 ---
 
