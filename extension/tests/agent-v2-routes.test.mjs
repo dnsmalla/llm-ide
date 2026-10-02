@@ -1298,3 +1298,26 @@ test('freshTurnHistory keeps the first user turn (the original request) even whe
   assert.ok(kept.reduce((n, t) => n + t.content.length, 0) <= 60_000);
   assert.ok(kept.length >= 3, 'the newest turns fill the rest');
 });
+
+// A chat turn was visible to /metrics only as one HTTP duration — the whole
+// SSE stream — so "is the agent slow to START answering" had no number. The
+// route now records the turn's phases: classify (Auto only), first_token (to
+// the first streamed text) and total.
+test('stream: a turn records first_token and total phase timings', async () => {
+  const metrics = await import('../server/metrics.mjs');
+  metrics._resetForTests();
+  const user = newUser('v2route-timing@example.com');
+  const fakeTurn = async ({ onEvent }) => {
+    onEvent({ type: 'delta', text: 'hi' });
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-t', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: {} };
+  };
+  await handleAgentV2Routes(makeReq({
+    method: 'POST', url: '/agent/v2/stream', user,
+    body: { message: 'fix it', mode: 'execute', agentContext: { chatSessionId: 'chat-t', workspaceRoot: WS } },
+  }), makeRes(), { runTurn: fakeTurn });
+  const text = metrics.renderPrometheus();
+  assert.match(text, /llmide_agent_turn_phase_seconds_count\{engine="v2",phase="first_token"\} 1/);
+  assert.match(text, /llmide_agent_turn_phase_seconds_count\{engine="v2",phase="total"\} 1/);
+  assert.doesNotMatch(text, /phase="classify"/, 'an explicit mode is not classified, so not timed');
+});

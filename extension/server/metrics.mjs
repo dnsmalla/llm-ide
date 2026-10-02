@@ -9,6 +9,8 @@
 //   llmide_kb_records{kind} (gauge)  — pulled from kb stats
 //   llmide_audit_events_total (counter)
 //   llmide_rate_limit_rejections_total{profile} (counter)
+//   llmide_agent_turn_phase_seconds{engine, phase} (histogram) — classify,
+//     first_token (to the first streamed text) and total, per chat turn
 //
 // The histogram buckets are tuned for our workload: most KB writes are
 // sub-100ms, LLM calls are 1–60s, dispatch is 1–10s.  Skewing toward
@@ -95,12 +97,24 @@ const registry = {
   rateLimitDenies: new Counter(),
   auditEvents:     new Counter(),
   kbRecords:       new Gauge(),
+  agentTurnPhase:  new Histogram(),
 };
 
 export function recordHttpRequest({ method, route, status, durationMs }) {
   const labels = { method, route: normalizeRoute(route), status: String(status) };
   registry.httpRequests.inc(labels);
   registry.httpDuration.observe({ route: labels.route }, durationMs / 1000);
+}
+
+// Fixed label sets: both come from server code, never from a request, so a
+// client cannot grow the series count.
+const AGENT_ENGINES = new Set(['v2', 'legacy']);
+const AGENT_PHASES = new Set(['classify', 'first_token', 'total']);
+
+export function recordAgentTurnPhase({ engine, phase, durationMs }) {
+  if (!AGENT_ENGINES.has(engine) || !AGENT_PHASES.has(phase)) return;
+  if (!Number.isFinite(durationMs) || durationMs < 0) return;
+  registry.agentTurnPhase.observe({ engine, phase }, durationMs / 1000);
 }
 
 export function recordRateLimitDeny(profile) {
@@ -191,6 +205,17 @@ export function renderPrometheus() {
     lines.push(`llmide_http_request_duration_seconds_count${fmtLabels(labels)} ${count}`);
   }
 
+  lines.push('# HELP llmide_agent_turn_phase_seconds Chat-turn latency by phase.');
+  lines.push('# TYPE llmide_agent_turn_phase_seconds histogram');
+  for (const { labels, counts, sum, count } of registry.agentTurnPhase.iterate()) {
+    for (let i = 0; i < HIST_BUCKETS_SEC.length; i += 1) {
+      lines.push(`llmide_agent_turn_phase_seconds_bucket${fmtLabels({ ...labels, le: String(HIST_BUCKETS_SEC[i]) })} ${counts[i]}`);
+    }
+    lines.push(`llmide_agent_turn_phase_seconds_bucket${fmtLabels({ ...labels, le: '+Inf' })} ${count}`);
+    lines.push(`llmide_agent_turn_phase_seconds_sum${fmtLabels(labels)} ${sum.toFixed(3)}`);
+    lines.push(`llmide_agent_turn_phase_seconds_count${fmtLabels(labels)} ${count}`);
+  }
+
   lines.push('# HELP llmide_rate_limit_rejections_total Requests rejected by rate limiter.');
   lines.push('# TYPE llmide_rate_limit_rejections_total counter');
   for (const { labels, value } of registry.rateLimitDenies.iterate()) {
@@ -219,4 +244,5 @@ export function _resetForTests() {
   registry.rateLimitDenies = new Counter();
   registry.auditEvents = new Counter();
   registry.kbRecords = new Gauge();
+  registry.agentTurnPhase = new Histogram();
 }

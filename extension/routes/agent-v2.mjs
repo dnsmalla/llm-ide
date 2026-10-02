@@ -36,6 +36,10 @@ import { createToolAccounting } from '../llm_agent/sdk/tool-accounting.mjs';
 import { recordToolEvents } from '../kb/tool-events.mjs';
 import { isSdkUpdating } from '../llm_agent/sdk/updater.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
+import { recordAgentTurnPhase } from '../server/metrics.mjs';
+import { logger } from '../core/logger.mjs';
+
+const log = logger.child({ component: 'agent-v2' });
 
 // Mirrors buildEngineOptions' mode default so the mode_set echo reports
 // what actually ran. Keep the two in sync.
@@ -210,6 +214,7 @@ export async function handleAgentV2Routes(
 // metered into the usage ledger (per-model caps keep working).
 
 async function handleV2Stream(req, res, userId, deps) {
+  const turnStartedAt = Date.now();
   const body = parseJSON(await readBody(req, 8 * 1024 * 1024)) || {};
 
   // Validation happens BEFORE the SSE headers: once the stream has started
@@ -272,7 +277,9 @@ async function handleV2Stream(req, res, userId, deps) {
     mode = readOnly ? clampToReadOnly('execute') : 'execute';
   } else if (requestedMode === 'auto' || readOnly) {
     try {
+      const classifyStartedAt = Date.now();
       const classified = (await deps.classifyMode(message, { userId }))?.mode;
+      recordAgentTurnPhase({ engine: 'v2', phase: 'classify', durationMs: Date.now() - classifyStartedAt });
       const resolved = typeof classified === 'string' && MODES.has(classified)
         ? classified
         : (readOnly ? 'ask' : DEFAULT_MODE);
@@ -309,7 +316,7 @@ async function handleV2Stream(req, res, userId, deps) {
   }
   inFlightChatSessions.add(lockKey);
   try {
-    return await runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, provider, effectiveMessage, body, deps);
+    return await runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, provider, effectiveMessage, body, deps, turnStartedAt);
   } finally {
     inFlightChatSessions.delete(lockKey);
     inFlightAborts.delete(lockKey);
@@ -322,7 +329,7 @@ const PROVIDER_ERROR_CODES = new Set(['PROVIDER_NOT_AGENT_CAPABLE', 'PROVIDER_UN
 
 // The rest of the turn, once this chat session's lock is held — split out so
 // the lock's try/finally above stays a thin wrapper around it.
-async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, provider, message, body, deps) {
+async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, provider, message, body, deps, turnStartedAt = Date.now()) {
   const db = getDb();
   const row = getOrCreateAgentSession(db, userId, chatSessionId);
   const resumeSdkSessionId = body.fresh ? null : row.sdk_session_id;
@@ -371,7 +378,13 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   // (usage_ledger.request_id), which were written with no request id before.
   const turnId = randomUUID();
   const toolAccounting = createToolAccounting();
+  // Time to the first streamed text — what the user actually waits for.
+  let firstTokenMs = null;
   const onEvent = (ev) => {
+    if (firstTokenMs === null && ev?.type === 'delta') {
+      firstTokenMs = Date.now() - turnStartedAt;
+      recordAgentTurnPhase({ engine: 'v2', phase: 'first_token', durationMs: firstTokenMs });
+    }
     if (ev && typeof ev.sessionId === 'string' && ev.sessionId) currentSdkSessionId = ev.sessionId;
     if (typeof ev?.model === 'string' && ev.model) resolvedModel = ev.model;
     send(ev);
@@ -502,6 +515,9 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   // Every exit path — success, Stop, failure: a stopped turn's tool calls
   // still cost tokens and are exactly the data the report needs.
   recordToolEvents(userId, { turnId, engine: 'v2', mode, events: toolAccounting.events() });
+  const totalMs = Date.now() - turnStartedAt;
+  recordAgentTurnPhase({ engine: 'v2', phase: 'total', durationMs: totalMs });
+  log.info('agent_turn_timing', { engine: 'v2', mode, turnId, firstTokenMs, totalMs, aborted: ac.signal.aborted });
   if (!res.writableEnded) res.end();
   return true;
 }
