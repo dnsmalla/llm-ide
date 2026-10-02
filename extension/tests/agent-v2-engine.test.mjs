@@ -1823,3 +1823,17 @@ test('the SDK subprocess env drops the server\'s own secrets and keeps the user\
     }
   }
 });
+
+// Native tool output is trimmed before the model sees it (tool-output-cap.mjs)
+// — on every turn, with or without plugin hooks.
+test('every turn installs the tool-output cap as a PostToolUse hook', async () => {
+  let hooks;
+  await runAgentV2Turn({
+    message: 'hello', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
+    allowAmbientAuth: true, onEvent: () => {},
+    queryFactory: (p, o) => { hooks = o.hooks; return (async function* () {})(); },
+  }, turnInjectable);
+  const entry = hooks?.PostToolUse?.find((h) => h.matcher === 'Bash|Grep');
+  assert.ok(entry, 'PostToolUse carries the cap');
+  assert.equal(typeof entry.hooks[0], 'function');
+});

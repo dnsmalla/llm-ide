@@ -35,7 +35,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query, SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '@anthropic-ai/claude-agent-sdk';
 import {
   personaForMode, PLAN_LIKE_MODES, restrictsTools, allowedToolNames,
 } from '../runtime/mode-personas.mjs';
@@ -46,6 +46,8 @@ import {
 } from '../skills/index.mjs';
 import { composeSystemContext, composeRecentContext } from '../internal/context/compose.mjs';
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
+import { withToolOutputCap } from './tool-output-cap.mjs';
+import { COMPACT_BASE_PROMPT, compactEnvironmentBlock, compactPromptEnabled } from './compact-system-prompt.mjs';
 import { contentHash, emptyDelivered, deliveredFor, commitDelivered, forgetDelivered } from './turn-context.mjs';
 import { usageBaselineFor, recordUsageBaseline, usageDelta } from './usage-baseline.mjs';
 import { buildSessionTaskPromptBlock } from '../runtime/task-session-context.mjs';
@@ -182,6 +184,22 @@ const capAttachments = selectAttachments;
 // it is read on every later turn as cached history, and project_memory
 // (PROJECT_MEMORY_TOOL_CHARS) serves the depth.
 const PROJECT_MEMORY_SUMMARY_CHARS = 2_500;
+
+// Context size (tokens) at which the SDK compacts a conversation — OPT-IN via
+// LLMIDE_V2_AUTOCOMPACT_WINDOW. Every hop re-reads the whole context, so a
+// smaller window bounds the cost of each hop of a long chat; but the SDK's
+// default is an "auto" value tuned per model, and a fixed one wastes a large
+// window or compacts mid-turn. The SDK accepts 100k–1M and silently DROPS
+// anything else, so an out-of-range value is rejected here with a warning.
+const AUTOCOMPACT_MIN = 100_000;
+const AUTOCOMPACT_MAX = 1_000_000;
+function autoCompactWindow(raw = process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW) {
+  if (raw === undefined || raw === '') return undefined;
+  const n = Math.trunc(Number(raw));
+  if (Number.isFinite(n) && n >= AUTOCOMPACT_MIN && n <= AUTOCOMPACT_MAX) return n;
+  if (raw !== '0') console.warn(`LLMIDE_V2_AUTOCOMPACT_WINDOW=${raw} ignored — must be ${AUTOCOMPACT_MIN}–${AUTOCOMPACT_MAX} tokens`);
+  return undefined;
+}
 
 // Attachments are DATA: each wrapped in a <<<BEGIN>>>…<<<END>>> fence, with
 // the content's own fence sentinels neutralised by sanitizeForPrompt inside
@@ -721,6 +739,7 @@ export function buildEngineOptions(
   }
   // Bounded: a very long chat must not carry an ever-growing hash list.
   for (const key of ['attachments', 'images']) next[key] = next[key].slice(-400);
+  const compactWindow = autoCompactWindow();
   const effort = effortForTurn(resolvedMode, message);
   const queryOptions = {
     // Live token + tool-args deltas — the stream a chat UI needs.
@@ -748,7 +767,22 @@ export function buildEngineOptions(
     // per-turn content (that rides in the message), but it still follows the
     // chat's MODE — persona, pipeline stage skill — and a mode switch within
     // one resumed session must reach the model, which a snapshot would freeze.
-    systemPrompt: { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n'), snapshot: false },
+    // LLMIDE_V2_COMPACT_PROMPT=1: a compact LLM-IDE base prompt instead of the
+    // ~26k-token preset (compact-system-prompt.mjs). The static base sits before
+    // the SDK's cache boundary; the working directory and the same append follow.
+    systemPrompt: compactPromptEnabled()
+      ? {
+        type: 'custom',
+        prompt: [
+          COMPACT_BASE_PROMPT,
+          SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+          compactEnvironmentBlock({ cwd: workspaceRoot, model: typeof model === 'string' ? model : '' }),
+          appendParts.join('\n\n'),
+        ],
+        snapshot: false,
+      }
+      : { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n'), snapshot: false },
+    ...(compactWindow ? { settings: { autoCompactWindow: compactWindow } } : {}),
     ...(typeof model === 'string' && model ? { model } : {}),
     // See effortForTurn. The runner drops it on a gateway turn.
     ...(effort ? { effort } : {}),
@@ -1431,7 +1465,10 @@ export async function runAgentV2Turn(
       ? { allowedTools: [...(queryOptions.allowedTools || []), ...userMcp.allowedTools] }
       : {}),
     ...(pluginDelivery.sdkPlugins.length ? { plugins: pluginDelivery.sdkPlugins } : {}),
-    ...(Object.keys(pluginDelivery.hooks).length ? { hooks: pluginDelivery.hooks } : {}),
+    // Plugin hooks plus the native-tool output cap (tool-output-cap.mjs): a
+    // huge Bash/Grep result is re-read on every later hop, so it is trimmed
+    // before the model sees it (not with native plugins — see there).
+    hooks: withToolOutputCap(pluginDelivery.hooks, { nativePlugins: pluginDelivery.sdkPlugins.length }),
     mcpServers: {
       llmide: buildLlmIdeServer(userId, agentContext, message, {
         runClaude,
