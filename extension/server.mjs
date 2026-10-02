@@ -248,7 +248,7 @@ const HOST = config.host;
 //     400 EXTRA_ROOT_NOT_ALLOWED) → `changedExtraPaths: [abs]`, plus
 //     `createdPaths` (the changedPaths a Write created); Grep/Glob
 //     never reach secret paths; a timed-out/aborted run is still metered.
-const SERVER_API_VERSION = 58;
+const SERVER_API_VERSION = 59;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
