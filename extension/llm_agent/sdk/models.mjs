@@ -32,9 +32,35 @@ const inFlight = new Map();
 // 'claude-sonnet-5'): a stable id is what a picker should persist, and an
 // alias would silently move under a saved choice. The 'default' row is the
 // SDK's pointer at one of the others — it names which one goes first, then
-// is dropped. `displayName` comes from the description's lead ("Sonnet 5 ·
-// Efficient for…" → "Sonnet 5"): the SDK's own displayName is the bare family
-// ("Sonnet"), which cannot tell two generations apart.
+// is dropped.
+//
+// `displayName` — the SDK has shipped two row shapes:
+//   before 0.3.283: displayName is the bare family ("Sonnet") and the
+//     description leads with the name ("Sonnet 5 · Efficient for…"), so the
+//     name is the description's lead;
+//   0.3.283+: displayName carries the generation ("Sonnet 5") and the
+//     description is only the tagline ("Efficient for routine tasks").
+// Taking the lead of a tagline-only description made every picker label a
+// sentence. A bare family with no "·" lead falls back to a name built from
+// the id, so two generations never share a label.
+function nameFromId(id) {
+  const m = /^claude-([a-z]+)-([\d-]+?)(?:-\d{8})?(?:\[1m\])?$/i.exec(id);
+  if (!m) return id;
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2].split('-').filter(Boolean).join('.')}`;
+}
+
+function nameOf(row, id) {
+  const description = typeof row.description === 'string' ? row.description : '';
+  if (description.includes('·')) {
+    // "Opus 5 with 1M context" is a sentence, not a picker label.
+    const lead = description.split('·')[0].trim().replace(/\s+with\s+1M\s+context$/i, ' (1M)');
+    if (lead) return lead;
+  }
+  const dn = typeof row.displayName === 'string' ? row.displayName.trim() : '';
+  if (dn && /\d/.test(dn)) return dn;
+  return nameFromId(id);
+}
+
 export function mapSupportedModels(rows) {
   if (!Array.isArray(rows)) return [];
   const idOf = (r) => (typeof r?.resolvedModel === 'string' && r.resolvedModel) || (typeof r?.value === 'string' ? r.value : '');
@@ -47,9 +73,7 @@ export function mapSupportedModels(rows) {
     if (!/^claude-/i.test(id) || seen.has(id)) continue;
     seen.add(id);
     const description = typeof r.description === 'string' ? r.description : '';
-    // "Opus 5 with 1M context" is a sentence, not a picker label.
-    const lead = description.split('·')[0].trim().replace(/\s+with\s+1M\s+context$/i, ' (1M)');
-    out.push({ id, displayName: lead || (typeof r.displayName === 'string' && r.displayName) || id, description });
+    out.push({ id, displayName: nameOf(r, id), description });
   }
   if (defaultId) {
     const i = out.findIndex((m) => m.id === defaultId);

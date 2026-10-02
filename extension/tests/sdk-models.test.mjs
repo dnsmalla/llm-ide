@@ -96,3 +96,26 @@ test('listSdkModels: concurrent requests share one SDK call', async () => {
   assert.equal(calls.length, 1, 'one CLI for both');
   assert.deepEqual(ra, rb);
 });
+
+// SDK 0.3.283 changed the row shape: `displayName` now carries the generation
+// ("Opus 5.5") and `description` is ONLY the tagline ("For complex work…") —
+// no "Name · tagline" any more. Taking the description's lead then made every
+// picker label a sentence ("Efficient for routine tasks" for Sonnet 5).
+test('mapSupportedModels: the 0.3.283 row shape — name from displayName, tagline as description', () => {
+  const rows = [
+    { value: 'default', resolvedModel: 'claude-opus-5-5', displayName: 'Default (recommended)', description: 'Opus 5.5 · Best for everyday, complex tasks' },
+    { value: 'opus', resolvedModel: 'claude-opus-5-5', displayName: 'Opus 5.5', description: 'For complex work and everyday tasks' },
+    { value: 'haiku', resolvedModel: 'claude-haiku-4-5-20251001', displayName: 'Haiku 4.5', description: 'Fastest for quick answers' },
+    { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet 5', description: 'Efficient for routine tasks' },
+  ];
+  assert.deepEqual(mapSupportedModels(rows).map((m) => [m.id, m.displayName, m.description]), [
+    ['claude-opus-5-5', 'Opus 5.5', 'For complex work and everyday tasks'],
+    ['claude-haiku-4-5-20251001', 'Haiku 4.5', 'Fastest for quick answers'],
+    ['claude-sonnet-5', 'Sonnet 5', 'Efficient for routine tasks'],
+  ]);
+});
+
+test('mapSupportedModels: a bare family displayName with a tagline-only description falls back to a name from the id', () => {
+  const out = mapSupportedModels([{ value: 'sonnet', resolvedModel: 'claude-sonnet-5-5', displayName: 'Sonnet', description: 'Efficient for routine tasks' }]);
+  assert.equal(out[0].displayName, 'Sonnet 5.5');
+});
