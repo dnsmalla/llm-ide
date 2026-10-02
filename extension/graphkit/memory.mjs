@@ -347,7 +347,10 @@ export function scoreFactsByRelevance(facts, { userMessage = '' } = {}) {
   return scored;
 }
 
-export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) {
+// `stableOnly` keeps just the files that change rarely — repo.md, the
+// environment note, the graph overview — with no "(updated …)" age, for the v2
+// per-session summary that is re-sent whenever its text changes (engine.mjs).
+export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage, { stableOnly = false } = {}) {
   if (!repo) return null;
   const root = resolveAllowedRepoRoot(repo.path, allowedRoots);
   if (!root) return null;
@@ -374,7 +377,7 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) 
     join(memDir, 'doc-notes.md'),
     join(legacyMemoryDir(root), 'graph-notes.md'),
   ]);
-  const ageClause = mtime != null ? ` (updated ${relativeAge(mtime)})` : '';
+  const ageClause = mtime != null && !stableOnly ? ` (updated ${relativeAge(mtime)})` : '';
   const header = `## ${repoName} — memory${ageClause}\n_(from \`${root}/${SYSTEM_DIR}/\`)_`;
 
   const parts = [];
@@ -410,7 +413,7 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) 
   // facts most relevant to THIS question and reserve a budget FLOOR for them so
   // a fat repo.md can't crowd them out (the old order added repo.md first with
   // the full budget, starving chat-memory within — and across — repos).
-  const chatBody = selectChatMemoryFacts(
+  const chatBody = stableOnly ? '' : selectChatMemoryFacts(
     readMemoryFile('chat-memory.md', CHAT_STORE_CHARS),
     { userMessage, room: Math.min(budget, CHAT_INJECT_CHARS) },
   );
@@ -433,6 +436,7 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) 
   // the code graph's own index.md. This used to be a second, byte-identical
   // `repo.md` copied into the memory dir on every generation; the copy is gone.
   tryAdd('graph/index.md', safeRead(graphIndexFile(root), PER_FILE_CHARS), budget - chatFloor);
+  if (stableOnly) return parts.length ? `${header}\n\n${parts.join('\n\n')}` : null;
   // Auto-captured facts the Code Assistant learned in prior chats about this
   // project (written by memory-writer.mjs after each turn). Same dir, same
   // gate — recall is free because this reader already runs every request.
@@ -473,7 +477,7 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) 
 // because its result stays in the chat transcript for every later turn.
 // The per-repo blocks fill by priority, so a smaller budget keeps the
 // highest-signal parts (hand-authored repo facts, relevant chat facts).
-export function renderGraphifyMemory(agentContext, userId, stats, userMessage = '', { totalChars = TOTAL_CHARS } = {}) {
+export function renderGraphifyMemory(agentContext, userId, stats, userMessage = '', { totalChars = TOTAL_CHARS, stableOnly = false } = {}) {
   if (!userId) return '';   // no anonymous reads
   const indexed = Array.isArray(agentContext?.indexedRepos) ? agentContext.indexedRepos : [];
   const wsRoot = agentContext?.workspaceRoot;
@@ -507,7 +511,7 @@ export function renderGraphifyMemory(agentContext, userId, stats, userMessage = 
   for (const repo of candidates) {
     const remaining = Math.min(TOTAL_CHARS, totalChars) - totalUsed;
     if (remaining <= 500) break;
-    const block = repoMemoryBlock(repo, remaining, allowedRoots, stats, userMessage);
+    const block = repoMemoryBlock(repo, remaining, allowedRoots, stats, userMessage, { stableOnly });
     if (block) {
       blocks.push(block);
       totalUsed += block.length;

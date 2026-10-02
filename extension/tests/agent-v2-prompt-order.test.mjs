@@ -207,6 +207,7 @@ test('a project-memory summary is delivered once per session and again only when
   assert.match(first.prompt, /project_memory/, 'and is told where the rest is');
   assert.equal(memoryCalls[0].focus, '', 'the summary is query-independent, so it does not change every turn');
   assert.ok(memoryCalls[0].opts.totalChars <= 3_000, 'and it is small');
+  assert.equal(memoryCalls[0].opts.stableOnly, true, 'and holds only the rarely-changing files, with no age');
 
   const second = turn(first.meta.delivered);
   assert.doesNotMatch(second.prompt, /Python virtualenv/, 'an unchanged summary is not re-sent');

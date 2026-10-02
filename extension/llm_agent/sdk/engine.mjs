@@ -623,16 +623,18 @@ export function buildEngineOptions(
     }
     next.recentHash = recentHash;
   }
-  // Project memory summary: the top of the repo-memory block (repo.md, the
-  // environment note, newest chat facts) at a small budget, ranked without
-  // the question so it only changes when the memory does. Resent only when
-  // it changed, like the recent list above; the tool has the rest.
+  // Project memory summary: only the files that change rarely (repo.md, the
+  // environment note, the graph overview) and no "(updated …)" age —
+  // stableOnly — so its text, and hash, change only when one of them does.
+  // Chat facts (written after most turns) would make it churn; they stay in
+  // the project_memory tool. Resent only when it changed, like the recent
+  // list above.
   try {
     // `stats` lists the memory files that actually made it in: with none,
     // the block is only a "nothing generated yet" placeholder — not worth a
     // message section, and certainly not one per new session.
     const stats = [];
-    const summary = renderMemory(agentContext, userId, stats, '', { totalChars: PROJECT_MEMORY_SUMMARY_CHARS });
+    const summary = renderMemory(agentContext, userId, stats, '', { totalChars: PROJECT_MEMORY_SUMMARY_CHARS, stableOnly: true });
     const memoryText = summary && stats.length > 0
       ? redactFence(`${summary.trim()}\n\n(Summary of the project memory — call \`project_memory\` with a focus for more.)`)
       : null;
