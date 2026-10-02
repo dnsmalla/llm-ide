@@ -596,6 +596,7 @@ struct LoopEngineView: View {
             // without it a fast double-click reached the service's refusal
             // path and reported "already busy" for a run that DID start.
             .disabled(runner.running || runner.waitingInQueue || isStartPending || laneRun != nil
+                      || isSettingUpEnvironment
                       || !stages.contains(where: \.enabled) || activeGitRootURL == nil)
             .help(laneRun.map { "\($0.label) — stop it before running from here." } ?? "")
             if !runner.running, let gitRoot = activeGitRootURL {
@@ -661,12 +662,12 @@ struct LoopEngineView: View {
                     .controlSize(.small)
                     .disabled(isSettingUpEnvironment)
                     .help("Create \(plan.virtualEnvName)/ in this project and install its dependencies and pytest")
-                }
-                if let message = environmentSetupMessage {
-                    Text(message)
-                        .font(Typography.caption)
-                        .foregroundStyle(theme.current.textMuted)
-                        .lineLimit(3)
+                    if let message = environmentSetupMessage {
+                        Text(message)
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
+                            .lineLimit(3)
+                    }
                 }
             } else if !runner.running, didRejectLastRun {
                 // Defensive only: with the Run button disabled on
@@ -739,7 +740,7 @@ struct LoopEngineView: View {
         environmentSetupPlan = nil
         isSettingUpEnvironment = true
         environmentSetupMessage = nil
-        Task {
+        Task { @MainActor in
             let result = await ProjectEnvironmentSetupService().run(plan, in: gitRoot)
             isSettingUpEnvironment = false
             environmentSetupMessage = result.succeeded
@@ -1718,6 +1719,10 @@ struct LoopEngineView: View {
         // "Run this stage only" lives in a menu the disable doesn't cover.
         guard !runService.isRunning(projectId: projectId, loopId: loopId),
               runService.laneRun(projectId: projectId, loopId: loopId) == nil else { return }
+        // A pip install into the project's venv is in flight; running now
+        // would race it.
+        guard !isSettingUpEnvironment else { return }
+        environmentSetupMessage = nil
         // Only after every refusal path: a refused start must not close the
         // journal record the user was reading.
         clearPastRunInspection()
