@@ -120,11 +120,24 @@ export function safeJSONStringify(v) {
 // when the query has nothing longer.
 //
 // Returns null when the query has no usable term, else { match, likes, mode }.
+// Japanese has no spaces, so a sentence reached here as ONE token — an exact
+// phrase no document contains. Its content words are the kanji and katakana
+// runs (kept whole: this is substring matching, unlike the memory ranker's
+// bigrams); hiragana between them is particles and okurigana. Tokens without
+// kana or kanji pass through unchanged.
+const JAPANESE_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const JAPANESE_RUN_RE = /[\p{Script=Katakana}\u30FC]{2,}|\p{Script=Han}{2,}|[\p{Script=Latin}\p{N}_]{2,}/gu;
+function splitJapaneseRuns(token) {
+  if (!JAPANESE_RE.test(token)) return [token];
+  return token.match(JAPANESE_RUN_RE) || [];
+}
+
 function buildSearchFilter(raw, mode = 'and') {
   if (typeof raw !== 'string') return null;
   const tokens = raw
     .toLowerCase()
     .split(/[^\p{L}\p{M}\p{N}_]+/u)
+    .flatMap(splitJapaneseRuns)
     .filter((t) => t.length >= 2 && t.length <= 64)
     .slice(0, 12);
   if (tokens.length === 0) return null;

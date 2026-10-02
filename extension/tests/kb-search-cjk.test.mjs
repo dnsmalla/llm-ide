@@ -67,6 +67,27 @@ test('a 2-character Japanese word is found (LIKE fallback), alone or with a long
   assert.deepEqual(ids(db.search(u, { q: '資料', kind: 'meeting' })), ['m2']);
 });
 
+test('a natural Japanese sentence finds the meeting that contains its content words', () => {
+  // Japanese has no spaces, so the whole sentence used to be ONE search term —
+  // an exact-substring phrase no transcript contains. Its kanji and katakana
+  // runs are the terms; the hiragana between them (の, について) is glue.
+  reset();
+  const u = provision('ja3');
+  meeting(u, 'm1', '定例', '認証トークンの有効期限と更新処理を確認した。', '2026-05-01');
+  meeting(u, 'm2', '週次', '予算の見直しについて話しました。', '2026-05-02');
+  assert.deepEqual(ids(db.search(u, { q: '認証トークンの更新について', kind: 'meeting' })), ['m1']);
+  assert.deepEqual(ids(db.search(u, { q: '予算の見直しについて教えて', kind: 'meeting' })), ['m2']);
+});
+
+test('findContext (OR) retrieves a meeting from a Japanese sentence query', () => {
+  reset();
+  const u = provision('ja4');
+  meeting(u, 'm1', '定例', 'デプロイ手順をレビューした。', '2026-05-01');
+  meeting(u, 'm2', '雑談', '天気の話だけ。', '2026-05-02');
+  const ctx = db.findContext(u, 'デプロイの手順はどうなっていますか', 5);
+  assert.deepEqual(ctx.meetings.map((h) => h.meeting_id), ['m1']);
+});
+
 test('LIKE wildcards in a short term are literal, not patterns', () => {
   reset();
   const u = provision('esc');
