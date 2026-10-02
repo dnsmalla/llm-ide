@@ -227,6 +227,7 @@ const NON_WIRE_TYPE_LITERALS = new Set([
   // written to our SSE stream.
   'local',                    // sdk/engine.mjs — plugin mount descriptor
   'preset',                   // sdk/engine.mjs — systemPrompt: { type: 'preset' }
+  'custom',                   // sdk/engine.mjs — systemPrompt: { type: 'custom' } (LLMIDE_V2_COMPACT_PROMPT)
   'function',                 // runtime/openai-tools.mjs — OpenAI tool definition
   'web_fetch_tool_result',    // runtime/handlers/fetch-url.mjs — Anthropic content block
   'web_fetch_result',
