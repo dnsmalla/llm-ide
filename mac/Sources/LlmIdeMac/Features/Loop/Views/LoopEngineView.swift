@@ -101,6 +101,11 @@ struct LoopEngineView: View {
     /// a re-render (config reload, project switch, cache expiry) cannot change
     /// the list between showing it and approving it.
     @State private var approveAllSnapshot: (gitRoot: URL, items: [(stageId: String, name: String, command: String)])?
+    /// The plan awaiting the user's consent for "Set up environment…".
+    @State private var environmentSetupPlan: ProjectEnvironmentSetupPlan?
+    @State private var isSettingUpEnvironment = false
+    /// The last setup run's outcome, shown under the toolbar until the next run.
+    @State private var environmentSetupMessage: String?
     @State private var skillCatalog: [LlmIdeAPIClient.SkillLibraryEntry] = []
     @State private var skillsLoaded = false
     @State private var pastRuns: [LoopRunIndexEntry] = []
@@ -568,7 +573,7 @@ struct LoopEngineView: View {
     }
 
     private var toolbar: some View {
-        RunnerObserver(runner: runner) { approveAllDialog(toolbarContent) }
+        RunnerObserver(runner: runner) { environmentSetupDialog(approveAllDialog(toolbarContent)) }
     }
 
     /// A phone/schedule run of THIS loop on the Auto Task lane — shown in the
@@ -645,6 +650,24 @@ struct LoopEngineView: View {
                 Text(status.summary)
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
+                // Only for a missing tool/dependency, and only where a Python
+                // project declares its dependencies. The loop never installs:
+                // this is the user's explicit action.
+                if case .blocked(.environment) = status, let gitRoot = activeGitRootURL,
+                   let plan = ProjectEnvironmentSetupPlanner.plan(for: gitRoot) {
+                    Button(isSettingUpEnvironment ? "Setting up…" : "Set up environment…") {
+                        environmentSetupPlan = plan
+                    }
+                    .controlSize(.small)
+                    .disabled(isSettingUpEnvironment)
+                    .help("Create \(plan.virtualEnvName)/ in this project and install its dependencies and pytest")
+                }
+                if let message = environmentSetupMessage {
+                    Text(message)
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                        .lineLimit(3)
+                }
             } else if !runner.running, didRejectLastRun {
                 // Defensive only: with the Run button disabled on
                 // `isStartPending` and startRun's own guard, the remaining
@@ -695,6 +718,34 @@ struct LoopEngineView: View {
             } message: {
                 Text((approveAllSnapshot?.items ?? []).map { "\($0.name): \($0.command)" }.joined(separator: "\n"))
             }
+    }
+
+    /// Shows exactly the commands that will run, because this installs software.
+    private func environmentSetupDialog<Content: View>(_ content: Content) -> some View {
+        content
+            .confirmationDialog("Set up this project's Python environment?",
+                                isPresented: Binding(get: { environmentSetupPlan != nil },
+                                                     set: { if !$0 { environmentSetupPlan = nil } }),
+                                titleVisibility: .visible) {
+                Button("Set up") { startEnvironmentSetup() }
+                Button("Cancel", role: .cancel) { environmentSetupPlan = nil }
+            } message: {
+                Text(environmentSetupPlan?.summary ?? "")
+            }
+    }
+
+    private func startEnvironmentSetup() {
+        guard let plan = environmentSetupPlan, let gitRoot = activeGitRootURL else { return }
+        environmentSetupPlan = nil
+        isSettingUpEnvironment = true
+        environmentSetupMessage = nil
+        Task {
+            let result = await ProjectEnvironmentSetupService().run(plan, in: gitRoot)
+            isSettingUpEnvironment = false
+            environmentSetupMessage = result.succeeded
+                ? "Environment is ready — run the loop again."
+                : "Setup failed — \(String(result.output.suffix(300)))"
+        }
     }
 
     /// A binding to the stage with `id`, looked up on every access. A binding
