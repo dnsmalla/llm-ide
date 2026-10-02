@@ -31,7 +31,7 @@ export function contentHash(text) {
 }
 
 export function emptyDelivered() {
-  return { recentHash: null, taskHash: null, attachments: [], images: [] };
+  return { recentHash: null, taskHash: null, memoryHash: null, attachments: [], images: [] };
 }
 
 /** State already delivered in `sdkSessionId`, or null (fresh session / unknown). */

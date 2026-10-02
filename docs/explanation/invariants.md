@@ -454,6 +454,7 @@ Run through this against a real meeting before merging:
 - **v2 does not mount `ask-internal`** — its nested loop only had `search-kb` + project memory, which a v2 turn has itself; mounted descriptions naming it are rewritten (`v2Description`).
 - **Reasoning effort follows the mode, never the model** (`effortForTurn`): `high` for plan/assist_plan/execute, `medium` otherwise and for bare greetings (not acknowledgements — "ok" can mean "go ahead"); none on a gateway turn.
 - **`project_memory` results are tool-sized** (`PROJECT_MEMORY_TOOL_CHARS`, 10k) and a `{ text }`-only tool result goes out as plain text — it stays in the transcript for the rest of the chat.
+- **v2 gets a project-memory SUMMARY in the turn's context block, not in the system prompt** (`PROJECT_MEMORY_SUMMARY_CHARS`, 2.5k): rendered with an EMPTY focus so it only changes when the memory does, sent once per SDK session and again only when its hash changes (`memoryHash`), and skipped when no memory file made it in (the "nothing generated yet" placeholder). The model never called `project_memory` on its own, so without this the curated facts and the environment note never reached v2.
 
 ### ❌ DO NOT do these
 

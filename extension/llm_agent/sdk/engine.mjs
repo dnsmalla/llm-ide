@@ -26,11 +26,12 @@
 // (same framing as legacy; only facts the SDK session has not seen — see
 // ./turn-context.mjs) and written back by runAgentV2Turn via
 // persistTurnMemory, fire-and-forget, after each turn. Project memory
-// (Graphify, graphkit/memory.mjs) is deliberately NOT injected the same
-// way — it's exposed as a callable tool (project_memory, ./tools.mjs)
-// instead, matching v2's tool-driven design (same reasoning as kb_search):
-// the model reaches for grounded project context when it helps, rather than
-// paying its token cost on every turn.
+// (Graphify, graphkit/memory.mjs) is NOT injected in full: the whole block
+// (up to 40k chars) is the callable project_memory tool (./tools.mjs). A
+// small query-independent SUMMARY of it rides in the message instead — once
+// per SDK session and again only when it changes — because the model, left
+// to reach for the tool, never did (0 project_memory calls measured), so the
+// curated facts and this machine's environment note never reached v2.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -62,6 +63,7 @@ import { usdCapForModel } from '../../kb/usage.mjs';
 import { nativePluginsEnabled } from '../../kb/user.mjs';
 import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { selectSessionMemory } from '../runtime/session-memory-select.mjs';
+import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { getAgentPersona } from '../../kb/personas.mjs';
 import { getSecret, makeSecretReader } from '../../server/vault.mjs';
 import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
@@ -175,6 +177,11 @@ export function agentSdkHomeFor(userId) {
 // `capAttachments` name kept locally as a thin alias so call sites below
 // read the same as before the extraction.
 const capAttachments = selectAttachments;
+
+// The per-session project-memory summary's budget (chars). Small on purpose:
+// it is read on every later turn as cached history, and project_memory
+// (PROJECT_MEMORY_TOOL_CHARS) serves the depth.
+const PROJECT_MEMORY_SUMMARY_CHARS = 2_500;
 
 // Attachments are DATA: each wrapped in a <<<BEGIN>>>…<<<END>>> fence, with
 // the content's own fence sentinels neutralised by sanitizeForPrompt inside
@@ -465,6 +472,7 @@ export function buildEngineOptions(
     readSkill = readSkillInstructions,
     roots = buildReadableRoots,
     sessionMemory = listSessionMemory,
+    renderMemory = renderGraphifyMemory,
     getPersona = getAgentPersona,
     // Injected for the same reason `readSkill` is: composition must stay
     // testable without a plugin directory on disk. Only used to decide
@@ -603,6 +611,25 @@ export function buildEngineOptions(
     }
     next.recentHash = recentHash;
   }
+  // Project memory summary: the top of the repo-memory block (repo.md, the
+  // environment note, newest chat facts) at a small budget, ranked without
+  // the question so it only changes when the memory does. Resent only when
+  // it changed, like the recent list above; the tool has the rest.
+  try {
+    // `stats` lists the memory files that actually made it in: with none,
+    // the block is only a "nothing generated yet" placeholder — not worth a
+    // message section, and certainly not one per new session.
+    const stats = [];
+    const summary = renderMemory(agentContext, userId, stats, '', { totalChars: PROJECT_MEMORY_SUMMARY_CHARS });
+    const memoryText = summary && stats.length > 0
+      ? redactFence(`${summary.trim()}\n\n(Summary of the project memory — call \`project_memory\` with a focus for more.)`)
+      : null;
+    const memoryHash = memoryText ? contentHash(memoryText) : null;
+    if (memoryText && memoryHash !== next.memoryHash) {
+      contextParts.push(prev?.memoryHash ? `${memoryText}\n(Updated since you last saw it.)` : memoryText);
+    }
+    next.memoryHash = memoryHash;
+  } catch { /* memory is best-effort — keep the turn without it */ }
   // Session memory (kb/session-memory.mjs): facts extracted from THIS chat's
   // own prior turns — a real DB-backed record, not the SDK's own resumed-
   // session continuity (which only covers turn text, not distilled facts,

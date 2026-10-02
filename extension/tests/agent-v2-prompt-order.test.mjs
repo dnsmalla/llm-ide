@@ -180,3 +180,53 @@ test('the pipeline stage skill is ALWAYS inlined, however large', async () => {
   assert.doesNotMatch(append, /NOT INCLUDED HERE/,
     'a stage skill is never announced — the turn has no process without it');
 });
+
+// v2 offered project memory only through the project_memory tool, and the
+// model never called it (0 calls in turn_tool_events): the curated project
+// facts and this machine's environment note never reached the default engine.
+// A small query-independent summary now rides in the MESSAGE — once per SDK
+// session, again only when it changes — so the system prompt (and the cache
+// behind it) is untouched and an unchanged summary costs nothing per turn.
+test('a project-memory summary is delivered once per session and again only when it changes', () => {
+  const memoryCalls = [];
+  let memory = '# Repository memory\n- Python virtualenv: `.venv`';
+  const memDeps = {
+    ...deps,
+    renderMemory: (ctx, uid, stats, focus, opts) => {
+      memoryCalls.push({ focus, opts });
+      stats.push({ file: 'environment.md', chars: memory.length });
+      return memory;
+    },
+  };
+  const turn = (delivered) => buildEngineOptions(
+    { userId: 'u-mem', mode: 'execute', message: 'how do I run the tests?', delivered,
+      agentContext: { workspaceRoot: process.cwd(), chatSessionId: 'chat-mem' } }, memDeps);
+
+  const first = turn(null);
+  assert.match(first.prompt, /Python virtualenv: `\.venv`/, 'a fresh session gets the summary');
+  assert.match(first.prompt, /project_memory/, 'and is told where the rest is');
+  assert.equal(memoryCalls[0].focus, '', 'the summary is query-independent, so it does not change every turn');
+  assert.ok(memoryCalls[0].opts.totalChars <= 3_000, 'and it is small');
+
+  const second = turn(first.meta.delivered);
+  assert.doesNotMatch(second.prompt, /Python virtualenv/, 'an unchanged summary is not re-sent');
+  assert.equal(second.queryOptions.systemPrompt.append, first.queryOptions.systemPrompt.append);
+
+  memory = '# Repository memory\n- Python virtualenv: `venv`';
+  const third = turn(second.meta.delivered);
+  assert.match(third.prompt, /Python virtualenv: `venv`/, 'a changed summary is re-sent');
+  assert.match(third.prompt, /Updated since/);
+});
+
+test('no project memory, or only the "nothing generated yet" placeholder → no memory block', () => {
+  for (const renderMemory of [
+    () => null,
+    () => '# Repository memory (Graphify)\n\n## Workspace — memory\n_No code-graph memory generated for this repo yet._',
+  ]) {
+    const out = buildEngineOptions(
+      { userId: 'u-mem', mode: 'execute', message: 'hi', delivered: null,
+        agentContext: { workspaceRoot: process.cwd(), chatSessionId: 'chat-mem-2' } },
+      { ...deps, renderMemory });
+    assert.doesNotMatch(out.prompt, /project_memory|Repository memory/);
+  }
+});
