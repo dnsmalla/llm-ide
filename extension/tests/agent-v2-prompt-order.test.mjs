@@ -276,3 +276,36 @@ test('the auto-compact window defaults to 120k and is configurable', () => {
     if (saved === undefined) delete process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW; else process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW = saved;
   }
 });
+
+// The claude_code preset is ~26k tokens of the ~30k every model call pays
+// (measured: a bare "hi" turn wrote ~30k tokens to the cache). With
+// LLMIDE_V2_COMPACT_PROMPT=1 a compact LLM-IDE base prompt replaces it — off by
+// default until it has been compared on real tasks.
+test('LLMIDE_V2_COMPACT_PROMPT swaps the preset for a compact custom prompt; off by default', async () => {
+  const { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } = await import('@anthropic-ai/claude-agent-sdk');
+  const opts = () => buildEngineOptions(
+    { userId: 'u-cp', mode: 'execute', message: 'hi', delivered: null,
+      agentContext: { workspaceRoot: process.cwd(), chatSessionId: 'chat-cp' } },
+    { ...deps, renderMemory: () => null }).queryOptions;
+  const saved = process.env.LLMIDE_V2_COMPACT_PROMPT;
+  try {
+    delete process.env.LLMIDE_V2_COMPACT_PROMPT;
+    const def = opts().systemPrompt;
+    assert.equal(def.type, 'preset', 'default unchanged');
+    process.env.LLMIDE_V2_COMPACT_PROMPT = '1';
+    const sp = opts().systemPrompt;
+    assert.equal(sp.type, 'custom');
+    assert.equal(sp.snapshot, false, 'a mode change mid-chat must still reach the model');
+    const [base, boundary, ...dynamic] = sp.prompt;
+    assert.equal(boundary, SYSTEM_PROMPT_DYNAMIC_BOUNDARY, 'the static base is cacheable across sessions');
+    assert.ok(base.length < 8_000, `compact (got ${base.length} chars)`);
+    for (const rule of [/Read a file before you Edit it/, /do not commit or push/i, /destructive/i, /in ONE response/, /file:line/]) {
+      assert.match(base, rule);
+    }
+    const rest = dynamic.join('\n');
+    assert.ok(rest.includes(process.cwd()), 'the working directory the preset used to carry');
+    assert.ok(rest.includes(def.append.slice(0, 200)), 'the same LLM-IDE append follows');
+  } finally {
+    if (saved === undefined) delete process.env.LLMIDE_V2_COMPACT_PROMPT; else process.env.LLMIDE_V2_COMPACT_PROMPT = saved;
+  }
+});

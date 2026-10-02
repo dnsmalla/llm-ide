@@ -35,7 +35,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query, SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '@anthropic-ai/claude-agent-sdk';
 import {
   personaForMode, PLAN_LIKE_MODES, restrictsTools, allowedToolNames,
 } from '../runtime/mode-personas.mjs';
@@ -47,6 +47,7 @@ import {
 import { composeSystemContext, composeRecentContext } from '../internal/context/compose.mjs';
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
 import { withToolOutputCap } from './tool-output-cap.mjs';
+import { COMPACT_BASE_PROMPT, compactEnvironmentBlock, compactPromptEnabled } from './compact-system-prompt.mjs';
 import { contentHash, emptyDelivered, deliveredFor, commitDelivered, forgetDelivered } from './turn-context.mjs';
 import { usageBaselineFor, recordUsageBaseline, usageDelta } from './usage-baseline.mjs';
 import { buildSessionTaskPromptBlock } from '../runtime/task-session-context.mjs';
@@ -761,7 +762,21 @@ export function buildEngineOptions(
     // per-turn content (that rides in the message), but it still follows the
     // chat's MODE — persona, pipeline stage skill — and a mode switch within
     // one resumed session must reach the model, which a snapshot would freeze.
-    systemPrompt: { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n'), snapshot: false },
+    // LLMIDE_V2_COMPACT_PROMPT=1: a compact LLM-IDE base prompt instead of the
+    // ~26k-token preset (compact-system-prompt.mjs). The static base sits before
+    // the SDK's cache boundary; the working directory and the same append follow.
+    systemPrompt: compactPromptEnabled()
+      ? {
+        type: 'custom',
+        prompt: [
+          COMPACT_BASE_PROMPT,
+          SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+          compactEnvironmentBlock({ cwd: workspaceRoot }),
+          appendParts.join('\n\n'),
+        ],
+        snapshot: false,
+      }
+      : { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n'), snapshot: false },
     ...(autoCompactWindow() ? { settings: { autoCompactWindow: autoCompactWindow() } } : {}),
     ...(typeof model === 'string' && model ? { model } : {}),
     // See effortForTurn. The runner drops it on a gateway turn.
