@@ -739,6 +739,7 @@ export function buildEngineOptions(
   }
   // Bounded: a very long chat must not carry an ever-growing hash list.
   for (const key of ['attachments', 'images']) next[key] = next[key].slice(-400);
+  const compactWindow = autoCompactWindow();
   const effort = effortForTurn(resolvedMode, message);
   const queryOptions = {
     // Live token + tool-args deltas — the stream a chat UI needs.
@@ -781,7 +782,7 @@ export function buildEngineOptions(
         snapshot: false,
       }
       : { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n'), snapshot: false },
-    ...(autoCompactWindow() ? { settings: { autoCompactWindow: autoCompactWindow() } } : {}),
+    ...(compactWindow ? { settings: { autoCompactWindow: compactWindow } } : {}),
     ...(typeof model === 'string' && model ? { model } : {}),
     // See effortForTurn. The runner drops it on a gateway turn.
     ...(effort ? { effort } : {}),
