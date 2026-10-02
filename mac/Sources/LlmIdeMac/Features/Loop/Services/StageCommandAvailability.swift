@@ -15,11 +15,14 @@ public enum StageCommandAvailability {
         "alias", "unalias", "ulimit", "pwd", "type", "command", "trap", "shift", "return", "local",
         "if", "then", "elif", "else", "fi", "for", "in", "do", "done", "while", "until", "case",
         "esac", "function", "time", "true", "false", "test", "echo", "printf",
+        "declare", "typeset", "let", "readonly", "pushd", "popd", "dirs", "break", "continue",
+        "builtin", "hash", "getopts", "jobs", "fg", "bg", "disown", "select", "mapfile", "history",
     ]
 
     /// Characters that make splitting a command by operator unreliable: a
-    /// quoted `&&` is an argument, not a boundary.
-    private static let unreliableCharacters = CharacterSet(charactersIn: "\"'\\$`(){}")
+    /// quoted `&&` is an argument, not a boundary; heredoc redirection and comments
+    /// contain multiple words that are not commands.
+    private static let unreliableCharacters = CharacterSet(charactersIn: "\"'\\$`(){}<#")
 
     /// The first executable the command names that is not on `path`, or nil.
     public static func missingExecutable(in command: String, path: String) -> String? {

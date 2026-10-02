@@ -50,6 +50,25 @@ func runStageCommandAvailabilityChecks() {
     expect(missing("adir") == "adir", "a directory is not found")
     expect(missing("") == nil, "an empty command reports nothing")
 
+    // Additional quoting and unreliable-character tests
+    expect(missing("pytest \"x && nosuchtool y\"") == nil,
+           "quoted operators with a quoted word ending cleanly pass (unreliableCharacters guard prevents parsing)")
+    expect(missing("pytest&&nosuchtool") == "nosuchtool", "no-space operator is still split")
+    expect(missing("pytest\t-q") == nil, "tab-separated arguments are handled like spaces")
+    expect(missing("pytest &&") == nil, "a trailing operator with no right side reports nothing")
+    expect(missing("&&") == nil, "an operator-only string reports nothing")
+
+    // Heredocs and comments: both contain unreliable characters so the whole
+    // command must be treated as a single unit (leading word only).
+    expect(missing("pytest <<EOF\nhello world\nEOF") == nil,
+           "a heredoc redirection is undecidable, so it passes (< is unreliable)")
+    expect(missing("pytest # run; then x") == nil,
+           "a comment's content is undecidable, so it passes (# is unreliable)")
+
+    // New builtins added to shellWords
+    expect(missing("pushd dir && pytest") == nil,
+           "pushd is a builtin and is not looked up on PATH")
+
     // Stage level: the project's virtualenv is searched first.
     let tool = "llmide-no-such-tool-xyz"
     let repo = root.appendingPathComponent("repo")
