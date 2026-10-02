@@ -199,6 +199,11 @@ struct LoopEngineView: View {
     /// the filesystem scan per shell stage per render.
     @State var detectedCommandCandidates: [LoopStageDetector.DetectedCommand] = []
 
+    /// Read-only environment status for the Environment section. Refreshed when
+    /// the project changes and on demand; never persisted.
+    @State var environmentStatus: ProjectEnvironmentStatus?
+    @State var isInspectingEnvironment = false
+
     /// How many past runs the history list shows. One constant, so the header's
     /// "latest N" badge cannot claim a different cap than `loadPastRuns`
     /// actually applies.
@@ -247,6 +252,12 @@ struct LoopEngineView: View {
             detectedCommandCandidates = gitRoot == nil ? [] : await Task.detached(priority: .userInitiated) {
                 LoopStageDetector.detectCommandCandidates(gitRoot: gitRoot!)
             }.value
+        }
+        .task(id: reloadKey) {
+            // Cleared first so a previous project's answer is never shown while
+            // this project is being inspected.
+            environmentStatus = nil
+            await refreshEnvironmentStatus()
         }
         .task(id: reloadKey) {
             selectedStageId = nil
@@ -441,6 +452,8 @@ struct LoopEngineView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Spacing.lg) {
                         overviewSection
+                        Divider().background(t.border)
+                        environmentSection
                         Divider().background(t.border)
                         templateSection
                         Divider().background(t.border)
