@@ -424,6 +424,11 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage) 
   // generator can reproduce — so it leads. It shares the `budget - chatFloor`
   // cap with the generated overview so neither can starve the curated facts.
   tryAdd('system/repo.md', safeRead(join(sysDir, 'repo.md'), PER_FILE_CHARS), budget - chatFloor);
+  // This machine's runtime facts (virtualenv, PATH additions, project files) —
+  // written by the Mac app, so "how do I run the tests here?" is answered from
+  // memory instead of rediscovered with tool calls. Small (well under 1k) and
+  // high-signal, so it goes ahead of the bulk files that can fill the budget.
+  tryAdd('environment.md', readMemoryFile('environment.md', PER_FILE_CHARS), budget - chatFloor);
   // The impact-ranked repo overview, read from the ONE file that owns it —
   // the code graph's own index.md. This used to be a second, byte-identical
   // `repo.md` copied into the memory dir on every generation; the copy is gone.

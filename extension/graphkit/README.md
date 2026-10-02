@@ -21,6 +21,7 @@ system/graph/graph.json        adjacency list
 system/memory/graph-notes.md   cross-links + dependency hubs
 system/memory/doc-notes.md     doc sections + module affinity
 system/memory/chat-memory.md   LLM-curated durable facts
+system/memory/environment.md   this machine's venv / PATH / project files
 system/repo.md                 hand-authored project facts
 system/faults/  system/q&a/    archived fault reports + saved Q&A
 ```

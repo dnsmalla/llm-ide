@@ -477,6 +477,7 @@ struct AppShell: View {
         // rehydrate) AND explicit open/switch. .onReceive alone missed restore.
         .task(id: projectStore.activeProject?.localPath) {
             indexActiveProjectCode()
+            writeEnvironmentNote()
         }
         // Auto-jump to Live when EITHER source goes from idle to active.
         .onChange(of: capture.isRunning) { old, new in
@@ -983,6 +984,16 @@ struct AppShell: View {
             } catch {
                 // best-effort — leave code search empty rather than surfacing
             }
+        }
+    }
+
+    /// Refresh `system/memory/environment.md` for the open project, where the
+    /// server's repo-memory reader (same root as `indexActiveProjectCode`)
+    /// hands it to the chat agents. Off the main actor: it walks a few dirs.
+    private func writeEnvironmentNote() {
+        guard let root = WorkspaceRoot.resolve(config: config, projectStore: projectStore) else { return }
+        Task.detached(priority: .utility) {
+            EnvironmentNoteWriter.write(projectRoot: root, inherited: ProcessInfo.processInfo.environment)
         }
     }
 

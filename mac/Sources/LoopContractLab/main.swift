@@ -520,6 +520,7 @@ print("  skipped — Loop is excluded from this build (auto_tasks not in LLMIDE_
 runSelfHealCoreChecks()
 await runSelfHealLoopChecks()
 runRuntimeEnvironmentChecks()
+runEnvironmentNoteChecks()
 #if FEATURE_AUTOTASK
 runEnvironmentProblemChecks()
 #endif

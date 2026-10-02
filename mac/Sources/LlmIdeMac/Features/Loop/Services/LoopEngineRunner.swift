@@ -451,6 +451,12 @@ final class LoopEngineRunner: ObservableObject {
         var worktreeLease: LoopWorktreeManager.Lease?
         var worktreeRequiredFailure: String?
 
+        // Keep the agents' environment note current — a venv created since
+        // the project was opened is otherwise unknown to chat until reopen.
+        // Off the main actor: it is a few stats and a small write, never awaited.
+        Task.detached(priority: .utility) { [faultsRoot] in
+            EnvironmentNoteWriter.write(projectRoot: faultsRoot, inherited: ProcessInfo.processInfo.environment)
+        }
         for note in await LoopWorktreeManager.pruneStale(mainRepo: mainGitRoot, faultsRoot: faultsRoot) {
             appendLog(.info, "Worktree cleanup · \(note)")
         }
