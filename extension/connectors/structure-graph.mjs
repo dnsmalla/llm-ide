@@ -21,7 +21,8 @@
 
 import path from 'node:path';
 import { getDb } from '../kb/db.mjs';
-import { writeCodeGraph, clearCodeGraph, setCodeGraphMeta, GRAPH_SOURCE_STRUCTURE } from '../kb/code-graph.mjs';
+import { writeCodeGraph, clearCodeGraph, setCodeGraphMeta, removeCaseVariantRepos, GRAPH_SOURCE_STRUCTURE } from '../kb/code-graph.mjs';
+import { canonicalPathCase } from '../core/path-case.mjs';
 
 // Per-request ceilings. The Mac client batches, so these bound ONE batch, not a
 // repo — a graph larger than this arrives across several calls. Sized well under
@@ -89,7 +90,8 @@ export function normalizeEdge(raw) {
  * clean one instead of assuming success.
  */
 export function ingestStructureGraph(userId, repoPath, graph, opts = {}) {
-  const repoId = path.resolve(repoPath);
+  // On-disk letter case: one repo_id per directory (core/path-case.mjs).
+  const repoId = canonicalPathCase(repoPath);
   const rawNodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
   const rawEdges = Array.isArray(graph?.edges) ? graph.edges : [];
   if (rawNodes.length > MAX_NODES_PER_REQUEST) {
@@ -106,7 +108,10 @@ export function ingestStructureGraph(userId, repoPath, graph, opts = {}) {
   // One transaction over the clear + write so a mid-write failure can't leave
   // the repo with its previous graph deleted and no replacement.
   return getDb().transaction(() => {
-    if (replace) clearCodeGraph(userId, repoId, { source: GRAPH_SOURCE_STRUCTURE });
+    if (replace) {
+      clearCodeGraph(userId, repoId, { source: GRAPH_SOURCE_STRUCTURE });
+      removeCaseVariantRepos(userId, repoId);
+    }
     const written = writeCodeGraph(userId, repoId, { nodes, edges },
       { source: GRAPH_SOURCE_STRUCTURE });
     if (replace && (opts.commitSha || opts.generatedAt)) {

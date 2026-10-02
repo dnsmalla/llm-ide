@@ -5,6 +5,7 @@
 
 import path from 'node:path';
 import os from 'node:os';
+import { canonicalPathCase } from '../core/path-case.mjs';
 import { getDb, requireUser } from './db.mjs';
 
 // `AND repo_id IN (…)` for an optional repo scope. null/[] = unscoped, so every
@@ -35,11 +36,11 @@ function expandHome(p) {
 export function workspaceRepoIds(userId, workspaceRoot) {
   requireUser(userId);
   if (typeof workspaceRoot !== 'string' || !workspaceRoot.trim()) return null;
-  const ws = path.resolve(expandHome(workspaceRoot.trim()));
+  const ws = canonicalPathCase(expandHome(workspaceRoot.trim()));
   const within = (child, parent) => child === parent || child.startsWith(parent + path.sep);
   const repos = getDb().prepare('SELECT DISTINCT repo_id FROM code_graph_nodes WHERE user_id=?')
     .all(userId)
-    .map((r) => ({ id: r.repo_id, abs: path.resolve(expandHome(String(r.repo_id))) }));
+    .map((r) => ({ id: r.repo_id, abs: canonicalPathCase(expandHome(String(r.repo_id))) }));
   const containing = repos.filter((r) => within(ws, r.abs));
   if (containing.length > 0) {
     containing.sort((x, y) => y.abs.length - x.abs.length);
@@ -142,6 +143,27 @@ export function writeCodeGraph(userId, repoId, cg, { source = GRAPH_SOURCE_SCIP 
  * `source` — passing null clears EVERY source for the repo, which only a
  * whole-repo teardown should do.
  */
+/**
+ * Delete every producer's rows for repo_ids that are a letter-case variant of
+ * `repoId` AND name the same directory on disk — the copies a
+ * case-insensitive filesystem let a second spelling create. A variant that is
+ * a genuinely different directory (case-sensitive filesystem) is kept.
+ */
+export function removeCaseVariantRepos(userId, repoId) {
+  requireUser(userId);
+  const db = getDb();
+  const variants = db.prepare(
+    'SELECT DISTINCT repo_id FROM code_graph_nodes WHERE user_id=? AND repo_id=? COLLATE NOCASE AND repo_id<>?',
+  ).all(userId, repoId, repoId).map((r) => r.repo_id)
+    .filter((id) => canonicalPathCase(id) === repoId);
+  for (const id of variants) {
+    for (const table of ['code_graph_nodes', 'code_graph_edges', 'code_graph_meta']) {
+      db.prepare(`DELETE FROM ${table} WHERE user_id=? AND repo_id=?`).run(userId, id);
+    }
+  }
+  return variants;
+}
+
 export function clearCodeGraph(userId, repoId, { source = GRAPH_SOURCE_SCIP } = {}) {
   requireUser(userId);
   if (source !== null) requireGraphSource(source);

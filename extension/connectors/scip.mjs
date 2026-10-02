@@ -7,6 +7,7 @@
 
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { canonicalPathCase } from '../core/path-case.mjs';
 import { getDb, ingestSources } from '../kb/db.mjs';
 import {
   writeCodeGraph, clearCodeGraph, deleteScipSources, GRAPH_SOURCE_SCIP,
@@ -14,7 +15,7 @@ import {
 import { loadScipIndex, parseScipJson } from './scip-scanner.mjs';
 
 export async function indexScip(userId, repoPath, scipPath, opts = {}) {
-  const repoId = path.resolve(repoPath);
+  const repoId = canonicalPathCase(repoPath);
   let stat;
   try { stat = await fs.stat(repoId); }
   catch (err) { throw new Error(`Cannot access repo ${repoId}: ${err.message}`); }
