@@ -1,8 +1,8 @@
 import Foundation
 
-/// The outcome of one read-only probe. `notRun` means the probe was skipped
-/// on purpose (nothing to ask), which is different from `timedOut`
-/// (it was asked and did not answer).
+/// The outcome of one probe. `notRun` means the probe was skipped on purpose
+/// OR the inspection was cancelled before it ran, which is different from
+/// `timedOut` (it was asked and did not answer).
 public enum EnvironmentProbe: Equatable {
     case ok(String)
     case failed(String)
@@ -25,11 +25,15 @@ public struct ProjectEnvironmentFacts: Equatable {
     public var pytestInstalled: EnvironmentProbe
     public var pytestStarts: EnvironmentProbe
     public var pipCheck: EnvironmentProbe
+    /// Whether the interpreter probes were allowed to run. False means only
+    /// file-system facts were collected and no process was started.
+    public var interpreterProbesRan: Bool
 
     public init(isPythonProject: Bool = false, recommendedTestCommand: String? = nil,
                 missingExecutable: String? = nil, virtualEnvName: String? = nil,
                 pythonVersion: EnvironmentProbe = .notRun, pytestInstalled: EnvironmentProbe = .notRun,
-                pytestStarts: EnvironmentProbe = .notRun, pipCheck: EnvironmentProbe = .notRun) {
+                pytestStarts: EnvironmentProbe = .notRun, pipCheck: EnvironmentProbe = .notRun,
+                interpreterProbesRan: Bool = false) {
         self.isPythonProject = isPythonProject
         self.recommendedTestCommand = recommendedTestCommand
         self.missingExecutable = missingExecutable
@@ -38,6 +42,7 @@ public struct ProjectEnvironmentFacts: Equatable {
         self.pytestInstalled = pytestInstalled
         self.pytestStarts = pytestStarts
         self.pipCheck = pipCheck
+        self.interpreterProbesRan = interpreterProbesRan
     }
 
     /// Whether the recommended command runs pytest as a whole word, so a
@@ -93,6 +98,9 @@ public enum ProjectEnvironmentAssessor {
             if facts.virtualEnvName == nil {
                 add(.warning, "No project virtualenv (.venv/ or venv/) found — the system Python is used")
             }
+            if !facts.interpreterProbesRan {
+                add(.info, "Python environment not checked yet — use “Check Python environment” (this runs the project's own Python)")
+            }
             switch facts.pythonVersion {
             case .failed: add(.blocking, "Python could not be run", missing: "python3")
             case .timedOut: add(.warning, "Python did not answer within the time limit")
@@ -117,16 +125,25 @@ public enum ProjectEnvironmentAssessor {
                 default: break
                 }
             }
-            if case .failed(let output) = facts.pipCheck {
+            switch facts.pipCheck {
+            case .failed(let output):
                 let lines = nonEmptyLines(of: output).prefix(pipCheckLineLimit)
-                if !lines.isEmpty {
+                if output.contains("No module named pip") {
+                    add(.warning, "pip is not available in this Python")
+                } else if !lines.isEmpty {
                     add(.warning, "Dependency conflicts: " + lines.joined(separator: "; "))
                 }
+            case .timedOut:
+                add(.warning, "pip check did not finish within the time limit")
+            default: break
             }
         }
 
         let hasBlocking = findings.contains { $0.severity == .blocking }
-        let hasUnknown = [facts.pythonVersion, facts.pytestInstalled, facts.pytestStarts].contains(.timedOut)
+        var probes = [facts.pythonVersion, facts.pipCheck]
+        if facts.usesPytest { probes += [facts.pytestInstalled, facts.pytestStarts] }
+        let isUnchecked = facts.isPythonProject && !facts.interpreterProbesRan
+        let hasUnknown = isUnchecked || probes.contains(.timedOut)
         return ProjectEnvironmentStatus(
             readiness: hasBlocking ? .needsSetup : (hasUnknown ? .unknown : .ready),
             recommendedTestCommand: facts.recommendedTestCommand,
