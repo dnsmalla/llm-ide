@@ -526,6 +526,7 @@ runRepoGraphLocatorChecks()
 runEnvironmentProblemChecks()
 runStageCommandAvailabilityChecks()
 runProjectEnvironmentSetupChecks()
+runProjectEnvironmentAssessorChecks()
 #endif
 
 if failures.isEmpty {
