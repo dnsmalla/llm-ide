@@ -62,12 +62,17 @@ final class GraphAutoUpdater: ObservableObject {
     // without this we'd post the same "N code · M doc" notification repeatedly.
     // We only notify when this signature actually changes.
     private var lastReportedSignature: String?
-    // The project's OTHER code/<repo> children, graphed in the background so
-    // agents can query every repo, not just the primary one. One service per
-    // repo: a service that hits a busy scan lock keeps the graph it already
-    // holds, so sharing one across repos could upload repo A's graph under B.
-    private var otherRepoGraphs: [String: KnowledgeGraphService] = [:]
-    private var otherReposRunning = false
+    // The project's OTHER code/<repo> children are graphed in the background so
+    // agents can query every repo, not just the primary one. Each repo gets a
+    // FRESH KnowledgeGraphService, discarded after its upload: a service that
+    // hits a busy scan lock keeps the graph it already holds (so one shared
+    // across repos could upload repo A's graph under B), and keeping one per
+    // repo held N full graph sets in memory for the life of the project.
+    // `otherReposGeneration` advances on every project switch; a loop started
+    // for an older generation stops at its next repo, and a new project's loop
+    // is never blocked by the old one.
+    private var otherReposGeneration = 0
+    private var otherReposRunningGeneration: Int?
 
     nonisolated private static let log = Logger(subsystem: "com.llmide.macapp",
                                                 category: "GraphAutoUpdater")
@@ -98,7 +103,7 @@ final class GraphAutoUpdater: ObservableObject {
             // The notification block is not @MainActor-typed; hop on.
             Task { @MainActor in
                 self?.graph.resetCache()
-                self?.otherRepoGraphs.removeAll()
+                self?.otherReposGeneration += 1
                 self?.runIfEligible()   // also (re)points the file watcher
             }
         }
@@ -225,18 +230,21 @@ final class GraphAutoUpdater: ObservableObject {
     /// primary `graph`: those stay the repo the Code Graph view shows. A run
     /// already in progress makes this a no-op — the next tick catches up.
     private func refreshOtherRepos(projectRoot: URL, primary: URL) async {
-        guard !otherReposRunning else { return }
-        otherReposRunning = true
-        defer { otherReposRunning = false }
+        let generation = otherReposGeneration
+        // One loop per project at a time; a timer tick during it is a no-op.
+        guard otherReposRunningGeneration != generation else { return }
+        otherReposRunningGeneration = generation
+        defer { if otherReposRunningGeneration == generation { otherReposRunningGeneration = nil } }
         let primaryPath = primary.standardizedFileURL.path
+        let projectPath = projectRoot.standardizedFileURL.path
         let others = RepoGraphLocator.reposToGraph(projectRoot: projectRoot)
             .filter { $0.standardizedFileURL.path != primaryPath }
         for repo in others {
-            // The project may have been switched while an earlier repo ran.
-            guard projectStore?.activeProject?.localPath == projectRoot.path else { return }
-            let key = repo.standardizedFileURL.path
-            let service = otherRepoGraphs[key] ?? KnowledgeGraphService()
-            otherRepoGraphs[key] = service
+            // Stop when the project was switched while an earlier repo ran.
+            guard generation == otherReposGeneration,
+                  let active = projectStore?.activeProject?.localPath,
+                  URL(fileURLWithPath: active).standardizedFileURL.path == projectPath else { return }
+            let service = KnowledgeGraphService()
             guard case .completed(let held) = await service.generate(
                 codeRepoRoot: repo, docRoots: [repo], memoryRoot: repo),
                   let held, case .complete = service.phase else {
