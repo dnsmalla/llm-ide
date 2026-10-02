@@ -1,4 +1,4 @@
-// Loop Engineering detail pane — the read-only ENVIRONMENT section: what the
+// Loop Engineering detail pane — the ENVIRONMENT section: what the
 // project's environment looks like BEFORE a run, so a missing tool or a broken
 // dependency is seen here instead of as a failed stage. Storage lives in
 // LoopEngineView.swift (a SwiftUI extension cannot declare it).
@@ -17,7 +17,10 @@ extension LoopEngineView {
                 SectionLabel("ENVIRONMENT")
                 Spacer()
                 if isInspectingEnvironment { ProgressView().controlSize(.small) }
-                Button("Refresh") { Task { @MainActor in await refreshEnvironmentStatus() } }
+                Button(environmentInterpreterChecked ? "Re-check" : "Check Python environment…") {
+                    Task { @MainActor in await refreshEnvironmentStatus(interpreter: true) }
+                }
+                    .help("Runs this project's own Python (python -m pytest --version, pip check). Only click for a repository you trust.")
                     .controlSize(.small)
                     .disabled(isInspectingEnvironment || activeGitRootURL == nil)
             }
@@ -42,7 +45,7 @@ extension LoopEngineView {
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             }
-            Text("Read-only: nothing is installed or changed.")
+            Text("Nothing is installed or changed. The Python check runs this project's own Python, so it only starts when you click.")
                 .font(Typography.caption)
                 .foregroundStyle(t.textMuted)
         }
@@ -51,8 +54,11 @@ extension LoopEngineView {
     /// Re-inspects the active project. `@MainActor` because this view is not
     /// main-actor isolated and the results are written to @State.
     @MainActor
-    func refreshEnvironmentStatus(clearing: Bool = false) async {
-        if clearing { environmentStatus = nil }
+    func refreshEnvironmentStatus(clearing: Bool = false, interpreter: Bool = false) async {
+        if clearing {
+            environmentStatus = nil
+            environmentInterpreterChecked = false
+        }
         guard let gitRoot = activeGitRootURL else {
             environmentInspectionToken += 1
             isInspectingEnvironment = false
@@ -62,7 +68,7 @@ extension LoopEngineView {
         environmentInspectionToken += 1
         let token = environmentInspectionToken
         isInspectingEnvironment = true
-        let facts = await ProjectEnvironmentInspector.inspect(repoRoot: gitRoot)
+        let facts = await ProjectEnvironmentInspector.inspect(repoRoot: gitRoot, runInterpreterProbes: interpreter)
         // A newer run owns the in-progress flag and the result.
         guard token == environmentInspectionToken else { return }
         isInspectingEnvironment = false
@@ -71,6 +77,7 @@ extension LoopEngineView {
         // another project.
         guard !Task.isCancelled, activeGitRootURL == gitRoot else { return }
         environmentStatus = ProjectEnvironmentAssessor.assess(facts)
+        environmentInterpreterChecked = interpreter
     }
 
     private func readinessText(_ readiness: ProjectEnvironmentStatus.Readiness) -> String {

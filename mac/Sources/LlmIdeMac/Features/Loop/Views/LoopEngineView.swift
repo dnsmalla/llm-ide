@@ -206,6 +206,9 @@ struct LoopEngineView: View {
     /// Identifies the latest inspection; only the run holding the current token
     /// may clear the in-progress flag or store a result.
     @State var environmentInspectionToken = 0
+    /// Whether the shown status came from an explicit interpreter check (which
+    /// runs the project's own Python) rather than file facts only.
+    @State var environmentInterpreterChecked = false
 
     /// How many past runs the history list shows. One constant, so the header's
     /// "latest N" badge cannot claim a different cap than `loadPastRuns`
@@ -258,8 +261,9 @@ struct LoopEngineView: View {
         }
         .task(id: reloadKey) {
             // Cleared first (inside the call) so a previous project's answer is
-            // never shown while this project is being inspected.
-            await refreshEnvironmentStatus(clearing: true)
+            // never shown while this project is being inspected. File facts
+            // only: opening the page must not run repository-controlled code.
+            await refreshEnvironmentStatus(clearing: true, interpreter: false)
         }
         .task(id: reloadKey) {
             selectedStageId = nil
@@ -767,6 +771,8 @@ struct LoopEngineView: View {
             environmentSetupMessage = result.succeeded
                 ? "Environment is ready — run the loop again."
                 : "Setup failed — \(String(result.output.suffix(300)))"
+            // The click on "Set up" was the approval to run the project's Python.
+            if result.succeeded { await refreshEnvironmentStatus(interpreter: true) }
         }
     }
 
