@@ -772,7 +772,11 @@ struct LoopEngineView: View {
                 ? "Environment is ready — run the loop again."
                 : "Setup failed — \(String(result.output.suffix(300)))"
             // The click on "Set up" was the approval to run the project's Python.
-            if result.succeeded { await refreshEnvironmentStatus(interpreter: true) }
+            // Skipped when the user switched project meanwhile: no click approved running
+            // the OTHER project's Python.
+            if result.succeeded, activeGitRootURL == gitRoot {
+                await refreshEnvironmentStatus(interpreter: true)
+            }
         }
     }
 

@@ -185,7 +185,7 @@ private func makeFakePythonProject(name: String, withPytestBinary: Bool, body: S
 private let fakePythonHealthy = """
 touch "$(dirname "$0")/ran"
 case "$*" in
-  "--version") echo "Python 9.9.9 dwb=$PYTHONDONTWRITEBYTECODE safe=$PYTHONSAFEPATH pp=[$PYTHONPATH] addopts=[$PYTEST_ADDOPTS] cwd=$(pwd)" ;;
+  "--version") echo "Python 9.9.9 dwb=$PYTHONDONTWRITEBYTECODE safe=$PYTHONSAFEPATH pp=[$PYTHONPATH] addopts=[$PYTEST_ADDOPTS] plugins=[$PYTEST_PLUGINS] cwd=$(pwd)" ;;
   *find_spec*) echo True ;;
   "-m pytest --version --noconftest -p no:cacheprovider -c /dev/null") echo "pytest 0.0.0" ;;
   "-m pip check") echo "No broken requirements found." ;;
@@ -214,7 +214,18 @@ func runProjectEnvironmentInspectorChecks() async {
     expect(ProjectEnvironmentAssessor.assess(fileOnly).readiness == .unknown,
            "a file-only inspection of a Python project is unknown")
 
-    let ok = await ProjectEnvironmentInspector.inspect(repoRoot: healthy, inherited: inherited, timeout: 10,
+    // Hostile ambient values, both in the process environment and in the
+    // inherited map, must be neutralised for the probes.
+    setenv("PYTHONPATH", "/evil", 1)
+    setenv("PYTEST_ADDOPTS", "-p evil", 1)
+    setenv("PYTEST_PLUGINS", "evil", 1)
+    defer {
+        unsetenv("PYTHONPATH")
+        unsetenv("PYTEST_ADDOPTS")
+        unsetenv("PYTEST_PLUGINS")
+    }
+    let hostile = inherited.merging(["PYTHONPATH": "/evil", "PYTEST_ADDOPTS": "-p evil", "PYTEST_PLUGINS": "evil"]) { $1 }
+    let ok = await ProjectEnvironmentInspector.inspect(repoRoot: healthy, inherited: hostile, timeout: 10,
                                                        runInterpreterProbes: true)
     expect(FileManager.default.fileExists(atPath: marker.path), "a full inspection does run the interpreter")
     expect(ok.interpreterProbesRan, "a full inspection says the probes ran")
@@ -224,7 +235,7 @@ func runProjectEnvironmentInspectorChecks() async {
     expect(ok.virtualEnvName == ".venv", "the virtualenv folder is named")
     var versionText = ""
     if case .ok(let text) = ok.pythonVersion { versionText = text }
-    expect(versionText.hasPrefix("Python 9.9.9 dwb=1 safe=1 pp=[] addopts=[] cwd="),
+    expect(versionText.hasPrefix("Python 9.9.9 dwb=1 safe=1 pp=[] addopts=[] plugins=[] cwd="),
            "the probe runs with the hardened environment")
     let probeDirectory = String(versionText.drop { $0 != "/" })
     let rootPaths = [healthy.path, healthy.resolvingSymlinksInPath().path]

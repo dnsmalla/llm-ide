@@ -45,7 +45,7 @@ extension LoopEngineView {
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             }
-            Text("Nothing is installed or changed. The Python check runs this project's own Python, so it only starts when you click.")
+            Text("Nothing is installed or changed. The Python check runs this project's own Python, so it only starts when you click — only click for a repository you trust.")
                 .font(Typography.caption)
                 .foregroundStyle(t.textMuted)
         }
