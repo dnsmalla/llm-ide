@@ -99,3 +99,55 @@ test('an unknown symbol, a bad relation, and no user are plain answers, not thro
   assert.match(handleCodeRelations({ symbol: 'core', relation: 'sideways' }, ctx()).error, /relation/);
   assert.match(handleCodeRelations({ symbol: 'core', relation: 'callers' }, {}).error, /signed in/);
 });
+
+// The real multi-repo layout: a project root that is NOT itself graphed,
+// with its repos under code/<repo> (what bf48a688 now graphs in full).
+const PROJ = fs.mkdtempSync(path.join(__dirname, '_cr-proj-'));
+const REPO_A = path.join(PROJ, 'code', 'api');
+const REPO_B = path.join(PROJ, 'code', 'web');
+const pctx = () => ({ userId: U, roots: [PROJ], workspaceRoot: PROJ });
+test.after(() => fs.rmSync(PROJ, { recursive: true, force: true }));
+
+// Structure-graph ids carry no repo (`file:src/index.ts`), so two repos with
+// the same relative path shared ids — and a traversal scoped to both returned
+// the OTHER repo's callers as this one's. Each seed now walks its own repo.
+test('two repos with the same relative path do not leak into each other', () => {
+  db.writeCodeGraph(U, REPO_A, {
+    nodes: [file('src/a.ts'), fn('src/a.ts', 'core', 3), fn('src/b.ts', 'apiCaller', 5)],
+    edges: [calls('src/b.ts', 'apiCaller', 'src/a.ts', 'core')],
+  }, { source: 'structure' });
+  db.writeCodeGraph(U, REPO_B, {
+    nodes: [file('src/a.ts'), fn('src/a.ts', 'core', 3), fn('src/z.ts', 'webCaller', 1)],
+    edges: [calls('src/z.ts', 'webCaller', 'src/a.ts', 'core')],
+  }, { source: 'structure' });
+  const out = handleCodeRelations({ symbol: 'core', relation: 'callers' }, pctx());
+  assert.equal(out.ambiguous, true);
+  assert.deepEqual(out.symbol.map((s) => s.repo).sort(), ['api', 'web']);
+  const got = out.results.map((r) => `${r.name}@${r.repo}`).sort();
+  assert.deepEqual(got, ['apiCaller@api', 'webCaller@web'], 'each caller is attributed to its own repo');
+  const onlyApi = handleCodeRelations({ symbol: 'core', relation: 'callers', path: 'code/api/src/a.ts' }, pctx());
+  assert.deepEqual(onlyApi.results.map((r) => r.name), ['apiCaller'], 'a workspace-relative path picks one repo');
+});
+
+test('callers also follows references — the only usage edges a SCIP graph has', () => {
+  const SCIP = path.join(PROJ, 'code', 'scip');
+  db.writeCodeGraph(U, SCIP, {
+    nodes: [{ id: 'scip:lib/x#Thing', title: 'ScipThing', kind: 'class', metadata: { source_file: 'lib/x.ts', line: 'L4' } },
+      { id: 'scip:lib/y#user', title: 'scipUser', kind: 'function', metadata: { source_file: 'lib/y.ts', line: 'L2' } }],
+    edges: [{ fromId: 'scip:lib/y#user', toId: 'scip:lib/x#Thing', kind: 'references' }],
+  }, { source: 'scip' });
+  const out = handleCodeRelations({ symbol: 'ScipThing', relation: 'callers' }, pctx());
+  assert.deepEqual(out.results.map((r) => `${r.name}:${r.relation}`), ['scipUser:referenced by']);
+});
+
+test('path: ./-prefixed, repo-relative or absolute picks the symbol, past the first 20 namesakes', () => {
+  const MANY = path.join(PROJ, 'code', 'many');
+  const nodes = [];
+  for (let i = 0; i < 30; i += 1) nodes.push(fn(`pkg/m${String(i).padStart(2, '0')}.ts`, 'render', i + 1));
+  db.writeCodeGraph(U, MANY, { nodes, edges: [] }, { source: 'structure' });
+  for (const p of ['./pkg/m29.ts', 'pkg/m29.ts', path.join(MANY, 'pkg/m29.ts')]) {
+    const out = handleCodeRelations({ symbol: 'render', relation: 'callers', path: p }, pctx());
+    assert.deepEqual(out.symbol.map((s) => s.line), [30], `found via ${p}`);
+    assert.equal(out.ambiguous, undefined, p);
+  }
+});

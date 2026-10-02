@@ -16,7 +16,9 @@ import { shapeSymbol, staleGraphs, STALE_HINT } from './find-code.mjs';
 import { redactFence } from '../redaction.mjs';
 
 const RELATIONS = {
-  callers: { direction: 'in', edgeKinds: ['calls'] },
+  // `references` too: a SCIP graph has no `calls` edges at all, so without it
+  // callers was always empty there.
+  callers: { direction: 'in', edgeKinds: ['calls', 'references'] },
   callees: { direction: 'out', edgeKinds: ['calls'] },
   impact: { direction: 'in', edgeKinds: ['calls', 'references', 'implements', 'inherits', 'imports'] },
 };
@@ -27,6 +29,21 @@ const LABELS = {
 const MAX_DEPTH = 3;
 const MAX_RESULTS = 60;
 const MAX_SEEDS = 8;
+// Namesakes fetched before the `path` filter, so a common name (`render`,
+// `init`) still finds the one asked for.
+const MAX_CANDIDATES = 400;
+
+// Does a graph row's file match the path the agent passed? Compared against
+// the row's ABSOLUTE path (repo_id + source_file), so a workspace-relative
+// path (`code/api/src/x.ts`) picks one repo while a repo-relative one
+// (`src/x.ts`) still matches every repo that has it. Accepts `./x` and
+// absolute paths too.
+function pathMatches(row, wanted) {
+  if (!wanted) return true;
+  const abs = `${String(row.repo_id || '').replace(/[/\\]+$/, '')}/${String(row.source_file || '')}`;
+  return abs === wanted || abs.endsWith(`/${wanted}`);
+}
+const repoName = (repoId) => String(repoId || '').split(/[/\\]/).filter(Boolean).pop() || '';
 
 function clampDepth(v) {
   const n = Math.trunc(Number(v));
@@ -56,13 +73,16 @@ export function handleCodeRelations(args, ctx) {
   let seeds;
   try {
     repoIds = resolveRepoScope(ctx.userId, { activeRepoRoot: ctx.activeRepoRoot || '', workspaceRoot });
-    seeds = findSymbolsByTitle(ctx.userId, name, { repoIds })
-      .filter((r) => !pathFilter || r.source_file === pathFilter || r.source_file.endsWith(`/${pathFilter}`))
+    seeds = findSymbolsByTitle(ctx.userId, name, { repoIds, limit: MAX_CANDIDATES })
+      .filter((r) => pathMatches(r, pathFilter))
       .slice(0, MAX_SEEDS);
   } catch (err) {
     return { error: `code graph unavailable: ${redactFence(String(err?.message || err))}` };
   }
-  const symbol = seeds.map((r) => shapeSymbol(r, roots, workspaceRoot)).filter(Boolean);
+  const seedsMultiRepo = new Set(seeds.map((r) => r.repo_id)).size > 1;
+  const symbol = seeds
+    .map((r) => shapeSymbol(r, roots, workspaceRoot, seedsMultiRepo ? { repo: redactFence(repoName(r.repo_id)) } : {}))
+    .filter(Boolean);
   if (seeds.length === 0) {
     return {
       symbol: [], relation, results: [],
@@ -70,28 +90,40 @@ export function handleCodeRelations(args, ctx) {
     };
   }
 
-  // impact also walks from each seed's FILE node: importers depend on the
-  // file, not on one function inside it.
-  const seedIds = seeds.map((r) => r.symbol_id);
-  if (relation === 'impact') {
-    for (const r of seeds) if (r.source_file) seedIds.push(`file:${r.source_file}`);
+  // Walk each seed's OWN repo. Structure-graph ids carry no repo
+  // (`file:src/index.ts`), so a traversal scoped to several repos at once
+  // joined two repos' identically-named files and reported one repo's callers
+  // as the other's. impact also starts from each seed's FILE node: importers
+  // depend on the file, not on one function inside it.
+  const byRepo = new Map();
+  for (const r of seeds) {
+    const ids = byRepo.get(r.repo_id) || [];
+    ids.push(r.symbol_id);
+    if (relation === 'impact' && r.source_file) ids.push(`file:${r.source_file}`);
+    byRepo.set(r.repo_id, ids);
   }
-  const hits = graphNeighbors(ctx.userId, [...new Set(seedIds)], {
-    hops: depth, edgeKinds: spec.edgeKinds, direction: spec.direction, limit: MAX_RESULTS, repoIds,
-  });
-  const rows = new Map(hydrateSymbols(ctx.userId, hits.map((h) => h.symbolId), { repoIds }).map((r) => [r.symbol_id, r]));
-  const results = hits
-    .map((h) => {
-      const row = rows.get(h.symbolId);
-      if (!row) return null;
-      return shapeSymbol(row, roots, workspaceRoot, {
-        relation: LABELS[h.direction]?.[h.viaKind] || h.viaKind,
-        hop: h.hop,
-        ...(h.confidence && h.confidence !== 'EXTRACTED' ? { confidence: redactFence(String(h.confidence)) } : {}),
-      });
-    })
+  const found = [];
+  for (const [repoId, ids] of byRepo) {
+    const room = MAX_RESULTS - found.length;
+    if (room <= 0) break;
+    const hits = graphNeighbors(ctx.userId, [...new Set(ids)], {
+      hops: depth, edgeKinds: spec.edgeKinds, direction: spec.direction, limit: room, repoIds: [repoId],
+    });
+    const rows = new Map(hydrateSymbols(ctx.userId, hits.map((h) => h.symbolId), { repoIds: [repoId] })
+      .map((r) => [r.symbol_id, r]));
+    for (const h of hits) if (rows.has(h.symbolId)) found.push({ hit: h, row: rows.get(h.symbolId), repoId });
+  }
+  const multiRepo = new Set([...seeds.map((r) => r.repo_id), ...found.map((f) => f.repoId)]).size > 1;
+  const results = found
+    .map(({ hit: h, row, repoId }) => shapeSymbol(row, roots, workspaceRoot, {
+      relation: LABELS[h.direction]?.[h.viaKind] || h.viaKind,
+      hop: h.hop,
+      ...(multiRepo ? { repo: redactFence(repoName(repoId)) } : {}),
+      ...(h.confidence && h.confidence !== 'EXTRACTED' ? { confidence: redactFence(String(h.confidence)) } : {}),
+    }))
     .filter(Boolean)
     .sort((a, b) => a.hop - b.hop || a.path.localeCompare(b.path) || a.line - b.line);
+  const hits = found;
 
   const stale = (() => {
     try { return staleGraphs(ctx.userId, repoIds, Number.isFinite(ctx.freshnessCacheMs) ? ctx.freshnessCacheMs : 30_000); }

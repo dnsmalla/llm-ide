@@ -462,12 +462,6 @@ export function hasCodeGraph(userId) {
 }
 
 /**
- * Hydrate symbol ids to node rows for agent context. Includes repo_id
- * (alongside the relative source_file) so callers can resolve the absolute
- * on-disk path — e.g. codegen.mjs uses it to confirm which FTS-matched file
- * a task's compiler-derived symbols actually touch.
- */
-/**
  * Symbols named exactly `title` (never file nodes), for a tool that has been
  * given a symbol rather than a search phrase. Uses the (user_id, title) index.
  */
@@ -481,6 +475,12 @@ export function findSymbolsByTitle(userId, title, { repoIds = null, limit = 20 }
   ).all(userId, title, ...scope.params, limit);
 }
 
+/**
+ * Hydrate symbol ids to node rows for agent context. Includes repo_id
+ * (alongside the relative source_file) so callers can resolve the absolute
+ * on-disk path — e.g. codegen.mjs uses it to confirm which FTS-matched file
+ * a task's compiler-derived symbols actually touch.
+ */
 export function hydrateSymbols(userId, symbolIds, { repoIds = null } = {}) {
   requireUser(userId);
   if (!Array.isArray(symbolIds) || symbolIds.length === 0) return [];
