@@ -41,6 +41,16 @@ public enum AgentV2Conformance {
         ClaudeToolPresentation.icon(for: tool)
     }
 
+    /// `AgentV2Transport.freshHistoryField`, exposed for the lab: the history
+    /// a fresh (unresumable-session retry) turn sends. `turns` are
+    /// `(role, content)` with role `user` or `assistant`; others are dropped.
+    public static func freshHistoryField(_ turns: [(String, String)]) -> [[String: String]] {
+        let packed = turns.compactMap { role, content in
+            LlmIdeAPIClient.CodeAssistRole(rawValue: role).map { LlmIdeAPIClient.CodeAssistTurn(role: $0, content: content) }
+        }
+        return AgentV2Transport.freshHistoryField(packed)
+    }
+
     /// The tool → verb table, same reasoning.
     public static func verb(for tool: String?) -> String {
         ClaudeToolPresentation.verb(tool)

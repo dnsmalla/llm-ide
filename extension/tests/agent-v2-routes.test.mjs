@@ -331,6 +331,39 @@ test('stream: second turn resumes the recorded sdk session; fresh:true starts ov
   assert.deepEqual(seen, [undefined, 'sdk-r1', undefined]);
 });
 
+// The fresh:true retry after SESSION_UNRESUMABLE starts a context-blind SDK
+// session, so it carries the app's own record of the chat. The route passes
+// it on ONLY then (a resumable session already holds its transcript), keeps
+// well-formed user/assistant turns only, and bounds the total.
+test('stream: history reaches the engine only on a fresh turn, sanitised and bounded', async () => {
+  const user = newUser('v2route-history@example.com');
+  const seen = [];
+  const fakeTurn = async ({ onEvent, history }) => {
+    seen.push(history);
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-h', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: {} };
+  };
+  const history = [
+    { role: 'user', content: 'Please refactor the parser.' },
+    { role: 'assistant', content: 'Done — split it into three files.' },
+    { role: 'system', content: 'not a chat turn' },
+    { role: 'user', content: 42 },
+    { role: 'user', content: 'x'.repeat(200_000) },
+  ];
+  const req = (body) => makeReq({
+    method: 'POST', url: '/agent/v2/stream', user,
+    body: { message: 'continue', agentContext: { chatSessionId: 'chat-h', workspaceRoot: WS }, history, ...body },
+  });
+  await handleAgentV2Routes(req({}), makeRes(), { runTurn: fakeTurn });
+  await handleAgentV2Routes(req({ fresh: true }), makeRes(), { runTurn: fakeTurn });
+  assert.deepEqual(seen[0], [], 'a resumable turn ignores history: the SDK session already holds it');
+  const fresh = seen[1];
+  assert.deepEqual(fresh.slice(0, 2).map((t) => t.role), ['user', 'assistant']);
+  assert.ok(fresh.every((t) => (t.role === 'user' || t.role === 'assistant') && typeof t.content === 'string'));
+  const total = fresh.reduce((n, t) => n + t.content.length, 0);
+  assert.ok(total <= 60_000, `bounded (got ${total})`);
+});
+
 test('stream: SESSION_UNRESUMABLE surfaces as an error event, not a crash', async () => {
   const db = getDb();
   const user = newUser('v2route-unresumable@example.com');

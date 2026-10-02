@@ -128,6 +128,27 @@ export function ledgerRowsForTurn(meteredModel, usageTotals) {
   ];
 }
 
+// The chat history a FRESH turn carries (the client's retry after
+// SESSION_UNRESUMABLE opens a context-blind SDK session). Ignored otherwise —
+// a resumable session already holds its transcript. Only well-formed
+// user/assistant turns; each clipped, and the newest kept within a total.
+const HISTORY_TURN_CHARS = 20_000;
+const HISTORY_TOTAL_CHARS = 60_000;
+export function freshTurnHistory(body) {
+  if (body?.fresh !== true || !Array.isArray(body.history)) return [];
+  const turns = body.history
+    .filter((t) => t && (t.role === 'user' || t.role === 'assistant') && typeof t.content === 'string')
+    .map((t) => ({ role: t.role, content: t.content.slice(0, HISTORY_TURN_CHARS) }));
+  const kept = [];
+  let budget = HISTORY_TOTAL_CHARS;
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    if (turns[i].content.length > budget) break;
+    budget -= turns[i].content.length;
+    kept.unshift(turns[i]);
+  }
+  return kept;
+}
+
 export async function handleAgentV2Routes(
   req,
   res,
@@ -164,7 +185,8 @@ export async function handleAgentV2Routes(
 // --- POST /agent/v2/stream ----------------------------------------------------
 //
 // Body: { message, language?, model?, provider?, mode?, skills?, planExecute?,
-// agentContext: { chatSessionId, workspaceRoot, … }, attachments?, fresh? } →
+// agentContext: { chatSessionId, workspaceRoot, … }, attachments?, fresh?,
+// history? (only read when fresh — see freshTurnHistory) } →
 // SSE stream of engine events with `mode_set` injected right after the first
 // `init`. `provider` is `anthropic` (or absent — older clients only ever sent
 // v2 turns for Anthropic) or an Anthropic-compatible `custom:<uuid>`; the
@@ -378,6 +400,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   try {
     const { usageTotals } = await deps.runTurn({
       message,
+      history: freshTurnHistory(body),
       userId,
       mode,
       model,

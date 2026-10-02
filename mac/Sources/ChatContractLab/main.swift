@@ -1313,6 +1313,17 @@ do {
            "but an ordinary question in Ask is exactly right — say nothing")
 }
 
+// AgentV2Transport's fresh-turn history. The retry after SESSION_UNRESUMABLE
+// opens a context-blind SDK session; it now carries the chat the app already
+// packed (`historyForRequest`), so "continue" does not start from nothing.
+// The server reads it ONLY on a fresh turn (routes/agent-v2.mjs).
+do {
+    let field = AgentV2Conformance.freshHistoryField([("user", "Refactor the parser"), ("assistant", "Done")])
+    expect(field == [["role": "user", "content": "Refactor the parser"], ["role": "assistant", "content": "Done"]],
+           "fresh-turn history is sent as role/content pairs, in order")
+    expect(AgentV2Conformance.freshHistoryField([]).isEmpty, "an empty chat sends no history")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

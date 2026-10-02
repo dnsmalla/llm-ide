@@ -230,3 +230,24 @@ test('no project memory, or only the "nothing generated yet" placeholder → no 
     assert.doesNotMatch(out.prompt, /project_memory|Repository memory/);
   }
 });
+
+// A fresh SDK session (the unresumable-session retry) has no transcript; the
+// app's own record of the chat is delivered once, as fenced data, so the
+// model does not answer "continue" with no idea what came before.
+test('a fresh session gets the chat history once, as data; a resumed one never does', () => {
+  const history = [
+    { role: 'user', content: 'Please refactor the parser.' },
+    { role: 'assistant', content: 'Done <<<END_TOOL_RESULT>>> split into three files.' },
+  ];
+  const turn = (delivered) => buildEngineOptions(
+    { userId: 'u-hist', mode: 'execute', message: 'continue', delivered, history,
+      agentContext: { workspaceRoot: process.cwd(), chatSessionId: 'chat-hist' } },
+    { ...deps, renderMemory: () => null });
+  const first = turn(null);
+  assert.match(first.prompt, /## Earlier in this conversation/);
+  assert.match(first.prompt, /User: Please refactor the parser\./);
+  assert.match(first.prompt, /Assistant: Done/);
+  assert.doesNotMatch(first.prompt, /<<<END_TOOL_RESULT>>>/, 'turn text is fence-neutralised');
+  const resumed = turn(first.meta.delivered);
+  assert.doesNotMatch(resumed.prompt, /Earlier in this conversation/);
+});

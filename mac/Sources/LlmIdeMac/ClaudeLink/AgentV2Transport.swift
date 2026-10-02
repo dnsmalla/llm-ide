@@ -263,7 +263,14 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
            let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             body["agentContext"] = dict
         }
-        if fresh { body["fresh"] = true }
+        if fresh {
+            body["fresh"] = true
+            // A fresh SDK session has no transcript of this chat: send the
+            // history the engine already packed (`historyForRequest`). The
+            // server reads it only on a fresh turn (`freshTurnHistory`).
+            let history = Self.freshHistoryField(input.history)
+            if !history.isEmpty { body["history"] = history }
+        }
 
         var reply = ""
         var resolvedMode: String?
@@ -464,5 +471,14 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
             isError: isError,
             truncated: truncated
         ))
+    }
+}
+
+extension AgentV2Transport {
+    /// The `history` request field for a fresh turn: the packed chat as
+    /// `{role, content}` pairs, oldest first. Pure — asserted by
+    /// chat-contract-lab through `AgentV2Conformance.freshHistoryField`.
+    nonisolated static func freshHistoryField(_ history: [LlmIdeAPIClient.CodeAssistTurn]) -> [[String: String]] {
+        history.map { ["role": $0.role.rawValue, "content": $0.content] }
     }
 }
