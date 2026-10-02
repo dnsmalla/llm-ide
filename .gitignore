@@ -138,3 +138,10 @@ extension/tests/mcp-plugins-state.json
 # *Service.swift files there.)
 /services/
 extension/tests/_connector-routes-repo-root-fixture/
+
+# Serena MCP per-machine project config — the tool rewrites project.yml on
+# every upgrade, so tracking it only produces noise diffs.
+.serena/
+
+# Stray empty DB created when a script opens the legacy default name.
+kb/llmide.db
