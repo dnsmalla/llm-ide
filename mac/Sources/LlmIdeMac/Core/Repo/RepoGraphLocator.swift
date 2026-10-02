@@ -3,7 +3,7 @@ import Foundation
 /// Maps a project root to the repo directory the code graph is generated
 /// from. Lives in core (not Graph/) because the auto-task pipeline needs the
 /// mapping even in builds where the Graph feature is excluded.
-enum RepoGraphLocator {
+public enum RepoGraphLocator {
     /// Moved verbatim from `GraphAutoUpdater.repoToGraph` — same behavior.
     static func repoToGraph(projectRoot: URL) -> URL? {
         let fm = FileManager.default
@@ -28,5 +28,22 @@ enum RepoGraphLocator {
         let hasFiles = ((try? fm.contentsOfDirectory(at: projectRoot, includingPropertiesForKeys: nil,
                                                      options: [.skipsHiddenFiles]))?.isEmpty == false)
         return hasFiles ? projectRoot : nil
+    }
+
+    /// EVERY repo the project's graph should cover: each `code/<child>`
+    /// directory (sorted, hidden ones skipped), else the project root itself
+    /// when it holds files, else none. `repoToGraph` stays the single PRIMARY
+    /// repo the view, file watcher and memory track; the auto-updater graphs
+    /// the rest in the background so agents can query all of them — before,
+    /// every repo but the first was invisible to find-code / code-relations.
+    public static func reposToGraph(projectRoot: URL) -> [URL] {
+        let fm = FileManager.default
+        let codeDir = ProjectLayout(root: projectRoot).codeDir
+        let children = (try? fm.contentsOfDirectory(at: codeDir, includingPropertiesForKeys: [.isDirectoryKey],
+                                                    options: [.skipsHiddenFiles])) ?? []
+        let dirs = children.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        if !dirs.isEmpty { return dirs }
+        return repoToGraph(projectRoot: projectRoot).map { [$0] } ?? []
     }
 }

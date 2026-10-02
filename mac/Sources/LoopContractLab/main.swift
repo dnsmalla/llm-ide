@@ -521,6 +521,7 @@ runSelfHealCoreChecks()
 await runSelfHealLoopChecks()
 runRuntimeEnvironmentChecks()
 runEnvironmentNoteChecks()
+runRepoGraphLocatorChecks()
 #if FEATURE_AUTOTASK
 runEnvironmentProblemChecks()
 #endif

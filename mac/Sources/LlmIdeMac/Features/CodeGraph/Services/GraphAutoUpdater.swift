@@ -62,6 +62,12 @@ final class GraphAutoUpdater: ObservableObject {
     // without this we'd post the same "N code · M doc" notification repeatedly.
     // We only notify when this signature actually changes.
     private var lastReportedSignature: String?
+    // The project's OTHER code/<repo> children, graphed in the background so
+    // agents can query every repo, not just the primary one. One service per
+    // repo: a service that hits a busy scan lock keeps the graph it already
+    // holds, so sharing one across repos could upload repo A's graph under B.
+    private var otherRepoGraphs: [String: KnowledgeGraphService] = [:]
+    private var otherReposRunning = false
 
     nonisolated private static let log = Logger(subsystem: "com.llmide.macapp",
                                                 category: "GraphAutoUpdater")
@@ -92,6 +98,7 @@ final class GraphAutoUpdater: ObservableObject {
             // The notification block is not @MainActor-typed; hop on.
             Task { @MainActor in
                 self?.graph.resetCache()
+                self?.otherRepoGraphs.removeAll()
                 self?.runIfEligible()   // also (re)points the file watcher
             }
         }
@@ -130,7 +137,7 @@ final class GraphAutoUpdater: ObservableObject {
         watcher = RepoFileWatcher(repoRoot: repoRoot) { [weak self] in
             // FSEvents callback is off the main actor — hop on, then run the
             // same gated/coalesced regen the timer and project-switch use.
-            Task { @MainActor in self?.runIfEligible() }
+            Task { @MainActor in self?.runIfEligible(includeOtherRepos: false) }
         }
         if watcher != nil {
             watchedRoot = target
@@ -149,7 +156,12 @@ final class GraphAutoUpdater: ObservableObject {
     /// (first-time OR incremental — see repoToGraph). The whole point of the
     /// product is autonomous knowledge: the user reviews, never hand-triggers.
     /// First-gen used to be manual; now the auto-updater does it on open too.
-    private func runIfEligible() {
+    ///
+    /// `includeOtherRepos`: also refresh the project's other `code/<repo>`
+    /// children after the primary one. Off for file-watcher ticks — the
+    /// watcher only covers the primary repo, and an edit there says nothing
+    /// about the others; project open and the timer refresh them.
+    private func runIfEligible(includeOtherRepos: Bool = true) {
         guard let ap = projectStore?.activeProject else { ensureWatcher(nil); return }
         let projectRoot = URL(fileURLWithPath: ap.localPath)
         guard let repoRoot = Self.repoToGraph(projectRoot: projectRoot) else {
@@ -202,6 +214,39 @@ final class GraphAutoUpdater: ObservableObject {
             // citation overlay (server-only; the views never see doc nodes).
             await self.uploader.upload(graph: self.graph.codeGraphForUpload, repoRoot: heldRoot)
             self.objectWillChange.send()
+            if includeOtherRepos {
+                await self.refreshOtherRepos(projectRoot: projectRoot, primary: heldRoot)
+            }
+        }
+    }
+
+    /// Graph + upload (+ write memory for) every code/<repo> child except the
+    /// primary, one at a time. Never touches the view's session store or the
+    /// primary `graph`: those stay the repo the Code Graph view shows. A run
+    /// already in progress makes this a no-op — the next tick catches up.
+    private func refreshOtherRepos(projectRoot: URL, primary: URL) async {
+        guard !otherReposRunning else { return }
+        otherReposRunning = true
+        defer { otherReposRunning = false }
+        let primaryPath = primary.standardizedFileURL.path
+        let others = RepoGraphLocator.reposToGraph(projectRoot: projectRoot)
+            .filter { $0.standardizedFileURL.path != primaryPath }
+        for repo in others {
+            // The project may have been switched while an earlier repo ran.
+            guard projectStore?.activeProject?.localPath == projectRoot.path else { return }
+            let key = repo.standardizedFileURL.path
+            let service = otherRepoGraphs[key] ?? KnowledgeGraphService()
+            otherRepoGraphs[key] = service
+            guard case .completed(let held) = await service.generate(
+                codeRepoRoot: repo, docRoots: [repo], memoryRoot: repo),
+                  let held, case .complete = service.phase else {
+                Self.log.info("background graph skipped for \(repo.lastPathComponent, privacy: .public)")
+                continue
+            }
+            await uploader.upload(graph: service.codeGraphForUpload, repoRoot: held)
+        }
+        if !others.isEmpty {
+            Self.log.info("background graphs refreshed for \(others.count, privacy: .public) other repo(s)")
         }
     }
 
