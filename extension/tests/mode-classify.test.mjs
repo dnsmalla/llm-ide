@@ -167,10 +167,13 @@ const counting = (reply) => {
 for (const msg of [
   'fix the failing test in parser.ts',
   'rename fooBar to fooBaz everywhere',
+  'add a --verbose flag to the CLI',
   'ok',
+  'continue',
   'このバグを直して',
   'はい、続けてください',
   'parser.ts の型エラーを修正して',
+  'ログイン画面にボタンを追加して',
 ]) {
   test(`no plan/review/document wording → execute without a model call: ${msg}`, async () => {
     const run = counting('{"mode": "plan"}');
@@ -180,6 +183,30 @@ for (const msg of [
 }
 
 for (const msg of [
+  // The reviewer's set: every one of these used to be forced to execute.
+  'what do you think about the auth flow?',
+  'このコード見てほしい',
+  'このファイルにバグある？',
+  'アーキテクチャを見直して',
+  'any concerns with this diff?',
+  'thoughts on this refactor?',
+  '意見ください',
+  'pros and cons of sqlite',
+  'which is better, A or B?',
+  'should this be async',
+  'how can I speed up the build',
+  'アプローチを考えたい',
+  '戦略を立てて',
+  'ロードマップ作って',
+  'パフォーマンスを改善したい',
+  '仕様書を書いて',
+  'add JSDoc to utils.ts',
+  'write a changelog',
+  '教えて',
+  'why is this slow?',
+  'どう思う？',
+  '整理して',
+  'is this the right way to do it?',
   'how would you approach caching here?',
   'review this diff',
   'any bugs in this function?',

@@ -130,24 +130,34 @@ ${clipForClassifier(message)}
 <<<END>>>`;
 }
 
-// Words that COULD mean plan / assist_plan / review / document. Only their
-// absence is acted on (→ execute, no model call); their presence just asks
-// the model, so this list errs wide — a false hit costs one classifier call,
-// which is what every turn paid before. English is matched on word starts;
-// Japanese (no spaces) as substrings.
-const NON_EXECUTE_WORDS_EN = /\b(plan|planning|approach|design|architect|strateg|option|alternative|trade-?off|best way|how (would|should|do) (you|we|i)|what (would|should)|should (we|i)|recommend|suggest|propos|idea|brainstorm|review|critique|feedback|audit|bugs?\b|wrong|issue with|problem|check|inspect|look over|evaluat|assess|document|docs?\b|readme|docstring|comment|explain|describe|summar|grill|poke holes|challenge|question me|ask me|stress-?test|interrogat|work through|together)/i;
-const NON_EXECUTE_WORDS_JA = /(計画|プラン|設計|方針|方法|やり方|進め方|手順を考|検討|案|選択肢|比較|相談|提案|おすすめ|どう(すれば|したら|やって|進め)|べき|レビュー|確認して|チェック|指摘|問題点|改善点|評価|点検|監査|ドキュメント|文書|説明|README|コメント|まとめ|要約|質問して|詰めて|洗い出|一緒に)/i;
+// The local fast path answers ONLY "execute", and only for a message that is
+// plainly an instruction to change something: it starts with an imperative
+// build verb (fix / add / 直して / 追加して …) or is a bare go-ahead, has no
+// question mark, and has none of the words below. Everything else goes to the
+// model as before. The first version keyed only on the word list's ABSENCE,
+// and review asks phrased loosely ("このコード見てほしい", "thoughts on this?")
+// slipped through to execute — with write tools.
+// (No "bug" here on purpose: with the imperative-verb gate, "fix the bug" /
+// 「バグを直して」 is an instruction, and a bug QUESTION already carries ?/？.)
+const NON_EXECUTE_WORDS_EN = /(plan|approach|design|architect|strateg|roadmap|option|alternative|trade-?off|pros\b|cons\b|compar|versus|\bvs\b|better|worse|best way|right way|how (would|should|do|can|could)|what (would|should|do you)|should\b|recommend|suggest|propos|idea|brainstorm|think|thought|opinion|concern|review|critique|feedback|audit|wrong|issue with|problem|check|inspect|look (at|over)|see if|evaluat|assess|improve|optimi[sz]|speed up|why\b|document|\bdocs?\b|jsdoc|readme|docstring|changelog|\bspec|comment|explain|describe|summar|grill|poke holes|challenge|question me|ask me|stress-?test|interrogat|work through|together)/i;
+const NON_EXECUTE_WORDS_JA = /(計画|プラン|設計|方針|方法|やり方|進め方|手順を考|検討|案|選択肢|比較|相談|提案|おすすめ|どう|べき|なぜ|どうして|思う|思い|考え|意見|教えて|見て|見直|レビュー|確認|チェック|指摘|問題|改善|最適化|高速化|評価|点検|監査|アーキ|アプローチ|戦略|ロードマップ|仕様|ドキュメント|文書|説明|README|コメント|まとめ|要約|整理|質問|詰めて|洗い出|一緒に)/i;
+const IMPERATIVE_EN = /^\s*(please\s+)?(fix|add|implement|create|remove|delete|rename|update|change|replace|move|run|install|build|bump|make|refactor|convert|migrate|wire|set up|enable|disable|apply|commit|revert|format|lint|write)\b/i;
+const GO_AHEAD_EN = /^\s*(ok(ay)?|yes|yep|sure|go( ahead)?|continue|proceed|do it|lgtm)[.!\s]*$/i;
+const IMPERATIVE_JA = /(直して|修正して|追加して|実装して|作成して|作って|削除して|消して|変更して|更新して|実行して|インストールして|置き換えて|移動して|リネームして|書き換えて|適用して|反映して|入れて|ビルドして|コミットして|続けて|進めて)(ください|下さい)?[。！!\s]*$/;
+const GO_AHEAD_JA = /^\s*(はい|うん|ええ)?[、,\s]*(お願いします|おねがいします|それでお願いします)?[。！!\s]*$/;
 
 /**
  * The mode when it can be decided without a model call, else null. Pure.
- * Only ever answers `execute`: a message with no wording that could ask for
- * any other mode is execute whatever the model would say (it is also the
- * default when unsure). An empty message is left to the caller's fallback.
+ * Only ever answers `execute` (see above); an empty message is left to the
+ * caller's fallback.
  */
 export function quickMode(message) {
   if (typeof message !== 'string' || !message.trim()) return null;
+  if (/[?？]/.test(message)) return null;
   if (NON_EXECUTE_WORDS_EN.test(message) || NON_EXECUTE_WORDS_JA.test(message)) return null;
-  return 'execute';
+  const instruction = IMPERATIVE_EN.test(message) || GO_AHEAD_EN.test(message)
+    || IMPERATIVE_JA.test(message) || GO_AHEAD_JA.test(message);
+  return instruction ? 'execute' : null;
 }
 
 export async function classifyCodeAssistMode(message, opts = {}) {
