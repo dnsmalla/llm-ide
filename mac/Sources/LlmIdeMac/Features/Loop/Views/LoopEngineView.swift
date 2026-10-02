@@ -102,7 +102,8 @@ struct LoopEngineView: View {
     /// the list between showing it and approving it.
     @State private var approveAllSnapshot: (gitRoot: URL, items: [(stageId: String, name: String, command: String)])?
     /// The plan awaiting the user's consent for "Set up environment…".
-    @State private var environmentSetupPlan: ProjectEnvironmentSetupPlan?
+    /// Frozen with the repo root at tap time, like `approveAllSnapshot`.
+    @State private var environmentSetupPlan: (plan: ProjectEnvironmentSetupPlan, gitRoot: URL)?
     @State private var isSettingUpEnvironment = false
     /// The last setup run's outcome, shown under the toolbar until the next run.
     @State private var environmentSetupMessage: String?
@@ -654,10 +655,14 @@ struct LoopEngineView: View {
                 // Only for a missing tool/dependency, and only where a Python
                 // project declares its dependencies. The loop never installs:
                 // this is the user's explicit action.
-                if case .blocked(.environment) = status, let gitRoot = activeGitRootURL,
+                // Hidden for a worktree run: the main checkout's .venv is never
+                // borrowed by a worktree, so setting it up would not help.
+                if case .blocked(.environment(_, let detail)) = status,
+                   !detail.contains(LoopEngineRunner.worktreeEnvironmentNote),
+                   let gitRoot = activeGitRootURL,
                    let plan = ProjectEnvironmentSetupPlanner.plan(for: gitRoot) {
                     Button(isSettingUpEnvironment ? "Setting up…" : "Set up environment…") {
-                        environmentSetupPlan = plan
+                        environmentSetupPlan = (plan: plan, gitRoot: gitRoot)
                     }
                     .controlSize(.small)
                     .disabled(isSettingUpEnvironment)
@@ -731,12 +736,13 @@ struct LoopEngineView: View {
                 Button("Set up") { startEnvironmentSetup() }
                 Button("Cancel", role: .cancel) { environmentSetupPlan = nil }
             } message: {
-                Text(environmentSetupPlan?.summary ?? "")
+                Text(environmentSetupPlan?.plan.summary ?? "")
             }
     }
 
     private func startEnvironmentSetup() {
-        guard let plan = environmentSetupPlan, let gitRoot = activeGitRootURL else { return }
+        guard let snapshot = environmentSetupPlan else { return }
+        let (plan, gitRoot) = (snapshot.plan, snapshot.gitRoot)
         environmentSetupPlan = nil
         isSettingUpEnvironment = true
         environmentSetupMessage = nil

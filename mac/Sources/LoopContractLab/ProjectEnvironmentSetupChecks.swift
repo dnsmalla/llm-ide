@@ -31,6 +31,7 @@ func runProjectEnvironmentSetupChecks() {
     let requirements = ProjectEnvironmentSetupPlanner.plan(for: project("req", files: ["requirements.txt"]))
     expect(requirements?.commands == [
         "python3 -m venv .venv",
+        ".venv/bin/python -m pip install --upgrade pip",
         ".venv/bin/python -m pip install -r requirements.txt",
         ".venv/bin/python -m pip install pytest",
     ], "requirements.txt: create .venv, install the requirements, then pytest")
@@ -38,6 +39,7 @@ func runProjectEnvironmentSetupChecks() {
     let pyproject = ProjectEnvironmentSetupPlanner.plan(for: project("pyp", files: ["pyproject.toml"]))
     expect(pyproject?.commands == [
         "python3 -m venv .venv",
+        ".venv/bin/python -m pip install --upgrade pip",
         ".venv/bin/python -m pip install -e .",
         ".venv/bin/python -m pip install pytest",
     ], "pyproject.toml alone: editable install, then pytest")
@@ -51,6 +53,7 @@ func runProjectEnvironmentSetupChecks() {
     let existing = ProjectEnvironmentSetupPlanner.plan(
         for: project("has-venv", files: ["requirements.txt"], venv: "venv"))
     expect(existing?.commands == [
+        "venv/bin/python -m pip install --upgrade pip",
         "venv/bin/python -m pip install -r requirements.txt",
         "venv/bin/python -m pip install pytest",
     ], "an existing venv/ is reused, not recreated as .venv")

@@ -32,6 +32,7 @@ public enum ProjectEnvironmentSetupPlanner {
         if existing == nil { commands.append("python3 -m venv \(name)") }
         // `-e .[dev]` would fail on a project with no `dev` extra, so install
         // the project itself and add pytest as its own step.
+        commands.append("\(python) -m pip install --upgrade pip")
         commands.append(hasRequirements
                         ? "\(python) -m pip install -r requirements.txt"
                         : "\(python) -m pip install -e .")
@@ -40,7 +41,7 @@ public enum ProjectEnvironmentSetupPlanner {
     }
 }
 
-public struct ProjectEnvironmentSetupResult: Equatable {
+struct ProjectEnvironmentSetupResult: Equatable {
     public let succeeded: Bool
     /// Output of the failing command, or the last command on success.
     public let output: String
@@ -73,7 +74,8 @@ final class ProjectEnvironmentSetupService {
                         succeeded: false, output: "$ \(command)\n\(lastOutput)")
                 }
             } catch is CancellationError {
-                // User stopped the sheet or quit the app. The defer above stops
+                // Reached only if the owning Task is cancelled; the current caller
+                // (LoopEngineView) does not cancel it. The defer above stops
                 // the process. Leave the half-built .venv in place; the planner
                 // re-detects it on next run via pyvenv.cfg.
                 return ProjectEnvironmentSetupResult(succeeded: false, output: "Cancelled")
