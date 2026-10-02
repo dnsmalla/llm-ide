@@ -9,6 +9,8 @@
 import fsp from 'fs/promises';
 import path from 'path';
 import { createHash } from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import {
   ingestSources, deleteSourcesByRef, sourceContentHashes, getDb, MAX_INGEST_BATCH,
 } from '../kb/db.mjs';
@@ -28,6 +30,8 @@ const SKIP_DIRS = new Set([
   '__pycache__', '.venv', 'venv', 'env', 'target', 'out',
   '.DS_Store', '.cache', 'coverage', '.pytest_cache',
 ]);
+
+const execFileAsync = promisify(execFile);
 
 const MAX_FILE_BYTES = 200 * 1024;       // 200 KB — skip large generated files
 const CHUNK_LINES = 80;                  // lines per chunk
@@ -82,6 +86,42 @@ async function* walkAsync(root) {
   }
 }
 
+// The files git would consider part of the work tree at `dir` — tracked plus
+// untracked, minus everything .gitignore excludes — as absolute paths, or
+// null when `dir` is not in a git work tree (or git is unavailable), so the
+// caller falls back to the plain walk.
+async function gitListedFiles(dir) {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', dir, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+      maxBuffer: 64 * 1024 * 1024, timeout: 30_000,
+    });
+    return stdout.split('\0').filter(Boolean).map((rel) => path.join(dir, rel));
+  } catch {
+    return null;
+  }
+}
+
+// walkAsync's contract (absolute file paths under `root`, no symlinks, no
+// hidden segments, contained in `root`) with the file list taken from git
+// when `root` is in a work tree. A nested repository is listed by git as one
+// `dir/` entry; it is expanded the same way, recursively.
+async function* gitAwareWalk(root, depth = 0) {
+  const absRoot = path.resolve(root);
+  const listed = depth > MAX_DEPTH ? null : await gitListedFiles(absRoot);
+  if (!listed) { yield* walkAsync(absRoot); return; }
+  for (const full of listed) {
+    const rel = path.relative(absRoot, full);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+    if (rel.split(path.sep).some((seg) => (seg.startsWith('.') && seg !== '.env.example') || SKIP_DIRS.has(seg))) continue;
+    if (full.endsWith(path.sep)) { yield* gitAwareWalk(full, depth + 1); continue; }
+    let st;
+    try { st = await fsp.lstat(full); } catch { continue; }   // tracked but deleted
+    if (st.isSymbolicLink()) continue;
+    if (st.isDirectory()) { yield* gitAwareWalk(full, depth + 1); continue; }
+    if (st.isFile()) yield full;
+  }
+}
+
 export function chunkLines(text) {
   const lines = text.split(/\r?\n/);
   const chunks = [];
@@ -108,7 +148,7 @@ export async function indexLocalRepo(userId, repoPath, opts = {}) {
   }
 
   const replace = opts.replace !== false;
-  const walk = typeof opts.walk === 'function' ? opts.walk : walkAsync;
+  const walk = typeof opts.walk === 'function' ? opts.walk : gitAwareWalk;
 
   // Incremental: each file's rows carry its content hash, so a re-index
   // rewrites only files whose bytes changed (and removes deleted ones) instead

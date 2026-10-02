@@ -65,3 +65,28 @@ test('a file that shrinks to fewer chunks loses its extra chunk rows', async () 
   await indexLocalRepo(U, REPO);
   assert.equal(idsOf('long.ts').length, 1);
 });
+
+// The walker read every non-hidden directory, so a repo's generated output
+// (anything its .gitignore excludes) went into the index and crowded real
+// code out of search. In a git work tree the file list now comes from git:
+// tracked + untracked, minus ignored.
+test('in a git repo, files its .gitignore excludes are not indexed', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const GR = fs.mkdtempSync(path.join(__dirname, '_gi-git-'));
+  try {
+    execFileSync('git', ['init', '-q', '--template='], { cwd: GR, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } });
+    fs.writeFileSync(path.join(GR, '.gitignore'), 'generated/\n*.log\n');
+    fs.mkdirSync(path.join(GR, 'generated'));
+    fs.writeFileSync(path.join(GR, 'generated', 'out.js'), 'export const generatedMarker = 1;\n');
+    fs.writeFileSync(path.join(GR, 'debug.log'), 'noise\n');
+    fs.mkdirSync(path.join(GR, 'src'));
+    fs.writeFileSync(path.join(GR, 'src', 'real.ts'), 'export const realMarker = 1;\n');
+    const out = await indexLocalRepo(U, GR);
+    const refs = db.getDb().prepare("SELECT ref FROM sources WHERE user_id=? AND kind='code' AND ref LIKE ?")
+      .all(U, `${GR}%`).map((r) => path.relative(GR, r.ref));
+    assert.deepEqual(refs, [path.join('src', 'real.ts')], `only the un-ignored file (got ${refs.join(', ')})`);
+    assert.equal(out.filesIndexed, 1);
+  } finally {
+    fs.rmSync(GR, { recursive: true, force: true });
+  }
+});
