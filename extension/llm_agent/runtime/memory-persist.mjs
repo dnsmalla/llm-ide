@@ -12,6 +12,7 @@ import { extractMemories } from './memory-extract.mjs';
 import { appendSessionMemory, listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { logger } from '../../core/logger.mjs';
 
+import { recordMemoryLedger } from '../../kb/memory-ledger.mjs';
 // Observability: every turn logs ONE `project_memory` line with `outcome` so
 // "is memory working?" is answerable from the log instead of guessing. Skips log
 // WHY (no target / no facts); success logs the counts + root; a genuine
@@ -107,6 +108,15 @@ export async function persistTurnMemory({ agentContext, userId, userMessage, rep
     let saved = null;
     if (root && (facts.length || superseded.length)) {
       saved = appendChatMemory({ root, facts, remove: superseded, meta });
+      // The typed record beside the file (kb/memory-ledger.mjs): every
+      // extracted fact counts as a confirmation — including a restatement the
+      // file deliberately ignores — and a superseded one is marked. Best-
+      // effort: the file write above already captured the facts.
+      try {
+        recordMemoryLedger(userId, root, { confirmed: facts, removed: superseded, chatSessionId: sessionId });
+      } catch (err) {
+        logger.warn('project_memory_ledger', { outcome: 'error', err: err?.message || String(err) });
+      }
     }
     // Session-scoped record in a real DB table (kb/session-memory.mjs): the
     // project facts this chat taught PLUS the conversation-state sentences.

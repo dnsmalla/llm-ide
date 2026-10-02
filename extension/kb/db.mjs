@@ -977,6 +977,9 @@ export function deleteUserCascade(userId) {
     // migration 0031 — per-user, per-connector MCP dedup ledger. No FK, so
     // the seen-set would outlive the account without this explicit delete.
     counts.mcp_connector_seen = del('DELETE FROM mcp_connector_seen WHERE user_id = ?');
+    // migration 0038 — project-memory ledger. ON DELETE CASCADE on the users
+    // FK; explicit delete keeps the receipt complete.
+    counts.project_memory_ledger = del('DELETE FROM project_memory_ledger WHERE user_id = ?');
     // migration 0018 — activity feed + read cursor. Both have ON DELETE CASCADE
     // on the users FK, but we delete explicitly so the count appears in the
     // receipt and so the contract holds regardless of FK enforcement.
