@@ -90,12 +90,20 @@ async function* walkAsync(root) {
 // untracked, minus everything .gitignore excludes — as absolute paths, or
 // null when `dir` is not in a git work tree (or git is unavailable), so the
 // caller falls back to the plain walk.
+//
+// An EMPTY listing is null too: it is what a project inside a repo that
+// ignores it produces (a dotfiles repo at ~ with `*` in its .gitignore), and
+// taking it at face value made the incremental indexer delete every file it
+// had indexed. The server's own GIT_* variables are dropped — one started
+// from a git hook carries GIT_DIR / GIT_INDEX_FILE, which aim git elsewhere.
 async function gitListedFiles(dir) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
   try {
     const { stdout } = await execFileAsync('git', ['-C', dir, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
-      maxBuffer: 64 * 1024 * 1024, timeout: 30_000,
+      maxBuffer: 64 * 1024 * 1024, timeout: 30_000, env,
     });
-    return stdout.split('\0').filter(Boolean).map((rel) => path.join(dir, rel));
+    const files = stdout.split('\0').filter(Boolean).map((rel) => path.join(dir, rel));
+    return files.length > 0 ? files : null;
   } catch {
     return null;
   }
