@@ -45,6 +45,11 @@ final class MobileGenerationBridge: MobileFeatureBridge {
                     error: "The Mac could not read this generation request. Update LLM-IDE on both devices to matching versions."))
                 return true
             }
+            guard manager?.phoneAccess.isAllowed(.generationRun) == true else {
+                manager?.reply(GenerationResult(commandId: run.commandId, ok: false,
+                                                error: PhoneAccess.generationRun.deniedMessage))
+                return true
+            }
             manager?.registerMobileInflightTask(commandId: run.commandId) { [weak self] in
                 await self?.execute(run)
             }

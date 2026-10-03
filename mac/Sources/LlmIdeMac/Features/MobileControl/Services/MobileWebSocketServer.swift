@@ -153,7 +153,14 @@ final class MobileWebSocketServer: @unchecked Sendable {
         let opts = NWProtocolWebSocket.Options()
         opts.autoReplyPing = true
         opts.maximumMessageSize = 8_388_608   // 8 MiB — matches the :3456 body cap; paired-LAN only
-        let params = NWParameters.tcp
+        // A phone that vanishes (Wi-Fi drop, app killed, lid closed) sends no FIN, so without keepalive
+        // the socket stays `.ready` and the Mac keeps showing it as paired. Probe soon, give up fast.
+        let tcp = NWProtocolTCP.Options()
+        tcp.enableKeepalive = true
+        tcp.keepaliveIdle = 30
+        tcp.keepaliveInterval = 10
+        tcp.keepaliveCount = 3
+        let params = NWParameters(tls: nil, tcp: tcp)
         params.defaultProtocolStack.applicationProtocols.insert(opts, at: 0)
         guard let rawPort = UInt16(exactly: currentPort), let port = NWEndpoint.Port(rawValue: rawPort) else {
             throw NWError.posix(.EADDRNOTAVAIL)
@@ -423,6 +430,10 @@ final class MobileWebSocketServer: @unchecked Sendable {
                 if let error {
                     self.onLog("❌ Receive error: \(error.localizedDescription)")
                 }
+                // No data and no error is a close frame: the peer is gone, so cancel — returning
+                // silently left a dead phone looking paired until the next send failed.
+                // Cancelling fires `.cancelled`, which clears `client` and tells the manager.
+                conn.cancel()
                 return
             }
             // Only the PAIRED connection's frames reach the app; everyone else

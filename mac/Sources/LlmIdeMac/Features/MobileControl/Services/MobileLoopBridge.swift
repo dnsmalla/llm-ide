@@ -72,6 +72,10 @@ final class MobileLoopBridge: MobileFeatureBridge {
             return true
 
         case MobileProtocol.Tag.loopStart:
+            guard loopControlAllowed else {
+                manager?.reply(LoopAck(accepted: false, message: PhoneAccess.loopControl.deniedMessage))
+                return true
+            }
             guard let autoCode else {
                 // Not `replyNotConfigured`: that says "Auto-tasks not
                 // configured", which is true underneath but reads as a
@@ -131,6 +135,10 @@ final class MobileLoopBridge: MobileFeatureBridge {
             return true
 
         case MobileProtocol.Tag.loopStartStage:
+            guard loopControlAllowed else {
+                manager?.reply(LoopAck(accepted: false, message: PhoneAccess.loopControl.deniedMessage))
+                return true
+            }
             guard let req = try? manager?.decoder.decode(LoopStartStage.self, from: data ?? Data()),
                   !req.stageId.isEmpty else {
                 manager?.reply(CommandError(commandId: "loop_start_stage",
@@ -216,6 +224,12 @@ final class MobileLoopBridge: MobileFeatureBridge {
             manager?.append(.info, "Unhandled loop type: \(type)")
             return false
         }
+    }
+
+    /// Re-read on every request: a phone may hold an old capability list after the switch flips off.
+    /// Stop is deliberately ungated so a phone can always halt a run.
+    private var loopControlAllowed: Bool {
+        manager?.phoneAccess.isAllowed(.loopControl) == true
     }
 
     /// No push-on-change subscriptions exist for Loop today — the phone only

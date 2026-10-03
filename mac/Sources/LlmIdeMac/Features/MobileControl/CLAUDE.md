@@ -57,6 +57,9 @@ cd ~/llm-ide/ios_app && open MyApp.xcodeproj
   handler must re-check the switch on every request** (a phone may hold an old capability list).
 - Anything that edits files, posts as the user or approves a tool defaults **OFF**. Replies must be shaped
   for the phone's pending request (never a bare `CommandError(commandId: <type>)`), so a screen can't spin.
+- Switches that gate control from the phone, all default **OFF**: `autoTaskControl` (Auto Task run/toggle/config/templates),
+  `loopControl` (`loop_start*`), `generationRun`, plus `fileBrowse` for Explore search and `@file` refs. They are
+  enforced in the handlers, not through advertised capabilities, so an old phone sees the screens and gets a typed refusal.
 - Never take a path from the phone as a filesystem path: resolve ids on the Mac (recents, incidents) or
   check the path against the Mac's own list (git status). Re-check symlink TARGETS, open regular files only.
 - **Redact through `PhoneRedaction`, never `IncidentRedactor` directly.** Its regexes backtrack

@@ -129,6 +129,10 @@ final class MobileExploreIndexStore {
     private(set) var isRefreshing: Bool = false
 
     private let fm = FileManager.default
+    /// Latest workspace root a refresh was requested for; a finished build
+    /// applies/persists only while its root still equals this.
+    private var requestedWorkspaceRoot: String?
+    private var inFlightWorkspaceBuilds: [String: Task<Result<MobileWorkspaceIndexFile, Error>, Never>] = [:]
 
     init() {
         bootstrapFromDisk()
@@ -178,22 +182,78 @@ final class MobileExploreIndexStore {
             return loaded
         }
         let resolved = root.resolvingSymlinksInPath()
-        let built = MobileWorkspaceSearch.buildIndex(in: resolved, limit: Self.maxWorkspaceEntries)
-        let truncated = built.count >= Self.maxWorkspaceEntries
-        let entries = built.map { MobileWorkspaceIndexEntry(from: $0) }
-        let file = MobileWorkspaceIndexFile(
-            workspaceRoot: resolved.path, entries: entries, truncated: truncated)
-        do {
-            try saveWorkspaceIndex(file)
+        let rootPath = resolved.path
+        requestedWorkspaceRoot = rootPath
+        // One in-flight build per root, shared by every concurrent caller, so
+        // two refreshes never walk and write the same index at once.
+        // A forced refresh means "something changed": a build already walking
+        // may have passed the changed directory, so wait it out and walk again.
+        if force, let running = inFlightWorkspaceBuilds[rootPath] {
+            _ = await running.value
+        }
+        let task: Task<Result<MobileWorkspaceIndexFile, Error>, Never>
+        if let existing = inFlightWorkspaceBuilds[rootPath] {
+            task = existing
+        } else {
+            let indexURL = workspaceIndexURL
+            let directory = settingsDirectory
+            // The walk (up to 50k directory visits), the JSON encode and the write all run off the
+            // main actor; only the meta (counts, timestamps) is applied back here.
+            task = Task.detached(priority: .utility) { [weak self] in
+                do {
+                    let built = Self.buildWorkspaceIndex(resolved: resolved)
+                    // Don't persist an index for a root the user has since left.
+                    let isCurrent = await self?.isRequestedWorkspaceRoot(rootPath) ?? false
+                    if isCurrent {
+                        try Self.writeWorkspaceIndex(built, indexURL: indexURL, directory: directory)
+                    }
+                    return .success(built)
+                } catch {
+                    return .failure(error)
+                }
+            }
+            inFlightWorkspaceBuilds[rootPath] = task
+        }
+        let outcome = await task.value
+        // Only the task THIS caller awaited: a newer build for the same root
+        // may have replaced the entry while we were suspended.
+        if inFlightWorkspaceBuilds[rootPath] == task { inFlightWorkspaceBuilds[rootPath] = nil }
+        // A newer root was requested while this build ran: its result describes
+        // a workspace the user has left, so don't apply it as the current meta.
+        guard requestedWorkspaceRoot == rootPath else {
+            if case .success(let file) = outcome { return file }
+            return nil
+        }
+        switch outcome {
+        case .success(let file):
             applyWorkspaceMeta(file)
-            lastError = truncated
+            lastError = file.truncated
                 ? "Workspace index truncated at \(Self.maxWorkspaceEntries) entries — narrow your project or refresh after cleanup."
                 : nil
             return file
-        } catch {
+        case .failure(let error):
             lastError = "Workspace index save failed: \(error.localizedDescription)"
             return nil
         }
+    }
+
+    private func isRequestedWorkspaceRoot(_ path: String) -> Bool {
+        requestedWorkspaceRoot == path
+    }
+
+    nonisolated private static func buildWorkspaceIndex(resolved: URL) -> MobileWorkspaceIndexFile {
+        let built = MobileWorkspaceSearch.buildIndex(in: resolved, limit: maxWorkspaceEntries)
+        return MobileWorkspaceIndexFile(
+            workspaceRoot: resolved.path,
+            entries: built.map { MobileWorkspaceIndexEntry(from: $0) },
+            truncated: built.count >= maxWorkspaceEntries)
+    }
+
+    nonisolated private static func writeWorkspaceIndex(
+        _ file: MobileWorkspaceIndexFile, indexURL: URL, directory: URL
+    ) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try AppJSON.iso8601Encoder.encode(file).write(to: indexURL, options: .atomic)
     }
 
     @discardableResult

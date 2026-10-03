@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import os
 
 /// The iPhones that have completed PIN pairing, keyed by the device id each
 /// phone chose for itself, and the per-device tokens they reconnect with.
@@ -138,8 +139,25 @@ final class MobilePairedDeviceStore: @unchecked Sendable {
         guard let data = try? Data(contentsOf: url) else { return [] }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([Device].self, from: data)) ?? []
+        do {
+            return try decoder.decode([Device].self, from: data)
+        } catch {
+            // Returning [] would let the next persist overwrite the file and silently unpair every
+            // phone, so the unreadable file is moved aside (recoverable) before anything can write.
+            let stamp = Int(Date().timeIntervalSince1970)
+            let backup = url.deletingLastPathComponent()
+                .appendingPathComponent("\(url.lastPathComponent).corrupt-\(stamp)")
+            do {
+                try FileManager.default.moveItem(at: url, to: backup)
+                Self.log.error("Paired-device file unreadable (\(error.localizedDescription, privacy: .public)); stashed as \(backup.lastPathComponent, privacy: .public)")
+            } catch {
+                Self.log.error("Paired-device file unreadable and could not be stashed: \(error.localizedDescription, privacy: .public)")
+            }
+            return []
+        }
     }
+
+    private static let log = Logger(subsystem: "com.llmide.macapp", category: "MobilePairedDeviceStore")
 
     /// Caller holds `lock`. Atomic write, owner-only permissions — the file
     /// holds hashes, not tokens, but there is no reason to widen it.

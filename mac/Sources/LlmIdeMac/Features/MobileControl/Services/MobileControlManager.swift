@@ -448,8 +448,18 @@ final class MobileControlManager {
         }
     }
 
+    /// Set when files changed while no phone was paired (the forced reindex was
+    /// skipped), so the index may be stale; pairing triggers one refresh.
+    private var workspaceChangedWhileUnpaired = false
+
     private func onWorkspaceFilesChanged() {
         guard case .running = status, let root = mobileWorkspaceURL() else { return }
+        // With no phone paired nobody reads the index; a later search rebuilds it once it is stale
+        // (`workspaceStaleInterval`), so a forced walk after every file change would be wasted work.
+        guard mobileClientPaired else {
+            workspaceChangedWhileUnpaired = true
+            return
+        }
         Task {
             await exploreIndex.refreshWorkspaceIndex(root: root, force: true)
             append(.info, "Workspace index updated after file change (\(exploreIndex.workspaceEntryCount) entries)")
@@ -828,6 +838,11 @@ final class MobileControlManager {
 
     /// Find files/folders on the Mac workspace by name (for iPhone @file picker).
     private func handleExploreSearch(_ req: ExploreSearchFiles) {
+        // Same switch as the Files browser: this lists the project's file names to the phone.
+        guard phoneAccess.isAllowed(.fileBrowse) else {
+            reply(ExploreSearchReply(workspaceRoot: nil, matches: [], error: PhoneAccess.fileBrowse.deniedMessage))
+            return
+        }
         guard let root = mobileWorkspaceURL() else {
             reply(ExploreSearchReply(workspaceRoot: nil, matches: [],
                                    error: "No Mac workspace open — open a project in LLM-IDE on your Mac."))
@@ -1077,13 +1092,19 @@ final class MobileControlManager {
             return
         }
         var attachments = MobileExploreBridge.attachments(from: chat.files)
-        if let root = mobileWorkspaceURL(), !chat.refs.isEmpty {
+        // @file/@folder refs read project files, so they honour the Files switch (re-checked per request).
+        let refsAllowed = phoneAccess.isAllowed(.fileBrowse)
+        let refs = refsAllowed ? chat.refs : []
+        if !refsAllowed, !chat.refs.isEmpty {
+            append(.info, "explore_chat: @file refs ignored — \"\(PhoneAccess.fileBrowse.title)\" is off")
+        }
+        if let root = mobileWorkspaceURL(), !refs.isEmpty {
             let (refAttachments, refErrors) = MobileWorkspaceSearch.attachments(
-                from: chat.refs, workspaceRoot: root)
+                from: refs, workspaceRoot: root)
             attachments.append(contentsOf: refAttachments)
             for err in refErrors { append(.info, "explore_chat: \(err)") }
         }
-        let agentMessage = MobileWorkspaceSearch.promptWithRefs(chat.text, refs: chat.refs)
+        let agentMessage = MobileWorkspaceSearch.promptWithRefs(chat.text, refs: refs)
         let (skillMessage, skillIds) = MobileSkillCatalog.resolveMessage(agentMessage, skills: chat.skills)
         let (model, provider) = MobileExploreBridge.modelAndProvider(config: config, mode: "auto")
         let agentContext: AgentContext?
@@ -1332,6 +1353,10 @@ final class MobileControlManager {
         _ = autoTaskBridge?.handle(type: MobileProtocol.Tag.autoTaskLogsList, data: nil)
         pushExploreSessionListIfPaired()
         _ = activityBridge?.handle(type: MobileProtocol.Tag.activityList, data: nil)
+        if workspaceChangedWhileUnpaired, let root = mobileWorkspaceURL() {
+            workspaceChangedWhileUnpaired = false
+            Task { await exploreIndex.refreshWorkspaceIndex(root: root, force: true) }
+        }
         Task { await pushMacStatusIfPaired() }
     }
 

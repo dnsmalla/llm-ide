@@ -65,6 +65,10 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             // as the on-Mac Settings toggle would; custom tasks persist via
             // CustomAutoTask.save() directly (they have no AutoTaskSettings
             // entry — enabled-state lives on the struct itself).
+            guard controlAllowed else {
+                manager?.reply(AutoTaskAck(ok: false, message: PhoneAccess.autoTaskControl.deniedMessage))
+                return true
+            }
             if let m = try? manager?.decoder.decode(AutoTaskToggle.self, from: data ?? Data()) {
                 if let taskName = m.task, let t = AutoTask(rawValue: taskName) {
                     settings?.setEnabled(m.enabled, task: t)
@@ -100,6 +104,10 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             // run. `runNow()`/`runSingle(_:)` are @MainActor-sync — each spins
             // its own internal `Task` — so no await is needed; we're already
             // on the main actor here (handleInbound is main-isolated).
+            guard controlAllowed else {
+                manager?.reply(AutoTaskAck(ok: false, message: PhoneAccess.autoTaskControl.deniedMessage))
+                return true
+            }
             guard let ac = autoCode else {
                 manager?.replyNotConfigured(commandId: "auto_task_run", logLabel: "auto_task_run")
                 return true
@@ -259,6 +267,11 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             manager?.replyNotConfigured(commandId: "auto_task_setup", logLabel: type)
             return
         }
+        // Everything except the snapshot request writes config or templates that a later run acts on.
+        if type != MobileProtocol.Tag.autoTaskSetupList, !controlAllowed {
+            manager?.reply(CommandError(commandId: type, message: PhoneAccess.autoTaskControl.deniedMessage))
+            return
+        }
 
         switch type {
         case MobileProtocol.Tag.autoTaskSetupList:
@@ -287,12 +300,21 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                                             message: "Paths must be folders inside the open project."))
                 return
             }
+            // `skillName` is interpolated into "Use the <name> skill:" at the head of a prompt a
+            // `.implement` task acts on, so only a skill the project really has may be named.
+            let name = AutoTaskConfig.normalized(m.skillName)
+            if let name, !isKnownSkill(name) {
+                manager?.append(.stderr, "auto_task_config_set: unknown skill \(name)")
+                manager?.reply(CommandError(commandId: "auto_task_config_set",
+                                            message: "That skill isn't in the open project. Refresh the task settings."))
+                return
+            }
             // Routed through the same store the Mac page writes to, so the
             // desktop UI updates live and the value persists identically.
             autoCode.taskConfigs.update(
                 AutoTaskConfig(inputPath: inputPath, outputPath: outputPath,
-                               skillName: m.skillName,
-                               skillDirective: m.skillName.map { AutoTaskSkillCatalog.directive(for: $0) },
+                               skillName: name,
+                               skillDirective: name.map { AutoTaskSkillCatalog.directive(for: $0) },
                                templateId: m.templateId),
                 for: m.taskId)
             manager?.append(.info, "Auto-task config set for \(m.taskId)")
@@ -359,6 +381,18 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
         }
 
         replyAutoTaskSetup(autoCode: autoCode, templates: templates)
+    }
+
+    /// Re-read on every request: a phone may hold an old capability list after the switch flips off.
+    private var controlAllowed: Bool {
+        manager?.phoneAccess.isAllowed(.autoTaskControl) == true
+    }
+
+    /// True when `name` is a skill the active project's catalog lists (the same scan the setup reply offers).
+    private func isKnownSkill(_ name: String) -> Bool {
+        guard let root = manager?.projectStore?.activeProject.map({ URL(fileURLWithPath: $0.localPath) })
+        else { return false }
+        return AutoTaskSkillCatalog.scan(projectRoot: root).contains { $0.name == name }
     }
 
     /// True for a built-in task or a custom task that currently exists.
