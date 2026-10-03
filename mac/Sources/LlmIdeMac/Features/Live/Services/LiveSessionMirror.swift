@@ -206,7 +206,13 @@ final class LiveSessionMirror: ObservableObject {
     private func pollOnce() async -> UInt64 {
         guard let session = activeSession else { return discoveryIntervalNs }
         do {
-            let r = try await api.liveCaptions(sessionId: session.sessionId, since: sinceSeq)
+            let polledSid = session.sessionId
+            let r = try await api.liveCaptions(sessionId: polledSid, since: sinceSeq)
+            // The session may have switched (or polling stopped) while the
+            // request was in flight; merging would pollute the new session.
+            guard !Task.isCancelled, activeSession?.sessionId == polledSid else {
+                return captionIntervalNs
+            }
             if !r.captions.isEmpty {
                 for c in r.captions {
                     guard Self.isHumanTranscriptSource(c.source) else { continue }
