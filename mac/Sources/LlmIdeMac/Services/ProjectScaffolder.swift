@@ -116,14 +116,23 @@ enum ProjectScaffolder {
         //    or already LLM-IDE-managed (carries the auto marker).
         let readmeURL = folderURL.appendingPathComponent("README.md")
         let existingReadme = try? String(contentsOf: readmeURL, encoding: .utf8)
-        if existingReadme == nil
-            || existingReadme!.contains("<!-- llmide:auto")
-            || existingReadme!.contains("<!-- meetnotes:auto") {
-            writeAlways(
-                at: readmeURL,
-                content: makeReadme(project: project, folderURL: folderURL))
+        // A README that exists but can't be read as UTF-8 (Shift_JIS, permission
+        // error) is NOT absent — leave it untouched rather than overwrite it.
+        let readmeExistsUnreadable = existingReadme == nil
+            && FileManager.default.fileExists(atPath: readmeURL.path)
+        let generatedReadme = makeReadme(project: project, folderURL: folderURL)
+        if let existingReadme {
+            // Replace only the marker-onward part so notes the user wrote above
+            // the marker survive; a README without our marker is theirs.
+            if let merged = mergedReadme(existing: existingReadme, generated: generatedReadme) {
+                if merged != existingReadme { writeAlways(at: readmeURL, content: merged) }
+            } else {
+                log.info("preserving existing non-LLM-IDE README at \(folderURL.lastPathComponent, privacy: .public)")
+            }
+        } else if readmeExistsUnreadable {
+            log.info("preserving unreadable README at \(folderURL.lastPathComponent, privacy: .public)")
         } else {
-            log.info("preserving existing non-LLM-IDE README at \(folderURL.lastPathComponent, privacy: .public)")
+            writeAlways(at: readmeURL, content: generatedReadme)
         }
 
         // 5. .claude directory — project-level agent configuration and instructions
@@ -277,6 +286,32 @@ enum ProjectScaffolder {
     }
 
     // MARK: - README
+
+    private static let readmeMarkerPrefixes = ["<!-- llmide:auto", "<!-- meetnotes:auto"]
+
+    /// `existing` with everything from its auto marker onward replaced by the
+    /// same part of `generated`; text above the marker is kept verbatim.
+    /// Returns nil when `existing` has no marker (user-authored — never touch).
+    /// Internal + pure so it is testable without scaffolding a project.
+    static func mergedReadme(existing: String, generated: String) -> String? {
+        guard let existingStart = markerStart(in: existing),
+              let generatedStart = markerStart(in: generated)
+        else { return nil }
+        return String(existing[..<existingStart]) + String(generated[generatedStart...])
+    }
+
+    /// Start of the first marker that opens a LINE. An inline mention (notes
+    /// that quote the marker text mid-sentence) must not truncate the README.
+    private static func markerStart(in text: String) -> String.Index? {
+        var lineStart = text.startIndex
+        while lineStart < text.endIndex {
+            let rest = text[lineStart...]
+            if readmeMarkerPrefixes.contains(where: { rest.hasPrefix($0) }) { return lineStart }
+            guard let newline = rest.firstIndex(where: \.isNewline) else { break }
+            lineStart = text.index(after: newline)
+        }
+        return nil
+    }
 
     /// Generate the project README.
     ///
