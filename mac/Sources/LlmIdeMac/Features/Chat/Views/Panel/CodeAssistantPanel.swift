@@ -536,7 +536,22 @@ struct CodeAssistantPanel: View {
     /// reassigns the same closures, so it is idempotent — and it MUST run
     /// before `handleOnAppearSessions()` below, which fires `onHistoryReplaced`
     /// while loading the restored chat.
+    /// Copy the on-screen composer settings onto `target` so it can still
+    /// resolve its own turns after it is parked. Keeps the last known
+    /// `agentContext` when none is passed.
+    func captureTurnSettings(into target: ChatEngine, agentContext: AgentContext? = nil) {
+        target.turnSettingsSnapshot = TurnSettingsSnapshot(
+            mode: modelState.selectedMode.rawValue,
+            provider: modelState.selectedProvider,
+            modelID: modelState.effectiveModelIdOrNil(config: config),
+            permissionMode: editMode.agentPermissionMode,
+            agentContext: agentContext ?? target.turnSettingsSnapshot?.agentContext)
+    }
+
     func wireEngine() {
+        // Refreshed on every (re)wire so the snapshot is current whenever
+        // this engine is about to become the displayed one.
+        captureTurnSettings(into: engine)
         // Not read by the engine itself today (`resolveTransportInput` supplies
         // the context as part of a fully-formed input, exactly as
         // `codeAssistRoundTrip` built `ctx` inline) — wired for completeness.
@@ -557,8 +572,61 @@ struct CodeAssistantPanel: View {
                 ]
             )
         }
+        // `engine` inside this closure is panel @State — i.e. whichever chat
+        // is on screen NOW — while a parked engine keeps the closure it was
+        // wired with. Capture the wired instance so a parked chat resolves
+        // ITS OWN settings instead of the displayed chat's.
+        weak var wiredEngine = engine
+        // Parked: the live panel state is another chat's. Use what `owner`
+        // last had on screen; with nothing captured, fall back to the most
+        // restrictive mode and no repo context so the turn can never escalate
+        // beyond what the user granted. The permission chip is ONE app-wide
+        // setting (@AppStorage), so a snapshot taken earlier must never
+        // outrank a stricter value the user set since — take the stricter.
+        func parkedInput(
+            for owner: ChatEngine, message: String,
+            history: [LlmIdeAPIClient.CodeAssistTurn],
+            attachments: [LlmIdeAPIClient.CodeAttachment], skills: [String],
+            contextFallback: AgentContext? = nil
+        ) -> ChatTransportInput {
+            let snap = owner.turnSettingsSnapshot
+            let ranked = EditAcceptanceMode.allCases.map(\.agentPermissionMode)
+            let rank = { (mode: String) in ranked.firstIndex(of: mode) ?? 0 }
+            let snapMode = snap?.permissionMode ?? EditAcceptanceMode.review.agentPermissionMode
+            let liveMode = editMode.agentPermissionMode
+            return ChatTransportInput(
+                message: message,
+                history: history,
+                attachments: attachments,
+                skills: skills,
+                agentContext: snap?.agentContext ?? contextFallback,
+                language: prefLanguage,
+                model: snap?.modelID,
+                provider: snap.map {
+                    ChatTransportInput.makeProvider(selectedProvider: $0.provider)
+                },
+                mode: snap?.mode,
+                permissionMode: rank(snapMode) <= rank(liveMode) ? snapMode : liveMode,
+                questionCard: true)
+        }
         engine.hooks.resolveTransportInput = { message, history, attachments, skills in
-            ChatTransportInput(
+            if let owner = wiredEngine, owner !== engine {
+                return parkedInput(
+                    for: owner, message: message, history: history,
+                    attachments: attachments, skills: skills)
+            }
+            let context = await buildAgentContext()
+            // The await is a suspension point: the user may have switched
+            // chats meanwhile, so `engine` and the panel state may now belong
+            // to ANOTHER chat. Do not stamp this turn's context onto it or
+            // read its mode/permission — resolve as the parked owner instead.
+            if let owner = wiredEngine, owner !== engine {
+                return parkedInput(
+                    for: owner, message: message, history: history,
+                    attachments: attachments, skills: skills, contextFallback: context)
+            }
+            captureTurnSettings(into: engine, agentContext: context)
+            return ChatTransportInput(
                 message: message,
                 history: history,
                 attachments: attachments,
@@ -566,7 +634,7 @@ struct CodeAssistantPanel: View {
                 // Recomputed per turn so Settings/branch changes are picked up
                 // live — same as the inline `await buildAgentContext()` the
                 // old `codeAssistRoundTrip` did on every call.
-                agentContext: await buildAgentContext(),
+                agentContext: context,
                 language: prefLanguage,
                 // A Settings model per purpose, resolved from the mode this turn
                 // sends; an explicit composer pick wins (see effectiveModelId).
@@ -744,6 +812,10 @@ struct CodeAssistantPanel: View {
     /// `engine` now holds.
     private func adoptEngine(_ next: ChatEngine) {
         guard next !== engine else { return }
+        // The outgoing engine may be parked by now (the registry ran before
+        // us); freeze the settings it was displayed with, since after the
+        // swap the panel's live state describes `next`.
+        captureTurnSettings(into: engine)
         // Swapping the instance makes `engine.messages` jump wholesale from
         // one chat's history to another's, which the panel's
         // `.onChange(of: engine.messages)` sees as "turns were appended" and

@@ -581,12 +581,17 @@ extension ChatEngine {
     /// signed in next.
     func forgetForSignOut() {
         stop()
+        // `stop()` leaves queued messages and panel-owned turn state behind;
+        // they would otherwise drain into the next user's session.
+        resetActiveTurnState()
         persistDebounceTask?.cancel()
         persistDebounceTask = nil
         persistsUnobserved = false
         currentSessionIDString = ""
         messages = []
         sessions = []
+        // The previous user's repo context must not seed the next turn.
+        turnSettingsSnapshot = nil
         resetTransientSessionState()
     }
 
