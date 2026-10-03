@@ -65,5 +65,10 @@ final class GenerationRegistry {
 
     /// Drops every model. Sign-out only: the next `model(for:)` starts clean,
     /// exactly as a fresh launch would.
-    func reset() { models.removeAll() }
+    func reset() {
+        // Dropping a model orphans its `generationTask` — Cancel can no longer
+        // reach it, so the LLM call (and spend) would run on to a dead model.
+        for model in models.values { model.cancelGeneration() }
+        models.removeAll()
+    }
 }
