@@ -23,14 +23,19 @@ struct UpdateFileSheet: View {
         case failure(String)
     }
 
-    /// The current content of the file the agent is proposing to edit — the
-    /// attachment's in-memory copy, or what was just read from disk. Used as
-    /// the LHS of the diff.
-    let originalContent: String
+    /// The content of the file as it was when the sheet OPENED — the
+    /// attachment's in-memory copy, or what was read from disk. Used as the LHS
+    /// of the diff and handed back through `onConfirm` as the stale-check
+    /// baseline. Held in @State so a parent re-render (which rebuilds this
+    /// struct with a freshly re-read original) cannot change it under the
+    /// already-frozen `proposedContent`.
+    @State private var originalContent: String
     /// Display path — the attachment chip's label, or the project-relative
     /// path. Surfaced verbatim so the user recognises which file they're editing.
     let displayPath: String
-    let onConfirm: (String) async -> ConfirmResult
+    /// Receives the (possibly edited) content and the original snapshot it was
+    /// built against.
+    let onConfirm: (_ content: String, _ originalSnapshot: String) async -> ConfirmResult
 
     @State private var proposedContent: String
     @State private var submitting: Bool = false
@@ -42,8 +47,8 @@ struct UpdateFileSheet: View {
     init(proposedContent: String,
          originalContent: String,
          displayPath: String,
-         onConfirm: @escaping (String) async -> ConfirmResult) {
-        self.originalContent = originalContent
+         onConfirm: @escaping (String, String) async -> ConfirmResult) {
+        _originalContent = State(initialValue: originalContent)
         self.displayPath = displayPath
         self.onConfirm = onConfirm
         _proposedContent = State(initialValue: proposedContent)
@@ -135,11 +140,12 @@ struct UpdateFileSheet: View {
 
     private func submit() {
         let toApply = proposedContent
+        let baseline = originalContent
         Task {
             submitting = true
             defer { submitting = false }
             errorMessage = nil
-            let outcome = await onConfirm(toApply)
+            let outcome = await onConfirm(toApply, baseline)
             switch outcome {
             case .success:
                 dismiss()

@@ -112,12 +112,17 @@ enum ProposedEditResolver {
         guard let projectRoot else {
             return .failure(.noProjectOrAttachment(path: args.path))
         }
-        let root = PathUtils.canonicalise(projectRoot.path)
-        let absolute = absolutise(args.path, under: root)
-        // Containment is checked AFTER canonicalisation, which resolves `..`
-        // and follows symlinks — so neither a traversal nor a symlink planted
-        // inside the project can point the write somewhere else. The trailing
-        // separator matters: without it "/repo-backup" passes a "/repo" prefix.
+        // Both sides are symlink-resolved: `canonicalise` is only lexical, so
+        // without this a `link -> /etc` inside the project passes the prefix
+        // check while reads and writes follow the link out of it. Resolving the
+        // root too keeps a project under a symlinked path (/var -> /private/var)
+        // working.
+        let root = PathUtils.resolvingSymlinks(projectRoot.path)
+        let absolute = PathUtils.resolvingSymlinks(absolutise(args.path, under: root))
+        // Containment is checked on the resolved paths, and the write targets
+        // that same resolved path, so what was validated is what gets written.
+        // The trailing separator matters: without it "/repo-backup" passes a
+        // "/repo" prefix.
         guard absolute == root || absolute.hasPrefix(root + "/") else {
             return .failure(.outsideProject(path: args.path, root: PathUtils.homeRelative(root)))
         }
