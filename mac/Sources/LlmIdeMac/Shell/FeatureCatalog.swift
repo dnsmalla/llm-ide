@@ -389,6 +389,7 @@ enum FeatureCatalog {
         let runHistory = AutoTaskRunHistory(storeURL: runHistoryURL)
         let settings = AutoTaskSettings()
         let taskLog = TaskLogStore()
+        SessionScopedRegistry.shared.register(taskLog)
         // `backend: nil` ⇒ auto-resolve from the active project's `linkedRepo`,
         // which supports BOTH GitLab and GitHub (set by syncLinkedRepoFromConfig).
         // Passing a GitLabClient here used to set `backendOverride` to a GitLab

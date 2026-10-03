@@ -157,6 +157,7 @@ public struct LlmIdeMacApp: App {
         self._projectStore = StateObject(wrappedValue: projectStoreInstance)
         let activity = ActivityStore(api: client)
         activity.start()
+        SessionScopedRegistry.shared.register(activity)
         self._activityStore = State(wrappedValue: activity)
         self.api = client
         self.autoCapture = AutoCaptureService(capture: orchestrator, config: cfg)
@@ -349,6 +350,8 @@ public struct LlmIdeMacApp: App {
                     // AND logout, replacing the old direct start()/stop().
                     FeatureRegistry.shared.refresh()
                     if authed {
+                        // Sign-out cancelled the poll loop; idempotent.
+                        activityStore.start()
                         Task { await sourceLinkStore.refresh(api: api) }
                         if case .running = backend.status {
                             CustomProvider.syncAllToBackend(api: api)

@@ -6,7 +6,7 @@ import Combine
 /// RUNS (never auto-cleared) so repeated runs are visible. The `.log` file on
 /// disk remains the permanent record; this is the live, capped, on-screen view.
 @MainActor
-final class TaskLogStore: ObservableObject {
+final class TaskLogStore: ObservableObject, SessionScoped {
 
     // `Level` moved to Core/Contracts/TaskLogWriting.swift as top-level
     // `TaskLogLevel` — `LoopRunService` mirrors its runner's log into this
@@ -50,6 +50,12 @@ final class TaskLogStore: ObservableObject {
 
     func clearAll() {
         buffers = [:]
+    }
+
+    /// The buffers hold every task's live log lines (including the Loop
+    /// mirror), which belong to the previous account.
+    func resetForSignOut() {
+        clearAll()
     }
 
     func lines(for id: String) -> [LogLine] {
