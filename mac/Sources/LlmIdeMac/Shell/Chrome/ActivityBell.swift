@@ -14,11 +14,11 @@ struct ActivityBell: View {
         Button {
             showPanel.toggle()
         } label: {
-            Image(systemName: activity.unreadCount > 0 ? "bell.badge" : "bell")
+            Image(systemName: activity.visibleUnreadCount > 0 ? "bell.badge" : "bell")
                 .font(.system(size: 13))
                 .overlay(alignment: .topTrailing) {
-                    if activity.unreadCount > 0 {
-                        Text("\(min(activity.unreadCount, 99))")
+                    if activity.visibleUnreadCount > 0 {
+                        Text("\(min(activity.visibleUnreadCount, 99))")
                             .font(.caption2)
                             .padding(.horizontal, 3)
                             .padding(.vertical, 2)
@@ -52,7 +52,7 @@ struct ActivityPanel: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if activity.recentItems.isEmpty {
-                    Text("No activity in the last 2 days")
+                    Text("No activity in the last 48 hours")
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 60)

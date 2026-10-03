@@ -71,6 +71,8 @@ final class MobileActivityBridge: MobileFeatureBridge {
             _ = store.lastId
             _ = store.unreadCount
             _ = store.items.count
+            // Dedup can swap the newest row without changing the count.
+            _ = store.items.first?.id
         } onChange: { [weak self] in
             // onChange fires BEFORE the new values land; hop so pushState reads them.
             Task { @MainActor [weak self] in
@@ -83,7 +85,7 @@ final class MobileActivityBridge: MobileFeatureBridge {
 
     private func pushState() {
         guard manager?.mobileClientPaired == true else { return }
-        manager?.reply(Self.state(items: store.items, unread: store.unreadCount))
+        manager?.reply(Self.state(items: store.recentItems, unread: store.visibleUnreadCount))
     }
 
     /// Pure so a test can pin the shaping: newest-first cap, title cap, no detail/link.
