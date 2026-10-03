@@ -121,26 +121,50 @@ final class ActivityStore: SessionScoped {
     /// How many feed items are kept in memory (newest first).
     static let maxItems = 500
 
-    /// The feed shows only today and yesterday — the two day buckets the
-    /// popover labels. The server prunes by COUNT (500 per user), never by
-    /// age, so without this the first poll after launch (`since=0`) surfaced
-    /// the newest 50 events however old they were.
-    static func windowStart(now: Date = Date(), calendar: Calendar = .current) -> Date {
-        let yesterday = calendar.date(byAdding: .day, value: -1, to: now) ?? now
-        return calendar.startOfDay(for: yesterday)
+    /// The feed shows only the last 48 hours. The server prunes by COUNT (500
+    /// per user), never by age, so without this the first poll after launch
+    /// (`since=0`) surfaced the newest 50 events however old they were.
+    static let windowSeconds: TimeInterval = 48 * 60 * 60
+
+    static func windowStart(now: Date = Date()) -> Date {
+        now.addingTimeInterval(-windowSeconds)
     }
 
-    /// `items` restricted to the display window, order preserved.
-    static func recent(
-        _ items: [ActivityItem], now: Date = Date(), calendar: Calendar = .current
-    ) -> [ActivityItem] {
-        let cutoff = windowStart(now: now, calendar: calendar)
-        return items.filter { $0.createdAt >= cutoff }
+    /// Drops repeats of the same alert, keeping the FIRST occurrence — the
+    /// newest, because items are ordered newest-first. "Same" means the same
+    /// kind, title and link: a recurring job ("Knowledge updated") would
+    /// otherwise fill the feed with identical rows.
+    static func deduped(_ items: [ActivityItem]) -> [ActivityItem] {
+        var seen = Set<String>()
+        return items.filter { item in
+            // U+0001 cannot occur in a title or link, so the parts cannot
+            // run together into a false match.
+            let key = [item.kind?.rawValue ?? "", item.title, item.link ?? ""]
+                .joined(separator: "\u{1}")
+            return seen.insert(key).inserted
+        }
     }
 
-    /// What the popover should render. Computed per access so an item that
-    /// crossed midnight drops out without waiting for the next poll.
+    /// `items` restricted to the display window and without repeats, order
+    /// preserved. Window first, so an expired row can never shadow a newer one.
+    static func recent(_ items: [ActivityItem], now: Date = Date()) -> [ActivityItem] {
+        let cutoff = windowStart(now: now)
+        return deduped(items.filter { $0.createdAt >= cutoff })
+    }
+
+    /// What the popover and the phone should render. Computed per access so an
+    /// item that aged past 48 h drops out without waiting for the next poll.
     var recentItems: [ActivityItem] { Self.recent(items) }
+
+    /// The server counts every unseen row, including repeats and rows outside
+    /// the window that we do not show; a badge larger than the list is wrong.
+    static func visibleUnread(unread: Int, shown: Int) -> Int {
+        max(0, min(unread, shown))
+    }
+
+    var visibleUnreadCount: Int {
+        Self.visibleUnread(unread: unreadCount, shown: recentItems.count)
+    }
 
     /// Fetch new items since `lastId`, prepend them, and update
     /// `lastId` + `unreadCount`.  Errors are swallowed — the next
@@ -160,17 +184,16 @@ final class ActivityStore: SessionScoped {
             guard startGeneration == generation else { return }
             // `lastId` must still advance past events we do not display, or
             // every poll would re-fetch the same old rows.
-            let newItems = Self.recent(
-                resp.items.map { $0.toActivityItem() }.filter { $0.id > self.lastId })
-            let retained = Self.recent(items)
-            if !newItems.isEmpty || retained.count != items.count {
-                // Prepend newest-first so the feed shows recent events at top.
-                // Capped: this polls every 25 s for the whole session and the
-                // popover re-buckets every item on each render, so an
-                // unbounded list grew into the thousands over a long run.
-                // Items older than the window are dropped here too, so a
-                // long-running session does not keep yesterday-1's rows.
-                items = Array((newItems + retained).prefix(Self.maxItems))
+            let incoming = resp.items.map { $0.toActivityItem() }.filter { $0.id > self.lastId }
+            // Prepend newest-first so the feed shows recent events at top.
+            // Capped: this polls every 25 s for the whole session and the
+            // popover re-buckets every item on each render, so an unbounded
+            // list grew into the thousands over a long run. Merging through
+            // `recent` also drops rows that aged out of the window and keeps
+            // only the newest copy of a repeated alert.
+            let merged = Array(Self.recent(incoming + items).prefix(Self.maxItems))
+            if merged.map(\.id) != items.map(\.id) {
+                items = merged
             }
             lastId = resp.lastId
             if !didInitialSeen {
