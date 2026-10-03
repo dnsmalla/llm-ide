@@ -62,36 +62,92 @@ final class SourceControlService {
     var stagedFiles: [FileChange]   { state.files.filter { $0.staged } }
     var unstagedFiles: [FileChange] { state.files.filter { !$0.staged } }
 
-    /// Refresh status + branch info for `root`. nil root → cleared state.
+    /// Incremented by every `refresh` call (including `refresh(root: nil)`).
+    /// A run whose token is no longer current was superseded (project switched
+    /// or closed mid-flight) and must not write `state`.
+    private var refreshGeneration = 0
+    /// Root the current `state` was last built for. Only meaningful once
+    /// `hasRefreshed` is true (so callers that act before the first refresh,
+    /// e.g. tests, are not refused).
+    private var activeRoot: URL?
+    private var hasRefreshed = false
+
+    private func isCurrent(_ root: URL) -> Bool {
+        !hasRefreshed || activeRoot?.standardizedFileURL == root.standardizedFileURL
+    }
+
+    /// Refuse an action whose `root` is not the root `state` was built for
+    /// (a stale view closure after a project switch/close).
+    private func refuseIfStale(_ root: URL) -> Bool {
+        if isCurrent(root) { return false }
+        state.opError = "The project changed; the action was not run."
+        return true
+    }
+
+    /// View-initiated refresh: status + branch info for `root`, and `root`
+    /// becomes the active root. nil root → cleared state. Post-action
+    /// refreshes must use `refreshIfCurrent` instead so a slow action for a
+    /// previous project cannot flip the active root back.
     func refresh(root: URL?) async {
+        hasRefreshed = true
+        activeRoot = root
+        await performRefresh(root: root)
+    }
+
+    /// Post-action refresh: never changes `activeRoot`; a no-op when `root`
+    /// is no longer the active one (the user switched projects meanwhile).
+    /// Before any view refresh has happened there is no active root, so the
+    /// action's root is adopted (keeps pre-first-refresh callers working).
+    func refreshIfCurrent(root: URL) async {
+        guard hasRefreshed else { await refresh(root: root); return }
+        guard isCurrent(root) else { return }
+        await performRefresh(root: root)
+    }
+
+    /// Test seam: awaited after a refresh's git calls finish and before it
+    /// writes `state`, so tests can supersede it deterministically.
+    @ObservationIgnored
+    var afterGitHook: (() async -> Void)?
+
+    private func performRefresh(root: URL?) async {
+        refreshGeneration &+= 1
+        let token = refreshGeneration
         guard let root, isGitRepo(root) else { state = State(); return }
         state.isLoading = true; state.error = nil
-        defer { state.isLoading = false; refreshTick &+= 1 }
+        defer {
+            if token == refreshGeneration { state.isLoading = false; refreshTick &+= 1 }
+        }
         // Retroactively self-ignore generated artifact dirs so their contents
         // stop flooding status (fixes already-generated trees without regen).
         ensureGeneratedIgnores(root)
         do {
             let porcelain = try await repo.runGit(
                 ["status", "--porcelain=v1", "--untracked-files=all"], at: root)
-            state.files = StatusParser.parse(porcelain: porcelain)
-            state.branch = try? await repo.runGit(
+            let branch = try? await repo.runGit(
                 ["rev-parse", "--abbrev-ref", "HEAD"], at: root)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             // Upstream tracking: resolves only when the branch has one (best-effort).
             let upstream = try? await repo.runGit(
                 ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], at: root)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            state.hasUpstream = !(upstream?.isEmpty ?? true)
             // ahead/behind vs upstream (best-effort; no upstream → 0/0)
+            var ahead = 0, behind = 0
             if let counts = try? await repo.runGit(
                 ["rev-list", "--count", "--left-right", "@{u}...HEAD"], at: root) {
                 let nums = counts.split(whereSeparator: { $0 == "\t" || $0 == " " })
                     .compactMap { Int($0) }
-                if nums.count == 2 { state.behind = nums[0]; state.ahead = nums[1] }
-                else { state.ahead = 0; state.behind = 0 }
-            } else { state.ahead = 0; state.behind = 0 }
+                if nums.count == 2 { behind = nums[0]; ahead = nums[1] }
+            }
+            await afterGitHook?()
+            // Superseded while awaiting: write nothing.
+            guard token == refreshGeneration else { return }
+            state.files = StatusParser.parse(porcelain: porcelain)
+            state.branch = branch
+            state.hasUpstream = !(upstream?.isEmpty ?? true)
+            state.ahead = ahead
+            state.behind = behind
         } catch {
-            state.error = error.localizedDescription
+            if token == refreshGeneration { state.error = error.localizedDescription }
         }
     }
 
@@ -154,32 +210,99 @@ final class SourceControlService {
         return (original: indexBlob, modified: workingTree)
     }
 
-    func stage(root: URL, path: String) async { await run(["add", "--", path], root) }
-    func unstage(root: URL, path: String) async { await run(["restore", "--staged", "--", path], root) }
+    func stage(root: URL, path: String) async {
+        if refuseIfStale(root) { return }
+        await run(["add", "--", path], root)
+    }
+    func unstage(root: URL, path: String) async {
+        if refuseIfStale(root) { return }
+        await run(["restore", "--staged", "--", path], root)
+    }
 
     /// Stage everything (`git add -A`), then refresh. Cursor-style "Stage All".
-    func stageAll(root: URL) async { await run(["add", "-A"], root) }
+    func stageAll(root: URL) async {
+        if refuseIfStale(root) { return }
+        await run(["add", "-A"], root)
+    }
 
     /// Unstage everything (`git reset`, a mixed reset to HEAD — working tree
     /// untouched), then refresh. Cursor-style "Unstage All". `git reset` on an
     /// unborn repo (no commits yet) resets the index to the empty tree, which
     /// is exactly "unstage all" for freshly-added files.
-    func unstageAll(root: URL) async { await run(["reset"], root) }
+    func unstageAll(root: URL) async {
+        if refuseIfStale(root) { return }
+        await run(["reset"], root)
+    }
 
-    /// Discard working-tree changes. Untracked files are deleted; tracked files
-    /// are restored. Caller must confirm — this is destructive.
+    /// Moves a path to the Trash. Injectable so tests never touch the real
+    /// ~/.Trash and can simulate a volume without one.
+    @ObservationIgnored
+    var trash: (URL) throws -> Void = { url in
+        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+    }
+
+    /// Set when moving an untracked path to the Trash failed; the view offers
+    /// an explicit "Delete permanently" confirmation. Nothing is deleted
+    /// until `deletePermanently` is called.
+    private(set) var pendingPermanentDelete: FileChange?
+
+    func cancelPermanentDelete() { pendingPermanentDelete = nil }
+
+    /// Discard working-tree changes. Untracked files are moved to the Trash
+    /// (recoverable); tracked files are restored. A nested git repository
+    /// (listed by status as a single `?? dir/` entry) is refused: removing it
+    /// would destroy its `.git` and any unpushed commits. If trashing fails
+    /// the path is NOT deleted; the failure is reported and a permanent
+    /// delete must be confirmed separately. Caller must confirm.
     func discard(root: URL, file: FileChange) async {
+        if refuseIfStale(root) { return }
         if file.status == .untracked {
-            do {
-                try FileManager.default.removeItem(at: root.appendingPathComponent(file.path))
-            } catch {
-                // Surface like every other op (was silently swallowed).
-                state.opError = "Couldn't discard \(file.path): \(error.localizedDescription)"
+            state.opError = nil
+            pendingPermanentDelete = nil
+            let url = root.appendingPathComponent(file.path)
+            if Self.containsGitRepo(url) {
+                state.opError = "Couldn't discard \(file.path): it is a nested git repository. Remove it manually if you really want it gone."
+            } else {
+                do {
+                    try trash(url)
+                } catch {
+                    state.opError = "Couldn't move \(file.path) to the Trash: \(error.localizedDescription). Nothing was deleted."
+                    pendingPermanentDelete = file
+                }
             }
         } else {
             await run(["restore", "--", file.path], root)
         }
-        await refresh(root: root)
+        await refreshIfCurrent(root: root)
+    }
+
+    /// Explicitly confirmed permanent delete of an untracked path whose
+    /// Trash move failed. Same nested-repo refusal as `discard`.
+    func deletePermanently(root: URL, file: FileChange) async {
+        pendingPermanentDelete = nil
+        if refuseIfStale(root) { return }
+        guard file.status == .untracked else { return }
+        state.opError = nil
+        let url = root.appendingPathComponent(file.path)
+        if Self.containsGitRepo(url) {
+            state.opError = "Couldn't delete \(file.path): it is a nested git repository."
+        } else {
+            do { try FileManager.default.removeItem(at: url) }
+            catch { state.opError = "Couldn't delete \(file.path): \(error.localizedDescription)" }
+        }
+        await refreshIfCurrent(root: root)
+    }
+
+    /// True when `url` is a directory that is itself a git work tree root
+    /// (has a `.git` dir or gitlink file). A symlink is never one: trashing
+    /// it removes only the link, not the target.
+    nonisolated static func containsGitRepo(_ url: URL) -> Bool {
+        if let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey]),
+           values.isSymbolicLink == true { return false }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue
+        else { return false }
+        return FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
     }
 
     /// Commit-all-aware (Cursor-style): if nothing is staged but there ARE
@@ -187,6 +310,7 @@ final class SourceControlService {
     /// commit what's already staged. Refresh afterwards either way.
     @discardableResult
     func commit(root: URL, message: String) async -> Bool {
+        if refuseIfStale(root) { return false }
         state.opError = nil
         // Busy for the whole commit so the 3 s status poll can't interleave,
         // and the commit-all decision is made on FRESH status: deciding from
@@ -206,7 +330,7 @@ final class SourceControlService {
         // AND flips `ok` to false. commitAndPush gates on the Bool return —
         // clearer than reading state, and now opError is reliable too.
         catch { state.opError = error.localizedDescription; ok = false }
-        await refresh(root: root)
+        await refreshIfCurrent(root: root)
         return ok
     }
 
@@ -214,6 +338,7 @@ final class SourceControlService {
 
     /// Pull (--ff-only) from origin using the repo's saved credentials.
     func pull(root: URL) async {
+        if refuseIfStale(root) { return }
         state.opError = nil
         if blocked(.sync, at: root) { return }
         guard let c = resolveCredentials?(root), !c.token.isEmpty else {
@@ -222,11 +347,12 @@ final class SourceControlService {
         isBusy = true; defer { isBusy = false }
         do { try await repo.pull(at: root, token: c.token, backend: c.backend) }
         catch { state.opError = error.localizedDescription }
-        await refresh(root: root)
+        await refreshIfCurrent(root: root)
     }
 
     /// Push the current branch (with upstream tracking) to origin.
     func push(root: URL) async {
+        if refuseIfStale(root) { return }
         state.opError = nil
         if blocked(.push, at: root) { return }
         guard let c = resolveCredentials?(root), !c.token.isEmpty else {
@@ -236,7 +362,7 @@ final class SourceControlService {
         isBusy = true; defer { isBusy = false }
         do { try await repo.push(at: root, branch: branch, token: c.token, backend: c.backend) }
         catch { state.opError = error.localizedDescription }
-        await refresh(root: root)
+        await refreshIfCurrent(root: root)
     }
 
     /// Fetch from origin (no merge), then refresh status / ahead-behind.
@@ -244,6 +370,7 @@ final class SourceControlService {
     /// refs is a sync, but this repo also treats "Sync" as fetch+push-adjacent
     /// in the allow-list model, so either disabled op blocks it.
     func sync(root: URL) async {
+        if refuseIfStale(root) { return }
         state.opError = nil
         if blocked(.sync, at: root) || blocked(.push, at: root) { return }
         guard let c = resolveCredentials?(root), !c.token.isEmpty else {
@@ -252,7 +379,7 @@ final class SourceControlService {
         isBusy = true; defer { isBusy = false }
         do { try await repo.fetch(at: root, token: c.token, backend: c.backend) }
         catch { state.opError = error.localizedDescription }
-        await refresh(root: root)
+        await refreshIfCurrent(root: root)
     }
 
     // MARK: - Branch operations
@@ -286,6 +413,7 @@ final class SourceControlService {
     /// Publish the current branch to origin, setting upstream tracking.
     /// Reuses the same credential resolution as `push()`.
     func publish(root: URL) async {
+        if refuseIfStale(root) { return }
         state.opError = nil
         if blocked(.push, at: root) { return }
         guard let c = resolveCredentials?(root), !c.token.isEmpty else {
@@ -295,7 +423,7 @@ final class SourceControlService {
         isBusy = true; defer { isBusy = false }
         do { try await repo.push(at: root, branch: branch, token: c.token, backend: c.backend) }
         catch { state.opError = error.localizedDescription }
-        await refresh(root: root)
+        await refreshIfCurrent(root: root)
     }
 
     // MARK: - History
@@ -415,6 +543,7 @@ final class SourceControlService {
     /// (`-m`); an empty message keeps it (`--no-edit`). Refresh afterwards.
     @discardableResult
     func amend(root: URL, message: String) async -> Bool {
+        if refuseIfStale(root) { return false }
         state.opError = nil
         isBusy = true; defer { isBusy = false }
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -424,7 +553,7 @@ final class SourceControlService {
         var ok = true
         do { _ = try await repo.runGit(args, at: root) }
         catch { state.opError = error.localizedDescription; ok = false }
-        await refresh(root: root)
+        await refreshIfCurrent(root: root)
         return ok
     }
 
@@ -444,13 +573,14 @@ final class SourceControlService {
     /// (`checkout -- .`) and delete untracked files/dirs (`clean -fd`), then
     /// refresh. DESTRUCTIVE — caller must confirm.
     func discardAll(root: URL) async {
+        if refuseIfStale(root) { return }
         state.opError = nil
         isBusy = true; defer { isBusy = false }
         do {
             _ = try await repo.runGit(["checkout", "--", "."], at: root)
             _ = try await repo.runGit(["clean", "-fd"], at: root)
         } catch { state.opError = error.localizedDescription }
-        await refresh(root: root)
+        await refreshIfCurrent(root: root)
     }
 
     // MARK: - Merge / Tags
@@ -482,12 +612,13 @@ final class SourceControlService {
     /// always reflect reality. A failure lands in `opError` (sticky) rather
     /// than `error` (transient), so the poll can't wipe it.
     private func run(_ args: [String], _ root: URL) async {
+        if refuseIfStale(root) { return }
         isBusy = true; defer { isBusy = false }
         state.opError = nil
-        do { _ = try await repo.runGit(args, at: root); await refresh(root: root) }
+        do { _ = try await repo.runGit(args, at: root); await refreshIfCurrent(root: root) }
         catch {
             state.opError = error.localizedDescription
-            await refresh(root: root)
+            await refreshIfCurrent(root: root)
         }
     }
 

@@ -75,4 +75,78 @@ final class MobileSelfHealBridgeTests: XCTestCase {
         XCTAssertEqual(text, "+a\n-b\n c")
         XCTAssertFalse(truncated)
     }
+
+    // MARK: - ReviewedPatchCache
+
+    private func proposal(_ name: String) -> IncidentProposal {
+        IncidentProposal(mainRepo: "/r", worktreePath: "/w/\(name)", branch: name, baseCommit: "abc")
+    }
+
+    private func patch(_ text: String) -> SelfHealProposalService.ReviewedPatch {
+        SelfHealProposalService.ReviewedPatch(text: text, binaryPatch: Data(text.utf8))
+    }
+
+    private func heldData(_ lookup: ReviewedPatchCache.Lookup) -> Data? {
+        if case .held(let patch) = lookup { return patch.binaryPatch }
+        return nil
+    }
+
+    private func isMissing(_ lookup: ReviewedPatchCache.Lookup) -> Bool {
+        if case .missing = lookup { return true }
+        return false
+    }
+
+    func testCacheReturnsHeldPatchForSameProposalOnly() {
+        var cache = ReviewedPatchCache()
+        let now = Date()
+        cache.store(patch("p"), for: "i1", proposal: proposal("a"), now: now)
+        XCTAssertEqual(heldData(cache.lookup(for: "i1", proposal: proposal("a"), now: now)), Data("p".utf8))
+        XCTAssertTrue(isMissing(cache.lookup(for: "i1", proposal: proposal("b"), now: now)))
+        XCTAssertTrue(isMissing(cache.lookup(for: "missing", proposal: proposal("a"), now: now)))
+    }
+
+    func testCacheRefusesTruncatedReview() {
+        var cache = ReviewedPatchCache()
+        let now = Date()
+        cache.store(patch("p"), for: "i1", proposal: proposal("a"), truncated: true, now: now)
+        guard case .truncated = cache.lookup(for: "i1", proposal: proposal("a"), now: now) else {
+            return XCTFail("a truncated review must not be applicable")
+        }
+    }
+
+    func testCacheIsBoundToReviewingDevice() {
+        var cache = ReviewedPatchCache()
+        let now = Date()
+        cache.store(patch("p"), for: "i1", proposal: proposal("a"), deviceId: "phoneA", now: now)
+        XCTAssertNotNil(heldData(cache.lookup(for: "i1", proposal: proposal("a"), deviceId: "phoneA", now: now)))
+        XCTAssertTrue(isMissing(cache.lookup(for: "i1", proposal: proposal("a"), deviceId: "phoneB", now: now)))
+    }
+
+    func testCacheExpires() {
+        var cache = ReviewedPatchCache()
+        let now = Date()
+        cache.store(patch("p"), for: "i1", proposal: proposal("a"), now: now)
+        let later = now.addingTimeInterval(ReviewedPatchCache.lifetime + 1)
+        XCTAssertTrue(isMissing(cache.lookup(for: "i1", proposal: proposal("a"), now: later)))
+    }
+
+    func testCacheIsBoundedAndEvictsOldest() {
+        var cache = ReviewedPatchCache()
+        let start = Date()
+        for i in 0..<(ReviewedPatchCache.capacity + 2) {
+            cache.store(patch("p\(i)"), for: "i\(i)", proposal: proposal("a"),
+                        now: start.addingTimeInterval(Double(i)))
+        }
+        XCTAssertEqual(cache.entries.count, ReviewedPatchCache.capacity)
+        XCTAssertNil(cache.entries["i0"])
+        XCTAssertNotNil(cache.entries["i\(ReviewedPatchCache.capacity + 1)"])
+    }
+
+    func testCacheRemove() {
+        var cache = ReviewedPatchCache()
+        let now = Date()
+        cache.store(patch("p"), for: "i1", proposal: proposal("a"), now: now)
+        cache.remove("i1")
+        XCTAssertTrue(isMissing(cache.lookup(for: "i1", proposal: proposal("a"), now: now)))
+    }
 }

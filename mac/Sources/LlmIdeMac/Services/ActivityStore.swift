@@ -51,7 +51,7 @@ struct ActivityItem: Identifiable {
 /// (`report`, `markSeen`) never throw into the caller.
 @MainActor
 @Observable
-final class ActivityStore {
+final class ActivityStore: SessionScoped {
 
     // MARK: Public state (Tasks 8–9 depend on these exact names)
 
@@ -68,6 +68,9 @@ final class ActivityStore {
     // server as seen, so the badge starts at zero and only activity created
     // during THIS session lights it. Old items stay listable in the popover.
     private var didInitialSeen = false
+    // Bumped on sign-out so an in-flight refresh/markSeen from the previous
+    // account cannot write its results into the next account's feed.
+    private var generation = 0
     private let pollInterval: Duration = .seconds(25)
     private let log = Logger(subsystem: "com.llmide.macapp", category: "ActivityStore")
 
@@ -98,6 +101,21 @@ final class ActivityStore {
         }
     }
 
+    // MARK: - Sign-out
+
+    /// Drops the previous account's feed and cursor. Polling is restarted by
+    /// the composition root via `start()` once a user is signed in again; the
+    /// old `lastId` would otherwise hide the new user's lower-id events.
+    func resetForSignOut() {
+        generation += 1
+        pollTask?.cancel()
+        pollTask = nil
+        items = []
+        unreadCount = 0
+        lastId = 0
+        didInitialSeen = false
+    }
+
     // MARK: - GET /kb/activity
 
     /// How many feed items are kept in memory (newest first).
@@ -108,6 +126,7 @@ final class ActivityStore {
     /// tick retries automatically on the next poll interval.
     func refresh() async {
         guard let api else { return }
+        let startGeneration = generation
         do {
             // The server returns: { items: [...], unread: Int, lastId: Int }
             // We decode the wrapper with Codable; rows carry `detail` as a
@@ -117,6 +136,7 @@ final class ActivityStore {
                 authenticated: true
             )
 
+            guard startGeneration == generation else { return }
             let newItems = resp.items.map { $0.toActivityItem() }.filter { $0.id > self.lastId }
             if !newItems.isEmpty {
                 // Prepend newest-first so the feed shows recent events at top.
@@ -188,6 +208,7 @@ final class ActivityStore {
     /// optimistically; the server confirms.  Never throws into the caller.
     func markSeen() {
         let upto = lastId
+        let startGeneration = generation
         Task { [weak self] in
             guard let self, let api = self.api else { return }
             do {
@@ -199,6 +220,7 @@ final class ActivityStore {
             } catch {
                 self.log.error("activity markSeen failed: \(error.localizedDescription, privacy: .public)")
             }
+            guard startGeneration == self.generation else { return }
             // Optimistic clear: hide the badge immediately on open. If the POST failed,
             // the next refresh() resyncs unreadCount from the server.
             self.unreadCount = 0

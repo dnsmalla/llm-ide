@@ -13,7 +13,7 @@ import Foundation
 /// The Auto Task scheduler keeps its own runner (`AutoCodeUpdateService`);
 /// the two serialize through the process-wide `LoopRunQueue` as before.
 @MainActor
-final class LoopRunService: ObservableObject {
+final class LoopRunService: ObservableObject, SessionScoped {
 
     /// Keys (`projectId::loopId`) with a desktop run in flight or queued —
     /// published so the loop list's running indicator updates the moment a
@@ -53,9 +53,32 @@ final class LoopRunService: ObservableObject {
     private let api: LlmIdeAPIClient
     private var runners: [String: LoopEngineRunner] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
+    /// Bumped by `resetForSignOut`. A run (or runner log sink) captures it when it starts and goes
+    /// silent once it changes: `LoopEngineRunner` keeps `.success` when cancelled late, so a run
+    /// finishing after sign-out would otherwise report under the next account's token.
+    private(set) var sessionEpoch = 0
 
     init(api: LlmIdeAPIClient) {
         self.api = api
+        // Loop may name Core; Core never names Loop, so the service enrolls
+        // itself for sign-out resets.
+        SessionScopedRegistry.shared.register(self)
+    }
+
+    /// Cancels every desktop and lane run and drops the previous account's
+    /// idle runners (and their live logs). A runner whose run is still
+    /// unwinding stays in `runners` so pause/resume and the page keep
+    /// addressing it; its task drops it (and reports nothing) once it sees the
+    /// new epoch. `laneRuns` is left alone: `onAdmissionChange(false)` clears
+    /// it when the lane run ends, and Stop must keep resolving until then.
+    func resetForSignOut() {
+        sessionEpoch += 1
+        for task in tasks.values { task.cancel() }
+        cancelLoopLane?()
+        for (key, runner) in runners {
+            runner.onLog = nil
+            if tasks[key] == nil { runners[key] = nil }
+        }
     }
 
     static func key(projectId: String, loopId: String) -> String {
@@ -89,8 +112,10 @@ final class LoopRunService: ObservableObject {
         // page and the phone read — so page-driven runs stay visible there.
         // Owned here (not per page appearance) so the mirror survives the
         // page being closed mid-run.
+        let epoch = sessionEpoch
         runner.onLog = { [weak self] line in
-            self?.logStore?.append(AutoTask.loopEngineering.rawValue, line.text,
+            guard let self, self.sessionEpoch == epoch else { return }
+            self.logStore?.append(AutoTask.loopEngineering.rawValue, line.text,
                                    level: line.level == .error ? .error : .info)
         }
         runners[key] = runner
@@ -130,6 +155,7 @@ final class LoopRunService: ObservableObject {
         // one moment the one-shot permission alert can actually be seen.
         LoopRunNotifier.prepareAuthorization()
         let startedAt = Date()
+        let epoch = sessionEpoch
         tasks[key] = Task { [weak self] in
             let result = await runner.run(
                 config: config, faultsRoot: faultsRoot, gitRoot: gitRoot,
@@ -139,6 +165,15 @@ final class LoopRunService: ObservableObject {
             guard let self else { return }
             self.tasks[key] = nil
             self.activeKeys.remove(key)
+            guard self.sessionEpoch == epoch else {
+                // Signed out mid-run: nothing about it may reach the next account's feed,
+                // notifications or page callbacks.
+                if self.runners[key] === runner {
+                    runner.onLog = nil
+                    self.runners[key] = nil
+                }
+                return
+            }
             if let result {
                 self.reportFinished(loopName: loopName, status: result,
                                     iterations: runner.iteration,

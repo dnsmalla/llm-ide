@@ -270,7 +270,7 @@ struct SourceControlView: View {
                 scm.setOpError("Couldn't stage that hunk in \(file.displayPath): "
                                + error.localizedDescription + hunkFailureHint())
             }
-            await scm.refresh(root: root)
+            await scm.refreshIfCurrent(root: root)
         }
     }
 
@@ -300,7 +300,7 @@ struct SourceControlView: View {
                 scm.setOpError("Couldn't unstage that hunk in \(file.displayPath): "
                                + error.localizedDescription + hunkFailureHint())
             }
-            await scm.refresh(root: root)
+            await scm.refreshIfCurrent(root: root)
         }
     }
 
@@ -617,8 +617,18 @@ struct SourceControlView: View {
             }
         } message: { file in
             Text(file.status == .untracked
-                 ? "“\(file.displayPath)” will be deleted."
+                 ? "“\(file.displayPath)” will be moved to the Trash. Nested git repositories are not discarded."
                  : "Changes to “\(file.displayPath)” will be lost.")
+        }
+        .confirmationDialog("Couldn't move to the Trash", isPresented: Binding(
+            get: { scm.pendingPermanentDelete != nil },
+            set: { if !$0 { scm.cancelPermanentDelete() } }
+        ), presenting: scm.pendingPermanentDelete) { file in
+            Button("Delete \(file.displayPath) permanently", role: .destructive) {
+                if let root { Task { await scm.deletePermanently(root: root, file: file) } }
+            }
+        } message: { file in
+            Text("“\(file.displayPath)” could not be moved to the Trash. Deleting it permanently cannot be undone.")
         }
         .alert("New branch", isPresented: $showCreateBranch) {
             TextField("Branch name", text: $newBranchName)

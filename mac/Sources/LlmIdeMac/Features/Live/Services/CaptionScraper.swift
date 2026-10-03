@@ -39,8 +39,8 @@ extension CaptionScraper {
 }
 
 /// Drives N scrapers on a shared poll timer and emits a deduped stream
-/// of `Caption` values.  Owns the in-memory dedup window — if a
-/// scraper re-emits a line we've seen in the last 2 seconds, drop it.
+/// of `Caption` values.  Dedup/merge policy lives in `CaptionDeltaState`:
+/// unchanged lines are dropped and a growing utterance replaces its row.
 ///
 /// Also owns the active session id (stable for one recording) and the
 /// last ingest status, so the UI can render success/failure feedback
@@ -73,9 +73,7 @@ final class CaptionOrchestrator: ObservableObject {
 
     private let log = Logger(subsystem: "com.llmide.macapp", category: "Capture")
     private var pollTimer: Timer?
-    private var recentKeys: [(key: String, at: Date)] = []   // time-ordered, for expiry
-    private var recentKeySet: Set<String> = []                // mirror of recentKeys, for O(1) membership
-    private let dedupWindow: TimeInterval = 2.0
+    private var deltaState = CaptionDeltaState()
     private let scrapers: [CaptionScraper]
     private let pollInterval: TimeInterval
     private let maxCaptionCount = 10_000
@@ -95,6 +93,47 @@ final class CaptionOrchestrator: ObservableObject {
     // Write-through to the .partial.md file for the active session.
     // Held only while a recording is in flight.
     private var fileHandle: MeetingFileStore.Handle?
+    /// Notes folder captured once in `start()` so a project switch
+    /// mid-recording can't split finalize/cleanup across two folders.
+    private var recordingRoot: URL?
+    /// Rows not yet written to the partial file, keyed by delta-state row id.
+    /// A row is written once it is "closed": it stopped growing for
+    /// `rowCloseAfter` seconds, scrolled off screen, or capture ended — so
+    /// the file doesn't get one row per growth step, yet a crash loses at
+    /// most the last few seconds.
+    /// `firstSeenAt` / `changedAt` are monotonic (`systemUptime`), so a wall
+    /// clock jump can neither flush early nor starve a row.
+    private struct PendingRow {
+        let timestamp: Date
+        let speaker: String
+        var text: String
+        let firstSeenAt: TimeInterval
+        var changedAt: TimeInterval
+    }
+    /// File-side mirror of every row, in row order, untouched by the UI trim
+    /// of `captions`.  The finish-time body rewrite is generated from this so
+    /// it stays correct after trimming.
+    /// NOTE: memory grows with meeting length (one small entry per
+    /// utterance, roughly 100-300 bytes each), unlike `captions`, which is
+    /// capped at `maxCaptionCount`.
+    private struct FileRow {
+        let timestamp: Date
+        let speaker: String
+        var text: String
+    }
+    private var fileRows: [Int: FileRow] = [:]
+    private var pendingRows: [Int: PendingRow] = [:]
+    /// Row id -> id of the `Caption` currently holding that row.
+    private var rowCaptionIDs: [Int: UUID] = [:]
+    private var writtenRows: Set<Int> = []
+    /// True when the partial file can differ from `captions` (a written row
+    /// later grew, or rows were written out of order).  Fixed up by a body
+    /// rewrite at finish.
+    private var fileNeedsRewrite = false
+    private let rowCloseAfter: TimeInterval = 3.0
+    /// A still-growing row is written anyway after this long, so a long
+    /// monologue survives a crash.  Later growth sets `fileNeedsRewrite`.
+    private let rowMaxPendingAge: TimeInterval = 15.0
 
     init(scrapers: [CaptionScraper] = PlatformDetector.allScrapers,
          pollInterval: TimeInterval = 0.25) {
@@ -117,13 +156,18 @@ final class CaptionOrchestrator: ObservableObject {
         sessionId = id
         startedAt = now
         captions.removeAll()
-        recentKeys.removeAll()
-        recentKeySet.removeAll()
+        deltaState = CaptionDeltaState()
+        pendingRows.removeAll()
+        rowCaptionIDs.removeAll()
+        writtenRows.removeAll()
+        fileRows.removeAll()
+        fileNeedsRewrite = false
         lastIngestStatus = .idle
         lastNewCaptionAt = now
         isIdlePolling = false
 
         let root = NotesFolderConfig().currentFolder
+        recordingRoot = root
         let store = MeetingFileStore(root: root)
         do {
             let h = try store.createPartial(
@@ -153,8 +197,10 @@ final class CaptionOrchestrator: ObservableObject {
         // ingest), flush and close the handle but leave the file in
         // place — recovery prompt picks it up on next launch.
         if let h = fileHandle {
+            flushAllPendingRows(to: h)
             try? h.flush()
             try? h.close()
+            rewriteTranscriptIfNeeded(at: h.url)
             // Keep fileHandle non-nil so finalize-on-next-stopAndIngest
             // would still find it; but here the orchestrator is done.
             fileHandle = nil
@@ -170,6 +216,14 @@ final class CaptionOrchestrator: ObservableObject {
         // stop() nils it; stop() only closes the handle in the
         // permission-lost path where nothing else will finalize.
         let capturedHandle = fileHandle
+        let capturedRoot = recordingRoot ?? NotesFolderConfig().currentFolder
+        if let handle = capturedHandle {
+            flushAllPendingRows(to: handle)
+            try? handle.flush()
+            // Before finalize: it reads the file by URL, so a body fixed up
+            // here is what gets finalized (the open fd just closes).
+            rewriteTranscriptIfNeeded(at: handle.url)
+        }
         fileHandle = nil
         stop()  // flush the timer first so a late tick can't mutate the buffer mid-ship
         guard let id = sessionId, let startedAt else {
@@ -181,7 +235,7 @@ final class CaptionOrchestrator: ObservableObject {
             // Close it, delete it, and drop its recovery record — left in
             // place, the next launch offered to "recover" an empty meeting.
             if let handle = capturedHandle {
-                let root = NotesFolderConfig().currentFolder
+                let root = capturedRoot
                 MeetingFileStore(root: root).discardPartial(handle: handle)
                 try? PartialRecovery(notesFolder: root).cleanup(id: handle.id)
             }
@@ -209,7 +263,7 @@ final class CaptionOrchestrator: ObservableObject {
         // Finalize the on-disk partial file first.  Independent of
         // /kb/ingest so we keep the file even if the network POST fails.
         if let handle = capturedHandle {
-            let root = NotesFolderConfig().currentFolder
+            let root = capturedRoot
             let store = MeetingFileStore(root: root)
             do {
                 let url = try store.finalize(
@@ -281,6 +335,7 @@ final class CaptionOrchestrator: ObservableObject {
             stop()
             return
         }
+        flushIdlePendingRows(now: ProcessInfo.processInfo.systemUptime)
         let scraper = scrapers.first(where: { $0.isAvailable() })
         guard let scraper else {
             activeSource = .unknown
@@ -300,25 +355,14 @@ final class CaptionOrchestrator: ObservableObject {
         }
 
         let now = Date()
-        // Expire old dedup entries from the front (recentKeys is time-ordered),
-        // keeping recentKeySet in sync — O(expired), not an O(n) scan per tick.
-        let cutoff = now.addingTimeInterval(-dedupWindow)
-        while let first = recentKeys.first, first.at < cutoff {
-            recentKeySet.remove(first.key)
-            recentKeys.removeFirst()
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let deltas = deltaState.ingest(scraper.snapshot())
+        let sawNew = deltas.contains { delta in
+            if case .closed = delta { return false }
+            return true
         }
-
-        var sawNew = false
-        for (speaker, text) in scraper.snapshot() {
-            let key = "\(speaker)::\(text)"
-            if recentKeySet.contains(key) { continue }   // O(1) dedup
-            recentKeys.append((key, now))
-            recentKeySet.insert(key)
-            captions.append(Caption(speaker: speaker, text: text, source: scraper.source))
-            sawNew = true
-            if let h = fileHandle {
-                try? h.appendCaption(timestamp: now, speaker: speaker, text: text)
-            }
+        for delta in deltas {
+            apply(delta, source: scraper.source, now: now, uptime: uptime)
         }
 
         if captions.count > maxCaptionCount {
@@ -339,6 +383,118 @@ final class CaptionOrchestrator: ObservableObject {
         }
     }
 
+    private func apply(_ delta: CaptionDelta, source: CaptureSource, now: Date,
+                       uptime: TimeInterval) {
+        switch delta {
+        case let .append(row, speaker, text):
+            appendRow(row, speaker: speaker, text: text, source: source,
+                      now: now, uptime: uptime)
+        case let .replace(row, speaker, _, newText):
+            updateFileSide(row, speaker: speaker, text: newText, now: now, uptime: uptime)
+            guard let captionID = rowCaptionIDs[row],
+                  let idx = captions.firstIndex(where: { $0.id == captionID }) else {
+                // Row was trimmed from the UI list; keep the text visible but
+                // do not re-pend it (updateFileSide already handled the file).
+                let caption = Caption(speaker: speaker, text: newText,
+                                      timestamp: now, source: source)
+                captions.append(caption)
+                rowCaptionIDs[row] = caption.id
+                return
+            }
+            let old = captions[idx]
+            // Keep the id so the list row identity (and auto-scroll) is stable.
+            captions[idx] = Caption(id: old.id, speaker: speaker, text: newText,
+                                    timestamp: old.timestamp, source: old.source)
+        case let .closed(row):
+            if let handle = fileHandle { flushRow(row, to: handle) }
+            rowCaptionIDs.removeValue(forKey: row)
+        }
+    }
+
+    /// Applies grown text to the file-side state for `row`: the mirror, and
+    /// either the pending row or a rewrite flag when it was already written.
+    private func updateFileSide(_ row: Int, speaker: String, text: String,
+                                now: Date, uptime: TimeInterval) {
+        if var mirrored = fileRows[row] {
+            mirrored.text = text
+            fileRows[row] = mirrored
+        } else {
+            fileRows[row] = FileRow(timestamp: now, speaker: speaker, text: text)
+        }
+        if var pending = pendingRows[row] {
+            pending.text = text
+            pending.changedAt = uptime
+            pendingRows[row] = pending
+        } else if writtenRows.contains(row) {
+            fileNeedsRewrite = true
+        } else {
+            let timestamp = fileRows[row]?.timestamp ?? now
+            pendingRows[row] = PendingRow(timestamp: timestamp, speaker: speaker, text: text,
+                                          firstSeenAt: uptime, changedAt: uptime)
+        }
+    }
+
+    private func appendRow(_ row: Int, speaker: String, text: String,
+                           source: CaptureSource, now: Date, uptime: TimeInterval) {
+        let caption = Caption(speaker: speaker, text: text, timestamp: now, source: source)
+        captions.append(caption)
+        rowCaptionIDs[row] = caption.id
+        fileRows[row] = FileRow(timestamp: now, speaker: speaker, text: text)
+        pendingRows[row] = PendingRow(timestamp: now, speaker: speaker, text: text,
+                                      firstSeenAt: uptime, changedAt: uptime)
+    }
+
+    /// Writes one pending row (if any) to `handle`.
+    private func flushRow(_ row: Int, to handle: MeetingFileStore.Handle) {
+        guard let pending = pendingRows.removeValue(forKey: row) else { return }
+        // An earlier row still pending means the file order will differ
+        // from `captions`; the finish-time rewrite repairs it.
+        if pendingRows.keys.contains(where: { $0 < row }) { fileNeedsRewrite = true }
+        writtenRows.insert(row)
+        try? handle.appendCaption(timestamp: pending.timestamp,
+                                  speaker: pending.speaker, text: pending.text)
+    }
+
+    /// Writes every pending row once, in row order, and clears them.
+    private func flushAllPendingRows(to handle: MeetingFileStore.Handle) {
+        for row in pendingRows.keys.sorted() { flushRow(row, to: handle) }
+    }
+
+    /// Writes rows that stopped growing for `rowCloseAfter` seconds, or that
+    /// have been pending longer than `rowMaxPendingAge` (`now` is uptime).
+    private func flushIdlePendingRows(now: TimeInterval) {
+        guard let handle = fileHandle else { return }
+        let idle = pendingRows
+            .filter {
+                now - $0.value.changedAt >= rowCloseAfter
+                    || now - $0.value.firstSeenAt >= rowMaxPendingAge
+            }
+            .keys.sorted()
+        for row in idle { flushRow(row, to: handle) }
+    }
+
+    /// Regenerates the transcript body from the file-side mirror (`fileRows`,
+    /// not `captions`, so UI trimming cannot lose rows) when the partial file
+    /// may disagree with it.  `MeetingFileStore` has no body-rewrite API, so
+    /// this keeps its line format.  Call after the handle is flushed;
+    /// best-effort.
+    private func rewriteTranscriptIfNeeded(at url: URL) {
+        guard fileNeedsRewrite else { return }
+        fileNeedsRewrite = false
+        let marker = "## Transcript\n\n"
+        guard let contents = try? String(contentsOf: url, encoding: .utf8),
+              let range = contents.range(of: marker) else { return }
+        let body = fileRows.keys.sorted().compactMap { fileRows[$0] }.map {
+            "[\(AppDateFormatter.hourMinuteSecond($0.timestamp))] **\($0.speaker)**: \($0.text)\n"
+        }.joined()
+        let rewritten = String(contents[..<range.upperBound]) + body
+        do {
+            try Data(rewritten.utf8).write(to: url, options: .atomic)
+        } catch {
+            log.error("transcript rewrite failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     private func setPollCadence(idle: Bool) {
         guard isRunning else { return }
         pollTimer?.invalidate()
@@ -349,5 +505,17 @@ final class CaptionOrchestrator: ObservableObject {
         RunLoop.main.add(timer, forMode: .common)
         pollTimer = timer
         isIdlePolling = idle
+    }
+}
+
+extension Caption {
+    /// Rebuilds a caption with an explicit id (a growing line keeps its
+    /// identity so list scrolling follows it).
+    init(id: UUID, speaker: String, text: String, timestamp: Date, source: CaptureSource) {
+        self.id = id
+        self.speaker = speaker
+        self.text = text
+        self.timestamp = timestamp
+        self.source = source
     }
 }

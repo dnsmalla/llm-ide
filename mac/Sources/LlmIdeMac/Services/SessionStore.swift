@@ -203,6 +203,10 @@ final class SessionStore: ObservableObject {
         // two. A server change in particular is a plausible move to a
         // different org's account.
         GenerationRegistry.shared.reset()
+        // Per-account state held by other long-lived stores (activity feed
+        // cursor, desktop Loop runs). clear() runs only on a definitive
+        // sign-out / auth rejection, never on a transient refresh failure.
+        SessionScopedRegistry.shared.resetAll()
     }
 
     @MainActor

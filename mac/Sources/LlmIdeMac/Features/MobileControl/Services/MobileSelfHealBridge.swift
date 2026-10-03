@@ -18,6 +18,8 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
     /// Incident ids with an apply/discard in progress. The incident stays `proposed` until the git work
     /// finishes, so without this a double-tap runs apply twice, or discard under a running apply.
     private var inFlight: Set<String> = []
+    /// Patches sent to the phone for review, so apply uses exactly what the user saw.
+    private var reviewed = ReviewedPatchCache()
 
     static let maxIncidents = 50
     static let maxMessage = 300
@@ -57,7 +59,11 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
         observing = true
         observe()
     }
-    func removePushObservers() { observing = false }
+    func removePushObservers() {
+        observing = false
+        // A stopped server means the phone is gone; a later pairing must review afresh.
+        reviewed = ReviewedPatchCache()
+    }
 
     private func observe() {
         guard observing else { return }
@@ -116,6 +122,24 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
                                    applyAllowed: manager.phoneAccess.isAllowed(.selfHealApply),
                                    busyReason: busyReason?() ?? manager.phoneWorkReason)
         if case .refuse(let why) = decision { push(error: why); return }
+        var reviewedPatch: SelfHealProposalService.ReviewedPatch?
+        if req.action == .apply, let proposal = incident.proposal {
+            // Only a patch the phone was shown may be applied; a restart or expiry loses it.
+            switch reviewed.lookup(for: incident.id, proposal: proposal,
+                                   deviceId: manager.connectedDeviceId, now: Date()) {
+            case .held(let held):
+                reviewedPatch = held
+            case .truncated:
+                push(error: Self.truncatedMessage)
+                return
+            case .missing:
+                // The phone keeps its cached diff for the whole session, so refill the Mac's cache
+                // AND replace the phone's copy instead of asking it to reopen.
+                push(error: Self.notReviewedMessage)
+                sendDiff(for: incident.id)
+                return
+            }
+        }
         if req.action == .apply || req.action == .discard {
             guard !inFlight.contains(incident.id) else { push(error: "That proposal is already being processed."); return }
             inFlight.insert(incident.id)
@@ -142,22 +166,33 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
                 }
             }
         case .apply:
-            guard let proposal = incident.proposal else { return }
+            guard let proposal = incident.proposal, let held = reviewedPatch else { return }
             manager.append(.info, "selfheal apply (phone) \(incident.id)")
             Task { @MainActor [weak self] in
                 defer { self?.inFlight.remove(incident.id) }
                 do {
-                    try await Task.detached { try SelfHealProposalService.apply(proposal) }.value
+                    try await Task.detached {
+                        try SelfHealProposalService.apply(proposal, reviewed: held.binaryPatch)
+                    }.value
+                    self?.reviewed.remove(incident.id)
                     // A leftover worktree is not an error — same as the Mac sheet.
                     try? await Task.detached { try SelfHealProposalService.discard(proposal) }.value
                     SelfHealProposalService.markApplied(proposal, store: store)
                     self?.push(message: "Applied to the LLM-IDE source checkout. Nothing was committed.")
+                } catch SelfHealProposalService.Failure.changedSinceReview {
+                    self?.reviewed.remove(incident.id)
+                    self?.push(error: Self.changedMessage)
+                    self?.sendDiff(for: incident.id)
                 } catch let failure {
                     self?.push(error: Self.safe(failure.localizedDescription))
                 }
             }
         }
     }
+
+    static let notReviewedMessage = "Review the diff again before applying."
+    static let changedMessage = "The proposal changed since you reviewed it. The diff was refreshed. Review it again before applying."
+    static let truncatedMessage = "Diff too long to review on the phone. Apply it from the Mac."
 
     private func sendDiff(for incidentId: String) {
         guard let proposal = IncidentStore.shared.incidents.first(where: { $0.id == incidentId })?.proposal else {
@@ -167,9 +202,13 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
         Task { @MainActor [weak self] in
             do {
                 // git AND the redaction both run off the main actor.
-                let (text, truncated) = try await Task.detached {
-                    Self.shapeDiff(try SelfHealProposalService.diff(proposal))
+                let (patch, text, truncated) = try await Task.detached {
+                    let patch = try SelfHealProposalService.reviewedPatch(proposal)
+                    let shaped = Self.shapeDiff(patch.text)
+                    return (patch, shaped.0, shaped.1)
                 }.value
+                self?.reviewed.store(patch, for: incidentId, proposal: proposal, truncated: truncated,
+                                     deviceId: self?.manager?.connectedDeviceId, now: Date())
                 self?.manager?.reply(SelfHealDiffResult(incidentId: incidentId,
                                                         diff: text.isEmpty ? "(no changes)" : text,
                                                         truncated: truncated))
@@ -215,4 +254,58 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
     }
 
     nonisolated static func safe(_ s: String, limit: Int = 300) -> String { PhoneRedaction.short(s, limit: limit) }
+}
+
+/// Bounded, expiring map of incident id to the patch last sent to the phone. Main-actor owned by the
+/// bridge; pure value type so a test can pin capacity and expiry. Entries are bound to the device that
+/// reviewed them so a newly paired phone cannot apply another device's review.
+struct ReviewedPatchCache {
+    struct Entry {
+        let patch: SelfHealProposalService.ReviewedPatch
+        let proposal: IncidentProposal
+        let truncated: Bool
+        let deviceId: String?
+        let storedAt: Date
+    }
+
+    enum Lookup {
+        case held(SelfHealProposalService.ReviewedPatch)
+        /// Never reviewed, expired, evicted, wrong proposal, or reviewed by another device.
+        case missing
+        /// The phone saw only the first part of the diff; the whole patch must not be applied from it.
+        case truncated
+    }
+
+    static let capacity = 8
+    static let lifetime: TimeInterval = 30 * 60
+
+    private(set) var entries: [String: Entry] = [:]
+
+    mutating func store(_ patch: SelfHealProposalService.ReviewedPatch, for key: String,
+                        proposal: IncidentProposal, truncated: Bool = false,
+                        deviceId: String? = nil, now: Date) {
+        prune(now: now)
+        entries[key] = Entry(patch: patch, proposal: proposal, truncated: truncated,
+                             deviceId: deviceId, storedAt: now)
+        while entries.count > Self.capacity,
+              let oldest = entries.min(by: { $0.value.storedAt < $1.value.storedAt })?.key {
+            entries.removeValue(forKey: oldest)
+        }
+    }
+
+    /// Returns the held patch only if it is fresh, complete, and belongs to this exact proposal and device.
+    mutating func lookup(for key: String, proposal: IncidentProposal, deviceId: String? = nil,
+                         now: Date) -> Lookup {
+        prune(now: now)
+        guard let entry = entries[key], entry.proposal == proposal, entry.deviceId == deviceId else {
+            return .missing
+        }
+        return entry.truncated ? .truncated : .held(entry.patch)
+    }
+
+    mutating func remove(_ key: String) { entries.removeValue(forKey: key) }
+
+    private mutating func prune(now: Date) {
+        entries = entries.filter { now.timeIntervalSince($0.value.storedAt) <= Self.lifetime }
+    }
 }
