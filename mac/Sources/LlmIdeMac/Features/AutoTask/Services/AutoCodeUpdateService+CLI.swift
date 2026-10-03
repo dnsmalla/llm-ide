@@ -730,6 +730,7 @@ extension AutoCodeUpdateService {
 
         activeProcess = nil
         var emptyImplementBranch: String?
+        var keepWorktreeForRecovery = false
         if let implementBranch {
             // `.implement`: persist the CLI's edits as a commit on its branch,
             // inside the worktree — the only changes there are this task's.
@@ -739,14 +740,30 @@ extension AutoCodeUpdateService {
             if committed {
                 logStore.append(logStoreId, "Committed on branch \(implementBranch) (your checkout is unchanged).")
             } else {
-                logStore.append(logStoreId, "No commit produced (nothing to commit, or commit failed).", level: .error)
-                emptyImplementBranch = implementBranch
+                // `commit` exits non-zero for "nothing to commit" AND for a
+                // failing hook / missing identity / signing error. Only a clean
+                // tree proves the former; `isWorkingTreeClean` fails closed, so
+                // an unverifiable tree is kept too. Removing the worktree of a
+                // dirty one would destroy the CLI's finished edits.
+                let isTreeClean = await Task.detached { Self.isWorkingTreeClean(at: worktree) }.value
+                if isTreeClean {
+                    logStore.append(logStoreId, "No commit produced (nothing to commit).", level: .error)
+                    emptyImplementBranch = implementBranch
+                } else {
+                    keepWorktreeForRecovery = true
+                    logStore.append(
+                        logStoreId,
+                        "Commit failed; the CLI's edits are kept uncommitted in \(worktree) on branch \(implementBranch).",
+                        level: .error)
+                }
             }
         }
         // Review: everything the CLI wrote goes away with the worktree —
         // findings live in the log via stdout. Implement: the commit is on
         // its branch; the checkout itself is no longer needed.
-        await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
+        if !keepWorktreeForRecovery {
+            await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
+        }
         // Only now: `git branch -D` refuses a branch that a worktree still
         // has checked out, so the delete must follow the removal.
         if let empty = emptyImplementBranch {
