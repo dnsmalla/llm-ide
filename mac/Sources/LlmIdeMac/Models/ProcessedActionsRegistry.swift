@@ -22,6 +22,13 @@ final class ProcessedActionsRegistry {
         var registeredAt: Date
         var lastUpdated: Date
         var taskType: String?
+        /// Repo the action was registered against ("<kind>/<projectId>").
+        /// nil for legacy entries written before this field existed (they
+        /// decode as nil and keep the old match-everything behaviour).
+        var repoKey: String?
+        /// The "starting work" issue comment was already posted (survives a
+        /// Stop, which leaves retryCount at 0). nil for legacy entries.
+        var startAnnounced: Bool?
     }
 
     // MARK: - State
@@ -59,12 +66,25 @@ final class ProcessedActionsRegistry {
 
     // MARK: - Public API
 
-    func isKnown(id: String) -> Bool {
-        entries[id] != nil
+    /// Dictionary key: the registry file is global across projects and the same
+    /// meeting action can surface in several repos, so a repo-scoped entry is
+    /// keyed by repo AND id (one repo's entry must never overwrite another's).
+    /// Legacy entries (no repo key) keep the bare id.
+    private static func storageKey(id: String, repoKey: String?) -> String {
+        repoKey.map { "\($0)|\(id)" } ?? id
     }
 
-    func register(action: NoteAction, issueIid: Int?) {
-        guard !isKnown(id: action.id) else { return }
+    /// Whether this repo already handled `id`. A legacy (no-repo-key) entry
+    /// counts as known everywhere: its origin is unknowable, and re-creating an
+    /// issue for an action that may well be done is the worse error.
+    func isKnown(id: String, repoKey: String? = nil) -> Bool {
+        if entries[Self.storageKey(id: id, repoKey: repoKey)] != nil { return true }
+        return entries[id]?.repoKey == nil && entries[id] != nil
+    }
+
+    func register(action: NoteAction, issueIid: Int?, repoKey: String? = nil) {
+        let key = Self.storageKey(id: action.id, repoKey: repoKey)
+        guard !isKnown(id: action.id, repoKey: repoKey) else { return }
         let entry = RegistryEntry(
             actionId: action.id,
             actionText: action.text,
@@ -72,22 +92,33 @@ final class ProcessedActionsRegistry {
             status: .pending,
             retryCount: 0,
             registeredAt: Date(),
-            lastUpdated: Date()
+            lastUpdated: Date(),
+            repoKey: repoKey
         )
-        entries[action.id] = entry
+        entries[key] = entry
         save()
     }
 
-    func markImplementing(id: String) {
-        update(id: id) { $0.status = .implementing }
+    func markImplementing(id: String, repoKey: String? = nil) {
+        update(id: id, repoKey: repoKey) { $0.status = .implementing }
     }
 
-    func markDone(id: String) {
-        update(id: id) { $0.status = .done }
+    /// Back to `pending` WITHOUT touching retryCount — for a user Stop, which
+    /// must not count toward the 3-strike limit.
+    func markPending(id: String, repoKey: String? = nil) {
+        update(id: id, repoKey: repoKey) { $0.status = .pending }
     }
 
-    func markFailed(id: String) {
-        update(id: id) {
+    func markStartAnnounced(id: String, repoKey: String? = nil) {
+        update(id: id, repoKey: repoKey) { $0.startAnnounced = true }
+    }
+
+    func markDone(id: String, repoKey: String? = nil) {
+        update(id: id, repoKey: repoKey) { $0.status = .done }
+    }
+
+    func markFailed(id: String, repoKey: String? = nil) {
+        update(id: id, repoKey: repoKey) {
             $0.retryCount += 1
             $0.status = .failed
         }
@@ -95,14 +126,19 @@ final class ProcessedActionsRegistry {
 
     /// Returns entries eligible for a CLI implementation run.
     /// Includes `pending` and `failed` entries with fewer than 3 retries.
-    func pendingEntries() -> [RegistryEntry] {
+    /// With a `repoKey`, only that repo's entries: a legacy (no-key) entry's
+    /// `issueIid` would be looked up in whichever repo is active now, i.e.
+    /// implemented as an unrelated issue, so it is skipped. nil matches all.
+    /// Ordered oldest-first so runs are deterministic, not dictionary-order.
+    func pendingEntries(repoKey: String? = nil) -> [RegistryEntry] {
         entries.values.filter { entry in
+            if let repoKey, entry.repoKey != repoKey { return false }
             switch entry.status {
             case .pending:             return true
             case .failed:              return entry.retryCount < 3
             case .implementing, .done: return false
             }
-        }
+        }.sorted { $0.registeredAt < $1.registeredAt }
     }
 
     func allEntries() -> [RegistryEntry] {
@@ -111,11 +147,12 @@ final class ProcessedActionsRegistry {
 
     // MARK: - Private
 
-    private func update(id: String, mutation: (inout RegistryEntry) -> Void) {
-        guard var entry = entries[id] else { return }
+    private func update(id: String, repoKey: String?, mutation: (inout RegistryEntry) -> Void) {
+        let key = Self.storageKey(id: id, repoKey: repoKey)
+        guard var entry = entries[key] else { return }
         mutation(&entry)
         entry.lastUpdated = Date()
-        entries[id] = entry
+        entries[key] = entry
         save()
     }
 
@@ -198,4 +235,11 @@ final class ProcessedActionsRegistry {
             onSaveError?(error)
         }
     }
+}
+
+
+extension ProcessedActionsRegistry.RegistryEntry: Identifiable {
+    /// Same shape as the registry's storage key: one action can have an entry
+    /// per repo, so `actionId` alone is not unique in a list.
+    var id: String { repoKey.map { "\($0)|\(actionId)" } ?? actionId }
 }

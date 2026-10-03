@@ -247,7 +247,7 @@ struct AutoCodeView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(autoCode.allEntries, id: \.actionId) { entry in
+                        ForEach(autoCode.allEntries, id: \.id) { entry in
                             historyRow(entry)
                         }
                     }

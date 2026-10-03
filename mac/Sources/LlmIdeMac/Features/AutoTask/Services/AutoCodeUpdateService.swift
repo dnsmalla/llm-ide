@@ -829,38 +829,46 @@ final class AutoCodeUpdateService: ObservableObject {
 
     // MARK: - Main run loop
 
+    /// Auto-stash bookkeeping (opt-in) shared between `runPipeline`, which
+    /// stashes, and `run`, which restores once the pipeline has returned.
+    private final class StashRecord {
+        var didStash = false
+        var branch: String?
+        var path: String?
+    }
+
     func run(trigger: AutoTaskRunTrigger = .pipeline) async {
         guard !isRunning else { return }
         isRunning = true
+        let stash = StashRecord()
+        await runPipeline(trigger: trigger, stash: stash)
+        // Restore the stash OFF the main actor (checkout + pop can be slow on
+        // a large repo) but AWAIT it here: `isRunning` and `runTask` must end
+        // together, otherwise a cron tick / Run Now in the gap is accepted and
+        // then silently skipped by the `!isRunning` guards. On a failed
+        // restore the stash is retained and we surface a recovery note.
+        if stash.didStash, let path = stash.path {
+            let branch = stash.branch
+            let restored = await Task.detached(priority: .userInitiated) {
+                Self.restoreStash(at: path, originalBranch: branch)
+            }.value
+            if !restored {
+                lastError = "Auto Tasks stashed your uncommitted changes but couldn't restore them cleanly — they're safe in `git stash` (the repo may be left on a fix/* branch). Run `git stash pop` to recover."
+            }
+        }
+        isRunning = false
+    }
+
+    private func runPipeline(trigger: AutoTaskRunTrigger, stash: StashRecord) async {
         currentStep = "Initializing"
         createdCount = 0
         implementedCount = 0
         failedCount = 0
         lastError = nil
         taskErrors = [:]
-        // Auto-stash bookkeeping (opt-in). Declared before the defer so the
-        // defer can always restore, even on an early return.
-        var didStash = false
-        var stashBranch: String? = nil
-        var stashPath: String? = nil
         defer {
-            isRunning = false
             currentStep = nil
             lastRunDate = Date()
-            // Restore the stash OFF the main actor — checkout + pop can be slow
-            // on a large repo and must not freeze the UI. Fire-and-forget; on a
-            // failed restore the stash is retained and we surface a recovery
-            // note. (defer can't await, hence the detached Task.)
-            if didStash, let p = stashPath {
-                let branch = stashBranch
-                Task.detached(priority: .userInitiated) {
-                    if !Self.restoreStash(at: p, originalBranch: branch) {
-                        await MainActor.run { [weak self] in
-                            self?.lastError = "Auto Tasks stashed your uncommitted changes but couldn't restore them cleanly — they're safe in `git stash` (the repo may be left on a fix/* branch). Run `git stash pop` to recover."
-                        }
-                    }
-                }
-            }
         }
 
         // .generateKnowledge only reports on the Graph/memory artifacts —
@@ -901,9 +909,9 @@ final class AutoCodeUpdateService: ObservableObject {
                 return (Self.stashPush(at: gitRoot), branch)
             }.value
             if stashResult.didStash {
-                didStash = true
-                stashBranch = stashResult.branch
-                stashPath = gitRoot
+                stash.didStash = true
+                stash.branch = stashResult.branch
+                stash.path = gitRoot
             }
         }
 

@@ -311,6 +311,7 @@ extension AutoCodeUpdateService {
             return
         }
 
+        let repoKey = Self.registryRepoKey(resolved)
         let actions = NoteActionExtractor.extract(from: recentRows)
         // Dedupe by id BEFORE the registry filter: the same action text can
         // now legitimately appear twice in `recentRows` (a meeting transcript
@@ -321,7 +322,7 @@ extension AutoCodeUpdateService {
         // separately below.
         var seenActionIds = Set<String>()
         let dedupedActions = actions.filter { seenActionIds.insert($0.id).inserted }
-        let newActions = dedupedActions.filter { !registry.isKnown(id: $0.id) }
+        let newActions = dedupedActions.filter { !registry.isKnown(id: $0.id, repoKey: repoKey) }
         if newActions.isEmpty {
             logStore.append(.sourcesToIssue, "No new action items to file as issues.")
             taskErrors.removeValue(forKey: key)
@@ -347,8 +348,8 @@ extension AutoCodeUpdateService {
             if Task.isCancelled { break }
             let normalized = NoteActionExtractor.normalize(action.text)
             if normalizedExistingTitles.contains(normalized) {
-                registry.register(action: action, issueIid: nil)
-                registry.markDone(id: action.id)
+                registry.register(action: action, issueIid: nil, repoKey: repoKey)
+                registry.markDone(id: action.id, repoKey: repoKey)
                 continue
             }
             do {
@@ -358,7 +359,7 @@ extension AutoCodeUpdateService {
                 )
                 let created = try await client.createIssue(projectId: resolved.projectId, payload: payload)
                 normalizedExistingTitles.insert(normalized)
-                registry.register(action: action, issueIid: created.number)
+                registry.register(action: action, issueIid: created.number, repoKey: repoKey)
                 createdCount += 1
                 logStore.append(.sourcesToIssue, "Created issue #\(created.number): \(created.title)")
                 activity?.report(
@@ -385,6 +386,12 @@ extension AutoCodeUpdateService {
         logStore.append(.sourcesToIssue, "— run finished —")
     }
 
+    /// Registry scope for `resolved`, so one project's pending issues are not
+    /// handed to another after a project switch.
+    static func registryRepoKey(_ resolved: ResolvedRepo) -> String {
+        "\(resolved.client.kind.rawValue)/\(resolved.projectId)"
+    }
+
     /// Run the CLI against pending registry entries (local fix branches).
     func runImplementIssues(resolved: ResolvedRepo, logDir: URL) async {
         let key = AutoTask.implementIssues.rawValue
@@ -399,7 +406,7 @@ extension AutoCodeUpdateService {
             return
         }
 
-        let pending = registry.pendingEntries()
+        let pending = registry.pendingEntries(repoKey: Self.registryRepoKey(resolved))
         if pending.isEmpty {
             logStore.append(.implementIssues, "No pending issues to implement.")
             taskErrors.removeValue(forKey: key)
@@ -429,14 +436,14 @@ extension AutoCodeUpdateService {
                     issue = try await client.getIssue(projectId: resolved.projectId, number: number)
                 } catch {
                     log.error("Failed to fetch issue \(number, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                    registry.markFailed(id: entry.actionId)
+                    registry.markFailed(id: entry.actionId, repoKey: entry.repoKey)
                     failedCount += 1
                     logStore.append(.implementIssues, "Issue #\(number): fetch failed.", level: .error)
                     continue
                 }
             }
 
-            registry.markImplementing(id: entry.actionId)
+            registry.markImplementing(id: entry.actionId, repoKey: entry.repoKey)
             logStore.append(.implementIssues, "Implementing issue #\(number)…")
 
             if let base = baseBranch {
@@ -445,7 +452,7 @@ extension AutoCodeUpdateService {
                     let msg = "Issue #\(number): couldn't switch to base branch \(base)."
                     taskErrors["#\(number)"] = msg
                     logStore.append(.implementIssues, msg, level: .error)
-                    registry.markFailed(id: entry.actionId)
+                    registry.markFailed(id: entry.actionId, repoKey: entry.repoKey)
                     failedCount += 1
                     continue
                 }
@@ -461,7 +468,11 @@ extension AutoCodeUpdateService {
             // same plan on every retry (with no "it failed" comment in
             // between) reads as the task being stuck in a loop.
             let plannedBranch = "fix/\(number)-\(Self.issueBranchSlug(from: issue.title))"
-            if entry.retryCount == 0, config.isAllowed(.commentIssue, provider: client.kind) {
+            if entry.retryCount == 0, entry.startAnnounced != true,
+               config.isAllowed(.commentIssue, provider: client.kind) {
+                // Recorded BEFORE posting: a Stop leaves the entry pending with
+                // retryCount 0, and the next run must not post the same plan again.
+                registry.markStartAnnounced(id: entry.actionId, repoKey: entry.repoKey)
                 do {
                     _ = try await client.createNote(
                         projectId: resolved.projectId,
@@ -477,6 +488,13 @@ extension AutoCodeUpdateService {
             let baseSha = await Task.detached { Self.headSha(at: capturedGitRoot) }.value
 
             let succeeded = await runCLI(issue: issue, localPath: capturedGitRoot, logDir: logDir)
+            // Stop is not a failure: markFailed would bump retryCount, and
+            // three Stops would exclude the entry for good. Leave it pending.
+            if !succeeded && Task.isCancelled {
+                registry.markPending(id: entry.actionId, repoKey: entry.repoKey)
+                logStore.append(.implementIssues, "Issue #\(number): stopped; left pending.")
+                break
+            }
             let headAfter = await Task.detached { Self.headSha(at: capturedGitRoot) }.value
             let committed = succeeded && headAfter != nil && headAfter != baseSha
 
@@ -484,7 +502,7 @@ extension AutoCodeUpdateService {
                 var branchAfter = await Task.detached { Self.currentBranch(at: capturedGitRoot) }.value
                 if let base = baseBranch, let baseSha, branchAfter == base {
                     let rescue = "fix/\(number)-auto"
-                    let rescued = await Task.detached {
+                    _ = await Task.detached {
                         Self.rescueCommitToBranch(rescue, base: base, baseSha: baseSha, at: capturedGitRoot)
                     }.value
                     // `rescueCommitToBranch` can fail on its LAST step (the
@@ -497,15 +515,21 @@ extension AutoCodeUpdateService {
                     // when the commit actually landed on `rescue`. (Written
                     // as an explicit `if`, not `rescued || await …` — `||`'s
                     // autoclosure doesn't support `await`.)
-                    var rescueBranchExists = rescued
-                    if !rescueBranchExists {
-                        rescueBranchExists = await Task.detached {
-                            Self.localBranches(prefix: "fix/", at: capturedGitRoot).contains(rescue)
-                        }.value
+                    // Verified by SHA, not by name or by the Bool: a stale
+                    // `rescue` branch from an earlier run exists but does not
+                    // hold this commit (the rescue refused to touch it), and a
+                    // failed last step leaves the commit on `rescue` while
+                    // `base` still carries it.
+                    let rescueSha = await Task.detached { Self.refSha("refs/heads/\(rescue)", at: capturedGitRoot) }.value
+                    if let rescueSha, rescueSha == headAfter {
+                        branchAfter = rescue
+                        let baseNow = await Task.detached { Self.refSha("refs/heads/\(base)", at: capturedGitRoot) }.value
+                        if baseNow != baseSha {
+                            logStore.append(.implementIssues, "Issue #\(number): commit is on \(rescue), but \(base) could not be moved back — check \(base) manually.", level: .error)
+                        }
                     }
-                    if rescueBranchExists { branchAfter = rescue }
                 }
-                registry.markDone(id: entry.actionId)
+                registry.markDone(id: entry.actionId, repoKey: entry.repoKey)
                 implementedCount += 1
                 // `branchAfter` is nil only when `git rev-parse` itself failed
                 // (detached HEAD, git error) — genuinely unknown, so the
@@ -529,7 +553,7 @@ extension AutoCodeUpdateService {
                     taskErrors["#\(number)"] = "Issue #\(number): CLI finished but made no commit."
                     logStore.append(.implementIssues, taskErrors["#\(number)"]!, level: .error)
                 }
-                registry.markFailed(id: entry.actionId)
+                registry.markFailed(id: entry.actionId, repoKey: entry.repoKey)
                 failedCount += 1
             }
         }
