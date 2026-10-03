@@ -10,6 +10,8 @@ struct SelfHealProposalSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var diff = ""
     @State private var diffLoaded = false
+    /// The exact `--binary` patch captured when the sheet loaded; Apply uses these bytes.
+    @State private var reviewedPatch: Data?
     @State private var failure: String?
     @State private var working = false
     private static let log = Logger(subsystem: "com.llmide.macapp", category: "Incidents")
@@ -33,17 +35,7 @@ struct SelfHealProposalSheet: View {
                 }
                 Spacer()
                 Button("Close") { dismiss() }
-                Button("Apply to this checkout") {
-                    run(gitWork: {
-                        try SelfHealProposalService.apply(proposal)
-                        do {
-                            try SelfHealProposalService.discard(proposal)
-                        } catch {
-                            // .info, not .error: a leftover worktree is not an incident to self-heal.
-                            Self.log.info("Self-Heal: could not remove worktree \(proposal.worktreePath, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                        }
-                    }, onSuccess: { SelfHealProposalService.markApplied(proposal, store: .shared) })
-                }
+                Button("Apply to this checkout") { runApply() }
                 .buttonStyle(.borderedProminent)
                 .disabled(!diffLoaded)
             }
@@ -54,17 +46,34 @@ struct SelfHealProposalSheet: View {
         .task {
             let p = proposal
             do {
-                let text = try await Task.detached { try SelfHealProposalService.diff(p) }.value
-                if text.isEmpty {
+                let reviewed = try await Task.detached { try SelfHealProposalService.reviewedPatch(p) }.value
+                if reviewed.binaryPatch.isEmpty {
                     diff = "(no changes)"
                 } else {
-                    diff = text
+                    diff = reviewed.text.isEmpty ? "(binary changes only)" : reviewed.text
+                    reviewedPatch = reviewed.binaryPatch
                     diffLoaded = true
                 }
             } catch {
                 failure = error.localizedDescription
             }
         }
+    }
+
+    private func runApply() {
+        guard let patch = reviewedPatch else { return }
+        let p = proposal
+        run(gitWork: {
+            // WHY bytes, not a re-diff: the user approved this exact patch (binary parts
+            // included); the service refuses if the worktree has drifted since.
+            try SelfHealProposalService.apply(p, reviewed: patch)
+            do {
+                try SelfHealProposalService.discard(p)
+            } catch {
+                // .info, not .error: a leftover worktree is not an incident to self-heal.
+                Self.log.info("Self-Heal: could not remove worktree \(p.worktreePath, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }, onSuccess: { SelfHealProposalService.markApplied(p, store: .shared) })
     }
 
     // gitWork runs off the main actor (a slow git call must not block the UI); onSuccess/failure hop back to touch main-actor-isolated state.
