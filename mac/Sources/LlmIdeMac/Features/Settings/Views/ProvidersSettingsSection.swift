@@ -21,6 +21,13 @@ struct ProvidersSettingsSection: View {
 
     @State private var drafts: [String: String] = [:]
     @State private var baseURLDraft: String = ""
+    /// Non-secret copy of the last saved custom base URL. The vault is
+    /// write-only, so without this the field could never be prefilled and
+    /// changing only the base URL meant retyping the key.
+    @AppStorage("MEETNOTES_CUSTOM_BASE_URL_HINT") private var savedBaseURL = ""
+    /// Set when the vault listing failed; otherwise every provider would
+    /// silently read "not configured" and Clear would be hidden.
+    @State private var configuredLoadError: String?
     @State private var status: [String: (ok: Bool, msg: String)] = [:]
     @State private var configured: Set<String> = []
     @State private var busy: Set<String> = []
@@ -29,6 +36,12 @@ struct ProvidersSettingsSection: View {
         SettingsSectionCard(icon: "key.horizontal", title: "Model Providers") {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 SettingsHint("Pick the default provider (◉) and model for new Code & Doc Review chats, and add each provider's credentials. A key runs over the fast HTTP API; with no key, “Check CLI” uses your logged-in CLI (subscription). Keys are stored in the server vault — never on disk here. You can also switch provider/model live in the chat composer. For multiple named providers (GLM, Ollama, …), see Custom Providers below.")
+                if let configuredLoadError {
+                    Text(configuredLoadError)
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 ForEach(providers) { providerRow($0) }
 
                 Divider().padding(.vertical, Spacing.sm)
@@ -36,7 +49,10 @@ struct ProvidersSettingsSection: View {
                 agentEngineToggle
             }
         }
-        .task { await loadConfigured() }
+        .task {
+            if baseURLDraft.isEmpty { baseURLDraft = savedBaseURL }
+            await loadConfigured()
+        }
         .onAppear(perform: normalizeActiveCLI)
     }
 
@@ -68,9 +84,12 @@ struct ProvidersSettingsSection: View {
         guard let tool = p.tool else { return }
         let changed = config.activeCLI != tool.rawValue
         config.activeCLI = tool.rawValue
+        // Re-clicking the active provider must not wipe the user's Default
+        // model or the purpose picks — only a real provider change resets them.
+        guard changed else { return }
         config.defaultModelId = tool.defaultModelId
-        // Re-clicking the active provider must not wipe the purpose picks.
-        if changed { config.resetPurposeModels(); config.modelPickIsExplicit = false }
+        config.resetPurposeModels()
+        config.modelPickIsExplicit = false
     }
 
     /// Keep `activeCLI` pointing at a selectable provider (a stale persisted
@@ -134,7 +153,7 @@ struct ProvidersSettingsSection: View {
                 Button(busy.contains(p.id) ? "Verifying…" : "Save & verify") {
                     Task { await saveAndVerify(p) }
                 }
-                .disabled(busy.contains(p.id) || (drafts[p.id] ?? "").isEmpty)
+                .disabled(busy.contains(p.id) || !canSave(p))
                 if configured.contains(p.vaultKey) {
                     Button("Clear") { Task { await clear(p) } }
                         .disabled(busy.contains(p.id))
@@ -157,7 +176,7 @@ struct ProvidersSettingsSection: View {
                         Text("Default model")
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
-                        Picker("", selection: $config.defaultModelId) {
+                        Picker("", selection: defaultModelBinding) {
                             ForEach(options) { Text($0.displayName).tag($0.id) }
                         }
                         .labelsHidden().pickerStyle(.menu).fixedSize()
@@ -206,6 +225,24 @@ struct ProvidersSettingsSection: View {
         return out
     }
 
+    /// The Default picker must also drop a composer pick, like the purpose
+    /// pickers do — the hint under them promises "until you change a model here".
+    // NOTE: uses the property directly; fold into a Config API if one appears.
+    private var defaultModelBinding: Binding<String> {
+        Binding(
+            get: { config.defaultModelId },
+            set: { config.defaultModelId = $0; config.modelPickIsExplicit = false })
+    }
+
+    /// A key is needed unless the row only changes the base URL of a provider
+    /// whose key is already in the vault.
+    private func canSave(_ p: ProviderCatalog.Entry) -> Bool {
+        if !(drafts[p.id] ?? "").isEmpty { return true }
+        guard p.needsBaseURL, configured.contains(p.vaultKey) else { return false }
+        let base = baseURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !base.isEmpty && base != savedBaseURL
+    }
+
     private func bindingFor(_ id: String) -> Binding<String> {
         Binding(get: { drafts[id] ?? "" }, set: { drafts[id] = $0 })
     }
@@ -213,12 +250,16 @@ struct ProvidersSettingsSection: View {
     // MARK: - Actions
 
     private func loadConfigured() async {
-        configured = (try? await api.configuredSecretKeys()) ?? []
+        do {
+            configured = try await api.configuredSecretKeys()
+            configuredLoadError = nil
+        } catch {
+            configuredLoadError = "Couldn't read which keys are stored (\(error.localizedDescription)). Rows below may show as not configured when they are."
+        }
     }
 
     private func saveAndVerify(_ p: ProviderCatalog.Entry) async {
         let key = (drafts[p.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else { return }
         busy.insert(p.id); defer { busy.remove(p.id) }
         do {
             var base: String?
@@ -228,7 +269,23 @@ struct ProvidersSettingsSection: View {
                     status[p.id] = (false, "Enter a base URL (e.g. https://openrouter.ai/api/v1).")
                     return
                 }
+                // The key is sent to this URL on every request, so plain http
+                // to a remote host would expose it (stored or newly entered).
+                guard !EndpointSecurity.isInsecureRemoteHTTP(b) else {
+                    status[p.id] = (false, "Plain http to a non-local host would send your API key unencrypted. Use https.")
+                    return
+                }
                 base = b
+            }
+            guard !key.isEmpty else {
+                // Base-URL-only change: the stored key stays, so there is
+                // nothing to verify against here.
+                guard let base, configured.contains(p.vaultKey) else { return }
+                try await api.setSecret(key: "custom.baseUrl", value: base)
+                configured.insert("custom.baseUrl")
+                savedBaseURL = base
+                status[p.id] = (true, "Base URL saved (key unchanged — not re-verified).")
+                return
             }
             // Verify BEFORE saving (the server accepts the candidate key and
             // base URL in the body). Saving first left a key that failed
@@ -237,13 +294,21 @@ struct ProvidersSettingsSection: View {
             let result = try await api.verifyProvider(p.id, mode: "key", apiKey: key, baseUrl: base)
             status[p.id] = (result.ok, result.ok ? "Verified ✓" : (result.detail ?? "Verification failed — key not saved"))
             guard result.ok else { return }
-            if let base {
-                try await api.setSecret(key: "custom.baseUrl", value: base)
-                configured.insert("custom.baseUrl")
-            }
+            // Key first: if the second write fails the base URL is the stale
+            // half, which the message below names, instead of a new URL
+            // paired with a key that was never stored.
             try await api.setSecret(key: p.vaultKey, value: key)
             configured.insert(p.vaultKey)
             drafts[p.id] = ""           // don't keep the secret in view state
+            if let base {
+                do {
+                    try await api.setSecret(key: "custom.baseUrl", value: base)
+                    configured.insert("custom.baseUrl")
+                    savedBaseURL = base
+                } catch {
+                    status[p.id] = (false, "Key saved, but the base URL was not: \(error.localizedDescription)")
+                }
+            }
         } catch {
             status[p.id] = (false, error.localizedDescription)
         }

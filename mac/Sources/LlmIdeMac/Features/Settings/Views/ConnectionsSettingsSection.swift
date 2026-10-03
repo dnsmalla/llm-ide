@@ -175,6 +175,14 @@ struct ConnectionsSettingsSection: View {
 
     // MARK: - Meetings add-on
 
+    /// The preference alone is not "On": the service only starts while the
+    /// Auto-Tasks feature is compiled in AND enabled at runtime.
+    private var isAutoCaptureLive: Bool {
+        config.autoCaptureOnMeeting
+            && registry.compiledFeatures.contains(.autoTasks)
+            && registry.isEnabled(.autoTasks)
+    }
+
     /// The single home for meeting capture config: the auto-capture toggle
     /// plus the poll interval. Drives `config.autoCaptureOnMeeting` /
     /// `pollIntervalMs` — the same properties the capture runtime reads.
@@ -183,8 +191,8 @@ struct ConnectionsSettingsSection: View {
             icon: "waveform",
             title: "Meetings",
             subtitle: MeetingCaptureMatrix.connectionsSubtitle,
-            badgeText: config.autoCaptureOnMeeting ? "On" : "Off",
-            badgeTone: config.autoCaptureOnMeeting ? .positive : .neutral
+            badgeText: isAutoCaptureLive ? "On" : "Off",
+            badgeTone: isAutoCaptureLive ? .positive : .neutral
         ) {
             HStack(spacing: Spacing.sm) {
                 Toggle(isOn: $config.autoCaptureOnMeeting) {
@@ -205,6 +213,10 @@ struct ConnectionsSettingsSection: View {
                 .disabled(!registry.compiledFeatures.contains(.autoTasks))
                 if !registry.compiledFeatures.contains(.autoTasks) {
                     Text("Not installed")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                } else if !registry.isEnabled(.autoTasks) {
+                    Text("Enable Auto-Tasks in Workspace")
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
                 }

@@ -21,6 +21,10 @@ struct ToolApprovalsSettingsSection: View {
     /// the card showed "Loading…" forever.
     @State private var loaded = false
     @State private var error: String?
+    /// True when the last load failed. The empty-state text must not render
+    /// then: "Nothing is always allowed" on a security panel is a false claim
+    /// when we simply couldn't read the grants.
+    @State private var loadFailed = false
     @State private var busy = false
     @State private var showRevokeAllConfirmation = false
 
@@ -47,6 +51,9 @@ struct ToolApprovalsSettingsSection: View {
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                     }
+                } else if loadFailed {
+                    // Error + Retry only; see `loadFailed`.
+                    EmptyView()
                 } else if isEmpty {
                     Text("Nothing is always allowed. Anything that needs approval asks you each time.")
                         .font(Typography.caption)
@@ -86,11 +93,11 @@ struct ToolApprovalsSettingsSection: View {
 
                 Divider().padding(.vertical, 2)
                 HStack {
-                    Button("Refresh") { Task { await load() } }
+                    Button(loadFailed ? "Retry" : "Refresh") { Task { await load() } }
                         .controlSize(.small)
                         .disabled(busy)
                     Spacer()
-                    if !isEmpty {
+                    if !isEmpty && !loadFailed {
                         Button(role: .destructive) { showRevokeAllConfirmation = true } label: {
                             Text("Revoke all").font(Typography.caption)
                         }
@@ -123,7 +130,9 @@ struct ToolApprovalsSettingsSection: View {
                 .font(.system(size: 11))
                 .foregroundStyle(theme.current.accent4)
             VStack(alignment: .leading, spacing: 1) {
-                Text(LocalizedStringKey(Self.ruleTitle(rule)))
+                // Verbatim: the title embeds a command pattern, which must not be
+                // interpreted as Markdown (link/format injection).
+                Text(verbatim: Self.ruleTitle(rule))
                     .font(Typography.body)
                     .foregroundStyle(theme.current.text)
                 Text("Allowed \(AppDateFormatter.absoluteMedium(rule.grantedAt))")
@@ -157,8 +166,13 @@ struct ToolApprovalsSettingsSection: View {
         guard !busy else { return }
         busy = true; defer { busy = false; loaded = true }
         error = nil
+        loadFailed = false
         do { permissions = try await api.toolPermissions() }
-        catch { self.error = "Couldn't load tool permissions." }
+        catch {
+            loadFailed = true
+            permissions = LlmIdeAPIClient.ToolPermissions()
+            self.error = "Couldn't load tool permissions."
+        }
     }
 
     private func revoke(_ rule: LlmIdeAPIClient.ToolRule) async {
