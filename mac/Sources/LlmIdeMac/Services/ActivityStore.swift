@@ -121,6 +121,27 @@ final class ActivityStore: SessionScoped {
     /// How many feed items are kept in memory (newest first).
     static let maxItems = 500
 
+    /// The feed shows only today and yesterday — the two day buckets the
+    /// popover labels. The server prunes by COUNT (500 per user), never by
+    /// age, so without this the first poll after launch (`since=0`) surfaced
+    /// the newest 50 events however old they were.
+    static func windowStart(now: Date = Date(), calendar: Calendar = .current) -> Date {
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: now) ?? now
+        return calendar.startOfDay(for: yesterday)
+    }
+
+    /// `items` restricted to the display window, order preserved.
+    static func recent(
+        _ items: [ActivityItem], now: Date = Date(), calendar: Calendar = .current
+    ) -> [ActivityItem] {
+        let cutoff = windowStart(now: now, calendar: calendar)
+        return items.filter { $0.createdAt >= cutoff }
+    }
+
+    /// What the popover should render. Computed per access so an item that
+    /// crossed midnight drops out without waiting for the next poll.
+    var recentItems: [ActivityItem] { Self.recent(items) }
+
     /// Fetch new items since `lastId`, prepend them, and update
     /// `lastId` + `unreadCount`.  Errors are swallowed — the next
     /// tick retries automatically on the next poll interval.
@@ -137,13 +158,19 @@ final class ActivityStore: SessionScoped {
             )
 
             guard startGeneration == generation else { return }
-            let newItems = resp.items.map { $0.toActivityItem() }.filter { $0.id > self.lastId }
-            if !newItems.isEmpty {
+            // `lastId` must still advance past events we do not display, or
+            // every poll would re-fetch the same old rows.
+            let newItems = Self.recent(
+                resp.items.map { $0.toActivityItem() }.filter { $0.id > self.lastId })
+            let retained = Self.recent(items)
+            if !newItems.isEmpty || retained.count != items.count {
                 // Prepend newest-first so the feed shows recent events at top.
                 // Capped: this polls every 25 s for the whole session and the
                 // popover re-buckets every item on each render, so an
                 // unbounded list grew into the thousands over a long run.
-                items = Array((newItems + items).prefix(Self.maxItems))
+                // Items older than the window are dropped here too, so a
+                // long-running session does not keep yesterday-1's rows.
+                items = Array((newItems + retained).prefix(Self.maxItems))
             }
             lastId = resp.lastId
             if !didInitialSeen {

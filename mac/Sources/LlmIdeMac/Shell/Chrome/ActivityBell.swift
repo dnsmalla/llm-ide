@@ -51,8 +51,8 @@ struct ActivityPanel: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                if activity.items.isEmpty {
-                    Text("No activity yet")
+                if activity.recentItems.isEmpty {
+                    Text("No activity in the last 2 days")
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 60)
@@ -77,7 +77,7 @@ struct ActivityPanel: View {
         .frame(width: 360, height: 420)
     }
 
-    /// Groups `activity.items` into labelled buckets: "Today",
+    /// Groups `activity.recentItems` into labelled buckets: "Today",
     /// "Yesterday", or an abbreviated date string.  Items arrive
     /// newest-first from `ActivityStore`, so bucket order reflects
     /// recency automatically.
@@ -91,7 +91,7 @@ struct ActivityPanel: View {
             return date.formatted(date: .abbreviated, time: .omitted)
         }
 
-        for item in activity.items {
+        for item in activity.recentItems {
             let label = bucketLabel(item.createdAt)
             if let idx = buckets.firstIndex(where: { $0.0 == label }) {
                 buckets[idx].1.append(item)
