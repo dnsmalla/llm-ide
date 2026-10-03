@@ -162,7 +162,7 @@ enum AppDateFormatter {
     /// (Date → "Today at…"/absolute), this always uses the short relative
     /// form — issue/PR lists have no room for an absolute fallback column.
     static func relativeISO(_ iso: String) -> String {
-        guard let date = isoWithoutFractional.date(from: iso) else { return iso }
+        guard let date = parseISO(iso) else { return iso }
         return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
     }
 
