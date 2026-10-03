@@ -19,7 +19,7 @@ final class ProposedEditResolverTests: XCTestCase {
     /// Resolve against an in-memory filesystem so no test touches real files.
     private func resolve(_ a: PendingTool.UpdateFileArgs,
                          attachments: [Known] = [],
-                         root: URL? = URL(fileURLWithPath: "/tmp/proj"),
+                         root: URL? = URL(fileURLWithPath: "/private/tmp/proj"),
                          allowBasenameFallback: Bool = true,
                          files: [String: String] = [:])
         -> Result<ProposedEdit, ProposedEditError>
@@ -43,7 +43,7 @@ final class ProposedEditResolverTests: XCTestCase {
     func testAnchoredEditReplacesOnlyTheMatchedRegion() throws {
         let original = "line one\nline two\nline three\n"
         let edit = try resolve(args("a.txt", old: "line two\n", new: "LINE TWO!\n"),
-                               files: ["/tmp/proj/a.txt": original]).get()
+                               files: ["/private/tmp/proj/a.txt": original]).get()
         XCTAssertEqual(edit.proposed, "line one\nLINE TWO!\nline three\n")
         XCTAssertEqual(edit.original, original, "the pre-edit content must be preserved for the diff")
         XCTAssertEqual(edit.source, .workspace)
@@ -52,20 +52,20 @@ final class ProposedEditResolverTests: XCTestCase {
     func testAnchoredEditPreservesIndentationExactly() throws {
         let original = "func f() {\n    let x = 1\n}\n"
         let edit = try resolve(args("a.swift", old: "    let x = 1\n", new: "    let x = 2\n"),
-                               files: ["/tmp/proj/a.swift": original]).get()
+                               files: ["/private/tmp/proj/a.swift": original]).get()
         XCTAssertEqual(edit.proposed, "func f() {\n    let x = 2\n}\n")
     }
 
     func testEmptyNewTextDeletesTheBlock() throws {
         let edit = try resolve(args("a.txt", old: "gone\n", new: ""),
-                               files: ["/tmp/proj/a.txt": "keep\ngone\nkeep\n"]).get()
+                               files: ["/private/tmp/proj/a.txt": "keep\ngone\nkeep\n"]).get()
         XCTAssertEqual(edit.proposed, "keep\nkeep\n")
     }
 
     func testAmbiguousAnchorIsRefusedRatherThanReplacingTheFirstMatch() {
         let original = "x = 1\ny = 2\nx = 1\n"
         let result = resolve(args("a.txt", old: "x = 1\n", new: "x = 9\n"),
-                             files: ["/tmp/proj/a.txt": original])
+                             files: ["/private/tmp/proj/a.txt": original])
         guard case .failure(let err) = result else {
             return XCTFail("two matches must not resolve — picking one silently is the bug")
         }
@@ -75,7 +75,7 @@ final class ProposedEditResolverTests: XCTestCase {
 
     func testMissingAnchorIsRefusedWithARetryHint() {
         let result = resolve(args("a.txt", old: "not here\n", new: "x\n"),
-                            files: ["/tmp/proj/a.txt": "something else\n"])
+                            files: ["/private/tmp/proj/a.txt": "something else\n"])
         guard case .failure(let err) = result else { return XCTFail("expected failure") }
         XCTAssertEqual(err, .anchorNotFound(path: "a.txt"))
         // The usual cause is the file changing under the agent, so say so.
@@ -86,7 +86,7 @@ final class ProposedEditResolverTests: XCTestCase {
         // An empty needle matches at offset 0 of every file. The server rejects
         // this shape, but the resolver must not depend on that to stay safe.
         let result = resolve(args("a.txt", old: "", new: "injected\n"),
-                            files: ["/tmp/proj/a.txt": "original\n"])
+                            files: ["/private/tmp/proj/a.txt": "original\n"])
         guard case .failure(let err) = result else {
             return XCTFail("an empty anchor must never resolve to a write")
         }
@@ -95,7 +95,7 @@ final class ProposedEditResolverTests: XCTestCase {
 
     func testAProposalWithNoEditAtAllNeverResolves() {
         // Neither shape present — must not fall through to "write the file back".
-        let result = resolve(args("a.txt"), files: ["/tmp/proj/a.txt": "original\n"])
+        let result = resolve(args("a.txt"), files: ["/private/tmp/proj/a.txt": "original\n"])
         guard case .failure = result else {
             return XCTFail("a proposal with no content and no anchor must be refused")
         }
@@ -111,14 +111,14 @@ final class ProposedEditResolverTests: XCTestCase {
 
     func testWholeFileContentReplacesEverything() throws {
         let edit = try resolve(args("a.md", content: "# New\n"),
-                               files: ["/tmp/proj/a.md": "# Old\nbody\n"]).get()
+                               files: ["/private/tmp/proj/a.md": "# Old\nbody\n"]).get()
         XCTAssertEqual(edit.proposed, "# New\n")
     }
 
     func testNoOpIsDetectedSoApplyCanBeDisabled() throws {
         let same = "unchanged\n"
         let edit = try resolve(args("a.txt", content: same),
-                               files: ["/tmp/proj/a.txt": same]).get()
+                               files: ["/private/tmp/proj/a.txt": same]).get()
         XCTAssertTrue(edit.isNoOp)
         XCTAssertEqual(edit.stats.added, 0)
         XCTAssertEqual(edit.stats.removed, 0)
@@ -130,16 +130,16 @@ final class ProposedEditResolverTests: XCTestCase {
         // What find-code returns. It must NOT resolve against the process cwd,
         // which for a GUI app is `/`.
         let edit = try resolve(args("extension/server.mjs", content: "x\n"),
-                               files: ["/tmp/proj/extension/server.mjs": "y\n"]).get()
-        XCTAssertEqual(edit.absolutePath, "/tmp/proj/extension/server.mjs")
+                               files: ["/private/tmp/proj/extension/server.mjs": "y\n"]).get()
+        XCTAssertEqual(edit.absolutePath, "/private/tmp/proj/extension/server.mjs")
         XCTAssertEqual(edit.displayPath, "extension/server.mjs",
                        "the card should show the project-relative path, not an absolute one")
     }
 
     func testDotSlashPrefixIsTolerated() throws {
         let edit = try resolve(args("./a.txt", content: "x\n"),
-                               files: ["/tmp/proj/a.txt": "y\n"]).get()
-        XCTAssertEqual(edit.absolutePath, "/tmp/proj/a.txt")
+                               files: ["/private/tmp/proj/a.txt": "y\n"]).get()
+        XCTAssertEqual(edit.absolutePath, "/private/tmp/proj/a.txt")
     }
 
     func testTraversalOutOfTheProjectIsRefused() {
@@ -159,9 +159,9 @@ final class ProposedEditResolverTests: XCTestCase {
     }
 
     func testASiblingDirectorySharingTheRootPrefixIsRefused() {
-        // "/tmp/proj-backup" must not pass a "/tmp/proj" prefix check.
-        let result = resolve(args("/tmp/proj-backup/a.txt", content: "x\n"),
-                            files: ["/tmp/proj-backup/a.txt": "y\n"])
+        // "/private/tmp/proj-backup" must not pass a "/private/tmp/proj" prefix check.
+        let result = resolve(args("/private/tmp/proj-backup/a.txt", content: "x\n"),
+                            files: ["/private/tmp/proj-backup/a.txt": "y\n"])
         guard case .failure(let err) = result else {
             return XCTFail("a sibling dir sharing the root's prefix must be refused")
         }
@@ -169,9 +169,9 @@ final class ProposedEditResolverTests: XCTestCase {
     }
 
     func testAbsolutePathInsideTheProjectIsAllowed() throws {
-        let edit = try resolve(args("/tmp/proj/a.txt", content: "x\n"),
-                               files: ["/tmp/proj/a.txt": "y\n"]).get()
-        XCTAssertEqual(edit.absolutePath, "/tmp/proj/a.txt")
+        let edit = try resolve(args("/private/tmp/proj/a.txt", content: "x\n"),
+                               files: ["/private/tmp/proj/a.txt": "y\n"]).get()
+        XCTAssertEqual(edit.absolutePath, "/private/tmp/proj/a.txt")
     }
 
     func testNoProjectAndNoAttachmentIsRefused() {
@@ -195,10 +195,10 @@ final class ProposedEditResolverTests: XCTestCase {
     func testAttachmentContentIsUsedAsTheDiffBaseline() throws {
         // The attachment is what the agent was SHOWN. Diffing against a
         // re-read of disk could hide a change made since.
-        let attached = Known(path: "/tmp/proj/a.txt", content: "as the agent saw it\n")
-        let edit = try resolve(args("/tmp/proj/a.txt", content: "new\n"),
+        let attached = Known(path: "/private/tmp/proj/a.txt", content: "as the agent saw it\n")
+        let edit = try resolve(args("/private/tmp/proj/a.txt", content: "new\n"),
                                attachments: [attached],
-                               files: ["/tmp/proj/a.txt": "changed on disk\n"]).get()
+                               files: ["/private/tmp/proj/a.txt": "changed on disk\n"]).get()
         XCTAssertEqual(edit.original, "as the agent saw it\n")
         XCTAssertEqual(edit.source, .attachment)
     }
@@ -243,7 +243,7 @@ final class ProposedEditResolverTests: XCTestCase {
         // Auto-edit mode passes allowBasenameFallback: false. A hallucinated
         // parent directory must not silently redirect the write onto an
         // attachment when nobody is going to review the result.
-        let attached = Known(path: "/tmp/proj/README.md", content: "old\n")
+        let attached = Known(path: "/private/tmp/proj/README.md", content: "old\n")
         let result = resolve(args("/somewhere/else/README.md", content: "new\n"),
                             attachments: [attached],
                             allowBasenameFallback: false)
@@ -272,5 +272,53 @@ final class ProposedEditResolverTests: XCTestCase {
                                                from: Data(json.utf8))
         XCTAssertEqual(decoded.content, "# Hi\n")
         XCTAssertNil(decoded.oldText)
+    }
+
+    // MARK: - Symlink containment (real filesystem)
+
+    private func makeProject() throws -> (base: URL, project: URL, outside: URL) {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("ProposedEditSymlink-\(UUID().uuidString)")
+        let project = base.appendingPathComponent("project")
+        let outside = base.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        return (base, project, outside)
+    }
+
+    func testSymlinkInsideProjectPointingOutsideIsRejected() throws {
+        let dirs = try makeProject()
+        defer { try? FileManager.default.removeItem(at: dirs.base) }
+        try "secret\n".write(to: dirs.outside.appendingPathComponent("x.txt"),
+                             atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: dirs.project.appendingPathComponent("link"), withDestinationURL: dirs.outside)
+
+        let result = ProposedEditResolver.resolve(
+            args: args("link/x.txt", content: "pwned\n"),
+            attachments: [],
+            projectRoot: dirs.project,
+            allowBasenameFallback: false)
+        guard case .failure(.outsideProject) = result else {
+            return XCTFail("expected outsideProject, got \(result)")
+        }
+    }
+
+    func testSymlinkedProjectRootStillAcceptsItsOwnFiles() throws {
+        let dirs = try makeProject()
+        defer { try? FileManager.default.removeItem(at: dirs.base) }
+        try "old\n".write(to: dirs.project.appendingPathComponent("a.txt"),
+                          atomically: true, encoding: .utf8)
+        // Root reached through a symlink, like /var -> /private/var.
+        let rootLink = dirs.base.appendingPathComponent("rootlink")
+        try FileManager.default.createSymbolicLink(at: rootLink, withDestinationURL: dirs.project)
+
+        let edit = try ProposedEditResolver.resolve(
+            args: args("a.txt", content: "new\n"),
+            attachments: [],
+            projectRoot: rootLink,
+            allowBasenameFallback: false).get()
+        XCTAssertEqual(edit.original, "old\n")
+        XCTAssertEqual(edit.displayPath, "a.txt")
     }
 }

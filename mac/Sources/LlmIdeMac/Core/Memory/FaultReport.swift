@@ -193,6 +193,10 @@ struct FaultReport: Equatable {
     static let fsTimestampFormatter: DateFormatter = {
         let f = DateFormatter()
         f.timeZone = TimeZone(identifier: "UTC")
+        // Fixed locale + calendar: a Japanese region calendar would emit era
+        // years and break the chronological sort of these file names.
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "yyyy-MM-dd'T'HH-mm-ss'Z'"
         return f
     }()

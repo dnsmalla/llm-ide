@@ -84,8 +84,12 @@ extension CodeAssistantPanel {
                     proposedContent: edit.proposed,
                     originalContent: edit.original,
                     displayPath: edit.displayPath,
-                    onConfirm: { editedContent in
-                        await confirmUpdateFile(args, finalContent: editedContent)
+                    onConfirm: { editedContent, originalSnapshot in
+                        // The sheet's own snapshot, not `edit.original`: `edit`
+                        // is re-read from disk on every re-render, so it can
+                        // drift from the text the user actually reviewed.
+                        await confirmUpdateFile(args, finalContent: editedContent,
+                                                expectedOriginal: originalSnapshot)
                     }
                 )
             } else {

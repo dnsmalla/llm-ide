@@ -223,15 +223,39 @@ extension CodeAssistantPanel {
     /// card and the review sheet described. `finalContent` is what the user
     /// approved (the sheet lets them edit it), NOT `args`, which is why this
     /// re-resolves rather than trusting the caller's path.
+    ///
+    /// `expectedOriginal` is the file text the review sheet displayed. When the
+    /// fresh read differs, the file changed while the sheet was open and
+    /// `finalContent` (built from the old text) would silently discard that
+    /// change, so we refuse. Callers that resolved just now pass nil.
+    ///
+    /// For an attachment-sourced edit `edit.original` is the in-memory
+    /// attachment text, which never reflects disk, so the comparison above
+    /// cannot catch an external change. Those edits are additionally checked
+    /// against the file on disk (when it exists) and refused on mismatch.
     @MainActor
     func confirmUpdateFile(_ args: PendingTool.UpdateFileArgs,
-                                   finalContent: String)
+                                   finalContent: String,
+                                   expectedOriginal: String? = nil)
         async -> UpdateFileSheet.ConfirmResult
     {
         let edit: ProposedEdit
         switch resolveEdit(args) {
         case .failure(let err): return .failure(err.message)
         case .success(let e): edit = e
+        }
+        if let expectedOriginal, expectedOriginal != edit.original {
+            return .failure("\(edit.displayPath) changed on disk since this edit was proposed — refusing to overwrite it. Re-propose the edit against the current file.")
+        }
+        if edit.source == .attachment,
+           FileManager.default.fileExists(atPath: edit.absolutePath) {
+            // Only a file that decodes as UTF-8 can be compared: attachments
+            // may also be UTF-16 / Shift_JIS, and treating "undecodable" as
+            // "changed" would make every such file permanently uneditable.
+            if let onDisk = try? String(contentsOfFile: edit.absolutePath, encoding: .utf8),
+               onDisk != edit.original {
+                return .failure("\(edit.displayPath) changed on disk since it was attached — refusing to overwrite it. Re-propose the edit against the current file.")
+            }
         }
         // Write to the resolved path, never the LLM-emitted one: a
         // basename-fallback match or a relative path makes args.path diverge

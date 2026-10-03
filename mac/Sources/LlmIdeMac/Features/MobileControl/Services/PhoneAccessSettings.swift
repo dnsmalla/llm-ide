@@ -20,6 +20,9 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
     case issueComment       // post a comment on an issue
     case selfHealApply      // apply a Self-Heal proposal to the checkout
     case toolApprovals      // answer tool/edit permission prompts
+    case autoTaskControl    // toggle / run auto tasks, edit their config and templates
+    case loopControl        // start a Loop run or a single stage
+    case generationRun      // run Doc Gen from the phone (writes files under llm-doc/)
 
     var id: String { rawValue }
 
@@ -32,6 +35,9 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
         case .issueComment:      return "Comment on issues"
         case .selfHealApply:     return "Apply or discard Self-Heal fixes"
         case .toolApprovals:     return "Approve or deny tool and edit requests"
+        case .autoTaskControl:   return "Control Auto Tasks (run, enable, edit settings and templates)"
+        case .loopControl:       return "Start Loop runs"
+        case .generationRun:     return "Run document generation"
         }
     }
 
@@ -44,6 +50,9 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
         case .issueComment:      return "Posts as you. Closing, editing and deleting stay on the Mac."
         case .selfHealApply:     return "Apply patches the LLM-IDE source checkout (never commits); discard deletes the proposal. Viewing, ignoring and retrying need no switch."
         case .toolApprovals:     return "Lets the phone answer a running chat's permission prompts, one tap each."
+        case .autoTaskControl:   return "Auto Tasks can edit files in the project. Viewing state, history and logs, and Stop, need no switch."
+        case .loopControl:       return "A Loop run edits files and runs commands in the project. Viewing and Stop need no switch."
+        case .generationRun:     return "Writes generated documents into the project's llm-doc/generated folder and uses your LLM quota."
         }
     }
 
@@ -51,7 +60,8 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
     var defaultsOn: Bool {
         switch self {
         case .projectSwitch, .fileBrowse, .sourceControlRead, .issuesRead: return true
-        case .issueComment, .selfHealApply, .toolApprovals:                return false
+        case .issueComment, .selfHealApply, .toolApprovals,
+             .autoTaskControl, .loopControl, .generationRun:               return false
         }
     }
 

@@ -329,6 +329,12 @@ func presentMeetingExportPanel(id: String?, env: AppEnvironment) {
     panel.title = "Export Meeting"
     panel.message = "Save this meeting as a Markdown file"
     guard panel.runModal() == .OK, let dst = panel.url else { return }
+    // Replacing the source with itself would delete the meeting before the
+    // copy fails (same path, symlink or hardlink to it).
+    guard dst.resolvingSymlinksInPath() != src.resolvingSymlinksInPath() else {
+        NSAlert(error: CocoaError(.fileWriteFileExists)).runModal()
+        return
+    }
     do {
         if FileManager.default.fileExists(atPath: dst.path) {
             try FileManager.default.removeItem(at: dst)

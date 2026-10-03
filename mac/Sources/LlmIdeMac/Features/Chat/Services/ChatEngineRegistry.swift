@@ -408,7 +408,10 @@ final class ChatEngineRegistry {
     /// Drop parked engines that have finished their turn, then — only if the
     /// lot is still over its limit — the oldest still-running ones.
     private func sweepBackground() {
-        for (id, engine) in background where !engine.hasPendingWork {
+        // `isWorkOpen`, not `hasPendingWork`: a parked engine holding an
+        // unanswered proposal card / approval is idle but not finished, and
+        // dropping it would lose the card.
+        for (id, engine) in background where !engine.isWorkOpen {
             engine.persistsUnobserved = false
             background.removeValue(forKey: id)
             backgroundOrder.removeAll { $0 == id }

@@ -220,6 +220,15 @@ final class ChatEngine {
     /// end is a no-op — the whole background turn would finish in memory and
     /// never reach disk. With this set, the turn-end funnel writes directly.
     var persistsUnobserved = false
+
+    /// The composer settings this engine's turns send, captured while it was
+    /// on screen. The panel's `resolveTransportInput` reads LIVE panel state,
+    /// which belongs to whichever chat is DISPLAYED — a parked engine that
+    /// auto-continues or drains its queue must not borrow that chat's mode,
+    /// permission chip or repo context (a parked Ask chat would otherwise
+    /// run as `bypass` because the displayed chat is on Auto). `nil` means
+    /// "never captured": the panel then fails closed to the read-only mode.
+    @ObservationIgnored var turnSettingsSnapshot: TurnSettingsSnapshot?
     /// Measured render height per assistant turn, keyed by MESSAGE id, so each
     /// markdown web-view bubble can be sized to its content in the scroll list.
     /// Written by the VIEWS — `ChatMessageList` and `MenuBarChatView` — so it
@@ -1480,4 +1489,16 @@ final class ChatEngine {
         if release { hooks.onPlanExecutionSettled() }
     }
 
+}
+
+/// Value copy of the per-turn settings a panel resolves for an engine. See
+/// `ChatEngine.turnSettingsSnapshot`.
+struct TurnSettingsSnapshot {
+    var mode: String
+    var provider: String
+    var modelID: String?
+    var permissionMode: String
+    /// Last context built while this engine was displayed; `nil` rather than
+    /// the displayed chat's repo when none exists.
+    var agentContext: AgentContext?
 }

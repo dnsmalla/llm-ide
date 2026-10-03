@@ -85,6 +85,13 @@ extension AutoCodeUpdateService {
         return (r.code == 0 && !s.isEmpty) ? s : nil
     }
 
+    /// Commit a ref points at, or nil when it doesn't exist / git failed.
+    nonisolated static func refSha(_ ref: String, at localPath: String) -> String? {
+        let r = git(["rev-parse", "--verify", "--quiet", ref], at: localPath)
+        let s = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (r.code == 0 && !s.isEmpty) ? s : nil
+    }
+
     /// Check out an existing branch. Returns true on success.
     nonisolated static func checkout(_ branch: String, at localPath: String) -> Bool {
         return git(["checkout", branch], at: localPath).code == 0
@@ -92,16 +99,21 @@ extension AutoCodeUpdateService {
 
     /// The CLI was told to commit on a fix/ branch but committed onto `base`
     /// instead. Isolate its commit(s) so base isn't polluted (and the next
-    /// issue doesn't chain off it): create `branch` at the current HEAD —
-    /// preserving the work — then rewind `base` to `baseSha` and switch to the
-    /// new branch. Creating the branch first means the commits are safe before
-    /// the reset, and the reset only moves a ref (recoverable via reflog).
-    /// Returns false (leaving the commit on base, no data loss) if `branch`
-    /// already exists or any step fails.
+    /// issue doesn't chain off it): `checkout -B branch` creates the branch at
+    /// the current HEAD and switches to it, then `base` is moved back to
+    /// `baseSha` while it is no longer checked out.
+    ///
+    /// NOTE: deliberately NOT `reset --hard` — this runs in the user's own
+    /// checkout after a long CLI run, and a hard reset would discard any
+    /// edits they made meanwhile. Both steps only move refs; the working tree
+    /// and index are untouched (HEAD's commit is identical across the switch).
+    /// Returns false if `branch` already exists (nothing changed) or a step
+    /// fails; if only the last step fails the commit is safe on `branch`.
     nonisolated static func rescueCommitToBranch(_ branch: String, base: String, baseSha: String, at localPath: String) -> Bool {
-        guard git(["branch", branch], at: localPath).code == 0 else { return false }
-        guard git(["reset", "--hard", baseSha], at: localPath).code == 0 else { return false }
-        return git(["checkout", branch], at: localPath).code == 0
+        // `checkout -B` would silently reset an existing branch — refuse instead.
+        guard git(["show-ref", "--verify", "--quiet", "refs/heads/\(branch)"], at: localPath).code != 0 else { return false }
+        guard git(["checkout", "-B", branch], at: localPath).code == 0 else { return false }
+        return git(["branch", "-f", base, baseSha], at: localPath).code == 0
     }
 
     /// Branch name for a `.implement` custom auto-task: `fix/custom-<slug>-<token>`.
@@ -363,6 +375,52 @@ extension AutoCodeUpdateService {
             .joined(separator: "-")
     }
 
+    /// Launch `process` and wait for it to exit. Stop (task cancellation) and
+    /// the resource guard both tear down the WHOLE process tree via
+    /// `terminateWithKillFallback`; the continuation is resumed only by the
+    /// process's own termination, so callers never remove a worktree while
+    /// descendants are still writing into it.
+    func awaitProcessExit(_ process: Process, guardLabel: String) async -> Bool {
+        var guardToken: ResourceGuardService.Registration?
+        let result = await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                let resumed = OSAllocatedUnfairLock(initialState: false)
+                let resumeOnce: @Sendable (Bool) -> Void = { value in
+                    let alreadyResumed = resumed.withLock { state -> Bool in
+                        if state { return true }
+                        state = true
+                        return false
+                    }
+                    if !alreadyResumed { continuation.resume(returning: value) }
+                }
+                process.terminationHandler = { p in resumeOnce(p.terminationStatus == 0) }
+                do {
+                    try process.run()
+                } catch {
+                    resumeOnce(false)
+                    return
+                }
+                // onCancel is a no-op while the process is not yet running, so a
+                // Stop that landed before run() would otherwise be lost.
+                if Task.isCancelled {
+                    Self.terminateWithKillFallback(process, grace: Self.cancelKillGrace)
+                }
+                // Resource guard (replaces the old timeout watchdog): triggered
+                // by machine risk, not a clock. Same tree-wide teardown as Stop;
+                // the terminationHandler above resumes once the process is gone.
+                guardToken = ResourceGuardService.shared.register(label: guardLabel) { [weak process] _ in
+                    if let process {
+                        Self.terminateWithKillFallback(process, grace: Self.cancelKillGrace)
+                    }
+                }
+            }
+        } onCancel: {
+            Self.terminateWithKillFallback(process, grace: Self.cancelKillGrace)
+        }
+        guardToken?.cancel()
+        return result
+    }
+
     func runCLI(issue: RepoIssue, localPath: String, logDir: URL) async -> Bool {
         let cliTool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
         let cliCommand = cliTool.cliExecutable   // e.g. "claude" or "gh copilot"
@@ -394,6 +452,9 @@ extension AutoCodeUpdateService {
         case .proceed(let model):
             resolvedModel = model
         }
+        // Stop pressed during the model lookup: activeProcess is still nil, so
+        // cancel() could not reach anything — bail before launching.
+        if Task.isCancelled { return false }
 
         let slug = Self.issueBranchSlug(from: issue.title)
 
@@ -496,52 +557,8 @@ extension AutoCodeUpdateService {
         // below is exposed precisely so cancel() can terminate it), or
         // ResourceGuardService stops it under sustained critical memory pressure.
         activeProcess = process
-        var guardToken: ResourceGuardService.Registration?
-        let result = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            let resumed = OSAllocatedUnfairLock(initialState: false)
+        let result = await awaitProcessExit(process, guardLabel: "auto task CLI")
 
-            process.terminationHandler = { p in
-                let alreadyResumed = resumed.withLock { state -> Bool in
-                    if state { return true }
-                    state = true
-                    return false
-                }
-                guard !alreadyResumed else { return }
-                continuation.resume(returning: p.terminationStatus == 0)
-            }
-
-            do {
-                try process.run()
-            } catch {
-                let alreadyResumed = resumed.withLock { state -> Bool in
-                    if state { return true }
-                    state = true
-                    return false
-                }
-                if !alreadyResumed {
-                    continuation.resume(returning: false)
-                }
-                return
-            }
-
-            // Resource guard, replacing the old timeout watchdog: identical
-            // teardown, triggered by the machine being at risk rather than by a
-            // clock. Weak process capture so a normal-exit run doesn't pin the
-            // Process object for the life of the registration.
-            guardToken = ResourceGuardService.shared.register(label: "auto task CLI") { [weak process] _ in
-                let alreadyResumed = resumed.withLock { state -> Bool in
-                    if state { return true }
-                    state = true
-                    return false
-                }
-                guard !alreadyResumed else { return }
-                process?.terminate()
-                continuation.resume(returning: false)
-            }
-        }
-
-        guardToken?.cancel()
-        guardToken = nil
         activeProcess = nil
         // The model was invoked (it ran, pass or fail) — count it.
         await recordRun(model: resolvedModel, endpoint: "auto-task:issue-\(issue.number)")
@@ -575,6 +592,8 @@ extension AutoCodeUpdateService {
         case .proceed(let model):
             resolvedModel = model
         }
+        // Stop pressed during the model lookup — see runCLI(issue:).
+        if Task.isCancelled { return false }
 
         let logURL = logDir.appendingPathComponent("auto-task-\(logSuffix).log")
         Self.rotateLog(at: logURL)
@@ -613,6 +632,13 @@ extension AutoCodeUpdateService {
             ? Self.customImplementBranch(slug: Self.customTaskSlug(from: logSuffix), token: token)
             : nil
         let created = await Task.detached { Self.worktreeAdd(at: localPath, path: worktree, branch: implementBranch) }.value
+        // Stop during `worktree add` (incl. submodule update): nothing is running
+        // for cancel() to kill, so undo the worktree/branch and bail.
+        if created && Task.isCancelled {
+            await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
+            if let implementBranch { _ = await Task.detached { Self.branchDelete(implementBranch, at: localPath) }.value }
+            return false
+        }
         guard created else {
             let why = await Task.detached { Self.worktreeBlocker(at: localPath) }.value
             let msg = "Skipped auto-task \(logSuffix): could not create an isolated worktree of \(localPath)"
@@ -686,51 +712,18 @@ extension AutoCodeUpdateService {
         // No wall clock — same reasoning as the run above. Cancellation goes
         // through activeProcess; the machine is protected by ResourceGuardService.
         activeProcess = process
-        var guardToken: ResourceGuardService.Registration?
-        let result = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-            let resumed = OSAllocatedUnfairLock(initialState: false)
-
-            process.terminationHandler = { p in
-                let alreadyResumed = resumed.withLock { state -> Bool in
-                    if state { return true }
-                    state = true
-                    return false
-                }
-                guard !alreadyResumed else { return }
-                continuation.resume(returning: p.terminationStatus == 0)
-            }
-
-            do {
-                try process.run()
-            } catch {
-                let alreadyResumed = resumed.withLock { state -> Bool in
-                    if state { return true }
-                    state = true
-                    return false
-                }
-                if !alreadyResumed {
-                    continuation.resume(returning: false)
-                }
-                return
-            }
-
-            guardToken = ResourceGuardService.shared.register(label: "auto task CLI (stream)") { [weak process] _ in
-                let alreadyResumed = resumed.withLock { state -> Bool in
-                    if state { return true }
-                    state = true
-                    return false
-                }
-                guard !alreadyResumed else { return }
-                process?.terminate()
-                continuation.resume(returning: false)
-            }
-        }
-        guardToken?.cancel()
-        guardToken = nil
+        let result = await awaitProcessExit(process, guardLabel: "auto task CLI (stream)")
+        let wasCancelled = Task.isCancelled
 
         activeProcess = nil
         var emptyImplementBranch: String?
-        if let implementBranch {
+        var keepWorktreeForRecovery = false
+        if let implementBranch, wasCancelled, !result {
+            // Stopped mid-run (the CLI did not finish cleanly): the edits are half-done — drop the worktree and
+            // its branch instead of committing them as if the task finished.
+            logStore.append(logStoreId, "Stopped; discarded the unfinished checkout.")
+            emptyImplementBranch = implementBranch
+        } else if let implementBranch {
             // `.implement`: persist the CLI's edits as a commit on its branch,
             // inside the worktree — the only changes there are this task's.
             // "Nothing to commit" (the CLI made no edits) exits non-zero; then
@@ -739,14 +732,30 @@ extension AutoCodeUpdateService {
             if committed {
                 logStore.append(logStoreId, "Committed on branch \(implementBranch) (your checkout is unchanged).")
             } else {
-                logStore.append(logStoreId, "No commit produced (nothing to commit, or commit failed).", level: .error)
-                emptyImplementBranch = implementBranch
+                // `commit` exits non-zero for "nothing to commit" AND for a
+                // failing hook / missing identity / signing error. Only a clean
+                // tree proves the former; `isWorkingTreeClean` fails closed, so
+                // an unverifiable tree is kept too. Removing the worktree of a
+                // dirty one would destroy the CLI's finished edits.
+                let isTreeClean = await Task.detached { Self.isWorkingTreeClean(at: worktree) }.value
+                if isTreeClean {
+                    logStore.append(logStoreId, "No commit produced (nothing to commit).", level: .error)
+                    emptyImplementBranch = implementBranch
+                } else {
+                    keepWorktreeForRecovery = true
+                    logStore.append(
+                        logStoreId,
+                        "Commit failed; the CLI's edits are kept uncommitted in \(worktree) on branch \(implementBranch).",
+                        level: .error)
+                }
             }
         }
         // Review: everything the CLI wrote goes away with the worktree —
         // findings live in the log via stdout. Implement: the commit is on
         // its branch; the checkout itself is no longer needed.
-        await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
+        if !keepWorktreeForRecovery {
+            await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
+        }
         // Only now: `git branch -D` refuses a branch that a worktree still
         // has checked out, so the delete must follow the removal.
         if let empty = emptyImplementBranch {
