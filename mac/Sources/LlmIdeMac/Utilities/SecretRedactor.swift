@@ -33,6 +33,8 @@ enum SecretRedactor {
             (#"\bsk-[A-Za-z0-9]{32,}\b"#, false),         // OpenAI classic secret key
             (#"Bearer\s+[A-Za-z0-9._-]{20,}"#, true),     // Authorization: Bearer <jwt/opaque>
             (#"apiKey=[A-Za-z0-9_-]+"#, true),            // apiKey=<value> in query strings
+            (#"\bya29\.[A-Za-z0-9._-]{20,}"#, false),     // Google OAuth2 access token
+            (#"\b1//[A-Za-z0-9_-]{20,}"#, false),         // Google OAuth2 refresh token
         ]
         return sources.compactMap { src, ci in
             try? NSRegularExpression(pattern: src, options: ci ? [.caseInsensitive] : [])
