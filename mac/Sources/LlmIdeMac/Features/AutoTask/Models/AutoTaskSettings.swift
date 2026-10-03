@@ -35,18 +35,37 @@ final class AutoTaskSettings: ObservableObject {
         }
     }
     
+    /// Clamped to >= 1 on every write path: a consumer slices with
+    /// `.prefix(n)`, which traps on a negative n.
     @Published var lookbackMeetingCount: Int {
         didSet(oldValue) {
-            guard oldValue != lookbackMeetingCount else { return }
-            save("autoCodeUpdateLookbackCount", lookbackMeetingCount)
+            let clamped = Self.clampLookback(lookbackMeetingCount)
+            if clamped != lookbackMeetingCount { lookbackMeetingCount = clamped }
+            guard oldValue != clamped else { return }
+            save("autoCodeUpdateLookbackCount", clamped)
         }
     }
     
+    /// Clamped to >= 1, same reason as `lookbackMeetingCount`.
     @Published var lookbackDays: Int {
         didSet(oldValue) {
-            guard oldValue != lookbackDays else { return }
-            save("autoCodeLookbackDays", lookbackDays)
+            let clamped = Self.clampLookback(lookbackDays)
+            if clamped != lookbackDays { lookbackDays = clamped }
+            guard oldValue != clamped else { return }
+            save("autoCodeLookbackDays", clamped)
         }
+    }
+
+    static func clampLookback(_ value: Int) -> Int { max(1, value) }
+
+    static let defaultRegressionVerifyTimeout: TimeInterval = 120
+    static let maxRegressionVerifyTimeout: TimeInterval = 3600
+
+    /// Non-finite or non-positive input falls back to the default; otherwise
+    /// the value is held within 1...`maxRegressionVerifyTimeout` seconds.
+    static func clampVerifyTimeout(_ value: TimeInterval) -> TimeInterval {
+        guard value.isFinite, value > 0 else { return defaultRegressionVerifyTimeout }
+        return min(max(1, value), maxRegressionVerifyTimeout)
     }
 
     @Published var autoStash: Bool {
@@ -163,8 +182,12 @@ final class AutoTaskSettings: ObservableObject {
     
     @Published var regressionVerifyTimeout: TimeInterval {
         didSet(oldValue) {
-            guard oldValue != regressionVerifyTimeout else { return }
-            save("regressionVerifyTimeout", regressionVerifyTimeout)
+            // The Settings TextField accepts any number; a 0/negative/NaN
+            // timeout would kill or hang every verify run.
+            let clamped = Self.clampVerifyTimeout(regressionVerifyTimeout)
+            if clamped != regressionVerifyTimeout { regressionVerifyTimeout = clamped }
+            guard oldValue != clamped else { return }
+            save("regressionVerifyTimeout", clamped)
         }
     }
 
@@ -342,8 +365,8 @@ final class AutoTaskSettings: ObservableObject {
         
         self.enabled = defaults.object(forKey: "autoCodeUpdateEnabled") as? Bool ?? false
         self.lookbackByDays = defaults.object(forKey: "autoCodeLookbackByDays") as? Bool ?? false
-        self.lookbackMeetingCount = defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5
-        self.lookbackDays = defaults.object(forKey: "autoCodeLookbackDays") as? Int ?? 7
+        self.lookbackMeetingCount = Self.clampLookback(defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5)
+        self.lookbackDays = Self.clampLookback(defaults.object(forKey: "autoCodeLookbackDays") as? Int ?? 7)
         self.autoStash = defaults.object(forKey: "autoCodeAutoStash") as? Bool ?? false
         
         // Every per-task enable defaults to OFF: an Auto Task is opt-in, and
@@ -366,8 +389,7 @@ final class AutoTaskSettings: ObservableObject {
 
         self.regressionAttemptRepair = defaults.object(forKey: "regressionAttemptRepair") as? Bool ?? false
         self.regressionAutoReopen = defaults.object(forKey: "regressionAutoReopen") as? Bool ?? false
-        let savedTimeout = defaults.double(forKey: "regressionVerifyTimeout")
-        self.regressionVerifyTimeout = savedTimeout > 0 ? savedTimeout : 120
+        self.regressionVerifyTimeout = Self.clampVerifyTimeout(defaults.double(forKey: "regressionVerifyTimeout"))
 
         self.showOnlyEnabledTasks = defaults.object(forKey: "autoCodeShowOnlyEnabledTasks") as? Bool ?? false
 
@@ -413,10 +435,10 @@ final class AutoTaskSettings: ObservableObject {
         let newLookbackByDays = defaults.object(forKey: "autoCodeLookbackByDays") as? Bool ?? false
         if newLookbackByDays != lookbackByDays { lookbackByDays = newLookbackByDays }
         
-        let newLookbackMeetingCount = defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5
+        let newLookbackMeetingCount = Self.clampLookback(defaults.object(forKey: "autoCodeUpdateLookbackCount") as? Int ?? 5)
         if newLookbackMeetingCount != lookbackMeetingCount { lookbackMeetingCount = newLookbackMeetingCount }
         
-        let newLookbackDays = defaults.object(forKey: "autoCodeLookbackDays") as? Int ?? 7
+        let newLookbackDays = Self.clampLookback(defaults.object(forKey: "autoCodeLookbackDays") as? Int ?? 7)
         if newLookbackDays != lookbackDays { lookbackDays = newLookbackDays }
 
         let newAutoStash = defaults.object(forKey: "autoCodeAutoStash") as? Bool ?? false
@@ -467,7 +489,7 @@ final class AutoTaskSettings: ObservableObject {
         let newRegressionAutoReopen = defaults.object(forKey: "regressionAutoReopen") as? Bool ?? false
         if newRegressionAutoReopen != regressionAutoReopen { regressionAutoReopen = newRegressionAutoReopen }
         
-        let newRegressionVerifyTimeout = max(1.0, defaults.double(forKey: "regressionVerifyTimeout") > 0 ? defaults.double(forKey: "regressionVerifyTimeout") : 120)
+        let newRegressionVerifyTimeout = Self.clampVerifyTimeout(defaults.double(forKey: "regressionVerifyTimeout"))
         if newRegressionVerifyTimeout != regressionVerifyTimeout { regressionVerifyTimeout = newRegressionVerifyTimeout }
 
         let newShowOnlyEnabledTasks = defaults.object(forKey: "autoCodeShowOnlyEnabledTasks") as? Bool ?? false

@@ -106,7 +106,10 @@ final class SessionStore: ObservableObject {
             // otherwise `isAuthenticated` stays false and the user lands on
             // the login screen every launch despite a live refresh token.
             if user == nil {
-                user = try? await api.me()
+                if let me = try? await api.me() {
+                    noteSignedIn(me)
+                    user = me
+                }
             }
             unreachable = false
         } catch {
@@ -135,17 +138,48 @@ final class SessionStore: ObservableObject {
         return status == 401 || status == 403
     }
 
+    static let lastUserIdKey = "LLMIDE_LAST_SIGNED_IN_USER_ID"
+    static let customBaseURLHintKey = "MEETNOTES_CUSTOM_BASE_URL_HINT"
+
+    /// Reset the previous account's locally cached setup when a different user
+    /// signs in. Email / Slack / Box metadata and the custom base-URL prefill
+    /// are cached globally in UserDefaults, so without this the new account
+    /// would see (and appear to own) its predecessor's connections. An unknown
+    /// predecessor (first run / upgrade) is not treated as a change.
+    func noteSignedIn(_ newUser: UserInfo) {
+        let defaults = UserDefaults.standard
+        let previous = defaults.string(forKey: Self.lastUserIdKey)
+        if let previous, previous != newUser.id {
+            let config = AppConfig.shared
+            config.emailSource = nil
+            config.slackSource = nil
+            config.boxSource = nil
+            // Local cache of the server pref (`/auth/me/prefs`); the next
+            // Preferences load refreshes it. Back to the init default.
+            config.preferredLanguage = "en"
+            defaults.removeObject(forKey: Self.customBaseURLHintKey)
+        }
+        defaults.set(newUser.id, forKey: Self.lastUserIdKey)
+    }
+
     @MainActor
     func adopt(session: SessionResponse) {
         // /auth/refresh on older servers omits `user`; keep the one we
         // already have rather than logging the UI out (`isAuthenticated`
         // requires a non-nil user). Login responses always carry it.
-        if let refreshedUser = session.user { user = refreshedUser }
+        if let refreshedUser = session.user {
+            noteSignedIn(refreshedUser)
+            user = refreshedUser
+        }
         accessToken = session.accessToken
         refreshToken = session.refreshToken
         KeychainStore.saveToken(session.refreshToken, host: host)
     }
 
+    /// Sign out / drop the session. Per-account connector setup is NOT wiped
+    /// here: the vault secrets stay on the server, so the same user logging
+    /// straight back in would lose their setup for nothing. It is reset when a
+    /// DIFFERENT user signs in instead (`noteSignedIn`).
     @MainActor
     func clear() {
         user = nil

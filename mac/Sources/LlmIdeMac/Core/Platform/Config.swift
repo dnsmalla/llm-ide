@@ -313,8 +313,10 @@ final class AppConfig: ObservableObject {
             guard persistsSecrets else { return }
             if gitLabToken.isEmpty {
                 KeychainStore.deleteGitLabToken(host: gitLabBaseURL)
-            } else {
-                KeychainStore.saveGitLabToken(gitLabToken, host: gitLabBaseURL)
+            } else if !KeychainStore.saveGitLabToken(gitLabToken, host: gitLabBaseURL) {
+                // Same failure init already reports: the token is live in RAM
+                // only and will be gone next launch, so don't fail silently.
+                configLogger.error("GitLab token could not be saved to the Keychain; it will not survive a relaunch")
             }
             let host = gitLabBaseURL
             let token = gitLabToken
@@ -564,22 +566,10 @@ final class AppConfig: ObservableObject {
     @Published var lastRegressionRegressedCount: Int {
         didSet { defaults.set(lastRegressionRegressedCount, forKey: "lastRegressionRegressedCount") }
     }
-    /// When true, a regressed verdict reopens the fault on disk
-    /// (`fixed` → `open`). Default OFF: the verdict is a heuristic
-    /// text comparison, so the run reports drift but never mutates
-    /// files unless the user opts in.
-    /// Legacy mirrors of regression keys owned by `AutoTaskSettings`. Kept so
-    /// older builds and `defaultProjectSettings` snapshots stay compatible; UI
-    /// and runners read/write via `AutoTaskSettings` (single source of truth).
-    @Published var regressionAutoReopen: Bool {
-        didSet { defaults.set(regressionAutoReopen, forKey: "regressionAutoReopen") }
-    }
-    @Published var regressionAttemptRepair: Bool {
-        didSet { defaults.set(regressionAttemptRepair, forKey: "regressionAttemptRepair") }
-    }
-    @Published var regressionVerifyTimeout: TimeInterval {
-        didSet { defaults.set(regressionVerifyTimeout, forKey: "regressionVerifyTimeout") }
-    }
+    // NOTE: regressionAutoReopen / regressionAttemptRepair /
+    // regressionVerifyTimeout live ONLY in `AutoTaskSettings` (same UserDefaults
+    // keys). An AppConfig mirror had no consumers and two writers on one key
+    // could only ever disagree.
 
     // ── Paths ─────────────────────────────────────────────────────────
     /// Per-repo subdir inside the active repo where memory artifacts
@@ -751,8 +741,12 @@ final class AppConfig: ObservableObject {
     init(userDefaults defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.persistsSecrets = (defaults === UserDefaults.standard)
-        self.serverURL = (defaults.string(forKey: "serverURL")
-            ?? "http://127.0.0.1:\(BackendManager.defaultBackendPort)")
+        // Validated on load too, not only in the didSet: a tampered or stale
+        // plist value would otherwise point tokens/transcripts at a non-local
+        // host until the user happened to edit the field.
+        let defaultServerURL = "http://127.0.0.1:\(BackendManager.defaultBackendPort)"
+        let storedServerURL = defaults.string(forKey: "serverURL") ?? defaultServerURL
+        self.serverURL = AppConfig.isSafeServerURL(storedServerURL) ? storedServerURL : defaultServerURL
         self.themeID = defaults.string(forKey: "themeID") ?? Theme.light.id
         self.autoCaptureOnMeeting = defaults.object(forKey: "autoCaptureOnMeeting") as? Bool ?? false
         self.pollIntervalMs = defaults.object(forKey: "pollIntervalMs") as? Int ?? 250
@@ -784,8 +778,11 @@ final class AppConfig: ObservableObject {
             knownModelIds: knownModelIds)
         // Not coerced against the live list like `defaultModelId`: the list
         // isn't fetched yet at launch, and each send validates the id anyway.
-        self.purposeModelIds = Dictionary(uniqueKeysWithValues: ModelPurpose.allCases.map {
-            ($0, defaults.string(forKey: $0.settingsKey) ?? "")
+        // Retired ids are still migrated (same table as `defaultModelId`),
+        // otherwise a purpose pick keeps sending a shut-down model forever.
+        self.purposeModelIds = Dictionary(uniqueKeysWithValues: ModelPurpose.allCases.map { purpose -> (ModelPurpose, String) in
+            let stored = defaults.string(forKey: purpose.settingsKey) ?? ""
+            return (purpose, AppConfig.retiredModelIds[stored] ?? stored)
         })
         self.modelPickIsExplicit = defaults.bool(forKey: "modelPickIsExplicit")
         self.lastSeenAppVersion = defaults.string(forKey: "lastSeenAppVersion") ?? ""
@@ -796,10 +793,6 @@ final class AppConfig: ObservableObject {
             self.lastRegressionRunAt = nil
         }
         self.lastRegressionRegressedCount = defaults.integer(forKey: "lastRegressionRegressedCount")
-        self.regressionAutoReopen = defaults.object(forKey: "regressionAutoReopen") as? Bool ?? false
-        self.regressionAttemptRepair = defaults.object(forKey: "regressionAttemptRepair") as? Bool ?? false
-        let savedTimeout = defaults.double(forKey: "regressionVerifyTimeout")
-        self.regressionVerifyTimeout = savedTimeout > 0 ? savedTimeout : 120
         // Heal the pre-fix persisted value: "system/faults" used to be the
         // (buggy) container default and would double-nest faults into
         // system/faults/faults. Treat it as unset so it falls back to the

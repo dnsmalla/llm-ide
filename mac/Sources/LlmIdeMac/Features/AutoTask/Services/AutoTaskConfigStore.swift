@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import os.log
 
 /// Owns every task's `AutoTaskConfig`, scoped BY PROJECT and keyed by task id
 /// (`AutoTask.rawValue` for built-ins, `CustomAutoTask.id` for custom ones).
@@ -34,9 +35,16 @@ final class AutoTaskConfigStore: ObservableObject {
 
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    /// True when the stored blob was undecodable and could not be copied
+    /// aside. The blob is left in place and `save()` refuses to run so it is
+    /// never overwritten with a partial map.
+    private(set) var isReadOnly = false
+
+    /// - Parameter stashDirectory: where a corrupt blob is copied; defaults to
+    ///   Application Support. Injectable so tests don't touch the real one.
+    init(defaults: UserDefaults = .standard, stashDirectory: URL? = nil) {
         self.defaults = defaults
-        load()
+        load(stashDirectory: stashDirectory)
     }
 
     /// Point the store at a project (nil = no project open). Cheap — the whole
@@ -61,6 +69,7 @@ final class AutoTaskConfigStore: ObservableObject {
     /// REMOVES the record rather than storing an empty one, so the store only
     /// ever holds tasks the user actually configured.
     func update(_ config: AutoTaskConfig, for taskId: String) {
+        guard !refuseWhileReadOnly() else { return }
         let trimmed = config.trimmed
         var bucket = configs
         if trimmed.isEmpty {
@@ -85,6 +94,7 @@ final class AutoTaskConfigStore: ObservableObject {
     /// Forget a task's settings — called when a custom task is deleted so its
     /// record doesn't linger against an id nothing can reach.
     func remove(taskId: String) {
+        guard !refuseWhileReadOnly() else { return }
         var bucket = configs
         guard bucket.removeValue(forKey: taskId) != nil else { return }
         setBucket(bucket)
@@ -98,6 +108,7 @@ final class AutoTaskConfigStore: ObservableObject {
     /// different file and must not be touched. Pass `nil` for a deleted
     /// template to clear the reference.
     func retargetTemplate(from oldTemplateId: String, to newTemplateId: String?) {
+        guard !refuseWhileReadOnly() else { return }
         var bucket = configs
         var changed = false
         for (taskId, config) in bucket where config.templateId == oldTemplateId {
@@ -116,6 +127,23 @@ final class AutoTaskConfigStore: ObservableObject {
 
     // MARK: - Persistence
 
+    private var hasLoggedReadOnlyRefusal = false
+
+    /// While read-only, save() is a no-op. Mutating `byProject` anyway made the
+    /// UI show an edit as saved that then vanished on relaunch, so refuse the
+    /// edit instead; `objectWillChange` makes bound controls re-read the
+    /// unchanged value and snap back. Logged once (not per keystroke).
+    /// - Returns: true when the edit must be dropped.
+    private func refuseWhileReadOnly() -> Bool {
+        guard isReadOnly else { return false }
+        if !hasLoggedReadOnlyRefusal {
+            hasLoggedReadOnlyRefusal = true
+            Self.logger.error("Auto Task settings are read-only (stored blob unreadable, backup failed); edits are discarded")
+        }
+        objectWillChange.send()
+        return true
+    }
+
     private func setBucket(_ bucket: [String: AutoTaskConfig]) {
         if bucket.isEmpty {
             byProject.removeValue(forKey: scope)
@@ -125,15 +153,54 @@ final class AutoTaskConfigStore: ObservableObject {
         save()
     }
 
-    private func load() {
+    private func load(stashDirectory: URL?) {
         guard let data = defaults.data(forKey: Self.defaultsKey) else { return }
-        // A decode failure means a corrupt or future-shaped blob; starting
-        // empty loses settings but never blocks the page from opening.
-        byProject = (try? JSONDecoder()
-            .decode([String: [String: AutoTaskConfig]].self, from: data)) ?? [:]
+        do {
+            byProject = try JSONDecoder()
+                .decode([String: [String: AutoTaskConfig]].self, from: data)
+        } catch {
+            // Starting empty never blocks the page from opening, but the next
+            // `save()` would then overwrite EVERY project's config with the
+            // empty map. Keep the bad bytes on disk first so they can be
+            // recovered by hand.
+            byProject = [:]
+            if Self.stashCorruptBlob(data, error: error, directory: stashDirectory) {
+                defaults.removeObject(forKey: Self.defaultsKey)
+            } else {
+                // No verified copy: removing the key would destroy the only
+                // one, and saving would overwrite it. Keep it, go read-only.
+                isReadOnly = true
+            }
+        }
+    }
+
+    private static let logger = Logger(subsystem: "com.llmide.macapp", category: "AutoTaskConfigStore")
+
+    /// Copy an undecodable blob under Application Support (same convention as
+    /// `AppConfig`'s `*.corrupt-<ts>` stashes) and log it.
+    /// Returns true only when a byte-identical copy exists on disk.
+    private static func stashCorruptBlob(_ data: Data, error: Error, directory: URL?) -> Bool {
+        let fm = FileManager.default
+        let dir = directory ?? AppIdentity.applicationSupportRoot(fileManager: fm)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let ts = Int(Date().timeIntervalSince1970)
+        let backup = dir.appendingPathComponent("\(defaultsKey).json.corrupt-\(ts)")
+        do {
+            try data.write(to: backup, options: .atomic)
+            guard fm.contents(atPath: backup.path) == data else {
+                logger.error("Corrupt \(defaultsKey, privacy: .public) stash failed verification")
+                return false
+            }
+            logger.warning("Corrupt \(defaultsKey, privacy: .public) stashed to \(backup.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return true
+        } catch {
+            logger.error("Corrupt \(defaultsKey, privacy: .public) could not be stashed: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     private func save() {
+        guard !isReadOnly else { return }
         guard let data = try? JSONEncoder().encode(byProject) else { return }
         defaults.set(data, forKey: Self.defaultsKey)
     }
