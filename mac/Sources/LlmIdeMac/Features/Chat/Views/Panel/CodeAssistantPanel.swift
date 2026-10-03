@@ -581,16 +581,21 @@ struct CodeAssistantPanel: View {
                 // This panel renders the classic engine's ask-user card.
                 questionCard: true)
         }
+        let wiredID = ObjectIdentifier(engine)
         // Fresh budget of auto-run git ops for this user turn (commit→push→…).
         // Panel-owned because `autoChainPendingAction` — which spends it — is.
-        engine.hooks.onTurnStart = { autoGitOpsThisTurn = 0 }
+        engine.hooks.onTurnStart = {
+            // Identity check below (`wiredID`) — a parked engine must not
+            // zero the DISPLAYED chat's auto-op budget.
+            guard ObjectIdentifier(engine) == wiredID else { return }
+            autoGitOpsThisTurn = 0
+        }
         // Both hooks below reach into PANEL state (the mode picker, the
         // attachment bar) from an ENGINE callback, and `adoptEngine` rewires
         // only the incoming engine — a parked background engine keeps the
         // closure it was wired with and keeps running its turns. Without this
         // identity check, chat A's run settling off-screen would flip the
         // DISPLAYED chat B's mode picker, or strip B's attachments.
-        let wiredID = ObjectIdentifier(engine)
         engine.hooks.onPlanReviewReleased = {
             guard ObjectIdentifier(engine) == wiredID else { return }
             releasePlanReviewTurn()
@@ -610,15 +615,25 @@ struct CodeAssistantPanel: View {
             guard ObjectIdentifier(engine) == wiredID else { return }
             Self.releaseModeAfterWork(engine: engine, modelState: modelState)
         }
-        engine.hooks.onRecordPrompt = { _ = session.record(prompt: $0) }
+        // Same identity rule: a parked engine's prompt must not enter the
+        // displayed chat's history, nor its nudge the displayed engine.
+        engine.hooks.onRecordPrompt = {
+            guard ObjectIdentifier(engine) == wiredID else { return }
+            _ = session.record(prompt: $0)
+        }
         engine.hooks.onNudge = { prompt in
+            guard ObjectIdentifier(engine) == wiredID else { return }
             if session.shouldNudge(for: prompt) { engine.agent.nudgePrompt = prompt }
         }
         engine.hooks.attachmentsForTurn = { attachmentState.attachments }
         // `packHistory` defaults to `engine.historyForRequest` in
         // `ChatEngine.init` itself now (code review, Task 12) — no explicit
         // wiring needed here.
+        // A parked engine's proposal stays as a card on its own
+        // `agent.pendingTool`; running it here would execute it in the
+        // DISPLAYED chat's repo and post the result to that transcript.
         engine.hooks.autoChain = { pendingTool, usage in
+            guard ObjectIdentifier(engine) == wiredID else { return }
             await autoChainPendingAction(pendingTool, usage: usage)
         }
         engine.hooks.onHistoryReplaced = { history in
@@ -632,6 +647,8 @@ struct CodeAssistantPanel: View {
         }
         engine.hooks.onResetActiveTurnExtra = { expandedTurns.removeAll() }
         engine.hooks.onResetTransientStateExtra = {
+            // Deleting a parked chat must not wipe the displayed chat's draft.
+            guard ObjectIdentifier(engine) == wiredID else { return }
             sentPrompts = []; historyIndex = nil; draftStash = ""
             draft = ""
             imeComposing = false
