@@ -152,6 +152,10 @@ final class SessionStore: ObservableObject {
         accessToken = nil
         refreshToken = nil
         lastError = nil
+        // ContentView tests `unreachable` before `isAuthenticated`, so without
+        // this the Reconnect screen's "Sign out" deletes the token yet stays
+        // on screen.
+        unreachable = false
         KeychainStore.deleteToken(host: host)
         // In-memory generation state is registry-held so a running generation
         // survives a section switch — which also means it now outlives a sign
