@@ -203,6 +203,20 @@ final class KeychainStoreLoadFailureTests: XCTestCase {
         XCTAssertEqual(fake.blob()["github::github.com::token"], "ghp_new")
     }
 
+    /// `AppConfig` keeps the tokens in `@Published` properties. If the wipe
+    /// leaves them, a later `gitLabBaseURL` change re-saves the non-empty
+    /// GitLab token and the "disconnected" secret reappears in the keychain.
+    @MainActor
+    func testWipeAllSecretsClearsInMemoryTokensSoTheyCannotResurrect() {
+        AppConfig.shared.gitHubToken = "ghp_live"
+        XCTAssertEqual(fake.blob()["github::github.com::token"], "ghp_live")
+
+        KeychainStore.wipeAllSecrets()
+
+        XCTAssertEqual(AppConfig.shared.gitHubToken, "")
+        XCTAssertNil(fake.blob()["github::github.com::token"])
+    }
+
     /// Migration stamps a "already migrated" sentinel. It must not run — and
     /// so must not stamp — while the keychain is unreadable, or the legacy
     /// per-secret items would be permanently orphaned.

@@ -19,6 +19,9 @@ struct HelpGuideView: View {
         .issues: .ganttIssues,
         .gantt: .ganttIssues,
         .docGen: .docGen,
+        // ShellState.Section.backingFeature maps .visual to .docGen — mirror it
+        // so the topic hides in builds where the Visual section is hidden.
+        .visual: .docGen,
         .codeGraph: .codeGraph3D,
         .autoTasks: .autoTasks,
         .loopEngine: .autoTasks,
@@ -115,7 +118,7 @@ struct HelpGuideView: View {
             helpCard("First-time setup", icon: "checkmark.seal") {
                 helpBullet("Grant Accessibility permission so the Mac app can read captions from Zoom and Teams desktop windows")
                 helpBullet("Install the Chrome extension for Google Meet, Teams web, and Zoom web")
-                helpBullet("Sign in with your LLM-IDE account (your admin provides the server URL)")
+                helpBullet("Sign in with your LLM-IDE account (the app talks to the server on this Mac and starts it for you)")
                 helpBullet("Create or open a project — this is where your notes will be saved")
             }
 
@@ -402,10 +405,17 @@ struct HelpGuideView: View {
 
             helpCard("App settings", icon: "macwindow") {
                 helpBullet("Workspace — feature presets, per-feature toggles, and toolbar visibility")
-                helpBullet("Server & Backend — URL, local Node process, and log")
+                helpBullet("Server & Backend — local server URL, Node process, and log")
                 helpBullet("Connections — meetings, email, Slack, Box, and other inputs")
                 helpBullet("General — theme, language, and synced preferences")
                 helpBullet("Model Providers — API keys, default model, and Agent engine toggle")
+                helpBullet("Claude Agent SDK — how the agent engine runs and loads plugins")
+                helpBullet("Custom Providers — add named OpenAI-compatible providers (optionally with an Anthropic-compatible URL for the Agent engine)")
+                helpBullet("Tool permissions — which agent tools are allowed, asked, or blocked")
+                if AppSourceRoot.gitRoot != nil {
+                    // Settings only shows the Self-Heal card on a source checkout.
+                    helpBullet("Self-Heal — review fixes proposed for errors the app captured (source checkouts only)")
+                }
                 if FeatureRegistry.shared.compiledFeatures.contains(.mobileSync) {
                     helpBullet("Mobile Control — pair your iPhone companion")
                 }
@@ -415,6 +425,7 @@ struct HelpGuideView: View {
             helpCard("Project settings", icon: "folder.badge.gearshape") {
                 helpBullet("Paths — where your project files and notes are stored (also in Explorer → Project folders)")
                 helpBullet("Repositories — GitLab and GitHub tokens, saved repos, and automation allow-list")
+                helpBullet("Memory — the project graph and memory files the agent can draw on")
             }
 
             helpCard("Elsewhere", icon: "arrow.turn.down.right") {
@@ -454,19 +465,19 @@ struct HelpGuideView: View {
             }
 
             helpCard("Can't connect to the server", icon: "wifi.exclamationmark") {
-                helpStep(1, "Check the server URL in Settings → Server")
-                helpStep(2, "Make sure the LLM-IDE server is running")
+                helpStep(1, "Check the server URL in Settings → Server & Backend")
+                helpStep(2, "Make sure the LLM-IDE server is running (Settings → Server & Backend shows its status)")
                 helpStep(3, "If using localhost, check that the port matches (default: 3456)")
                 helpStep(4, "Try signing out and signing back in to refresh your token")
             }
 
             helpCard("Notes aren't being generated", icon: "doc.questionmark") {
-                helpBullet("Check Settings → Backend to make sure an AI provider is configured")
+                helpBullet("Check Settings → Model Providers to make sure an AI provider is configured")
                 helpBullet("Verify the transcript has enough content — very short meetings may not generate useful notes")
                 helpBullet("Check the status bar at the bottom for error messages")
             }
 
-            helpWarning("If something still isn't working, check the server logs for detailed error messages. The Mac app communicates with your self-hosted server — most issues originate there.")
+            helpWarning("If something still isn't working, check the server logs for detailed error messages. The Mac app talks to a server running on this Mac (localhost only) — most issues originate there.")
         }
     }
 

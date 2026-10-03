@@ -5,7 +5,24 @@ import Foundation
 public enum SelfHealProposalService {
     public enum Failure: Error, LocalizedError {
         case git(String)
-        public var errorDescription: String? { if case .git(let m) = self { return m } else { return nil } }
+        /// The worktree no longer matches the patch the user reviewed.
+        case changedSinceReview
+        public var errorDescription: String? {
+            switch self {
+            case .git(let message): return message
+            case .changedSinceReview:
+                return "The proposal changed since you opened it. Close and reopen it to review the current diff."
+            }
+        }
+    }
+
+    /// What the review sheet shows plus the exact bytes it will apply.
+    public struct ReviewedPatch: Sendable {
+        /// Human-readable text diff (binary changes appear only as "Binary files differ").
+        public let text: String
+        /// The `--binary` patch the text was derived from; applying THIS closes the
+        /// gap where a binary change passes review unseen.
+        public let binaryPatch: Data
     }
 
     public static func discard(_ proposal: IncidentProposal) throws {
@@ -33,13 +50,37 @@ public enum SelfHealProposalService {
         String(data: try stagedPatch(proposal, binary: false), encoding: .utf8) ?? ""
     }
 
+    /// Stages once and derives both the displayed diff and the applicable
+    /// `--binary` patch from that single index state.
+    public static func reviewedPatch(_ proposal: IncidentProposal) throws -> ReviewedPatch {
+        let wt = URL(fileURLWithPath: proposal.worktreePath)
+        try git(["add", "-A"] + pathspec, in: wt)
+        let base = ["diff", "--cached"]
+        let text = try git(base + [proposal.baseCommit] + pathspec, in: wt)
+        let binary = try git(base + ["--binary", proposal.baseCommit] + pathspec, in: wt)
+        return ReviewedPatch(text: String(data: text, encoding: .utf8) ?? "", binaryPatch: binary)
+    }
+
+    /// Applies exactly the reviewed bytes. Refuses when the worktree now produces a
+    /// different patch; real git failures propagate (never collapsed to "changed").
+    public static func apply(_ proposal: IncidentProposal, reviewed: Data) throws {
+        guard !reviewed.isEmpty else { throw Failure.git("The proposal has no changes.") }
+        let current = try stagedPatch(proposal, binary: true)
+        guard current == reviewed else { throw Failure.changedSinceReview }
+        try applyPatch(reviewed, to: proposal)
+    }
+
+    private static func applyPatch(_ patch: Data, to proposal: IncidentProposal) throws {
+        let main = URL(fileURLWithPath: proposal.mainRepo)
+        try git(["apply", "--check", "-"], in: main, input: patch)
+        try git(["apply", "-"], in: main, input: patch)
+    }
+
     /// All-or-nothing: `--check` first, because a partial apply would leave the main checkout half-changed.
     public static func apply(_ proposal: IncidentProposal) throws {
         let patch = try stagedPatch(proposal, binary: true)
         guard !patch.isEmpty else { throw Failure.git("The proposal has no changes.") }
-        let main = URL(fileURLWithPath: proposal.mainRepo)
-        try git(["apply", "--check", "-"], in: main, input: patch)
-        try git(["apply", "-"], in: main, input: patch)
+        try applyPatch(patch, to: proposal)
     }
 
     @MainActor

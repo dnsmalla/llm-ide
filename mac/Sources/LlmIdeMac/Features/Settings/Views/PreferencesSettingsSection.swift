@@ -6,11 +6,18 @@ struct PreferencesSettingsSection: View {
     @EnvironmentObject var config: AppConfig
 
     @State private var language: String = ""
+    /// Round-tripped untouched: the server still stores it (the Chrome
+    /// extension keeps its own toggle in chrome.storage), but no Mac surface
+    /// reads it, so it is not shown here.
     @State private var prefsBilingual: Bool = false
     @State private var prefsNativePlugins: Bool = true
     @State private var prefsLoaded: Bool = false
     @State private var prefsBusy: Bool = false
     @State private var prefsStatus: String?
+    /// Bumped per save so only the latest one clears `prefsBusy` / reports.
+    @State private var saveGeneration = 0
+
+    private static let offeredLanguages: Set<String> = ["en", "ja", "zh-CN", "ko", "es", "fr", "de"]
 
     var body: some View {
         SettingsSectionCard(icon: "globe", title: "General") {
@@ -61,7 +68,21 @@ struct PreferencesSettingsSection: View {
                         .font(Typography.body)
                         .foregroundStyle(theme.current.textMuted)
                         .frame(width: 110, alignment: .leading)
-                    Picker("", selection: $language) {
+                    // Edits save on change: with an explicit Save button, leaving the
+                    // pane silently dropped them while the controls looked instant.
+                    Picker("", selection: Binding(
+                        get: { language },
+                        set: { newValue in
+                            let previous = language
+                            language = newValue
+                            Task { await savePrefs(rollback: { language = previous }) }
+                        }
+                    )) {
+                        // A server value outside the offered tags (e.g. zh-TW)
+                        // would render the Picker blank — keep it selectable.
+                        if !language.isEmpty, !Self.offeredLanguages.contains(language) {
+                            Text(language).tag(language)
+                        }
                         Text("English").tag("en")
                         Text("日本語").tag("ja")
                         Text("简体中文").tag("zh-CN")
@@ -74,19 +95,14 @@ struct PreferencesSettingsSection: View {
                     .labelsHidden()
                     .disabled(!prefsLoaded || prefsBusy)
                 }
-                Toggle(isOn: $prefsBilingual) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Bilingual transcript display")
-                            .font(Typography.body)
-                            .foregroundStyle(theme.current.text)
-                        Text("Show captions + translations side by side. Off by default.")
-                            .font(Typography.caption)
-                            .foregroundStyle(theme.current.textMuted)
+                Toggle(isOn: Binding(
+                    get: { prefsNativePlugins },
+                    set: { newValue in
+                        let previous = prefsNativePlugins
+                        prefsNativePlugins = newValue
+                        Task { await savePrefs(rollback: { prefsNativePlugins = previous }) }
                     }
-                }
-                .toggleStyle(.switch)
-                .disabled(!prefsLoaded || prefsBusy)
-                Toggle(isOn: $prefsNativePlugins) {
+                )) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Let plugins load natively")
                             .font(Typography.body)
@@ -100,12 +116,11 @@ struct PreferencesSettingsSection: View {
                 .toggleStyle(.switch)
                 .disabled(!prefsLoaded || prefsBusy)
                 HStack {
-                    Button(prefsBusy ? "Saving…" : "Save") {
-                        Task { await savePrefs() }
+                    if prefsBusy {
+                        Text("Saving…")
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.textMuted)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(!prefsLoaded || prefsBusy)
                     if !prefsLoaded, prefsStatus != nil {
                         Button("Retry") { Task { await loadPrefs() } }
                             .buttonStyle(.bordered)
@@ -117,7 +132,7 @@ struct PreferencesSettingsSection: View {
                             .foregroundStyle(s.hasPrefix("✓") ? theme.current.text : theme.current.danger)
                     }
                 }
-                SettingsHint("Theme applies immediately on this Mac. Language drives every LLM output (notes, plans, agent questions) and applies on both this app and the Chrome extension once signed in.")
+                SettingsHint("Theme applies immediately on this Mac. Language and plugin changes save automatically. Language drives every LLM output (notes, plans, agent questions) and applies on both this app and the Chrome extension once signed in.")
             }
         }
         .task { await loadPrefs() }
@@ -143,18 +158,28 @@ struct PreferencesSettingsSection: View {
         }
     }
 
-    private func savePrefs() async {
+    /// `rollback` restores the control the user just changed if the save fails,
+    /// so the UI never shows a value the server and `config` don't have.
+    private func savePrefs(rollback: @escaping () -> Void) async {
+        saveGeneration += 1
+        let generation = saveGeneration
         prefsBusy = true
         prefsStatus = nil
-        defer { prefsBusy = false }
+        // WHY generation: two quick edits start two saves; the first to finish
+        // must not clear the busy flag while the later one is still running.
+        defer { if generation == saveGeneration { prefsBusy = false } }
+        let sentLanguage = language
         do {
-            _ = try await api.setUserPrefs(.init(language: language,
+            _ = try await api.setUserPrefs(.init(language: sentLanguage,
                                                  bilingual: prefsBilingual,
                                                  nativePlugins: prefsNativePlugins))
-            config.preferredLanguage = language
+            guard generation == saveGeneration else { return }
+            config.preferredLanguage = sentLanguage
             prefsStatus = "✓ Saved."
         } catch {
-            prefsStatus = "Failed: \(error.localizedDescription)"
+            guard generation == saveGeneration else { return }
+            rollback()
+            prefsStatus = "Failed: \(error.localizedDescription) (change reverted)"
         }
     }
 }

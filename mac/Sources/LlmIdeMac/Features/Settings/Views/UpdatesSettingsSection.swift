@@ -14,6 +14,7 @@ import SwiftUI
 struct UpdatesSettingsSection: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var updateService: UpdateService
+    @State private var automaticChecks = false
 
     var body: some View {
         SettingsSectionCard(icon: "arrow.down.circle", title: "Updates & About") {
@@ -32,9 +33,14 @@ struct UpdatesSettingsSection: View {
                 if updateService.isUpdateFeedConfigured {
                     Divider().opacity(0.4)
 
+                    // Sparkle's flag isn't @Published, so reading it directly in the
+                    // binding left the switch stale after a set; mirror it locally.
                     Toggle(isOn: Binding(
-                        get: { updateService.automaticChecksEnabled },
-                        set: { updateService.automaticChecksEnabled = $0 }
+                        get: { automaticChecks },
+                        set: {
+                            updateService.automaticChecksEnabled = $0
+                            automaticChecks = updateService.automaticChecksEnabled
+                        }
                     )) {
                         Text("Check for updates automatically")
                     }
@@ -55,6 +61,7 @@ struct UpdatesSettingsSection: View {
                 }
             }
         }
+        .onAppear { automaticChecks = updateService.automaticChecksEnabled }
     }
 
     private var versionRow: some View {

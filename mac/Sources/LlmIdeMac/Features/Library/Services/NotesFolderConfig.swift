@@ -27,7 +27,13 @@ final class NotesFolderConfig {
             if let url = try? URL(resolvingBookmarkData: data,
                                   options: [.withSecurityScope],
                                   relativeTo: nil,
-                                  bookmarkDataIsStale: &stale) {
+                                  bookmarkDataIsStale: &stale),
+               // A bookmark follows the folder wherever it goes — including
+               // the Trash. Resolving there would silently write new notes
+               // into ~/.Trash while the stored path still names the old
+               // location, so fall through to that path instead.
+               !Self.isInTrash(url) {
+                if stale { refreshBookmark(for: url) }
                 return url
             }
         }
@@ -35,6 +41,22 @@ final class NotesFolderConfig {
             return URL(fileURLWithPath: p, isDirectory: true)
         }
         return defaultFolder()
+    }
+
+    /// True for a URL inside a user or volume Trash (`.Trash` / `.Trashes`).
+    static func isInTrash(_ url: URL) -> Bool {
+        url.pathComponents.contains { $0 == ".Trash" || $0 == ".Trashes" }
+    }
+
+    /// A stale bookmark still resolved, but keeps going stale and its recorded
+    /// path no longer matches (folder moved/renamed). Re-save both from the
+    /// resolved location so later reads agree with where the folder really is.
+    private func refreshBookmark(for url: URL) {
+        guard let bm = try? url.bookmarkData(options: [.withSecurityScope],
+                                             includingResourceValuesForKeys: nil,
+                                             relativeTo: nil) else { return }
+        defaults.set(bm, forKey: bookmarkKey)
+        defaults.set(url.path, forKey: pathKey)
     }
 
     func setFolder(_ url: URL) throws {

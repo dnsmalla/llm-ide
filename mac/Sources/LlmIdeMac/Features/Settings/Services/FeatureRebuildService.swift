@@ -87,6 +87,19 @@ final class FeatureRebuildService: ObservableObject {
     /// Surfaced in the Settings card as "Built with: <csv|all>".
     let builtFeaturesRaw: String?
     private var stagedAppURL: URL?
+    /// The feature CSV the current/last staging run was started with. The
+    /// user can keep toggling Workspace features while "Build ready" is
+    /// showing; installing then would silently ship the OLD set, so the card
+    /// compares this with `desiredCSV` before offering "Restart & Install".
+    @Published private(set) var stagedCSV: String?
+    /// True when a ready build was staged for a different feature set than the
+    /// one currently selected.
+    var stagedIsStale: Bool { phase == .readyToSwap && stagedCSV != desiredCSV }
+    /// The staging `bash`, so quitting the app mid-build doesn't orphan a
+    /// multi-minute `swift build`. Written from the detached build task,
+    /// read from the willTerminate observer — hence the lock-guarded box.
+    private let buildProcess = BuildProcessBox()
+    private var terminateObserver: NSObjectProtocol?
     /// The detached `rebuild-swap.sh`, kept so the "did not terminate" path
     /// can stop it: it waits up to 120 s for this pid with a valid staged
     /// bundle, so after we gave up at 15 s and showed "install aborted", a
@@ -124,6 +137,11 @@ final class FeatureRebuildService: ObservableObject {
             try? FileManager.default.removeItem(at: errorFile)
             self.phase = .failed("Previous install attempt failed: \(reason)")
         }
+
+        let box = buildProcess
+        terminateObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { _ in box.terminate() }
 
         // Cheap but still a subprocess spawn, so it happens once,
         // asynchronously, off the critical init path — the card stays
@@ -173,7 +191,10 @@ final class FeatureRebuildService: ObservableObject {
         guard isEligible, let sourceRoot else { return }
         switch phase {
         case .idle, .failed: break
-        case .building, .readyToSwap, .swapping: return
+        case .building, .swapping: return
+        // A staged build is only re-run on purpose: the card offers "Rebuild"
+        // when the selection changed after staging (see `stagedIsStale`).
+        case .readyToSwap: guard stagedIsStale else { return }
         }
 
         phase = .building
@@ -182,6 +203,7 @@ final class FeatureRebuildService: ObservableObject {
         stagedAppURL = nil
 
         let csv = desiredCSV
+        stagedCSV = csv
         let stageDir = AppIdentity.applicationSupportRoot()
             .appendingPathComponent("rebuild-staging", isDirectory: true)
         let scriptPath = sourceRoot.appendingPathComponent("Scripts/rebuild-features.sh").path
@@ -247,6 +269,7 @@ final class FeatureRebuildService: ObservableObject {
 
             do {
                 try proc.run()
+                self.buildProcess.set(proc)
             } catch {
                 stdoutPipe.fileHandleForReading.readabilityHandler = nil
                 stderrPipe.fileHandleForReading.readabilityHandler = nil
@@ -257,6 +280,7 @@ final class FeatureRebuildService: ObservableObject {
             }
 
             proc.waitUntilExit()
+            self.buildProcess.set(nil)
 
             // A readability handler is edge-triggered via GCD and can race
             // waitUntilExit(): the final chunk — often exactly the failure's
@@ -309,6 +333,12 @@ final class FeatureRebuildService: ObservableObject {
     /// double-click, or `NSApp.terminate` taking a moment to actually quit)
     /// can never spawn a second `rebuild-swap.sh` racing the first.
     func swapAndRelaunch() {
+        // Not a silent return: the user tapped a button and must learn why
+        // nothing happened. Moving to .failed re-offers "Rebuild".
+        if phase == .readyToSwap, stagedIsStale {
+            phase = .failed("The feature selection changed after this build was staged. Rebuild to apply the current selection.")
+            return
+        }
         guard phase == .readyToSwap,
               let stagedAppURL,
               let installTarget,
@@ -396,6 +426,42 @@ final class FeatureRebuildService: ObservableObject {
             logBuffer.removeFirst(logBuffer.count - 200)
         }
         logTail = Array(logBuffer.suffix(20))
+    }
+}
+
+/// Holds the running staging process so the app-quit observer can stop it.
+private final class BuildProcessBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+
+    func set(_ newProcess: Process?) {
+        lock.lock(); defer { lock.unlock() }
+        process = newProcess
+    }
+
+    func terminate() {
+        lock.lock(); defer { lock.unlock() }
+        guard let process, process.isRunning else { return }
+        // `Process.terminate()` signals only the outer bash; rebuild-features.sh ->
+        // build.sh -> swift build would be orphaned and keep writing into
+        // rebuild-staging. Snapshot the descendants BEFORE signalling (once bash
+        // dies they re-parent to launchd and can't be found), then kill the tree.
+        // Deliberately not `kill(0, ...)`: that targets the app's own process group.
+        var tree = ProcessTree.snapshot(descendantsOfAny: [process.processIdentifier])
+        process.terminate()
+        ProcessTree.signal(tree, SIGTERM)
+        // Synchronous grace: this runs from willTerminate, so a deferred
+        // SIGKILL might never get to run.
+        let deadline = Date().addingTimeInterval(1.0)
+        while Date() < deadline {
+            tree = ProcessTree.stillAlive(tree)
+            if tree.isEmpty && !process.isRunning { return }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        // Re-walk from survivors in case they spawned more during the grace.
+        tree.merge(ProcessTree.snapshot(descendantsOfAny: Set(tree.keys))) { old, _ in old }
+        ProcessTree.signal(tree, SIGKILL)
+        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
     }
 }
 

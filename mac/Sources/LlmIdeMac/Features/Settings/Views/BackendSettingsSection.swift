@@ -78,8 +78,28 @@ struct BackendSettingsSection: View {
             serverError = "Server URL must be http(s) on localhost or 127.0.0.1."
             return
         }
-        config.serverURL = trimmed
+        let previousEndpoint = Self.endpointKey(config.serverURL)
+        let newEndpoint = Self.endpointKey(trimmed)
+        // The managed backend always listens on (and is health-probed at)
+        // `BackendManager.defaultBackendPort`; it has no PORT override. Saving
+        // another port while auto-start is on would sign the user out and then
+        // point the app at a port nothing serves.
+        let port = URL(string: trimmed)?.port ?? (trimmed.lowercased().hasPrefix("https") ? 443 : 80)
+        if config.backendAutoStart, port != BackendManager.defaultBackendPort {
+            serverError = "The app-managed backend only runs on port \(BackendManager.defaultBackendPort). Turn off \"Start backend on app launch\" to use another port."
+            return
+        }
         serverError = nil
+        // Cosmetic edits (trailing slash, localhost vs 127.0.0.1) keep the same
+        // endpoint, so they must not sign the user out. They must not be
+        // WRITTEN either: SessionStore keys the refresh token by the raw
+        // serverURL string, so a new spelling would miss the stored token at
+        // next launch (silent sign-out, old token orphaned in the Keychain).
+        guard newEndpoint != previousEndpoint else {
+            serverDraft = config.serverURL
+            return
+        }
+        config.serverURL = trimmed
         // The API client and session store captured the launch-time URL (both
         // `let`), so saving used to change nothing but the setting: the app
         // kept talking to the old server and the next sign-in stored its
@@ -88,6 +108,17 @@ struct BackendSettingsSection: View {
         session.clear()
         KeychainStore.deleteToken(host: trimmed)
         needsRelaunch = true
+    }
+
+    /// scheme + loopback-normalised host + effective port, so two spellings of
+    /// the same server compare equal.
+    private static func endpointKey(_ raw: String) -> String {
+        guard let url = URL(string: raw) else { return raw }
+        let scheme = (url.scheme ?? "http").lowercased()
+        var host = (url.host ?? "").lowercased()
+        if host == "localhost" || host == "::1" { host = "127.0.0.1" }
+        let port = url.port ?? (scheme == "https" ? 443 : 80)
+        return "\(scheme)://\(host):\(port)"
     }
 
     /// Quit and reopen the bundle (a detached `open` waits for this process

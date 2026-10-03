@@ -308,6 +308,14 @@ enum KeychainStore {
         clearBlobCache(wiped: wiped)
         AppConfig.shared.gitLabSavedProjects = []
         AppConfig.shared.gitHubSavedRepos = []
+        // The published tokens outlive the Keychain wipe: a later
+        // `gitLabBaseURL` change re-saves a non-empty `gitLabToken` back into
+        // the Keychain, resurrecting a secret the user just disconnected.
+        // Guarded on non-empty so an already-empty token doesn't trigger a
+        // pointless `glab auth logout`. The logout the didSet runs is intended
+        // here — this IS the "disconnect everything" action.
+        if !AppConfig.shared.gitLabToken.isEmpty { AppConfig.shared.gitLabToken = "" }
+        if !AppConfig.shared.gitHubToken.isEmpty { AppConfig.shared.gitHubToken = "" }
     }
 
     // MARK: - Map accessors (backed by the single blob item)

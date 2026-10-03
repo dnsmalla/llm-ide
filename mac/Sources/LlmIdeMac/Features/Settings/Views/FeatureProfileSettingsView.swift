@@ -7,6 +7,9 @@ struct FeatureProfileSettingsSection: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var rebuild: FeatureRebuildService
+    /// Features `AppFeature.validated` switched off as a side effect of the
+    /// user's last toggle (e.g. File Explorer takes Code Graph with it).
+    @State private var cascadeNotice: String?
 
     var body: some View {
         Group {
@@ -69,14 +72,31 @@ struct FeatureProfileSettingsSection: View {
                     if feature != lastFeature { Divider().opacity(0.4) }
                 }
 
+                if let notice = cascadeNotice {
+                    HStack(alignment: .top, spacing: 4) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.system(size: 10))
+                        Text(notice)
+                            .font(Typography.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundStyle(theme.current.warning)
+                }
+
                 Divider().padding(.vertical, Spacing.xs)
 
                 Text("Menu bar")
                     .font(Typography.captionStrong)
                     .foregroundStyle(theme.current.textMuted)
 
+                let resolvedHome = ShellState.Section.resolveHome(
+                    config.homeSection,
+                    hidden: config.hiddenSidebarSections,
+                    compiled: registry.compiledFeatures)
                 Picker("Home opens", selection: Binding(
-                    get: { config.homeSection },
+                    // Show the landing that will actually open: a hidden or
+                    // compiled-out choice silently resolves to Library.
+                    get: { resolvedHome.rawValue },
                     set: { config.homeSection = $0 }
                 )) {
                     // A section backed by a feature that isn't compiled into
@@ -85,11 +105,20 @@ struct FeatureProfileSettingsSection: View {
                     // section → feature mapping AppShell's toolbar filter
                     // uses (ShellState.Section.backingFeature).
                     ForEach(ShellState.Section.allCases.filter { section in
+                        // WHY always keep the resolved home: if Library is
+                        // hidden the fallback is still what opens, and a
+                        // selection missing from the options renders blank.
+                        if section == resolvedHome { return true }
                         guard section != .settings, section != .live else { return false }
+                        // Hidden sections resolve to Library at launch
+                        // (resolveHome), so offering them is a lie.
+                        guard !config.hiddenSidebarSections.contains(section.rawValue) else { return false }
                         guard let feature = section.backingFeature else { return true }
                         return registry.compiledFeatures.contains(feature)
                     }, id: \.self) { section in
-                        Text(section.label).tag(section.rawValue)
+                        let isHiddenFallback = config.hiddenSidebarSections.contains(section.rawValue)
+                        Text(isHiddenFallback ? "\(section.label) (hidden)" : section.label)
+                            .tag(section.rawValue)
                     }
                 }
                 .pickerStyle(.menu)
@@ -136,7 +165,13 @@ struct FeatureProfileSettingsSection: View {
                 } else {
                     updated.remove(feature)
                 }
+                let before = registry.activeFeatures
                 registry.updateFeatureSet(updated)
+                // Dependencies are enforced silently by the registry; say what
+                // else went off so the user isn't left guessing.
+                let cascaded = before.subtracting(registry.activeFeatures).subtracting([feature])
+                cascadeNotice = (isEnabled || cascaded.isEmpty) ? nil
+                    : "Turning off \(feature.displayName) also turned off \(cascaded.map(\.displayName).sorted().joined(separator: ", ")), which depend on it."
             }
         )
         HStack(spacing: Spacing.md) {
@@ -223,6 +258,10 @@ struct FeatureProfileSettingsSection: View {
 struct BuildRebuildSettingsCard: View {
     @EnvironmentObject var rebuild: FeatureRebuildService
     @EnvironmentObject var theme: ThemeStore
+    // Observed on purpose: stagedIsStale/desiredCSV read `activeFeatures` off the
+    // singleton; without this the card would not re-render after a toggle and
+    // would keep offering "Restart & Install" for an outdated staged build.
+    @ObservedObject private var registry = FeatureRegistry.shared
     @State private var showConfirmation = false
 
     var body: some View {
@@ -237,7 +276,7 @@ struct BuildRebuildSettingsCard: View {
                           compiled.map(\.displayName).sorted().joined(separator: ", "))
                 statusRow("Built with", rebuild.builtFeaturesRaw ?? "all")
 
-                if FeatureRebuildService.hasDrift(compiled: compiled, active: FeatureRegistry.shared.activeFeatures) {
+                if FeatureRebuildService.hasDrift(compiled: compiled, active: registry.activeFeatures) {
                     SettingsHint("This binary's compiled feature set differs from your current selection — rebuild to apply.")
                 }
 
@@ -289,11 +328,23 @@ struct BuildRebuildSettingsCard: View {
         case .readyToSwap:
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 statusRow("Status", "Build ready", ok: true)
+                statusRow("Staged with", rebuild.stagedCSV ?? "—")
+                if rebuild.stagedIsStale {
+                    // Installing now would ship the set that was staged, not
+                    // the one currently selected above.
+                    SettingsHint("Your feature selection changed after this build was staged. Rebuild to include the change.")
+                }
                 HStack {
                     Spacer()
-                    Button("Restart & Install") { rebuild.swapAndRelaunch() }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
+                    if rebuild.stagedIsStale {
+                        Button("Rebuild") { showConfirmation = true }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    } else {
+                        Button("Restart & Install") { rebuild.swapAndRelaunch() }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    }
                 }
             }
 

@@ -27,6 +27,8 @@ struct ProjectPathsPanel: View {
     @State private var createStatus: String?
     @State private var createError: String?
     @State private var rebuildingIndex = false
+    @State private var rebuildStatus: String?
+    @State private var rebuildFailed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
@@ -240,6 +242,11 @@ struct ProjectPathsPanel: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
             .disabled(rebuildingIndex)
+            if let status = rebuildStatus {
+                Text(status)
+                    .font(Typography.caption)
+                    .foregroundStyle(rebuildFailed ? theme.current.danger : theme.current.textMuted)
+            }
         }
     }
 
@@ -274,10 +281,23 @@ struct ProjectPathsPanel: View {
 
     private func rebuildIndex() async {
         rebuildingIndex = true
+        rebuildStatus = nil
         defer { rebuildingIndex = false }
-        try? await Task.detached(priority: .utility) { @MainActor in
-            try env.indexer.fullScan()
-        }.value
+        // FolderIndexer is thread-safe (fullScan is serialized by its scanLock),
+        // so the recursive walk runs off the main actor; pinning it to
+        // @MainActor froze the UI for the whole scan.
+        let indexer = env.indexer
+        do {
+            let total = try await Task.detached(priority: .utility) { () -> Int in
+                try indexer.fullScan()
+                return try indexer.index.count()
+            }.value
+            rebuildFailed = false
+            rebuildStatus = "Indexed \(total) note\(total == 1 ? "" : "s")."
+        } catch {
+            rebuildFailed = true
+            rebuildStatus = "Rebuild failed: \(error.localizedDescription)"
+        }
     }
 
 }
