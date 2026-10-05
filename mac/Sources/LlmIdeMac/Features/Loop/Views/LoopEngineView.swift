@@ -603,6 +603,22 @@ struct LoopEngineView: View {
         return runService.laneRun(projectId: projectId, loopId: loopId)
     }
 
+    /// Why Run is unavailable (nil = it can start); drives both `.disabled` and
+    /// the tooltip so the two cannot disagree.
+    private var runDisabledReason: String? {
+        // `isStartPending` covers the one main-actor turn between pressing Run
+        // and the runner's own `running`/`waitingInQueue` flipping — without it
+        // a fast double-click reached the service's refusal path.
+        LoopRunAvailability.disabledReason(
+            isRunning: runner.running,
+            isWaitingInQueue: runner.waitingInQueue,
+            isStartPending: isStartPending,
+            laneRunLabel: laneRun?.label,
+            isSettingUpEnvironment: isSettingUpEnvironment,
+            hasEnabledStage: stages.contains(where: \.enabled),
+            hasGitRoot: activeGitRootURL != nil)
+    }
+
     private var toolbarContent: some View {
         HStack(spacing: Spacing.md) {
             Button(runner.waitingInQueue ? "Queued…"
@@ -611,14 +627,8 @@ struct LoopEngineView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            // `isStartPending` covers the one main-actor turn between pressing
-            // Run and the runner's own `running`/`waitingInQueue` flipping —
-            // without it a fast double-click reached the service's refusal
-            // path and reported "already busy" for a run that DID start.
-            .disabled(runner.running || runner.waitingInQueue || isStartPending || laneRun != nil
-                      || isSettingUpEnvironment
-                      || !stages.contains(where: \.enabled) || activeGitRootURL == nil)
-            .help(laneRun.map { "\($0.label) — stop it before running from here." } ?? "")
+            .disabled(runDisabledReason != nil)
+            .help(runDisabledReason ?? "")
             if !runner.running, let gitRoot = activeGitRootURL {
                 approveAllButton(gitRoot: gitRoot)
             }
