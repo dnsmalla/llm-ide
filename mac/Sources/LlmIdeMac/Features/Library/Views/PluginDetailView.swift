@@ -8,6 +8,8 @@ import SwiftUI
 struct PluginDetailView: View {
     @EnvironmentObject private var theme: ThemeStore
     @Environment(ShellState.self) private var shell
+    /// Read for `serverApiVersion` only — the update block needs API v60+.
+    @Environment(BackendManager.self) private var backend
     let api: LlmIdeAPIClient
     let pluginName: String
 
@@ -26,6 +28,14 @@ struct PluginDetailView: View {
     /// An enable / disable failure, kept apart from `loadError` so it does not
     /// replace the whole pane.
     @State private var actionError: String?
+    /// What the server's update check reports for this plugin (nil = none).
+    @State private var updateEntry: PluginUpdateEntry?
+    @State private var checkingUpdates = false
+    @State private var updatePending = false
+    /// The last check / update result, and whether it was a failure.
+    @State private var updateMessage: String?
+    @State private var updateFailed = false
+    @State private var pendingConfirmation: PluginUpdateConfirmation?
 
     var body: some View {
         ScrollView {
@@ -40,6 +50,7 @@ struct PluginDetailView: View {
                 } else if let err = loadError {
                     Text(err).foregroundStyle(theme.current.danger).font(.callout)
                 } else if let plugin {
+                    updateBlock(plugin)
                     descriptionBlock(plugin)
                     commandsBlock(plugin)
                     subagentsBlock(plugin)
@@ -54,7 +65,19 @@ struct PluginDetailView: View {
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .task(id: pluginName) { await load() }
+        .task(id: pluginName) {
+            await load()
+            await loadUpdate(force: false)
+        }
+        .onChange(of: backend.serverApiVersion) { Task { await loadUpdate(force: false) } }
+        .sheet(item: $pendingConfirmation) { confirmation in
+            PluginUpdateConfirmSheet(confirmation: confirmation) {
+                pendingConfirmation = nil
+                Task { await runUpdate(acceptCommand: confirmation.sha256) }
+            } onCancel: {
+                pendingConfirmation = nil
+            }
+        }
         // A change made elsewhere must reach this open pane without blanking it.
         .onChange(of: shell.libraryDirtyToken) { Task { await refresh() } }
         .confirmationDialog(
@@ -113,6 +136,77 @@ struct PluginDetailView: View {
                 .toggleStyle(.switch)
                 .disabled(togglePending)
             }
+        }
+    }
+
+    // MARK: - Update
+
+    /// Imported vendor plugins on a v60+ server. A Claude import can always be
+    /// re-fetched; a Codex import only updates when its scan reports one.
+    private var showsUpdateBlock: Bool {
+        guard PluginUpdatePresentation.supportsOneClickUpdate(serverApiVersion: backend.serverApiVersion)
+        else { return false }
+        return isClaudeImport || pluginName.hasPrefix("codex-")
+    }
+
+    private var isClaudeImport: Bool { pluginName.hasPrefix("claude-") }
+
+    @ViewBuilder
+    private func updateBlock(_ plugin: PluginInfo) -> some View {
+        if showsUpdateBlock {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Updates").font(.headline)
+                if checkingUpdates {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Checking for updates…").font(.callout).foregroundStyle(.secondary)
+                    }
+                } else if let updateEntry {
+                    Label(PluginUpdatePresentation.availabilityText(updateEntry),
+                          systemImage: "arrow.triangle.2.circlepath")
+                        .font(.callout)
+                        .foregroundStyle(theme.current.warning)
+                } else {
+                    Text("No update reported for v\(plugin.version).")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 8) {
+                    if updatePending {
+                        ProgressView().controlSize(.small)
+                        Text("Updating…").font(.callout).foregroundStyle(.secondary)
+                    } else if isClaudeImport || updateEntry != nil {
+                        updateButton
+                    }
+                    Button("Check for updates") { Task { await loadUpdate(force: true) } }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(checkingUpdates || updatePending)
+                }
+                if let updateMessage {
+                    Text(updateMessage)
+                        .font(.caption)
+                        .foregroundStyle(updateFailed ? theme.current.danger : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var updateButton: some View {
+        let button = Button(PluginUpdatePresentation.buttonTitle(tier: updateEntry?.tier)) {
+            Task { await runUpdate(acceptCommand: nil) }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .disabled(checkingUpdates)
+        // Same emphasis as the import sheet's "Update": tinted only when an
+        // update is actually reported, plain for a speculative re-fetch.
+        if updateEntry != nil {
+            button.tint(theme.current.warning)
+        } else {
+            button
         }
     }
 
@@ -292,6 +386,74 @@ struct PluginDetailView: View {
             let message = error.localizedDescription
             await refresh()
             trustError = message
+        }
+    }
+
+    /// Ask the server whether this plugin has an update. `force` also refreshes
+    /// the marketplace catalogs (Claude only; the Codex scan is local).
+    private func loadUpdate(force: Bool) async {
+        guard showsUpdateBlock else { return }
+        checkingUpdates = true
+        defer { checkingUpdates = false }
+        do {
+            let check = isClaudeImport
+                ? try await api.claudePluginUpdates(force: force)
+                : try await api.codexPluginUpdateCheck()
+            updateEntry = check.updates.first { $0.name == pluginName }
+            if force {
+                updateFailed = false
+                updateMessage = updateEntry == nil ? "Checked — no update found." : nil
+            }
+        } catch {
+            updateFailed = true
+            updateMessage = "Could not check for updates: \(error.localizedDescription)"
+        }
+    }
+
+    private func runUpdate(acceptCommand: String?) async {
+        updatePending = true
+        updateMessage = nil
+        let finished: (message: String, failed: Bool)?
+        if isClaudeImport {
+            finished = await runClaudeUpdate(acceptCommand: acceptCommand)
+        } else {
+            finished = await runCodexReimport()
+        }
+        updatePending = false
+        // nil: the confirmation sheet is open and will run the update again.
+        guard let finished else { return }
+        updateMessage = finished.message
+        updateFailed = finished.failed
+        if !finished.failed {
+            // The Library rows and badges reload through the token.
+            shell.markLibraryDirty()
+            await loadUpdate(force: false)
+        }
+    }
+
+    private func runClaudeUpdate(acceptCommand: String?) async -> (message: String, failed: Bool)? {
+        do {
+            let outcome = try await api.updateClaudePlugin(name: pluginName, acceptCommand: acceptCommand)
+            if case let .needsConfirmation(command, sha256) = outcome {
+                pendingConfirmation = PluginUpdateConfirmation(pluginName: pluginName, command: command, sha256: sha256)
+                return nil
+            }
+            var failed = true
+            if case .updated = outcome { failed = false }
+            return (PluginUpdatePresentation.message(name: pluginName, outcome: outcome) ?? "", failed)
+        } catch {
+            return ("Could not update \(pluginName): \(error.localizedDescription)", true)
+        }
+    }
+
+    private func runCodexReimport() async -> (message: String, failed: Bool)? {
+        guard let entry = updateEntry else { return nil }
+        do {
+            _ = try await api.importCodexPlugin(name: entry.sourcePluginName, source: entry.source ?? "installed")
+            let target: String = entry.targetVersion.map { " to v\($0)" } ?? ""
+            return ("Updated \(pluginName)\(target).", false)
+        } catch {
+            return ("Could not update \(pluginName): \(error.localizedDescription)", true)
         }
     }
 

@@ -11,6 +11,9 @@ struct LibraryView: View {
     @Environment(ShellState.self) private var shell
     @Environment(AppEnvironment.self) private var env
     @Environment(LibraryItemStore.self) private var itemStore
+    /// Read for `serverApiVersion` only: it decides whether plugin updates use
+    /// the one-click endpoint (v60+) or the re-import path.
+    @Environment(BackendManager.self) private var backend
     @EnvironmentObject private var projectStore: ProjectStore
     @EnvironmentObject private var theme: ThemeStore
     @State private var vm: LibraryViewModel?
@@ -57,10 +60,16 @@ struct LibraryView: View {
     @State private var showingMarketplaceSheet = false
     @State private var showingCodexImportSheet = false
     @State private var pluginInstallMessage: String?
-    /// Updates available for imported vendor plugins. The server has reported
-    /// these since the bridge shipped; nothing ever asked for them until now.
-    @State private var pluginUpdates: [PluginUpdate] = []
+    /// Updates available for imported vendor plugins. On a pre-v60 server the
+    /// legacy rows are converted (`PluginUpdateEntry(legacy:)`), so the menu,
+    /// the row badges and the apply path read one list either way.
+    @State private var pluginUpdates: [PluginUpdateEntry] = []
     @State private var updatingPlugin: String?
+    /// An update stopped for a marketplace-declared command the user must see.
+    @State private var pendingUpdateConfirmation: PluginUpdateConfirmation?
+    /// What an "Update all" did before it stopped for a confirmation — shown
+    /// once the sheet is answered, so a trust-reset notice is never lost.
+    @State private var deferredUpdateMessage: String?
     /// Held when an install hits "already installed" (409): re-runs the same
     /// install with replace=true if the user confirms. Replaces the old
     /// "go to Settings → Plugins to overwrite" punt now that management is
@@ -137,6 +146,9 @@ struct LibraryView: View {
         .task { await loadMcpPlugins() }
         .task { await loadConnectors() }
         .task { await loadPluginUpdates() }
+        // The version gate decides which update API to ask; the first probe of
+        // the server can land after this view appeared.
+        .onChange(of: backend.serverApiVersion) { Task { await loadPluginUpdates() } }
         // A detail pane can change what these rows should show (MCP consent /
         // enable / remove). It has no way to call back into this list, so it
         // bumps ShellState's token and the affected sections reload here.
@@ -144,7 +156,9 @@ struct LibraryView: View {
             Task {
                 await loadMcpPlugins()
                 await loadConnectors()
-                await loadPlugins()
+                // Plugins AND their update state: an update run from the detail
+                // pane must clear the row badge and the header's count too.
+                await refreshPlugins()
                 await refreshLlmSources()
                 await loadLlmSourceUpdates(force: false)
             }
@@ -857,7 +871,8 @@ struct LibraryView: View {
                     }
                 } else {
                     ForEach(plugins) { p in
-                        PluginLibraryRow(plugin: p)
+                        PluginLibraryRow(plugin: p,
+                                         updateTier: pluginUpdates.first { $0.name == p.name }?.tier)
                             .tag(ShellState.LibrarySelection.plugin(p.name))
                             .contextMenu {
                                 Button(role: .destructive) {
@@ -903,7 +918,7 @@ struct LibraryView: View {
                             Button {
                                 Task { await applyPluginUpdate(update) }
                             } label: {
-                                Label("\(update.name) → \(update.sourceVersion)",
+                                Label(update.name + (update.targetVersion.map { " → \($0)" } ?? ""),
                                       systemImage: "arrow.triangle.2.circlepath")
                             }
                             .disabled(updatingPlugin != nil)
@@ -963,6 +978,16 @@ struct LibraryView: View {
                 onDismiss: { showingCodexImportSheet = false },
                 onImported: { Task { await refreshPlugins() } })
         }
+        .sheet(item: $pendingUpdateConfirmation) { confirmation in
+            PluginUpdateConfirmSheet(confirmation: confirmation) {
+                pendingUpdateConfirmation = nil
+                Task { await applyConfirmedUpdate(confirmation) }
+            } onCancel: {
+                pendingUpdateConfirmation = nil
+                pluginInstallMessage = deferredUpdateMessage
+                deferredUpdateMessage = nil
+            }
+        }
         .alert("Plugin install", isPresented: Binding(
             get: { pluginInstallMessage != nil },
             set: { if !$0 { pluginInstallMessage = nil } }
@@ -1008,13 +1033,25 @@ struct LibraryView: View {
         await loadPluginUpdates()
     }
 
+    /// True when the server has the one-click update endpoint (API v60+).
+    private var usesOneClickUpdate: Bool {
+        PluginUpdatePresentation.supportsOneClickUpdate(serverApiVersion: backend.serverApiVersion)
+    }
+
     /// Ask both bridges what the vendor sources now offer. Best-effort per
     /// vendor: a machine with Claude Code but no Codex (or neither) must not
-    /// surface an error here — it simply has no updates.
-    private func loadPluginUpdates() async {
-        var found: [PluginUpdate] = []
-        found.append(contentsOf: (try? await api.claudePluginUpdates()) ?? [])
-        found.append(contentsOf: (try? await api.codexPluginUpdates()) ?? [])
+    /// surface an error here — it simply has no updates. `force` bypasses the
+    /// server's marketplace refresh cache (v60+ only).
+    private func loadPluginUpdates(force: Bool = false) async {
+        var found: [PluginUpdateEntry] = []
+        if usesOneClickUpdate {
+            found.append(contentsOf: (try? await api.claudePluginUpdates(force: force))?.updates ?? [])
+            found.append(contentsOf: (try? await api.codexPluginUpdateCheck())?.updates ?? [])
+        } else {
+            let legacy: [PluginUpdate] = ((try? await api.claudePluginUpdates()) ?? [])
+                + ((try? await api.codexPluginUpdates()) ?? [])
+            found = legacy.map(PluginUpdateEntry.init(legacy:))
+        }
         pluginUpdates = found
     }
 
@@ -1024,7 +1061,8 @@ struct LibraryView: View {
     private func rescanVendorSources() async {
         let claude = try? await api.refreshClaudeSources()
         let codex = try? await api.refreshCodexSources()
-        await loadPluginUpdates()
+        // An explicit check: refresh the marketplace catalogs too.
+        await loadPluginUpdates(force: true)
         await scanClaudeSources()
         await scanCodexSources()
         // Split out of the message expression: inlining these sums plus two
@@ -1042,50 +1080,119 @@ struct LibraryView: View {
         }
     }
 
-    /// Re-import one plugin at the version its source now offers. Re-import IS
-    /// the update path — the same call the import sheet makes, which overwrites
-    /// the stored copy in place and keeps its enable state.
-    private func applyPluginUpdate(_ update: PluginUpdate) async {
-        updatingPlugin = update.name
-        defer { updatingPlugin = nil }
+    /// How one update ended: a result to report, or a stop for the
+    /// confirmation sheet (which `runUpdate` has already opened).
+    private enum UpdateStep {
+        case confirm
+        case done(message: String, succeeded: Bool, trustReset: Bool)
+    }
+
+    /// One plugin. A Claude import on a v60+ server goes through Claude Code's
+    /// own update (then a re-import); everything else re-imports at the version
+    /// its source offers — the same call the import sheets make.
+    private func runUpdate(_ update: PluginUpdateEntry) async -> UpdateStep {
+        if usesOneClickUpdate && update.name.hasPrefix("claude-") {
+            return await runOneClickUpdate(name: update.name, acceptCommand: nil)
+        }
         do {
             if update.name.hasPrefix("codex-") {
-                _ = try await api.importCodexPlugin(name: update.sourcePluginName, source: update.source)
+                _ = try await api.importCodexPlugin(name: update.sourcePluginName, source: update.source ?? "installed")
             } else {
-                _ = try await api.importClaudePlugin(name: update.sourcePluginName, source: update.source)
+                _ = try await api.importClaudePlugin(name: update.sourcePluginName, source: update.source ?? "installed")
             }
-            await refreshPlugins()
-            pluginInstallMessage = "Updated \(update.name) to \(update.sourceVersion)."
+            let target: String = update.targetVersion.map { " to \($0)" } ?? ""
+            return .done(message: "Updated \(update.name)\(target).", succeeded: true, trustReset: false)
         } catch {
-            pluginInstallMessage = "Could not update \(update.name): \(error.localizedDescription)"
+            return .done(message: "Could not update \(update.name): \(error.localizedDescription)",
+                         succeeded: false, trustReset: false)
         }
     }
 
+    private func runOneClickUpdate(name: String, acceptCommand: String?) async -> UpdateStep {
+        do {
+            let outcome = try await api.updateClaudePlugin(name: name, acceptCommand: acceptCommand)
+            if case let .needsConfirmation(command, sha256) = outcome {
+                pendingUpdateConfirmation = PluginUpdateConfirmation(pluginName: name, command: command, sha256: sha256)
+                return .confirm
+            }
+            let message: String = PluginUpdatePresentation.message(name: name, outcome: outcome) ?? ""
+            if case let .updated(_, _, trustReset) = outcome {
+                return .done(message: message, succeeded: true, trustReset: trustReset)
+            }
+            return .done(message: message, succeeded: false, trustReset: false)
+        } catch {
+            return .done(message: "Could not update \(name): \(error.localizedDescription)",
+                         succeeded: false, trustReset: false)
+        }
+    }
+
+    private func applyPluginUpdate(_ update: PluginUpdateEntry) async {
+        updatingPlugin = update.name
+        let step = await runUpdate(update)
+        updatingPlugin = nil
+        await refreshPlugins()
+        if case let .done(message, _, _) = step { pluginInstallMessage = message }
+    }
+
+    /// The user accepted the command shown in the sheet: re-send with its sha256.
+    private func applyConfirmedUpdate(_ confirmation: PluginUpdateConfirmation) async {
+        updatingPlugin = confirmation.pluginName
+        let step = await runOneClickUpdate(name: confirmation.pluginName, acceptCommand: confirmation.sha256)
+        updatingPlugin = nil
+        await refreshPlugins()
+        // A second confirmation (the command changed again) reopens the sheet
+        // and keeps the deferred message for when it is answered.
+        guard case let .done(message, _, _) = step else { return }
+        pluginInstallMessage = [deferredUpdateMessage, message].compactMap { $0 }.joined(separator: "\n\n")
+        deferredUpdateMessage = nil
+    }
+
+    /// Sequential, one server-side update at a time. Stops at the first plugin
+    /// that needs a command confirmed: the sheet asks about that one, and what
+    /// ran before it is reported once the sheet is answered.
     private func applyAllPluginUpdates() async {
         let pending = pluginUpdates
+        var succeeded = 0
         var failures: [String] = []
+        var trustResets: [String] = []
+        var stoppedForConfirmation = false
         for update in pending {
             updatingPlugin = update.name
-            do {
-                if update.name.hasPrefix("codex-") {
-                    _ = try await api.importCodexPlugin(name: update.sourcePluginName, source: update.source)
-                } else {
-                    _ = try await api.importClaudePlugin(name: update.sourcePluginName, source: update.source)
-                }
-            } catch {
-                failures.append(update.name)
+            let step = await runUpdate(update)
+            guard case let .done(_, ok, trustReset) = step else {
+                stoppedForConfirmation = true
+                break
             }
+            if ok { succeeded += 1 } else { failures.append(update.name) }
+            if trustReset { trustResets.append(update.name) }
         }
         updatingPlugin = nil
         await refreshPlugins()
+        let summary = Self.updateAllSummary(
+            succeeded: succeeded, failures: failures, trustResets: trustResets,
+            claudeUpdated: usesOneClickUpdate && pending.contains { $0.name.hasPrefix("claude-") } && succeeded > 0)
+        if stoppedForConfirmation {
+            deferredUpdateMessage = succeeded + failures.count > 0 ? summary : nil
+        } else {
+            pluginInstallMessage = summary
+        }
+    }
+
+    private static func updateAllSummary(succeeded: Int, failures: [String], trustResets: [String],
+                                         claudeUpdated: Bool) -> String {
+        var lines: [String] = []
         if failures.isEmpty {
-            let plural: String = pending.count == 1 ? "" : "s"
-            pluginInstallMessage = "Updated \(pending.count) plugin\(plural)."
+            let plural: String = succeeded == 1 ? "" : "s"
+            lines.append("Updated \(succeeded) plugin\(plural).")
         } else {
             let names: String = failures.joined(separator: ", ")
-            let done: Int = pending.count - failures.count
-            pluginInstallMessage = "Updated \(done) of \(pending.count); failed: \(names)."
+            lines.append("Updated \(succeeded) of \(succeeded + failures.count); failed: \(names).")
         }
+        for name in trustResets {
+            lines.append("Hooks/MCP of \(name) changed — review and re-approve them.")
+        }
+        if claudeUpdated { lines.append("Restart Claude Code to use the new version there.") }
+        return lines.joined(separator: "\n")
     }
 
     private func reloadPlugins() async {

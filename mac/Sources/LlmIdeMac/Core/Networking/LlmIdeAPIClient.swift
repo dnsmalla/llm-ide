@@ -338,6 +338,49 @@ final class LlmIdeAPIClient: @unchecked Sendable {
         return try decoder.decode(T.self, from: data)
     }
 
+    /// An authenticated request whose non-2xx answers are RESULTS the caller
+    /// branches on (a top-level `code`, not the `{error:{…}}` envelope), so it
+    /// hands back status + body instead of throwing for them. Only a transport
+    /// failure or an unrecoverable 401 throws.
+    ///
+    /// Runs on the long-timeout session even for `/auth/*` paths: the auth
+    /// session's 15 s resource cap would cut off work the server bounds with
+    /// its own (longer) deadline, e.g. a `claude plugin update`. `timeout` is
+    /// the idle timer, set above that server-side deadline.
+    func sendReturningStatus<B: Encodable>(
+        path: String, method: String, body: B?, timeout: TimeInterval, isRetry: Bool = false
+    ) async throws -> (status: Int, data: Data) {
+        guard let url = URL(string: baseURL + path) else { throw APIError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.timeoutInterval = timeout
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let token: String? = await MainActor.run { sessionStore?.accessToken }
+        guard let token else { throw APIError.noSession }
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let body { req.httpBody = try encoder.encode(body) }
+
+        let (data, response): (Data, URLResponse)
+        do {
+            if let fetchOverride { (data, response) = try await fetchOverride(req) }
+            else { (data, response) = try await llmSession.data(for: req) }
+        } catch {
+            throw APIError.network(error)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.network(URLError(.badServerResponse))
+        }
+        if http.statusCode == 401 && !isRetry, let store = sessionStore {
+            let hasRefresh = await MainActor.run { store.refreshToken != nil }
+            if hasRefresh, await store.attemptRefresh(via: self) {
+                return try await sendReturningStatus(path: path, method: method, body: body,
+                                                     timeout: timeout, isRetry: true)
+            }
+        }
+        if http.statusCode == 401 { throw APIError.noSession }
+        return (http.statusCode, data)
+    }
+
     /// Empty-body marker so the generic POST/GET share one implementation.
     struct EmptyBody: Encodable {}
 

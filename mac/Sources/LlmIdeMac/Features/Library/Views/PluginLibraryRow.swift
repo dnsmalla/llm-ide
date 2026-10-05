@@ -5,6 +5,8 @@ import SwiftUI
 /// opening the detail pane.
 struct PluginLibraryRow: View {
     let plugin: PluginInfo
+    /// The tier the server's update check reports for this plugin, if any.
+    var updateTier: String? = nil
 
     var body: some View {
         HStack(spacing: 8) {
@@ -33,6 +35,16 @@ struct PluginLibraryRow: View {
                             .padding(.vertical, 1)
                             .background(Color(red: 0.85, green: 0.55, blue: 0.25).opacity(0.15))
                             .clipShape(Capsule())
+                    }
+                    if let badge = PluginUpdatePresentation.badge(for: updateTier) {
+                        Text(badge)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color.accentColor)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.accentColor.opacity(0.15))
+                            .clipShape(Capsule())
+                            .help("An update is available")
                     }
                 }
                 Text(subtitle)

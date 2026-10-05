@@ -201,6 +201,147 @@ extension LlmIdeAPIClient {
         return response.updates
     }
 
+    // MARK: - One-click plugin update (server API v60+)
+    //
+    // The calls above are the pre-v60 shapes and stay for older servers. These
+    // read the tiered check and drive `POST /auth/me/claude-plugins/update`,
+    // which updates Claude Code's own install and then re-imports it.
+
+    /// Server-side deadline is three `claude plugin …` runs of 120 s each
+    /// (list, update, list); the client waits longer so the server's own
+    /// answer — not a client-side cut — is what the user sees.
+    private static let pluginUpdateTimeout: TimeInterval = 400
+
+    /// Which Claude-imported plugins have an update. `force` bypasses the
+    /// server's 30-minute marketplace refresh cache.
+    func claudePluginUpdates(force: Bool) async throws -> PluginUpdateCheck {
+        let path = "/auth/me/claude-plugins/updates" + (force ? "?force=1" : "")
+        let (status, data) = try await sendReturningStatus(
+            path: path, method: "GET", body: Optional<EmptyBody>.none, timeout: Self.pluginUpdateTimeout)
+        try Self.throwUnlessSuccess(status: status, data: data)
+        do { return try JSONDecoder().decode(PluginUpdateCheck.self, from: data) }
+        catch { throw APIError.decoding(error) }
+    }
+
+    /// Same shape as the Claude check (`cli: false`, every row `upstream`);
+    /// Codex's update is still the re-import call.
+    func codexPluginUpdateCheck() async throws -> PluginUpdateCheck {
+        try await get("/auth/me/codex-plugins/updates", authenticated: true)
+    }
+
+    /// Update one Claude-imported plugin. The route's 409 / 502 / 404 answers
+    /// are outcomes the UI branches on, so they come back as cases, not throws.
+    ///
+    /// Pre: `acceptCommand` is the sha256 the user was SHOWN with the command,
+    /// or nil on a first attempt.
+    /// Post: throws only for a transport failure, a validation / auth refusal,
+    /// or an unexpected server error (`UPDATE_FAILED`).
+    func updateClaudePlugin(name: String, acceptCommand: String?) async throws -> PluginUpdateOutcome {
+        struct Req: Encodable { let name: String; let acceptCommand: String? }
+        let (status, data) = try await sendReturningStatus(
+            path: "/auth/me/claude-plugins/update", method: "POST",
+            body: Req(name: name, acceptCommand: acceptCommand), timeout: Self.pluginUpdateTimeout)
+        if let outcome = PluginUpdateOutcome.decode(status: status, data: data) { return outcome }
+        try Self.throwUnlessSuccess(status: status, data: data)
+        // A 2xx that matched no known body is a wire change, not a success.
+        throw APIError.decoding(URLError(.cannotParseResponse))
+    }
+
+    /// The `send()` error contract for a status read through `sendReturningStatus`.
+    private static func throwUnlessSuccess(status: Int, data: Data) throws {
+        guard !(200..<300).contains(status) else { return }
+        let server = serverError(fromBody: data)
+        throw APIError.http(status: status, code: server?.code ?? "UPSTREAM_ERROR",
+                            message: server?.message ?? "HTTP \(status)", details: nil)
+    }
+
+}
+
+/// `GET /auth/me/{claude,codex}-plugins/updates` from API v60: which imported
+/// plugins have an update, and how it was detected.
+struct PluginUpdateCheck: Decodable {
+    /// False when the `claude` CLI could not answer and the local scan did
+    /// (always false for Codex).
+    let cli: Bool
+    let checkedAt: String
+    let updates: [PluginUpdateEntry]
+}
+
+/// One row of `PluginUpdateCheck`. `tier` is `"reimport"` (Claude Code already
+/// has a newer version than llm-ide's copy) or `"upstream"` (the marketplace
+/// offers a newer one).
+struct PluginUpdateEntry: Decodable, Hashable, Identifiable {
+    let name: String
+    let pluginId: String?
+    let importedVersion: String?
+    let claudeVersion: String?
+    let latest: String?
+    let tier: String
+    /// Legacy field, still sent: what the Codex re-import call needs as `source`.
+    let source: String?
+    var id: String { name }
+
+    /// The version to show as "the update", most specific first.
+    var targetVersion: String? {
+        [latest, claudeVersion].compactMap { $0 }.first { !$0.isEmpty }
+    }
+
+    /// Same prefix strip as `PluginUpdate.sourcePluginName`, for re-import.
+    var sourcePluginName: String {
+        for prefix in ["claude-", "codex-"] where name.hasPrefix(prefix) {
+            return String(name.dropFirst(prefix.count))
+        }
+        return name
+    }
+}
+
+/// What `POST /auth/me/claude-plugins/update` reported. Every case except
+/// `.updated` means llm-ide's copy is unchanged.
+enum PluginUpdateOutcome: Equatable {
+    /// `from == to` means it was already the latest version.
+    case updated(from: String?, to: String?, trustReset: Bool)
+    /// The marketplace declares a command; nothing ran yet. Re-send with
+    /// `acceptCommand: sha256` once the user has seen `command`.
+    case needsConfirmation(command: String, sha256: String)
+    /// Another update is running (one at a time, server-wide).
+    case inProgress
+    /// A chat turn is running; the reload must not happen mid-turn.
+    case busy
+    case cliFailed(String)
+    /// Claude Code updated, but the re-import failed — the old copy is kept.
+    case reimportFailed(String)
+    case notFound
+
+    /// The outcome a route answer carries, or nil for an answer that is not
+    /// one (the `{error:{…}}` envelope of a 400 / 403 / 500).
+    static func decode(status: Int, data: Data) -> PluginUpdateOutcome? {
+        struct Body: Decodable {
+            let ok: Bool?
+            let from: String?
+            let to: String?
+            let trustReset: Bool?
+            let code: String?
+            let detail: String?
+            let command: String?
+            let sha256: String?
+        }
+        guard let body = try? JSONDecoder().decode(Body.self, from: data) else { return nil }
+        // CLI output can echo a credential; never show it unredacted.
+        let detail = SecretRedactor.redact(body.detail ?? "")
+        switch (status, body.code) {
+        case (200, _) where body.ok == true:
+            return .updated(from: body.from, to: body.to, trustReset: body.trustReset ?? false)
+        case (200, "REIMPORT_FAILED"): return .reimportFailed(detail)
+        case (409, "NEEDS_CONFIRMATION"):
+            guard let command = body.command, let sha = body.sha256 else { return nil }
+            return .needsConfirmation(command: command, sha256: sha)
+        case (409, "UPDATE_IN_PROGRESS"): return .inProgress
+        case (409, "BUSY"): return .busy
+        case (502, "CLI_FAILED"): return .cliFailed(detail)
+        case (404, "NOT_FOUND"): return .notFound
+        default: return nil
+        }
+    }
 }
 
 /// One available update for an imported vendor plugin, as
@@ -462,11 +603,19 @@ struct ClaudePlugin: Decodable, Identifiable {
     let commandCount: Int
     var alreadyImported: Bool
     let importedVersion: String?
+    /// Set from the server's update check (API v60+): whether it reports a
+    /// `reimport` tier for this plugin. nil = no check result (older server),
+    /// in which case `hasUpdate` keeps the old string comparison.
+    var reportedReimport: Bool?
     var id: String { name }
 
-    /// True when the source version differs from the imported version.
+    /// True when re-importing would bring in a newer version. Follows the
+    /// server's check when there is one — its comparison is semver-aware and
+    /// shared with the Library badge, so the two never disagree.
     var hasUpdate: Bool {
-        guard alreadyImported, let iv = importedVersion else { return false }
+        guard alreadyImported else { return false }
+        if let reportedReimport { return reportedReimport }
+        guard let iv = importedVersion else { return false }
         return iv != version
     }
 
@@ -618,3 +767,13 @@ struct CodexImportResponse: Decodable {
     }
 }
 
+
+extension PluginUpdateEntry {
+    /// A pre-v60 row, so a Library on an older server lists updates the same
+    /// way. Those servers have no tiers; every row there is a source update.
+    init(legacy update: PluginUpdate) {
+        self.init(name: update.name, pluginId: nil, importedVersion: update.importedVersion,
+                  claudeVersion: update.sourceVersion, latest: update.sourceVersion,
+                  tier: "upstream", source: update.source)
+    }
+}
