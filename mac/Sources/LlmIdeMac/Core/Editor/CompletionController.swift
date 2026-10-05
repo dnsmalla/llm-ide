@@ -250,7 +250,9 @@ final class CompletionController: ObservableObject {
         // toggle live in the Library's plugin detail). Discovery rows, not
         // invocations: accepting navigates to that plugin's detail.
         if let plugins {
-            hookItems = plugins.plugins.filter { $0.hookCount > 0 }.map { p in
+            // Anything that needs a trust grant counts, not only translatable
+            // command hooks: monitors / LSP / bin/ / http hooks have hookCount 0.
+            hookItems = plugins.plugins.filter { $0.hookCount > 0 || $0.declaresHooks }.map { p in
                 Item(id: "hook:\(p.name)", kind: .hook,
                      label: p.title, detail: p.hookSummary,
                      insert: nil, fileURL: nil, target: .plugin(p.name))

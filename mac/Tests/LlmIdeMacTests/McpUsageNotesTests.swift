@@ -8,8 +8,8 @@ struct McpUsageNotesTests {
     @Test("none enabled reads as free; some enabled names the count")
     func sectionSummary() {
         #expect(McpUsageNotes.sectionSummary(enabledCount: 0).contains("adds no tokens"))
-        #expect(McpUsageNotes.sectionSummary(enabledCount: 1).hasPrefix("1 server enabled"))
-        #expect(McpUsageNotes.sectionSummary(enabledCount: 2).hasPrefix("2 servers enabled"))
+        #expect(McpUsageNotes.sectionSummary(enabledCount: 1).hasPrefix("1 server active"))
+        #expect(McpUsageNotes.sectionSummary(enabledCount: 2).hasPrefix("2 servers active"))
     }
 
     @Test("MCP is Execute-only: every other mode, and the quick-chat surfaces, are named as excluded")

@@ -61,6 +61,9 @@ extension LlmIdeAPIClient {
             if !enabled { return "disabled" }
             if !consented { return "needs consent" }
             if credentialMissing { return "credential missing" }
+            // Enabled and consented, yet the server would not mount it — a
+            // plugin-declared server whose plugin is switched off.
+            if effective == false { return "inactive" }
             return "enabled"
         }
 

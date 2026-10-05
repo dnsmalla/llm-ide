@@ -20,12 +20,14 @@ enum McpUsageNotes {
     static let costNote = "While enabled, its tool definitions are added to every model call — typically a few thousand tokens per server, repeated on each step of a turn. Keep it off until you need it."
 
     /// One line for the section header: how many servers are costing tokens now.
-    /// - Parameter enabledCount: servers that are both consented and enabled.
+    /// - Parameter enabledCount: servers a turn would really mount (the server's
+    ///   `effective` flag) — "active", not merely switched on, because a
+    ///   plugin-declared server whose plugin is off costs nothing.
     static func sectionSummary(enabledCount: Int) -> String {
         guard enabledCount > 0 else {
-            return "None enabled — MCP adds no tokens to your chats."
+            return "None active — MCP adds no tokens to your chats."
         }
         let noun = enabledCount == 1 ? "server" : "servers"
-        return "\(enabledCount) \(noun) enabled — each adds its tool definitions to every Execute call."
+        return "\(enabledCount) \(noun) active — each adds its tool definitions to every Execute call."
     }
 }

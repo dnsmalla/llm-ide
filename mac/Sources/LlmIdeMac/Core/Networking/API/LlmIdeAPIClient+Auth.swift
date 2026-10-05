@@ -308,6 +308,15 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     /// servers it starts) and "bin" (executables put on the Bash PATH). All of
     /// them wait for the same trust grant.
     let executableKinds: [String]
+    /// Whether the package is a `.claude-plugin` one — the only layout the
+    /// Agent SDK reads. Nil from an older server (treated as readable).
+    let sdkReadable: Bool?
+    /// This user's "Let plugins load natively" preference. Nil from an older
+    /// server (treated as on).
+    let nativePluginsOn: Bool?
+    /// Whether the Agent engine can ever load this plugin: the two facts that
+    /// decide whether monitors / LSP / bin/ / JS hook modules can run at all.
+    var agentEngineCanLoad: Bool { (sdkReadable ?? true) && (nativePluginsOn ?? true) }
     /// What llm-ide will NOT run from this plugin's hooks file (non-command
     /// handler types, unsupported events, refused commands).
     let hookNotes: [String]
@@ -362,15 +371,20 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     static func == (lhs: PluginInfo, rhs: PluginInfo) -> Bool {
         lhs.name == rhs.name && lhs.enabled == rhs.enabled
             && lhs.hooksTrusted == rhs.hooksTrusted && lhs.nativeDelivery == rhs.nativeDelivery
-            // A reinstall that ADDS monitors must refresh the label and warning.
+            // A reinstall that changes what the package declares must refresh the
+            // label, the warning and the counts the detail view renders.
             && lhs.executableKinds == rhs.executableKinds && lhs.declaresHooks == rhs.declaresHooks
+            && lhs.hookCount == rhs.hookCount && lhs.hookNotes == rhs.hookNotes
+            && lhs.unsupportedComponents == rhs.unsupportedComponents
+            && lhs.mcpServerCount == rhs.mcpServerCount && lhs.version == rhs.version
+            && lhs.sdkReadable == rhs.sdkReadable && lhs.nativePluginsOn == rhs.nativePluginsOn
     }
 
     enum CodingKeys: String, CodingKey {
         case name, version, displayName, description, author
         case enabled, skillCount, commands, subagents
         case format, unsupportedComponents, pendingComponents
-        case hookCount, declaresHooks, executableKinds, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
+        case hookCount, declaresHooks, executableKinds, sdkReadable, nativePluginsOn, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -389,6 +403,8 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         self.hookCount      = try c.decodeIfPresent(Int.self, forKey: .hookCount) ?? 0
         self.declaresHooks  = try c.decodeIfPresent(Bool.self, forKey: .declaresHooks) ?? false
         self.executableKinds = try c.decodeIfPresent([String].self, forKey: .executableKinds) ?? []
+        self.sdkReadable     = try c.decodeIfPresent(Bool.self, forKey: .sdkReadable)
+        self.nativePluginsOn = try c.decodeIfPresent(Bool.self, forKey: .nativePluginsOn)
         self.hookNotes      = try c.decodeIfPresent([String].self, forKey: .hookNotes) ?? []
         self.hooksTrusted   = try c.decodeIfPresent(Bool.self, forKey: .hooksTrusted) ?? false
         self.mcpServerCount = try c.decodeIfPresent(Int.self, forKey: .mcpServerCount) ?? 0
