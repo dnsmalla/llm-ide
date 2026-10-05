@@ -36,14 +36,35 @@ public enum SelfHealProposalService {
         _ = try? git(["branch", "-D", proposal.branch], in: main)
     }
 
-    public static let excludedPaths = [".self-heal", ".skills", "mac/LocalPackages/graph-kit", "extension/node_modules"]
+    public static let excludedPaths = [".self-heal", ".skills", "mac/LocalPackages/graph-kit", "extension/node_modules",
+                                       ".sdk-adopt"]
 
     private static var pathspec: [String] { ["--", "."] + excludedPaths.map { ":(exclude)\($0)" } }
+
+    /// Paths changed in the worktree whose content in the main checkout is already
+    /// identical (e.g. the SDK pin the updater wrote uncommitted) — applying them
+    /// again would fail `git apply --check`.
+    private static func identicalInMain(_ proposal: IncidentProposal) throws -> [String] {
+        let wt = URL(fileURLWithPath: proposal.worktreePath)
+        let names = try git(["diff", "--cached", "--name-only", "-z", proposal.baseCommit] + pathspec, in: wt)
+        return names.split(separator: 0).compactMap { raw in
+            let rel = String(decoding: raw, as: UTF8.self)
+            let mine = FileManager.default.contents(atPath: wt.appendingPathComponent(rel).path)
+            let theirs = FileManager.default.contents(atPath: URL(fileURLWithPath: proposal.mainRepo)
+                .appendingPathComponent(rel).path)
+            return mine != nil && mine == theirs ? rel : nil
+        }
+    }
+
+    private static func pathspec(_ proposal: IncidentProposal) throws -> [String] {
+        pathspec + (try identicalInMain(proposal)).map { ":(exclude,literal)\($0)" }
+    }
 
     private static func stagedPatch(_ proposal: IncidentProposal, binary: Bool) throws -> Data {
         let wt = URL(fileURLWithPath: proposal.worktreePath)
         try git(["add", "-A"] + pathspec, in: wt)
-        return try git(["diff", "--cached"] + (binary ? ["--binary"] : []) + [proposal.baseCommit] + pathspec, in: wt)
+        return try git(["diff", "--cached"] + (binary ? ["--binary"] : []) + [proposal.baseCommit]
+                       + (try pathspec(proposal)), in: wt)
     }
 
     public static func diff(_ proposal: IncidentProposal) throws -> String {
@@ -56,8 +77,9 @@ public enum SelfHealProposalService {
         let wt = URL(fileURLWithPath: proposal.worktreePath)
         try git(["add", "-A"] + pathspec, in: wt)
         let base = ["diff", "--cached"]
-        let text = try git(base + [proposal.baseCommit] + pathspec, in: wt)
-        let binary = try git(base + ["--binary", proposal.baseCommit] + pathspec, in: wt)
+        let scoped = try pathspec(proposal)
+        let text = try git(base + [proposal.baseCommit] + scoped, in: wt)
+        let binary = try git(base + ["--binary", proposal.baseCommit] + scoped, in: wt)
         return ReviewedPatch(text: String(data: text, encoding: .utf8) ?? "", binaryPatch: binary)
     }
 

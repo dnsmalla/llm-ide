@@ -52,7 +52,8 @@ public final class IncidentStore {
     }
 
     public func candidatesForTriage() -> [Incident] {
-        incidents.filter { $0.status == .new }
+        // sdk incidents are adoption records with no error to triage.
+        incidents.filter { $0.status == .new && $0.source != .sdk }
             .sorted { ($0.count, $0.lastSeen) > ($1.count, $1.lastSeen) }
     }
 

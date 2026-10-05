@@ -1,6 +1,16 @@
 import Foundation
 
-public enum IncidentSource: String, Codable, CaseIterable, Sendable { case ui, log, crash, server }
+public enum IncidentSource: String, Codable, CaseIterable, Sendable {
+    case ui, log, crash, server
+    /// An SDK release whose new surface awaits adoption — a record, not a captured error.
+    case sdk
+
+    /// A source written by a newer build must not make the whole incident file unreadable.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = IncidentSource(rawValue: raw) ?? .ui
+    }
+}
 
 public enum IncidentStatus: String, Codable, Sendable { case new, fixing, proposed, ignored, needsHuman, fixed }
 
