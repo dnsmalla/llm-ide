@@ -194,6 +194,9 @@ export function shapeSymbol(row, roots, workspaceRoot, extra = {}) {
  *                           exists in more than one root — also the cwd run-bash
  *                           will use for the follow-up read
  * @param ctx.activeRepoRoot  the repo the user works in (client agentContext.activeRepoRoot) — preferred scope
+ * @param ctx.scopeRoot  optional: picks the graph scope in place of workspaceRoot
+ *                       (a Loop worktree's graph is keyed by the repo it was cut
+ *                       from), while paths still resolve against `roots`
  */
 export function handleFindCode(args, ctx) {
   const query = typeof args?.query === 'string' ? args.query.trim().slice(0, MAX_QUERY_CHARS) : '';
@@ -211,7 +214,8 @@ export function handleFindCode(args, ctx) {
   try {
     // Scope to the repos graphed for the open workspace; null (no match, or
     // no workspace) keeps the unscoped search so another clone still answers.
-    repoIds = resolveRepoScope(ctx.userId, { activeRepoRoot, workspaceRoot });
+    const scopeRoot = typeof ctx.scopeRoot === 'string' && ctx.scopeRoot ? ctx.scopeRoot : workspaceRoot;
+    repoIds = resolveRepoScope(ctx.userId, { activeRepoRoot, workspaceRoot: scopeRoot });
     result = searchCodeIndex(ctx.userId, query, { limit, hops, repoIds });
   } catch (err) {
     // A missing/locked graph table must degrade to "no index", never break the

@@ -32,7 +32,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod';
+import { handleFindCode, STALE_HINT } from '../runtime/handlers/find-code.mjs';
+import { resolveRepoScope } from '../../kb/db.mjs';
 import {
   AGENT_SDK_PROVIDER, resolveAgentEngineAuth, resolveAnthropicKey, agentSdkHomeFor, normalizeModelUsage,
 } from './engine.mjs';
@@ -52,13 +55,21 @@ import { createToolAccounting } from './tool-accounting.mjs';
 // WebSearch, Agent/Task, AskUserQuestion, NotebookEdit, Skill, … — is absent
 // from the model's context entirely (SDK `tools` is an allowlist).
 export const LOOP_AGENT_TOOLS = Object.freeze(['Read', 'Glob', 'Grep', 'Edit', 'Write']);
-const LOOP_AGENT_TOOL_SET = new Set(LOOP_AGENT_TOOLS);
+// The ONE MCP tool a Loop run gets: read-only code search over the user's own
+// graph, from an in-process server (never a user MCP server). Why: Loop steps
+// were ~87% of context tokens (2026-09-26..10-05), and with only Grep/Read the
+// agent found code a grep and a whole-file read at a time, each hop re-reading
+// the whole context. Same server name as chat, so the model sees the same name.
+export const LOOP_FIND_CODE_TOOL = 'mcp__llmide__find-code';
+const LOOP_AGENT_TOOL_SET = new Set([...LOOP_AGENT_TOOLS, LOOP_FIND_CODE_TOOL]);
 const WRITE_TOOLS = new Set(['Edit', 'Write']);
 // Belt to the `tools` braces: removed from context even if a future SDK
-// default re-added one. `mcp__*` drops every MCP tool.
+// default re-added one. MCP is NOT wildcard-disallowed any more (a deny would
+// also hide find-code); every other MCP name is refused by loopToolRefusal,
+// and the only server mounted is the one-tool server below.
 const LOOP_AGENT_DISALLOWED = Object.freeze([
   'Bash', 'BashOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Agent', 'Task',
-  'AskUserQuestion', 'NotebookEdit', 'Skill', 'mcp__*',
+  'AskUserQuestion', 'NotebookEdit', 'Skill',
 ]);
 
 // A Loop step is one focused edit, not a chat — but a repair across a few
@@ -265,8 +276,11 @@ export function loopToolRefusal(toolName, input, roots) {
   const allowed = (Array.isArray(roots) ? roots : [roots]).filter(Boolean);
   const where = allowed.join(', ');
   if (!LOOP_AGENT_TOOL_SET.has(toolName)) {
-    return `${toolName} is not available in a Loop run (file tools only: ${LOOP_AGENT_TOOLS.join(', ')}).`;
+    return `${toolName} is not available in a Loop run (file tools only: ${LOOP_AGENT_TOOLS.join(', ')}, plus ${LOOP_FIND_CODE_TOOL}).`;
   }
+  // Read-only and path-free: it returns names and repo-relative paths, and
+  // every follow-up Read is judged by the rules below.
+  if (toolName === LOOP_FIND_CODE_TOOL) return null;
   const inside = (p) => writePathGate(p, allowed) !== 'blocked';
   if (toolName === 'Read' || WRITE_TOOLS.has(toolName)) {
     if (!inside(input?.file_path)) {
@@ -309,6 +323,77 @@ function repoRelative(root, filePath) {
   return rel.split(path.sep).join('/');
 }
 
+/**
+ * The repo whose code graph a Loop run should search. A Loop worktree has no
+ * graph of its own — the graph is keyed by the repo it was cut from — so a
+ * worktree (its `.git` FILE points at `<repo>/.git/worktrees/<name>`) maps to
+ * `<repo>`; anything else maps to itself. Only narrows which of the user's
+ * own graphs are searched; it never widens what may be read.
+ */
+export function graphScopeRoot(root) {
+  try {
+    const dotGit = path.join(root, '.git');
+    if (!fs.lstatSync(dotGit).isFile()) return root;
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotGit, 'utf8'));
+    if (!m) return root;
+    const entry = fs.realpathSync(path.isAbsolute(m[1]) ? m[1] : path.resolve(root, m[1]));
+    const worktrees = path.dirname(entry);
+    const gitDir = path.dirname(worktrees);
+    if (path.basename(worktrees) !== 'worktrees' || path.basename(gitDir) !== '.git') return root;
+    return path.dirname(gitDir);
+  } catch {
+    return root;
+  }
+}
+
+// find-code's own hints name read-file / run-bash and "ask the user" — none of
+// which a headless Loop run has — so following one would cost a refused hop.
+const LOOP_HINT_FOUND = 'Read only the lines you need (Read with offset/limit); paths are relative to your working directory.';
+const LOOP_HINT_EMPTY = 'No usable match in the code index — fall back to Grep/Glob.';
+
+/**
+ * find-code for a Loop run: chat's handler, Loop-scoped, with Loop hints.
+ *
+ * Unlike chat, a repo with no graph gets "no match" instead of chat's unscoped
+ * fallback across every graphed repo: an unattended edit run told
+ * `src/server.ts:120` from ANOTHER repo would edit the wrong lines whenever the
+ * same relative path exists here, and nobody is watching to catch it.
+ */
+export function loopFindCode(args, { userId, roots, scopeRoot }) {
+  let scoped = null;
+  try { scoped = resolveRepoScope(userId, { workspaceRoot: scopeRoot }); } catch { scoped = null; }
+  if (!scoped) {
+    const query = typeof args?.query === 'string' ? args.query.trim().slice(0, 256) : '';
+    return { query, symbols: [], related: [], files: [], hint: LOOP_HINT_EMPTY };
+  }
+  const out = handleFindCode(args, { userId, roots, workspaceRoot: roots?.[0] || '', scopeRoot });
+  if (!out || out.error) return out;
+  const found = out.symbols.length > 0 || out.related.length > 0 || out.files.length > 0;
+  return { ...out, hint: `${found ? LOOP_HINT_FOUND : LOOP_HINT_EMPTY}${out.staleGraph ? ` ${STALE_HINT}` : ''}` };
+}
+
+function loopCodeSearchServer(userId, roots) {
+  const scopeRoot = graphScopeRoot(roots[0]);
+  return createSdkMcpServer({
+    name: 'llmide',
+    version: '0.2.0',
+    tools: [tool(
+      'find-code',
+      'Search the project\'s code index and graph for a symbol, file, or feature — returns definition sites '
+        + 'with file:line, related code (callers, callees, importers), and full-text hits. Use this before any Grep.',
+      {
+        query: z.string().max(256).describe('A symbol name, filename, feature, or error string to locate.'),
+        limit: z.number().optional().describe('Max results per section (1-20, default 8).'),
+        hops: z.number().optional().describe('Graph hops from each match (0-2, default 1).'),
+      },
+      async (args) => ({
+        content: [{ type: 'text', text: JSON.stringify(loopFindCode(args, { userId, roots, scopeRoot })) }],
+      }),
+      { annotations: { readOnlyHint: true }, alwaysLoad: true },
+    )],
+  });
+}
+
 function headlessSystemAppend(root, extraRoots, languageLine, skillsText) {
   const extra = extraRoots.length
     ? `- You may also read and edit the project's notes directory${extraRoots.length > 1 ? 'ies' : ''} `
@@ -320,9 +405,13 @@ function headlessSystemAppend(root, extraRoots, languageLine, skillsText) {
     `- Work only inside the repository at ${root} (your working directory)${extraRoots.length ? ' and the directories below' : ''}. `
       + 'Every path you read, search or edit must stay inside them; anything else is refused.',
     extra,
-    '- You have file tools only: Read, Glob, Grep, Edit, Write. There is no shell, no network and no '
-      + 'way to run builds or tests — the Loop runs its own stages afterwards to verify your change. '
-      + 'Do not claim you ran or verified anything.',
+    '- You have file tools only: Read, Glob, Grep, Edit, Write, plus mcp__llmide__find-code. There is no '
+      + 'shell, no network and no way to run builds or tests — the Loop runs its own stages afterwards to '
+      + 'verify your change. Do not claim you ran or verified anything.',
+    '- To locate code, your FIRST search is mcp__llmide__find-code (definitions, callers and importers with '
+      + 'file:line in one call); then Read only the lines it points at. Use Grep/Glob when it finds nothing, '
+      + 'or for a literal string, comment or config value. Every tool result is re-read on each later step: '
+      + 'make independent calls in ONE response.',
     '- Do not ask for permission or wait for input: make the change the request describes, or say in '
       + 'your reply why you could not.',
     '- End with a short plain summary of what you changed (which files, and why).',
@@ -494,9 +583,14 @@ export async function runLoopAgent(
   const q = queryFactory(safeMessage, {
     cwd: root,
     additionalDirectories: roots.slice(1),
-    // No operator settings, no user MCP, no plugins, no claude.ai connectors.
+    // No operator settings, no user MCP, no plugins, no claude.ai connectors —
+    // only the in-process, read-only code-search server.
     settingSources: [],
-    mcpServers: {},
+    mcpServers: { llmide: loopCodeSearchServer(userId, roots) },
+    // ONLY the server above: settingSources [] alone does not drop .mcp.json /
+    // user-scope / plugin servers, and `mcp__*` can no longer be denied
+    // wholesale (it would hide find-code too).
+    strictMcpConfig: true,
     tools: [...LOOP_AGENT_TOOLS],
     // Nothing is pre-approved: every call the SDK would ask about reaches
     // canUseTool, which applies the confinement rule.

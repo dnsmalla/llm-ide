@@ -24,9 +24,10 @@ process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
 const { registerUser } = await import('../server/users.mjs');
-const { getDb, addUserRepo } = await import('../kb/db.mjs');
+const { getDb, addUserRepo, writeCodeGraph } = await import('../kb/db.mjs');
 const {
   runLoopAgent, validateLoopRepoRoot, loopToolRefusal, LOOP_AGENT_TOOLS,
+  LOOP_FIND_CODE_TOOL, loopFindCode, graphScopeRoot,
 } = await import('../llm_agent/sdk/loop-agent.mjs');
 const { handleLoopAgentRoutes, resolveTimeoutMs } = await import('../routes/loop-agent.mjs');
 
@@ -208,12 +209,15 @@ test('loopToolRefusal: file tools inside the root pass; outside, symlink escapes
   assert.ok(loopToolRefusal('Glob', { pattern: '/etc/**' }, REPO));
   assert.ok(loopToolRefusal('Grep', { pattern: 'x', glob: '../**' }, REPO));
   assert.ok(loopToolRefusal('Grep', { pattern: 'x', path: OUTSIDE }, REPO));
-  for (const t of ['Bash', 'WebFetch', 'WebSearch', 'Agent', 'AskUserQuestion', 'mcp__llmide__run-bash']) {
+  for (const t of ['Bash', 'WebFetch', 'WebSearch', 'Agent', 'AskUserQuestion', 'mcp__llmide__run-bash',
+    'mcp__llmide__read-file', 'mcp__other__find-code']) {
     assert.ok(loopToolRefusal(t, { command: 'ls' }, REPO), `${t} must be refused`);
   }
+  // The one MCP tool a Loop run has: read-only code search over the user's own graph.
+  assert.equal(loopToolRefusal(LOOP_FIND_CODE_TOOL, { query: 'old' }, REPO), null);
 });
 
-test('runLoopAgent: offers file tools only — no shell, no network, no MCP, nothing pre-approved', () => withKey(async () => {
+test('runLoopAgent: offers file tools + find-code only — no shell, no network, no user MCP, nothing pre-approved', () => withKey(async () => {
   const capture = {};
   await runLoopAgent({
     message: 'fix it', root: REPO, userId: user.id, queryFactory: toolPlayingQuery(capture, []),
@@ -224,9 +228,12 @@ test('runLoopAgent: offers file tools only — no shell, no network, no MCP, not
     assert.ok(!o.tools.includes(t), `${t} must not be offered`);
   }
   assert.ok(o.disallowedTools.includes('Bash'));
-  assert.ok(o.disallowedTools.includes('mcp__*'));
   assert.deepEqual(o.allowedTools, []);
-  assert.deepEqual(o.mcpServers, {});
+  // Only the in-process code-search server — never a user MCP server.
+  assert.deepEqual(Object.keys(o.mcpServers), ['llmide']);
+  assert.equal(o.strictMcpConfig, true, 'no .mcp.json / user / plugin MCP server can join');
+  assert.equal(o.mcpServers.llmide.type, 'sdk');
+  assert.match(o.systemPrompt.append, /mcp__llmide__find-code/);
   assert.deepEqual(o.settingSources, []);
   assert.equal(o.cwd, REPO);
   assert.deepEqual(o.additionalDirectories, []);
@@ -755,6 +762,66 @@ test('route: a run that fails mid-stream still records the tool calls it made', 
   assert.deepEqual(events.map((e) => e.tool), ['Glob']);
   const ledger = db.prepare('SELECT request_id FROM usage_ledger WHERE user_id = ?').all(u.id);
   assert.equal(ledger[0].request_id, events[0].turn_id);
+});
+
+// --- find-code in a Loop run -----------------------------------------------------
+
+test('graphScopeRoot: a Loop worktree scopes to the repo it was cut from; a plain repo to itself', () => {
+  const wt = path.join(SANDBOX, '.llmide-loop-worktrees', 'repo', 'scope1');
+  fs.mkdirSync(path.dirname(wt), { recursive: true });
+  git(['worktree', 'add', '-q', '-b', 'llmide/loop/scope1', wt, 'HEAD'], REPO);
+  assert.equal(graphScopeRoot(fs.realpathSync(wt)), REPO);
+  assert.equal(graphScopeRoot(REPO), REPO);
+  assert.equal(graphScopeRoot(OUTSIDE), OUTSIDE, 'not a git repo: itself');
+});
+
+test('loopFindCode: returns repo-relative hits and a hint naming only tools a Loop run has', () => {
+  const u = newUser();
+  addUserRepo(u.id, REPO);
+  getDb(); // ensure migrations ran
+  const cg = { nodes: [
+    { id: 'f:src/a.txt', title: 'a.txt', kind: 'file', metadata: { source_file: 'src/a.txt' } },
+    { id: 's:oldValue', title: 'oldValue', kind: 'function', metadata: { source_file: 'src/a.txt', line: 'L1' } },
+  ], edges: [{ fromId: 'f:src/a.txt', toId: 's:oldValue', kind: 'contains' }] };
+  writeCodeGraph(u.id, REPO, cg, { source: 'structure' });
+  const out = loopFindCode({ query: 'oldValue' }, { userId: u.id, roots: [REPO], scopeRoot: REPO });
+  assert.ok(out.symbols.some((s) => s.name === 'oldValue' && s.path === 'src/a.txt' && s.line === 1), JSON.stringify(out));
+  assert.match(out.hint, /Read/);
+  assert.doesNotMatch(out.hint, /run-bash|read-file|ask the user/);
+  const miss = loopFindCode({ query: 'zzNoSuchSymbolzz' }, { userId: u.id, roots: [REPO], scopeRoot: REPO });
+  assert.match(miss.hint, /Grep/);
+  assert.doesNotMatch(miss.hint, /run-bash|read-file|ask the user/);
+});
+
+test('loopFindCode: an ungraphed repo gets "no match", never another repo\'s hits; another user\'s graph never shows', () => {
+  const u = newUser();
+  addUserRepo(u.id, REPO);
+  addUserRepo(u.id, OUTSIDE);
+  // u graphed OUTSIDE only. A Loop on REPO must not be told OUTSIDE's paths,
+  // even where the same relative path happens to exist in REPO.
+  writeCodeGraph(u.id, OUTSIDE, { nodes: [
+    { id: 's:uniqueOutsideFn', title: 'uniqueOutsideFn', kind: 'function', metadata: { source_file: 'src/a.txt', line: 'L9' } },
+  ], edges: [] }, { source: 'structure' });
+  const out = loopFindCode({ query: 'uniqueOutsideFn' }, { userId: u.id, roots: [REPO], scopeRoot: REPO });
+  assert.deepEqual([out.symbols, out.related, out.files], [[], [], []]);
+  assert.match(out.hint, /Grep/);
+
+  // A second user with their OWN graph of the same repo (so the scope check
+  // passes): they see their symbol, never another user's.
+  const owner = newUser();
+  addUserRepo(owner.id, REPO);
+  writeCodeGraph(owner.id, REPO, { nodes: [
+    { id: 's:ownersOnlyFn', title: 'ownersOnlyFn', kind: 'function', metadata: { source_file: 'src/a.txt', line: 'L1' } },
+  ], edges: [] }, { source: 'structure' });
+  const other = newUser();
+  addUserRepo(other.id, REPO);
+  writeCodeGraph(other.id, REPO, { nodes: [
+    { id: 's:othersFn', title: 'othersFn', kind: 'function', metadata: { source_file: 'src/a.txt', line: 'L1' } },
+  ], edges: [] }, { source: 'structure' });
+  const theirs = loopFindCode({ query: 'ownersOnlyFn' }, { userId: other.id, roots: [REPO], scopeRoot: REPO });
+  assert.ok(!theirs.symbols.some((s) => s.name === 'ownersOnlyFn'), 'another user\'s graph never shows');
+  const own = loopFindCode({ query: 'othersFn' }, { userId: other.id, roots: [REPO], scopeRoot: REPO });
+  assert.ok(own.symbols.some((s) => s.name === 'othersFn'), JSON.stringify(own));
 });
 
 // --- too-broad roots are never registered / trusted --------------------------------
