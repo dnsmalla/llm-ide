@@ -719,6 +719,18 @@ test('GET /auth/me/claude-plugins/updates detects a newer source version after i
   assert.equal(update.latest, '2.0.0');
   assert.equal(update.tier, 'upstream');
   assert.equal(update.pluginId, null);
+  // Legacy fields kept for older Mac apps.
+  assert.equal(update.sourceVersion, '2.0.0');
+  assert.equal(update.source, 'installed');
+});
+
+test('claude update rows keep string legacy fields even when the imported version is unknown', async () => {
+  const { withLegacyFields } = await import('../plugins/claude-update.mjs');
+  const row = withLegacyFields({ name: 'claude-x', pluginId: 'x@m', importedVersion: null, claudeVersion: null, latest: null, tier: 'reimport' });
+  assert.equal(row.importedVersion, '');
+  assert.equal(row.sourceVersion, '');
+  assert.equal(row.source, 'installed');
+  assert.equal(row.tier, 'reimport');
 });
 
 test('GET /auth/me/claude-plugins/updates returns the new shape (cli:false with the CLI absent)', async () => {
@@ -882,6 +894,8 @@ test('GET /auth/me/codex-plugins/updates detects a newer source version after im
   assert.equal(update.latest, '2.0.0');
   assert.equal(update.tier, 'upstream');
   assert.equal(update.pluginId, null);
+  assert.equal(update.sourceVersion, '2.0.0');
+  assert.equal(update.source, 'installed');
 });
 
 test('GET /auth/me/codex-plugins/updates has the same shape as the Claude one', async () => {

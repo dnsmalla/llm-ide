@@ -1210,8 +1210,9 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   if (method === 'GET' && url.split('?')[0] === '/auth/me/claude-plugins/updates') {
     const force = new URL(url, 'http://x').searchParams.get('force') === '1';
     try {
-      const { checkClaudeUpdates } = await import('../plugins/claude-update.mjs');
-      send(res, 200, await checkClaudeUpdates({ force }));
+      const { checkClaudeUpdates, withLegacyFields } = await import('../plugins/claude-update.mjs');
+      const result = await checkClaudeUpdates({ force });
+      send(res, 200, { ...result, updates: result.updates.map(withLegacyFields) });
     } catch (err) {
       send(res, 500, { error: { code: 'CHECK_FAILED', message: publicMessageFor(err) } });
     }
@@ -1343,6 +1344,9 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       claudeVersion: u.sourceVersion,
       latest: u.sourceVersion,
       tier: 'upstream',
+      // Legacy fields: older Mac apps decode these as non-optional Strings.
+      sourceVersion: u.sourceVersion,
+      source: u.source ?? 'installed',
     }));
     send(res, 200, { cli: false, checkedAt: new Date().toISOString(), updates });
     return;

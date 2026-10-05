@@ -36,6 +36,20 @@ export function _resetForTests() {
   busy = false;
 }
 
+/**
+ * Add the pre-v60 row fields so an older Mac app (non-optional String
+ * `importedVersion`/`sourceVersion`/`source`) still decodes the response.
+ * @param {{importedVersion: string|null, claudeVersion: string|null, latest: string|null}} row
+ */
+export function withLegacyFields(row) {
+  return {
+    ...row,
+    importedVersion: row.importedVersion ?? '',
+    sourceVersion: row.claudeVersion ?? row.latest ?? '',
+    source: 'installed',
+  };
+}
+
 /** True while an update is running (the route uses it to refuse reloads). */
 export function isPluginUpdating() {
   return busy;
