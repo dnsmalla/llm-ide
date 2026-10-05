@@ -561,6 +561,64 @@ test('route: a run that times out after reporting usage is still metered before 
   assert.equal(res.statusCode, 504);
   const rows = db.prepare('SELECT model, input_tokens, output_tokens, cache_read_tokens FROM usage_ledger WHERE user_id = ?').all(u.id);
   assert.deepEqual(rows.map((r) => ({ ...r })), [{ model: 'test-model', input_tokens: 40, output_tokens: 7, cache_read_tokens: 3 }]);
+  // A run cut off before any result never reported a turn count: unknown, not zero,
+  // and the reason it stopped is recorded so it can be told from hitting the cap.
+  const stop = db.prepare('SELECT turns, stop_reason FROM usage_ledger WHERE user_id = ?').all(u.id);
+  assert.deepEqual(stop.map((r) => ({ ...r })), [{ turns: null, stop_reason: 'timeout' }]);
+});
+
+// --- round trips and stop reason on the ledger (migration 0039) ----------------------
+
+function resultQuery(result) {
+  return () => (async function* () {
+    yield { type: 'system', subtype: 'init', model: 'main-model' };
+    yield { type: 'assistant', message: { id: 'm1', model: 'main-model', content: [{ type: 'text', text: 'done' }], usage: { input_tokens: 1, output_tokens: 1 } } };
+    yield { type: 'result', ...result };
+  })();
+}
+
+test('route: a finished run records its turn count and why it stopped, once per run', async () => {
+  const db = getDb();
+  const u = newUser();
+  addUserRepo(u.id, REPO);
+  const res = makeRes();
+  await withKey(() => handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: REPO }, user: u }), res, { userId: u.id },
+    {
+      runAgent: (args) => runLoopAgent({
+        ...args,
+        queryFactory: resultQuery({
+          subtype: 'error_max_turns', num_turns: 60, total_cost_usd: 0.5, duration_ms: 1234,
+          // The run used a big model AND a small helper: two ledger rows, one run.
+          modelUsage: {
+            'helper-model': { inputTokens: 5, outputTokens: 1, cacheReadInputTokens: 10, cacheCreationInputTokens: 2 },
+            'main-model': { inputTokens: 40, outputTokens: 7, cacheReadInputTokens: 900, cacheCreationInputTokens: 30 },
+          },
+        }),
+      }, noSkill),
+    },
+  ));
+  assert.equal(res.statusCode, 200, res._body);
+  const rows = db.prepare('SELECT model, turns, stop_reason FROM usage_ledger WHERE user_id = ? ORDER BY model').all(u.id)
+    .map((r) => ({ ...r }));
+  assert.deepEqual(rows, [
+    { model: 'helper-model', turns: null, stop_reason: null },
+    { model: 'main-model', turns: 60, stop_reason: 'error_max_turns' },
+  ], 'the 60 turns are on the PRIMARY model\'s row only — repeating them would double the run');
+});
+
+test('route: a run with no reported turn count leaves turns unknown, not zero', async () => {
+  const db = getDb();
+  const u = newUser();
+  addUserRepo(u.id, REPO);
+  await withKey(() => handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: REPO }, user: u }), makeRes(), { userId: u.id },
+    { runAgent: (args) => runLoopAgent({ ...args, queryFactory: resultQuery({
+      subtype: 'success', modelUsage: { 'main-model': { inputTokens: 3, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 } },
+    }) }, noSkill) },
+  ));
+  const rows = db.prepare('SELECT turns, stop_reason FROM usage_ledger WHERE user_id = ?').all(u.id).map((r) => ({ ...r }));
+  assert.deepEqual(rows, [{ turns: null, stop_reason: 'success' }]);
 });
 
 test('runLoopAgent: createdPaths lists only the files a Write created, not ones it overwrote', () => withKey(async () => {

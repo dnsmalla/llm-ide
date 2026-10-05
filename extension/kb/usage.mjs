@@ -285,14 +285,17 @@ export function recordUsage(db, {
   // differently (~1.25x to write, ~0.1x to read). A caller that knows none
   // of them leaves them null — "unknown", not zero.
   cacheReadTokens = null, cacheCreationTokens = null,
+  // Model round trips for the whole run and why it stopped (migration 0039).
+  // Null = not reported; a caller that does not know leaves both out.
+  turns = null, stopReason = null,
 } = {}) {
   if (!userId || !provider || !model) return null;
   try {
     const info = db.prepare(
       `INSERT INTO usage_ledger
          (user_id, provider, model, source, endpoint, input_tokens, output_tokens,
-          cache_read_tokens, cache_creation_tokens, runs, request_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          cache_read_tokens, cache_creation_tokens, runs, request_id, turns, stop_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       userId, String(provider), String(model),
       VALID_SOURCES.has(source) ? source : 'api',
@@ -301,6 +304,7 @@ export function recordUsage(db, {
       tokenCountOrNull(cacheReadTokens), tokenCountOrNull(cacheCreationTokens),
       Math.max(1, Math.min(1_000_000, intOrNull(runs) || 1)),
       clampStr(requestId, 128),
+      turns == null ? null : tokenCountOrNull(turns), clampStr(stopReason, 40),
     );
     maybePruneLedger(db);
     return Number(info.lastInsertRowid);

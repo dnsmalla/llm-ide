@@ -52,13 +52,18 @@ function meterRun(userId, out, requestedModel) {
     const rows = Array.isArray(out.byModel) && out.byModel.length
       ? out.byModel
       : (meteredModel && out.ran ? [{ model: meteredModel, ...out.usage }] : []);
-    for (const row of rows) {
+    // Round trips belong to the RUN, not to a model: put them on the primary
+    // model's row only, or a run that also used a helper model would count twice.
+    const turns = Number(out.usage?.numTurns) > 0 ? Number(out.usage.numTurns) : null;
+    const primaryIndex = Math.max(0, rows.findIndex((row) => row.model === meteredModel));
+    rows.forEach((row, index) => {
       recordUsage(db, {
         userId, provider: AGENT_SDK_PROVIDER, model: row.model, endpoint: '/kb/loop/agent-run',
         inputTokens: row.inputTokens, outputTokens: row.outputTokens,
         cacheReadTokens: row.cacheReadTokens, cacheCreationTokens: row.cacheCreationTokens,
+        ...(index === primaryIndex ? { turns, stopReason: out.resultSubtype ?? null } : {}),
       });
-    }
+    });
   } catch { /* metering is best-effort */ }
 }
 
@@ -134,7 +139,9 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     });
   } catch (err) {
     // A cut-off run still reports what it spent before it was stopped.
-    if (err?.partialUsage) meterRun(userId, { ...err.partialUsage, ran: true }, model);
+    // Why it was cut off, so "hit the cap" and "timed out" can be told apart later.
+    const cutOffReason = timedOut ? 'timeout' : (ac.signal.aborted ? 'aborted' : 'error');
+    if (err?.partialUsage) meterRun(userId, { ...err.partialUsage, ran: true, resultSubtype: cutOffReason }, model);
     if (timedOut) {
       sendJSON(res, 504, { error: { code: 'AGENT_RUN_TIMEOUT', message: `The agent run exceeded ${timeoutMs} ms` } });
     } else if (ac.signal.aborted) {
