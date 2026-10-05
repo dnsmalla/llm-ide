@@ -1270,6 +1270,24 @@ test('stream: tool events and ledger rows share one turn id (the measurement joi
   assert.ok(ledger.every((r) => r.request_id === ev[0].turn_id));
 });
 
+test('stream: the turn\'s prompt composition is stored under the same turn id as its ledger rows', async () => {
+  const db = getDb();
+  const user = newUser('v2route-composition@example.com');
+  const fakeTurn = async () => ({
+    result: { subtype: 'success' }, usageTotals: { inputTokens: 2, outputTokens: 3 },
+    composition: { mode: 'execute', resumed: false, systemPromptKind: 'preset', systemChars: 3846, promptChars: 40,
+      tools: 20, mcpTools: 11, mcpServers: ['llmide'], apiCalls: 1,
+      firstCall: { inputTokens: 2, cacheCreationTokens: 30000, cacheReadTokens: 0 } },
+  });
+  await handleAgentV2Routes(toolTurnReq(user, 'chat-composition'), makeRes(), { runTurn: fakeTurn });
+  const rows = db.prepare('SELECT turn_id, mode, system_chars, first_call_prompt_tokens FROM turn_composition WHERE user_id = ?').all(user.id);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].system_chars, 3846);
+  assert.equal(rows[0].first_call_prompt_tokens, 30002);
+  const ledger = db.prepare('SELECT request_id FROM usage_ledger WHERE user_id = ?').all(user.id);
+  assert.ok(ledger.length >= 1 && ledger.every((r) => r.request_id === rows[0].turn_id), 'joins to the ledger');
+});
+
 test('stream: a turn that throws after a tool event still records it, with no ledger row', async () => {
   const db = getDb();
   const user = newUser('v2route-join-throw@example.com');

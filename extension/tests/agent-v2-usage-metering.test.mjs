@@ -180,3 +180,55 @@ test('usage snapshots without a message id count as one response, not one each',
   }, { readSkill: () => null, roots: () => [], sessionMemory: () => [], persistMemory: async () => null });
   assert.equal(usageTotals.cacheReadTokens, 900);
 });
+
+// --- per-turn prompt composition (migration 0040) -------------------------------
+
+test('a turn returns its composition: what LLM-IDE sent, what the SDK loaded, and the first call\'s real size', async () => {
+  const twoCalls = () => (async function* () {
+    yield { type: 'system', subtype: 'init', session_id: 'sdk-comp', claude_code_version: '2.1.288',
+      tools: ['Read', 'Grep', 'mcp__llmide__find-code', 'mcp__llmide__search-kb'], capabilities: [],
+      mcp_servers: [{ name: 'llmide', status: 'connected' }], agents: ['a', 'b'], skills: ['s1', 's2', 's3'],
+      slash_commands: ['c1'] };
+    yield { type: 'assistant', session_id: 'sdk-comp', message: { id: 'msg_a', content: [],
+      usage: { input_tokens: 2, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 19566 } } };
+    yield { type: 'assistant', session_id: 'sdk-comp', message: { id: 'msg_b', content: [],
+      usage: { input_tokens: 3, output_tokens: 9, cache_read_input_tokens: 19566, cache_creation_input_tokens: 400 } } };
+    yield { type: 'result', subtype: 'success', session_id: 'sdk-comp' };
+  })();
+  const { composition } = await runAgentV2Turn({
+    message: 'hi there', userId: 'u-meter', mode: 'ask', agentContext: { workspaceRoot: process.cwd() },
+    attachments: [{ path: 'a.txt', content: 'x'.repeat(50) }],
+    allowAmbientAuth: true, onEvent: () => {}, queryFactory: twoCalls,
+  }, { readSkill: () => null, roots: () => [process.cwd()], sessionMemory: () => [], persistMemory: async () => null });
+  assert.equal(composition.mode, 'ask');
+  assert.equal(composition.resumed, false);
+  assert.equal(composition.systemPromptKind, 'preset');
+  assert.ok(composition.systemChars > 0);
+  assert.ok(composition.promptChars >= 'hi there'.length);
+  assert.equal(composition.attachedFiles, 1);
+  assert.ok(composition.attachmentChars >= 50);
+  assert.equal(composition.tools, 4);
+  assert.equal(composition.mcpTools, 2);
+  assert.deepEqual(composition.mcpServers, ['llmide']);
+  assert.equal(composition.agents, 2);
+  assert.equal(composition.skills, 3);
+  assert.equal(composition.slashCommands, 1);
+  assert.equal(composition.claudeCodeVersion, '2.1.288');
+  assert.equal(composition.apiCalls, 2);
+  assert.deepEqual(composition.firstCall, { inputTokens: 2, cacheCreationTokens: 19566, cacheReadTokens: 0 },
+    'the FIRST API call is the turn\'s prefix size — later calls carry the growing tool loop');
+});
+
+test('composition: an id-less gateway snapshot records no first call; no init means zero counts', async () => {
+  const idless = () => (async function* () {
+    yield { type: 'assistant', session_id: 'sdk-gw', message: { content: [], usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 5, cache_creation_input_tokens: 9 } } };
+    yield { type: 'result', subtype: 'success', session_id: 'sdk-gw' };
+  })();
+  const { composition } = await runAgentV2Turn({
+    message: 'hi', userId: 'u-meter', mode: 'execute', agentContext: { workspaceRoot: process.cwd() },
+    allowAmbientAuth: true, onEvent: () => {}, queryFactory: idless,
+  }, { readSkill: () => null, roots: () => [], sessionMemory: () => [], persistMemory: async () => null });
+  assert.equal(composition.firstCall, null);
+  assert.equal(composition.tools, 0);
+  assert.equal(composition.claudeCodeVersion, null);
+});

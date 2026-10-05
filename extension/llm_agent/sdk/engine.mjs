@@ -822,6 +822,11 @@ export function buildEngineOptions(
     images: newImages,
     meta: {
       mode: resolvedMode,
+      // Sizes only, for turn_composition (migration 0040): what THIS turn's
+      // prompt carries beyond the user's text.
+      attachedFiles: newFiles.length,
+      attachmentChars: attachmentsText.length,
+      newImages: newImages.length,
       model: typeof model === 'string' && model ? model : null,
       truncatedPaths,
       promptTruncatedChars,
@@ -1557,6 +1562,8 @@ export async function runAgentV2Turn(
   };
   // messageId → that API response's largest usage snapshot (fallback only).
   const streamedUsage = new Map();
+  // The SDK's raw init message: what it actually loaded (turn_composition).
+  let sdkInit = null;
   // The client gets ONE usage event per turn (see the result branch). A turn
   // that never reaches its result — the user stopped it, or it failed after
   // real work — still spent tokens, so it reports what streamed (finally).
@@ -1591,6 +1598,7 @@ export async function runAgentV2Turn(
     for await (const msg of q) {
       if (msg?.session_id) currentSdkSessionId = msg.session_id;
       if (msg?.type === 'system' && msg?.subtype === 'compact_boundary') compacted = true;
+      if (msg?.type === 'system' && msg?.subtype === 'init') sdkInit = msg;
       for (const ev of mapSdkMessage(msg)) {
         if (TURN_PROGRESS_EVENTS.has(ev.type)) progressed = true;
         if (ev.type === 'delta' && typeof ev.text === 'string') {
@@ -1699,5 +1707,44 @@ export async function runAgentV2Turn(
   if (replyText) {
     void persistMemory({ agentContext, userId, userMessage: message, reply: replyText, runClaude }).catch(() => {});
   }
-  return { result, usageTotals };
+  // Telemetry never breaks a turn that already streamed its result.
+  let composition = null;
+  try { composition = turnComposition(); } catch { composition = null; }
+  return { result, usageTotals, composition };
+
+  // Sizes, counts and names only (migration 0040) — never prompt or tool text.
+  // The first API call is the turn's prefix (system + tools + history + this
+  // message); later calls add the turn's own tool loop.
+  function turnComposition() {
+    const sp = queryOptions.systemPrompt;
+    const systemText = sp?.type === 'preset' ? (sp.append ?? '') : (Array.isArray(sp?.prompt) ? sp.prompt.join('') : String(sp?.prompt ?? ''));
+    const list = (v) => (Array.isArray(v) ? v : []);
+    const tools = list(sdkInit?.tools);
+    // An id-less gateway snapshot max-merges every call into one entry
+    // (see the usage branch), so it is not the first call — record none.
+    const firstKey = streamedUsage.keys().next().value;
+    const first = firstKey && firstKey !== 'no-message-id' ? streamedUsage.get(firstKey) : null;
+    return {
+      mode: meta.mode,
+      model: typeof sdkInit?.model === 'string' ? sdkInit.model : (typeof model === 'string' ? model : null),
+      resumed: Boolean(resume),
+      systemPromptKind: sp?.type === 'preset' ? 'preset' : 'compact',
+      systemChars: systemText.length,
+      promptChars: typeof prompt === 'string' ? prompt.length : 0,
+      attachedFiles: meta.attachedFiles,
+      attachmentChars: meta.attachmentChars,
+      images: meta.newImages,
+      tools: tools.length,
+      mcpTools: tools.filter((t) => typeof t === 'string' && t.startsWith('mcp__')).length,
+      mcpServers: list(sdkInit?.mcp_servers).map((m) => m?.name).filter((n) => typeof n === 'string'),
+      agents: list(sdkInit?.agents).length,
+      skills: list(sdkInit?.skills).length,
+      slashCommands: list(sdkInit?.slash_commands).length,
+      claudeCodeVersion: typeof sdkInit?.claude_code_version === 'string' ? sdkInit.claude_code_version : null,
+      apiCalls: streamedUsage.size,
+      firstCall: first ? {
+        inputTokens: first.inputTokens, cacheCreationTokens: first.cacheCreationTokens, cacheReadTokens: first.cacheReadTokens,
+      } : null,
+    };
+  }
 }

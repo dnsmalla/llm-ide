@@ -34,6 +34,7 @@ import { recordUsage, pickMainModelRow } from '../kb/usage.mjs';
 import { randomUUID } from 'node:crypto';
 import { createToolAccounting } from '../llm_agent/sdk/tool-accounting.mjs';
 import { recordToolEvents } from '../kb/tool-events.mjs';
+import { recordTurnComposition } from '../kb/turn-composition.mjs';
 import { isSdkUpdating } from '../llm_agent/sdk/updater.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
 import { recordAgentTurnPhase } from '../server/metrics.mjs';
@@ -422,8 +423,10 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     }
   };
 
+  // Set when the engine finished the turn (sizes only — migration 0040).
+  let turnComposition = null;
   try {
-    const { usageTotals } = await deps.runTurn({
+    const { usageTotals, composition } = await deps.runTurn({
       message,
       history: freshTurnHistory(body),
       userId,
@@ -466,6 +469,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       // key gets ENGINE_ERROR on every v2 turn.
       allowAmbientAuth: true,
     });
+    turnComposition = composition ?? null;
     // Success bookkeeping: bind/refresh the mapping with the session the
     // stream reported, then meter the turn. The engine-resolved model wins
     // over the client's request (the SDK resolves defaults/fallbacks); with
@@ -517,6 +521,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   // Every exit path — success, Stop, failure: a stopped turn's tool calls
   // still cost tokens and are exactly the data the report needs.
   recordToolEvents(userId, { turnId, engine: 'v2', mode, events: toolAccounting.events() });
+  if (turnComposition) recordTurnComposition(userId, { ...turnComposition, turnId });
   const totalMs = Date.now() - turnStartedAt;
   recordAgentTurnPhase({ engine: 'v2', phase: 'total', durationMs: totalMs });
   log.info('agent_turn_timing', { engine: 'v2', mode, turnId, firstTokenMs, totalMs, aborted: ac.signal.aborted });

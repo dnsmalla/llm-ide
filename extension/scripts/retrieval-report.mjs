@@ -62,5 +62,35 @@ console.log(`\nLoop agent steps with tool calls: ${loop.turns}; using find-code:
 console.log(`  Avg tokens/step WITH find-code:    ${tok(loop.tokensWithFindCode)}`);
 console.log(`  Avg tokens/step WITHOUT find-code: ${tok(loop.tokensWithoutFindCode)}`);
 for (const r of loop.byTool) console.log(`  ${r.tool.padEnd(24)} ${String(r.calls).padStart(6)}   ~${r.avgChars} chars`);
+// Chat prompt composition (migration 0040): what a turn's FIRST API call was
+// made of, by mode. Absent until the backend has run that migration.
+try {
+  const rows = db.prepare(
+    `SELECT c.mode, c.resumed, c.system_prompt_kind AS kind, COUNT(*) AS turns,
+            ROUND(AVG(c.api_calls), 1) AS calls,
+            CAST(ROUND(AVG((SELECT SUM(COALESCE(l.input_tokens,0) + COALESCE(l.cache_read_tokens,0) + COALESCE(l.cache_creation_tokens,0))
+                            FROM usage_ledger l WHERE l.request_id = c.turn_id))) AS INTEGER) AS ledger,
+            CAST(ROUND(AVG(c.first_call_prompt_tokens)) AS INTEGER) AS firstCall,
+            CAST(ROUND(AVG(c.first_call_cache_read_tokens)) AS INTEGER) AS firstRead,
+            CAST(ROUND(AVG(c.system_chars)) AS INTEGER) AS sys, CAST(ROUND(AVG(c.prompt_chars)) AS INTEGER) AS prompt,
+            CAST(ROUND(AVG(c.attachment_chars)) AS INTEGER) AS att, CAST(ROUND(AVG(c.tools)) AS INTEGER) AS tools,
+            CAST(ROUND(AVG(c.mcp_tools)) AS INTEGER) AS mcp, CAST(ROUND(AVG(c.skills)) AS INTEGER) AS skills,
+            CAST(ROUND(AVG(c.agents)) AS INTEGER) AS agents, GROUP_CONCAT(DISTINCT c.mcp_servers) AS servers
+     FROM turn_composition c WHERE c.created_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now', ?)
+       -- Both averages over the SAME turns: one with a first call AND a ledger row.
+       AND c.first_call_prompt_tokens IS NOT NULL
+       AND EXISTS (SELECT 1 FROM usage_ledger x WHERE x.request_id = c.turn_id)
+     GROUP BY c.mode, c.resumed, c.system_prompt_kind ORDER BY turns DESC`,
+  ).all(`-${days} days`);
+  console.log('\nChat prompt composition (first API call of each turn; chars, not tokens, except firstCall/firstRead):');
+  if (!rows.length) console.log('  no data yet');
+  for (const r of rows) {
+    console.log(`  ${String(r.mode).padEnd(10)} ${r.resumed ? 'resumed' : 'fresh  '} ${String(r.kind).padEnd(7)} ${String(r.turns).padStart(4)} turns · ${r.calls} API calls · ledger ${r.ledger} tok vs firstCall ${r.firstCall} (read ${r.firstRead})`);
+    console.log(`      system ${r.sys} · prompt ${r.prompt} · attachments ${r.att} chars · tools ${r.tools} (mcp ${r.mcp}: ${r.servers || '-'}) · skills ${r.skills} · agents ${r.agents}`);
+  }
+} catch (err) {
+  if (!/no such table: turn_composition/.test(err.message)) throw err;
+  console.log('\nChat prompt composition: not recorded yet (restart the backend on this code to run migration 0040).');
+}
 console.log('\nCorrelation, not causation: turns differ in task size. Compare like-for-like modes before concluding.');
 db.close();
