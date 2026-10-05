@@ -1647,14 +1647,16 @@ final class LoopEngineRunner: ObservableObject {
         return .proceed
     }
 
-    /// SDK Adoption Diff: runs the fixed diff script in the worktree. Exit 3 means
-    /// every installed SDK item is already classified — end the run, no agent call.
+    /// SDK Adoption Diff: runs the fixed diff script in the worktree. A version
+    /// whose record is already settled is skipped before the script runs. Exit 3
+    /// means every installed SDK item is already classified, exit 4 that the pin
+    /// needs a human — both end the run with no agent call.
     /// A retried iteration keeps the first batch, as triage does: re-diffing after
     /// the agent edited sdk-surface.json could report "nothing to adopt" and end
     /// the run as a success over changes the Verify stage never passed.
     private func runSdkDiffStage(_ stage: LoopStage, gitRoot: URL) async -> StageDecision {
         let startedAt = Date()
-        guard currentWorktreeLease != nil else {
+        guard let lease = currentWorktreeLease else {
             stageStates[stage.id] = .failed
             let reason = "SDK adoption needs an isolated worktree; refusing to run in the main checkout"
             record(stage, startedAt: startedAt, duration: 0, exitCode: nil, passed: false, output: reason, score: nil)
@@ -1667,7 +1669,21 @@ final class LoopEngineRunner: ObservableObject {
                    output: "kept this run's SDK \(version) batch", score: nil)
             return .proceed
         }
+        // Set before any exit below so `finish` always runs the SDK write-back,
+        // which discards this run's worktree when nothing was proposed.
         sdkAdoptDiffRan = true
+        let installed = SdkAdoption.installedVersion(mainRepo: lease.mainRepo)
+        if let installed {
+            let status = IncidentStore.shared.incidents
+                .first { $0.id == SdkAdoption.incidentId(version: installed) }?.status
+            if SdkAdoption.shouldSkip(status: status) {
+                let why = "SDK \(installed) is already \(status.map(\.rawValue) ?? "settled") — nothing to run"
+                stageStates[stage.id] = .passed
+                appendLog(.info, "  [\(stage.name)] \(why)")
+                record(stage, startedAt: startedAt, duration: 0, exitCode: nil, passed: true, output: why, score: nil)
+                return .terminate(.success)
+            }
+        }
         let outcome: VerifyOutcome
         do {
             outcome = try await verifier.verify(command: LoopStageDetector.sdkAdoptDiffCommand,
@@ -1682,14 +1698,32 @@ final class LoopEngineRunner: ObservableObject {
             return .terminate(.error("SDK diff could not run: \(error.localizedDescription)"))
         }
         let duration = Date().timeIntervalSince(startedAt)
-        switch outcome.exitCode {
-        case 3:
+        switch SdkAdoption.diffAction(exitCode: outcome.exitCode) {
+        case .nothingToAdopt:
+            // Settled as fixed so the next tick's status gate skips this
+            // version (a version-only bump would otherwise re-run forever).
+            if let installed {
+                SdkAdoption.settle(version: installed, status: .fixed, note: SdkAdoption.nothingToAdoptNote,
+                                   store: .shared)
+            }
             stageStates[stage.id] = .passed
             appendLog(.info, "  [\(stage.name)] every installed SDK item is classified — nothing to adopt")
             record(stage, startedAt: startedAt, duration: duration, exitCode: 3, passed: true,
                    output: "nothing to adopt", score: nil)
             return .terminate(.success)
-        case 0:
+        case .needsHuman:
+            // The pin cannot be synced; an agent run would adopt against the
+            // wrong tree, so park the version for a human and stop here.
+            if let installed {
+                SdkAdoption.settle(version: installed, status: .needsHuman, note: SdkAdoption.pinRefusedNote,
+                                   store: .shared)
+            }
+            stageStates[stage.id] = .passed
+            appendLog(.warn, "  [\(stage.name)] \(SdkAdoption.pinRefusedNote)")
+            record(stage, startedAt: startedAt, duration: duration, exitCode: 4, passed: true,
+                   output: outcome.output, score: nil)
+            return .terminate(.success)
+        case .proceed:
             let batch = (try? String(contentsOf: gitRoot.appendingPathComponent(SdkAdoption.relativePath),
                                      encoding: .utf8)) ?? ""
             guard let version = SdkAdoption.version(fromBatch: batch) else {
@@ -1706,7 +1740,7 @@ final class LoopEngineRunner: ObservableObject {
             record(stage, startedAt: startedAt, duration: duration, exitCode: 0, passed: true,
                    output: outcome.output, score: nil)
             return .proceed
-        default:
+        case .error:
             stageStates[stage.id] = .failed
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode, passed: false,
                    output: outcome.output, score: nil)
@@ -2403,8 +2437,9 @@ final class LoopEngineRunner: ObservableObject {
         await retainOrDiscard(leaseProposal, proposed: proposed > 0, label: "Self-Heal")
     }
 
-    /// Records the SDK Adoption outcome on its `.sdk` incident (a run that found
-    /// nothing to adopt, or failed before a batch existed, records nothing),
+    /// Records the SDK Adoption outcome on its incident (a run that ended in the
+    /// Diff stage — skipped, nothing to adopt, pin refused or failed — has no
+    /// batch version and records nothing here),
     /// removes the batch directory, and keeps the worktree only as a proposal.
     private func writeBackSdkAdoption(version: String?, terminal: LoopEngineStatus, gitRoot: URL) async {
         try? FileManager.default.removeItem(

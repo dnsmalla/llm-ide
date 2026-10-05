@@ -7,14 +7,52 @@ func runSdkAdoptionCoreChecks() {
     let json = #"{"id":"x","source":"future-source","category":"c","message":"m","firstSeen":0,"lastSeen":0,"count":1,"attempts":0,"status":"new"}"#
     let decoded = try? JSONDecoder().decode(Incident.self, from: Data(json.utf8))
     expect(decoded?.source == .ui, "unknown incident source decodes (falls back to .ui) instead of failing the file")
-    expect(IncidentSource.sdk.rawValue == "sdk", "the sdk source is stored as \"sdk\"")
 
     let store = IncidentStore(fileURL: FileManager.default.temporaryDirectory
         .appendingPathComponent("sdk-\(UUID().uuidString).json"))
     SdkAdoption.recordPending(version: "1.2.3", store: store)
     SdkAdoption.recordPending(version: "1.2.3", store: store)
     expect(store.incidents.filter { $0.id == "sdk-adopt:1.2.3" }.count == 1, "recordPending is idempotent per version")
-    expect(!store.candidatesForTriage().contains { $0.source == .sdk }, "triage skips sdk incidents")
+    let record = store.incidents.first { $0.id == "sdk-adopt:1.2.3" }
+    expect(record?.source == .server && record?.category == "sdk-adoption",
+           "SDK records persist under an existing source (.server), so older builds still decode the file")
+    expect(record.map(SdkAdoption.isRecord) == true
+               && SdkAdoption.isRecord(Incident(id: "sdk-adopt:9", source: .server, category: "other", message: "m",
+                                                stack: nil, firstSeen: Date(), lastSeen: Date()))
+               && !SdkAdoption.isRecord(Incident(id: "srv:1", source: .server, category: "server", message: "m",
+                                                 stack: nil, firstSeen: Date(), lastSeen: Date())),
+           "isRecord keys on the sdk-adoption category or the sdk-adopt: id prefix, not the source")
+    store.upsert(Incident(id: "srv:1", source: .server, category: "server", message: "boom", stack: nil,
+                          firstSeen: Date(), lastSeen: Date()))
+    let triage = store.candidatesForTriage().map(\.id)
+    expect(triage.contains("srv:1") && !triage.contains("sdk-adopt:1.2.3"),
+           "triage skips SDK adoption records but keeps ordinary server incidents")
+
+    // C1: the status gate and the Diff exit-code mapping.
+    expect([IncidentStatus.proposed, .needsHuman, .ignored, .fixed].allSatisfy { SdkAdoption.shouldSkip(status: $0) }
+               && ![IncidentStatus.new, .fixing].contains { SdkAdoption.shouldSkip(status: $0) }
+               && !SdkAdoption.shouldSkip(status: nil),
+           "a proposed/needs-human/ignored/fixed version is skipped; new, fixing or unrecorded runs")
+    expect(SdkAdoption.diffAction(exitCode: 0) == .proceed && SdkAdoption.diffAction(exitCode: 3) == .nothingToAdopt
+               && SdkAdoption.diffAction(exitCode: 4) == .needsHuman && SdkAdoption.diffAction(exitCode: 1) == .error
+               && SdkAdoption.diffAction(exitCode: 2) == .error,
+           "diff exit 0 proceeds, 3 is nothing to adopt, 4 needs a human, anything else is an error")
+    let mainRepo = FileManager.default.temporaryDirectory.appendingPathComponent("sdk-main-\(UUID().uuidString)")
+    let sdkPkg = mainRepo.appendingPathComponent("extension/node_modules/@anthropic-ai/claude-agent-sdk")
+    try? FileManager.default.createDirectory(at: sdkPkg, withIntermediateDirectories: true)
+    expect(SdkAdoption.installedVersion(mainRepo: mainRepo) == nil, "no installed SDK reads as nil")
+    try? #"{"name":"@anthropic-ai/claude-agent-sdk","version":"0.3.290"}"#
+        .write(to: sdkPkg.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+    expect(SdkAdoption.installedVersion(mainRepo: mainRepo) == "0.3.290", "the installed version is read from main's node_modules")
+    try? FileManager.default.removeItem(at: mainRepo)
+    SdkAdoption.settle(version: "3.0.0", status: .fixed, note: SdkAdoption.nothingToAdoptNote, store: store)
+    let settled = store.incidents.first { $0.id == "sdk-adopt:3.0.0" }
+    expect(settled?.status == .fixed && settled?.note == "no new top-level SDK surface"
+               && SdkAdoption.shouldSkip(status: settled?.status),
+           "a version-only bump (exit 3) is recorded fixed, so the next tick skips it")
+    SdkAdoption.settle(version: "3.0.1", status: .needsHuman, note: SdkAdoption.pinRefusedNote, store: store)
+    expect(store.incidents.first { $0.id == "sdk-adopt:3.0.1" }?.note?.hasPrefix("main has unrelated dependency edits") == true,
+           "a refused pin (exit 4) parks the version for a human with the reason")
 
     let proposal = IncidentProposal(mainRepo: "/m", worktreePath: "/w", branch: "b", baseCommit: "c")
     SdkAdoption.applyOutcome(version: "1.2.3", runSucceeded: true, agentDown: false, runAborted: false,

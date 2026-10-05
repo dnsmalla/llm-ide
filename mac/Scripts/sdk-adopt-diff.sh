@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # SDK Adoption loop, Diff stage: borrow the main checkout's dependencies (the
 # installed SDK lives there), sync the SDK pin, and list unclassified surface.
-# Exit 0 = batch written, 3 = nothing to adopt, other = error.
+# Exit 0 = batch written, 3 = nothing to adopt, 4 = the pin needs a human
+# (main has unrelated dependency edits), other = error.
 set -euo pipefail
 here="$(cd "$(git rev-parse --show-toplevel)" && pwd -P)"
 main="$(cd "$(git rev-parse --git-common-dir)/.." && pwd -P)"
