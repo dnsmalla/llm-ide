@@ -29,9 +29,11 @@ try {
 
 let s;
 let legacy;
+let loop;
 try {
   s = summarizeToolEventsOn(db, null, { days });
   legacy = summarizeToolEventsOn(db, null, { days, engine: 'legacy' });
+  loop = summarizeToolEventsOn(db, null, { days, engine: 'loop' });
 } catch (err) {
   if (/no such table: (turn_tool_events|usage_ledger)/.test(err.message)) {
     console.log('No tool accounting yet: the backend has not run migration 0035. Restart the backend on this code, then re-run.');
@@ -56,5 +58,7 @@ console.log(`\nAvg tokens/turn WITH find-code:    ${tok(s.tokensWithFindCode)}`)
 console.log(`Avg tokens/turn WITHOUT find-code: ${tok(s.tokensWithoutFindCode)}`);
 const push = legacy.byTool.find((r) => r.tool === 'memory_push');
 console.log(`\nLegacy engine: ${legacy.turns} turn(s) with tool events; avg memory_push ${push ? `~${push.avgChars} chars` : 'n/a'} (not in the v2 figures above).`);
+console.log(`\nLoop agent steps: ${loop.turns} step(s) with tool calls; avg tokens per step with tool calls ${tok(loop.tokensWithoutFindCode)}`);
+for (const r of loop.byTool) console.log(`  ${r.tool.padEnd(24)} ${String(r.calls).padStart(6)}   ~${r.avgChars} chars`);
 console.log('\nCorrelation, not causation: turns differ in task size. Compare like-for-like modes before concluding.');
 db.close();

@@ -677,6 +677,86 @@ test('runLoopAgent: createdPaths lists only the files a Write created, not ones 
   git(['checkout', '--', 'src/a.txt'], REPO);
 }));
 
+// --- tool accounting (turn_tool_events, engine 'loop') ------------------------------
+
+// A stream shaped like the SDK's: assistant tool_use blocks, then user
+// tool_result blocks (string or text-block content; a denial is is_error).
+function toolStreamQuery() {
+  return () => (async function* () {
+    yield { type: 'system', subtype: 'init', model: 'main-model' };
+    yield { type: 'assistant', message: { id: 'a1', model: 'main-model', content: [
+      { type: 'tool_use', id: 'tu1', name: 'Grep', input: { pattern: 'x' } },
+      { type: 'tool_use', id: 'tu2', name: 'Read', input: { file_path: '/r/a' } },
+    ] } };
+    yield { type: 'user', message: { content: [
+      { type: 'tool_result', tool_use_id: 'tu1', content: 'abc' },
+      { type: 'tool_result', tool_use_id: 'tu2', content: [{ type: 'text', text: '12345' }] },
+    ] } };
+    yield { type: 'assistant', message: { id: 'a2', model: 'main-model', content: [
+      { type: 'tool_use', id: 'tu3', name: 'Edit', input: { file_path: '/outside' } },
+    ] } };
+    yield { type: 'user', message: { content: [
+      { type: 'tool_result', tool_use_id: 'tu3', content: 'refused', is_error: true },
+    ] } };
+    yield { type: 'result', subtype: 'success', num_turns: 3, modelUsage: {
+      'main-model': { inputTokens: 3, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    } };
+  })();
+}
+
+test('runLoopAgent: reports every tool call in order — name, result size, denial — never the text', () => withKey(async () => {
+  const out = await runLoopAgent({ message: 'x', root: REPO, userId: user.id, queryFactory: toolStreamQuery() }, noSkill);
+  assert.deepEqual(out.toolEvents, [
+    { tool: 'Grep', resultChars: 3, truncated: false, isError: false },
+    { tool: 'Read', resultChars: 5, truncated: false, isError: false },
+    { tool: 'Edit', resultChars: 7, truncated: false, isError: true },
+  ]);
+}));
+
+test('route: a run\'s tool calls land in turn_tool_events under engine loop, keyed to its ledger rows', async () => {
+  const db = getDb();
+  const u = newUser();
+  addUserRepo(u.id, REPO);
+  await withKey(() => handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: REPO }, user: u }), makeRes(), { userId: u.id },
+    { runAgent: (args) => runLoopAgent({ ...args, queryFactory: toolStreamQuery() }, noSkill) },
+  ));
+  const events = db.prepare('SELECT turn_id, engine, seq, tool, is_error FROM turn_tool_events WHERE user_id = ? ORDER BY seq')
+    .all(u.id).map((r) => ({ ...r }));
+  assert.deepEqual(events.map(({ turn_id: _t, ...rest }) => rest), [
+    { engine: 'loop', seq: 0, tool: 'Grep', is_error: 0 },
+    { engine: 'loop', seq: 1, tool: 'Read', is_error: 0 },
+    { engine: 'loop', seq: 2, tool: 'Edit', is_error: 1 },
+  ]);
+  const ledger = db.prepare('SELECT request_id FROM usage_ledger WHERE user_id = ?').all(u.id);
+  assert.equal(ledger.length, 1);
+  assert.ok(events[0].turn_id, 'a turn id is generated');
+  assert.equal(ledger[0].request_id, events[0].turn_id, 'the ledger row joins to its tool events');
+});
+
+test('route: a run that fails mid-stream still records the tool calls it made', async () => {
+  const db = getDb();
+  const u = newUser();
+  addUserRepo(u.id, REPO);
+  const res = makeRes();
+  await withKey(() => handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: REPO }, user: u }), res, { userId: u.id },
+    { runAgent: (args) => runLoopAgent({ ...args, queryFactory: () => (async function* () {
+      yield { type: 'system', subtype: 'init', model: 'main-model' };
+      yield { type: 'assistant', message: { id: 'a1', model: 'main-model',
+        content: [{ type: 'tool_use', id: 'tu1', name: 'Glob', input: { pattern: '*' } }],
+        usage: { input_tokens: 2, output_tokens: 1 } } };
+      yield { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'a\nb' }] } };
+      throw new Error('engine died');
+    })() }, noSkill) },
+  ));
+  assert.equal(res.statusCode, 502);
+  const events = db.prepare('SELECT turn_id, tool FROM turn_tool_events WHERE user_id = ?').all(u.id);
+  assert.deepEqual(events.map((e) => e.tool), ['Glob']);
+  const ledger = db.prepare('SELECT request_id FROM usage_ledger WHERE user_id = ?').all(u.id);
+  assert.equal(ledger[0].request_id, events[0].turn_id);
+});
+
 // --- too-broad roots are never registered / trusted --------------------------------
 
 test('addUserRepo refuses too-broad roots; buildTrustedRoots drops stored ones', async () => {

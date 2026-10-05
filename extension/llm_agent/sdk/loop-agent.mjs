@@ -46,6 +46,7 @@ import { neutralizePromptFences } from '../../core/utils.mjs';
 import { resolveLanguage } from '../../providers/runtime.mjs';
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
 import { withToolOutputCap } from './tool-output-cap.mjs';
+import { createToolAccounting } from './tool-accounting.mjs';
 
 // The only built-ins a Loop run may see. Everything else — Bash, WebFetch,
 // WebSearch, Agent/Task, AskUserQuestion, NotebookEdit, Skill, … — is absent
@@ -330,6 +331,34 @@ function headlessSystemAppend(root, extraRoots, languageLine, skillsText) {
   ].filter(Boolean).join('\n\n');
 }
 
+// A tool_result's content is a string or an array of content blocks; only the
+// text blocks count toward its size.
+function toolResultText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.filter((b) => b?.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('');
+}
+
+// Feeds the raw SDK stream into the same accounting the chat route uses
+// (tool-accounting.mjs), translated into its event shape. Read from the stream,
+// not the hooks: a call the hook or canUseTool denies never reaches
+// PostToolUse, but it still cost a round trip and shows up as an error result.
+// Known gaps: a call cut off before its result arrives is not counted, and if
+// a subagent tool is ever enabled here its nested calls (parent_tool_use_id)
+// would count as this step's.
+function observeToolBlocks(accounting, msg) {
+  const blocks = Array.isArray(msg?.message?.content) ? msg.message.content : [];
+  for (const b of blocks) {
+    if (msg.type === 'assistant' && b?.type === 'tool_use') {
+      accounting.observe({ type: 'tool_use_start', id: b.id, name: b.name });
+    } else if (msg.type === 'user' && b?.type === 'tool_result') {
+      accounting.observe({
+        type: 'tool_result', toolUseId: b.tool_use_id, text: toolResultText(b.content), isError: b.is_error === true,
+      });
+    }
+  }
+}
+
 // The injectable factory contract (prompt, options) — same shape as the chat
 // engine's, so tests drive this runner with the same kind of fake.
 const sdkQueryFactory = (prompt, options) => query({ prompt, options });
@@ -348,7 +377,8 @@ const sdkQueryFactory = (prompt, options) => query({ prompt, options });
  *   createdPaths: string[], usage: object,
  *   resolvedSkills: string[], unresolvedSkills: string[], truncatedSkills: string[],
  *   ran: boolean, resultSubtype: string|null, denied: Array<{toolName: string, reason: string}>,
- *   model: string|null, byModel: object[] }>}
+ *   model: string|null, byModel: object[],
+ *   toolEvents: Array<{tool: string, resultChars: number, truncated: boolean, isError: boolean}> }>}
  */
 export async function runLoopAgent(
   {
@@ -374,7 +404,7 @@ export async function runLoopAgent(
   if (unresolved.length > 0) {
     return {
       reply: '', changedPaths: [], changedExtraPaths: [], createdPaths: [], usage, ...base, ran: false, resultSubtype: null, denied: [],
-      model: null, byModel: [],
+      model: null, byModel: [], toolEvents: [],
     };
   }
 
@@ -509,6 +539,7 @@ export async function runLoopAgent(
   // same usage). Only consulted when no `result` arrives — a timeout or an
   // abort — so a cut-off run is still metered for what it spent.
   const streamed = new Map();
+  const toolAccounting = createToolAccounting();
   const applyRows = (rows) => {
     byModel = rows;
     usage.inputTokens = 0; usage.outputTokens = 0; usage.cacheReadTokens = 0; usage.cacheCreationTokens = 0;
@@ -536,6 +567,7 @@ export async function runLoopAgent(
   };
   try {
     for await (const msg of q) {
+      observeToolBlocks(toolAccounting, msg);
       if (msg?.type === 'system' && msg?.subtype === 'init' && typeof msg.model === 'string') {
         resolvedModel = msg.model;
       } else if (msg?.type === 'assistant') {
@@ -566,6 +598,7 @@ export async function runLoopAgent(
       err.partialUsage = {
         usage: { ...usage }, byModel,
         model: resolvedModel ?? (typeof model === 'string' && model ? model : null),
+        toolEvents: toolAccounting.events(),
       };
     }
     throw err;
@@ -584,5 +617,6 @@ export async function runLoopAgent(
     denied,
     model: resolvedModel ?? (typeof model === 'string' && model ? model : null),
     byModel,
+    toolEvents: toolAccounting.events(),
   };
 }

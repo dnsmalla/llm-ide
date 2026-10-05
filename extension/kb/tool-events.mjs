@@ -4,6 +4,8 @@ import { getDb, requireUser } from './db.mjs';
 import { summarizeToolEventsOn } from './tool-events-summary.mjs';
 
 const MAX_EVENTS_PER_TURN = 200;
+// 'loop' = one headless Loop agent step (routes/loop-agent.mjs).
+const ENGINES = new Set(['v2', 'legacy', 'loop']);
 const clampInt = (v) => Math.max(0, Math.min(1_000_000_000, Math.trunc(Number(v) || 0)));
 const clampStr = (v, n) => (typeof v === 'string' ? v.slice(0, n) : null);
 
@@ -11,7 +13,7 @@ export function recordToolEvents(userId, { turnId, engine, mode = null, events }
   try {
     requireUser(userId);
     if (typeof turnId !== 'string' || !turnId) return 0;
-    if (engine !== 'v2' && engine !== 'legacy') return 0;
+    if (!ENGINES.has(engine)) return 0;
     if (!Array.isArray(events) || events.length === 0) return 0;
     const db = getDb();
     const insert = db.prepare(

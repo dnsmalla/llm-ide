@@ -118,6 +118,14 @@ test('summary is per-engine: legacy memory_push turns never leak into the defaul
   assert.equal(all.turns, before.turns + 2);
 });
 
+test('loop engine events are accepted and summarized on their own; unknown engines are not', () => {
+  const before = db.summarizeToolEvents(U, { days: 7 });
+  assert.equal(db.recordToolEvents(U, { turnId: 'P1', engine: 'loop', events: [{ tool: 'Grep', resultChars: 10 }] }), 1);
+  assert.equal(db.recordToolEvents(U, { turnId: 'P2', engine: 'bogus', events: [{ tool: 'Grep', resultChars: 10 }] }), 0);
+  assert.equal(db.summarizeToolEvents(U, { days: 7 }).turns, before.turns, 'loop turns stay out of the v2 summary');
+  assert.equal(db.summarizeToolEvents(U, { days: 7, engine: 'loop' }).turns, 1);
+});
+
 test('token averages are scoped to the requesting user', () => {
   const other = users.registerUser(db.getDb(), {
     email: `te2-${Date.now()}@example.test`, password: 'CorrectHorseBattery', displayName: 'o',

@@ -15,12 +15,13 @@
 //   handleLoopAgentRoutes(req, res, { userId }, deps) → Promise<boolean>
 // `deps` ({ runAgent, validateRoot }) is the tests' seam for the engine.
 
+import { randomUUID } from 'node:crypto';
 import {
   runLoopAgent, validateLoopRepoRoot, validateLoopExtraRoots, MAX_LOOP_MESSAGE_CHARS,
 } from '../llm_agent/sdk/loop-agent.mjs';
 import { AGENT_SDK_PROVIDER } from '../llm_agent/sdk/engine.mjs';
 import { recordUsage, pickMainModelRow } from '../kb/usage.mjs';
-import { getDb } from '../kb/db.mjs';
+import { getDb, recordToolEvents } from '../kb/db.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
 
 const MAX_SKILL_IDS = 5;
@@ -43,9 +44,12 @@ export function resolveTimeoutMs(raw) {
 }
 
 // Best-effort metering of one run (finished or cut off). The run already
-// happened — a metering failure never changes the answer.
-function meterRun(userId, out, requestedModel) {
+// happened — a metering failure never changes the answer. `turnId` keys the
+// ledger rows (request_id) to the run's tool calls (turn_tool_events), so
+// "which tools did an expensive step call" is one join.
+function meterRun(userId, out, requestedModel, turnId) {
   if (!out) return;
+  recordToolEvents(userId, { turnId, engine: 'loop', events: out.toolEvents });
   const meteredModel = out.model ?? requestedModel;
   try {
     const db = getDb();
@@ -61,7 +65,7 @@ function meterRun(userId, out, requestedModel) {
     const primaryIndex = Math.max(0, rows.indexOf(pickMainModelRow(rows, meteredModel)));
     rows.forEach((row, index) => {
       recordUsage(db, {
-        userId, provider: AGENT_SDK_PROVIDER, model: row.model, endpoint: '/kb/loop/agent-run',
+        userId, provider: AGENT_SDK_PROVIDER, model: row.model, endpoint: '/kb/loop/agent-run', requestId: turnId,
         inputTokens: row.inputTokens, outputTokens: row.outputTokens,
         cacheReadTokens: row.cacheReadTokens, cacheCreationTokens: row.cacheCreationTokens,
         ...(index === primaryIndex ? { turns, stopReason: out.resultSubtype ?? null } : {}),
@@ -102,6 +106,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
   // client going away (Loop Stop / app quit). `abortController` is the shape
   // the SDK needs to kill its CLI subprocess.
   const ac = new AbortController();
+  const turnId = randomUUID();
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; ac.abort(); }, timeoutMs);
   onClientDisconnect(req, res, () => ac.abort());
@@ -126,7 +131,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     meterRun(userId, {
       ...out,
       resultSubtype: out.resultSubtype ?? (timedOut ? 'timeout' : (ac.signal.aborted ? 'aborted' : null)),
-    }, model);
+    }, model, turnId);
     if (ac.signal.aborted && !timedOut) return true; // client gone — nobody to answer
     if (timedOut) {
       sendJSON(res, 504, { error: { code: 'AGENT_RUN_TIMEOUT', message: `The agent run exceeded ${timeoutMs} ms` } });
@@ -149,7 +154,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     // A cut-off run still reports what it spent before it was stopped.
     // Why it was cut off, so "hit the cap" and "timed out" can be told apart later.
     const cutOffReason = timedOut ? 'timeout' : (ac.signal.aborted ? 'aborted' : 'error');
-    if (err?.partialUsage) meterRun(userId, { ...err.partialUsage, ran: true, resultSubtype: cutOffReason }, model);
+    if (err?.partialUsage) meterRun(userId, { ...err.partialUsage, ran: true, resultSubtype: cutOffReason }, model, turnId);
     if (timedOut) {
       sendJSON(res, 504, { error: { code: 'AGENT_RUN_TIMEOUT', message: `The agent run exceeded ${timeoutMs} ms` } });
     } else if (ac.signal.aborted) {
