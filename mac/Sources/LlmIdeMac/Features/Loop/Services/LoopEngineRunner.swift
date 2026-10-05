@@ -466,6 +466,10 @@ final class LoopEngineRunner: ObservableObject {
         }
         isAdmitted = true
         onAdmissionChange?(projectId, loopId, true)
+        // Self-Heal-family guarantees come from the stages, never from editable
+        // policy/globs: every caller (Loop page, scheduler, phone) gets them.
+        let config = config.enforcingFamilyProtection()
+        let scopeGlobs = LoopStageDetector.effectiveScopeGlobs(scopeGlobs, stages: config.stages)
         defer {
             isAdmitted = false
             onAdmissionChange?(projectId, loopId, false)
@@ -1659,6 +1663,8 @@ final class LoopEngineRunner: ObservableObject {
         if let version = sdkAdoptVersion {
             stageStates[stage.id] = .passed
             appendLog(.info, "  [\(stage.name)] keeping this run's SDK \(version) batch")
+            record(stage, startedAt: startedAt, duration: 0, exitCode: nil, passed: true,
+                   output: "kept this run's SDK \(version) batch", score: nil)
             return .proceed
         }
         sdkAdoptDiffRan = true

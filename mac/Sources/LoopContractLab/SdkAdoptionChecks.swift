@@ -76,8 +76,8 @@ func runSdkAdoptionLoopChecks() {
     expect(config.isSelfHealRun && config.requiresWorktree, "an sdk-adoption run is Self-Heal family: forced worktree")
     expect(LoopStageDetector.sdkAdoptScopeGlobs == [
         "extension/llm_agent/sdk/**", "extension/providers/**", "extension/tests/**",
-        "extension/scripts/sdk-surface.mjs", "extension/package.json", "extension/package-lock.json",
-    ], "adopt scope is the server linker, its tests and the pin only")
+        "extension/package.json", "extension/package-lock.json",
+    ], "adopt scope is the server linker, its tests and the pin only — not the ledger gate tool")
     expect(LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.sdkAdoption,
                                           gitRoot: FileManager.default.temporaryDirectory).isEmpty,
            "sdk-adoption exists only on the LLM-IDE checkout")
@@ -88,9 +88,10 @@ func runSdkAdoptionLoopChecks() {
     let llmIde = FileManager.default.temporaryDirectory.appendingPathComponent("sdk-\(UUID().uuidString)")
     let scriptDir = llmIde.appendingPathComponent("mac/Scripts")
     try? FileManager.default.createDirectory(at: scriptDir, withIntermediateDirectories: true)
-    for name in ["self-heal-verify.sh", "sdk-adopt-diff.sh"] {
+    for name in ["self-heal-verify.sh", "sdk-adopt-diff.sh", "sdk-adopt-verify.sh"] {
         try? "#!/bin/sh\n".write(to: scriptDir.appendingPathComponent(name), atomically: true, encoding: .utf8)
     }
+    let previousAppSourceRoot = LoopStageDetector.appSourceRoot
     LoopStageDetector.appSourceRoot = { llmIde }
     let adopt = LoopStageDetector.defaultLoops(gitRoot: llmIde).first { $0.defaultKey == LoopDefaultLoopKey.sdkAdoption }
     expect(adopt?.name == "SDK Adoption", "the LLM-IDE checkout gets an SDK Adoption loop")
@@ -105,13 +106,14 @@ func runSdkAdoptionLoopChecks() {
     expect(adopt?.scopeGlobs == LoopStageDetector.sdkAdoptScopeGlobs, "the SDK Adoption loop carries its scope allowlist")
     expect(adopt?.runsOnSchedule == true && adopt?.config.alwaysUseWorktree == true && adopt?.config.maxIterations == 3,
            "SDK Adoption runs on the schedule, always in a worktree, with 3 iterations")
-    expect(adopt?.config.extraProtectedGlobs.contains("mac/Scripts/**") == true,
-           "SDK Adoption protects the scripts its stages execute")
+    expect(adopt?.config.extraProtectedGlobs.contains("mac/Scripts/**") == true
+               && adopt?.config.extraProtectedGlobs.contains("extension/scripts/sdk-surface.mjs") == true,
+           "SDK Adoption protects the scripts its stages execute and the ledger gate")
     let approvals = VerifyApprovalStore(defaults: UserDefaults(suiteName: "sdk-\(UUID().uuidString)")!)
     if let verify = adopt?.config.stages.last, let command = verify.command {
-        expect(command == LoopStageDetector.selfHealVerifyCommand
+        expect(command == LoopStageDetector.sdkAdoptVerifyCommand
                    && LoopStageApproval.isApproved(verify, command: command, repo: llmIde, approvals: approvals, fresh: true),
-               "the SDK Adoption verify stage is the regression gate, run without a first-run approval")
+               "the SDK Adoption verify stage runs extension tests + the regression gate, without a first-run approval")
     } else {
         expect(false, "the SDK Adoption verify stage has a command")
     }
@@ -123,7 +125,37 @@ func runSdkAdoptionLoopChecks() {
     expect(ensured.loops.contains { $0.defaultKey == LoopDefaultLoopKey.sdkAdoption
                && $0.scopeGlobs == LoopStageDetector.sdkAdoptScopeGlobs },
            "a project that already has loops gains the SDK Adoption loop, scope included")
-    LoopStageDetector.appSourceRoot = { AppSourceRoot.gitRoot }
+    LoopStageDetector.appSourceRoot = previousAppSourceRoot
     try? FileManager.default.removeItem(at: llmIde)
+
+    // Run-time enforcement: editable policy and globs cannot loosen the family's guard.
+    let familyGlobs = LoopStageDetector.selfHealFamilyProtectedGlobs
+    let gateGlobs = LoopStageDetector.sdkAdoptProtectedGlobs
+    for policy in [ProtectedPathPolicy.warn, .off, .stop] {
+        var heal = LoopEngineConfig(stages: [LoopStage(name: "Triage", kind: .incidentTriage, order: 0)])
+        heal.protectedPathPolicy = policy
+        heal.extraProtectedGlobs = []
+        let enforced = heal.enforcingFamilyProtection()
+        expect(enforced.protectedPathPolicy == .revert && familyGlobs.allSatisfy(enforced.extraProtectedGlobs.contains)
+                   && !gateGlobs.contains(where: enforced.extraProtectedGlobs.contains),
+               "a Self-Heal run with policy \(policy.rawValue) and cleared globs is forced to revert + family globs")
+    }
+    var sdk = LoopEngineConfig(stages: stages)
+    sdk.protectedPathPolicy = .off
+    sdk.extraProtectedGlobs = ["custom/**"]
+    let sdkEnforced = sdk.enforcingFamilyProtection()
+    expect(sdkEnforced.protectedPathPolicy == .revert
+               && (familyGlobs + gateGlobs + ["custom/**"]).allSatisfy(sdkEnforced.extraProtectedGlobs.contains),
+           "an SDK Adoption run also protects the ledger gate, keeping user globs")
+    for requested in [[], ["**"]] as [[String]] {
+        expect(LoopStageDetector.effectiveScopeGlobs(requested, stages: stages) == LoopStageDetector.sdkAdoptScopeGlobs,
+               "an SDK Adoption run's scope is exactly the allowlist whatever was passed (\(requested))")
+    }
+    var plain = LoopEngineConfig(stages: [LoopStage(name: "Test", kind: .shellCommand, command: "true", order: 0)])
+    plain.protectedPathPolicy = .warn
+    expect(plain.enforcingFamilyProtection() == plain, "an ordinary loop's policy and globs are left alone")
+    expect(LoopStageDetector.effectiveScopeGlobs(["src/**"], stages: plain.stages) == ["src/**"]
+               && LoopStageDetector.effectiveScopeGlobs([], stages: plain.stages).isEmpty,
+           "an ordinary loop's scope is what it asked for")
     #endif
 }

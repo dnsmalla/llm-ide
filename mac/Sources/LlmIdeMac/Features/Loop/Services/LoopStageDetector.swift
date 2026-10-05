@@ -24,13 +24,39 @@ public enum LoopStageDetector {
     /// runner directly — never read from `loop.json` — so an edited file
     /// cannot swap what runs before the adopt agent.
     public static let sdkAdoptDiffCommand = "bash mac/Scripts/sdk-adopt-diff.sh"
+    /// The SDK Adoption Verify stage's command: the extension suite (where every
+    /// in-scope edit lands) and then the regression gate.
+    public static let sdkAdoptVerifyCommand = "bash mac/Scripts/sdk-adopt-verify.sh"
     /// What the SDK Adoption loop's agents may change: the server-side Claude
     /// linker, its tests, the surface ledger tool and the SDK pin. Everything
     /// else (wire, Mac app, auth) is a "needs-human" verdict, not an edit.
+    /// The ledger tool and its gate test are deliberately NOT here (they are in
+    /// `sdkAdoptProtectedGlobs`): the agent must not be able to edit the check
+    /// that decides whether its own classification is complete.
     public static let sdkAdoptScopeGlobs = [
         "extension/llm_agent/sdk/**", "extension/providers/**", "extension/tests/**",
-        "extension/scripts/sdk-surface.mjs", "extension/package.json", "extension/package-lock.json",
+        "extension/package.json", "extension/package-lock.json",
     ]
+    /// Protected in every Self-Heal-family run: the verify stage executes these,
+    /// and the text the agent reads (incidents, SDK item names) is untrusted.
+    public static let selfHealFamilyProtectedGlobs = ["mac/Scripts/**", "scripts/**", "**/*.sh"]
+    /// Protected in SDK Adoption runs on top of the family set: the gate that
+    /// judges the agent's ledger. The ledger JSON itself stays editable.
+    public static let sdkAdoptProtectedGlobs = [
+        "extension/scripts/sdk-surface.mjs", "extension/tests/sdk-surface-ledger.test.mjs",
+    ]
+
+    /// The scope allowlist a run actually enforces. A run holding any SDK
+    /// Adoption stage gets exactly `sdkAdoptScopeGlobs`, whatever its
+    /// `LoopDefinition.scopeGlobs` says — that list is editable in the detail
+    /// pane and in loop.json, and clearing it (or setting "**") must not widen
+    /// what an agent fed untrusted SDK item names may touch.
+    public static func effectiveScopeGlobs(_ requested: [String], stages: [LoopStage]) -> [String] {
+        let isSdkAdoption = stages.contains {
+            $0.kind == .sdkSurfaceDiff || $0.defaultKey?.hasPrefix("sdk-adopt-") == true
+        }
+        return isSdkAdoption ? sdkAdoptScopeGlobs : requested
+    }
     /// Test seam: which checkout is LLM-IDE's own.
     nonisolated(unsafe) public static var appSourceRoot: () -> URL? = { AppSourceRoot.gitRoot }
 
@@ -141,13 +167,18 @@ public enum LoopStageDetector {
         switch key {
         case "test", "regression-test", "refactor-test":
             return detectTestCommand(gitRoot: gitRoot)
-        case "self-heal-verify", "sdk-adopt-verify":
+        case "self-heal-verify":
             // Gated on the LLM-IDE checkout, not just the script's presence —
             // otherwise any repo shipping this script name would auto-approve
             // running it, bypassing the first-run approval click entirely.
             guard isAppSourceRoot(gitRoot) else { return nil }
             let script = gitRoot.appendingPathComponent("mac/Scripts/self-heal-verify.sh").path
             return FileManager.default.fileExists(atPath: script) ? selfHealVerifyCommand : nil
+        case "sdk-adopt-verify":
+            // Same gate as self-heal-verify, for the same reason.
+            guard isAppSourceRoot(gitRoot) else { return nil }
+            let script = gitRoot.appendingPathComponent("mac/Scripts/sdk-adopt-verify.sh").path
+            return FileManager.default.fileExists(atPath: script) ? sdkAdoptVerifyCommand : nil
         default:
             return systemCheckStages(gitRoot: gitRoot).first(where: { $0.key == key })?.command
         }
@@ -1075,7 +1106,8 @@ public enum LoopStageDetector {
     it would take. For a "Removed" item that was adopted, repair the linker so it no longer depends on it. Never \
     weaken, skip or delete a test. Finish by writing every item into sdk-surface.json (status, plus "where" for \
     adopted or "reason" otherwise), removing removed items, and setting "sdkVersion" to the batch header's version. \
-    If the batch says needs-human for the pin, change nothing.
+    If the batch says needs-human for the pin, change nothing. Never run npm install, npm update, npm ci or any \
+    npx command that installs packages: extension/node_modules belongs to the main checkout.
     """
 
     /// Display name of a default loop.
@@ -1175,8 +1207,10 @@ public enum LoopStageDetector {
             if isSelfHealFamily {
                 config.maxIterations = 3
                 config.alwaysUseWorktree = true
-                // The verify stage executes these, and incident text the fix agent reads is untrusted.
-                config.extraProtectedGlobs = ["mac/Scripts/**", "scripts/**", "**/*.sh"]
+                // The run re-applies these (`LoopEngineConfig.enforcingFamilyProtection`);
+                // stored here too so the detail pane shows what is enforced.
+                config.extraProtectedGlobs = selfHealFamilyProtectedGlobs
+                    + (key == LoopDefaultLoopKey.sdkAdoption ? sdkAdoptProtectedGlobs : [])
             }
             return LoopDefinition(id: defaultLoopId(key), name: defaultLoopName(key),
                                   goal: contract?.goal,

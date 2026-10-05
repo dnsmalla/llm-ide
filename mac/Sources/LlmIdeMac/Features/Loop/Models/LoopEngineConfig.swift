@@ -96,6 +96,26 @@ public struct LoopEngineConfig: Codable, Equatable {
         return nil
     }
 
+    /// This config with the Self-Heal family's guarantees re-applied: policy
+    /// `.revert` and the family's protected globs, whatever loop.json or the
+    /// app-wide default (`LoopEngineDefaults.newConfig`) set. Both are editable,
+    /// and an agent reading untrusted text (incidents, SDK item names) must not
+    /// keep an edit to the scripts its own verify stage runs. This also closes
+    /// the same inherited gap for Self-Heal, which trusted the stored values.
+    /// Any other config is returned unchanged.
+    public func enforcingFamilyProtection() -> LoopEngineConfig {
+        guard isSelfHealRun else { return self }
+        var copy = self
+        copy.protectedPathPolicy = .revert
+        let isSdkAdoption = stages.contains {
+            $0.kind == .sdkSurfaceDiff || $0.defaultKey?.hasPrefix("sdk-adopt-") == true
+        }
+        let required = LoopStageDetector.selfHealFamilyProtectedGlobs
+            + (isSdkAdoption ? LoopStageDetector.sdkAdoptProtectedGlobs : [])
+        copy.extraProtectedGlobs += required.filter { !extraProtectedGlobs.contains($0) }
+        return copy
+    }
+
     /// The full protected set this config enforces.
     var protectedGlobs: [String] {
         GitRepairScopeGuard.defaultProtectedGlobs + extraProtectedGlobs
