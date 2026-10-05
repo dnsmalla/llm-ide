@@ -142,6 +142,11 @@ struct AgentSdkSettingsSection: View {
                 restartBackend()
                 await waitForBackend(running: r.to)
                 await refresh(force: false)
+                // Core-only hand-off: the scheduled SDK Adoption loop picks this version up.
+                // Settings must not start a Loop itself (feature boundary).
+                if let running = status?.running, running == r.to {
+                    SdkAdoption.recordPending(version: running, store: .shared)
+                }
                 resultMessage = status?.running == r.to
                     ? "Updated to \(r.to ?? "") — the backend is running it."
                     : "Installed \(r.to ?? ""). Restart the backend to start using it."
