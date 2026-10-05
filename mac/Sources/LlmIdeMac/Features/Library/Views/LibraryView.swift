@@ -1288,6 +1288,13 @@ struct LibraryView: View {
                 } else if mcpPlugins.isEmpty {
                     emptyRow("No MCP plugins registered yet.", icon: "bolt.horizontal.circle")
                 } else {
+                    // Say what the enabled ones cost before the list, so the price of
+                    // leaving a server on is visible where it is switched.
+                    Text(McpUsageNotes.sectionSummary(
+                        enabledCount: mcpPlugins.filter { $0.enabled && $0.consented }.count))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, 2)
                     ForEach(mcpPlugins) { p in
                         McpPluginRow(
                             plugin: p,

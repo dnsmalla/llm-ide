@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Sidebar row for a registered MCP plugin. Two independent per-user gates
-/// govern whether the Claude CLI's `--mcp-config` ever sees this server —
+/// govern whether the agent is ever offered this server —
 /// `consented` and `enabled` — so both surface inline, matching how
 /// `LlmSourceRow` puts its single `enabled` toggle inline (the most common
 /// action belongs in the list, not buried in the detail pane).
@@ -41,7 +41,7 @@ struct McpPluginRow: View {
                 }
             }
             .buttonStyle(.plain)
-            .help(plugin.consented ? "Consented — click to revoke" : "Not consented — click to consent. Until you do, this server never reaches the agent.")
+            .help(plugin.consented ? "Consented — click to revoke" : "Not consented — click to consent. Until you do, this server is never offered to the agent.")
             Toggle("", isOn: Binding(get: { plugin.enabled }, set: onToggleEnabled))
                 .toggleStyle(.switch)
                 .labelsHidden()

@@ -5,7 +5,7 @@ import SwiftUI
 /// load/toggle/remove shape.
 ///
 /// This client never connects to or spawns the listed server — dispatch is
-/// delegated entirely to the Claude CLI's `--mcp-config` on the server side
+/// delegated entirely to the server's MCP config (extension/mcp/mcp-config.mjs)
 /// (extension/mcp/mcp-config.mjs), and only once this user has both
 /// consented AND enabled it.
 ///
@@ -114,12 +114,20 @@ struct McpPluginDetailView: View {
             .toggleStyle(.switch)
             .disabled(busy || !p.consented)
             if !p.consented {
-                Text("Consent before enabling — an enabled-but-unconsented server never reaches the Claude CLI.")
+                Text("Consent before enabling — an enabled-but-unconsented server is never offered to the agent.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
-                Text("Reaches the Claude CLI's --mcp-config as mcp__\(p.id)__* once enabled.")
+                Text("Once enabled it is offered to the agent as mcp__\(p.id)__* tools.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            // The two facts the toggles do not say: where it works, and the
+            // per-call cost of leaving it on.
+            VStack(alignment: .leading, spacing: 2) {
+                Text(McpUsageNotes.modeNote)
+                Text(McpUsageNotes.costNote)
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 

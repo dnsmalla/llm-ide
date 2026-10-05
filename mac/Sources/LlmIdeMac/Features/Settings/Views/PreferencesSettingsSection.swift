@@ -107,7 +107,7 @@ struct PreferencesSettingsSection: View {
                         Text("Let plugins load natively")
                             .font(Typography.body)
                             .foregroundStyle(theme.current.text)
-                        Text("Claude-format plugins are loaded by the agent engine itself, so their skills, commands, agents and hooks work exactly as their author intended. Turn this off to fall back to LLM-IDE's own hook handling. Either way, a plugin's hooks only run once you trust them, and its MCP servers still need your consent.")
+                        Text("Claude-format plugins are loaded by the agent engine itself, which then runs their hooks (and background monitors, language servers and bin/ commands) as their author wrote them. Their skills, commands and agents are offered through LLM-IDE's own paths either way. Turn this off to fall back to LLM-IDE's own hook handling. Either way, those parts only run once you trust the plugin, and its MCP servers still need your consent.")
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                             .fixedSize(horizontal: false, vertical: true)
