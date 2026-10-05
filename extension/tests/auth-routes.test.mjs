@@ -1089,6 +1089,23 @@ test('POST /auth/me/mcp-plugins/add never echoes env or header VALUES back', asy
   assert.equal(bad.statusCode, 400, 'a foreign vault key is refused over the wire too');
 });
 
+test('GET /auth/me/mcp-plugins reports `effective` — what a turn would really mount', async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+    body: { command: 'npx', args: ['-y', '@x/mcp'], name: 'eff-check' } });
+  const id = added.json().plugin.id;
+  const effectiveOf = async () => (await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins', user: admin }))
+    .json().plugins.find((p) => p.id === id).effective;
+  assert.equal(await effectiveOf(), false, 'registered only');
+  await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/consent', user: admin, body: { id, consented: true } });
+  assert.equal(await effectiveOf(), false, 'consented but not enabled');
+  await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/toggle', user: admin, body: { id, enabled: true } });
+  assert.equal(await effectiveOf(), true, 'enabled + consented');
+  await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/toggle', user: admin, body: { id, enabled: false } });
+  assert.equal(await effectiveOf(), false);
+});
+
 test('MCP responses mask a secret carried in the URL (query values, userinfo)', async () => {
   const { user } = await registerAndLogin();
   const admin = { id: user.id, role: 'admin' };

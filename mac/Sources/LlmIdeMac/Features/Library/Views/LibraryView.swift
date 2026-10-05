@@ -1291,7 +1291,7 @@ struct LibraryView: View {
                     // Say what the enabled ones cost before the list, so the price of
                     // leaving a server on is visible where it is switched.
                     Text(McpUsageNotes.sectionSummary(
-                        enabledCount: mcpPlugins.filter { $0.enabled && $0.consented }.count))
+                        enabledCount: mcpPlugins.filter(\.isEffective).count))
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.vertical, 2)

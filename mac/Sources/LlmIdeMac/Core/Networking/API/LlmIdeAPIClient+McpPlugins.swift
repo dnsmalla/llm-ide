@@ -40,6 +40,12 @@ extension LlmIdeAPIClient {
         let builtin: Bool
         let enabled: Bool
         let consented: Bool
+        /// Server-computed: a turn would really mount this server — enabled AND
+        /// consented AND (for a plugin-declared server) its plugin enabled for
+        /// this user. Nil from an older server, which `isEffective` falls back on.
+        let effective: Bool?
+        /// What the user should count as "costing tokens now".
+        var isEffective: Bool { effective ?? (enabled && consented) }
 
         var isHosted: Bool { transport == "http" || transport == "sse" }
         /// One line describing how this server is reached, for the row/detail.
@@ -60,7 +66,7 @@ extension LlmIdeAPIClient {
 
         enum CodingKeys: String, CodingKey {
             case id, name, transport, command, args, env, url, headers
-            case credential, credentialMissing, source, builtin, enabled, consented
+            case credential, credentialMissing, source, builtin, enabled, consented, effective
         }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -78,6 +84,7 @@ extension LlmIdeAPIClient {
             self.builtin = try c.decodeIfPresent(Bool.self, forKey: .builtin) ?? false
             self.enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
             self.consented = try c.decodeIfPresent(Bool.self, forKey: .consented) ?? false
+            self.effective = try c.decodeIfPresent(Bool.self, forKey: .effective)
         }
     }
     private struct McpPluginListResponse: Decodable { let plugins: [McpPluginInfo] }

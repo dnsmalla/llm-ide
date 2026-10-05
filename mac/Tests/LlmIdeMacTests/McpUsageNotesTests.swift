@@ -12,12 +12,18 @@ struct McpUsageNotesTests {
         #expect(McpUsageNotes.sectionSummary(enabledCount: 2).hasPrefix("2 servers enabled"))
     }
 
-    @Test("the mode note names every mode that never gets MCP")
+    @Test("MCP is Execute-only: every other mode, and the quick-chat surfaces, are named as excluded")
     func modeNote() {
-        for mode in ["Plan", "Assist Plan", "Review", "Document"] {
-            #expect(McpUsageNotes.modeNote.contains(mode), "\(mode) is a restricted mode")
+        // `restrictsTools` is true for every mode in MODE_CONFIG, Ask included.
+        for mode in ["Plan", "Assist Plan", "Review", "Document", "Ask"] {
+            #expect(McpUsageNotes.modeNote.contains(mode), "\(mode) never gets MCP")
         }
-        #expect(McpUsageNotes.modeNote.contains("Ask") && McpUsageNotes.modeNote.contains("Execute"))
+        #expect(McpUsageNotes.modeNote.hasPrefix("Available in Execute mode only"),
+                "Ask must not be offered as a place MCP works")
+        for surface in ["menu bar", "chat sheet", "phone"] {
+            #expect(McpUsageNotes.modeNote.contains(surface))
+        }
+        #expect(!McpUsageNotes.sectionSummary(enabledCount: 1).contains("Ask"))
     }
 
     @Test("the cost note says it is per call and tells the user to keep it off")

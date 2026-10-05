@@ -5,8 +5,7 @@ import SwiftUI
 /// load/toggle/remove shape.
 ///
 /// This client never connects to or spawns the listed server — dispatch is
-/// delegated entirely to the server's MCP config (extension/mcp/mcp-config.mjs)
-/// (extension/mcp/mcp-config.mjs), and only once this user has both
+/// delegated entirely to the server's MCP config (extension/mcp/mcp-config.mjs), and only once this user has both
 /// consented AND enabled it.
 ///
 /// Mutations here bump `ShellState.libraryDirtyToken`, which the Library

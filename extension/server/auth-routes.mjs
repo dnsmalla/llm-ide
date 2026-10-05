@@ -1490,9 +1490,19 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     // whether or not they've ever consented to or enabled that plugin.
     // Key NAMES are kept (mirrors vault's listSecretKeys) since the Mac
     // detail view only ever displays the key list, never a value.
-    const { credentialMissing } = await import('../mcp/mcp-config.mjs');
+    const { credentialMissing, effectiveMcpServers } = await import('../mcp/mcp-config.mjs');
     const { makeSecretReader } = await import('./vault.mjs');
     const readSecret = makeSecretReader(db, req.user.id);
+    // Which servers a turn would really mount: enabled AND consented AND, for a
+    // plugin-declared server, its plugin enabled for THIS user. The client
+    // cannot derive the third gate, so it counts this instead of guessing.
+    let effectiveIds = null;
+    try {
+      const { pluginEnabledFor } = await import('../llm_agent/skills/index.mjs');
+      effectiveIds = new Set(Object.keys(effectiveMcpServers(req.user.id, {
+        readSecret, pluginEnabled: pluginEnabledFor(req.user.id),
+      })));
+    } catch { /* leave `effective` off; the client falls back to enabled && consented */ }
     send(res, 200, {
       plugins: plugins.map((p) => ({
         ...p,
@@ -1504,6 +1514,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         // the CLI (which reports a real auth failure), and the client needs to
         // be able to say "add the token" instead of leaving the user guessing.
         credentialMissing: credentialMissing(p, readSecret),
+        ...(effectiveIds ? { effective: effectiveIds.has(p.id) } : {}),
       })),
     });
     return;
