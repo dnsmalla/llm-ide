@@ -1,7 +1,7 @@
 import { join, sep } from 'node:path';
 import os from 'node:os';
 import {
-  existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, rmSync, renameSync, realpathSync,
+  existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, rmSync, renameSync, realpathSync, statSync,
 } from 'node:fs';
 import { isNewer } from './plugin-version.mjs';
 import { defaultPluginDir } from './loader.mjs';
@@ -193,8 +193,8 @@ export function importPlugin(opts) {
           version: vendorVersion,
           llmideOrigin: 'claude',
           llmideSourcePlugin: name,
-          llmideSourceVersion: opts.sourceVersion ?? null,
-          llmideSourceScope: opts.scope ?? null,
+          llmideSourceVersion: strOrNull(opts.sourceVersion),
+          llmideSourceScope: strOrNull(opts.scope),
         }, null, 2), 'utf8');
       });
     } catch (err) {
@@ -236,8 +236,8 @@ export function importPlugin(opts) {
     origin: 'claude',
     sourcePlugin: name,
     sourceMarketplace: source === 'marketplace' ? findMarketplaceName(claudeRoot, name) : null,
-    sourceVersion: opts.sourceVersion ?? null,
-    sourceScope: opts.scope ?? null,
+    sourceVersion: strOrNull(opts.sourceVersion),
+    sourceScope: strOrNull(opts.scope),
   };
 
   let skillCount = 0;
@@ -283,7 +283,10 @@ export function importPlugin(opts) {
   };
 }
 
+const strOrNull = (v) => (typeof v === 'string' ? v : null);
 let swapCounter = 0;
+// Test seam for the post-swap cleanup of the previous copy.
+export const swapHooks = { removeOld: (dir) => rmSync(dir, { recursive: true, force: true }) };
 
 /**
  * Build a plugin in `<dir>/.<name>.tmp-<pid>-<n>` and swap it over `targetDir`.
@@ -292,6 +295,13 @@ let swapCounter = 0;
  */
 function swapIn(parentDir, mnName, targetDir, build) {
   mkdirSync(parentDir, { recursive: true });
+  // Leftovers of a crashed earlier swap for THIS plugin only.
+  const stale = [`.${mnName}.tmp-`, `.${mnName}.old-`];
+  for (const entry of readdirSync(parentDir)) {
+    if (stale.some((prefix) => entry.startsWith(prefix))) {
+      rmSync(join(parentDir, entry), { recursive: true, force: true });
+    }
+  }
   swapCounter += 1;
   const suffix = `${process.pid}-${swapCounter}`;
   const tmpDir = join(parentDir, `.${mnName}.tmp-${suffix}`);
@@ -300,16 +310,19 @@ function swapIn(parentDir, mnName, targetDir, build) {
     mkdirSync(tmpDir, { recursive: true });
     build(tmpDir);
     if (existsSync(targetDir)) renameSync(targetDir, oldDir);
-    renameSync(tmpDir, targetDir);
-    rmSync(oldDir, { recursive: true, force: true });
+    try {
+      renameSync(tmpDir, targetDir);
+    } catch (err) {
+      if (existsSync(oldDir)) renameSync(oldDir, targetDir);
+      throw err;
+    }
   } catch (err) {
     rmSync(tmpDir, { recursive: true, force: true });
-    if (existsSync(oldDir)) {
-      rmSync(targetDir, { recursive: true, force: true });
-      renameSync(oldDir, targetDir);
-    }
     throw err;
   }
+  // The swap is done: never roll back from here. A leftover .old dir is
+  // dot-prefixed (ignored by the loader) and swept by the next import.
+  try { swapHooks.removeOld(oldDir); } catch { /* best effort */ }
 }
 
 /** realpath of `installPath` if it is an existing directory under `<root>/cache`, else null. */
@@ -318,7 +331,8 @@ function resolveInstallPath(root, installPath) {
   try {
     const cache = realpathSync(join(root, 'cache'));
     const real = realpathSync(installPath);
-    return real.startsWith(cache + sep) ? real : null;
+    if (!real.startsWith(cache + sep) || !statSync(real).isDirectory()) return null;
+    return real;
   } catch { return null; }
 }
 

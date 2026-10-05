@@ -222,7 +222,7 @@ export function listImportedNames(mnDirOverride) {
   const names = new Set();
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
       // Skip symlinks (same policy as loader.mjs)
       try { if (lstatSync(join(dir, entry.name)).isSymbolicLink()) continue; } catch { continue; }
       // A whole-tree vendor copy has no root plugin.json — its manifest

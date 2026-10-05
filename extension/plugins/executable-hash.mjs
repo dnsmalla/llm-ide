@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { join, sep } from 'node:path';
 
 const MANIFEST_RELS = ['.claude-plugin/plugin.json', 'plugin.json'];
 
 function isExecutablePath(rel, mode) {
-  return rel.startsWith('hooks/') || rel === 'hooks.json' || rel === '.mcp.json'
+  return rel.startsWith('hooks/') || rel === 'hooks.json' || rel === '.mcp.json' || rel === '.lsp.json' || rel.startsWith('monitors/')
     || rel.endsWith('/.mcp.json') || rel.startsWith('bin/') || (mode & 0o111) !== 0;
 }
 
@@ -22,17 +22,48 @@ function walk(root, rel, out) {
   }
 }
 
-/** Inline `hooks` / `mcpServers` declared by a vendor manifest, as stable JSON. */
-function manifestExecutableFields(dir) {
+/** JSON with object keys sorted, so key order alone never changes the hash. */
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+/** Bytes of a manifest-named file when it resolves inside `dir`; escapes are ignored. */
+function readInside(dir, rel) {
+  try {
+    const root = realpathSync(dir);
+    const real = realpathSync(join(dir, rel));
+    if (!real.startsWith(root + sep)) return null;
+    return readFileSync(real);
+  } catch { return null; }
+}
+
+/** Executable-declaring manifest fields (same kinds the loader gates), plus any files they name. */
+function manifestExecutableParts(dir, hash) {
   for (const rel of MANIFEST_RELS) {
     let manifest;
     try { manifest = JSON.parse(readFileSync(join(dir, rel), 'utf8')); } catch { continue; }
-    const picked = {};
-    if (manifest.hooks !== undefined) picked.hooks = manifest.hooks;
-    if (manifest.mcpServers !== undefined) picked.mcpServers = manifest.mcpServers;
-    return Object.keys(picked).length ? JSON.stringify(picked) : null;
+    const fields = {
+      hooks: manifest.hooks,
+      mcpServers: manifest.mcpServers,
+      monitors: manifest.monitors,
+      'experimental.monitors': manifest.experimental?.monitors,
+      lspServers: manifest.lspServers,
+    };
+    for (const key of Object.keys(fields).sort()) {
+      const value = fields[key];
+      if (value === undefined) continue;
+      hash.update(`manifest:${key}\0${canonicalJson(value)}\0`);
+      if (typeof value === 'string') {
+        const bytes = readInside(dir, value);
+        if (bytes) { hash.update(`file:${value}\0`); hash.update(bytes); hash.update('\0'); }
+      }
+    }
+    return;
   }
-  return null;
 }
 
 /**
@@ -54,7 +85,6 @@ export function hashExecutables(dir) {
     hash.update(readFileSync(join(dir, rel)));
     hash.update('\0');
   }
-  const inline = manifestExecutableFields(dir);
-  if (inline) hash.update(`manifest\0${inline}\0`);
+  manifestExecutableParts(dir, hash);
   return hash.digest('hex');
 }

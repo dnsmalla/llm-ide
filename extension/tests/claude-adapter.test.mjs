@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync, chmodSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { claudePluginsRoot, scanInstalled, scanMarketplace, importPlugin, readImportStamp, listImportedNames, getImportedVersion, checkForUpdates } from '../plugins/claude-adapter.mjs';
+import { claudePluginsRoot, scanInstalled, scanMarketplace, importPlugin, readImportStamp, swapHooks, listImportedNames, getImportedVersion, checkForUpdates } from '../plugins/claude-adapter.mjs';
 import { loadPlugins } from '../plugins/loader.mjs';
 import { loadSkills } from '../llm_agent/skills/loader.mjs';
 
@@ -536,5 +536,53 @@ test('own-format (manifest-less) import stamps and swaps too', () => {
     assert.deepEqual(readImportStamp('claude-demo', mn), { sourceVersion: '2.0.0', sourceScope: 'project', sourcePlugin: 'demo' });
     assert.deepEqual(readdirSync(mn), ['claude-demo']);
     assert.equal(readImportStamp('nope', mn), null);
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(mn, { recursive: true, force: true }); }
+});
+
+test('failure removing the old copy after a successful swap keeps the NEW plugin', (t) => {
+  const { root, mn } = makeVersionedCache(['1.9.0', '1.10.0']);
+  const orig = swapHooks.removeOld;
+  t.after(() => { swapHooks.removeOld = orig; rmSync(root, { recursive: true, force: true }); rmSync(mn, { recursive: true, force: true }); });
+  const imp = (v) => importPlugin({ source: 'installed', name: 'demo', installPath: join(root, 'cache/mp/demo', v),
+    sourceVersion: v, scope: 'user', claudeRoot: root, llmidePluginDir: mn });
+  assert.equal(imp('1.9.0').ok, true);
+  swapHooks.removeOld = () => { throw new Error('EBUSY'); };
+  assert.equal(imp('1.10.0').ok, true);
+  assert.equal(readImportStamp('claude-demo', mn).sourceVersion, '1.10.0');
+});
+
+test('dot-dir leftovers are neither listed nor loaded, and the next import sweeps them', () => {
+  const { root, mn } = makeVersionedCache(['1.0.0']);
+  try {
+    const left = join(mn, '.claude-demo.old-1');
+    mkdirSync(join(left, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(left, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'claude-demo', version: '0.1.0' }), 'utf8');
+    const other = join(mn, '.claude-other.old-1');
+    mkdirSync(other, { recursive: true });
+    assert.equal(listImportedNames(mn).size, 0);
+    assert.equal(loadPlugins({ pluginDir: mn }).plugins.size, 0);
+    assert.equal(importPlugin({ source: 'installed', name: 'demo', claudeRoot: root, llmidePluginDir: mn }).ok, true);
+    assert.equal(existsSync(left), false, 'own stale sibling swept');
+    assert.equal(existsSync(other), true, 'other plugin siblings untouched');
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(mn, { recursive: true, force: true }); }
+});
+
+test('installPath that is a file or a symlink escaping the cache is refused', () => {
+  const { root, mn } = makeVersionedCache(['1.0.0']);
+  const outside = mkdtempSync(join(tmpdir(), 'claude-outside-'));
+  try {
+    symlinkSync(outside, join(root, 'cache', 'mp', 'escape'));
+    const viaLink = importPlugin({ source: 'installed', name: 'demo', installPath: join(root, 'cache', 'mp', 'escape'), claudeRoot: root, llmidePluginDir: mn });
+    assert.equal(viaLink.ok, false);
+    const file = join(root, 'cache', 'mp', 'demo', '1.0.0', 'skills', 's', 'SKILL.md');
+    assert.equal(importPlugin({ source: 'installed', name: 'demo', installPath: file, claudeRoot: root, llmidePluginDir: mn }).ok, false);
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(mn, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
+});
+
+test('non-string sourceVersion/scope are stamped as null', () => {
+  const { root, mn } = makeVersionedCache(['1.0.0']);
+  try {
+    assert.equal(importPlugin({ source: 'installed', name: 'demo', sourceVersion: 5, scope: { a: 1 }, claudeRoot: root, llmidePluginDir: mn }).ok, true);
+    assert.deepEqual(readImportStamp('claude-demo', mn), { sourceVersion: null, sourceScope: null, sourcePlugin: 'demo' });
   } finally { rmSync(root, { recursive: true, force: true }); rmSync(mn, { recursive: true, force: true }); }
 });

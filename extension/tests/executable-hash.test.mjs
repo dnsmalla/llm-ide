@@ -32,3 +32,24 @@ test('inline manifest hooks/mcpServers move the hash; version stamps do not', ()
   assert.notEqual(base, hashExecutables(dir({ '.claude-plugin/plugin.json': m({ mcpServers: { a: { command: 'x' } } }) })));
   assert.notEqual(base, hashExecutables(dir({ '.claude-plugin/plugin.json': m({ hooks: { PreToolUse: [] } }) })));
 });
+
+test('monitors and lsp changes move the hash; manifest key order does not', () => {
+  const base = hashExecutables(dir({ 'monitors/monitors.json': '[{"command":"a"}]', '.lsp.json': '{}' }));
+  assert.notEqual(base, hashExecutables(dir({ 'monitors/monitors.json': '[{"command":"b"}]', '.lsp.json': '{}' })));
+  assert.notEqual(base, hashExecutables(dir({ 'monitors/monitors.json': '[{"command":"a"}]', '.lsp.json': '{"x":1}' })));
+  const m = (o) => JSON.stringify({ name: 'p', ...o });
+  const a = hashExecutables(dir({ '.claude-plugin/plugin.json': m({ mcpServers: { a: { command: 'x', args: [] }, b: 1 } }) }));
+  assert.equal(a, hashExecutables(dir({ '.claude-plugin/plugin.json': m({ mcpServers: { b: 1, a: { args: [], command: 'x' } } }) })));
+  const none = hashExecutables(dir({ '.claude-plugin/plugin.json': m({}) }));
+  assert.notEqual(none, hashExecutables(dir({ '.claude-plugin/plugin.json': m({ experimental: { monitors: [{ command: 'x' }] } }) })));
+  assert.notEqual(none, hashExecutables(dir({ '.claude-plugin/plugin.json': m({ lspServers: { ts: { command: 'x' } } }) })));
+  assert.notEqual(none, hashExecutables(dir({ '.claude-plugin/plugin.json': m({ monitors: [{ command: 'x' }] }) })));
+});
+
+test('manifest string paths hash the named file; escapes are ignored', () => {
+  const m = JSON.stringify({ name: 'p', lspServers: './lsp-config.json' });
+  const a = hashExecutables(dir({ '.claude-plugin/plugin.json': m, 'lsp-config.json': 'one' }));
+  assert.notEqual(a, hashExecutables(dir({ '.claude-plugin/plugin.json': m, 'lsp-config.json': 'two' })));
+  const esc = JSON.stringify({ name: 'p', lspServers: '../../../etc/hosts' });
+  assert.equal(hashExecutables(dir({ '.claude-plugin/plugin.json': esc })), hashExecutables(dir({ '.claude-plugin/plugin.json': esc })));
+});

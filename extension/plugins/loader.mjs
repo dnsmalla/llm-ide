@@ -814,6 +814,8 @@ export function loadPlugins({ pluginDir = defaultPluginDir() } = {}) {
   catch (err) { return { plugins, warnings: [`scan failed: ${err.message}`], pluginDir }; }
 
   for (const entry of entries) {
+    // Dot-entries are import scratch (.<name>.tmp-*/.old-*), never plugins.
+    if (entry.startsWith('.')) continue;
     const full = join(pluginDir, entry);
     let st;
     // Use lstatSync so we inspect the entry itself, NOT its target.
