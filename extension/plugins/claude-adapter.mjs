@@ -1,6 +1,9 @@
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import os from 'node:os';
-import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, rmSync, renameSync, realpathSync,
+} from 'node:fs';
+import { isNewer } from './plugin-version.mjs';
 import { defaultPluginDir } from './loader.mjs';
 import {
   PLUGIN_NAME_RE, semverNewer, copySkills, copyCmds, countSkills, countCommands,
@@ -137,7 +140,15 @@ export function importPlugin(opts) {
     return { ok: false, error: `name must match ${PLUGIN_NAME_RE} (got ${JSON.stringify(name)})` };
   }
 
-  const sourceDir = findClaudePlugin(claudeRoot, source, name);
+  let sourceDir;
+  if (opts.installPath !== undefined && opts.installPath !== null) {
+    sourceDir = resolveInstallPath(claudeRoot, opts.installPath);
+    if (!sourceDir) {
+      return { ok: false, error: 'installPath must be an existing directory under the Claude plugin cache' };
+    }
+  } else {
+    sourceDir = findClaudePlugin(claudeRoot, source, name);
+  }
   if (!sourceDir) {
     return { ok: false, error: `Plugin '${name}' not found in Claude ${source} directory` };
   }
@@ -163,29 +174,32 @@ export function importPlugin(opts) {
     }
     const vendorVersion = (typeof vendorManifest.version === 'string' && /^\d+\.\d+\.\d+/.test(vendorManifest.version))
       ? vendorManifest.version : '0.0.0';
-    // Clean start — a stale file from an earlier lossy import must not linger
-    // beside the whole-tree copy.
-    rmSync(targetDir, { recursive: true, force: true });
+    // Copy-then-swap: the live plugin is untouched until the new tree is
+    // complete, so a failed copy never leaves a half-replaced plugin.
     let copied;
-    try { copied = copyPluginTree(sourceDir, targetDir); }
-    catch (err) {
-      rmSync(targetDir, { recursive: true, force: true });
+    try {
+      swapIn(mnDir, mnName, targetDir, (tmpDir) => {
+        copied = copyPluginTree(sourceDir, tmpDir);
+        // The name is rewritten to match the namespaced directory — the
+        // identity enable state keys off — and llm-ide provenance is stamped
+        // alongside it. Provenance is what makes update-checking safe: without
+        // it, a vendor-format plugin the USER installed by zip would be
+        // mistaken for an import and silently overwritten by a same-named
+        // marketplace package. Everything else in the manifest is preserved
+        // verbatim, so this is not a lossy regeneration.
+        writeFileSync(join(tmpDir, vendorRel), JSON.stringify({
+          ...vendorManifest,
+          name: mnName,
+          version: vendorVersion,
+          llmideOrigin: 'claude',
+          llmideSourcePlugin: name,
+          llmideSourceVersion: opts.sourceVersion ?? null,
+          llmideSourceScope: opts.scope ?? null,
+        }, null, 2), 'utf8');
+      });
+    } catch (err) {
       return { ok: false, error: `plugin tree not copied: ${err.message}` };
     }
-    // The name is rewritten to match the namespaced directory — the identity
-    // enable state keys off — and llm-ide provenance is stamped alongside it.
-    // Provenance is what makes update-checking safe: without it, a
-    // vendor-format plugin the USER installed by zip would be mistaken for an
-    // import and silently overwritten by a same-named marketplace package.
-    // Everything else in the manifest is preserved verbatim (the loader
-    // ignores fields it does not know), so this is not a lossy regeneration.
-    writeFileSync(join(targetDir, vendorRel), JSON.stringify({
-      ...vendorManifest,
-      name: mnName,
-      version: vendorVersion,
-      llmideOrigin: 'claude',
-      llmideSourcePlugin: name,
-    }, null, 2), 'utf8');
     return {
       ok: true,
       warnings: copied.skipped.length > 0 ? copied.skipped : undefined,
@@ -213,7 +227,6 @@ export function importPlugin(opts) {
     } catch { /* use default */ }
   }
 
-  mkdirSync(targetDir, { recursive: true });
   const manifest = {
     name: mnName,
     version,
@@ -223,28 +236,35 @@ export function importPlugin(opts) {
     origin: 'claude',
     sourcePlugin: name,
     sourceMarketplace: source === 'marketplace' ? findMarketplaceName(claudeRoot, name) : null,
+    sourceVersion: opts.sourceVersion ?? null,
+    sourceScope: opts.scope ?? null,
   };
-  writeFileSync(join(targetDir, 'plugin.json'), JSON.stringify(manifest, null, 2), 'utf8');
 
   let skillCount = 0;
-  const skillWarnings = [];
-  const skillsDir = join(sourceDir, 'skills');
-  if (existsSync(skillsDir)) {
-    const targetSkills = join(targetDir, 'skills');
-    mkdirSync(targetSkills, { recursive: true });
-    const result = copySkills(skillsDir, targetSkills);
-    skillCount = result.count;
-    if (result.skipped.length > 0) {
-      skillWarnings.push(...result.skipped.map(s => `Skill skipped (too large): ${s}`));
-    }
-  }
-
   let commandCount = 0;
-  const cmdsDir = join(sourceDir, 'commands');
-  if (existsSync(cmdsDir)) {
-    const targetCmds = join(targetDir, 'commands');
-    mkdirSync(targetCmds, { recursive: true });
-    commandCount = copyCmds(cmdsDir, targetCmds);
+  const skillWarnings = [];
+  try {
+    swapIn(mnDir, mnName, targetDir, (tmpDir) => {
+      writeFileSync(join(tmpDir, 'plugin.json'), JSON.stringify(manifest, null, 2), 'utf8');
+      const skillsDir = join(sourceDir, 'skills');
+      if (existsSync(skillsDir)) {
+        const targetSkills = join(tmpDir, 'skills');
+        mkdirSync(targetSkills, { recursive: true });
+        const result = copySkills(skillsDir, targetSkills);
+        skillCount = result.count;
+        if (result.skipped.length > 0) {
+          skillWarnings.push(...result.skipped.map(sk => `Skill skipped (too large): ${sk}`));
+        }
+      }
+      const cmdsDir = join(sourceDir, 'commands');
+      if (existsSync(cmdsDir)) {
+        const targetCmds = join(tmpDir, 'commands');
+        mkdirSync(targetCmds, { recursive: true });
+        commandCount = copyCmds(cmdsDir, targetCmds);
+      }
+    });
+  } catch (err) {
+    return { ok: false, error: `plugin not copied: ${err.message}` };
   }
 
   return {
@@ -263,8 +283,85 @@ export function importPlugin(opts) {
   };
 }
 
+let swapCounter = 0;
+
+/**
+ * Build a plugin in `<dir>/.<name>.tmp-<pid>-<n>` and swap it over `targetDir`.
+ * Dot-prefixed siblings stay in the plugin dir (same filesystem, so rename is
+ * atomic). The old copy is restored if anything throws.
+ */
+function swapIn(parentDir, mnName, targetDir, build) {
+  mkdirSync(parentDir, { recursive: true });
+  swapCounter += 1;
+  const suffix = `${process.pid}-${swapCounter}`;
+  const tmpDir = join(parentDir, `.${mnName}.tmp-${suffix}`);
+  const oldDir = join(parentDir, `.${mnName}.old-${suffix}`);
+  try {
+    mkdirSync(tmpDir, { recursive: true });
+    build(tmpDir);
+    if (existsSync(targetDir)) renameSync(targetDir, oldDir);
+    renameSync(tmpDir, targetDir);
+    rmSync(oldDir, { recursive: true, force: true });
+  } catch (err) {
+    rmSync(tmpDir, { recursive: true, force: true });
+    if (existsSync(oldDir)) {
+      rmSync(targetDir, { recursive: true, force: true });
+      renameSync(oldDir, targetDir);
+    }
+    throw err;
+  }
+}
+
+/** realpath of `installPath` if it is an existing directory under `<root>/cache`, else null. */
+function resolveInstallPath(root, installPath) {
+  if (typeof installPath !== 'string' || installPath === '') return null;
+  try {
+    const cache = realpathSync(join(root, 'cache'));
+    const real = realpathSync(installPath);
+    return real.startsWith(cache + sep) ? real : null;
+  } catch { return null; }
+}
+
+/**
+ * Stamp recorded at import time: which Claude version/scope the copy came from.
+ * @returns {{sourceVersion: string|null, sourceScope: string|null, sourcePlugin: string|null}|null}
+ */
+export function readImportStamp(mnName, mnDirOverride) {
+  const pluginDir = join(mnDirOverride || defaultPluginDir(), mnName);
+  const ownPath = join(pluginDir, 'plugin.json');
+  const vendorRel = existsSync(ownPath) ? null : findVendorManifestRel(pluginDir);
+  const path = vendorRel ? join(pluginDir, vendorRel) : ownPath;
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(path, 'utf8')); } catch { return null; }
+  if (vendorRel) {
+    if (manifest.llmideOrigin !== 'claude') return null;
+    return {
+      sourceVersion: manifest.llmideSourceVersion ?? null,
+      sourceScope: manifest.llmideSourceScope ?? null,
+      sourcePlugin: manifest.llmideSourcePlugin ?? null,
+    };
+  }
+  if (manifest.origin !== 'claude') return null;
+  return {
+    sourceVersion: manifest.sourceVersion ?? null,
+    sourceScope: manifest.sourceScope ?? null,
+    sourcePlugin: manifest.sourcePlugin ?? null,
+  };
+}
+
+function newestVersionDir(names) {
+  return names.reduce((best, cur) => {
+    if (best === null) return cur;
+    const bothSemver = /^\d+\.\d+\.\d+/.test(best) && /^\d+\.\d+\.\d+/.test(cur);
+    if (bothSemver) return isNewer(cur, best) ? cur : best;
+    return cur > best ? cur : best;
+  }, null);
+}
+
 function findClaudePlugin(root, source, name) {
   if (source === 'installed') {
+    const recorded = scanInstalled(root).find((p) => p.name === name);
+    if (recorded && resolveInstallPath(root, recorded.installPath)) return recorded.installPath;
     const cacheDir = join(root, 'cache');
     if (!existsSync(cacheDir)) return null;
     try {
@@ -272,13 +369,9 @@ function findClaudePlugin(root, source, name) {
         if (!mp.isDirectory()) continue;
         const pluginDir = join(cacheDir, mp.name, name);
         if (existsSync(pluginDir)) {
-          const versions = readdirSync(pluginDir, { withFileTypes: true })
-            .filter(d => d.isDirectory())
-            .map(d => d.name)
-            .sort()
-            .reverse();
-          if (versions.length > 0) return join(pluginDir, versions[0]);
-          return pluginDir;
+          const newest = newestVersionDir(
+            readdirSync(pluginDir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name));
+          return newest ? join(pluginDir, newest) : pluginDir;
         }
       }
     } catch { /* ignore */ }
