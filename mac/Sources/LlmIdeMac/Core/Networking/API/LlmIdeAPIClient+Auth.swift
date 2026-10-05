@@ -378,6 +378,19 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
             && lhs.unsupportedComponents == rhs.unsupportedComponents
             && lhs.mcpServerCount == rhs.mcpServerCount && lhs.version == rhs.version
             && lhs.sdkReadable == rhs.sdkReadable && lhs.nativePluginsOn == rhs.nativePluginsOn
+            // The rest of what PluginDetailView renders: a reinstall that only adds
+            // a .mcp.json or a slash command must not leave the old rows showing.
+            && lhs.displayName == rhs.displayName && lhs.description == rhs.description
+            && lhs.author == rhs.author && lhs.pendingComponents == rhs.pendingComponents
+            && lhs.commands.map(Self.signature) == rhs.commands.map(Self.signature)
+            && lhs.subagents.map(Self.signature) == rhs.subagents.map(Self.signature)
+    }
+    // The command / subagent types are not Equatable; their rendered text is.
+    private static func signature(_ command: PluginCommandInfo) -> String {
+        "\(command.trigger)|\(command.description)"
+    }
+    private static func signature(_ subagent: PluginSubagentInfo) -> String {
+        "\(subagent.name)|\(subagent.description)|\(subagent.allowedTools.joined(separator: ","))"
     }
 
     enum CodingKeys: String, CodingKey {

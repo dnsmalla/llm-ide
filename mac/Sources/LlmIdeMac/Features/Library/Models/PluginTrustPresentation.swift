@@ -37,6 +37,16 @@ enum PluginTrustPresentation {
         return (plugin.sdkReadable ?? true) ? .nativeOff : .ignored
     }
 
+    /// The row text for a component the Agent engine runs, following the grant:
+    /// "once you trust this plugin" is stale after trusting and wrong while the
+    /// plugin is disabled.
+    static func agentEngineRowText(_ component: String, _ plugin: PluginInfo) -> String {
+        if !plugin.hooksTrusted { return "\(component) — run by the agent engine once you trust this plugin" }
+        return plugin.enabled
+            ? "\(component) — run by the agent engine (trusted)"
+            : "\(component) — will run once you enable this plugin (trusted)"
+    }
+
     /// "Hooks" unless the package also brings scripts the engine runs.
     static func hooksHeading(_ plugin: PluginInfo) -> String {
         plugin.executableKinds.contains { $0 != "hooks" } ? "Hooks & scripts" : "Hooks"
@@ -66,6 +76,15 @@ enum PluginTrustPresentation {
                 return "Turning this on lets the agent engine run this plugin's \(plugin.executableSummary) with the same access as the app.\(sandbox) Leave it off unless you trust the author."
             }
             return "Turning this on lets this plugin run commands from its hooks file during a turn. Leave it off unless you trust the author."
+        }
+        // `nativeDelivery` is false for EVERY disabled plugin, so a trusted but
+        // disabled one must not be described by the route it is not on yet.
+        if !plugin.enabled {
+            return plugin.agentEngineCanLoad
+                ? "Trusted. Once you enable the plugin, the agent engine runs its \(beyondHooks ? plugin.executableSummary : "hooks") with the same access as the app."
+                : (plugin.hookCount > 0
+                    ? "Trusted. Once you enable the plugin, LLM-IDE runs its command hooks with the same access as the app."
+                    : "Trusted. It runs once the plugin is enabled.")
         }
         if plugin.nativeDelivery {
             return "The agent engine loads this plugin and runs its \(beyondHooks ? plugin.executableSummary : "hooks") as its author wrote them, with the same access as the app."

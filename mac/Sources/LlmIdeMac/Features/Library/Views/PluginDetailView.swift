@@ -167,7 +167,7 @@ struct PluginDetailView: View {
                     case .agentEngine:
                         // LLM-IDE ignores it, but the Agent engine loads the whole
                         // package — "ignored" would be false once it is trusted.
-                        Label("\(component) — run by the agent engine once you trust this plugin",
+                        Label(PluginTrustPresentation.agentEngineRowText(component, plugin),
                               systemImage: "exclamationmark.triangle")
                             .font(.callout).foregroundStyle(.orange)
                     case .nativeOff:

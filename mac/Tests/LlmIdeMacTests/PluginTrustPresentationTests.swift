@@ -8,13 +8,15 @@ import Foundation
 @Suite("Plugin trust presentation")
 struct PluginTrustPresentationTests {
     private func plugin(kinds: [String] = [], hookCount: Int = 0, declares: Bool? = nil,
-                        trusted: Bool = false, native: Bool = false,
-                        sdkReadable: Bool? = true, nativeOn: Bool? = true) throws -> PluginInfo {
+                        trusted: Bool = false, native: Bool = false, enabled: Bool = true,
+                        sdkReadable: Bool? = true, nativeOn: Bool? = true,
+                        commands: String = "[]", pending: String = "[]") throws -> PluginInfo {
         func flag(_ value: Bool?) -> String { value.map { "\($0)" } ?? "null" }
         let kindsJSON = "[" + kinds.map { "\"\($0)\"" }.joined(separator: ",") + "]"
         let json = """
         {"name":"p","version":"1.0.0","displayName":"P","description":"d","author":"a",
-         "enabled":true,"skillCount":0,"commands":[],"subagents":[],"format":"claude",
+         "enabled":\(enabled),"skillCount":0,"commands":\(commands),"subagents":[],"format":"claude",
+         "pendingComponents":\(pending),
          "hookCount":\(hookCount),"declaresHooks":\(declares ?? !kinds.isEmpty),
          "executableKinds":\(kindsJSON),"hooksTrusted":\(trusted),"nativeDelivery":\(native),
          "sdkReadable":\(flag(sdkReadable)),"nativePluginsOn":\(flag(nativeOn))}
@@ -73,6 +75,31 @@ struct PluginTrustPresentationTests {
         #expect(PluginTrustPresentation.hooksHeading(try plugin(kinds: ["monitors"])) == "Hooks & scripts")
     }
 
+    @Test("a trusted but DISABLED plugin is not described by a delivery route it is not on")
+    func disabledTrusted() throws {
+        // nativeDelivery is false for every disabled plugin, so it cannot pick the route.
+        let engine = PluginTrustPresentation.trustExplanation(
+            try plugin(kinds: ["hooks", "monitors"], hookCount: 1, trusted: true, enabled: false))
+        #expect(engine.hasPrefix("Trusted. Once you enable the plugin, the agent engine runs"))
+        #expect(!engine.contains("LLM-IDE runs"))
+        let translated = PluginTrustPresentation.trustExplanation(
+            try plugin(kinds: ["hooks"], hookCount: 1, trusted: true, enabled: false, nativeOn: false))
+        #expect(translated.hasPrefix("Trusted. Once you enable the plugin, LLM-IDE runs its command hooks"))
+        let noHooks = PluginTrustPresentation.trustExplanation(
+            try plugin(kinds: ["hooks"], hookCount: 0, trusted: true, enabled: false, sdkReadable: true))
+        #expect(noHooks.contains("agent engine runs"))
+    }
+
+    @Test("a component row stops saying 'once you trust' after the grant, and while disabled")
+    func rowText() throws {
+        #expect(PluginTrustPresentation.agentEngineRowText("monitors", try plugin(kinds: ["monitors"]))
+            .contains("once you trust this plugin"))
+        #expect(PluginTrustPresentation.agentEngineRowText("monitors", try plugin(kinds: ["monitors"], trusted: true))
+            == "monitors — run by the agent engine (trusted)")
+        #expect(PluginTrustPresentation.agentEngineRowText("monitors", try plugin(kinds: ["monitors"], trusted: true, enabled: false))
+            .contains("once you enable this plugin"))
+    }
+
     @Test("an older server (no delivery facts) is treated as loadable, like before")
     func olderServer() throws {
         let info = try plugin(kinds: ["monitors"], sdkReadable: nil, nativeOn: nil)
@@ -87,6 +114,10 @@ struct PluginTrustPresentationTests {
         #expect(base != (try plugin(kinds: ["hooks"], hookCount: 2)), "a reinstall with more handlers must refresh")
         #expect(base != (try plugin(kinds: ["hooks", "monitors"], hookCount: 1)))
         #expect(base != (try plugin(kinds: ["hooks"], hookCount: 1, nativeOn: false)))
+        // What the rest of the detail view renders.
+        #expect(base != (try plugin(kinds: ["hooks"], hookCount: 1, pending: "[\"mcp\"]")), "a reinstall that adds .mcp.json")
+        #expect(base != (try plugin(kinds: ["hooks"], hookCount: 1,
+                                    commands: "[{\"trigger\":\"go\",\"description\":\"d\"}]")), "a new slash command")
     }
 }
 
