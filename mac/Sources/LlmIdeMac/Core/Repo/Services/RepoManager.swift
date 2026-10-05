@@ -226,8 +226,10 @@ final class RepoManager {
                     backend: Backend = .gitlab, remote: String = "origin") async throws {
         try await stripRemoteCredentials(at: repoURL, remote: remote)
         let url = try await remoteURL(at: repoURL, remote: remote)
+        // Bounded: the repo's own pre-push hook runs here and may take minutes; a hung
+        // hook must not hold the caller (and a Loop's queue slot) for ever.
         _ = try await git(["push", remote, "\(sha):refs/heads/\(branch)"], cwd: repoURL,
-                          token: token, backend: backend, remoteURL: url)
+                          token: token, backend: backend, remoteURL: url, timeout: 900)
         log.info("pushed commit to branch=\(branch, privacy: .public)")
     }
 
@@ -625,8 +627,11 @@ final class RepoManager {
                 // suppression, the transfer-stall guard, and credentials when
                 // authenticating — see gitEnv. Detaching stdin closes the
                 // credential-prompt hole from the other side.
-                proc.environment = Self.gitEnv(token: token, backend: backend, scope: headerScope)
-                    .merging(extraEnv) { _, caller in caller }
+                // Ours win: a caller may ADD variables (GIT_INDEX_FILE, …) but can never
+                // replace the prompt suppression, the credential header or the transfer guard.
+                var environment = Self.gitEnv(token: token, backend: backend, scope: headerScope)
+                for (key, value) in extraEnv where environment[key] == nil { environment[key] = value }
+                proc.environment = environment
                 let stdinPipe = Pipe()
                 if stdin != nil {
                     proc.standardInput = stdinPipe

@@ -5,8 +5,9 @@ import Foundation
 /// not know — so the runner holds this seam and tests substitute a fake.
 @MainActor
 protocol LoopChangeShipping {
-    /// The paths git already reports as modified BEFORE the run's first stage —
-    /// the user's own work in progress. nil when git could not say.
+    /// The paths git reports as modified (tracked changes AND untracked files,
+    /// every file listed, never a collapsed directory) BEFORE the run's first stage
+    /// — the user's own work in progress. nil when git could not say.
     func baseline(gitRoot: URL) async -> Set<String>?
 
     /// Preconditions: `record` is the finished run's record (not yet journaled),
@@ -81,11 +82,15 @@ enum LoopShipPlanning {
         return out
     }
 
-    /// Files the user was already editing when the run began that the run also
-    /// changed. Their working-tree content is the user's work PLUS the repair, and
-    /// a request made from it would publish the user's work.
-    static func overlap(files: [String], baseline: Set<String>) -> [String] {
-        files.filter(baseline.contains)
+    /// TRACKED files that are modified now but that no repair accounts for. Since a run
+    /// only ships from a tree that was clean when it began, such a change was made by
+    /// something else while the run was going — most likely the user. (Untracked files
+    /// are not counted: only attributed paths are ever shipped, so an unrelated new file
+    /// cannot enter a request, and test artifacts would otherwise block every run.)
+    static func foreignTrackedChanges(entries: [ShipPlanning.StatusEntry], attributed: Set<String>) -> [String] {
+        entries.filter { entry in
+            !entry.isUntracked && !entry.allPaths.contains(where: attributed.contains)
+        }.map(\.path)
     }
 
     private static func oneLine(_ text: String) -> String {
@@ -140,6 +145,8 @@ enum LoopShipPlanning {
         lines.append("### Files changed (\(files.count))")
         for path in files.prefix(50) { lines.append("- `\(path)`") }
         if files.count > 50 { lines.append("- … and \(files.count - 50) more") }
+        lines.append("")
+        lines.append("> The working tree on the machine that ran the loop still holds these changes, uncommitted. Before pulling the merged result there, discard them (`git restore -- <these files>`), or git will refuse to overwrite them.")
         return String(lines.joined(separator: "\n").prefix(6_000))
     }
 }
@@ -156,7 +163,7 @@ final class LoopShipCoordinator: LoopChangeShipping {
     }
 
     func baseline(gitRoot: URL) async -> Set<String>? {
-        guard let raw = try? await repo.runGit(["status", "--porcelain", "-z"], at: gitRoot,
+        guard let raw = try? await repo.runGit(["status", "--porcelain", "-z", "--untracked-files=all"], at: gitRoot,
                                                environment: ["GIT_LITERAL_PATHSPECS": "1"]) else { return nil }
         return Set(ShipPlanning.statusEntries(porcelainZ: raw).flatMap(\.allPaths))
     }
@@ -179,23 +186,33 @@ final class LoopShipCoordinator: LoopChangeShipping {
         guard !changed.isEmpty else { return nil }
         let raw: String
         do {
-            raw = try await repo.runGit(["status", "--porcelain", "-z", "--"] + changed, at: gitRoot,
+            raw = try await repo.runGit(["status", "--porcelain", "-z", "--untracked-files=all"], at: gitRoot,
                                         environment: ["GIT_LITERAL_PATHSPECS": "1"])
         } catch {
             return LoopShipment(status: .failed,
                                 summary: "Merge request not created: could not read git status — \(error.localizedDescription)")
         }
-        let files = LoopShipPlanning.shippablePaths(entries: ShipPlanning.statusEntries(porcelainZ: raw), among: changed)
+        let entries = ShipPlanning.statusEntries(porcelainZ: raw)
+        let files = LoopShipPlanning.shippablePaths(entries: entries, among: changed)
         guard !files.isEmpty else { return nil }
 
-        // The user's own work in progress must never ride along in the request.
+        // A request is only made from a tree that was CLEAN when the run began. The run
+        // can tell which files a repair touched, but not which of them the user was
+        // already editing (a half-attributed file would ship half a fix), and the user's
+        // own work must never ride along in a push.
         guard let baseline else {
             return LoopShipment(status: .skipped,
-                                summary: "No merge request: git could not say which files were already modified before the run, so its changes were left for you to review")
+                                summary: "No merge request: git could not say what was modified before the run, so its changes were left for you to review")
         }
-        let mixed = LoopShipPlanning.overlap(files: files, baseline: baseline)
-        if !mixed.isEmpty {
-            return LoopShipment(status: .skipped, summary: "No merge request: \(mixed.prefix(3).joined(separator: ", ")) already had your uncommitted changes before the run, so a request would publish them — review and commit by hand")
+        if !baseline.isEmpty {
+            let shown = baseline.sorted().prefix(3).joined(separator: ", ")
+            return LoopShipment(status: .skipped, summary: "No merge request: your working tree had uncommitted changes when the run began (\(shown)\(baseline.count > 3 ? ", …" : "")), so its changes were left for you to review. Commit or stash them to let loops open merge requests automatically")
+        }
+        // …and nothing else may have changed while it ran (a file the user edited meanwhile).
+        let attributed = Set(changed).union(files)
+        let foreign = LoopShipPlanning.foreignTrackedChanges(entries: entries, attributed: attributed)
+        if !foreign.isEmpty {
+            return LoopShipment(status: .skipped, summary: "No merge request: \(foreign.prefix(3).joined(separator: ", ")) changed during the run and no repair accounts for it — it may be your own edit, so nothing was pushed")
         }
 
         switch ChangeShippingFactory.make(for: gitRoot, config: config) {

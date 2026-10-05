@@ -155,6 +155,8 @@ struct ChangeShippingTests {
         git.handler = { args in args.first == "remote" ? "https://gitlab.example/someone-else/p.git\n" : "" }
         guard case .skipped(let reason) = await shipper(git, backend, expectedRemote: "https://gitlab.example/g/p").ship(request) else { Issue.record("a fork was pushed to"); return }
         #expect(reason.contains("someone-else") && git.pushes.isEmpty && backend.created.isEmpty)
+        // The PUSH url is the one compared: `pushurl` / `pushInsteadOf` can redirect a push.
+        #expect(git.calls.contains { $0.args == ["remote", "get-url", "--push", "origin"] })
         // The saved project matches origin in https and scp forms, with or without .git.
         for origin in ["https://gitlab.example/g/p.git", "git@gitlab.example:g/p.git", "https://oauth2:tok@gitlab.example/g/p/"] {
             let ok = happyGit(); let base = ok.handler
@@ -164,7 +166,7 @@ struct ChangeShippingTests {
         }
     }
 
-    @Test("no origin/<default> yet, a branch that differs from it, and an already-identical tree each stop it")
+    @Test("no origin/<default> yet, a checkout that differs from it, and an already-identical tree each stop it")
     func contentGuards() async {
         let noBase = happyGit(); let base1 = noBase.handler
         noBase.handler = { args in if args.first == "rev-parse", !args.contains(where: { $0.hasSuffix("^{tree}") }) { throw Boom(text: "unknown") }; return try base1(args) }
@@ -173,8 +175,10 @@ struct ChangeShippingTests {
         let ahead = happyGit(); let base2 = ahead.handler
         ahead.handler = { args in args.first == "diff" ? "src/a.py\n" : try base2(args) }
         let backend = FakeBackend()
-        if case .skipped(let reason) = await shipper(ahead, backend).ship(request) { #expect(reason.contains("differs from origin/main") && reason.contains("src/a.py")) }
-        else { Issue.record("a branch that differs from main must not be shipped") }
+        if case .skipped(let reason) = await shipper(ahead, backend).ship(request) { #expect(reason.contains("differs from origin/main") && reason.contains("src/a.py") && reason.contains("not be what the loop tested")) }
+        else { Issue.record("a checkout that differs from main must not be shipped") }
+        // The WHOLE tree is compared, not just the shipped paths.
+        #expect(ahead.calls.contains { $0.args == ["diff", "--name-only", "basesha", "HEAD"] })
         #expect(backend.created.isEmpty && ahead.pushes.isEmpty && !ahead.ran(["read-tree"]))
 
         let same = happyGit(); let base3 = same.handler
@@ -234,8 +238,17 @@ struct ChangeShippingTests {
             #expect(!ShipPlanning.isSecretPath(fine), "\(fine) is not a secret")
         }
         #expect(ShipPlanning.sameRemote(saved: "owner/name", origin: "git@github.com:Owner/Name.git"), "a bare owner/name matches on the path")
-        #expect(!ShipPlanning.sameRemote(saved: "https://gitlab.example/g/p", origin: "https://other.example/g/p"))
-        #expect(!ShipPlanning.sameRemote(saved: "https://gitlab.example/g/p", origin: "https://gitlab.example/g/p-fork"))
+        #expect(!ShipPlanning.sameRemote(saved: "https://gitlab.example/g/p", origin: "https://gitlab.example/g/p-fork"), "a fork is a different path")
+        #expect(!ShipPlanning.sameRemote(saved: "https://gitlab.example/g/p", origin: "https://gitlab.example/someone/p"))
+        // Legitimate spellings must not be refused for ever.
+        for origin in ["ssh://git@gitlab.example:2222/g/p.git", "git@github-work:g/p.git", "gitlab.example:g/p", "http://GITLAB.example/G/P/", "https://altssh.gitlab.example/g/p"] {
+            #expect(ShipPlanning.sameRemote(saved: "https://gitlab.example/g/p", origin: origin), "\(origin) is the saved project")
+        }
+        for saved in ["https://gitlab.example/g/p/-/tree/main", "https://github.com/o/n/tree/main/src", "https://gitlab.example/g/sub/p/-/merge_requests", "g/p.git"] {
+            #expect(ShipPlanning.remoteKey(saved) != nil, "\(saved) names a project")
+        }
+        #expect(ShipPlanning.sameRemote(saved: "https://gitlab.example/g/sub/p/-/issues", origin: "git@gitlab.example:g/sub/p.git"), "subgroups")
+        #expect(ShipPlanning.sameRemote(saved: "1234", origin: "https://gitlab.example/g/p.git"), "a numeric id cannot be compared and is accepted")
         #expect(ShipPlanning.branchPrefix(for: "Regression") == "loop/regression")
         #expect(ShipPlanning.branchPrefix(for: "日本語") == "loop/run")
         #expect(ShipPlanning.branchName(prefix: "loop/x", at: Date(timeIntervalSince1970: 0)) == "loop/x-19700101-000000")

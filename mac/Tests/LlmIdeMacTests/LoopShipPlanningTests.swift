@@ -68,10 +68,14 @@ struct LoopShipPlanningTests {
         #expect(LoopShipPlanning.shippablePaths(entries: [], among: ["a.py"]).isEmpty)
     }
 
-    @Test("files the user was already editing are never shipped")
-    func overlap() {
-        #expect(LoopShipPlanning.overlap(files: ["a.py", "b.py", "c.py"], baseline: ["b.py", "other.py"]) == ["b.py"])
-        #expect(LoopShipPlanning.overlap(files: ["a.py"], baseline: []).isEmpty)
+    @Test("a tracked change no repair accounts for is foreign; untracked ones do not block")
+    func foreign() {
+        let entries = ShipPlanning.statusEntries(porcelainZ: " M a.py\0 M users-edit.py\0?? .coverage\0R  renamed.py\0old.py\0")
+        let attributed: Set<String> = ["a.py", "renamed.py", "old.py"]
+        #expect(LoopShipPlanning.foreignTrackedChanges(entries: entries, attributed: attributed) == ["users-edit.py"],
+                "a file edited meanwhile blocks shipping; an untracked artifact (.coverage) does not")
+        #expect(LoopShipPlanning.foreignTrackedChanges(entries: entries, attributed: attributed.union(["users-edit.py"])).isEmpty)
+        #expect(LoopShipPlanning.foreignTrackedChanges(entries: [], attributed: []).isEmpty)
     }
 
     @Test("the request says what happened, and never copies stage output")
@@ -87,6 +91,7 @@ struct LoopShipPlanningTests {
         #expect(text.contains("Repair attempts: 1"))
         #expect(text.contains("✅ Test (repaired)"), "the stage's FINAL attempt decides its mark")
         #expect(text.contains("✅ Lint") && text.contains("`a.py`") && text.contains("Files changed (2)"))
+        #expect(text.contains("git restore"), "the reader is told to discard the local copy before pulling the merge")
         #expect(!text.contains("AWS_SECRET") && !text.contains("/Users/me"), "stage output must never reach the request")
         let many = LoopShipPlanning.description(record: r, files: (1...80).map { "f\($0).py" })
         #expect(many.contains("and 30 more") && many.count <= 6_000)

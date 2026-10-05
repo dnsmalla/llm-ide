@@ -465,6 +465,8 @@ final class LoopEngineRunner: ObservableObject {
             isAdmitted = false
             onAdmissionChange?(projectId, loopId, false)
         }
+        // A previous run's baseline must never reach this one (the runner is reused).
+        shipBaseline = nil
         let mainGitRoot = gitRoot
         let mainRootKey = mainGitRoot.resolvingSymlinksInPath().path
         var runGitRoot = mainGitRoot
@@ -2264,6 +2266,7 @@ final class LoopEngineRunner: ObservableObject {
             record.shipment = shipment
             appendLog(shipment.status == .failed ? .warn : .info, shipment.summary)
         }
+        shipBaseline = nil
         // Fail-open: telemetry never gates the work it observes.
         if let reason = journal.write(record, root: faultsRoot) {
             appendLog(.warn, "Run journal not written: \(reason)")

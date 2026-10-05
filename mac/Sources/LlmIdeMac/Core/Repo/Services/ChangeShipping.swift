@@ -185,8 +185,10 @@ enum ShipPlanning {
     // MARK: remote
 
     /// `host/path` of a remote, lower-cased and without credentials, scheme, a
-    /// trailing slash or `.git`. Handles https and the scp form (`git@host:a/b`).
-    /// A bare `owner/name` (how a GitHub repo is often saved) has no host.
+    /// trailing slash, `.git`, or the web-page suffix a pasted URL carries
+    /// (`/-/…`, `/tree/…`, `/blob/…`, `/issues`, `/merge_requests`). Handles https,
+    /// `ssh://` and the scp form (`git@host:a/b`, `host:a/b`). A bare `owner/name`
+    /// (how a GitHub repo is often saved) has no host.
     struct RemoteKey: Equatable {
         var host: String?
         var path: String
@@ -204,24 +206,34 @@ enum ShipPlanning {
             guard let slash = text.firstIndex(of: "/") else { return nil }
             host = String(text[..<slash])
             text = String(text[text.index(after: slash)...])
-        } else if let colon = text.firstIndex(of: ":"), text.contains("@") {
-            // git@host:owner/name
+        } else if let colon = text.firstIndex(of: ":"),
+                  colon < (text.firstIndex(of: "/") ?? text.endIndex) {
+            // git@host:owner/name, or host:owner/name
             let beforeColon = String(text[..<colon])
             host = String(beforeColon.split(separator: "@").last ?? "")
             text = String(text[text.index(after: colon)...])
         }
         if let current = host, let port = current.firstIndex(of: ":") { host = String(current[..<port]) }
+        for marker in ["/-/", "/tree/", "/blob/", "/issues", "/merge_requests", "/pulls", "/pull/"] {
+            if let cut = text.range(of: marker) { text = String(text[..<cut.lowerBound]) }
+        }
         text = text.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if text.hasSuffix(".git") { text = String(text.dropLast(4)) }
-        guard !text.isEmpty else { return nil }
+        // `owner/name` at least: a single word (a numeric project id) names no project here.
+        guard text.contains("/") else { return nil }
         return RemoteKey(host: host?.isEmpty == true ? nil : host, path: text)
     }
 
-    /// Whether `origin` is the project the app saved. A saved value without a host
-    /// (`owner/name`) matches on the path alone.
+    /// Whether `origin` is the project the app saved: the PATH (`group/project`)
+    /// must be the same. The host is deliberately not compared — an SSH alias
+    /// (`github-work`) or an alternate SSH host (`ssh.github.com`) is the same
+    /// server under another name, and the credential is already scoped to the
+    /// token's own host by the push. What this guards is a FORK (a different owner).
+    /// A saved value that names no `group/project` (a numeric id) cannot be compared,
+    /// and is accepted.
     static func sameRemote(saved: String, origin: String) -> Bool {
-        guard let wanted = remoteKey(saved), let actual = remoteKey(origin) else { return false }
-        if let host = wanted.host, let other = actual.host, host != other { return false }
+        guard let wanted = remoteKey(saved) else { return true }
+        guard let actual = remoteKey(origin) else { return false }
         return wanted.path == actual.path
     }
 }
@@ -286,7 +298,8 @@ final class GitChangeShipper: ChangeShipping {
         // The branch must go to the project the request is opened in.
         if let expected = expectedRemote {
             let origin: String
-            do { origin = try await run(["remote", "get-url", "origin"], at: root).trimmingCharacters(in: .whitespacesAndNewlines) }
+            // The PUSH url: `pushurl` / `pushInsteadOf` can send a push somewhere the fetch url does not.
+            do { origin = try await run(["remote", "get-url", "--push", "origin"], at: root).trimmingCharacters(in: .whitespacesAndNewlines) }
             catch { return .failed(step: .remote, message: "could not read the origin remote: \(error.localizedDescription)") }
             guard ShipPlanning.sameRemote(saved: expected, origin: origin) else {
                 return .skipped(reason: "origin (\(origin)) is not the project this folder is saved as (\(expected)), so nothing was pushed")
@@ -302,15 +315,16 @@ final class GitChangeShipper: ChangeShipping {
             return .skipped(reason: "there is no origin/\(target) here yet — fetch the repo in Source Control first")
         }
 
-        // The request is "origin/<default> + these files". If the user's branch
-        // already differs from it in one of these files, the file's working-tree
-        // content would carry that difference into the request too.
+        // The request is "origin/<default> + these files", but the run was TESTED on
+        // HEAD. Unless the two are the same tree, the request is not what was tested
+        // (a repair that calls a helper from an unpushed commit would fail in CI),
+        // and a shipped file would carry the branch's own differences along with it.
         let differing: String
-        do { differing = try await run(["diff", "--name-only", base, "HEAD", "--"] + request.paths, at: root) }
+        do { differing = try await run(["diff", "--name-only", base, "HEAD"], at: root) }
         catch { return .failed(step: .content, message: error.localizedDescription) }
         let drift = differing.split(separator: "\n").map(String.init)
         if !drift.isEmpty {
-            return .skipped(reason: "your current branch differs from origin/\(target) in \(drift.prefix(3).joined(separator: ", ")), so the request would carry that difference too — open it from a branch based on origin/\(target)")
+            return .skipped(reason: "your current checkout differs from origin/\(target) (\(drift.count) file\(drift.count == 1 ? "" : "s"): \(drift.prefix(3).joined(separator: ", "))), but the request is built on origin/\(target) — it would not be what the loop tested. Push or pull so they match, then run again")
         }
 
         // Build the tree in a THROWAWAY index: origin/<default>, plus the named paths
