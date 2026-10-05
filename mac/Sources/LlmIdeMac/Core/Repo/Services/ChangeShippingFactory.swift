@@ -30,7 +30,7 @@ enum ChangeShippingFactory {
             }
             return .available(shipper(
                 backend: RepoBackendFactory.guarded(GitLabClient(config: config), config: config),
-                projectId: String(id), hint: project.defaultBranch,
+                projectId: String(id), hint: project.defaultBranch, expectedRemote: project.url,
                 token: config.gitLabToken, pushBackend: .gitlab, kind: .gitlab, config: config))
         }
 
@@ -46,19 +46,20 @@ enum ChangeShippingFactory {
             }
             return .available(shipper(
                 backend: RepoBackendFactory.guarded(GitHubClient(config: config), config: config),
-                projectId: "\(owner)/\(name)", hint: repo.defaultBranch,
+                projectId: "\(owner)/\(name)", hint: repo.defaultBranch, expectedRemote: repo.url,
                 token: config.gitHubToken, pushBackend: .github, kind: .github, config: config))
         }
 
         return .unavailable(reason: "no GitLab project or GitHub repo is linked to this folder — clone it from Source Control.")
     }
 
-    private static func shipper(backend: RepoBackend, projectId: String, hint: String?, token: String,
-                                pushBackend: RepoManager.Backend, kind: RepoBackendKind,
+    private static func shipper(backend: RepoBackend, projectId: String, hint: String?, expectedRemote: String,
+                                token: String, pushBackend: RepoManager.Backend, kind: RepoBackendKind,
                                 config: AppConfig) -> ChangeShipping {
         GitChangeShipper(
             git: RepoManagerShipGit(repo: RepoManager(), token: token, backend: pushBackend),
             backend: backend, projectId: projectId, defaultBranchHint: hint,
+            expectedRemote: expectedRemote,
             isAllowed: { config.isAllowed($0, provider: kind) })
     }
 

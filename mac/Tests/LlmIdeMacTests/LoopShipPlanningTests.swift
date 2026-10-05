@@ -59,12 +59,19 @@ struct LoopShipPlanningTests {
         #expect(!LoopShipPlanning.touchedProtectedPath(in: record(iterations: [[attempt("T", verdict: .clean)]])))
     }
 
-    @Test("dirty paths: only what git still lists, renames and quoting handled")
-    func dirty() {
-        let porcelain = " M a.py\n?? new.py\nR  old.py -> renamed.py\n?? \"sp ace.py\"\n M untouched-by-loop.py\n"
-        #expect(LoopShipPlanning.dirtyPaths(porcelain: porcelain, among: ["a.py", "new.py", "renamed.py", "sp ace.py", "gone.py"])
-                == ["a.py", "new.py", "renamed.py", "sp ace.py"], "a path git no longer lists (already committed) is not shipped")
-        #expect(LoopShipPlanning.dirtyPaths(porcelain: "", among: ["a.py"]).isEmpty)
+    @Test("shippable paths: what git still lists, a rename's both names, in the run's order")
+    func shippable() {
+        let entries = ShipPlanning.statusEntries(porcelainZ: " M a.py\0?? new.py\0R  renamed.py\0old.py\0?? 日本語.txt\0 M untouched-by-loop.py\0")
+        #expect(LoopShipPlanning.shippablePaths(entries: entries, among: ["a.py", "new.py", "renamed.py", "日本語.txt", "gone.py"])
+                == ["a.py", "new.py", "renamed.py", "old.py", "日本語.txt"],
+                "the old name is shipped too, so the rename is one change; a path git no longer lists (already committed) is not")
+        #expect(LoopShipPlanning.shippablePaths(entries: [], among: ["a.py"]).isEmpty)
+    }
+
+    @Test("files the user was already editing are never shipped")
+    func overlap() {
+        #expect(LoopShipPlanning.overlap(files: ["a.py", "b.py", "c.py"], baseline: ["b.py", "other.py"]) == ["b.py"])
+        #expect(LoopShipPlanning.overlap(files: ["a.py"], baseline: []).isEmpty)
     }
 
     @Test("the request says what happened, and never copies stage output")

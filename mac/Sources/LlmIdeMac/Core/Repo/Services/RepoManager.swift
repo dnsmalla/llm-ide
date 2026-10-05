@@ -219,6 +219,18 @@ final class RepoManager {
         log.info("pushed branch=\(branch, privacy: .public)")
     }
 
+    /// Push the commit `sha` to `refs/heads/<branch>` on the remote, without
+    /// checking out or creating any local branch. Same credential handling as
+    /// `push` (credentials stripped from the remote, header scoped to its host).
+    func pushCommit(at repoURL: URL, sha: String, toBranch branch: String, token: String,
+                    backend: Backend = .gitlab, remote: String = "origin") async throws {
+        try await stripRemoteCredentials(at: repoURL, remote: remote)
+        let url = try await remoteURL(at: repoURL, remote: remote)
+        _ = try await git(["push", remote, "\(sha):refs/heads/\(branch)"], cwd: repoURL,
+                          token: token, backend: backend, remoteURL: url)
+        log.info("pushed commit to branch=\(branch, privacy: .public)")
+    }
+
     // MARK: - Agent git-op
 
     static let defaultBranchNames: Set<String> = ["main", "master"]
@@ -556,6 +568,14 @@ final class RepoManager {
         try await gitOutput(args, cwd: cwd)
     }
 
+    /// `runGit` with extra environment variables — for plumbing that must not touch
+    /// the real index, e.g. `GIT_INDEX_FILE=<temp>` while building a commit from a
+    /// working-tree snapshot (see `ChangeShipping`).
+    func runGit(_ args: [String], at cwd: URL, environment: [String: String]) async throws -> String {
+        let (out, _) = try await git(args, cwd: cwd, extraEnv: environment)
+        return out
+    }
+
     /// Same as `runGit(_:at:)`, but pipes `stdin` to the child process before
     /// reading its output — needed for `git apply --cached -` (hunk staging,
     /// see `GitTruthStore.stagePatch`). No existing call in this codebase
@@ -570,7 +590,8 @@ final class RepoManager {
     /// process environment (see `authEnv`) and redacted from any error text.
     @discardableResult
     private func git(_ args: [String], cwd: URL, token: String? = nil, backend: Backend = .gitlab,
-                     remoteURL: String? = nil, timeout: TimeInterval? = nil, stdin: Data? = nil) async throws -> (String, String) {
+                     remoteURL: String? = nil, timeout: TimeInterval? = nil, stdin: Data? = nil,
+                     extraEnv: [String: String] = [:]) async throws -> (String, String) {
         // A token needs the remote it is for: scope the header to it and
         // refuse a remote that is not the token's host (credentialScope).
         var scope: String?
@@ -605,6 +626,7 @@ final class RepoManager {
                 // authenticating — see gitEnv. Detaching stdin closes the
                 // credential-prompt hole from the other side.
                 proc.environment = Self.gitEnv(token: token, backend: backend, scope: headerScope)
+                    .merging(extraEnv) { _, caller in caller }
                 let stdinPipe = Pipe()
                 if stdin != nil {
                     proc.standardInput = stdinPipe

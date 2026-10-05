@@ -5,13 +5,19 @@ import Foundation
 /// not know — so the runner holds this seam and tests substitute a fake.
 @MainActor
 protocol LoopChangeShipping {
+    /// The paths git already reports as modified BEFORE the run's first stage —
+    /// the user's own work in progress. nil when git could not say.
+    func baseline(gitRoot: URL) async -> Set<String>?
+
     /// Preconditions: `record` is the finished run's record (not yet journaled),
-    /// `gitRoot` its working tree.
+    /// `gitRoot` its working tree, `baseline` what `baseline(gitRoot:)` returned
+    /// when the run began.
     /// Postconditions: returns nil when there is nothing to do (the run did not
     /// succeed, opening requests is off, or no file is left modified); otherwise
-    /// what happened. Never throws and never touches the default branch.
+    /// what happened. Never throws; never touches the checkout (HEAD, index,
+    /// working tree, local branches) or the default branch.
     func ship(record: LoopRunRecord, config: LoopEngineConfig, gitRoot: URL,
-              ranInWorktree: Bool) async -> LoopShipment?
+              ranInWorktree: Bool, baseline: Set<String>?) async -> LoopShipment?
 }
 
 /// The decisions behind shipping a run, separated from the I/O so they can be
@@ -61,20 +67,25 @@ enum LoopShipPlanning {
         record.iterations.contains { $0.attempts.contains { $0.scopeVerdict == .violated } }
     }
 
-    /// The paths in `among` that `git status --porcelain` still lists, in
-    /// `among`'s order. A change that was already committed, or reverted since,
-    /// is not shipped.
-    static func dirtyPaths(porcelain: String, among paths: [String]) -> [String] {
-        var dirty = Set<String>()
-        for line in porcelain.split(separator: "\n") where line.count > 3 {
-            var path = String(line.dropFirst(3))
-            if let arrow = path.range(of: " -> ") { path = String(path[arrow.upperBound...]) }
-            if path.hasPrefix("\"") && path.hasSuffix("\"") && path.count >= 2 {
-                path = String(path.dropFirst().dropLast())
-            }
-            dirty.insert(path)
+    /// The paths to ship: those of `entries` (from `git status`) that this run
+    /// changed — a rename contributes both names, so the old file's deletion is
+    /// committed with the new file. A change already committed, or reverted since,
+    /// is not listed by git and so is not shipped. In `among`'s order, no duplicates.
+    static func shippablePaths(entries: [ShipPlanning.StatusEntry], among changed: [String]) -> [String] {
+        let wanted = Set(changed)
+        var seen = Set<String>()
+        var out: [String] = []
+        for entry in entries where entry.allPaths.contains(where: wanted.contains) {
+            for path in entry.allPaths where seen.insert(path).inserted { out.append(path) }
         }
-        return paths.filter { dirty.contains($0) }
+        return out
+    }
+
+    /// Files the user was already editing when the run began that the run also
+    /// changed. Their working-tree content is the user's work PLUS the repair, and
+    /// a request made from it would publish the user's work.
+    static func overlap(files: [String], baseline: Set<String>) -> [String] {
+        files.filter(baseline.contains)
     }
 
     private static func oneLine(_ text: String) -> String {
@@ -144,8 +155,14 @@ final class LoopShipCoordinator: LoopChangeShipping {
         self.repo = repo ?? RepoManager()
     }
 
+    func baseline(gitRoot: URL) async -> Set<String>? {
+        guard let raw = try? await repo.runGit(["status", "--porcelain", "-z"], at: gitRoot,
+                                               environment: ["GIT_LITERAL_PATHSPECS": "1"]) else { return nil }
+        return Set(ShipPlanning.statusEntries(porcelainZ: raw).flatMap(\.allPaths))
+    }
+
     func ship(record: LoopRunRecord, config loopConfig: LoopEngineConfig, gitRoot: URL,
-              ranInWorktree: Bool) async -> LoopShipment? {
+              ranInWorktree: Bool, baseline: Set<String>?) async -> LoopShipment? {
         switch LoopShipPlanning.decide(
             statusCode: record.statusCode, openMergeRequest: loopConfig.openMergeRequest,
             ranInWorktree: ranInWorktree,
@@ -160,15 +177,26 @@ final class LoopShipCoordinator: LoopChangeShipping {
 
         let changed = LoopShipPlanning.changedPaths(in: record)
         guard !changed.isEmpty else { return nil }
-        let porcelain: String
+        let raw: String
         do {
-            porcelain = try await repo.runGit(["status", "--porcelain", "--"] + changed, at: gitRoot)
+            raw = try await repo.runGit(["status", "--porcelain", "-z", "--"] + changed, at: gitRoot,
+                                        environment: ["GIT_LITERAL_PATHSPECS": "1"])
         } catch {
             return LoopShipment(status: .failed,
                                 summary: "Merge request not created: could not read git status — \(error.localizedDescription)")
         }
-        let files = LoopShipPlanning.dirtyPaths(porcelain: porcelain, among: changed)
+        let files = LoopShipPlanning.shippablePaths(entries: ShipPlanning.statusEntries(porcelainZ: raw), among: changed)
         guard !files.isEmpty else { return nil }
+
+        // The user's own work in progress must never ride along in the request.
+        guard let baseline else {
+            return LoopShipment(status: .skipped,
+                                summary: "No merge request: git could not say which files were already modified before the run, so its changes were left for you to review")
+        }
+        let mixed = LoopShipPlanning.overlap(files: files, baseline: baseline)
+        if !mixed.isEmpty {
+            return LoopShipment(status: .skipped, summary: "No merge request: \(mixed.prefix(3).joined(separator: ", ")) already had your uncommitted changes before the run, so a request would publish them — review and commit by hand")
+        }
 
         switch ChangeShippingFactory.make(for: gitRoot, config: config) {
         case .unavailable(let reason):
@@ -182,7 +210,7 @@ final class LoopShipCoordinator: LoopChangeShipping {
                 title: LoopShipPlanning.title(loopName: name, fileCount: files.count),
                 description: LoopShipPlanning.description(record: record, files: files)))
             switch outcome {
-            case .shipped(let branch, let url, _, _):
+            case .shipped(let branch, let url, _):
                 return LoopShipment(status: .shipped, summary: outcome.summary,
                                     mergeRequestURL: url, branch: branch, files: files)
             case .skipped:

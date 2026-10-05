@@ -431,7 +431,7 @@ extension LoopEngineView {
             if let gitRoot = activeGitRootURL {
                 outputRow(label: "Working tree",
                           detail: openMergeRequest
-                              ? "repair edits land here, then are moved to a merge-request branch"
+                              ? "repair edits land here and stay; a copy is pushed as a merge request"
                               : "repair edits land here — review with git before committing",
                           url: gitRoot)
             }
@@ -442,7 +442,7 @@ extension LoopEngineView {
             Toggle("Open a merge request after a successful run that changed files", isOn: $openMergeRequest)
                 .font(Typography.caption)
             Text(openMergeRequest
-                 ? "The changes go on a new loop/… branch, are committed (only the files this run changed), pushed, and a merge request is opened against the default branch. Nothing is merged for you. It needs Create branch, Auto-commit, Push and Create PR/MR to be allowed for this repo, and a GitLab/GitHub project cloned in this folder. Every successful run opens its own request, even if an earlier one is still open; your own branch is checked out again afterwards."
+                 ? "One commit with only the files this run changed, built on origin's default branch, is pushed to a new loop/… branch and a merge request is opened. Nothing is merged for you, and your working tree, branch and staging area are never touched — the repair stays in your files, so the loop does not redo it. After merging, discard your local copy of those files before pulling. Every successful run opens its own request. It needs Create branch, Auto-commit, Push and Create PR/MR to be allowed for this repo and a GitLab/GitHub project cloned in this folder; it is skipped when you already had uncommitted changes in one of the files, when your branch differs from origin in it, or when a file looks like a secret."
                  : "Repair edits stay in the working tree — review and commit them yourself.")
                 .font(Typography.caption)
                 .foregroundStyle(t.textMuted)

@@ -1,9 +1,20 @@
 import Foundation
 
-// "Ship" a set of edits that are already in a working tree: put them on a NEW
-// branch, commit exactly those files, push the branch and open a merge/pull
-// request against the default branch. Nothing here ever pushes to, or merges
-// into, the default branch — a human merges the request.
+// "Ship" a set of edits that are sitting in a working tree: build ONE commit on
+// top of the remote's default branch that contains exactly those files, push it
+// to a new branch, and open a merge/pull request against the default branch.
+// Nothing here ever pushes to, or merges into, the default branch — a human
+// merges the request.
+//
+// The commit is built WITHOUT touching the user's checkout. A temporary index
+// (`GIT_INDEX_FILE`) is filled from `origin/<default>` plus the working-tree
+// content of the named paths, written out as a tree, committed with
+// `commit-tree`, and pushed by sha. HEAD, the real index, the working tree and
+// the local branches are never written. That is the whole point: the repair
+// stays in the user's tree (so the next run does not repair it again, and the
+// review screens still show it), their own staged and unstaged work is never
+// swept into the commit, and a failure at any step cannot leave them on the
+// wrong branch.
 //
 // Used by the Loop after a successful run that changed files. It lives in Core
 // because the same sequence exists, privately, inside the Chat and Auto Task
@@ -12,8 +23,8 @@ import Foundation
 /// What to ship: edits already sitting in the working tree of `gitRoot`.
 struct ShipRequest: Equatable {
     var gitRoot: URL
-    /// Repo-relative paths. ONLY these are committed — anything else the user
-    /// has modified or staged is left exactly as it was.
+    /// Repo-relative paths, taken literally (no globbing). A rename lists both
+    /// the old and the new path. ONLY these are committed.
     var paths: [String]
     /// The branch is `<branchPrefix>-<timestamp>`: every shipment gets its own
     /// branch and its own request, whether or not an earlier one is still open.
@@ -25,24 +36,24 @@ struct ShipRequest: Equatable {
 
 /// The step a shipment stopped at, for the message the user reads.
 enum ShipStep: String, Equatable {
-    case permissions, repository, gitState, branch, commit, push, mergeRequest
+    case permissions, remote, base, content, commit, push, mergeRequest
 }
 
 enum ShipOutcome: Equatable {
-    /// The request is open. `leftOnBranch` is true when switching back to the
-    /// branch the user was on failed, so the tree is still on the new branch.
-    case shipped(branch: String, mergeRequestURL: String, number: Int, leftOnBranch: Bool)
-    /// Deliberately not shipped — a rule, not a fault (not allowed, nothing to
-    /// ship, a merge or cherry-pick in progress).
+    /// The request is open on `branch` (a remote branch; no local one exists).
+    case shipped(branch: String, mergeRequestURL: String, number: Int)
+    /// Deliberately not shipped — a rule, not a fault (not allowed, a secret in
+    /// the list, the branch differs from the remote's default, …).
     case skipped(reason: String)
-    /// Something went wrong at `step`. The message says what state it left.
+    /// Something went wrong at `step`. The message says what state it left; the
+    /// user's checkout is never part of that state, because it is never touched.
     case failed(step: ShipStep, message: String)
 
     /// One line for logs and the run journal.
     var summary: String {
         switch self {
-        case .shipped(_, let url, let number, let left):
-            return "Opened merge request !\(number): \(url)" + (left ? " (the working tree was left on the new branch)" : "")
+        case .shipped(_, let url, let number):
+            return "Opened merge request !\(number): \(url)"
         case .skipped(let reason):
             return "No merge request: \(reason)"
         case .failed(let step, let message):
@@ -53,14 +64,12 @@ enum ShipOutcome: Equatable {
 
 @MainActor
 protocol ChangeShipping {
-    /// Preconditions: `request.gitRoot` is a git working tree whose current
-    /// branch is a named branch, and `request.paths` are modified in it.
-    /// Postconditions: on `.shipped` the paths are committed on a new branch that
-    /// was pushed, and a request is open; the original branch is checked out again
-    /// (unless `leftOnBranch`). On `.skipped` / `.failed` no request was created;
-    /// `.failed` at `.push` or later leaves the commit on the local new branch.
-    /// An earlier request that is still open does not matter: each shipment is
-    /// its own branch and request. Never touches the default branch.
+    /// Preconditions: `request.gitRoot` is a git working tree and `request.paths`
+    /// are modified in it.
+    /// Postconditions: on `.shipped` one commit (parent: `origin/<default>`) holding
+    /// exactly those paths' working-tree content was pushed to a new branch and a
+    /// request is open. In EVERY outcome HEAD, the index, the working tree and the
+    /// local branches are exactly as they were. Never touches the default branch.
     func ship(_ request: ShipRequest) async -> ShipOutcome
 }
 
@@ -68,9 +77,10 @@ protocol ChangeShipping {
 /// tested without a repository or a remote.
 @MainActor
 protocol ShipGitOperating {
-    func git(_ args: [String], at root: URL) async throws -> String
-    func currentBranch(at root: URL) async throws -> String
-    func push(branch: String, at root: URL) async throws
+    /// Runs `git <args>` in `root` with `environment` added to the process's.
+    func git(_ args: [String], at root: URL, environment: [String: String]) async throws -> String
+    /// Pushes the commit `sha` to `refs/heads/<branch>` on the remote.
+    func pushCommit(sha: String, toBranch branch: String, at root: URL) async throws
 }
 
 // MARK: - Planning (pure)
@@ -87,28 +97,13 @@ enum ShipPlanning {
 
     /// `<prefix>-yyyyMMdd-HHmmss` (UTC, so the name does not depend on the locale
     /// or time zone). Seconds are in it because two runs in one minute must not
-    /// collide on `git switch -c`.
+    /// collide on the remote branch.
     static func branchName(prefix: String, at date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "UTC")
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         return "\(prefix)-\(formatter.string(from: date))"
-    }
-
-    /// Paths from `git status --porcelain` that are untracked (`??`) — they need
-    /// `git add` before a pathspec can name them.
-    static func untrackedPaths(porcelain: String, among paths: [String]) -> [String] {
-        let wanted = Set(paths)
-        var out: [String] = []
-        for line in porcelain.split(separator: "\n") where line.hasPrefix("?? ") {
-            var path = String(line.dropFirst(3))
-            if path.hasPrefix("\"") && path.hasSuffix("\"") && path.count >= 2 {
-                path = String(path.dropFirst().dropLast())
-            }
-            if wanted.contains(path) { out.append(path) }
-        }
-        return out
     }
 
     /// The default branch from `git symbolic-ref refs/remotes/origin/HEAD`
@@ -123,6 +118,112 @@ enum ShipPlanning {
     /// Operations the user must have allowed (the repo allow-list) before anything
     /// leaves the machine. The same list the manual buttons obey.
     static let requiredOperations: [RepoOperation] = [.createBranch, .autoCommit, .push, .createPR]
+
+    // MARK: status
+
+    struct StatusEntry: Equatable {
+        var path: String
+        /// The old name, for a rename or copy.
+        var originalPath: String?
+        var isUntracked: Bool
+
+        /// Every path this entry touches (a rename touches both names).
+        var allPaths: [String] { [path] + (originalPath.map { [$0] } ?? []) }
+    }
+
+    /// Entries of `git status --porcelain -z`. NUL-separated, so no path is quoted
+    /// or escaped — a name with non-ASCII characters, spaces or quotes arrives
+    /// exactly as it is on disk. A rename is `XY <new>\0<old>\0`.
+    static func statusEntries(porcelainZ raw: String) -> [StatusEntry] {
+        let tokens = raw.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
+        var out: [StatusEntry] = []
+        var index = 0
+        while index < tokens.count {
+            let token = tokens[index]
+            index += 1
+            guard token.count > 3 else { continue }
+            let status = String(token.prefix(2))
+            let path = String(token.dropFirst(3))
+            var original: String?
+            if status.contains("R") || status.contains("C"), index < tokens.count {
+                original = tokens[index]
+                index += 1
+            }
+            out.append(StatusEntry(path: path, originalPath: original, isUntracked: status == "??"))
+        }
+        return out
+    }
+
+    // MARK: secrets
+
+    private static let secretNames: Set<String> = [
+        ".env", ".npmrc", ".netrc", ".pgpass", "credentials.json", "secrets.json", "secrets.yaml",
+        "secrets.yml", "secrets.toml", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "service-account.json",
+    ]
+    private static let secretSuffixes = [".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".kdbx", ".secret"]
+    private static let secretDirectories: Set<String> = [".aws", ".ssh", ".gnupg", ".docker", ".kube"]
+    private static let templateSuffixes = [".example", ".sample", ".template", ".dist"]
+
+    /// True for a path that looks like a credential or key. Such a file must not be
+    /// put in a request even if a repair or a skill stage wrote it — the push
+    /// cannot be taken back. Name-based on purpose: it is a floor under the
+    /// protected-path rules, not a content scanner.
+    static func isSecretPath(_ path: String) -> Bool {
+        let parts = path.split(separator: "/").map { String($0).lowercased() }
+        guard let name = parts.last else { return false }
+        if parts.dropLast().contains(where: { secretDirectories.contains($0) }) { return true }
+        if templateSuffixes.contains(where: { name.hasSuffix($0) }) { return false }
+        if secretNames.contains(name) || name.hasPrefix(".env.")
+            || (name.hasPrefix("service-account") && name.hasSuffix(".json")) {
+            return true
+        }
+        return secretSuffixes.contains { name.hasSuffix($0) }
+    }
+
+    static func secretPaths(in paths: [String]) -> [String] { paths.filter(isSecretPath) }
+
+    // MARK: remote
+
+    /// `host/path` of a remote, lower-cased and without credentials, scheme, a
+    /// trailing slash or `.git`. Handles https and the scp form (`git@host:a/b`).
+    /// A bare `owner/name` (how a GitHub repo is often saved) has no host.
+    struct RemoteKey: Equatable {
+        var host: String?
+        var path: String
+    }
+
+    static func remoteKey(_ raw: String) -> RemoteKey? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !text.isEmpty else { return nil }
+        var host: String?
+        if let scheme = text.range(of: "://") {
+            text = String(text[scheme.upperBound...])
+            if let at = text.firstIndex(of: "@"), at < (text.firstIndex(of: "/") ?? text.endIndex) {
+                text = String(text[text.index(after: at)...])
+            }
+            guard let slash = text.firstIndex(of: "/") else { return nil }
+            host = String(text[..<slash])
+            text = String(text[text.index(after: slash)...])
+        } else if let colon = text.firstIndex(of: ":"), text.contains("@") {
+            // git@host:owner/name
+            let beforeColon = String(text[..<colon])
+            host = String(beforeColon.split(separator: "@").last ?? "")
+            text = String(text[text.index(after: colon)...])
+        }
+        if let current = host, let port = current.firstIndex(of: ":") { host = String(current[..<port]) }
+        text = text.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if text.hasSuffix(".git") { text = String(text.dropLast(4)) }
+        guard !text.isEmpty else { return nil }
+        return RemoteKey(host: host?.isEmpty == true ? nil : host, path: text)
+    }
+
+    /// Whether `origin` is the project the app saved. A saved value without a host
+    /// (`owner/name`) matches on the path alone.
+    static func sameRemote(saved: String, origin: String) -> Bool {
+        guard let wanted = remoteKey(saved), let actual = remoteKey(origin) else { return false }
+        if let host = wanted.host, let other = actual.host, host != other { return false }
+        return wanted.path == actual.path
+    }
 }
 
 // MARK: - Executor
@@ -133,24 +234,39 @@ final class GitChangeShipper: ChangeShipping {
     private let backend: RepoBackend
     private let projectId: String
     private let defaultBranchHint: String?
+    private let expectedRemote: String?
     private let isAllowed: (RepoOperation) -> Bool
     private let now: () -> Date
+    private let temporaryDirectory: URL
 
     /// - Parameters:
     ///   - projectId: the backend-native project id the requests are opened in.
     ///   - defaultBranchHint: the default branch the app recorded when it cloned
     ///     the repo; used when git cannot say.
+    ///   - expectedRemote: the project URL (or `owner/name`) the app saved. When
+    ///     set, `origin` must be that project — otherwise the branch would be
+    ///     pushed to a fork and the request opened somewhere it does not exist.
     ///   - isAllowed: the repo allow-list for this provider.
     init(git: ShipGitOperating, backend: RepoBackend, projectId: String,
-         defaultBranchHint: String? = nil,
+         defaultBranchHint: String? = nil, expectedRemote: String? = nil,
          isAllowed: @escaping (RepoOperation) -> Bool,
-         now: @escaping () -> Date = Date.init) {
+         now: @escaping () -> Date = Date.init,
+         temporaryDirectory: URL = FileManager.default.temporaryDirectory) {
         self.git = git
         self.backend = backend
         self.projectId = projectId
         self.defaultBranchHint = defaultBranchHint
+        self.expectedRemote = expectedRemote
         self.isAllowed = isAllowed
         self.now = now
+        self.temporaryDirectory = temporaryDirectory
+    }
+
+    /// Paths are file NAMES, not patterns: `t[1].py` must not also match `t1.py`.
+    private let literal = ["GIT_LITERAL_PATHSPECS": "1"]
+
+    private func run(_ args: [String], at root: URL, extra: [String: String] = [:]) async throws -> String {
+        try await git.git(args, at: root, environment: literal.merging(extra) { _, new in new })
     }
 
     func ship(_ request: ShipRequest) async -> ShipOutcome {
@@ -159,68 +275,83 @@ final class GitChangeShipper: ChangeShipping {
         }
         guard !request.paths.isEmpty else { return .skipped(reason: "nothing changed") }
 
-        let root = request.gitRoot
-        // A pathspec commit is refused mid-merge and mid-cherry-pick; say so
-        // instead of forwarding git's message.
-        for marker in ["MERGE_HEAD", "CHERRY_PICK_HEAD"] {
-            if (try? await git.git(["rev-parse", "-q", "--verify", marker], at: root)) != nil {
-                return .skipped(reason: "the repo has a \(marker == "MERGE_HEAD" ? "merge" : "cherry-pick") in progress")
-            }
+        // A push cannot be taken back: never put a credential or key in one.
+        let secrets = ShipPlanning.secretPaths(in: request.paths)
+        if !secrets.isEmpty {
+            return .skipped(reason: "\(secrets.prefix(3).joined(separator: ", ")) looks like a secret, so none of this run's changes were pushed — review them by hand")
         }
-        let original: String
-        do { original = try await git.currentBranch(at: root) }
-        catch { return .failed(step: .gitState, message: error.localizedDescription) }
-        guard !original.isEmpty, original != "HEAD" else {
-            return .skipped(reason: "the repo is on a detached HEAD, so there is no branch to return to")
+
+        let root = request.gitRoot
+
+        // The branch must go to the project the request is opened in.
+        if let expected = expectedRemote {
+            let origin: String
+            do { origin = try await run(["remote", "get-url", "origin"], at: root).trimmingCharacters(in: .whitespacesAndNewlines) }
+            catch { return .failed(step: .remote, message: "could not read the origin remote: \(error.localizedDescription)") }
+            guard ShipPlanning.sameRemote(saved: expected, origin: origin) else {
+                return .skipped(reason: "origin (\(origin)) is not the project this folder is saved as (\(expected)), so nothing was pushed")
+            }
         }
 
         let target = await defaultBranch(at: root)
-
-        let branch = ShipPlanning.branchName(prefix: request.branchPrefix, at: now())
-        do { _ = try await git.git(["switch", "-c", branch], at: root) }
-        catch { return .failed(step: .branch, message: error.localizedDescription) }
-
-        // From here a failure must put the user back on their branch.
-        var untracked: [String] = []
+        let base: String
         do {
-            let porcelain = try await git.git(["status", "--porcelain", "--"] + request.paths, at: root)
-            untracked = ShipPlanning.untrackedPaths(porcelain: porcelain, among: request.paths)
-            if !untracked.isEmpty { _ = try await git.git(["add", "--"] + untracked, at: root) }
-            _ = try await git.git(["commit", "-m", request.commitMessage, "--"] + request.paths, at: root)
+            base = try await run(["rev-parse", "--verify", "--quiet", "refs/remotes/origin/\(target)^{commit}"], at: root)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
-            if !untracked.isEmpty { _ = try? await git.git(["restore", "--staged", "--"] + untracked, at: root) }
-            _ = try? await git.git(["switch", original], at: root)
-            _ = try? await git.git(["branch", "-D", branch], at: root)   // nothing was committed on it
+            return .skipped(reason: "there is no origin/\(target) here yet — fetch the repo in Source Control first")
+        }
+
+        // The request is "origin/<default> + these files". If the user's branch
+        // already differs from it in one of these files, the file's working-tree
+        // content would carry that difference into the request too.
+        let differing: String
+        do { differing = try await run(["diff", "--name-only", base, "HEAD", "--"] + request.paths, at: root) }
+        catch { return .failed(step: .content, message: error.localizedDescription) }
+        let drift = differing.split(separator: "\n").map(String.init)
+        if !drift.isEmpty {
+            return .skipped(reason: "your current branch differs from origin/\(target) in \(drift.prefix(3).joined(separator: ", ")), so the request would carry that difference too — open it from a branch based on origin/\(target)")
+        }
+
+        // Build the tree in a THROWAWAY index: origin/<default>, plus the named paths
+        // as they are in the working tree. The real index is never read or written.
+        let indexFile = temporaryDirectory.appendingPathComponent("ship-\(UUID().uuidString).index")
+        defer { try? FileManager.default.removeItem(at: indexFile) }
+        let scratch = ["GIT_INDEX_FILE": indexFile.path]
+        let sha: String
+        do {
+            _ = try await run(["read-tree", base], at: root, extra: scratch)
+            _ = try await run(["add", "-A", "--"] + request.paths, at: root, extra: scratch)
+            let tree = try await run(["write-tree"], at: root, extra: scratch).trimmingCharacters(in: .whitespacesAndNewlines)
+            let baseTree = try await run(["rev-parse", "\(base)^{tree}"], at: root).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard tree != baseTree else {
+                return .skipped(reason: "these files already match origin/\(target), so there is nothing to put in a request")
+            }
+            sha = try await run(["commit-tree", tree, "-p", base, "-m", request.commitMessage], at: root)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
             return .failed(step: .commit, message: error.localizedDescription)
         }
 
-        do { try await git.push(branch: branch, at: root) }
+        let branch = ShipPlanning.branchName(prefix: request.branchPrefix, at: now())
+        do { try await git.pushCommit(sha: sha, toBranch: branch, at: root) }
         catch {
-            let back = await switchBack(to: original, at: root)
-            return .failed(step: .push, message: "\(error.localizedDescription). The fix is committed on the local branch \(branch)\(back ? "" : " (the working tree is still on it)").")
+            return .failed(step: .push, message: "\(error.localizedDescription). Your files and branches are untouched; nothing was created on the remote.")
         }
 
-        let created: RepoMergeRequest
         do {
-            created = try await backend.createMergeRequest(
+            let created = try await backend.createMergeRequest(
                 projectId: projectId,
                 payload: RepoMergeRequestPayload(title: request.title, description: request.description,
                                                  sourceBranch: branch, targetBranch: target))
+            return .shipped(branch: branch, mergeRequestURL: created.webUrl, number: created.number)
         } catch {
-            let back = await switchBack(to: original, at: root)
-            return .failed(step: .mergeRequest, message: "\(error.localizedDescription). The branch \(branch) is pushed; open the request by hand\(back ? "" : " (the working tree is still on it)").")
+            return .failed(step: .mergeRequest, message: "\(error.localizedDescription). The branch \(branch) is pushed; open the request by hand. Your files and branches are untouched.")
         }
-
-        let back = await switchBack(to: original, at: root)
-        return .shipped(branch: branch, mergeRequestURL: created.webUrl, number: created.number, leftOnBranch: !back)
-    }
-
-    private func switchBack(to branch: String, at root: URL) async -> Bool {
-        (try? await git.git(["switch", branch], at: root)) != nil
     }
 
     private func defaultBranch(at root: URL) async -> String {
-        if let ref = try? await git.git(["symbolic-ref", "refs/remotes/origin/HEAD"], at: root),
+        if let ref = try? await run(["symbolic-ref", "refs/remotes/origin/HEAD"], at: root),
            let name = ShipPlanning.defaultBranch(fromSymbolicRef: ref) { return name }
         if let hint = defaultBranchHint, !hint.isEmpty { return hint }
         return "main"
@@ -230,22 +361,18 @@ final class GitChangeShipper: ChangeShipping {
 // MARK: - Real git
 
 /// `RepoManager` as the git seam: local commands through its hardened runner,
-/// the push through its credential-scoped `push`.
+/// the push through its credential-scoped `pushCommit`.
 @MainActor
 struct RepoManagerShipGit: ShipGitOperating {
     let repo: RepoManager
     let token: String
     let backend: RepoManager.Backend
 
-    func git(_ args: [String], at root: URL) async throws -> String {
-        try await repo.runGit(args, at: root)
+    func git(_ args: [String], at root: URL, environment: [String: String]) async throws -> String {
+        try await repo.runGit(args, at: root, environment: environment)
     }
 
-    func currentBranch(at root: URL) async throws -> String {
-        try await repo.currentBranch(at: root)
-    }
-
-    func push(branch: String, at root: URL) async throws {
-        try await repo.push(at: root, branch: branch, token: token, backend: backend)
+    func pushCommit(sha: String, toBranch branch: String, at root: URL) async throws {
+        try await repo.pushCommit(at: root, sha: sha, toBranch: branch, token: token, backend: backend)
     }
 }

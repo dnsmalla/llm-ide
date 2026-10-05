@@ -201,6 +201,9 @@ final class LoopEngineRunner: ObservableObject {
     /// Opens a merge request for a successful run's edits (see `LoopShipCoordinator`).
     /// Nil in tests and wherever no repo target exists.
     private let changeShipper: LoopChangeShipping?
+    /// The paths that were already modified when this run began (the user's own work
+    /// in progress), so a request is never made from files that mix it with a repair.
+    private var shipBaseline: Set<String>?
     private let summaryWriter: LoopRunSummaryWriting
     private let scopeGuard: RepairScopeGuarding
     private let trigger: LoopRunTrigger
@@ -652,6 +655,11 @@ final class LoopEngineRunner: ObservableObject {
         }
         let skippedNote = disabledCount > 0 ? " (\(disabledCount) disabled stage(s) skipped)" : ""
         appendLog(.info, "Loop started · \(orderedStages.count) stage(s), max \(config.maxIterations) iteration(s)\(skippedNote)")
+        // Before any stage runs, so nothing the run does can be mistaken for the user's own edits.
+        shipBaseline = nil
+        if config.openMergeRequest, let changeShipper {
+            shipBaseline = await changeShipper.baseline(gitRoot: runGitRoot)
+        }
 
         // Preflight: every stage's static config is checked BEFORE any
         // iteration runs — burning iterations/LLM repair calls on an
@@ -2251,7 +2259,8 @@ final class LoopEngineRunner: ObservableObject {
         // Fail-open like the journal: a failed shipment is reported, never a failed run.
         if let changeShipper,
            let shipment = await changeShipper.ship(record: record, config: config, gitRoot: gitRoot,
-                                                   ranInWorktree: currentWorktreeLease != nil) {
+                                                   ranInWorktree: currentWorktreeLease != nil,
+                                                   baseline: shipBaseline) {
             record.shipment = shipment
             appendLog(shipment.status == .failed ? .warn : .info, shipment.summary)
         }
