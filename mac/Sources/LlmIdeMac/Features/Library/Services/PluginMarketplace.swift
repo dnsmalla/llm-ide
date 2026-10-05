@@ -92,7 +92,10 @@ enum PluginMarketplace {
     static func package(_ entry: Entry, from staged: Staged) async throws -> URL {
         let pluginDir = try resolve(entry.relativePath, inside: staged.repoRoot)
         let zipURL = staged.repoRoot.deletingLastPathComponent()
-            .appendingPathComponent("\(entry.name).zip")
+            // Not `entry.name`: it comes from the cloned (untrusted) manifest, and a
+            // name holding `/` or `..` would write the zip outside this folder. The
+            // installer reads the plugin's real name from its own manifest anyway.
+            .appendingPathComponent("plugin-\(UUID().uuidString).zip")
         try await PluginGitInstaller.zipDirectory(pluginDir, to: zipURL)
         return zipURL
     }
@@ -163,8 +166,10 @@ enum PluginMarketplace {
 
     /// Resolve a relative plugin path and prove it stayed inside the clone.
     static func resolve(_ relativePath: String, inside root: URL) throws -> URL {
-        let candidate = root.appendingPathComponent(relativePath).standardizedFileURL
-        let base = root.standardizedFileURL
+        // Resolve symlinks too: a lexical check passes `plugins/x` even when `x`
+        // is a link to a directory outside the clone.
+        let candidate = root.appendingPathComponent(relativePath).standardizedFileURL.resolvingSymlinksInPath()
+        let base = root.standardizedFileURL.resolvingSymlinksInPath()
         guard candidate.path == base.path || candidate.path.hasPrefix(base.path + "/") else {
             throw MarketplaceError.badManifest("plugin path escapes the repository")
         }

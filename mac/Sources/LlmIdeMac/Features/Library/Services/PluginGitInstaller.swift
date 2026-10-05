@@ -108,7 +108,7 @@ enum PluginGitInstaller {
         // into clonedDir gives us a clean zip without the parent path.
         let zipRes = try await runProcess(
             "/usr/bin/zip",
-            args: ["-rq", zipURL.path, "."],
+            args: zipArgs(zipURL),
             cwd: clonedDir
         )
         guard zipRes.code == 0 else {
@@ -151,10 +151,18 @@ enum PluginGitInstaller {
         return StagedRepo(repoRoot: clonedDir, cleanup: { try? FileManager.default.removeItem(at: stage) })
     }
 
+    /// `-y` stores a symlink AS a link instead of zipping the file it points at.
+    /// Without it a cloned repo holding `x -> ~/.ssh` would copy the user's keys
+    /// into the installed plugin. The server refuses archives containing
+    /// symlinks, so such a repo now fails to install with a clear error.
+    static func zipArgs(_ zipURL: URL) -> [String] {
+        ["-rqy", zipURL.path, "."]
+    }
+
     /// Zip a directory's CONTENTS to `zipURL` — the shape the install endpoint
     /// expects (manifest at the zip root).
     static func zipDirectory(_ directory: URL, to zipURL: URL) async throws {
-        let res = try await runProcess("/usr/bin/zip", args: ["-rq", zipURL.path, "."], cwd: directory)
+        let res = try await runProcess("/usr/bin/zip", args: zipArgs(zipURL), cwd: directory)
         guard res.code == 0 else {
             let stderr = res.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             throw InstallError.zipFailed(stderr.isEmpty ? "zip exited \(res.code)" : stderr)
