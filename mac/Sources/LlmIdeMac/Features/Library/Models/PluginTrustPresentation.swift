@@ -70,6 +70,12 @@ enum PluginTrustPresentation {
             return "Nothing from this plugin runs right now: \(reason). Trusting it changes nothing until that changes."
         }
         guard plugin.hooksTrusted else {
+            // A grant exists but no longer covers what the plugin declares: say so,
+            // or the toggle would look like it reset itself for no reason.
+            if plugin.trustOutdated == true {
+                let what = plugin.executableSummary.isEmpty ? "more executable parts" : plugin.executableSummary
+                return "You trusted an earlier version of this plugin. It now declares \(what), which that trust did not cover, so it is off again. Turn it on to allow the current version."
+            }
             if beyondHooks && plugin.agentEngineCanLoad {
                 let sandbox = plugin.executableKinds.contains("monitors")
                     ? " Background monitors run outside the sandbox." : ""

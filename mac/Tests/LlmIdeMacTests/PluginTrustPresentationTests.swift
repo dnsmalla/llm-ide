@@ -10,7 +10,8 @@ struct PluginTrustPresentationTests {
     private func plugin(kinds: [String] = [], hookCount: Int = 0, declares: Bool? = nil,
                         trusted: Bool = false, native: Bool = false, enabled: Bool = true,
                         sdkReadable: Bool? = true, nativeOn: Bool? = true,
-                        commands: String = "[]", pending: String = "[]") throws -> PluginInfo {
+                        commands: String = "[]", pending: String = "[]",
+                        outdated: Bool? = nil) throws -> PluginInfo {
         func flag(_ value: Bool?) -> String { value.map { "\($0)" } ?? "null" }
         let kindsJSON = "[" + kinds.map { "\"\($0)\"" }.joined(separator: ",") + "]"
         let json = """
@@ -19,7 +20,8 @@ struct PluginTrustPresentationTests {
          "pendingComponents":\(pending),
          "hookCount":\(hookCount),"declaresHooks":\(declares ?? !kinds.isEmpty),
          "executableKinds":\(kindsJSON),"hooksTrusted":\(trusted),"nativeDelivery":\(native),
-         "sdkReadable":\(flag(sdkReadable)),"nativePluginsOn":\(flag(nativeOn))}
+         "sdkReadable":\(flag(sdkReadable)),"nativePluginsOn":\(flag(nativeOn)),
+         "trustOutdated":\(flag(outdated))}
         """
         return try JSONDecoder().decode(PluginInfo.self, from: Data(json.utf8))
     }
@@ -98,6 +100,22 @@ struct PluginTrustPresentationTests {
             == "monitors — run by the agent engine (trusted)")
         #expect(PluginTrustPresentation.agentEngineRowText("monitors", try plugin(kinds: ["monitors"], trusted: true, enabled: false))
             .contains("once you enable this plugin"))
+    }
+
+    @Test("a grant that no longer covers the plugin says why it is off")
+    func outdatedTrust() throws {
+        let text = PluginTrustPresentation.trustExplanation(
+            try plugin(kinds: ["hooks", "monitors"], hookCount: 1, trusted: false, outdated: true))
+        #expect(text.hasPrefix("You trusted an earlier version of this plugin"))
+        #expect(text.contains("background monitors"))
+        // Not outdated: the ordinary untrusted text.
+        let plain = PluginTrustPresentation.trustExplanation(try plugin(kinds: ["hooks"], hookCount: 1, outdated: false))
+        #expect(plain.hasPrefix("Turning this on lets"))
+        // Nothing would run anyway: that message wins over the history.
+        let off = PluginTrustPresentation.trustExplanation(
+            try plugin(kinds: ["monitors"], nativeOn: false, outdated: true))
+        #expect(off.hasPrefix("Nothing from this plugin runs right now"))
+        #expect(try plugin(kinds: ["hooks"], outdated: true) != (try plugin(kinds: ["hooks"], outdated: false)))
     }
 
     @Test("an older server (no delivery facts) is treated as loadable, like before")

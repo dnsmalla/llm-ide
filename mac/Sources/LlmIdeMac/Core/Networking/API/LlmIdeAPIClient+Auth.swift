@@ -314,6 +314,10 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     /// This user's "Let plugins load natively" preference. Nil from an older
     /// server (treated as on).
     let nativePluginsOn: Bool?
+    /// The user trusted an earlier version of this plugin, but it now declares
+    /// executable components that grant did not cover (an update added monitors,
+    /// a language server or bin/). Nil from an older server.
+    let trustOutdated: Bool?
     /// Whether the Agent engine can ever load this plugin: the two facts that
     /// decide whether monitors / LSP / bin/ / JS hook modules can run at all.
     var agentEngineCanLoad: Bool { (sdkReadable ?? true) && (nativePluginsOn ?? true) }
@@ -378,6 +382,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
             && lhs.unsupportedComponents == rhs.unsupportedComponents
             && lhs.mcpServerCount == rhs.mcpServerCount && lhs.version == rhs.version
             && lhs.sdkReadable == rhs.sdkReadable && lhs.nativePluginsOn == rhs.nativePluginsOn
+            && lhs.trustOutdated == rhs.trustOutdated
             // The rest of what PluginDetailView renders: a reinstall that only adds
             // a .mcp.json or a slash command must not leave the old rows showing.
             && lhs.displayName == rhs.displayName && lhs.description == rhs.description
@@ -397,7 +402,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         case name, version, displayName, description, author
         case enabled, skillCount, commands, subagents
         case format, unsupportedComponents, pendingComponents
-        case hookCount, declaresHooks, executableKinds, sdkReadable, nativePluginsOn, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
+        case hookCount, declaresHooks, executableKinds, sdkReadable, nativePluginsOn, trustOutdated, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -418,6 +423,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         self.executableKinds = try c.decodeIfPresent([String].self, forKey: .executableKinds) ?? []
         self.sdkReadable     = try c.decodeIfPresent(Bool.self, forKey: .sdkReadable)
         self.nativePluginsOn = try c.decodeIfPresent(Bool.self, forKey: .nativePluginsOn)
+        self.trustOutdated   = try c.decodeIfPresent(Bool.self, forKey: .trustOutdated)
         self.hookNotes      = try c.decodeIfPresent([String].self, forKey: .hookNotes) ?? []
         self.hooksTrusted   = try c.decodeIfPresent(Bool.self, forKey: .hooksTrusted) ?? false
         self.mcpServerCount = try c.decodeIfPresent(Int.self, forKey: .mcpServerCount) ?? 0
