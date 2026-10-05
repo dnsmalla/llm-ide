@@ -154,6 +154,8 @@ struct LoopEngineView: View {
     @State var newTemplateSummary = ""
     /// Mirrors `LoopEngineConfig.writeSummaryNote`; edited in the Output section.
     @State var writeSummaryNote = false
+    /// Mirrors `LoopEngineConfig.openMergeRequest`; edited in the Output section.
+    @State var openMergeRequest = true
     /// When enabled, a run that would queue on the main checkout uses an
     /// isolated git worktree instead.
     @State var useWorktreesForConcurrentRuns = false
@@ -1586,7 +1588,8 @@ struct LoopEngineView: View {
             writeSummaryNote: writeSummaryNote,
             useWorktreesForConcurrentRuns: useWorktreesForConcurrentRuns,
             repairModel: repairModel,
-            alwaysUseWorktree: alwaysUseWorktree)
+            alwaysUseWorktree: alwaysUseWorktree,
+            openMergeRequest: openMergeRequest)
     }
 
     /// The full `LoopDefinition` this page currently represents — `currentConfig`
@@ -1637,6 +1640,7 @@ struct LoopEngineView: View {
             writeSummaryNote = ensuredConfig.writeSummaryNote
             useWorktreesForConcurrentRuns = ensuredConfig.useWorktreesForConcurrentRuns
             alwaysUseWorktree = ensuredConfig.alwaysUseWorktree
+            openMergeRequest = ensuredConfig.openMergeRequest
             loopName = existing.name
             isPrimaryLoop = existing.isPrimary
             goal = existing.goal ?? ""
@@ -1694,6 +1698,7 @@ struct LoopEngineView: View {
         writeSummaryNote = seed.writeSummaryNote
         useWorktreesForConcurrentRuns = seed.useWorktreesForConcurrentRuns
         alwaysUseWorktree = seed.alwaysUseWorktree
+        openMergeRequest = seed.openMergeRequest
         // Reset the loop-identity/contract state too — without this, closing
         // a project that had a loop with a Goal set and opening one with no
         // config yet would leave that Goal text displayed against the new,
@@ -2046,6 +2051,7 @@ struct LoopEngineView: View {
         writeSummaryNote = applied.writeSummaryNote
         useWorktreesForConcurrentRuns = applied.useWorktreesForConcurrentRuns
         alwaysUseWorktree = applied.alwaysUseWorktree
+        openMergeRequest = applied.openMergeRequest
         // Stage ids are regenerated on apply, so the old selection no longer exists.
         selectedStageId = nil
     }

@@ -198,6 +198,9 @@ final class LoopEngineRunner: ObservableObject {
     var defaultShellTimeout: TimeInterval
     var defaultAgentTimeout: TimeInterval
     private let journal: LoopRunJournaling
+    /// Opens a merge request for a successful run's edits (see `LoopShipCoordinator`).
+    /// Nil in tests and wherever no repo target exists.
+    private let changeShipper: LoopChangeShipping?
     private let summaryWriter: LoopRunSummaryWriting
     private let scopeGuard: RepairScopeGuarding
     private let trigger: LoopRunTrigger
@@ -282,7 +285,9 @@ final class LoopEngineRunner: ObservableObject {
          transportRetryDelay: TimeInterval = 2,
          defaultShellTimeout: TimeInterval = 0,
          defaultAgentTimeout: TimeInterval = 0,
-         checksCommandAvailability: Bool = false) {
+         checksCommandAvailability: Bool = false,
+         changeShipper: LoopChangeShipping? = nil) {
+        self.changeShipper = changeShipper
         self.checksCommandAvailability = checksCommandAvailability
         self.transportRetryDelay = transportRetryDelay
         self.repoRegistrar = repoRegistrar
@@ -2235,12 +2240,21 @@ final class LoopEngineRunner: ObservableObject {
 
         emit(LoopRunEvent(kind: LoopRunEvent.Kind.verdict, detail: terminal.summary,
                           statusCode: terminal.code))
-        let record = LoopRunRecord(
+        var record = LoopRunRecord(
             id: currentRunContext?.runId ?? UUID().uuidString, projectId: projectId, trigger: trigger,
             gitRoot: gitRoot.path, startedAt: startedAt, endedAt: Date(),
             iterationsUsed: iteration, config: LoopRunConfigSnapshot(config),
             iterations: iterationRecords, statusCode: terminal.code,
             statusSummary: terminal.summary, loopId: loopId, loopName: loopName)
+        // A successful run that changed files: branch, commit, push, open a merge
+        // request. Before the journal write so the record says where the fix went.
+        // Fail-open like the journal: a failed shipment is reported, never a failed run.
+        if let changeShipper,
+           let shipment = await changeShipper.ship(record: record, config: config, gitRoot: gitRoot,
+                                                   ranInWorktree: currentWorktreeLease != nil) {
+            record.shipment = shipment
+            appendLog(shipment.status == .failed ? .warn : .info, shipment.summary)
+        }
         // Fail-open: telemetry never gates the work it observes.
         if let reason = journal.write(record, root: faultsRoot) {
             appendLog(.warn, "Run journal not written: \(reason)")

@@ -203,6 +203,11 @@ struct LoopRunRecord: Codable, Equatable {
     /// automatically — no custom `Decodable` needed, same as `projectId`.
     var loopId: String? = nil
     var loopName: String? = nil
+    /// Where the run's edits went after it succeeded (a merge request, or why
+    /// not). `nil` for every run that did not try — it failed, changed nothing,
+    /// or opening requests was off — and for every record written before this
+    /// existed. Optional, so older records decode.
+    var shipment: LoopShipment? = nil
 
     var durationSeconds: Double { endedAt.timeIntervalSince(startedAt) }
 }

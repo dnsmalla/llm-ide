@@ -430,12 +430,23 @@ extension LoopEngineView {
             }
             if let gitRoot = activeGitRootURL {
                 outputRow(label: "Working tree",
-                          detail: "repair edits land here — review with git before committing",
+                          detail: openMergeRequest
+                              ? "repair edits land here, then are moved to a merge-request branch"
+                              : "repair edits land here — review with git before committing",
                           url: gitRoot)
             }
             outputRow(label: "Run log", detail: "live, in the panel to the right", url: nil)
 
             Divider().background(t.border).padding(.vertical, 2)
+
+            Toggle("Open a merge request after a successful run that changed files", isOn: $openMergeRequest)
+                .font(Typography.caption)
+            Text(openMergeRequest
+                 ? "The changes go on a new loop/… branch, are committed (only the files this run changed), pushed, and a merge request is opened against the default branch. Nothing is merged for you. It needs Create branch, Auto-commit, Push and Create PR/MR to be allowed for this repo, and a GitLab/GitHub project cloned in this folder. Every successful run opens its own request, even if an earlier one is still open; your own branch is checked out again afterwards."
+                 : "Repair edits stay in the working tree — review and commit them yourself.")
+                .font(Typography.caption)
+                .foregroundStyle(t.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
 
             Toggle("Write a run summary note to the Library", isOn: $writeSummaryNote)
                 .font(Typography.caption)

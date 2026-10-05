@@ -15,8 +15,8 @@ struct ShipRequest: Equatable {
     /// Repo-relative paths. ONLY these are committed — anything else the user
     /// has modified or staged is left exactly as it was.
     var paths: [String]
-    /// The branch is `<branchPrefix>-<timestamp>`; the prefix is also how an
-    /// already-open request from the same source is recognised.
+    /// The branch is `<branchPrefix>-<timestamp>`: every shipment gets its own
+    /// branch and its own request, whether or not an earlier one is still open.
     var branchPrefix: String
     var commitMessage: String
     var title: String
@@ -25,7 +25,7 @@ struct ShipRequest: Equatable {
 
 /// The step a shipment stopped at, for the message the user reads.
 enum ShipStep: String, Equatable {
-    case permissions, repository, gitState, duplicate, branch, commit, push, mergeRequest
+    case permissions, repository, gitState, branch, commit, push, mergeRequest
 }
 
 enum ShipOutcome: Equatable {
@@ -33,7 +33,7 @@ enum ShipOutcome: Equatable {
     /// branch the user was on failed, so the tree is still on the new branch.
     case shipped(branch: String, mergeRequestURL: String, number: Int, leftOnBranch: Bool)
     /// Deliberately not shipped — a rule, not a fault (not allowed, nothing to
-    /// ship, a request from the same source is already open).
+    /// ship, a merge or cherry-pick in progress).
     case skipped(reason: String)
     /// Something went wrong at `step`. The message says what state it left.
     case failed(step: ShipStep, message: String)
@@ -59,7 +59,8 @@ protocol ChangeShipping {
     /// was pushed, and a request is open; the original branch is checked out again
     /// (unless `leftOnBranch`). On `.skipped` / `.failed` no request was created;
     /// `.failed` at `.push` or later leaves the commit on the local new branch.
-    /// Never touches the default branch.
+    /// An earlier request that is still open does not matter: each shipment is
+    /// its own branch and request. Never touches the default branch.
     func ship(_ request: ShipRequest) async -> ShipOutcome
 }
 
@@ -93,13 +94,6 @@ enum ShipPlanning {
         formatter.timeZone = TimeZone(identifier: "UTC")
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         return "\(prefix)-\(formatter.string(from: date))"
-    }
-
-    /// An open request that came from this prefix, if any. One loop opening a new
-    /// request on every run, each re-fixing what the previous one already fixed,
-    /// is the failure this guards against.
-    static func openRequest(matching prefix: String, in open: [RepoMergeRequest]) -> RepoMergeRequest? {
-        open.first { $0.sourceBranch.hasPrefix(prefix + "-") }
     }
 
     /// Paths from `git status --porcelain` that are untracked (`??`) — they need
@@ -181,14 +175,6 @@ final class GitChangeShipper: ChangeShipping {
         }
 
         let target = await defaultBranch(at: root)
-
-        // One open request per loop: do not stack another on top of it.
-        let open: [RepoMergeRequest]
-        do { open = try await backend.listOpenMergeRequests(projectId: projectId) }
-        catch { return .failed(step: .duplicate, message: "could not list open merge requests: \(error.localizedDescription)") }
-        if let existing = ShipPlanning.openRequest(matching: request.branchPrefix, in: open) {
-            return .skipped(reason: "merge request !\(existing.number) from this loop is still open (\(existing.webUrl)) — merge or close it first")
-        }
 
         let branch = ShipPlanning.branchName(prefix: request.branchPrefix, at: now())
         do { _ = try await git.git(["switch", "-c", branch], at: root) }

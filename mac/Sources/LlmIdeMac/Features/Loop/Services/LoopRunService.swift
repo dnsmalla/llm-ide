@@ -107,7 +107,8 @@ final class LoopRunService: ObservableObject, SessionScoped {
             repoRegistrar: APILoopRepoRegistrar(api: api),
             defaultShellTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().shellSeconds),
             defaultAgentTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().agentSeconds),
-            checksCommandAvailability: true)
+            checksCommandAvailability: true,
+            changeShipper: LoopShipCoordinator(config: AppConfig.shared))
         // Mirror into the shared per-task log — the buffer the Auto Tasks
         // page and the phone read — so page-driven runs stay visible there.
         // Owned here (not per page appearance) so the mirror survives the

@@ -116,6 +116,7 @@ if autoTasksIncluded {
         "LoopEngineRunnerTests.swift",
         "LoopRunJournalTests.swift",
         "LoopRunAvailabilityTests.swift",
+        "LoopShipPlanningTests.swift",
         "LoopRunQueueTests.swift",
         "LoopRunSummaryWriterTests.swift",
         "LoopStageDetectorTests.swift",

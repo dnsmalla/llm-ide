@@ -28,10 +28,9 @@ struct ChangeShippingTests {
     final class FakeBackend: RepoBackend, @unchecked Sendable {
         var open: [RepoMergeRequest] = []
         var created: [RepoMergeRequestPayload] = []
-        var listError: Error?
         var createError: Error?
         var kind: RepoBackendKind { .gitlab }
-        func listOpenMergeRequests(projectId: String) async throws -> [RepoMergeRequest] { if let listError { throw listError }; return open }
+        func listOpenMergeRequests(projectId: String) async throws -> [RepoMergeRequest] { open }
         func createMergeRequest(projectId: String, payload: RepoMergeRequestPayload) async throws -> RepoMergeRequest {
             if let createError { throw createError }
             created.append(payload)
@@ -111,21 +110,20 @@ struct ChangeShippingTests {
         }
     }
 
-    @Test("an open request from the same loop stops a second one, before any branch exists")
-    func duplicate() async {
-        let git = happyGit(); let backend = FakeBackend()
+    @Test("an earlier request that is still open does not stop the next one: each shipment is its own")
+    func eachShipmentIsItsOwn() async {
+        let backend = FakeBackend()
         backend.open = [RepoMergeRequest(id: "5", number: 5, title: "t", state: "opened",
                                          sourceBranch: "loop/regression-20261001-000000", targetBranch: "main",
                                          webUrl: "https://gitlab.example/5", isDraft: false)]
-        let outcome = await shipper(git, backend).ship(request)
-        guard case .skipped(let reason) = outcome else { Issue.record("\(outcome)"); return }
-        #expect(reason.contains("!5"))
-        #expect(!git.ran(["switch", "-c"]) && git.pushed.isEmpty && backend.created.isEmpty)
-        // A request from another loop does not count.
-        backend.open = [RepoMergeRequest(id: "6", number: 6, title: "t", state: "opened",
-                                         sourceBranch: "loop/plan-20261001-000000", targetBranch: "main",
-                                         webUrl: "https://gitlab.example/6", isDraft: false)]
-        if case .shipped = await shipper(happyGit(), backend).ship(request) {} else { Issue.record("another loop's request blocked this one") }
+        let git = happyGit()
+        guard case .shipped(let branch, _, _, _) = await shipper(git, backend).ship(request) else {
+            Issue.record("an open request from the same loop must not block a new one"); return
+        }
+        #expect(branch != "loop/regression-20261001-000000")
+        #expect(backend.created.count == 1)
+        // The shipment never needed to look at the open list.
+        #expect(git.ran(["switch", "-c", branch]))
     }
 
     @Test("a failed commit puts the user back, removes the empty branch and pushes nothing")
@@ -163,7 +161,7 @@ struct ChangeShippingTests {
         #expect(git.pushed.count == 1)
     }
 
-    @Test("a merge in progress, a detached HEAD and an unreadable MR list stop it early")
+    @Test("a merge in progress and a detached HEAD stop it early")
     func guards() async {
         let merging = happyGit()
         merging.handler = { args in if args.first == "rev-parse" { return "abc" }; return "" }
@@ -173,11 +171,6 @@ struct ChangeShippingTests {
         let detached = happyGit(); detached.branch = "HEAD"
         if case .skipped(let reason) = await shipper(detached, FakeBackend()).ship(request) { #expect(reason.contains("detached")) }
         else { Issue.record("detached") }
-
-        let backend = FakeBackend(); backend.listError = Boom(text: "401")
-        let git = happyGit()
-        if case .failed(let step, _) = await shipper(git, backend).ship(request) { #expect(step == .duplicate && !git.ran(["switch", "-c"])) }
-        else { Issue.record("unreadable list must not risk a duplicate") }
 
         var empty = request; empty.paths = []
         if case .skipped = await shipper(happyGit(), FakeBackend()).ship(empty) {} else { Issue.record("no paths") }

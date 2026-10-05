@@ -40,7 +40,8 @@ final class LoopRunnerProvider: LoopRunnerProviding {
             repoRegistrar: APILoopRepoRegistrar(api: api),
             defaultShellTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().shellSeconds),
             defaultAgentTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().agentSeconds),
-            checksCommandAvailability: true
+            checksCommandAvailability: true,
+            changeShipper: LoopShipCoordinator(config: config)
         )
         laneRegistry?.attachLaneRunner(runner, trigger: trigger)
         return runner

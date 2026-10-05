@@ -66,6 +66,16 @@ public struct LoopEngineConfig: Codable, Equatable {
     /// so an uncommitted submodule pointer or in-progress edit never blocks it.
     public var alwaysUseWorktree: Bool = false
 
+    /// After a SUCCESSFUL run that changed files, put the changes on a new branch,
+    /// commit them, push it and open a merge request against the default branch
+    /// (`ChangeShipping`). On by default; a loop that should only ever edit the
+    /// working tree turns it off. The repo allow-list (branch, auto-commit, push,
+    /// create MR) still has to permit it, and nothing is ever merged automatically.
+    /// Every successful run opens its OWN request, whether or not an earlier one
+    /// is still open.
+    /// An absent key decodes as true, so existing loops pick it up.
+    public var openMergeRequest: Bool = true
+
     /// Any enabled stage belongs to Self-Heal — keyed on the stages, not the
     /// flag, so a hand-edited loop.json, a template or "Run this stage only"
     /// cannot drop the guarantees below.
@@ -99,13 +109,15 @@ public struct LoopEngineConfig: Codable, Equatable {
         case stages, maxIterations, consecutiveFailureStop
         case wallClockBudgetSeconds, maxRepairsPerStage, protectedPathPolicy, extraProtectedGlobs
         case writeSummaryNote, useWorktreesForConcurrentRuns, repairModel, alwaysUseWorktree
+        case openMergeRequest
     }
 
     public init(stages: [LoopStage], maxIterations: Int = 10, consecutiveFailureStop: Int = 2,
          wallClockBudgetSeconds: Double? = nil, maxRepairsPerStage: Int = 3,
          protectedPathPolicy: ProtectedPathPolicy = .revert, extraProtectedGlobs: [String] = [],
          writeSummaryNote: Bool = false, useWorktreesForConcurrentRuns: Bool = false,
-         repairModel: String? = nil, alwaysUseWorktree: Bool = false) {
+         repairModel: String? = nil, alwaysUseWorktree: Bool = false,
+         openMergeRequest: Bool = true) {
         self.stages = stages
         self.maxIterations = maxIterations
         self.consecutiveFailureStop = consecutiveFailureStop
@@ -117,6 +129,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         self.useWorktreesForConcurrentRuns = useWorktreesForConcurrentRuns
         self.repairModel = repairModel
         self.alwaysUseWorktree = alwaysUseWorktree
+        self.openMergeRequest = openMergeRequest
     }
 
     /// Same rule as `LoopStage.init(from:)`: every field added after the first
@@ -144,6 +157,7 @@ public struct LoopEngineConfig: Codable, Equatable {
             Bool.self, forKey: .useWorktreesForConcurrentRuns) ?? false
         repairModel = try container.decodeIfPresent(String.self, forKey: .repairModel)
         alwaysUseWorktree = try container.decodeIfPresent(Bool.self, forKey: .alwaysUseWorktree) ?? false
+        openMergeRequest = try container.decodeIfPresent(Bool.self, forKey: .openMergeRequest) ?? true
     }
 
     /// Hand-written so `wallClockBudgetSeconds` is encoded as an explicit JSON
@@ -165,6 +179,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         try container.encode(useWorktreesForConcurrentRuns, forKey: .useWorktreesForConcurrentRuns)
         try container.encodeIfPresent(repairModel, forKey: .repairModel)
         try container.encode(alwaysUseWorktree, forKey: .alwaysUseWorktree)
+        try container.encode(openMergeRequest, forKey: .openMergeRequest)
     }
 
     /// Whether an auto-detected stage list is safe to persist as the

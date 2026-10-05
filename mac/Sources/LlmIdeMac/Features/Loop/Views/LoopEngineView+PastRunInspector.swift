@@ -50,6 +50,31 @@ extension LoopEngineView {
                 .foregroundStyle(t.textMuted)
                 .lineLimit(2)
                 .truncationMode(.middle)
+            if let shipment = record.shipment {
+                pastRunShipment(shipment)
+            }
+        }
+    }
+
+    /// Where the run's edits went: the merge request (a link), or why not.
+    @ViewBuilder
+    private func pastRunShipment(_ shipment: LoopShipment) -> some View {
+        let t = theme.current
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: shipment.status == .shipped ? "arrow.triangle.pull"
+                  : (shipment.status == .failed ? "exclamationmark.triangle" : "minus.circle"))
+                .font(.system(size: 10))
+                .foregroundStyle(shipment.status == .failed ? t.danger : (shipment.status == .shipped ? t.success : t.textMuted))
+            if shipment.status == .shipped, let raw = shipment.mergeRequestURL, let url = URL(string: raw) {
+                Link(shipment.summary, destination: url)
+                    .font(Typography.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(shipment.summary)
+                    .font(Typography.caption)
+                    .foregroundStyle(shipment.status == .failed ? t.danger : t.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
