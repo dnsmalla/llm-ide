@@ -38,6 +38,9 @@ const { reloadPlugins, buildUserPluginHooks, buildUserPluginDelivery } = await i
 // plugin-native-delivery.test.mjs.
 const translatedHooks = (userId) => buildUserPluginHooks(userId, { nativeEnabled: false });
 const { setEnabled, setHooksTrusted } = await import('../plugins/state.mjs');
+// What the trust route records for a Claude-layout plugin with hooks: its components
+// plus the delivery mode (see plugins/hook-trust.mjs).
+const GRANT_KINDS = ['hooks', 'sdk'];
 reloadPlugins();
 
 test('no hooks for a user who has not enabled the plugin', () => {
@@ -55,7 +58,7 @@ test('enabling a plugin does not by itself arm its hooks — by either mechanism
 
 test('an enabled + hook-trusted plugin contributes its hooks', () => {
   setEnabled('u', 'reviewer', true);
-  setHooksTrusted('u', 'reviewer', true);
+  setHooksTrusted('u', 'reviewer', true, GRANT_KINDS);
   const hooks = translatedHooks('u');
   assert.deepEqual(Object.keys(hooks), ['PreToolUse']);
   assert.equal(hooks.PreToolUse[0].matcher, 'Bash');
@@ -67,14 +70,14 @@ test('an enabled + hook-trusted plugin contributes its hooks', () => {
 });
 
 test('trusting hooks but disabling the plugin leaves nothing armed', () => {
-  setHooksTrusted('u2', 'reviewer', true);   // trusted, never enabled
+  setHooksTrusted('u2', 'reviewer', true, GRANT_KINDS);   // trusted, never enabled
   assert.deepEqual(translatedHooks('u2'), {});
   assert.deepEqual(buildUserPluginDelivery('u2').sdkPlugins, []);
 });
 
 test('revoking trust disarms them again, under either mechanism', () => {
   setEnabled('u3', 'reviewer', true);
-  setHooksTrusted('u3', 'reviewer', true);
+  setHooksTrusted('u3', 'reviewer', true, GRANT_KINDS);
   assert.equal(Object.keys(translatedHooks('u3')).length, 1);
   assert.deepEqual(buildUserPluginDelivery('u3').native, ['reviewer']);
   setHooksTrusted('u3', 'reviewer', false);
@@ -132,7 +135,7 @@ test('a trusted plugin reaches the SDK as a local plugin, MCP discovery off', as
     email: 'native-turn@example.com', password: 'pw-12345678', displayName: 'T',
   });
   setEnabled(id, 'reviewer', true);
-  setHooksTrusted(id, 'reviewer', true);
+  setHooksTrusted(id, 'reviewer', true, GRANT_KINDS);
   const options = await composeTurn(id);
   assert.equal(options.plugins?.length, 1, 'the turn must carry the plugin');
   assert.equal(options.plugins[0].type, 'local');
@@ -145,7 +148,7 @@ test('turning the pref off swaps the plugin option for translated hooks', async 
     email: 'translated-turn@example.com', password: 'pw-12345678', displayName: 'T2',
   });
   setEnabled(id, 'reviewer', true);
-  setHooksTrusted(id, 'reviewer', true);
+  setHooksTrusted(id, 'reviewer', true, GRANT_KINDS);
   setUserPrefs(id, { nativePlugins: false });
   const options = await composeTurn(id);
   assert.equal(options.plugins, undefined, 'nothing handed to the SDK');

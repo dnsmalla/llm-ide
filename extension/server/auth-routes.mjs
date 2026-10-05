@@ -1020,6 +1020,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     const { listInstalledPlugins } = await import('../llm_agent/runtime/route.mjs');
     const result = setPluginHookTrust(req.user.id, body?.name, body?.trusted, {
       listPlugins: (userId) => listInstalledPlugins(userId).plugins,
+      shownKinds: Array.isArray(body?.kinds) ? body.kinds : undefined,
     });
     if (result.error) {
       send(res, result.status || 400, { error: { code: 'VALIDATION_FAILED', message: result.error } });
@@ -1029,8 +1030,10 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       userId: req.user.id, requestId, ip, userAgent: ua,
       action: result.hooksTrusted ? 'plugin.hooks.trust' : 'plugin.hooks.revoke',
       resource: body.name, outcome: 'success',
+      // What the grant covered, so the audit trail can answer "what did they allow".
+      ...(result.kinds ? { detail: { kinds: result.kinds } } : {}),
     });
-    send(res, 200, result);
+    send(res, 200, { ok: result.ok, hooksTrusted: result.hooksTrusted });
     return;
   }
 

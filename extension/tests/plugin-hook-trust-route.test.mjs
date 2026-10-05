@@ -57,7 +57,7 @@ test('the plugins payload reports hook declarations and trust state', () => {
 });
 
 test('trust can be granted and revoked for a hook-declaring plugin', () => {
-  assert.deepEqual(setPluginHookTrust('u', 'hooked', true), { ok: true, hooksTrusted: true });
+  assert.deepEqual(setPluginHookTrust('u', 'hooked', true), { ok: true, hooksTrusted: true, kinds: ['hooks', 'sdk'] });
   assert.equal(listHooksTrusted('u').has('hooked'), true);
   assert.deepEqual(setPluginHookTrust('u', 'hooked', false), { ok: true, hooksTrusted: false });
   assert.equal(listHooksTrusted('u').has('hooked'), false);
@@ -71,11 +71,12 @@ test('granting records everything the plugin declares at that moment', async () 
   fs.writeFileSync(path.join(pluginDir, 'both', 'monitors', 'monitors.json'),
     JSON.stringify([{ name: 'w', command: 'echo hi', description: 'x', when: 'always' }]), 'utf8');
   reloadPlugins();
-  assert.deepEqual(setPluginHookTrust('u-rec', 'both', true), { ok: true, hooksTrusted: true });
-  assert.deepEqual([...listHooksTrustedKinds('u-rec').get('both')].sort(), ['hooks', 'monitors']);
+  assert.equal(setPluginHookTrust('u-rec', 'both', true).ok, true);
+  assert.deepEqual([...listHooksTrustedKinds('u-rec').get('both')].sort(), ['hooks', 'monitors', 'sdk']);
   // A hooks-only plugin records hooks only.
-  assert.deepEqual(setPluginHookTrust('u-rec', 'hooked', true), { ok: true, hooksTrusted: true });
-  assert.deepEqual([...listHooksTrustedKinds('u-rec').get('hooked')], ['hooks']);
+  assert.equal(setPluginHookTrust('u-rec', 'hooked', true).ok, true);
+  assert.deepEqual([...listHooksTrustedKinds('u-rec').get('hooked')].sort(), ['hooks', 'sdk'],
+    'the delivery mode is recorded with the components');
 });
 
 test('a plugin that declares no hooks cannot be granted hook trust', () => {

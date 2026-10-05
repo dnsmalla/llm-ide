@@ -22,9 +22,14 @@ import { setHooksTrusted } from './state.mjs';
  *   declares lives in llm_agent/, a peer layer this module may not import
  *   (CLAUDE.md "Module Boundaries"). The route layer, which may import both,
  *   passes it in.
+ * @param {string[]} [deps.shownKinds] — the executable kinds the client displayed
+ *   when the user clicked. If the plugin now declares anything beyond them (it
+ *   was updated between looking and clicking), the grant is refused with 409:
+ *   a grant must never be larger than what the user was shown. Omitted by an
+ *   older client, which skips the check.
  * @returns {{ok: true, hooksTrusted: boolean} | {error: string, status?: number}}
  */
-export function setPluginHookTrust(userId, pluginName, trusted, { listPlugins } = {}) {
+export function setPluginHookTrust(userId, pluginName, trusted, { listPlugins, shownKinds } = {}) {
   if (!userId) return { error: 'no user', status: 401 };
   if (typeof pluginName !== 'string' || !/^[a-z][a-z0-9-]{1,40}$/.test(pluginName)) {
     return { error: 'name must be a valid plugin slug', status: 400 };
@@ -54,6 +59,20 @@ export function setPluginHookTrust(userId, pluginName, trusted, { listPlugins } 
   // grant instead of riding on it (see plugins/state.mjs).
   const kinds = new Set(Array.isArray(found.executableKinds) ? found.executableKinds : []);
   if (found.hookCount > 0) kinds.add('hooks');
+  if (Array.isArray(shownKinds)) {
+    const shown = new Set(shownKinds.filter((k) => typeof k === 'string'));
+    const unseen = [...kinds].filter((kind) => !shown.has(kind));
+    if (unseen.length) {
+      return {
+        error: `plugin '${pluginName}' changed since you looked at it (it now also declares: ${unseen.join(', ')}). Reload and review it before trusting.`,
+        status: 409,
+      };
+    }
+  }
+  // The delivery mode is part of what is trusted (see currentTrustKinds in
+  // llm_agent/skills/registry.mjs, which this must mirror): a package that
+  // later moves from translated to native loading gains capability.
+  if (kinds.size > 0 && found.sdkReadable === true) kinds.add('sdk');
   setHooksTrusted(userId, pluginName, true, [...kinds]);
-  return { ok: true, hooksTrusted: true };
+  return { ok: true, hooksTrusted: true, kinds: [...kinds].sort() };
 }

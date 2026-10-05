@@ -127,13 +127,16 @@ reloadPlugins();
 
 function enable(userId, ...names) { for (const n of names) setEnabled(userId, n, true); }
 
-// What the trust route records: everything the plugin declares right now.
+// The REAL grant path (hook-trust.mjs), so these tests cannot drift from what the
+// route records: everything the plugin declares right now plus the delivery mode.
 const { listInstalledPlugins: listPluginsForTrust } = await import('../llm_agent/skills/registry.mjs');
-function trustAs(userId, name) {
-  const found = listPluginsForTrust(userId).plugins.find((p) => p.name === name);
-  const kinds = new Set(found.executableKinds);
-  if (found.hookCount > 0) kinds.add('hooks');
-  setHooksTrusted(userId, name, true, [...kinds]);
+const { setPluginHookTrust } = await import('../plugins/hook-trust.mjs');
+function trustAs(userId, name, extra = {}) {
+  const result = setPluginHookTrust(userId, name, true, {
+    listPlugins: (uid) => listPluginsForTrust(uid).plugins, ...extra,
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  return result;
 }
 
 test('nothing is delivered for a plugin the user has not enabled', () => {
@@ -173,7 +176,6 @@ for (const name of ['monitorsonly', 'lsponly', 'inlinelsp', 'bincontent', 'broke
 // --- A grant covers what the user was shown, not whatever the plugin becomes ---
 
 test('an update that adds monitors voids a hooks-only grant until the user trusts again', async () => {
-  const { setHooksTrusted: grant } = await import('../plugins/state.mjs');
   enable('u-grow', 'growing');
   trustAs('u-grow', 'growing');
   assert.deepEqual(buildUserPluginDelivery('u-grow', { nativeEnabled: true }).native, ['growing'],
@@ -196,18 +198,69 @@ test('an update that adds monitors voids a hooks-only grant until the user trust
   trustAs('u-grow', 'growing');
   assert.deepEqual(buildUserPluginDelivery('u-grow', { nativeEnabled: true }).native, ['growing']);
   assert.equal(listPluginsForTrust('u-grow').plugins.find((p) => p.name === 'growing').trustOutdated, false);
-  void grant;
 });
 
 test('a grant with no record (written before kinds were recorded) covers hooks only', () => {
-  enable('u-legacy', 'monitorsonly', 'hookedclaude');
+  enable('u-legacy', 'monitorsonly', 'hookedclaude', 'hookedcodex');
   setHooksTrusted('u-legacy', 'monitorsonly', true);       // no kinds argument = the old call
   setHooksTrusted('u-legacy', 'hookedclaude', true);
+  setHooksTrusted('u-legacy', 'hookedcodex', true);
   const d = buildUserPluginDelivery('u-legacy', { nativeEnabled: true });
   assert.ok(!d.native.includes('monitorsonly'), 'an old grant never covers monitors');
-  assert.ok(d.native.includes('hookedclaude'), 'hooks-only plugins keep working with their old grant');
-  const row = listPluginsForTrust('u-legacy').plugins.find((p) => p.name === 'monitorsonly');
+  // A Claude-layout package would now be loaded by the SDK itself, which the old
+  // grant never knew about: it asks once more (fail closed).
+  assert.ok(!d.native.includes('hookedclaude'));
+  assert.ok(d.translated.includes('hookedcodex'), 'a Codex layout never reaches the SDK, so its old hooks-only grant still covers it');
+  const rows = Object.fromEntries(listPluginsForTrust('u-legacy').plugins.map((p) => [p.name, p]));
+  assert.equal(rows.monitorsonly.trustOutdated, true);
+  assert.equal(rows.hookedclaude.trustOutdated, true);
+  assert.deepEqual(rows.hookedclaude.trustOutdatedKinds, ['sdk']);
+  assert.deepEqual(rows.monitorsonly.trustOutdatedKinds.sort(), ['monitors', 'sdk']);
+});
+
+test('a grant covers the delivery mode: translated -> native needs a new grant', () => {
+  // The same plugin, first as a Codex layout (command hooks, translated)…
+  makePlugin('switcher', { vendor: 'codex', hooks: true });
+  reloadPlugins();
+  enable('u-switch', 'switcher');
+  trustAs('u-switch', 'switcher');
+  assert.deepEqual(buildUserPluginDelivery('u-switch', { nativeEnabled: true }).translated, ['switcher']);
+  // …then the update moves it to the Claude layout with the SAME hooks.
+  fs.rmSync(path.join(pluginDir, 'switcher', '.codex-plugin'), { recursive: true, force: true });
+  fs.mkdirSync(path.join(pluginDir, 'switcher', '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(pluginDir, 'switcher', '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'switcher', version: '2.0.0' }), 'utf8');
+  reloadPlugins();
+  const d = buildUserPluginDelivery('u-switch', { nativeEnabled: true });
+  assert.deepEqual(d.sdkPlugins, [], 'native loading runs more handler types than translation did');
+  const row = listPluginsForTrust('u-switch').plugins.find((p) => p.name === 'switcher');
   assert.equal(row.trustOutdated, true);
+  assert.deepEqual(row.trustOutdatedKinds, ['sdk']);
+  trustAs('u-switch', 'switcher');
+  assert.deepEqual(buildUserPluginDelivery('u-switch', { nativeEnabled: true }).native, ['switcher']);
+});
+
+test('a plugin that LOST a kind stays trusted (the grant is a superset)', () => {
+  enable('u-lost', 'growing');
+  trustAs('u-lost', 'growing');           // growing declares hooks + monitors at this point
+  fs.rmSync(path.join(pluginDir, 'growing', 'monitors'), { recursive: true, force: true });
+  reloadPlugins();
+  assert.deepEqual(buildUserPluginDelivery('u-lost', { nativeEnabled: true }).native, ['growing']);
+  assert.equal(listPluginsForTrust('u-lost').plugins.find((p) => p.name === 'growing').trustOutdated, false);
+});
+
+test('a grant is refused when the plugin changed after the client looked (409), never larger than shown', () => {
+  enable('u-shown', 'monitorsonly');
+  const refused = setPluginHookTrust('u-shown', 'monitorsonly', true, {
+    listPlugins: (uid) => listPluginsForTrust(uid).plugins, shownKinds: ['hooks'],
+  });
+  assert.equal(refused.status, 409);
+  assert.match(refused.error, /monitors/);
+  assert.equal(buildUserPluginDelivery('u-shown', { nativeEnabled: true }).native.includes('monitorsonly'), false);
+  // What the client really displayed is accepted; an older client (no list) is too.
+  assert.equal(trustAs('u-shown', 'monitorsonly', { shownKinds: ['monitors'] }).ok, true);
+  enable('u-old-client', 'lsponly');
+  assert.equal(trustAs('u-old-client', 'lsponly').ok, true);
 });
 
 test('a trusted plugin with nothing to translate is not listed as translated (native off)', () => {
@@ -222,7 +275,7 @@ test('a trusted plugin with nothing to translate is not listed as translated (na
   }
   // …while one with real command hooks still is.
   enable('u-off-hooked', 'hookedclaude');
-  setHooksTrusted('u-off-hooked', 'hookedclaude', true);
+  trustAs('u-off-hooked', 'hookedclaude');
   assert.deepEqual(buildUserPluginDelivery('u-off-hooked', { nativeEnabled: false }).translated, ['hookedclaude']);
 });
 
@@ -272,7 +325,7 @@ for (const name of ['unsupportedhook', 'httphook', 'inlinehook']) {
 
 test('a trusted plugin with hooks goes native, and is not also translated', () => {
   enable('u3', 'hookedclaude');
-  setHooksTrusted('u3', 'hookedclaude', true);
+  trustAs('u3', 'hookedclaude');
   const d = buildUserPluginDelivery('u3', { nativeEnabled: true });
   assert.deepEqual(d.native, ['hookedclaude']);
   assert.deepEqual(d.hooks, {}, 'running both mechanisms would fire every hook twice');
@@ -281,7 +334,7 @@ test('a trusted plugin with hooks goes native, and is not also translated', () =
 
 test('with native off, a trusted plugin falls back to translated hooks', () => {
   enable('u4', 'hookedclaude');
-  setHooksTrusted('u4', 'hookedclaude', true);
+  trustAs('u4', 'hookedclaude');
   const d = buildUserPluginDelivery('u4', { nativeEnabled: false });
   assert.deepEqual(d.sdkPlugins, []);
   assert.deepEqual(Object.keys(d.hooks), ['PreToolUse']);
@@ -290,7 +343,7 @@ test('with native off, a trusted plugin falls back to translated hooks', () => {
 
 test('a Codex-layout plugin is never handed over — the SDK cannot read it', () => {
   enable('u5', 'hookedcodex');
-  setHooksTrusted('u5', 'hookedcodex', true);
+  trustAs('u5', 'hookedcodex');
   const d = buildUserPluginDelivery('u5', { nativeEnabled: true });
   assert.deepEqual(d.sdkPlugins, []);
   // It still gets its hooks, through translation — the fallback covers it.

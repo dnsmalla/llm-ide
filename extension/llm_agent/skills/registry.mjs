@@ -148,14 +148,30 @@ export function reloadPlugins() {
  * mysteriously reset. A grant with no record reads as hooks-only.
  */
 export function trustStatusFor(p, trustedNames, trustedKinds) {
-  if (!trustedNames.has(p.name)) return { trusted: false, outdated: false };
+  if (!trustedNames.has(p.name)) return { trusted: false, outdated: false, missing: [] };
   const recorded = trustedKinds.get(p.name) || new Set(['hooks']);
-  const current = new Set(Array.isArray(p.executableKinds) ? p.executableKinds : []);
-  if (Array.isArray(p.hooks) && p.hooks.length > 0) current.add('hooks');
-  for (const kind of current) {
-    if (!recorded.has(kind)) return { trusted: false, outdated: true };
-  }
-  return { trusted: true, outdated: false };
+  const current = currentTrustKinds(p);
+  const missing = [...current].filter((kind) => !recorded.has(kind));
+  return missing.length
+    ? { trusted: false, outdated: true, missing }
+    : { trusted: true, outdated: false, missing: [] };
+}
+
+/**
+ * What a grant must cover for `p` as it is now: its executable kinds, plus the
+ * internal `sdk` marker when the Agent SDK would load the package itself. `sdk`
+ * is not a component the user sees; it records the DELIVERY MODE, because a
+ * package that moves from the translated path (command hooks only, bounded) to
+ * native loading (every handler type, JS modules) keeps the same kinds but
+ * gains capability.
+ */
+export function currentTrustKinds(p) {
+  const kinds = new Set(Array.isArray(p.executableKinds) ? p.executableKinds : []);
+  if (Array.isArray(p.hooks) && p.hooks.length > 0) kinds.add('hooks');
+  const sdkLoads = p.format === 'claude'
+    && typeof p.manifestRel === 'string' && p.manifestRel.startsWith('.claude-plugin');
+  if (sdkLoads && kinds.size > 0) kinds.add('sdk');
+  return kinds;
 }
 
 /**
@@ -377,6 +393,8 @@ export function listInstalledPlugins(userId) {
       // Effective trust: a grant that no longer covers the plugin reads untrusted.
       hooksTrusted: trustStatusFor(p, grantedNames, grantedKinds).trusted,
       trustOutdated: trustStatusFor(p, grantedNames, grantedKinds).outdated,
+      // Only the kinds the old grant did not cover, so the UI names what is NEW.
+      trustOutdatedKinds: trustStatusFor(p, grantedNames, grantedKinds).missing,
       nativeDelivery: nativeNames.has(p.name),
       mcpServerCount: Array.isArray(p.mcpServers) ? p.mcpServers.length : 0,
     });
