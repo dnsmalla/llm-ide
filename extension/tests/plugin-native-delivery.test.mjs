@@ -80,6 +80,19 @@ fs.writeFileSync(path.join(pluginDir, 'inlinelsp', '.claude-plugin', 'plugin.jso
 makePlugin('bincontent');
 fs.mkdirSync(path.join(pluginDir, 'bincontent', 'bin'), { recursive: true });
 fs.writeFileSync(path.join(pluginDir, 'bincontent', 'bin', 'tool'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+makePlugin('modulesonly');
+fs.mkdirSync(path.join(pluginDir, 'modulesonly', 'hooks'), { recursive: true });
+fs.writeFileSync(path.join(pluginDir, 'modulesonly', 'hooks', 'hooks.json'),
+  JSON.stringify({ hooks: {}, modules: ['./h.mjs'] }), 'utf8');
+makePlugin('expmonitors');
+fs.writeFileSync(path.join(pluginDir, 'expmonitors', '.claude-plugin', 'plugin.json'), JSON.stringify({
+  name: 'expmonitors', version: '1.0.0',
+  experimental: { monitors: [{ name: 'w', command: 'echo hi', description: 'x', when: 'always' }] },
+}), 'utf8');
+makePlugin('codexmonitors', { vendor: 'codex' });
+fs.mkdirSync(path.join(pluginDir, 'codexmonitors', 'monitors'), { recursive: true });
+fs.writeFileSync(path.join(pluginDir, 'codexmonitors', 'monitors', 'monitors.json'),
+  JSON.stringify([{ name: 'w', command: 'echo hi', description: 'x', when: 'always' }]), 'utf8');
 makePlugin('emptymonitors');
 fs.mkdirSync(path.join(pluginDir, 'emptymonitors', 'monitors'), { recursive: true });
 fs.writeFileSync(path.join(pluginDir, 'emptymonitors', 'monitors', 'monitors.json'), '[]', 'utf8');
@@ -128,7 +141,7 @@ test('an untrusted plugin with hooks is NOT handed over — the SDK would run th
   assert.deepEqual(d.hooks, {}, 'and it must not run through translation either');
 });
 
-for (const name of ['monitorsonly', 'lsponly', 'inlinelsp', 'bincontent', 'brokenmonitors']) {
+for (const name of ['monitorsonly', 'lsponly', 'inlinelsp', 'bincontent', 'brokenmonitors', 'modulesonly', 'expmonitors']) {
   test(`'${name}': an executable component beyond hooks needs trust before the SDK loads it`, () => {
     enable(`u-${name}`, name);
     assert.deepEqual(buildUserPluginDelivery(`u-${name}`, { nativeEnabled: true }).sdkPlugins, [],
@@ -148,6 +161,11 @@ test('the plugin list names WHICH executable components a plugin declares', asyn
   assert.deepEqual(byName.hookedclaude.executableKinds, ['hooks']);
   assert.deepEqual(byName.plainclaude.executableKinds, []);
   assert.equal(byName.monitorsonly.declaresHooks, true, 'wire flag means ANY executable component');
+  assert.deepEqual(byName.expmonitors.executableKinds, ['monitors'], 'experimental.monitors is what the SDK reads');
+  assert.deepEqual(byName.modulesonly.executableKinds, ['hooks'], 'hooks.json modules are plugin code');
+  // The SDK never loads a Codex-layout package, so monitors there are inert and
+  // must not be claimed (or gated) as if the agent engine would run them.
+  assert.deepEqual(byName.codexmonitors.executableKinds, []);
 });
 
 for (const name of ['emptyhooks', 'emptyinline', 'emptymonitors']) {

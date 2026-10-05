@@ -118,7 +118,8 @@ function validateClaudeManifest(raw) {
     // honours both, so their mere presence has to reach the trust gate.
     declares: {
       hooks: hasContent(raw.hooks),
-      monitors: hasContent(raw.monitors),
+      // The SDK reads `experimental.monitors ?? monitors`.
+      monitors: hasContent(raw.experimental?.monitors ?? raw.monitors),
       lsp: hasContent(raw.lspServers),
     },
   };
@@ -453,8 +454,14 @@ function parseHookDeclarations(path, pluginDir) {
   try { parsed = JSON.parse(raw); }
   catch (err) { return { hooks: [], declared: 1, notes: [`hooks.json: parse: ${err.message}`] }; }
   const events = parsed?.hooks;
-  if (!events || typeof events !== 'object' || Array.isArray(events)) return { hooks: [], declared: 0, notes };
-  let declared = 0;
+  // `modules` names JS hooks modules the SDK loads into a vm and runs — plugin
+  // code, so they count as declared hooks even though nothing here can run them.
+  const moduleCount = hasContent(parsed?.modules)
+    ? (Array.isArray(parsed.modules) ? parsed.modules.length : Object.keys(parsed.modules).length || 1)
+    : 0;
+  if (moduleCount > 0) notes.push('modules: JS hook modules are run only by the agent engine, after you trust this plugin');
+  if (!events || typeof events !== 'object' || Array.isArray(events)) return { hooks: [], declared: moduleCount, notes };
+  let declared = moduleCount;
   for (const matchers of Object.values(events)) {
     for (const entry of Array.isArray(matchers) ? matchers : []) {
       declared += Array.isArray(entry?.hooks) ? entry.hooks.length : 0;
@@ -722,9 +729,15 @@ function loadOnePlugin(dir) {
   const executableKinds = [];
   if (format === 'claude') {
     if (manifestDeclares.hooks) executableKinds.push('hooks');
-    if (manifestDeclares.monitors || jsonFileDeclares(join(dir, 'monitors', 'monitors.json'))) executableKinds.push('monitors');
-    if (manifestDeclares.lsp || jsonFileDeclares(join(dir, '.lsp.json'))) executableKinds.push('lsp');
-    if (binDeclares(dir)) executableKinds.push('bin');
+    // Monitors, LSP servers and bin/ are run by the SDK only, and the SDK reads
+    // only `.claude-plugin` packages — a `.codex-plugin` one never reaches it
+    // (the translated path runs command hooks alone), so claiming them there
+    // would gate and promise something that never happens.
+    if (manifestRel.startsWith('.claude-plugin')) {
+      if (manifestDeclares.monitors || jsonFileDeclares(join(dir, 'monitors', 'monitors.json'))) executableKinds.push('monitors');
+      if (manifestDeclares.lsp || jsonFileDeclares(join(dir, '.lsp.json'))) executableKinds.push('lsp');
+      if (binDeclares(dir)) executableKinds.push('bin');
+    }
     for (const rel of ['themes', 'output-styles', 'monitors', 'workflows', 'bin', '.lsp.json', 'settings.json']) {
       if (existsSync(join(dir, rel))) unsupportedComponents.push(rel);
     }
