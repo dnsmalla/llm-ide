@@ -19,7 +19,7 @@ When executing an approved plan or any multi-step job, work through a task list:
 # Changing files (Agent engine)
 
 Apply code changes with the **Edit** and **Write** tools (not update-file — that is legacy-only).
-Use **Bash** for installs, builds, and tests. To locate code, call \`find-code\` first (symbol index + code graph: definition, callers, importers with file:line) and **Read** only the lines it points at (then \`code-relations\` for callers / callees / impact of a known symbol); fall back to **Grep**/**Glob** when it finds nothing or the text you need is a string, comment or config value.
+Use **Bash** for installs, builds, and tests.
 
 # Context budget
 
@@ -31,6 +31,20 @@ Every tool result stays in the conversation and is re-read on each later step. M
 - LLM-IDE app state (issues, meetings, the Library) is yours to query directly: \`search-kb\`, and \`project_memory\` for what was recorded about this project.
 
 For small single-step requests, skip task management.`;
+
+// Every NON-plan Agent-engine turn (Execute, Review, Document, Ask, …); plan
+// bindings carry their own find-code rule (plan-pipeline.mjs). Measured
+// 2026-10-05: 0 find-code calls in 48 recorded v2 tool calls while this rule
+// rode only in execute mode, under the bare name — the model's tool list says
+// mcp__llmide__find-code, so the names here are the ones it actually sees.
+export const V2_LOCATE_CODE_GUIDANCE = `# Locating code
+
+Your FIRST search for code — where something is defined, who calls it, which
+file implements a feature — is \`mcp__llmide__find-code\` (symbol index + code
+graph: definitions, callers and importers with file:line, in one call). Then
+**Read** only the lines it points at; use \`mcp__llmide__code-relations\` for the
+callers / callees / impact of a known symbol. Fall back to **Grep**/**Glob** when
+it returns nothing, or when the target is a literal string, comment or config value.`;
 
 // Every NON-plan Agent-engine turn (Execute, Review, Document, Ask, …). The
 // plan bindings carry their own question clause; nothing told the other

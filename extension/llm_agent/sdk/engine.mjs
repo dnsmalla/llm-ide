@@ -51,7 +51,7 @@ import { COMPACT_BASE_PROMPT, compactEnvironmentBlock, compactPromptEnabled } fr
 import { contentHash, emptyDelivered, deliveredFor, commitDelivered, forgetDelivered } from './turn-context.mjs';
 import { usageBaselineFor, recordUsageBaseline, usageDelta } from './usage-baseline.mjs';
 import { buildSessionTaskPromptBlock } from '../runtime/task-session-context.mjs';
-import { V2_EXECUTE_GUIDANCE, V2_QUESTION_GUIDANCE } from '../runtime/execute-guidance.mjs';
+import { V2_EXECUTE_GUIDANCE, V2_LOCATE_CODE_GUIDANCE, V2_QUESTION_GUIDANCE } from '../runtime/execute-guidance.mjs';
 import { buildReadableRoots, buildTrustedRoots, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
 import { expandTilde } from '../../graphkit/memory.mjs';
 import { redactFence } from '../runtime/redaction.mjs';
@@ -571,6 +571,8 @@ export function buildEngineOptions(
   // mid-chat and ride in the turn's message instead; see below.
   appendParts.push(composeSystemContext(agentContext, userId, message, { memory: false, recent: false }));
   if (persona) appendParts.push(persona);
+  // Plan modes get the locate rule from plan-pipeline.mjs.
+  if (!planLike) appendParts.push(V2_LOCATE_CODE_GUIDANCE);
   if (resolvedMode === 'execute') appendParts.push(V2_EXECUTE_GUIDANCE);
   // Plan modes get the same rule from their binding (QUESTION_CLAUSE_AGENT).
   if (!planLike) appendParts.push(V2_QUESTION_GUIDANCE);

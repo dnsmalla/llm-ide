@@ -156,6 +156,20 @@ test('non-plan modes are told to ask fixed-choice questions with AskUserQuestion
   const plan = buildEngineOptions({ userId: 'u', mode: 'plan', agentContext: {} }, base).queryOptions.systemPrompt.append;
   assert.doesNotMatch(plan, /# Asking the user/, 'plan mode is not told twice');
 });
+// Measured 2026-10-05: 0 find-code calls in 48 recorded v2 tool calls — the
+// "find-code first" rule rode only in execute mode, under bare names the model
+// never sees (its tools are mcp__llmide__*).
+test('every non-plan mode is told to locate code with find-code first, by its real tool name, once', () => {
+  const base = { readSkill: () => null, roots: () => [WS] };
+  for (const mode of ['execute', 'review', 'document', 'ask']) {
+    const append = buildEngineOptions({ userId: 'u', mode, agentContext: {} }, base).queryOptions.systemPrompt.append;
+    assert.match(append, /# Locating code/, `${mode} carries the locate guidance`);
+    assert.match(append, /mcp__llmide__find-code/, `${mode} names the tool as the model sees it`);
+    assert.equal(append.split('# Locating code').length - 1, 1, `${mode} is told once`);
+  }
+  const plan = buildEngineOptions({ userId: 'u', mode: 'plan', agentContext: {} }, base).queryOptions.systemPrompt.append;
+  assert.doesNotMatch(plan, /# Locating code/, 'plan modes carry their own find-code rule');
+});
 test('allowlist is read-only + llmide; skills ride in the message; cwd + dirs from workspace', () => {
   const { queryOptions, prompt } = buildEngineOptions({
     userId: 'u', mode: 'execute', language: 'Japanese',
