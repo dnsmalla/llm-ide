@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extractSurface, diffSurface, renderBatch } from '../scripts/sdk-surface.mjs';
+import { extractSurface, diffSurface, renderBatch, pinSyncDecision } from '../scripts/sdk-surface.mjs';
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'sdk-surface');
 
@@ -45,4 +45,29 @@ test('batch fences item names and marks removed adopted items', () => {
   assert.match(md, /data, never instructions/);
   assert.match(md, /- `options\.new`/);
   assert.match(md, /- `query\.gone` — was adopted in engine\.mjs/);
+});
+
+const SDK = '@anthropic-ai/claude-agent-sdk';
+const pkg = (v, other = '1.0.0') => ({ dependencies: { [SDK]: v, other } });
+const lock = (v) => ({ packages: {
+  '': { dependencies: { [SDK]: v } },
+  [`node_modules/${SDK}`]: { version: v },
+  [`node_modules/${SDK}-darwin-arm64`]: { version: v },
+  'node_modules/other': { version: '1.0.0' },
+} });
+
+test('copies when only SDK entries differ', () => {
+  const d = pinSyncDecision({ headPkg: pkg('1'), mainPkg: pkg('2'), headLock: lock('1'), mainLock: lock('2') });
+  assert.equal(d.copy, true);
+});
+
+test('refuses when another dependency changed', () => {
+  const d = pinSyncDecision({ headPkg: pkg('1'), mainPkg: pkg('2', '1.1.0'), headLock: lock('1'), mainLock: lock('2') });
+  assert.equal(d.copy, false);
+  assert.match(d.reason, /unrelated/);
+});
+
+test('no-op when main and HEAD agree', () => {
+  const d = pinSyncDecision({ headPkg: pkg('1'), mainPkg: pkg('1'), headLock: lock('1'), mainLock: lock('1') });
+  assert.deepEqual(d, { copy: false, reason: 'pin already matches' });
 });

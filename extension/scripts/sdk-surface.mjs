@@ -4,6 +4,7 @@
 // passed through (see docs/explanation/claude-linker.md, "Adopt").
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Body of `<header> … \n};` or `\n}` — the declarations are top-level, so
 // their closing brace is the first one at column 0.
@@ -63,4 +64,79 @@ export function renderBatch({ added, removed }, version, ledger) {
     }).join('\n')
     : '(none)';
   return `${out}\n`;
+}
+
+const PKG = '@anthropic-ai/claude-agent-sdk';
+const isSdkLockKey = (k) => k.startsWith(`node_modules/${PKG}`);
+
+// package.json / package-lock.json with every SDK-owned entry removed — what
+// must be identical for main's dependency change to be "the SDK bump only".
+function withoutSdk(pkgJson, lockJson) {
+  const p = structuredClone(pkgJson);
+  delete p.dependencies?.[PKG];
+  const l = structuredClone(lockJson);
+  delete l.packages?.['']?.dependencies?.[PKG];
+  for (const k of Object.keys(l.packages ?? {})) if (isSdkLockKey(k)) delete l.packages[k];
+  return JSON.stringify([p, l]);
+}
+
+export function pinSyncDecision({ headPkg, mainPkg, headLock, mainLock }) {
+  if (JSON.stringify([headPkg, headLock]) === JSON.stringify([mainPkg, mainLock])) {
+    return { copy: false, reason: 'pin already matches' };
+  }
+  if (withoutSdk(headPkg, headLock) !== withoutSdk(mainPkg, mainLock)) {
+    return { copy: false, reason: 'main has unrelated dependency edits' };
+  }
+  return { copy: true, reason: 'SDK pin differs only' };
+}
+
+const EXTENSION_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SDK_DIR = path.join(EXTENSION_DIR, 'node_modules', ...PKG.split('/'));
+const LEDGER = path.join(EXTENSION_DIR, 'llm_agent', 'sdk', 'sdk-surface.json');
+const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
+
+function syncPin(mainRoot) {
+  const files = ['package.json', 'package-lock.json'];
+  const [headPkg, headLock] = files.map((f) => readJson(path.join(EXTENSION_DIR, f)));
+  const [mainPkg, mainLock] = files.map((f) => readJson(path.join(mainRoot, 'extension', f)));
+  const decision = pinSyncDecision({ headPkg, mainPkg, headLock, mainLock });
+  if (decision.copy) {
+    for (const f of files) fs.copyFileSync(path.join(mainRoot, 'extension', f), path.join(EXTENSION_DIR, f));
+  }
+  return decision;
+}
+
+function main(argv) {
+  const [cmd, ...rest] = argv;
+  const flag = (name) => { const i = rest.indexOf(name); return i < 0 ? null : rest[i + 1]; };
+  const surface = extractSurface(SDK_DIR);
+  if (cmd === 'init') {
+    const items = Object.fromEntries(surface.items.map((k) => [k, { status: 'needs-human', reason: 'seed: not yet reviewed' }]));
+    fs.writeFileSync(LEDGER, `${JSON.stringify({ sdkVersion: surface.version, items }, null, 2)}\n`);
+    return 0;
+  }
+  if (cmd !== 'diff' || !flag('--batch')) throw new Error('usage: sdk-surface.mjs diff --batch <file> [--main <root>] | init');
+  const batchFile = path.resolve(flag('--batch'));
+  fs.mkdirSync(path.dirname(batchFile), { recursive: true });
+  if (flag('--main')) {
+    const pin = syncPin(flag('--main'));
+    if (!pin.copy && pin.reason !== 'pin already matches') {
+      fs.writeFileSync(batchFile, `# SDK adoption batch — ${surface.version}\n\nneeds-human: ${pin.reason}. Change nothing.\n`);
+      return 0;
+    }
+  }
+  const ledger = readJson(LEDGER);
+  const diff = diffSurface(surface.items, ledger);
+  if (!diff.added.length && !diff.removed.length) return 3;
+  fs.writeFileSync(batchFile, renderBatch(diff, surface.version, ledger));
+  return 0;
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    process.exitCode = main(process.argv.slice(2));
+  } catch (err) {
+    process.stderr.write(`${err.message}\n`);
+    process.exitCode = 1;
+  }
 }
