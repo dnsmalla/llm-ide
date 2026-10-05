@@ -13,6 +13,7 @@ import SwiftUI
 /// or refresh.
 struct ConnectorDetailView: View {
     @EnvironmentObject private var theme: ThemeStore
+    @Environment(ShellState.self) private var shell
     let api: LlmIdeAPIClient
     let connectorId: String
 
@@ -20,12 +21,19 @@ struct ConnectorDetailView: View {
     @State private var loaded = false
     @State private var loadError: String?
     @State private var busy = false
+    /// An action's failure, kept apart from `loadError` so a failed Remove does
+    /// not replace the whole pane.
+    @State private var actionError: String?
+    @State private var confirmingRemoval = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 Divider()
+                if let actionError {
+                    Text(actionError).foregroundStyle(theme.current.danger).font(.callout)
+                }
                 if !loaded {
                     ProgressView().controlSize(.small)
                 } else if let err = loadError {
@@ -43,6 +51,17 @@ struct ConnectorDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task(id: connectorId) { await load() }
+        .confirmationDialog(
+            LibraryRemoval.connector(id: connectorId, name: entry?.name ?? connectorId).dialogTitle,
+            isPresented: $confirmingRemoval, titleVisibility: .visible
+        ) {
+            Button(LibraryRemoval.connector(id: connectorId, name: "").confirmLabel, role: .destructive) {
+                Task { await remove() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(LibraryRemoval.connector(id: connectorId, name: "").message)
+        }
     }
 
     @ViewBuilder
@@ -88,7 +107,7 @@ struct ConnectorDetailView: View {
     private func actionsRow(_ e: ConnectorCatalogEntry) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
-                Button("Remove", role: .destructive) { Task { await remove() } }
+                Button("Remove", role: .destructive) { confirmingRemoval = true }
                     .disabled(busy || !e.selected)
                 if !e.selected {
                     Text("Not currently added.").font(.caption).foregroundStyle(.secondary)
@@ -117,11 +136,16 @@ struct ConnectorDetailView: View {
     private func remove() async {
         busy = true
         defer { busy = false }
+        actionError = nil
         do {
             try await api.removeConnector(id: connectorId)
-            await load()
+            // Its card is gone from the sidebar: leave the pane, and let the list reload.
+            if case .connector(let selected) = shell.librarySelection, selected == connectorId {
+                shell.librarySelection = nil
+            }
+            shell.markLibraryDirty()
         } catch {
-            loadError = error.localizedDescription
+            actionError = error.localizedDescription
         }
     }
 }

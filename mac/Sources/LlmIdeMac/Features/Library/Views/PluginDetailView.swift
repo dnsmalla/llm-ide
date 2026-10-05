@@ -7,6 +7,7 @@ import SwiftUI
 /// Settings → Plugins.)
 struct PluginDetailView: View {
     @EnvironmentObject private var theme: ThemeStore
+    @Environment(ShellState.self) private var shell
     let api: LlmIdeAPIClient
     let pluginName: String
 
@@ -16,12 +17,20 @@ struct PluginDetailView: View {
     @State private var togglePending = false
     @State private var trustPending = false
     @State private var trustError: String?
+    /// Turning trust ON asks first; turning it off never does.
+    @State private var confirmingTrust = false
+    /// An enable / disable failure, kept apart from `loadError` so it does not
+    /// replace the whole pane.
+    @State private var actionError: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 Divider()
+                if let actionError {
+                    Text(actionError).foregroundStyle(theme.current.danger).font(.callout)
+                }
                 if !loaded {
                     ProgressView().controlSize(.small)
                 } else if let err = loadError {
@@ -42,6 +51,19 @@ struct PluginDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task(id: pluginName) { await load() }
+        // A change made elsewhere must reach this open pane without blanking it.
+        .onChange(of: shell.libraryDirtyToken) { Task { await refresh() } }
+        .confirmationDialog(
+            plugin.map(PluginTrustConfirmation.title) ?? "Trust this plugin?",
+            isPresented: $confirmingTrust, titleVisibility: .visible
+        ) {
+            Button(PluginTrustConfirmation.confirmLabel, role: .destructive) {
+                Task { await setHookTrust(true) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(plugin.map(PluginTrustConfirmation.message) ?? "")
+        }
     }
 
     // MARK: - Header
@@ -195,7 +217,11 @@ struct PluginDetailView: View {
                 if plugin.hookCount > 0 || plugin.declaresHooks {
                     Toggle(isOn: Binding(
                         get: { plugin.hooksTrusted },
-                        set: { newValue in Task { await setHookTrust(newValue) } }
+                        // Granting runs the plugin's code with the app's access: ask
+                        // first. Revoking is one click.
+                        set: { newValue in
+                            if newValue { confirmingTrust = true } else { Task { await setHookTrust(false) } }
+                        }
                     )) {
                         Text(PluginTrustPresentation.trustLabel(plugin))
                     }
@@ -245,14 +271,21 @@ struct PluginDetailView: View {
             _ = try await api.setPluginHookTrust(
                 name: pluginName, trusted: trusted,
                 shownKinds: trusted ? plugin.map(PluginTrustPresentation.shownKinds) : nil)
-            await load()
+            shell.markLibraryDirty()
+            await refresh()
         } catch {
             // A refused grant (the plugin changed since it was shown) must not wipe
             // the pane: reload so the new declaration is on screen, then say why.
             let message = error.localizedDescription
-            await load()
+            await refresh()
             trustError = message
         }
+    }
+
+    /// Re-read without the spinner, so the pane does not flash on every change.
+    private func refresh() async {
+        guard let resp = try? await api.listPlugins() else { return }
+        self.plugin = resp.plugins.first { $0.name == pluginName }
     }
 
     private func load() async {
@@ -271,11 +304,13 @@ struct PluginDetailView: View {
         guard let p = plugin else { return }
         togglePending = true
         defer { togglePending = false }
+        actionError = nil
         do {
             try await api.togglePlugin(name: p.name, enabled: !p.enabled)
-            await load()
+            shell.markLibraryDirty()
+            await refresh()
         } catch {
-            loadError = error.localizedDescription
+            actionError = error.localizedDescription
         }
     }
 

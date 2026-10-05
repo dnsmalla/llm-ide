@@ -47,6 +47,11 @@ struct LibraryView: View {
     /// and refreshed when the user (re-)opens Library. Failures are
     /// silent — the sidebar just shows an empty Plugins section.
     @State private var plugins: [PluginInfo] = []
+    /// Why the plugin list could not be read (server down, …). Without it a failed
+    /// fetch read as "No plugins installed yet" and emptied the list.
+    @State private var pluginsError: String?
+    /// The destructive action waiting for the user's yes.
+    @State private var pendingRemoval: LibraryRemoval?
     @State private var showingGitInstallSheet = false
     @State private var showingClaudeImportSheet = false
     @State private var showingMarketplaceSheet = false
@@ -138,10 +143,27 @@ struct LibraryView: View {
         .onChange(of: shell.libraryDirtyToken) {
             Task {
                 await loadMcpPlugins()
+                await loadConnectors()
                 await loadPlugins()
                 await refreshLlmSources()
                 await loadLlmSourceUpdates(force: false)
             }
+        }
+        // Destructive actions (uninstall / remove) are confirmed first; the row
+        // context menus only set `pendingRemoval`.
+        .confirmationDialog(
+            pendingRemoval?.dialogTitle ?? "",
+            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingRemoval
+        ) { removal in
+            Button(removal.confirmLabel, role: .destructive) {
+                pendingRemoval = nil
+                Task { await perform(removal) }
+            }
+            Button("Cancel", role: .cancel) { pendingRemoval = nil }
+        } message: { removal in
+            Text(removal.message)
         }
         .task { await scanClaudeSources() }
         .task { await scanCodexSources() }
@@ -819,16 +841,27 @@ struct LibraryView: View {
     private var pluginsSection: some View {
         Section {
             if sectionExpanded("plugins").wrappedValue {
+                if let pluginsError {
+                    HStack(spacing: 6) {
+                        Text("Couldn't read the plugin list: \(pluginsError)")
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        Button("Retry") { Task { await loadPlugins() } }.font(.caption)
+                    }
+                    .padding(.vertical, 2)
+                }
                 if plugins.isEmpty {
-                    emptyRow("No plugins installed yet — install from .zip or a Git URL.",
-                             icon: "puzzlepiece.extension")
+                    // Only claim "none" when the list was actually read.
+                    if pluginsError == nil {
+                        emptyRow("No plugins installed yet — install from .zip or a Git URL.",
+                                 icon: "puzzlepiece.extension")
+                    }
                 } else {
                     ForEach(plugins) { p in
                         PluginLibraryRow(plugin: p)
                             .tag(ShellState.LibrarySelection.plugin(p.name))
                             .contextMenu {
                                 Button(role: .destructive) {
-                                    Task { await uninstall(p) }
+                                    pendingRemoval = .plugin(name: p.name, title: p.title)
                                 } label: { Label("Uninstall", systemImage: "trash") }
                             }
                     }
@@ -949,16 +982,29 @@ struct LibraryView: View {
         }
     }
 
-    /// Load installed plugins for the Library → Plugins section.
-    /// Errors are swallowed — the section stays empty on failure.
+    /// Load installed plugins for the Library → Plugins section. A failure keeps
+    /// the last good list and says so, rather than emptying it.
     private func loadPlugins() async {
-        let pluginsResp = try? await api.listPlugins()
-        self.plugins = pluginsResp?.plugins ?? []
+        do {
+            self.plugins = try await api.listPlugins().plugins
+            self.pluginsError = nil
+        } catch {
+            self.pluginsError = error.localizedDescription
+        }
+    }
+
+    /// Run the removal the user just confirmed.
+    private func perform(_ removal: LibraryRemoval) async {
+        switch removal {
+        case .plugin(let name, _):
+            if let plugin = plugins.first(where: { $0.name == name }) { await uninstall(plugin) }
+        case .mcpServer(let id, _): await removePlugin(id)
+        case .connector(let id, _): await removeConnector(id)
+        }
     }
 
     private func refreshPlugins() async {
-        let resp = try? await api.listPlugins()
-        self.plugins = resp?.plugins ?? []
+        await loadPlugins()
         await loadPluginUpdates()
     }
 
@@ -1105,6 +1151,9 @@ struct LibraryView: View {
     private func uninstall(_ plugin: PluginInfo) async {
         do {
             _ = try await api.uninstallPlugin(name: plugin.name)
+            if case .plugin(let selected) = shell.librarySelection, selected == plugin.name {
+                shell.librarySelection = nil
+            }
             await refreshPlugins()
         } catch {
             pluginInstallMessage = error.localizedDescription
@@ -1304,7 +1353,7 @@ struct LibraryView: View {
                         .tag(ShellState.LibrarySelection.mcpPlugin(p.id))
                         .contextMenu {
                             Button(role: .destructive) {
-                                Task { await removePlugin(p.id) }
+                                pendingRemoval = .mcpServer(id: p.id, name: p.name)
                             } label: { Label("Remove", systemImage: "trash") }
                         }
                     }
@@ -1474,6 +1523,7 @@ struct LibraryView: View {
         do {
             _ = try await api.consentMcpPlugin(id: id, consented: consented)
             await refreshMcpPlugins()
+            shell.markLibraryDirty()   // an open detail pane shows the old switch otherwise
         } catch {
             mcpPluginMessage = error.localizedDescription
         }
@@ -1483,6 +1533,7 @@ struct LibraryView: View {
         do {
             _ = try await api.toggleMcpPlugin(id: id, enabled: enabled)
             await refreshMcpPlugins()
+            shell.markLibraryDirty()
         } catch {
             mcpPluginMessage = error.localizedDescription
         }
@@ -1521,7 +1572,7 @@ struct LibraryView: View {
                             .tag(ShellState.LibrarySelection.connector(entry.id))
                             .contextMenu {
                                 Button(role: .destructive) {
-                                    Task { await removeConnector(entry.id) }
+                                    pendingRemoval = .connector(id: entry.id, name: entry.name)
                                 } label: { Label("Remove", systemImage: "trash") }
                             }
                     }

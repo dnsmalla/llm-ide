@@ -21,6 +21,10 @@ struct McpPluginDetailView: View {
     @State private var loaded = false
     @State private var loadError: String?
     @State private var busy = false
+    /// An action's failure. Kept apart from `loadError`: a failed toggle must not
+    /// replace the whole pane (the server is fine, the user can retry).
+    @State private var actionError: String?
+    @State private var confirmingRemoval = false
     /// Typed into the inline credential field; never persisted client-side —
     /// it goes straight to the server vault and the field is cleared.
     @State private var credentialDraft = ""
@@ -30,6 +34,9 @@ struct McpPluginDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 Divider()
+                if let actionError {
+                    Text(actionError).foregroundStyle(theme.current.danger).font(.callout)
+                }
                 if !loaded {
                     ProgressView().controlSize(.small)
                 } else if let err = loadError {
@@ -47,6 +54,20 @@ struct McpPluginDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task(id: pluginId) { await load() }
+        // A change made elsewhere (the sidebar row's consent / enable switches)
+        // must reach this open pane too, without blanking it.
+        .onChange(of: shell.libraryDirtyToken) { Task { await refresh() } }
+        .confirmationDialog(
+            LibraryRemoval.mcpServer(id: pluginId, name: plugin?.name ?? pluginId).dialogTitle,
+            isPresented: $confirmingRemoval, titleVisibility: .visible
+        ) {
+            Button(LibraryRemoval.mcpServer(id: pluginId, name: "").confirmLabel, role: .destructive) {
+                Task { await remove() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(LibraryRemoval.mcpServer(id: pluginId, name: "").message)
+        }
     }
 
     @ViewBuilder
@@ -133,7 +154,7 @@ struct McpPluginDetailView: View {
     @ViewBuilder
     private var actionsRow: some View {
         HStack(spacing: 10) {
-            Button("Remove", role: .destructive) { Task { await remove() } }
+            Button("Remove", role: .destructive) { confirmingRemoval = true }
                 .disabled(busy)
         }
     }
@@ -152,38 +173,52 @@ struct McpPluginDetailView: View {
         loaded = true
     }
 
+    /// Re-read without the spinner, so the pane does not flash on every change.
+    private func refresh() async {
+        guard let plugins = try? await api.listMcpPlugins() else { return }
+        self.plugin = plugins.first { $0.id == pluginId }
+    }
+
     private func setConsented(_ consented: Bool) async {
         busy = true
         defer { busy = false }
+        actionError = nil
         do {
             _ = try await api.consentMcpPlugin(id: pluginId, consented: consented)
             shell.markLibraryDirty()
-            await load()
+            await refresh()
         } catch {
-            loadError = error.localizedDescription
+            actionError = error.localizedDescription
         }
     }
 
     private func setEnabled(_ enabled: Bool) async {
         busy = true
         defer { busy = false }
+        actionError = nil
         do {
             _ = try await api.toggleMcpPlugin(id: pluginId, enabled: enabled)
             shell.markLibraryDirty()
-            await load()
+            await refresh()
         } catch {
-            loadError = error.localizedDescription
+            actionError = error.localizedDescription
         }
     }
 
     private func remove() async {
         busy = true
         defer { busy = false }
+        actionError = nil
         do {
             try await api.removeMcpPlugin(id: pluginId)
+            // The server is gone: leave the pane instead of showing live toggles
+            // for something that no longer exists.
+            if case .mcpPlugin(let selected) = shell.librarySelection, selected == pluginId {
+                shell.librarySelection = nil
+            }
             shell.markLibraryDirty()
         } catch {
-            loadError = error.localizedDescription
+            actionError = error.localizedDescription
         }
     }
 
@@ -194,13 +229,14 @@ struct McpPluginDetailView: View {
         guard !value.isEmpty else { return }
         busy = true
         defer { busy = false }
+        actionError = nil
         do {
             try await api.setSecret(key: key, value: value)
             credentialDraft = ""
             shell.markLibraryDirty()
-            await load()
+            await refresh()
         } catch {
-            loadError = error.localizedDescription
+            actionError = error.localizedDescription
         }
     }
 }
