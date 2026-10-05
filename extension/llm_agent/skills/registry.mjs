@@ -336,6 +336,7 @@ export function listInstalledPlugins(userId) {
       // when it is zero.
       hookCount: Array.isArray(p.hooks) ? p.hooks.length : 0,
       declaresHooks: p.declaresHooks === true,
+      executableKinds: Array.isArray(p.executableKinds) ? p.executableKinds : [],
       hookNotes: p.hookNotes || [],
       hooksTrusted: hooksTrusted.has(p.name),
       nativeDelivery: nativeNames.has(p.name),

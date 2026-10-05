@@ -63,6 +63,29 @@ fs.mkdirSync(path.join(pluginDir, 'httphook', 'hooks'), { recursive: true });
 fs.writeFileSync(path.join(pluginDir, 'httphook', 'hooks', 'hooks.json'), JSON.stringify({
   hooks: { PreToolUse: [{ hooks: [{ type: 'http', url: 'http://127.0.0.1:1/x' }] }] },
 }), 'utf8');
+// Beyond hooks the SDK also runs monitors (unsandboxed background scripts),
+// starts LSP servers and puts bin/ on PATH — all of it must wait for trust.
+makePlugin('monitorsonly');
+fs.mkdirSync(path.join(pluginDir, 'monitorsonly', 'monitors'), { recursive: true });
+fs.writeFileSync(path.join(pluginDir, 'monitorsonly', 'monitors', 'monitors.json'),
+  JSON.stringify([{ name: 'watch', command: 'tail -f /dev/null', description: 'x', when: 'always' }]), 'utf8');
+makePlugin('lsponly');
+fs.writeFileSync(path.join(pluginDir, 'lsponly', '.lsp.json'),
+  JSON.stringify({ ts: { command: 'typescript-language-server', extensionToLanguage: { '.ts': 'typescript' } } }), 'utf8');
+makePlugin('inlinelsp');
+fs.writeFileSync(path.join(pluginDir, 'inlinelsp', '.claude-plugin', 'plugin.json'), JSON.stringify({
+  name: 'inlinelsp', version: '1.0.0',
+  lspServers: { ts: { command: 'typescript-language-server', extensionToLanguage: { '.ts': 'typescript' } } },
+}), 'utf8');
+makePlugin('bincontent');
+fs.mkdirSync(path.join(pluginDir, 'bincontent', 'bin'), { recursive: true });
+fs.writeFileSync(path.join(pluginDir, 'bincontent', 'bin', 'tool'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+makePlugin('emptymonitors');
+fs.mkdirSync(path.join(pluginDir, 'emptymonitors', 'monitors'), { recursive: true });
+fs.writeFileSync(path.join(pluginDir, 'emptymonitors', 'monitors', 'monitors.json'), '[]', 'utf8');
+makePlugin('brokenmonitors');
+fs.mkdirSync(path.join(pluginDir, 'brokenmonitors', 'monitors'), { recursive: true });
+fs.writeFileSync(path.join(pluginDir, 'brokenmonitors', 'monitors', 'monitors.json'), '{ not json', 'utf8');
 makePlugin('emptyhooks');
 fs.mkdirSync(path.join(pluginDir, 'emptyhooks', 'hooks'), { recursive: true });
 fs.writeFileSync(path.join(pluginDir, 'emptyhooks', 'hooks', 'hooks.json'), JSON.stringify({ hooks: {} }), 'utf8');
@@ -105,7 +128,29 @@ test('an untrusted plugin with hooks is NOT handed over — the SDK would run th
   assert.deepEqual(d.hooks, {}, 'and it must not run through translation either');
 });
 
-for (const name of ['emptyhooks', 'emptyinline']) {
+for (const name of ['monitorsonly', 'lsponly', 'inlinelsp', 'bincontent', 'brokenmonitors']) {
+  test(`'${name}': an executable component beyond hooks needs trust before the SDK loads it`, () => {
+    enable(`u-${name}`, name);
+    assert.deepEqual(buildUserPluginDelivery(`u-${name}`, { nativeEnabled: true }).sdkPlugins, [],
+      'the SDK would arm/start it on its own');
+    setHooksTrusted(`u-${name}`, name, true);
+    assert.deepEqual(buildUserPluginDelivery(`u-${name}`, { nativeEnabled: true }).native, [name]);
+  });
+}
+
+test('the plugin list names WHICH executable components a plugin declares', async () => {
+  const { listInstalledPlugins } = await import('../llm_agent/skills/registry.mjs');
+  const byName = Object.fromEntries(listInstalledPlugins('u-list').plugins.map((p) => [p.name, p]));
+  assert.deepEqual(byName.monitorsonly.executableKinds, ['monitors']);
+  assert.deepEqual(byName.lsponly.executableKinds, ['lsp']);
+  assert.deepEqual(byName.inlinelsp.executableKinds, ['lsp']);
+  assert.deepEqual(byName.bincontent.executableKinds, ['bin']);
+  assert.deepEqual(byName.hookedclaude.executableKinds, ['hooks']);
+  assert.deepEqual(byName.plainclaude.executableKinds, []);
+  assert.equal(byName.monitorsonly.declaresHooks, true, 'wire flag means ANY executable component');
+});
+
+for (const name of ['emptyhooks', 'emptyinline', 'emptymonitors']) {
   test(`'${name}': a plugin that declares no handler is not stranded behind a trust grant`, () => {
     enable(`u-${name}`, name);
     const d = buildUserPluginDelivery(`u-${name}`, { nativeEnabled: true });

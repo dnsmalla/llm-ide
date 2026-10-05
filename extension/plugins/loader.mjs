@@ -65,6 +65,25 @@ function hasContent(value) {
   return true;
 }
 
+/**
+ * Whether a JSON component file names anything. Fails CLOSED: a file that is
+ * too large or cannot be read/parsed counts as declaring something, because the
+ * SDK may understand what this could not.
+ */
+function jsonFileDeclares(path) {
+  if (!existsSync(path)) return false;
+  try {
+    const raw = readFileSync(path, 'utf8');
+    if (Buffer.byteLength(raw, 'utf8') > MAX_HOOKS_JSON_BYTES) return true;
+    return hasContent(JSON.parse(raw));
+  } catch { return true; }
+}
+
+/** `bin/` puts the plugin's executables on the Bash tool's PATH. */
+function binDeclares(dir) {
+  try { return readdirSync(join(dir, 'bin')).length > 0; } catch { return existsSync(join(dir, 'bin')); }
+}
+
 function validateClaudeManifest(raw) {
   if (!raw || typeof raw !== 'object') return { error: 'manifest is not an object' };
   const { name, version } = raw;
@@ -95,9 +114,13 @@ function validateClaudeManifest(raw) {
       author,
     },
     components,
-    // The manifest can carry hooks inline or point at another file; the SDK
+    // The manifest can carry these inline or point at another file; the SDK
     // honours both, so their mere presence has to reach the trust gate.
-    declaresHooks: hasContent(raw.hooks),
+    declares: {
+      hooks: hasContent(raw.hooks),
+      monitors: hasContent(raw.monitors),
+      lsp: hasContent(raw.lspServers),
+    },
   };
 }
 
@@ -513,7 +536,7 @@ function loadOnePlugin(dir) {
   // Agent SDK can load a `.claude-plugin` package natively; a `.codex-plugin`
   // one it cannot, and `format` alone does not distinguish them.
   let manifestRel = 'plugin.json';
-  let manifestDeclaresHooks = false;
+  let manifestDeclares = { hooks: false, monitors: false, lsp: false };
   if (format === 'llmide') {
     let raw;
     try { raw = JSON.parse(readFileSync(join(dir, 'plugin.json'), 'utf8')); }
@@ -532,7 +555,7 @@ function loadOnePlugin(dir) {
     if (v.error) return { error: v.error };
     manifest = v.manifest;
     components = v.components;
-    manifestDeclaresHooks = v.declaresHooks === true;
+    manifestDeclares = v.declares || manifestDeclares;
   }
   const warnings = [];
 
@@ -689,14 +712,19 @@ function loadOnePlugin(dir) {
   const mcpServers = [];
   const hooks = [];
   const hookNotes = [];
-  // Whether the package declares hooks AT ALL, runnable here or not. The SDK
-  // loads the whole package natively and runs every hook it understands, so
-  // the trust gate must key off this, not off `hooks.length`: a hook the
-  // loader dropped (unsupported event, refused command, inline in plugin.json)
-  // would otherwise read as "no hooks" and run with no trust.
-  let declaresHooks = false;
+  // Which EXECUTABLE components the package declares, runnable here or not. The
+  // SDK loads the whole package natively and runs what it understands, so the
+  // trust gate must key off this, not off `hooks.length`: a hook the loader
+  // dropped (unsupported event, refused command, inline in plugin.json) would
+  // otherwise read as "no hooks" and run with no trust. Beyond hooks the SDK
+  // also arms `monitors` (background scripts, "unsandboxed, same trust tier as
+  // hooks"), starts `.lsp.json` language servers, and puts `bin/` on PATH.
+  const executableKinds = [];
   if (format === 'claude') {
-    declaresHooks = manifestDeclaresHooks;
+    if (manifestDeclares.hooks) executableKinds.push('hooks');
+    if (manifestDeclares.monitors || jsonFileDeclares(join(dir, 'monitors', 'monitors.json'))) executableKinds.push('monitors');
+    if (manifestDeclares.lsp || jsonFileDeclares(join(dir, '.lsp.json'))) executableKinds.push('lsp');
+    if (binDeclares(dir)) executableKinds.push('bin');
     for (const rel of ['themes', 'output-styles', 'monitors', 'workflows', 'bin', '.lsp.json', 'settings.json']) {
       if (existsSync(join(dir, rel))) unsupportedComponents.push(rel);
     }
@@ -705,7 +733,7 @@ function loadOnePlugin(dir) {
       const parsed = parseHookDeclarations(join(dir, 'hooks', 'hooks.json'), dir);
       // An empty hooks.json declares nothing, so it must not demand a trust
       // grant the UI could never collect.
-      if (parsed.declared > 0) declaresHooks = true;
+      if (parsed.declared > 0 && !executableKinds.includes('hooks')) executableKinds.unshift('hooks');
       hooks.push(...parsed.hooks);
       hookNotes.push(...parsed.notes);
     }
@@ -736,7 +764,10 @@ function loadOnePlugin(dir) {
       mcpServers,
       hooks,
       hookNotes,
-      declaresHooks,
+      executableKinds,
+      // Wire name kept for the Mac client: true when ANY executable component
+      // is declared, not only hooks (see `executableKinds`).
+      declaresHooks: executableKinds.length > 0,
     },
     warnings,
   };
