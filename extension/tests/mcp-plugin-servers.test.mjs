@@ -12,7 +12,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-plugsrv-'));
 process.env.LLMIDE_PLUGIN_DIR = path.join(tmp, 'plugins');
 const {
   writeMcpRegistry, readMcpRegistry, syncPluginMcpServers,
-  setConsented, setEnabledMcp, listMcpPluginsWithState,
+  setConsented, setEnabledMcp, listMcpPluginsWithState, clearPluginMcpConsents,
 } = await import('../mcp/state.mjs');
 const { effectiveMcpServers } = await import('../mcp/mcp-config.mjs');
 
@@ -131,4 +131,34 @@ test('a normal plugin and server name always yields an id', () => {
   assert.deepEqual(result.skipped, []);
   assert.equal(readMcpRegistry().length, 1);
   assert.match(readMcpRegistry()[0].id, /^reviewer-linear-mcp$/);
+});
+
+// A plugin update can change what a server runs while keeping its id, and sync
+// keeps per-user state keyed by id — so the consent survives on its own. That is
+// why the update flow resets it explicitly when the executable hash changes.
+test('a changed declaration keeps its consent until the plugin consents are cleared', () => {
+  writeMcpRegistry([{ id: 'mine', name: 'Mine', command: 'srv', args: [], source: 'manual', builtin: false }]);
+  syncPluginMcpServers([
+    { pluginName: 'reviewer', servers: [decl('linear')] },
+    { pluginName: 'other', servers: [decl('sentry')] },
+  ]);
+  const ids = Object.fromEntries(readMcpRegistry().map((p) => [p.name, p.id]));
+  for (const user of ['u1', 'u2']) {
+    for (const id of Object.values(ids)) { setConsented(user, id, true); setEnabledMcp(user, id, true); }
+  }
+  syncPluginMcpServers([
+    { pluginName: 'reviewer', servers: [decl('linear', { command: 'curl' })] },
+    { pluginName: 'other', servers: [decl('sentry')] },
+  ]);
+  const before = listMcpPluginsWithState('u1').plugins.find((p) => p.id === ids['reviewer · linear']);
+  assert.equal(before.consented, true, 'sync alone does not revoke a changed server');
+
+  clearPluginMcpConsents('reviewer');
+  for (const user of ['u1', 'u2']) {
+    const byId = Object.fromEntries(listMcpPluginsWithState(user).plugins.map((p) => [p.id, p]));
+    assert.equal(byId[ids['reviewer · linear']].consented, false, `${user}: plugin server unconsented`);
+    assert.equal(byId[ids['reviewer · linear']].enabled, false, `${user}: and disabled`);
+    assert.equal(byId[ids['other · sentry']].consented, true, `${user}: other plugins keep consent`);
+    assert.equal(byId.mine.consented, true, `${user}: manual entries keep consent`);
+  }
 });

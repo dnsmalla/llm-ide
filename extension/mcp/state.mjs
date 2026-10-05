@@ -367,6 +367,30 @@ export function setEnabledMcp(userId, id, enabled) {
   return { enabled: entry.enabled };
 }
 
+/**
+ * Revoke every user's consent (and therefore enable) for the servers one
+ * plugin declares. A plugin update can change what a server runs while its id
+ * stays the same, and sync keeps state keyed by id, so the update flow calls
+ * this when the plugin's executable components changed.
+ */
+export function clearPluginMcpConsents(pluginName) {
+  if (typeof pluginName !== 'string' || !pluginName) return;
+  const ids = new Set(readMcpRegistry()
+    .filter((p) => p.source === 'plugin' && p.pluginName === pluginName).map((p) => p.id));
+  if (!ids.size) return;
+  const st = readState();
+  let touched = false;
+  for (const entry of Object.values(st)) {
+    if (!entry || typeof entry !== 'object') continue;
+    for (const id of ids) {
+      if (!entry[id]) continue;
+      entry[id] = { ...entry[id], consented: false, enabled: false };
+      touched = true;
+    }
+  }
+  if (touched) writeState(st);
+}
+
 export function listMcpPluginsWithState(userId) {
   const st = readState()[userId] || {};
   return {

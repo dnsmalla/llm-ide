@@ -132,6 +132,31 @@ export function setHooksTrusted(userId, pluginName, trusted, kinds) {
 }
 
 /**
+ * Drop hook trust (and its kinds record) for one plugin, for EVERY user. Used
+ * when an update changed the plugin's executable components: what the users
+ * agreed to is no longer what would run. Enable state is kept.
+ */
+export function clearHooksTrustForPlugin(pluginName) {
+  if (typeof pluginName !== 'string' || !pluginName) return;
+  const all = readAll();
+  let touched = false;
+  for (const [userId, entry] of Object.entries(all)) {
+    if (!entry || typeof entry !== 'object') continue;
+    const trusted = Array.isArray(entry.hooksTrusted) ? entry.hooksTrusted : [];
+    const record = entry.hooksTrustedKinds && typeof entry.hooksTrustedKinds === 'object' ? entry.hooksTrustedKinds : {};
+    if (!trusted.includes(pluginName) && !(pluginName in record)) continue;
+    const next = { ...entry, hooksTrusted: trusted.filter((n) => n !== pluginName) };
+    if (!next.hooksTrusted.length) delete next.hooksTrusted;
+    const { [pluginName]: _dropped, ...keptRecord } = record;
+    if (Object.keys(keptRecord).length) next.hooksTrustedKinds = keptRecord;
+    else delete next.hooksTrustedKinds;
+    all[userId] = next;
+    touched = true;
+  }
+  if (touched) writeAll(all);
+}
+
+/**
  * Garbage-collect orphan enable entries — names of plugins that are
  * no longer installed on disk. Called by the runtime after a plugin
  * reload so the state file doesn't accumulate stale entries every
