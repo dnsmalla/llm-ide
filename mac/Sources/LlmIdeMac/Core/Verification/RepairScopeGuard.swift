@@ -153,6 +153,32 @@ struct RepairScopeSnapshot: Equatable {
     }
 }
 
+/// Matching against a protected-path list, with exemption entries.
+public enum ProtectedGlobs {
+    /// Marks an exemption entry in a protected list: `!<glob>` un-protects the
+    /// paths it matches. Only the runner adds one (`LoopEngineConfig.protectedGlobs`,
+    /// which drops any a user stored); a caller that matches entries with plain
+    /// `GlobMatch` sees it as a pattern no real path matches, so it fails closed.
+    public static let exemptionPrefix = "!"
+
+    /// Whether `path` matches a protected glob and no exemption entry.
+    public static func isProtected(_ path: String, by globs: [String]) -> Bool {
+        var isHit = false
+        for glob in globs {
+            if glob.hasPrefix(exemptionPrefix) {
+                let pattern = String(glob.dropFirst(exemptionPrefix.count))
+                // A bare "!" would match everything (GlobMatch treats an empty
+                // pattern as a wildcard) and un-protect the whole tree.
+                guard !pattern.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+                if GlobMatch.matches(path: path, pattern: pattern) { return false }
+            } else if !isHit, GlobMatch.matches(path: path, pattern: glob) {
+                isHit = true
+            }
+        }
+        return isHit
+    }
+}
+
 /// Production guard, driving `git` through `FaultVerifier` — the codebase's
 /// single sanctioned subprocess path (see `ShellFaultVerifier`), so no new code
 /// reaches `/bin/sh` directly.
@@ -232,7 +258,7 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
     /// non-empty scope allowlist (blank rows ignored, as in the runner) does
     /// not cover it. Hashing anything else is wasted work.
     static func canViolate(_ path: String, protectedGlobs: [String], scopeGlobs: [String]) -> Bool {
-        if protectedGlobs.contains(where: { GlobMatch.matches(path: path, pattern: $0) }) { return true }
+        if ProtectedGlobs.isProtected(path, by: protectedGlobs) { return true }
         let scope = scopeGlobs.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         return !scope.isEmpty && !scope.contains { GlobMatch.matches(path: path, pattern: $0) }
     }
@@ -320,9 +346,7 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
             }
         }
         let changed = changedSet.sorted()
-        let violations = changed.filter { path in
-            protectedGlobs.contains { GlobMatch.matches(path: path, pattern: $0) }
-        }
+        let violations = changed.filter { ProtectedGlobs.isProtected($0, by: protectedGlobs) }
         return violations.isEmpty
             ? .clean(changedPaths: changed)
             : .violated(paths: violations, allChangedPaths: changed)

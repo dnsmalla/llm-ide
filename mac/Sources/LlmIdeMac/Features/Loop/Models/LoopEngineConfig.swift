@@ -107,18 +107,21 @@ public struct LoopEngineConfig: Codable, Equatable {
         guard isSelfHealRun else { return self }
         var copy = self
         copy.protectedPathPolicy = .revert
-        let isSdkAdoption = stages.contains {
-            $0.kind == .sdkSurfaceDiff || $0.defaultKey?.hasPrefix("sdk-adopt-") == true
-        }
         let required = LoopStageDetector.selfHealFamilyProtectedGlobs
-            + (isSdkAdoption ? LoopStageDetector.sdkAdoptProtectedGlobs : [])
+            + (LoopStageDetector.isSdkAdoption(stages) ? LoopStageDetector.sdkAdoptProtectedGlobs : [])
         copy.extraProtectedGlobs += required.filter { !extraProtectedGlobs.contains($0) }
         return copy
     }
 
-    /// The full protected set this config enforces.
-    var protectedGlobs: [String] {
-        GitRepairScopeGuard.defaultProtectedGlobs + extraProtectedGlobs
+    /// The full protected set this config enforces. An SDK Adoption run's
+    /// adopted-item tests live in their own directory, which the default
+    /// test globs would otherwise forbid; only that run gets the exemption,
+    /// and a stored `!` entry is dropped so loop.json cannot grant itself one.
+    public var protectedGlobs: [String] {
+        let exempt = LoopStageDetector.isSdkAdoption(stages)
+            ? LoopStageDetector.sdkAdoptTestGlobs.map { ProtectedGlobs.exemptionPrefix + $0 } : []
+        return GitRepairScopeGuard.defaultProtectedGlobs
+            + extraProtectedGlobs.filter { !$0.hasPrefix(ProtectedGlobs.exemptionPrefix) } + exempt
     }
 
     private static func key(for projectId: String) -> String {

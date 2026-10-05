@@ -113,9 +113,32 @@ func runSdkAdoptionLoopChecks() {
     let config = LoopEngineConfig(stages: stages)
     expect(config.isSelfHealRun && config.requiresWorktree, "an sdk-adoption run is Self-Heal family: forced worktree")
     expect(LoopStageDetector.sdkAdoptScopeGlobs == [
-        "extension/llm_agent/sdk/**", "extension/providers/**", "extension/tests/**",
-        "extension/package.json", "extension/package-lock.json",
-    ], "adopt scope is the server linker, its tests and the pin only — not the ledger gate tool")
+        "extension/llm_agent/sdk/**", "extension/providers/**", "extension/tests/sdk-adopt/**",
+    ], "adopt scope is the server linker and the adopted items' test dir only — not existing tests or the pin")
+    // I1: the sdk-adopt test dir is exempt from the default test globs in SDK
+    // Adoption runs only; every other test stays protected.
+    let sdkGlobs = config.protectedGlobs
+    let plainGlobs = LoopEngineConfig(stages: [LoopStage(name: "T", kind: .shellCommand, command: "true", order: 0)])
+        .protectedGlobs
+    let adoptTest = "extension/tests/sdk-adopt/compaction.test.mjs"
+    expect(!ProtectedGlobs.isProtected(adoptTest, by: sdkGlobs)
+               && ProtectedGlobs.isProtected(adoptTest, by: plainGlobs),
+           "extension/tests/sdk-adopt/** is writable in an SDK Adoption run and protected in any other loop")
+    expect(["extension/tests/sdk-surface.test.mjs", "extension/tests/sdk-surface-ledger.test.mjs",
+            "extension/tests/providers.test.mjs", "extension/package.json"]
+               .allSatisfy { ProtectedGlobs.isProtected($0, by: sdkGlobs) },
+           "existing tests and package.json stay protected in an SDK Adoption run")
+    var sneaky = LoopEngineConfig(stages: [LoopStage(name: "T", kind: .shellCommand, command: "true", order: 0)])
+    sneaky.extraProtectedGlobs = ["!**", "!", "!extension/tests/**"]
+    expect(ProtectedGlobs.isProtected("extension/tests/x.test.mjs", by: sneaky.protectedGlobs)
+               && ProtectedGlobs.isProtected("Makefile", by: ["Makefile", "!"]),
+           "a stored or bare \"!\" entry cannot grant itself an exemption")
+    // I3: the agent's own sandbox code sits inside the in-scope linker dir.
+    let familyCheck = config.enforcingFamilyProtection().protectedGlobs
+    expect(["extension/llm_agent/sdk/loop-agent.mjs", "extension/llm_agent/sdk/subprocess-env.mjs",
+            "extension/llm_agent/sdk/updater.mjs"].allSatisfy { ProtectedGlobs.isProtected($0, by: familyCheck) }
+               && !ProtectedGlobs.isProtected("extension/llm_agent/sdk/engine.mjs", by: familyCheck),
+           "an SDK Adoption run protects the agent's loop, env scrubbing and updater, not the rest of the linker")
     expect(LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.sdkAdoption,
                                           gitRoot: FileManager.default.temporaryDirectory).isEmpty,
            "sdk-adoption exists only on the LLM-IDE checkout")

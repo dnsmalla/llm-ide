@@ -2161,7 +2161,7 @@ final class LoopEngineRunner: ObservableObject {
                                        scopeGlobs: [String]) -> [String] {
         let outOfScope = Set(outOfScopePaths(paths, scopeGlobs: scopeGlobs))
         return paths.filter { path in
-            outOfScope.contains(path) || protectedGlobs.contains { GlobMatch.matches(path: path, pattern: $0) }
+            outOfScope.contains(path) || ProtectedGlobs.isProtected(path, by: protectedGlobs)
         }
     }
 
