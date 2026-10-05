@@ -31,7 +31,7 @@ export function extractSurface(sdkDir) {
     options: topLevelNames(block(sdk, 'export declare type Options = {'), /^ {4}([A-Za-z_$][\w$]*)\??:/gm),
     messages: union.split('|').map((s) => s.trim()).filter(Boolean),
     query: topLevelNames(block(sdk, 'export declare interface Query '), /^ {4}([A-Za-z_$][\w$]*)\(/gm),
-    tools: toolUnion.split('|').map((s) => s.trim()).filter(Boolean),
+    tools: toolUnion.split('|').map((s) => s.trim()).filter((s) => s.endsWith('Input')),
   };
   const items = [];
   for (const [category, names] of Object.entries(categories)) {

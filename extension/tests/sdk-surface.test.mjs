@@ -21,11 +21,15 @@ test('extracts top-level options, message members, query methods and tools', () 
 
 test('throws when a category is empty', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-surface-'));
-  fs.copyFileSync(path.join(FIXTURE, 'package.json'), path.join(dir, 'package.json'));
-  fs.copyFileSync(path.join(FIXTURE, 'sdk-tools.d.ts'), path.join(dir, 'sdk-tools.d.ts'));
-  fs.writeFileSync(path.join(dir, 'sdk.d.ts'),
-    fs.readFileSync(path.join(FIXTURE, 'sdk.d.ts'), 'utf8').replace('type Options =', 'type Opts ='));
-  assert.throws(() => extractSurface(dir), /no options found/);
+  try {
+    fs.copyFileSync(path.join(FIXTURE, 'package.json'), path.join(dir, 'package.json'));
+    fs.copyFileSync(path.join(FIXTURE, 'sdk-tools.d.ts'), path.join(dir, 'sdk-tools.d.ts'));
+    fs.writeFileSync(path.join(dir, 'sdk.d.ts'),
+      fs.readFileSync(path.join(FIXTURE, 'sdk.d.ts'), 'utf8').replace('type Options =', 'type Opts ='));
+    assert.throws(() => extractSurface(dir), /no options found/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('diff reports added and removed keys', () => {

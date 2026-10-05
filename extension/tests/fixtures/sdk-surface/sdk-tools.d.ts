@@ -1,3 +1,4 @@
 export type ToolInputSchemas =
   | BashInput
-  | GrepInput;
+  | GrepInput
+  | ToolOutputSchemas;
