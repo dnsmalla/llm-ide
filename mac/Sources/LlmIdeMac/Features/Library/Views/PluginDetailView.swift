@@ -175,15 +175,17 @@ struct PluginDetailView: View {
     /// give — the warning says exactly what turning it on means.
     @ViewBuilder
     private func hooksBlock(_ plugin: PluginInfo) -> some View {
-        if plugin.hookCount > 0 || !plugin.hookNotes.isEmpty {
+        if plugin.hookCount > 0 || plugin.declaresHooks || !plugin.hookNotes.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Hooks").font(.headline)
-                if plugin.hookCount > 0 {
+                if plugin.hookCount > 0 || plugin.declaresHooks {
                     Toggle(isOn: Binding(
                         get: { plugin.hooksTrusted },
                         set: { newValue in Task { await setHookTrust(newValue) } }
                     )) {
-                        Text("Trust hooks (\(plugin.hookCount) handler\(plugin.hookCount == 1 ? "" : "s"))")
+                        Text(plugin.hookCount > 0
+                             ? "Trust hooks (\(plugin.hookCount) handler\(plugin.hookCount == 1 ? "" : "s"))"
+                             : "Trust hooks")
                     }
                     .toggleStyle(.switch)
                     .disabled(trustPending || !plugin.enabled)

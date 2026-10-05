@@ -295,9 +295,14 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     let unsupportedComponents: [String]
     /// Vendor components present but inactive until a later phase (hooks, MCP).
     let pendingComponents: [String]
-    /// Runnable hook handlers the plugin declares. Zero means there is nothing
-    /// to trust, and the trust toggle stays hidden.
+    /// Runnable hook handlers the plugin declares. Zero with `declaresHooks`
+    /// false means there is nothing to trust, and the trust toggle stays hidden.
     let hookCount: Int
+    /// The package names hook handlers LLM-IDE cannot translate (http, an
+    /// unsupported event, declared inline in plugin.json). The Agent engine
+    /// loads the whole package and would run what it understands, so these
+    /// still need a trust grant even though `hookCount` is zero.
+    let declaresHooks: Bool
     /// What llm-ide will NOT run from this plugin's hooks file (non-command
     /// handler types, unsupported events, refused commands).
     let hookNotes: [String]
@@ -340,7 +345,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         case name, version, displayName, description, author
         case enabled, skillCount, commands, subagents
         case format, unsupportedComponents, pendingComponents
-        case hookCount, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
+        case hookCount, declaresHooks, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -357,6 +362,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         self.unsupportedComponents = try c.decodeIfPresent([String].self, forKey: .unsupportedComponents) ?? []
         self.pendingComponents     = try c.decodeIfPresent([String].self, forKey: .pendingComponents) ?? []
         self.hookCount      = try c.decodeIfPresent(Int.self, forKey: .hookCount) ?? 0
+        self.declaresHooks  = try c.decodeIfPresent(Bool.self, forKey: .declaresHooks) ?? false
         self.hookNotes      = try c.decodeIfPresent([String].self, forKey: .hookNotes) ?? []
         self.hooksTrusted   = try c.decodeIfPresent(Bool.self, forKey: .hooksTrusted) ?? false
         self.mcpServerCount = try c.decodeIfPresent(Int.self, forKey: .mcpServerCount) ?? 0
