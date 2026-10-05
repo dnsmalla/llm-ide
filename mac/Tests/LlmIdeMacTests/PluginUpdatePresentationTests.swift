@@ -65,9 +65,20 @@ import Testing
     #expect(updated.contains("Hooks/MCP of claude-a changed — review and re-approve them."))
     #expect(updated.contains("Restart Claude Code to use the new version there."))
 
+    // Re-fetch of the same version, nothing executable changed: no restart,
+    // no trust notice.
     let latest = try #require(PluginUpdatePresentation.message(
         name: "claude-a", outcome: .updated(from: "1.1.0", to: "1.1.0", trustReset: false)))
     #expect(latest.contains("already the latest"))
+    #expect(!latest.contains("Restart Claude Code"))
+    #expect(!latest.contains("Hooks/MCP"))
+
+    // Same version, but its executables changed: the trust notice must stay.
+    let latestReset = try #require(PluginUpdatePresentation.message(
+        name: "claude-a", outcome: .updated(from: "1.1.0", to: "1.1.0", trustReset: true)))
+    #expect(latestReset.contains("already the latest"))
+    #expect(latestReset.contains("Hooks/MCP of claude-a changed — review and re-approve them."))
+    #expect(!latestReset.contains("Restart Claude Code"))
 
     #expect(PluginUpdatePresentation.message(
         name: "claude-a", outcome: .needsConfirmation(command: "c", sha256: "s")) == nil)
@@ -80,4 +91,21 @@ import Testing
     #expect(entry.tier == "upstream")
     #expect(entry.targetVersion == "1.4.0")
     #expect(entry.source == "marketplace")
+}
+
+@Test func claudeImportNameFollowsServerRule() {
+    #expect(PluginUpdatePresentation.claudeImportName(for: "code-review") == "claude-code-review")
+    // Already prefixed: the server does not double it.
+    #expect(PluginUpdatePresentation.claudeImportName(for: "claude-tools") == "claude-tools")
+}
+
+@Test func updateAllSummaryListsEachFailure() {
+    let summary = PluginUpdatePresentation.updateAllSummary(
+        succeeded: 1,
+        failures: [(name: "claude-b", message: "Claude Code could not update claude-b: exit 1. Nothing was changed.")],
+        trustResets: ["claude-a"], claudeUpdated: true)
+    #expect(summary.contains("Updated 1 of 2."))
+    #expect(summary.contains("Claude Code could not update claude-b: exit 1."))
+    #expect(summary.contains("Hooks/MCP of claude-a changed"))
+    #expect(summary.contains("Restart Claude Code"))
 }

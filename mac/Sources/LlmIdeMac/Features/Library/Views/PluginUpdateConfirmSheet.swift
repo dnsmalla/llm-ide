@@ -22,8 +22,9 @@ struct PluginUpdateConfirmSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Command").font(.callout)
                 ScrollView([.vertical, .horizontal]) {
-                    Text(confirmation.command)
+                    Text(commandText)
                         .font(.system(.callout, design: .monospaced))
+                        .foregroundStyle(hasCommandText ? .primary : .secondary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(8)
@@ -54,5 +55,14 @@ struct PluginUpdateConfirmSheet: View {
         }
         .padding(20)
         .frame(width: 480)
+    }
+
+    private var hasCommandText: Bool {
+        !confirmation.command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// An empty box would read as "nothing to review"; say so explicitly.
+    private var commandText: String {
+        hasCommandText ? confirmation.command : "(no command text provided)"
     }
 }

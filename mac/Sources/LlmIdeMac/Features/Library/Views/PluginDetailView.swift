@@ -28,14 +28,16 @@ struct PluginDetailView: View {
     /// An enable / disable failure, kept apart from `loadError` so it does not
     /// replace the whole pane.
     @State private var actionError: String?
-    /// What the server's update check reports for this plugin (nil = none).
-    @State private var updateEntry: PluginUpdateEntry?
-    @State private var checkingUpdates = false
-    @State private var updatePending = false
-    /// The last check / update result, and whether it was a failure.
-    @State private var updateMessage: String?
-    @State private var updateFailed = false
-    @State private var pendingConfirmation: PluginUpdateConfirmation?
+    /// Update state is app-lifetime (see `PluginUpdateCenter`): a result must
+    /// still be here after the user leaves the Library and comes back.
+    private var updateCenter: PluginUpdateCenter { .shared }
+    private var updateEntry: PluginUpdateEntry? { updateCenter.entry(for: pluginName) }
+    private var checkingUpdates: Bool { updateCenter.checking }
+    private var updatePending: Bool { updateCenter.inFlight.contains(pluginName) }
+    private var updateResult: PluginUpdateCenter.Result? { updateCenter.results[pluginName] }
+    private var oneClick: Bool {
+        PluginUpdatePresentation.supportsOneClickUpdate(serverApiVersion: backend.serverApiVersion)
+    }
 
     var body: some View {
         ScrollView {
@@ -70,12 +72,20 @@ struct PluginDetailView: View {
             await loadUpdate(force: false)
         }
         .onChange(of: backend.serverApiVersion) { Task { await loadUpdate(force: false) } }
-        .sheet(item: $pendingConfirmation) { confirmation in
+        .sheet(item: Binding(
+            get: {
+                guard updateCenter.pendingOrigin == .detail,
+                      let pending = updateCenter.pendingConfirmation,
+                      pending.pluginName == pluginName else { return nil }
+                return pending
+            },
+            set: { updateCenter.pendingConfirmation = $0 }
+        ), onDismiss: { updateCenter.confirmationDismissed() }) { confirmation in
             PluginUpdateConfirmSheet(confirmation: confirmation) {
-                pendingConfirmation = nil
-                Task { await runUpdate(acceptCommand: confirmation.sha256) }
+                let isOneClick = oneClick
+                Task { await updateCenter.accept(confirmation, api: api, oneClick: isOneClick) }
             } onCancel: {
-                pendingConfirmation = nil
+                updateCenter.pendingConfirmation = nil
             }
         }
         // A change made elsewhere must reach this open pane without blanking it.
@@ -182,10 +192,10 @@ struct PluginDetailView: View {
                         .controlSize(.small)
                         .disabled(checkingUpdates || updatePending)
                 }
-                if let updateMessage {
-                    Text(updateMessage)
+                if let updateResult, !updateResult.message.isEmpty {
+                    Text(updateResult.message)
                         .font(.caption)
-                        .foregroundStyle(updateFailed ? theme.current.danger : .secondary)
+                        .foregroundStyle(updateResult.failed ? theme.current.danger : .secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
@@ -196,11 +206,12 @@ struct PluginDetailView: View {
     @ViewBuilder
     private var updateButton: some View {
         let button = Button(PluginUpdatePresentation.buttonTitle(tier: updateEntry?.tier)) {
-            Task { await runUpdate(acceptCommand: nil) }
+            let isOneClick = oneClick
+            Task { await updateCenter.update(name: pluginName, api: api, oneClick: isOneClick, origin: .detail) }
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-        .disabled(checkingUpdates)
+        .disabled(checkingUpdates || updateCenter.isUpdating)
         // Same emphasis as the import sheet's "Update": tinted only when an
         // update is actually reported, plain for a speculative re-fetch.
         if updateEntry != nil {
@@ -389,71 +400,15 @@ struct PluginDetailView: View {
         }
     }
 
-    /// Ask the server whether this plugin has an update. `force` also refreshes
-    /// the marketplace catalogs (Claude only; the Codex scan is local).
+    /// Ask the server whether this plugin has an update. `force` (the button)
+    /// also refreshes the marketplace catalogs and records the outcome;
+    /// otherwise the center's short TTL applies.
     private func loadUpdate(force: Bool) async {
         guard showsUpdateBlock else { return }
-        checkingUpdates = true
-        defer { checkingUpdates = false }
-        do {
-            let check = isClaudeImport
-                ? try await api.claudePluginUpdates(force: force)
-                : try await api.codexPluginUpdateCheck()
-            updateEntry = check.updates.first { $0.name == pluginName }
-            if force {
-                updateFailed = false
-                updateMessage = updateEntry == nil ? "Checked — no update found." : nil
-            }
-        } catch {
-            updateFailed = true
-            updateMessage = "Could not check for updates: \(error.localizedDescription)"
-        }
-    }
-
-    private func runUpdate(acceptCommand: String?) async {
-        updatePending = true
-        updateMessage = nil
-        let finished: (message: String, failed: Bool)?
-        if isClaudeImport {
-            finished = await runClaudeUpdate(acceptCommand: acceptCommand)
+        if force {
+            await updateCenter.check(name: pluginName, api: api, oneClick: oneClick)
         } else {
-            finished = await runCodexReimport()
-        }
-        updatePending = false
-        // nil: the confirmation sheet is open and will run the update again.
-        guard let finished else { return }
-        updateMessage = finished.message
-        updateFailed = finished.failed
-        if !finished.failed {
-            // The Library rows and badges reload through the token.
-            shell.markLibraryDirty()
-            await loadUpdate(force: false)
-        }
-    }
-
-    private func runClaudeUpdate(acceptCommand: String?) async -> (message: String, failed: Bool)? {
-        do {
-            let outcome = try await api.updateClaudePlugin(name: pluginName, acceptCommand: acceptCommand)
-            if case let .needsConfirmation(command, sha256) = outcome {
-                pendingConfirmation = PluginUpdateConfirmation(pluginName: pluginName, command: command, sha256: sha256)
-                return nil
-            }
-            var failed = true
-            if case .updated = outcome { failed = false }
-            return (PluginUpdatePresentation.message(name: pluginName, outcome: outcome) ?? "", failed)
-        } catch {
-            return ("Could not update \(pluginName): \(error.localizedDescription)", true)
-        }
-    }
-
-    private func runCodexReimport() async -> (message: String, failed: Bool)? {
-        guard let entry = updateEntry else { return nil }
-        do {
-            _ = try await api.importCodexPlugin(name: entry.sourcePluginName, source: entry.source ?? "installed")
-            let target: String = entry.targetVersion.map { " to v\($0)" } ?? ""
-            return ("Updated \(pluginName)\(target).", false)
-        } catch {
-            return ("Could not update \(pluginName): \(error.localizedDescription)", true)
+            await updateCenter.refresh(api: api, oneClick: oneClick, force: false)
         }
     }
 

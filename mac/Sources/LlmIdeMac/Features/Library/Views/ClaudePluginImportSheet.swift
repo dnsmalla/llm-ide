@@ -311,20 +311,25 @@ struct ClaudePluginImportSheet: View {
             let (iResp, mResp) = try await (i, m)
             installedPlugins = iResp.plugins
             marketplacePlugins = mResp.plugins
-            // "Update" here is a re-import, so it should appear exactly when the
-            // server's check reports the `reimport` tier. A pre-v60 server has no
-            // such check (the decode fails) and the old comparison stays.
-            if let check = try? await api.claudePluginUpdates(force: false) {
-                let reimport = Set(check.updates.filter { $0.tier == "reimport" }.map(\.name))
-                for idx in installedPlugins.indices {
-                    installedPlugins[idx].reportedReimport =
-                        reimport.contains("claude-" + installedPlugins[idx].name)
-                }
-            }
         } catch {
             self.error = "Could not scan Claude plugins: \(error.localizedDescription)"
         }
         loading = false
+        // Never block the list on the update check (it can run the claude CLI):
+        // show it now, and let the Update buttons follow when the check lands.
+        Task { await applyUpdateCheck() }
+    }
+
+    /// "Update" here is a re-import, so it should appear exactly when the
+    /// server's check reports the `reimport` tier. A pre-v60 server has no such
+    /// check (the decode fails) and the old version comparison stays.
+    private func applyUpdateCheck() async {
+        guard let check = try? await api.claudePluginUpdates(force: false) else { return }
+        let reimport = Set(check.updates.filter { $0.tier == "reimport" }.map(\.name))
+        for idx in installedPlugins.indices {
+            installedPlugins[idx].reportedReimport =
+                reimport.contains(PluginUpdatePresentation.claudeImportName(for: installedPlugins[idx].name))
+        }
     }
 
     private func doImport(name: String, source: String, isUpdate: Bool) async {

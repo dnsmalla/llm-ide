@@ -14,6 +14,13 @@ enum PluginUpdatePresentation {
         (serverApiVersion ?? 0) >= oneClickUpdateApiVersion
     }
 
+    /// The name llm-ide stores a Claude Code plugin under — the server's rule
+    /// (extension/plugins/claude-adapter.mjs): "claude-" is added only when
+    /// the name does not already carry it.
+    static func claudeImportName(for claudeName: String) -> String {
+        claudeName.hasPrefix("claude-") ? claudeName : "claude-" + claudeName
+    }
+
     /// Sidebar badge text, or nil for no badge.
     static func badge(for tier: String?) -> String? {
         isKnownTier(tier) ? "Update" : nil
@@ -62,11 +69,13 @@ enum PluginUpdatePresentation {
     }
 
     private static func updatedMessage(name: String, from: String?, to: String?, trustReset: Bool) -> String {
-        if let from, let to, from == to {
-            return "\(name) is already the latest version (v\(to))."
-        }
         var lines: [String] = []
-        if let from, let to {
+        let unchanged: Bool = from != nil && from == to
+        if unchanged, let to {
+            // A re-fetch of the same version can still change executables
+            // (same version string, new contents); the trust notice must stay.
+            lines.append("\(name) is already the latest version (v\(to)).")
+        } else if let from, let to {
             lines.append("Updated \(name) from v\(from) to v\(to).")
         } else if let to {
             lines.append("Updated \(name) to v\(to).")
@@ -76,7 +85,31 @@ enum PluginUpdatePresentation {
         if trustReset {
             lines.append("Hooks/MCP of \(name) changed — review and re-approve them.")
         }
-        lines.append("Restart Claude Code to use the new version there.")
+        // Claude Code's install did not move when the version is unchanged.
+        if !unchanged {
+            lines.append("Restart Claude Code to use the new version there.")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// The Library alert after "Update all": counts, each failure's own
+    /// message, each trust reset, and the restart note when Claude moved.
+    static func updateAllSummary(succeeded: Int, failures: [(name: String, message: String)],
+                                 trustResets: [String], claudeUpdated: Bool) -> String {
+        var lines: [String] = []
+        if failures.isEmpty {
+            let plural: String = succeeded == 1 ? "" : "s"
+            lines.append("Updated \(succeeded) plugin\(plural).")
+        } else {
+            lines.append("Updated \(succeeded) of \(succeeded + failures.count).")
+            for failure in failures {
+                lines.append(failure.message.isEmpty ? "\(failure.name) failed." : failure.message)
+            }
+        }
+        for name in trustResets {
+            lines.append("Hooks/MCP of \(name) changed — review and re-approve them.")
+        }
+        if claudeUpdated { lines.append("Restart Claude Code to use the new version there.") }
         return lines.joined(separator: "\n")
     }
 
