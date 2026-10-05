@@ -1241,6 +1241,43 @@ test('stream: a turn is refused with SDK_UPDATING while the SDK is being replace
   }
 });
 
+test('stream: a turn is refused with PLUGIN_UPDATING while a plugin update runs', async () => {
+  const { updateClaudePlugin, _resetForTests } = await import('../plugins/claude-update.mjs');
+  _resetForTests();
+  const fsx = await import('node:fs');
+  const osx = await import('node:os');
+  const mnDir = fsx.mkdtempSync(path.join(osx.tmpdir(), 'v2-plugin-updating-'));
+  fsx.mkdirSync(path.join(mnDir, 'claude-gate-demo'));
+  fsx.writeFileSync(path.join(mnDir, 'claude-gate-demo', 'plugin.json'),
+    JSON.stringify({ name: 'claude-gate-demo', origin: 'claude', sourceVersion: '1.0.0', sourcePlugin: 'gate-demo' }));
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const pending = updateClaudePlugin({
+    name: 'claude-gate-demo',
+    deps: {
+      llmidePluginDir: mnDir,
+      reload: () => {}, isTurnActive: () => false, clearMcpConsents: () => {},
+      run: async () => { await gate; return { stdout: '[]', stderr: '' }; },
+    },
+  });
+  try {
+    const user = newUser('v2route-plugin-updating@example.com');
+    const res = makeRes();
+    let ran = false;
+    await handleAgentV2Routes(makeReq({
+      method: 'POST', url: '/agent/v2/stream', user,
+      body: { message: 'hi', mode: 'execute', agentContext: { chatSessionId: 'chat-plugin-updating', workspaceRoot: WS } },
+    }), res, { runTurn: async () => { ran = true; return { result: null, usageTotals: {} }; } });
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.json().error.code, 'PLUGIN_UPDATING');
+    assert.equal(ran, false);
+  } finally {
+    release();
+    await pending.catch(() => {});
+    _resetForTests();
+  }
+});
+
 // The measurement rests on this join: one turn id ties turn_tool_events to
 // usage_ledger.request_id.
 const toolTurnReq = (user, chatSessionId) => makeReq({

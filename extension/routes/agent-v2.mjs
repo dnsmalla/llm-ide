@@ -36,6 +36,7 @@ import { createToolAccounting } from '../llm_agent/sdk/tool-accounting.mjs';
 import { recordToolEvents } from '../kb/tool-events.mjs';
 import { recordTurnComposition } from '../kb/turn-composition.mjs';
 import { isSdkUpdating } from '../llm_agent/sdk/updater.mjs';
+import { isPluginUpdating } from '../plugins/claude-update.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
 import { recordAgentTurnPhase } from '../server/metrics.mjs';
 import { logger } from '../core/logger.mjs';
@@ -240,6 +241,13 @@ async function handleV2Stream(req, res, userId, deps) {
   // SDK code. Refused plainly instead; the update is minutes at most.
   if (isSdkUpdating()) {
     sendJSON(res, 503, { error: { code: 'SDK_UPDATING', message: 'The Claude Agent SDK is being updated — try again in a moment.' } });
+    return true;
+  }
+
+  // Same reasoning for a Claude-plugin update: the plugin tree and hook trust
+  // are being rewritten, so a turn started now could see a half-copied plugin.
+  if (isPluginUpdating()) {
+    sendJSON(res, 503, { error: { code: 'PLUGIN_UPDATING', message: 'A plugin is being updated — try again in a moment.' } });
     return true;
   }
 

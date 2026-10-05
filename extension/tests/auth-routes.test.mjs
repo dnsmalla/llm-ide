@@ -13,6 +13,8 @@ import { tmpdir } from 'node:os';
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
+// Never let a plugin-update route spawn the real `claude` CLI.
+process.env.LLMIDE_CLAUDE_BIN_DISABLED = '1';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tmpDb = path.join(__dirname, '_auth-routes-test.db');
@@ -713,8 +715,46 @@ test('GET /auth/me/claude-plugins/updates detects a newer source version after i
   const update = res.json().updates.find((u) => u.name === 'claude-bridge-update-demo');
   assert.ok(update, 'update is detected');
   assert.equal(update.importedVersion, '1.0.0');
-  assert.equal(update.sourceVersion, '2.0.0');
-  assert.equal(update.source, 'installed');
+  assert.equal(update.claudeVersion, '2.0.0');
+  assert.equal(update.latest, '2.0.0');
+  assert.equal(update.tier, 'upstream');
+  assert.equal(update.pluginId, null);
+});
+
+test('GET /auth/me/claude-plugins/updates returns the new shape (cli:false with the CLI absent)', async () => {
+  const { user } = await registerAndLogin();
+  const res = await callAuth({ method: 'GET', url: '/auth/me/claude-plugins/updates?force=1', user: { id: user.id } });
+  assert.equal(res.statusCode, 200, res._body);
+  const body = res.json();
+  assert.deepEqual(Object.keys(body).sort(), ['checkedAt', 'cli', 'updates']);
+  assert.equal(body.cli, false);
+  assert.ok(!Number.isNaN(Date.parse(body.checkedAt)));
+  assert.ok(Array.isArray(body.updates));
+});
+
+test('POST /auth/me/claude-plugins/update uses requireAdmin (open to any authenticated user, no admin role)', async () => {
+  // requireAdmin only demands an authenticated user (see the "no admin
+  // concept" test above), so a role-less user reaches validation/lookup (404),
+  // never a 403 wall.
+  const { user } = await registerAndLogin();
+  const res = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/update', user: { id: user.id }, body: { name: 'some-plugin' } });
+  assert.equal(res.statusCode, 404, res._body);
+});
+
+test('POST /auth/me/claude-plugins/update validates name and acceptCommand', async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const post = (body) => callAuth({ method: 'POST', url: '/auth/me/claude-plugins/update', user: admin, body });
+  assert.equal((await post({ name: '../x' })).statusCode, 400);
+  assert.equal((await post({})).statusCode, 400);
+  assert.equal((await post({ name: 'some-plugin', acceptCommand: 'not hex!' })).statusCode, 400);
+  assert.equal((await post({ name: 'some-plugin', acceptCommand: 42 })).statusCode, 400);
+});
+
+test('POST /auth/me/claude-plugins/update on an unknown plugin is 404', async () => {
+  const { user } = await registerAndLogin();
+  const res = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/update', user: { id: user.id, role: 'admin' }, body: { name: 'never-imported' } });
+  assert.equal(res.statusCode, 404, res._body);
 });
 
 // ---- Codex Plugin Bridge --------------------------------------------------
@@ -838,8 +878,20 @@ test('GET /auth/me/codex-plugins/updates detects a newer source version after im
   const update = res.json().updates.find((u) => u.name === 'codex-bridge-update-demo');
   assert.ok(update, 'update is detected');
   assert.equal(update.importedVersion, '1.0.0');
-  assert.equal(update.sourceVersion, '2.0.0');
-  assert.equal(update.source, 'installed');
+  assert.equal(update.claudeVersion, '2.0.0');
+  assert.equal(update.latest, '2.0.0');
+  assert.equal(update.tier, 'upstream');
+  assert.equal(update.pluginId, null);
+});
+
+test('GET /auth/me/codex-plugins/updates has the same shape as the Claude one', async () => {
+  const { user } = await registerAndLogin();
+  const res = await callAuth({ method: 'GET', url: '/auth/me/codex-plugins/updates', user: { id: user.id } });
+  assert.equal(res.statusCode, 200, res._body);
+  const body = res.json();
+  assert.deepEqual(Object.keys(body).sort(), ['checkedAt', 'cli', 'updates']);
+  assert.equal(body.cli, false);
+  assert.ok(Array.isArray(body.updates));
 });
 
 // ---- LLM sources -------------------------------------------------------

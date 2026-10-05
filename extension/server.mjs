@@ -251,7 +251,8 @@ const HOST = config.host;
 //     never reach secret paths; a timed-out/aborted run is still metered.
 //     Additive (no bump): a step that repeats itself or fails 5 tool calls in
 //     a row ends 200 with `resultSubtype: 'no_progress'` + `noProgressReason`.
-const SERVER_API_VERSION = 59;
+//   v60 — GET /auth/me/claude-plugins/updates → { cli, checkedAt, updates:[{ name, pluginId, importedVersion, claudeVersion, latest, tier }] }; POST /auth/me/claude-plugins/update { name, acceptCommand? } → 200 { ok, from, to, trustReset } | 409 NEEDS_CONFIRMATION { command, sha256 } | 409 UPDATE_IN_PROGRESS | 409 BUSY | 502 CLI_FAILED | 200 { ok:false, code: REIMPORT_FAILED }; codex …/updates same shape. /agent/v2/stream refuses 503 PLUGIN_UPDATING during an update.
+const SERVER_API_VERSION = 60;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

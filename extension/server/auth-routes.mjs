@@ -220,6 +220,7 @@ export function isAuthRoute(url) {
       || path === '/auth/me/claude-plugins/import'
       || path === '/auth/me/claude-plugins/refresh'
       || path === '/auth/me/claude-plugins/updates'
+      || path === '/auth/me/claude-plugins/update'
       || path === '/auth/me/codex-plugins/installed'
       || path === '/auth/me/codex-plugins/marketplace'
       || path === '/auth/me/codex-plugins/import'
@@ -1207,9 +1208,53 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   }
 
   if (method === 'GET' && url.split('?')[0] === '/auth/me/claude-plugins/updates') {
-    const { checkForUpdates } = await import('../plugins/claude-adapter.mjs');
-    const updates = checkForUpdates();
-    send(res, 200, { updates });
+    const force = new URL(url, 'http://x').searchParams.get('force') === '1';
+    try {
+      const { checkClaudeUpdates } = await import('../plugins/claude-update.mjs');
+      send(res, 200, await checkClaudeUpdates({ force }));
+    } catch (err) {
+      send(res, 500, { error: { code: 'CHECK_FAILED', message: publicMessageFor(err) } });
+    }
+    return;
+  }
+
+  // Update one Claude-imported plugin: Claude Code's own update first, then a
+  // re-import. Admin-only. Statuses are the orchestrator's (see claude-update.mjs).
+  if (method === 'POST' && url === '/auth/me/claude-plugins/update') {
+    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    let body;
+    try { body = await readJson(req, bodyLimit); }
+    catch { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid JSON body' } }); return; }
+    const name = body?.name;
+    const acceptCommand = body?.acceptCommand;
+    if (typeof name !== 'string' || !/^[a-z][a-z0-9-]{1,48}$/.test(name)) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid plugin name' } });
+      return;
+    }
+    if (acceptCommand !== undefined && (typeof acceptCommand !== 'string' || !/^[0-9a-f]{8,128}$/i.test(acceptCommand))) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid acceptCommand' } });
+      return;
+    }
+    const auditBase = { userId: req.user.id, requestId, ip, userAgent: ua, action: 'claude-plugin.update', resource: name };
+    try {
+      const { updateClaudePlugin } = await import('../plugins/claude-update.mjs');
+      const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
+      const { clearPluginMcpConsents } = await import('../mcp/state.mjs');
+      const { activeTurnCount } = await import('../routes/agent-v2.mjs');
+      const { status, body: out } = await updateClaudePlugin({
+        name, acceptCommand,
+        deps: { reload: reloadPlugins, isTurnActive: () => activeTurnCount() > 0, clearMcpConsents: clearPluginMcpConsents },
+      });
+      if (status === 200 && out.ok) {
+        safeAudit(db, { ...auditBase, outcome: 'success', detail: { from: out.from, to: out.to, trustReset: out.trustReset } });
+      } else {
+        safeAudit(db, { ...auditBase, outcome: 'failure', detail: { code: out.code || String(status) } });
+      }
+      send(res, status, out);
+    } catch (err) {
+      safeAudit(db, { ...auditBase, outcome: 'failure', detail: { code: 'UPDATE_FAILED' } });
+      send(res, 500, { error: { code: 'UPDATE_FAILED', message: publicMessageFor(err) } });
+    }
     return;
   }
 
@@ -1290,8 +1335,16 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
 
   if (method === 'GET' && url.split('?')[0] === '/auth/me/codex-plugins/updates') {
     const { checkForUpdates } = await import('../plugins/codex-adapter.mjs');
-    const updates = checkForUpdates();
-    send(res, 200, { updates });
+    // Same shape as the Claude check; Codex has no CLI path, so always upstream.
+    const updates = checkForUpdates().map((u) => ({
+      name: u.name,
+      pluginId: null,
+      importedVersion: u.importedVersion,
+      claudeVersion: u.sourceVersion,
+      latest: u.sourceVersion,
+      tier: 'upstream',
+    }));
+    send(res, 200, { cli: false, checkedAt: new Date().toISOString(), updates });
     return;
   }
 
