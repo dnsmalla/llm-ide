@@ -102,6 +102,12 @@ enum PluginGitInstaller {
         // here is non-fatal — the resulting zip would just be larger.
         try? FileManager.default.removeItem(at: clonedDir.appendingPathComponent(".git"))
 
+        // The server refuses any archive holding a symlink, and a repo often has
+        // harmless ones (`CLAUDE.md -> AGENTS.md`, a committed `.bin`). They are
+        // untrusted content, so drop them here instead of failing the whole install.
+        let dropped = removeSymlinks(in: clonedDir)
+        if dropped > 0 { log.notice("dropped \(dropped) symlink(s) from the clone before zipping") }
+
         // Zip the cloned dir's contents (not the wrapping dir itself —
         // the installer accepts plugin.json at the zip root OR inside
         // a single subdir, so either shape works). Using -r with cd
@@ -162,11 +168,30 @@ enum PluginGitInstaller {
     /// Zip a directory's CONTENTS to `zipURL` — the shape the install endpoint
     /// expects (manifest at the zip root).
     static func zipDirectory(_ directory: URL, to zipURL: URL) async throws {
+        removeSymlinks(in: directory)
         let res = try await runProcess("/usr/bin/zip", args: zipArgs(zipURL), cwd: directory)
         guard res.code == 0 else {
             let stderr = res.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             throw InstallError.zipFailed(stderr.isEmpty ? "zip exited \(res.code)" : stderr)
         }
+    }
+
+    /// Delete every symlink under `directory` and return how many there were.
+    /// The enumerator reports a link without following it, so a link to a folder
+    /// outside the clone is removed, never walked. Only ever called on a temp clone.
+    @discardableResult
+    static func removeSymlinks(in directory: URL) -> Int {
+        let fileManager = FileManager.default
+        guard let walker = fileManager.enumerator(
+            at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey], options: []) else { return 0 }
+        var links: [URL] = []
+        for case let url as URL in walker {
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true {
+                links.append(url)
+            }
+        }
+        for url in links { try? fileManager.removeItem(at: url) }
+        return links.count
     }
 
     // MARK: - Internals

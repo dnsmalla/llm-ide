@@ -34,6 +34,33 @@ struct PluginInstallSafetyTests {
         }
     }
 
+    @Test("a missing plugin path is refused, not waved through")
+    func resolveRefusesMissingPath() throws {
+        let root = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(throws: PluginMarketplace.MarketplaceError.self) {
+            _ = try PluginMarketplace.resolve("plugins/nope", inside: root)
+        }
+    }
+
+    @Test("harmless symlinks are dropped so the install is not refused, and their targets are untouched")
+    func removeSymlinksKeepsRealFiles() throws {
+        let root = try makeTempDir()
+        let outside = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: outside) }
+        try "keep".write(to: root.appendingPathComponent("AGENTS.md"), atomically: true, encoding: .utf8)
+        try "secret".write(to: outside.appendingPathComponent("key"), atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("CLAUDE.md"), withDestinationURL: root.appendingPathComponent("AGENTS.md"))
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("leak"), withDestinationURL: outside)
+        #expect(PluginGitInstaller.removeSymlinks(in: root) == 2)
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("AGENTS.md").path))
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("CLAUDE.md").path))
+        #expect(FileManager.default.fileExists(atPath: outside.appendingPathComponent("key").path),
+                "removing the link must not touch what it pointed at")
+    }
+
     @Test("a real plugin path inside the clone still resolves")
     func resolveAcceptsRealPath() throws {
         let root = try makeTempDir()
@@ -59,7 +86,8 @@ struct PluginInstallSafetyTests {
         let zip = try await PluginMarketplace.package(entry, from: staged)
         #expect(zip.deletingLastPathComponent().standardizedFileURL.path == parent.standardizedFileURL.path)
         #expect(zip.lastPathComponent.hasPrefix("plugin-") && zip.pathExtension == "zip")
-        #expect(!FileManager.default.fileExists(
-            atPath: parent.deletingLastPathComponent().appendingPathComponent("escape.zip").path))
+        // `../../escape.zip` from `parent` would land two levels up.
+        let twoUp = parent.deletingLastPathComponent().deletingLastPathComponent()
+        #expect(!FileManager.default.fileExists(atPath: twoUp.appendingPathComponent("escape.zip").path))
     }
 }

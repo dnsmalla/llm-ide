@@ -173,6 +173,11 @@ enum PluginMarketplace {
         guard candidate.path == base.path || candidate.path.hasPrefix(base.path + "/") else {
             throw MarketplaceError.badManifest("plugin path escapes the repository")
         }
+        // Fail closed on a path that cannot be resolved: `resolvingSymlinksInPath`
+        // leaves a missing path as written, so a link further up would go unseen.
+        guard FileManager.default.fileExists(atPath: candidate.path) else {
+            throw MarketplaceError.badManifest("plugin path not found in the repository")
+        }
         return candidate
     }
 }
