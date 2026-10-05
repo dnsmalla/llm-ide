@@ -244,12 +244,15 @@ struct PluginDetailView: View {
     private func trustExplanation(_ plugin: PluginInfo) -> String {
         guard plugin.hooksTrusted else {
             if plugin.executableKinds.contains(where: { $0 != "hooks" }) {
-                return "Turning this on lets the agent engine run this plugin's \(plugin.executableSummary) with the same access as the app — monitors run outside the sandbox. Leave it off unless you trust the author."
+                let sandbox = plugin.executableKinds.contains("monitors")
+                    ? " Background monitors run outside the sandbox." : ""
+                return "Turning this on lets the agent engine run this plugin's \(plugin.executableSummary) with the same access as the app.\(sandbox) Applies when the agent engine loads the plugin natively. Leave it off unless you trust the author."
             }
             return "Turning this on lets this plugin run commands from its hooks file during a turn. Leave it off unless you trust the author."
         }
+        let beyondHooks = plugin.executableKinds.contains { $0 != "hooks" }
         return plugin.nativeDelivery
-            ? "The agent engine loads this plugin and runs its hooks as its author wrote them, with the same access as the app."
+            ? "The agent engine loads this plugin and runs its \(beyondHooks ? plugin.executableSummary : "hooks") as its author wrote them, with the same access as the app."
             : "LLM-IDE runs this plugin's command hooks during a turn, with the same access as the app."
     }
 

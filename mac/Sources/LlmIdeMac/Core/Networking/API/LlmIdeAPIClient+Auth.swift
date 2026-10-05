@@ -347,8 +347,12 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     /// surface describing this plugin's hooks — one phrasing of the fact,
     /// so two views can't drift apart.
     var hookSummary: String {
-        var bits = ["\(hookCount) handler\(hookCount == 1 ? "" : "s")",
-                    hooksTrusted ? "trusted" : "not trusted"]
+        // A plugin whose only executable parts are monitors / a language server
+        // has no handlers to count; say what it does have.
+        let what = (hookCount == 0 && !executableSummary.isEmpty)
+            ? executableSummary
+            : "\(hookCount) handler\(hookCount == 1 ? "" : "s")"
+        var bits = [what, hooksTrusted ? "trusted" : "not trusted"]
         if !enabled { bits.append("plugin disabled") }
         return bits.joined(separator: " · ")
     }
@@ -358,6 +362,8 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     static func == (lhs: PluginInfo, rhs: PluginInfo) -> Bool {
         lhs.name == rhs.name && lhs.enabled == rhs.enabled
             && lhs.hooksTrusted == rhs.hooksTrusted && lhs.nativeDelivery == rhs.nativeDelivery
+            // A reinstall that ADDS monitors must refresh the label and warning.
+            && lhs.executableKinds == rhs.executableKinds && lhs.declaresHooks == rhs.declaresHooks
     }
 
     enum CodingKeys: String, CodingKey {
