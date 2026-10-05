@@ -3329,10 +3329,13 @@ paths:
       summary: Run one headless, confined agent step for the Mac Loop
       description: >
         The Loop's skill stages, stage repairs and fault repairs. Runs on the
-        Claude Agent SDK with FILE TOOLS ONLY (Read, Glob, Grep, Edit, Write),
-        working directory `repoRoot`, and every path confined to it (symlinks
-        resolved; secret paths such as `.env` and `.git/` refused). No shell,
-        no network, no MCP servers, no plugins, no operator settings. Nothing
+        Claude Agent SDK with FILE TOOLS ONLY (Read, Glob, Grep, Edit, Write)
+        plus one read-only code-graph search, `mcp__llmide__find-code`, served
+        in-process (strict MCP config: no user, project or plugin MCP server
+        can join), working directory `repoRoot`, and every path confined to it
+        (symlinks resolved; secret paths such as `.env` and `.git/` refused).
+        No shell, no network, no plugins, no operator settings. A step that
+        repeats itself or keeps failing is stopped as `no_progress`. Nothing
         is ever parked for approval: a refused tool call is denied and listed
         in `denied`. `repoRoot` must be absolute and either at or below a root
         on the caller's repo allow-list (`/auth/me/repos`) or a linked git

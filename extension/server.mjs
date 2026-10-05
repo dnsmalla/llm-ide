@@ -239,7 +239,8 @@ const HOST = config.host;
 //   v58 — POST /kb/loop/agent-run { message, skills?, repoRoot, language?,
 //     model?, timeoutMs? } → { reply, changedPaths, usage, resolvedSkills,
 //     unresolvedSkills, truncatedSkills, ran, resultSubtype, denied }: the
-//     Loop's headless agent step — file tools only (Read/Glob/Grep/Edit/Write)
+//     Loop's headless agent step — file tools only (Read/Glob/Grep/Edit/Write,
+//     plus the in-process read-only mcp__llmide__find-code)
 //     confined to `repoRoot` (an allow-listed repo or a Loop worktree of one),
 //     no shell/network, never parks an approval. 400 REPO_ROOT_NOT_ALLOWED,
 //     504 AGENT_RUN_TIMEOUT. Replaces the Loop's tool-less /code-assist calls.

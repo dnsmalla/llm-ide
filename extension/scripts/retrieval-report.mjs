@@ -58,7 +58,9 @@ console.log(`\nAvg tokens/turn WITH find-code:    ${tok(s.tokensWithFindCode)}`)
 console.log(`Avg tokens/turn WITHOUT find-code: ${tok(s.tokensWithoutFindCode)}`);
 const push = legacy.byTool.find((r) => r.tool === 'memory_push');
 console.log(`\nLegacy engine: ${legacy.turns} turn(s) with tool events; avg memory_push ${push ? `~${push.avgChars} chars` : 'n/a'} (not in the v2 figures above).`);
-console.log(`\nLoop agent steps: ${loop.turns} step(s) with tool calls; avg tokens per step with tool calls ${tok(loop.tokensWithoutFindCode)}`);
+console.log(`\nLoop agent steps with tool calls: ${loop.turns}; using find-code: ${loop.turnsWithFindCode} (${pct(loop.turnsWithFindCode, loop.turns)}); find-code before Read/Grep: ${loop.findCodeFirstTurns}`);
+console.log(`  Avg tokens/step WITH find-code:    ${tok(loop.tokensWithFindCode)}`);
+console.log(`  Avg tokens/step WITHOUT find-code: ${tok(loop.tokensWithoutFindCode)}`);
 for (const r of loop.byTool) console.log(`  ${r.tool.padEnd(24)} ${String(r.calls).padStart(6)}   ~${r.avgChars} chars`);
 console.log('\nCorrelation, not causation: turns differ in task size. Compare like-for-like modes before concluding.');
 db.close();

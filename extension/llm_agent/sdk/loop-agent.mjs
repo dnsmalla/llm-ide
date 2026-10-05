@@ -10,8 +10,10 @@
 // The ruling this module implements: a Loop agent run is NON-INTERACTIVE and
 // CONFINED.
 //   - File tools only — Read, Glob, Grep, Edit, Write — rooted at the run's
-//     git root (the worktree when one is in use). No shell, no network, no
-//     subagents, no MCP servers, no plugins, no operator settings.
+//     git root (the worktree when one is in use), plus ONE read-only code
+//     search (mcp__llmide__find-code) from an in-process server. No shell, no
+//     network, no subagents, no other MCP server (strictMcpConfig), no
+//     plugins, no operator settings.
 //   - Nothing ever waits for a human: a tool call the confinement refuses is
 //     DENIED, never parked as an approval. The Loop verifies by running its
 //     own stages afterwards.
