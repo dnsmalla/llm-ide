@@ -93,6 +93,10 @@ makePlugin('codexmonitors', { vendor: 'codex' });
 fs.mkdirSync(path.join(pluginDir, 'codexmonitors', 'monitors'), { recursive: true });
 fs.writeFileSync(path.join(pluginDir, 'codexmonitors', 'monitors', 'monitors.json'),
   JSON.stringify([{ name: 'w', command: 'echo hi', description: 'x', when: 'always' }]), 'utf8');
+makePlugin('dotfilebin');
+fs.mkdirSync(path.join(pluginDir, 'dotfilebin', 'bin'), { recursive: true });
+fs.writeFileSync(path.join(pluginDir, 'dotfilebin', 'bin', '.gitkeep'), '', 'utf8');
+fs.writeFileSync(path.join(pluginDir, 'dotfilebin', 'bin', '.DS_Store'), '', 'utf8');
 makePlugin('emptymonitors');
 fs.mkdirSync(path.join(pluginDir, 'emptymonitors', 'monitors'), { recursive: true });
 fs.writeFileSync(path.join(pluginDir, 'emptymonitors', 'monitors', 'monitors.json'), '[]', 'utf8');
@@ -151,6 +155,31 @@ for (const name of ['monitorsonly', 'lsponly', 'inlinelsp', 'bincontent', 'broke
   });
 }
 
+test('a trusted plugin with nothing to translate is not listed as translated (native off)', () => {
+  // lsp / bin / monitors / modules only run in the SDK; with native loading off
+  // nothing runs, and `translated` must not claim otherwise.
+  for (const name of ['monitorsonly', 'lsponly', 'bincontent', 'modulesonly']) {
+    enable(`u-off-${name}`, name);
+    setHooksTrusted(`u-off-${name}`, name, true);
+    const d = buildUserPluginDelivery(`u-off-${name}`, { nativeEnabled: false });
+    assert.deepEqual(d.translated, [], `${name} has no command hooks to translate`);
+    assert.deepEqual(d.sdkPlugins, []);
+  }
+  // …while one with real command hooks still is.
+  enable('u-off-hooked', 'hookedclaude');
+  setHooksTrusted('u-off-hooked', 'hookedclaude', true);
+  assert.deepEqual(buildUserPluginDelivery('u-off-hooked', { nativeEnabled: false }).translated, ['hookedclaude']);
+});
+
+test('the list says whether the agent engine can load a plugin at all', async () => {
+  const { listInstalledPlugins } = await import('../llm_agent/skills/registry.mjs');
+  const byName = Object.fromEntries(listInstalledPlugins('u-list').plugins.map((p) => [p.name, p]));
+  assert.equal(byName.hookedclaude.sdkReadable, true);
+  assert.equal(byName.hookedcodex.sdkReadable, false, 'a Codex layout never reaches the SDK');
+  assert.equal(byName.ownformat.sdkReadable, false);
+  assert.equal(typeof byName.hookedclaude.nativePluginsOn, 'boolean');
+});
+
 test('the plugin list names WHICH executable components a plugin declares', async () => {
   const { listInstalledPlugins } = await import('../llm_agent/skills/registry.mjs');
   const byName = Object.fromEntries(listInstalledPlugins('u-list').plugins.map((p) => [p.name, p]));
@@ -168,7 +197,7 @@ test('the plugin list names WHICH executable components a plugin declares', asyn
   assert.deepEqual(byName.codexmonitors.executableKinds, []);
 });
 
-for (const name of ['emptyhooks', 'emptyinline', 'emptymonitors']) {
+for (const name of ['emptyhooks', 'emptyinline', 'emptymonitors', 'dotfilebin']) {
   test(`'${name}': a plugin that declares no handler is not stranded behind a trust grant`, () => {
     enable(`u-${name}`, name);
     const d = buildUserPluginDelivery(`u-${name}`, { nativeEnabled: true });

@@ -79,9 +79,14 @@ function jsonFileDeclares(path) {
   } catch { return true; }
 }
 
-/** `bin/` puts the plugin's executables on the Bash tool's PATH. */
+/**
+ * `bin/` puts the plugin's executables on the Bash tool's PATH. Dotfiles
+ * (`.gitkeep`, Finder's `.DS_Store`) are not executables, so a bin/ holding only
+ * those must not demand a trust grant.
+ */
 function binDeclares(dir) {
-  try { return readdirSync(join(dir, 'bin')).length > 0; } catch { return existsSync(join(dir, 'bin')); }
+  try { return readdirSync(join(dir, 'bin')).some((name) => !name.startsWith('.')); }
+  catch { return existsSync(join(dir, 'bin')); }
 }
 
 function validateClaudeManifest(raw) {
@@ -462,7 +467,7 @@ function parseHookDeclarations(path, pluginDir) {
   const moduleCount = hasContent(parsed?.modules)
     ? (Array.isArray(parsed.modules) ? parsed.modules.length : Object.keys(parsed.modules).length || 1)
     : 0;
-  if (moduleCount > 0) notes.push('modules: JS hook modules are run only by the agent engine, after you trust this plugin');
+  if (moduleCount > 0) notes.push('modules: JS hook modules run only when the agent engine loads this plugin natively');
   if (!events || typeof events !== 'object' || Array.isArray(events)) return { hooks: [], declared: moduleCount, notes };
   let declared = moduleCount;
   for (const matchers of Object.values(events)) {

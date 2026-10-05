@@ -191,7 +191,10 @@ export function buildUserPluginDelivery(userId, { nativeEnabled = true, cwd, env
       native.push(p.name);
       continue;
     }
-    if (hasHooks && hookTrusted) {
+    // Only a plugin with something to translate counts as translated: a trusted
+    // one whose parts are all lsp/bin/monitors/modules has zero command hooks
+    // here, and listing it would claim something runs when nothing does.
+    if (hooks.length > 0 && hookTrusted) {
       toTranslate.push({ name: p.name, hooks });
       translated.push(p.name);
     }
@@ -305,11 +308,18 @@ export function listInstalledPlugins(userId) {
   const nativeNames = new Set(buildUserPluginDelivery(userId, {
     nativeEnabled: nativePluginsEnabled(userId),
   }).native);
+  // The client cannot tell "native pref off" from "waiting for trust" from
+  // "Codex layout" by `nativeDelivery` alone (false in all three), so say the two
+  // facts that decide whether the agent engine can ever load a plugin.
+  const nativePluginsOn = nativePluginsEnabled(userId);
   const items = [];
   for (const p of pluginRegistry.plugins.values()) {
     items.push({
       name: p.name,
       version: p.version,
+      sdkReadable: p.format === 'claude'
+        && typeof p.manifestRel === 'string' && p.manifestRel.startsWith('.claude-plugin'),
+      nativePluginsOn,
       displayName: p.displayName,
       description: p.description,
       author: p.author,

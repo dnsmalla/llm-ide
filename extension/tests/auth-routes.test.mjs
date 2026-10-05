@@ -1106,6 +1106,30 @@ test('GET /auth/me/mcp-plugins reports `effective` — what a turn would really 
   assert.equal(await effectiveOf(), false);
 });
 
+test('`effective` ignores the reserved `llmide` name (the engine drops such a server)', async () => {
+  const { readMcpRegistry, writeMcpRegistry } = await import('../mcp/state.mjs');
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const saved = readMcpRegistry();
+  try {
+    // An empty registry so the row really gets the id `llmide` (a collision
+    // suffix from an earlier test would silently turn this into a no-op).
+    writeMcpRegistry([]);
+    const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+      body: { command: 'npx', args: ['-y', '@x/mcp'], name: 'llmide' } });
+    assert.equal(added.statusCode, 200, added._body);
+    assert.equal(added.json().plugin.id, 'llmide');
+    await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/consent', user: admin, body: { id: 'llmide', consented: true } });
+    await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/toggle', user: admin, body: { id: 'llmide', enabled: true } });
+    const row = (await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins', user: admin }))
+      .json().plugins.find((p) => p.id === 'llmide');
+    assert.equal(row.enabled && row.consented, true);
+    assert.equal(row.effective, false, 'enabled + consented, yet the engine refuses the name');
+  } finally {
+    writeMcpRegistry(saved);
+  }
+});
+
 test('MCP responses mask a secret carried in the URL (query values, userinfo)', async () => {
   const { user } = await registerAndLogin();
   const admin = { id: user.id, role: 'admin' };

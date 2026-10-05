@@ -1499,10 +1499,19 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     let effectiveIds = null;
     try {
       const { pluginEnabledFor } = await import('../llm_agent/skills/index.mjs');
+      // No `readSecret`: membership never depends on a credential's value (an
+      // empty one only drops the header/env), so decrypting every enabled
+      // server's secret just to build a boolean would be pure exposure.
       effectiveIds = new Set(Object.keys(effectiveMcpServers(req.user.id, {
-        readSecret, pluginEnabled: pluginEnabledFor(req.user.id),
+        pluginEnabled: pluginEnabledFor(req.user.id),
       })));
-    } catch { /* leave `effective` off; the client falls back to enabled && consented */ }
+      // The engine refuses a server named `llmide` (RESERVED_MCP_NAME in
+      // llm_agent/sdk/engine.mjs, which a route should not import for one string).
+      effectiveIds.delete('llmide');
+    } catch (err) {
+      logger?.warn?.(`mcp-plugins: could not compute effective flags: ${err?.message || err}`);
+      // `effective` stays off; the client falls back to enabled && consented.
+    }
     send(res, 200, {
       plugins: plugins.map((p) => ({
         ...p,
