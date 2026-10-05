@@ -163,10 +163,29 @@ struct PluginDetailView: View {
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 ForEach(plugin.unsupportedComponents, id: \.self) { component in
-                    Label("\(component) — unsupported, ignored", systemImage: "minus.circle")
-                        .font(.callout).foregroundStyle(.secondary)
+                    if Self.runsUnderAgentEngine(component, plugin) {
+                        // LLM-IDE ignores it, but the Agent engine loads the whole
+                        // package — "ignored" would be false once it is trusted.
+                        Label("\(component) — run by the agent engine once you trust this plugin",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.callout).foregroundStyle(.orange)
+                    } else {
+                        Label("\(component) — unsupported, ignored", systemImage: "minus.circle")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
                 }
             }
+        }
+    }
+
+    /// Whether `component` (a name from `unsupportedComponents`) is one the
+    /// Agent engine really executes, so the row must not say "ignored".
+    static func runsUnderAgentEngine(_ component: String, _ plugin: PluginInfo) -> Bool {
+        switch component {
+        case "monitors": return plugin.executableKinds.contains("monitors")
+        case ".lsp.json": return plugin.executableKinds.contains("lsp")
+        case "bin": return plugin.executableKinds.contains("bin")
+        default: return false
         }
     }
 
@@ -183,9 +202,7 @@ struct PluginDetailView: View {
                         get: { plugin.hooksTrusted },
                         set: { newValue in Task { await setHookTrust(newValue) } }
                     )) {
-                        Text(plugin.hookCount > 0
-                             ? "Trust hooks (\(plugin.hookCount) handler\(plugin.hookCount == 1 ? "" : "s"))"
-                             : "Trust hooks")
+                        Text(trustLabel(plugin))
                     }
                     .toggleStyle(.switch)
                     .disabled(trustPending || !plugin.enabled)
@@ -214,8 +231,21 @@ struct PluginDetailView: View {
     /// What trusting (or having trusted) this plugin's hooks actually means —
     /// which differs by delivery route, so the copy follows it rather than
     /// describing one mechanism for both.
+    /// The toggle's label names what is being trusted: a plugin that only
+    /// ships background monitors or a language server must not read "hooks".
+    private func trustLabel(_ plugin: PluginInfo) -> String {
+        let beyondHooks = plugin.executableKinds.contains { $0 != "hooks" }
+        if beyondHooks { return "Trust \(plugin.executableSummary)" }
+        return plugin.hookCount > 0
+            ? "Trust hooks (\(plugin.hookCount) handler\(plugin.hookCount == 1 ? "" : "s"))"
+            : "Trust hooks"
+    }
+
     private func trustExplanation(_ plugin: PluginInfo) -> String {
         guard plugin.hooksTrusted else {
+            if plugin.executableKinds.contains(where: { $0 != "hooks" }) {
+                return "Turning this on lets the agent engine run this plugin's \(plugin.executableSummary) with the same access as the app — monitors run outside the sandbox. Leave it off unless you trust the author."
+            }
             return "Turning this on lets this plugin run commands from its hooks file during a turn. Leave it off unless you trust the author."
         }
         return plugin.nativeDelivery

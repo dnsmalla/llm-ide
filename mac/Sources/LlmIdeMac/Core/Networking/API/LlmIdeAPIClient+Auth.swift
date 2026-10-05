@@ -303,6 +303,11 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     /// loads the whole package and would run what it understands, so these
     /// still need a trust grant even though `hookCount` is zero.
     let declaresHooks: Bool
+    /// Which executable components the package declares: "hooks", "monitors"
+    /// (background scripts the Agent engine arms unsandboxed), "lsp" (language
+    /// servers it starts) and "bin" (executables put on the Bash PATH). All of
+    /// them wait for the same trust grant.
+    let executableKinds: [String]
     /// What llm-ide will NOT run from this plugin's hooks file (non-command
     /// handler types, unsupported events, refused commands).
     let hookNotes: [String]
@@ -323,6 +328,20 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     var title: String {
         let trimmed = displayName.trimmingCharacters(in: .whitespaces)
         return trimmed.isEmpty ? name : trimmed
+    }
+    /// What trusting this plugin lets it run, in the user's words
+    /// ("hooks, background monitors"). Empty when it declares nothing beyond
+    /// the runnable hooks `hookCount` already counts.
+    var executableSummary: String {
+        executableKinds.compactMap { kind -> String? in
+            switch kind {
+            case "hooks": return "hooks"
+            case "monitors": return "background monitors"
+            case "lsp": return "language servers"
+            case "bin": return "bin/ commands"
+            default: return nil
+            }
+        }.joined(separator: ", ")
     }
     /// One-line hook summary shared by the "/" menu row and any other
     /// surface describing this plugin's hooks — one phrasing of the fact,
@@ -345,7 +364,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         case name, version, displayName, description, author
         case enabled, skillCount, commands, subagents
         case format, unsupportedComponents, pendingComponents
-        case hookCount, declaresHooks, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
+        case hookCount, declaresHooks, executableKinds, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -363,6 +382,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         self.pendingComponents     = try c.decodeIfPresent([String].self, forKey: .pendingComponents) ?? []
         self.hookCount      = try c.decodeIfPresent(Int.self, forKey: .hookCount) ?? 0
         self.declaresHooks  = try c.decodeIfPresent(Bool.self, forKey: .declaresHooks) ?? false
+        self.executableKinds = try c.decodeIfPresent([String].self, forKey: .executableKinds) ?? []
         self.hookNotes      = try c.decodeIfPresent([String].self, forKey: .hookNotes) ?? []
         self.hooksTrusted   = try c.decodeIfPresent(Bool.self, forKey: .hooksTrusted) ?? false
         self.mcpServerCount = try c.decodeIfPresent(Int.self, forKey: .mcpServerCount) ?? 0
