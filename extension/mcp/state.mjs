@@ -94,7 +94,17 @@ function normalizeUrl(url) {
  * when the config is built (see mcp-config.mjs), keeping tokens out of this
  * registry file — which is shared by every user and only redacted on read.
  */
-export function addMcpPlugin({ name, command, args, env, url, headers, transport, credential, source }) {
+// Mirrors server/vault.mjs MCP_CREDENTIAL_KEY_RE (mcp/ may not import server/).
+const MCP_CREDENTIAL_KEY_RE = /^mcp\.[a-z][a-z0-9-]{1,40}\.[a-zA-Z]{1,32}$/;
+
+/**
+ * `allowCatalogKey` is passed only by `addMcpPluginFromCatalog`, never from a
+ * request body: a catalog entry's key is curated and need not match its row id.
+ * Every other caller may name only a vault key in the row's OWN `mcp.<id>.`
+ * namespace. Without that, a hand-added server could name `claude.apiKey` and
+ * have whoever consents to it send their API key to an arbitrary URL.
+ */
+export function addMcpPlugin({ name, command, args, env, url, headers, transport, credential, source }, { allowCatalogKey = false } = {}) {
   const wantsHttp = transport === 'http' || transport === 'sse' || (!command && url);
   const resolved = { source: (source === 'claude' || source === 'codex' || source === 'catalog') ? source : 'manual' };
 
@@ -114,6 +124,14 @@ export function addMcpPlugin({ name, command, args, env, url, headers, transport
 
   const list = readMcpRegistry();
   const id = slugifyMcp(name || resolved.command || resolved.url, new Set(list.map((s) => s.id)));
+  if (credential && typeof credential === 'object') {
+    const key = credential.vaultKey;
+    const ownNamespace = typeof key === 'string' && key.startsWith(`mcp.${id}.`);
+    const curated = allowCatalogKey && typeof key === 'string';
+    if (typeof key !== 'string' || !MCP_CREDENTIAL_KEY_RE.test(key) || !(ownNamespace || curated)) {
+      return { error: `credential.vaultKey must be in this server's own namespace (mcp.${id}.<field>)`, status: 400 };
+    }
+  }
   const plugin = {
     id,
     name: name || id,
@@ -148,7 +166,7 @@ export function addMcpPluginFromCatalog(catalogId, { arg, name } = {}) {
     url: entry.url,
     credential: entry.credential,
     source: 'catalog',
-  });
+  }, { allowCatalogKey: true });
 }
 
 /**

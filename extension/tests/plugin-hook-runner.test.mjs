@@ -96,3 +96,18 @@ test('a hook that ignores SIGTERM is killed outright, not left running', async (
   assert.equal(fs.existsSync(marker), false,
     'the hook outlived SIGTERM and kept running — the SIGKILL escalation never fired');
 });
+
+test('a hook does not inherit the server\'s own secrets (JWT / vault keys)', async () => {
+  process.env.LLMIDE_JWT_SECRET = 'must-not-reach-a-plugin-script';
+  process.env.LLMIDE_VAULT_KEY = 'must-not-reach-a-plugin-script';
+  const result = await runHookCommand({
+    command: 'if [ -n "$LLMIDE_JWT_SECRET$LLMIDE_VAULT_KEY" ]; then echo leaked 1>&2; exit 2; fi; exit 0',
+    timeoutMs: 5_000,
+  }, { input: {} });
+  assert.equal(result.continue, true, result.stopReason);
+  // A caller-supplied env is still honoured as given.
+  const own = await runHookCommand({
+    command: 'if [ "$MARK" = ok ]; then exit 0; fi; echo missing 1>&2; exit 2', timeoutMs: 5_000,
+  }, { input: {}, env: { MARK: 'ok', PATH: process.env.PATH } });
+  assert.equal(own.continue, true, own.stopReason);
+});

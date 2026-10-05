@@ -86,6 +86,9 @@ function validateClaudeManifest(raw) {
       author,
     },
     components,
+    // The manifest can carry hooks inline or point at another file; the SDK
+    // honours both, so their mere presence has to reach the trust gate.
+    declaresHooks: raw.hooks !== undefined && raw.hooks !== null,
   };
 }
 
@@ -492,6 +495,7 @@ function loadOnePlugin(dir) {
   // Agent SDK can load a `.claude-plugin` package natively; a `.codex-plugin`
   // one it cannot, and `format` alone does not distinguish them.
   let manifestRel = 'plugin.json';
+  let manifestDeclaresHooks = false;
   if (format === 'llmide') {
     let raw;
     try { raw = JSON.parse(readFileSync(join(dir, 'plugin.json'), 'utf8')); }
@@ -510,6 +514,7 @@ function loadOnePlugin(dir) {
     if (v.error) return { error: v.error };
     manifest = v.manifest;
     components = v.components;
+    manifestDeclaresHooks = v.declaresHooks === true;
   }
   const warnings = [];
 
@@ -666,11 +671,19 @@ function loadOnePlugin(dir) {
   const mcpServers = [];
   const hooks = [];
   const hookNotes = [];
+  // Whether the package declares hooks AT ALL, runnable here or not. The SDK
+  // loads the whole package natively and runs every hook it understands, so
+  // the trust gate must key off this, not off `hooks.length`: a hook the
+  // loader dropped (unsupported event, refused command, inline in plugin.json)
+  // would otherwise read as "no hooks" and run with no trust.
+  let declaresHooks = false;
   if (format === 'claude') {
+    declaresHooks = manifestDeclaresHooks;
     for (const rel of ['themes', 'output-styles', 'monitors', 'workflows', 'bin', '.lsp.json', 'settings.json']) {
       if (existsSync(join(dir, rel))) unsupportedComponents.push(rel);
     }
     if (existsSync(join(dir, 'hooks', 'hooks.json'))) {
+      declaresHooks = true;
       pendingComponents.push('hooks');
       const parsed = parseHookDeclarations(join(dir, 'hooks', 'hooks.json'), dir);
       hooks.push(...parsed.hooks);
@@ -703,6 +716,7 @@ function loadOnePlugin(dir) {
       mcpServers,
       hooks,
       hookNotes,
+      declaresHooks,
     },
     warnings,
   };

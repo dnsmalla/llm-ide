@@ -46,7 +46,7 @@ export function setPluginHookTrust(userId, pluginName, trusted, { listPlugins } 
   // Nothing to trust: granting here would leave a standing shell-execution
   // grant attached to a plugin that could acquire hooks in a later update
   // without the user ever being asked again.
-  if (!found.hookCount) {
+  if (!found.hookCount && !found.declaresHooks) {
     return { error: `plugin '${pluginName}' declares no hooks that llm-ide can run`, status: 400 };
   }
   setHooksTrusted(userId, pluginName, true);

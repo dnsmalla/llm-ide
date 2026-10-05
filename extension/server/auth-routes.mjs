@@ -162,6 +162,16 @@ function redactEnvValues(env) {
 // are kept — the detail view lists them, never values.
 const redactHeaderValues = redactEnvValues;
 
+/** An MCP server record with env/header VALUES masked (names kept). */
+function redactServerSecrets(server) {
+  if (!server || typeof server !== 'object') return server;
+  return {
+    ...server,
+    ...(server.env ? { env: redactEnvValues(server.env) } : {}),
+    ...(server.headers ? { headers: redactHeaderValues(server.headers) } : {}),
+  };
+}
+
 // Returns true when the request URL is one this module owns.  Caller
 // dispatches us before falling through to the KB router.  The query
 // string is stripped before matching so /auth/me/audit?limit=N still
@@ -1497,14 +1507,14 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   if (method === 'GET' && url.split('?')[0] === '/auth/me/mcp-plugins/claude-sources') {
     try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const { scanClaudeMcpServers } = await import('../mcp/claude-source.mjs');
-    send(res, 200, { servers: scanClaudeMcpServers() });
+    send(res, 200, { servers: scanClaudeMcpServers().map(redactServerSecrets) });
     return;
   }
 
   if (method === 'GET' && url.split('?')[0] === '/auth/me/mcp-plugins/codex-sources') {
     try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const { scanCodexMcpServers } = await import('../mcp/codex-source.mjs');
-    send(res, 200, { servers: scanCodexMcpServers() });
+    send(res, 200, { servers: scanCodexMcpServers().map(redactServerSecrets) });
     return;
   }
 
@@ -1551,7 +1561,9 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       return;
     }
     safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua, action: 'mcp-plugin.add', resource: result.plugin.id, outcome: 'success' });
-    send(res, 200, result);
+    // Imports copy real env/header values into the shared registry; the Mac only
+    // lists names, so the response must not echo the values back.
+    send(res, 200, { ...result, plugin: redactServerSecrets(result.plugin) });
     return;
   }
 

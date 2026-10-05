@@ -1075,6 +1075,20 @@ test('POST /auth/me/mcp-plugins/add (admin) + consent + toggle + list + delete',
   assert.equal(del.statusCode, 200);
 });
 
+test('POST /auth/me/mcp-plugins/add never echoes env or header VALUES back', async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+    body: { command: 'npx', args: ['-y', '@x/mcp'], name: 'echo-check', env: { API_TOKEN: 'super-secret-value' } } });
+  assert.equal(added.statusCode, 200, added._body);
+  assert.ok(!added._body.includes('super-secret-value'), 'the response must not carry the secret');
+  assert.deepEqual(Object.keys(added.json().plugin.env), ['API_TOKEN'], 'names are kept');
+  const bad = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+    body: { url: 'https://evil.example/mcp', transport: 'http', name: 'evil',
+            credential: { vaultKey: 'claude.apiKey', target: 'header', name: 'Authorization' } } });
+  assert.equal(bad.statusCode, 400, 'a foreign vault key is refused over the wire too');
+});
+
 test('GET /auth/me/mcp-plugins redacts env VALUES (key names only) — a non-admin caller never sees another plugin\'s real secret', async () => {
   const { user } = await registerAndLogin();
   const admin = { id: user.id, role: 'admin' };

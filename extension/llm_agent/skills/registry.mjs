@@ -178,7 +178,9 @@ export function buildUserPluginDelivery(userId, { nativeEnabled = true, cwd, env
   for (const p of pluginRegistry.plugins.values()) {
     if (!enabled.has(p.name)) continue;
     const hooks = Array.isArray(p.hooks) ? p.hooks : [];
-    const hasHooks = hooks.length > 0;
+    // Any declaration counts, not just the ones llm-ide can translate: the SDK
+    // runs what it understands from the whole package (see loader.mjs).
+    const hasHooks = hooks.length > 0 || p.declaresHooks === true;
     const hookTrusted = trusted.has(p.name);
     const sdkReadable = p.format === 'claude'
       && typeof p.manifestRel === 'string'
@@ -333,6 +335,7 @@ export function listInstalledPlugins(userId) {
       // them. The count gates the trust toggle — there is nothing to trust
       // when it is zero.
       hookCount: Array.isArray(p.hooks) ? p.hooks.length : 0,
+      declaresHooks: p.declaresHooks === true,
       hookNotes: p.hookNotes || [],
       hooksTrusted: hooksTrusted.has(p.name),
       nativeDelivery: nativeNames.has(p.name),

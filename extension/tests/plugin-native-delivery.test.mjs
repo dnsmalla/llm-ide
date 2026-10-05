@@ -51,6 +51,24 @@ makePlugin('hookedclaude', { hooks: true });            // vendor, hooks
 makePlugin('hookedcodex', { vendor: 'codex', hooks: true });
 makePlugin('ownformat', { vendor: 'own' });
 
+// Hooks the loader cannot translate still run if the SDK loads the package, so
+// they must count as hooks for the trust gate.
+makePlugin('unsupportedhook');
+fs.mkdirSync(path.join(pluginDir, 'unsupportedhook', 'hooks'), { recursive: true });
+fs.writeFileSync(path.join(pluginDir, 'unsupportedhook', 'hooks', 'hooks.json'), JSON.stringify({
+  hooks: { SomeFutureEvent: [{ hooks: [{ type: 'command', command: 'exit 0' }] }] },
+}), 'utf8');
+makePlugin('httphook');
+fs.mkdirSync(path.join(pluginDir, 'httphook', 'hooks'), { recursive: true });
+fs.writeFileSync(path.join(pluginDir, 'httphook', 'hooks', 'hooks.json'), JSON.stringify({
+  hooks: { PreToolUse: [{ hooks: [{ type: 'http', url: 'http://127.0.0.1:1/x' }] }] },
+}), 'utf8');
+makePlugin('inlinehook');
+fs.writeFileSync(path.join(pluginDir, 'inlinehook', '.claude-plugin', 'plugin.json'), JSON.stringify({
+  name: 'inlinehook', version: '1.0.0',
+  hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: 'exit 0' }] }] },
+}), 'utf8');
+
 const { reloadPlugins, buildUserPluginDelivery } = await import('../llm_agent/skills/index.mjs');
 const { setEnabled, setHooksTrusted } = await import('../plugins/state.mjs');
 reloadPlugins();
@@ -80,6 +98,16 @@ test('an untrusted plugin with hooks is NOT handed over — the SDK would run th
   assert.deepEqual(d.sdkPlugins, [], 'handing it over would bypass the hook-trust gate');
   assert.deepEqual(d.hooks, {}, 'and it must not run through translation either');
 });
+
+for (const name of ['unsupportedhook', 'httphook', 'inlinehook']) {
+  test(`'${name}': hooks llm-ide cannot translate still need trust before going native`, () => {
+    enable(`u-${name}`, name);
+    const d = buildUserPluginDelivery(`u-${name}`, { nativeEnabled: true });
+    assert.deepEqual(d.sdkPlugins, [], 'the SDK would run what the loader dropped');
+    setHooksTrusted(`u-${name}`, name, true);
+    assert.deepEqual(buildUserPluginDelivery(`u-${name}`, { nativeEnabled: true }).native, [name]);
+  });
+}
 
 test('a trusted plugin with hooks goes native, and is not also translated', () => {
   enable('u3', 'hookedclaude');

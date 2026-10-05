@@ -21,6 +21,7 @@
 // failed (logged, turn continues — a broken hook must not wedge a session).
 
 import { spawn } from 'node:child_process';
+import { sdkSubprocessEnv } from './subprocess-env.mjs';
 
 // A hook gets a bounded slice of the turn: its own declared timeout (already
 // clamped by the loader) and a hard output cap, so a chatty or hung hook can
@@ -48,7 +49,10 @@ export function runHookCommand({ command, timeoutMs }, { input, cwd, env } = {})
       child = spawn('sh', ['-c', command], {
         stdio: ['pipe', 'pipe', 'pipe'],
         cwd: cwd || process.cwd(),
-        env: env || process.env,
+        // The server's own environment holds its secrets (JWT/vault keys, API
+        // keys); a plugin script must see what the SDK subprocess sees, never
+        // more — see sdkSubprocessEnv().
+        env: env || sdkSubprocessEnv(),
       });
     } catch (err) {
       resolve({ continue: true, systemMessage: `hook could not start: ${err.message}` });
