@@ -6,12 +6,18 @@
 // authenticated users with different enable sets.
 //
 // File: <pluginDir>/../plugin-state.json
-// Shape: { [userId]: { enabled: string[], hooksTrusted?: string[] } }
+// Shape: { [userId]: { enabled: string[], hooksTrusted?: string[],
+//                      hooksTrustedKinds?: { [plugin]: string[] } } }
 //
 // `hooksTrusted` is additive: a state file written before hooks existed has
 // only `enabled` and keeps working (absent means "trusted nothing"). Every
 // writer below MERGES into the existing user entry rather than replacing it,
 // or toggling one list would silently erase the other.
+//
+// `hooksTrustedKinds` records WHICH executable components the grant covered
+// (hooks, monitors, lsp, bin). A grant without a record (written before this
+// existed) is read as hooks-only, so it never silently covers monitors, a
+// language server or bin/ that a plugin declares or gains later.
 //
 // Writes are atomic (tmp file + rename) so a crash mid-save can't
 // corrupt the file.
@@ -82,14 +88,45 @@ export function listHooksTrusted(userId) {
   return new Set(Array.isArray(arr) ? arr.filter((s) => typeof s === 'string') : []);
 }
 
-/** Grant or revoke hook trust for one plugin. Returns the new full Set. */
-export function setHooksTrusted(userId, pluginName, trusted) {
+/**
+ * What each trusted plugin's grant covered: Map<name, Set<kind>>. A trusted
+ * plugin with no record reads as `{hooks}` (see the header).
+ */
+export function listHooksTrustedKinds(userId) {
+  const out = new Map();
+  if (!userId) return out;
+  const entry = readAll()[userId];
+  const record = entry?.hooksTrustedKinds;
+  const trusted = Array.isArray(entry?.hooksTrusted) ? entry.hooksTrusted : [];
+  for (const name of trusted) {
+    const kinds = record && typeof record === 'object' && Array.isArray(record[name])
+      ? record[name].filter((k) => typeof k === 'string') : ['hooks'];
+    out.set(name, new Set(kinds));
+  }
+  return out;
+}
+
+/**
+ * Grant or revoke hook trust for one plugin. `kinds` is what the user was
+ * shown and agreed to (the plugin's executable components at grant time);
+ * omitted means hooks only. Returns the new full Set.
+ */
+export function setHooksTrusted(userId, pluginName, trusted, kinds) {
   if (!userId || typeof pluginName !== 'string') return new Set();
   const all = readAll();
   const cur = new Set(all[userId]?.hooksTrusted || []);
-  if (trusted) cur.add(pluginName);
-  else cur.delete(pluginName);
+  const record = { ...(all[userId]?.hooksTrustedKinds || {}) };
+  if (trusted) {
+    cur.add(pluginName);
+    record[pluginName] = Array.isArray(kinds) && kinds.length
+      ? [...new Set(kinds.filter((k) => typeof k === 'string'))].sort() : ['hooks'];
+  } else {
+    cur.delete(pluginName);
+    delete record[pluginName];
+  }
   all[userId] = { ...all[userId], hooksTrusted: [...cur].sort() };
+  if (Object.keys(record).length) all[userId].hooksTrustedKinds = record;
+  else delete all[userId].hooksTrustedKinds;
   writeAll(all);
   return cur;
 }
@@ -115,13 +152,21 @@ export function pruneOrphans(installedNames) {
     // keep a standing grant to run shell commands, or reinstalling something
     // by the same name would silently inherit it.
     const keptTrusted = trusted.filter((n) => installedNames.has(n));
-    if (keptEnabled.length !== enabled.length || keptTrusted.length !== trusted.length) {
+    const record = entry.hooksTrustedKinds && typeof entry.hooksTrustedKinds === 'object'
+      ? entry.hooksTrustedKinds : {};
+    const keptRecord = Object.fromEntries(Object.entries(record).filter(([n]) => keptTrusted.includes(n)));
+    if (keptEnabled.length !== enabled.length || keptTrusted.length !== trusted.length
+        || Object.keys(keptRecord).length !== Object.keys(record).length) {
       all[userId] = {
         ...entry,
         enabled: keptEnabled,
         ...(keptTrusted.length ? { hooksTrusted: keptTrusted } : {}),
       };
       if (!keptTrusted.length) delete all[userId].hooksTrusted;
+      // The record goes with the grant: a reinstall by the same name must not
+      // inherit what the old package was trusted for.
+      if (Object.keys(keptRecord).length) all[userId].hooksTrustedKinds = keptRecord;
+      else delete all[userId].hooksTrustedKinds;
       touched = true;
     }
     // Drop the user entry entirely once nothing is left to remember.

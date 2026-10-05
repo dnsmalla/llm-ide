@@ -49,6 +49,11 @@ export function setPluginHookTrust(userId, pluginName, trusted, { listPlugins } 
   if (!found.hookCount && !found.declaresHooks) {
     return { error: `plugin '${pluginName}' declares no hooks that llm-ide can run`, status: 400 };
   }
-  setHooksTrusted(userId, pluginName, true);
+  // Record WHAT is being trusted — everything the plugin declares right now —
+  // so a later update that adds monitors / a language server / bin/ voids the
+  // grant instead of riding on it (see plugins/state.mjs).
+  const kinds = new Set(Array.isArray(found.executableKinds) ? found.executableKinds : []);
+  if (found.hookCount > 0) kinds.add('hooks');
+  setHooksTrusted(userId, pluginName, true, [...kinds]);
   return { ok: true, hooksTrusted: true };
 }

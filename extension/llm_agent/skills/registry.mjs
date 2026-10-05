@@ -14,6 +14,7 @@ import { loadPlugins } from '../../plugins/loader.mjs';
 import {
   listEnabled as listEnabledPlugins,
   listHooksTrusted as listHooksTrustedPlugins,
+  listHooksTrustedKinds as listHooksTrustedKindsOf,
   pruneOrphans as prunePluginOrphans,
 } from '../../plugins/state.mjs';
 import { syncPluginMcpServers } from '../../mcp/state.mjs';
@@ -140,6 +141,24 @@ export function reloadPlugins() {
 }
 
 /**
+ * Whether `p`'s grant still covers what it declares NOW. A grant records the
+ * executable kinds the user agreed to; a plugin that has since gained another
+ * (an update adds monitors, a language server, bin/) is untrusted again until
+ * the user re-grants — `outdated` lets the UI say why instead of looking
+ * mysteriously reset. A grant with no record reads as hooks-only.
+ */
+export function trustStatusFor(p, trustedNames, trustedKinds) {
+  if (!trustedNames.has(p.name)) return { trusted: false, outdated: false };
+  const recorded = trustedKinds.get(p.name) || new Set(['hooks']);
+  const current = new Set(Array.isArray(p.executableKinds) ? p.executableKinds : []);
+  if (Array.isArray(p.hooks) && p.hooks.length > 0) current.add('hooks');
+  for (const kind of current) {
+    if (!recorded.has(kind)) return { trusted: false, outdated: true };
+  }
+  return { trusted: true, outdated: false };
+}
+
+/**
  * How this user's enabled plugins reach the v2 engine. Two mechanisms, and each
  * plugin uses exactly one:
  *
@@ -169,7 +188,13 @@ export function reloadPlugins() {
  */
 export function buildUserPluginDelivery(userId, { nativeEnabled = true, cwd, env, onNote } = {}) {
   const enabled = listEnabledPlugins(userId);
-  const trusted = listHooksTrustedPlugins(userId);
+  const grantedNames = listHooksTrustedPlugins(userId);
+  const grantedKinds = listHooksTrustedKindsOf(userId);
+  // Names whose grant still covers what the plugin declares today.
+  const trusted = new Set();
+  for (const p of pluginRegistry.plugins.values()) {
+    if (trustStatusFor(p, grantedNames, grantedKinds).trusted) trusted.add(p.name);
+  }
   const sdkPlugins = [];
   const native = [];
   const translated = [];
@@ -301,7 +326,8 @@ export function listAllSkills() {
  */
 export function listInstalledPlugins(userId) {
   const enabled = listEnabledPlugins(userId);
-  const hooksTrusted = listHooksTrustedPlugins(userId);
+  const grantedNames = listHooksTrustedPlugins(userId);
+  const grantedKinds = listHooksTrustedKindsOf(userId);
   // Which plugins this user's next turn would hand to the SDK. Reported so the
   // UI can describe hook behaviour truthfully: natively the SDK runs every
   // handler type it supports, translated only `command` ones.
@@ -348,7 +374,9 @@ export function listInstalledPlugins(userId) {
       declaresHooks: p.declaresHooks === true,
       executableKinds: Array.isArray(p.executableKinds) ? p.executableKinds : [],
       hookNotes: p.hookNotes || [],
-      hooksTrusted: hooksTrusted.has(p.name),
+      // Effective trust: a grant that no longer covers the plugin reads untrusted.
+      hooksTrusted: trustStatusFor(p, grantedNames, grantedKinds).trusted,
+      trustOutdated: trustStatusFor(p, grantedNames, grantedKinds).outdated,
       nativeDelivery: nativeNames.has(p.name),
       mcpServerCount: Array.isArray(p.mcpServers) ? p.mcpServers.length : 0,
     });

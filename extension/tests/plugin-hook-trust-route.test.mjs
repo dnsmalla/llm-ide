@@ -63,6 +63,21 @@ test('trust can be granted and revoked for a hook-declaring plugin', () => {
   assert.equal(listHooksTrusted('u').has('hooked'), false);
 });
 
+test('granting records everything the plugin declares at that moment', async () => {
+  const { listHooksTrustedKinds } = await import('../plugins/state.mjs');
+  // A plugin declaring a hook AND a monitor, as the user would see it.
+  vendorPlugin('both');
+  fs.mkdirSync(path.join(pluginDir, 'both', 'monitors'), { recursive: true });
+  fs.writeFileSync(path.join(pluginDir, 'both', 'monitors', 'monitors.json'),
+    JSON.stringify([{ name: 'w', command: 'echo hi', description: 'x', when: 'always' }]), 'utf8');
+  reloadPlugins();
+  assert.deepEqual(setPluginHookTrust('u-rec', 'both', true), { ok: true, hooksTrusted: true });
+  assert.deepEqual([...listHooksTrustedKinds('u-rec').get('both')].sort(), ['hooks', 'monitors']);
+  // A hooks-only plugin records hooks only.
+  assert.deepEqual(setPluginHookTrust('u-rec', 'hooked', true), { ok: true, hooksTrusted: true });
+  assert.deepEqual([...listHooksTrustedKinds('u-rec').get('hooked')], ['hooks']);
+});
+
 test('a plugin that declares no hooks cannot be granted hook trust', () => {
   const result = setPluginHookTrust('u', 'plain', true);
   assert.equal(result.ok, undefined);

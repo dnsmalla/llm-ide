@@ -11,7 +11,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-hook-trust-'));
 process.env.LLMIDE_PLUGIN_DIR = path.join(tmp, 'plugins');
 const statePath = path.join(tmp, 'plugin-state.json');
 
-const { listEnabled, setEnabled, listHooksTrusted, setHooksTrusted, pruneOrphans } =
+const { listEnabled, setEnabled, listHooksTrusted, setHooksTrusted, pruneOrphans, listHooksTrustedKinds } =
   await import('../plugins/state.mjs');
 
 test('hooks are untrusted until the user says otherwise', () => {
@@ -57,4 +57,36 @@ test('a pre-existing state file with only `enabled` still loads', () => {
   fs.writeFileSync(statePath, JSON.stringify({ u: { enabled: ['legacy'] } }), 'utf8');
   assert.deepEqual([...listEnabled('u')], ['legacy']);
   assert.deepEqual([...listHooksTrusted('u')], []);
+});
+
+test('a grant records WHICH components it covered; omitted means hooks only', () => {
+  fs.rmSync(statePath, { force: true });
+  setHooksTrusted('u', 'a', true, ['monitors', 'hooks', 'monitors']);
+  setHooksTrusted('u', 'b', true);
+  const kinds = listHooksTrustedKinds('u');
+  assert.deepEqual([...kinds.get('a')].sort(), ['hooks', 'monitors'], 'sorted and de-duplicated');
+  assert.deepEqual([...kinds.get('b')], ['hooks'], 'no kinds given = hooks only');
+});
+
+test('a state file written before kinds existed reads as hooks-only', () => {
+  fs.writeFileSync(statePath, JSON.stringify({ u: { enabled: ['a'], hooksTrusted: ['a'] } }), 'utf8');
+  assert.deepEqual([...listHooksTrustedKinds('u').get('a')], ['hooks']);
+  assert.deepEqual([...listHooksTrusted('u')], ['a']);
+});
+
+test('revoking, pruning and re-trusting never leave a stale record behind', () => {
+  fs.rmSync(statePath, { force: true });
+  setHooksTrusted('u', 'a', true, ['hooks', 'lsp']);
+  setHooksTrusted('u', 'b', true, ['hooks', 'bin']);
+  setHooksTrusted('u', 'a', false);
+  let record = JSON.parse(fs.readFileSync(statePath, 'utf8')).u.hooksTrustedKinds;
+  assert.deepEqual(Object.keys(record), ['b'], 'revoke drops that plugin\'s record');
+  // An uninstalled plugin: its grant AND its record go, so a reinstall inherits neither.
+  pruneOrphans(new Set(['zzz']));
+  assert.equal(listHooksTrusted('u').size, 0);
+  assert.equal(fs.existsSync(statePath) ? (JSON.parse(fs.readFileSync(statePath, 'utf8')).u?.hooksTrustedKinds ?? null) : null, null);
+  // Re-trusting replaces the record rather than merging into the old one.
+  setHooksTrusted('u', 'c', true, ['hooks', 'lsp']);
+  setHooksTrusted('u', 'c', true, ['hooks']);
+  assert.deepEqual([...listHooksTrustedKinds('u').get('c')], ['hooks']);
 });
