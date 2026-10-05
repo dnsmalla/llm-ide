@@ -50,6 +50,7 @@ import { resolveLanguage } from '../../providers/runtime.mjs';
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
 import { withToolOutputCap } from './tool-output-cap.mjs';
 import { createToolAccounting } from './tool-accounting.mjs';
+import { createProgressGuard } from './loop-progress.mjs';
 
 // The only built-ins a Loop run may see. Everything else — Bash, WebFetch,
 // WebSearch, Agent/Task, AskUserQuestion, NotebookEdit, Skill, … — is absent
@@ -530,9 +531,35 @@ export async function runLoopAgent(
   const refuse = (toolName, reason) => {
     if (denied.length < 50) denied.push({ toolName, reason });
   };
+  // No-progress stop (loop-progress.mjs). The step gets its OWN controller so
+  // stopping it is told apart from the caller's timeout / disconnect, which
+  // is forwarded into it.
+  const progress = createProgressGuard();
+  const stepAc = new AbortController();
+  if (abortController?.signal) {
+    if (abortController.signal.aborted) stepAc.abort();
+    else abortController.signal.addEventListener('abort', () => stepAc.abort(), { once: true });
+  }
+  let noProgressReason = null;
+  const stopForNoProgress = (reason) => {
+    if (!reason || noProgressReason) return;
+    noProgressReason = reason;
+    stepAc.abort();
+  };
 
   const preToolUse = async (input) => {
     const reason = loopToolRefusal(input?.tool_name, input?.tool_input, roots);
+    // Refused calls never count as repeats (only on the error streak).
+    const verdict = reason ? { action: 'ok' } : progress.onCall(input?.tool_name, input?.tool_input);
+    if (verdict.action !== 'ok') {
+      if (verdict.action === 'stop') stopForNoProgress(verdict.reason);
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse', permissionDecision: 'deny',
+          permissionDecisionReason: verdict.action === 'stop' ? `Stopped: ${verdict.reason}.` : verdict.message,
+        },
+      };
+    }
     if (!reason) {
       const fp = input?.tool_input?.file_path;
       if (input?.tool_name === 'Write' && typeof fp === 'string' && fp && !fs.existsSync(absOf(fp))) {
@@ -557,6 +584,7 @@ export async function runLoopAgent(
   };
   const postToolUse = async (input) => {
     if (WRITE_TOOLS.has(input?.tool_name)) {
+      progress.onWrite();
       const rel = repoRelative(root, input?.tool_input?.file_path);
       if (rel) {
         changed.add(rel);
@@ -619,7 +647,7 @@ export async function runLoopAgent(
       ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
       ...(key ? { ANTHROPIC_API_KEY: key, ...(sdkHome ? { CLAUDE_CONFIG_DIR: sdkHome } : {}) } : {}),
     },
-    ...(abortController ? { abortController } : {}),
+    abortController: stepAc,
   });
 
   let reply = '';
@@ -662,6 +690,11 @@ export async function runLoopAgent(
   try {
     for await (const msg of q) {
       observeToolBlocks(toolAccounting, msg);
+      if (msg?.type === 'user') {
+        for (const b of Array.isArray(msg?.message?.content) ? msg.message.content : []) {
+          if (b?.type === 'tool_result') stopForNoProgress(progress.onResult(b.is_error === true));
+        }
+      }
       if (msg?.type === 'system' && msg?.subtype === 'init' && typeof msg.model === 'string') {
         resolvedModel = msg.model;
       } else if (msg?.type === 'assistant') {
@@ -688,6 +721,9 @@ export async function runLoopAgent(
   } catch (err) {
     // Timeout / abort / engine failure: hand the caller what was spent so far.
     if (!sawResult) applyRows(streamedRows());
+    // Our own no-progress stop (and not the caller's timeout/disconnect) is a
+    // finished step, not an engine failure.
+    if (noProgressReason && !abortController?.signal?.aborted) return finish();
     if (err && typeof err === 'object') {
       err.partialUsage = {
         usage: { ...usage }, byModel,
@@ -698,19 +734,28 @@ export async function runLoopAgent(
     throw err;
   }
   if (!sawResult) applyRows(streamedRows());
+  return finish();
 
-  return {
-    reply: (reply || lastAssistantText).trim(),
-    changedPaths: [...changed].sort(),
-    changedExtraPaths: [...changedExtra].sort(),
-    createdPaths: [...created].sort(),
-    usage,
-    ...base,
-    ran: true,
-    resultSubtype,
-    denied,
-    model: resolvedModel ?? (typeof model === 'string' && model ? model : null),
-    byModel,
-    toolEvents: toolAccounting.events(),
-  };
+  function finish() {
+    const stoppedNote = noProgressReason
+      ? `[LLM-IDE stopped this step: ${noProgressReason} — no progress, so further turns would only cost tokens.]`
+      : '';
+    return {
+      reply: [(reply || lastAssistantText).trim(), stoppedNote].filter(Boolean).join('\n\n'),
+      changedPaths: [...changed].sort(),
+      changedExtraPaths: [...changedExtra].sort(),
+      createdPaths: [...created].sort(),
+      usage,
+      ...base,
+      ran: true,
+      resultSubtype,
+      denied,
+      model: resolvedModel ?? (typeof model === 'string' && model ? model : null),
+      byModel,
+      toolEvents: toolAccounting.events(),
+      // Never over the caller's own timeout / disconnect, which the route names.
+      ...(noProgressReason && !abortController?.signal?.aborted
+        ? { resultSubtype: 'no_progress', noProgressReason } : {}),
+    };
+  }
 }

@@ -9,7 +9,7 @@
 // Response { reply, changedPaths: [repo-relative], changedExtraPaths: [abs],
 //            createdPaths: [repo-relative, the subset a Write created],
 //            usage, resolvedSkills, unresolvedSkills, truncatedSkills, ran,
-//            resultSubtype, denied }
+//            resultSubtype, denied, noProgressReason? }
 //
 // Contract (mirrors the sibling route modules):
 //   handleLoopAgentRoutes(req, res, { userId }, deps) → Promise<boolean>
@@ -149,6 +149,8 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       ran: out.ran,
       resultSubtype: out.resultSubtype,
       denied: out.denied,
+      // Set with resultSubtype 'no_progress' (llm_agent/sdk/loop-progress.mjs).
+      ...(out.noProgressReason ? { noProgressReason: out.noProgressReason } : {}),
     });
   } catch (err) {
     // A cut-off run still reports what it spent before it was stopped.

@@ -248,6 +248,8 @@ const HOST = config.host;
 //     400 EXTRA_ROOT_NOT_ALLOWED) → `changedExtraPaths: [abs]`, plus
 //     `createdPaths` (the changedPaths a Write created); Grep/Glob
 //     never reach secret paths; a timed-out/aborted run is still metered.
+//     Additive (no bump): a step that repeats itself or fails 5 tool calls in
+//     a row ends 200 with `resultSubtype: 'no_progress'` + `noProgressReason`.
 const SERVER_API_VERSION = 59;
 const ENDPOINTS = [
   '/generate-notes',

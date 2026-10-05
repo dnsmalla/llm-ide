@@ -764,6 +764,146 @@ test('route: a run that fails mid-stream still records the tool calls it made', 
   assert.equal(ledger[0].request_id, events[0].turn_id);
 });
 
+// --- no-progress stop ------------------------------------------------------------
+
+// Plays the SDK side: each call runs the PreToolUse hooks; a denied call is
+// answered with an error tool_result, as the CLI does. Once the step's
+// controller is aborted the stream throws, like the SDK's abort.
+function repeatingQuery(calls, { onAbort, afterCall } = {}) {
+  return (prompt, options) => (async function* () {
+    yield { type: 'system', subtype: 'init', model: 'main-model' };
+    let n = 0;
+    for (const { tool, input, isError = false } of calls) {
+      n += 1;
+      const id = `r${n}`;
+      yield { type: 'assistant', message: { id: `m${n}`, model: 'main-model',
+        content: [{ type: 'tool_use', id, name: tool, input }], usage: { input_tokens: 100, output_tokens: 5 } } };
+      let denied = false;
+      for (const m of options.hooks?.PreToolUse ?? []) {
+        for (const h of m.hooks) {
+          const out = await h({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: input }, id, {});
+          if (out?.hookSpecificOutput?.permissionDecision === 'deny') denied = true;
+        }
+      }
+      if (options.abortController?.signal.aborted) {
+        onAbort?.();
+        throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      }
+      if (!denied && !isError) {
+        for (const m of options.hooks?.PostToolUse ?? []) {
+          if (m.matcher && !new RegExp(`^(${m.matcher})$`).test(tool)) continue;
+          for (const h of m.hooks) await h({ hook_event_name: 'PostToolUse', tool_name: tool, tool_input: input }, id, {});
+        }
+      }
+      yield { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'x', is_error: denied || isError }] } };
+      afterCall?.(n);
+    }
+    yield { type: 'result', subtype: 'success', num_turns: n, modelUsage: {
+      'main-model': { inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    } };
+  })();
+}
+
+test('runLoopAgent: a repeated Read is warned on the 3rd call and stops the step on the 4th as no_progress', () => withKey(async () => {
+  const read = { tool: 'Read', input: { file_path: path.join(REPO, 'src', 'a.txt') } };
+  let aborted = 0;
+  const out = await runLoopAgent({
+    message: 'x', root: REPO, userId: user.id,
+    queryFactory: repeatingQuery([read, read, read, read, read, read], { onAbort: () => { aborted += 1; } }),
+  }, noSkill);
+  assert.equal(aborted, 1, 'the SDK run was cut off at the 4th repeat, not run to maxTurns');
+  assert.equal(out.ran, true);
+  assert.equal(out.resultSubtype, 'no_progress');
+  assert.match(out.noProgressReason, /same Read call/);
+  assert.match(out.reply, /stopped this step/);
+  assert.equal(out.usage.inputTokens, 400, 'what the cut-off step spent is still metered');
+  assert.equal(out.toolEvents.filter((e) => e.isError).length, 1, 'the 3rd call came back as the warning');
+}));
+
+test('runLoopAgent: a successful Edit between re-reads resets the count through the real hooks', () => withKey(async () => {
+  const fp = path.join(REPO, 'src', 'a.txt');
+  const read = { tool: 'Read', input: { file_path: fp } };
+  const edit = (i) => ({ tool: 'Edit', input: { file_path: fp, old_string: `v${i}`, new_string: `v${i + 1}` } });
+  const out = await runLoopAgent({
+    message: 'x', root: REPO, userId: user.id,
+    queryFactory: repeatingQuery([read, read, edit(0), read, read, edit(1), read, read]),
+  }, noSkill);
+  assert.equal(out.resultSubtype, 'success', out.noProgressReason);
+}));
+
+test('runLoopAgent: a refused call never counts as a repeat (only on the error streak)', () => withKey(async () => {
+  const outside = { tool: 'Read', input: { file_path: path.join(OUTSIDE, 'secret.txt') } };
+  const ok = { tool: 'Grep', input: { pattern: 'z' } };
+  const out = await runLoopAgent({
+    message: 'x', root: REPO, userId: user.id,
+    queryFactory: repeatingQuery([outside, outside, outside, outside, ok]),
+  }, noSkill);
+  assert.equal(out.resultSubtype, 'success', out.noProgressReason);
+  assert.equal(out.denied.length, 4);
+}));
+
+test('runLoopAgent: five failed tool calls in a row stop the step', () => withKey(async () => {
+  const fail = (i) => ({ tool: 'Read', input: { file_path: path.join(REPO, 'src', `missing-${i}.txt`) }, isError: true });
+  const out = await runLoopAgent({
+    message: 'x', root: REPO, userId: user.id,
+    queryFactory: repeatingQuery([0, 1, 2, 3, 4, 5, 6].map(fail)),
+  }, noSkill);
+  assert.equal(out.resultSubtype, 'no_progress');
+  assert.match(out.noProgressReason, /in a row failed/);
+}));
+
+test('runLoopAgent: an ordinary step that keeps finding new things is not stopped', () => withKey(async () => {
+  const reads = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({ tool: 'Grep', input: { pattern: `p${i}` } }));
+  const out = await runLoopAgent({ message: 'x', root: REPO, userId: user.id, queryFactory: repeatingQuery(reads) }, noSkill);
+  assert.equal(out.resultSubtype, 'success');
+  assert.equal(out.noProgressReason, undefined);
+}));
+
+test('route: a caller timeout during a no-progress stop is still a timeout (504, metered as timeout)', async () => {
+  const db = getDb();
+  const u = newUser();
+  addUserRepo(u.id, REPO);
+  const read = { tool: 'Read', input: { file_path: path.join(REPO, 'src', 'a.txt') } };
+  const res = makeRes();
+  await withKey(() => handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: REPO, timeoutMs: 1_000 }, user: u }), res, { userId: u.id },
+    { runAgent: (args) => runLoopAgent({ ...args, queryFactory: (prompt, options) => (async function* () {
+      yield { type: 'system', subtype: 'init', model: 'main-model' };
+      const call = async (i) => {
+        for (const m of options.hooks.PreToolUse) {
+          for (const h of m.hooks) await h({ hook_event_name: 'PreToolUse', tool_name: read.tool, tool_input: read.input }, `t${i}`, {});
+        }
+      };
+      await call(1); await call(2);
+      // The caller's timeout lands first; the 3rd (warn) and 4th (stop) repeats
+      // after it set noProgressReason, and the stream then ends QUIETLY.
+      await new Promise((resolve) => args.abortController.signal.addEventListener('abort', resolve));
+      await call(3); await call(4);
+    })() }, noSkill) },
+  ));
+  assert.equal(res.statusCode, 504, res._body);
+  const rows = db.prepare('SELECT stop_reason FROM usage_ledger WHERE user_id = ?').all(u.id).map((r) => r.stop_reason);
+  assert.deepEqual(rows, ['timeout']);
+});
+
+test('route: a no_progress step answers 200 with the reason and is metered as no_progress', async () => {
+  const db = getDb();
+  const u = newUser();
+  addUserRepo(u.id, REPO);
+  const read = { tool: 'Read', input: { file_path: path.join(REPO, 'src', 'a.txt') } };
+  const res = makeRes();
+  await withKey(() => handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: REPO }, user: u }), res, { userId: u.id },
+    { runAgent: (args) => runLoopAgent({ ...args, queryFactory: repeatingQuery([read, read, read, read, read]) }, noSkill) },
+  ));
+  assert.equal(res.statusCode, 200, res._body);
+  const body = res.json();
+  assert.equal(body.resultSubtype, 'no_progress');
+  assert.match(body.noProgressReason, /same Read call/);
+  const rows = db.prepare('SELECT stop_reason FROM usage_ledger WHERE user_id = ?').all(u.id).map((r) => r.stop_reason);
+  assert.deepEqual(rows, ['no_progress']);
+});
+
 // --- find-code in a Loop run -----------------------------------------------------
 
 test('graphScopeRoot: a Loop worktree scopes to the repo it was cut from; a plain repo to itself', () => {

@@ -3391,7 +3391,8 @@ paths:
                   unresolvedSkills: { type: array, items: { type: string } }
                   truncatedSkills:  { type: array, items: { type: string }, description: Resolved skills longer than the cap; only their head was sent }
                   ran:              { type: boolean }
-                  resultSubtype:    { type: string, nullable: true, description: The SDK result subtype (success, error_max_turns, …) }
+                  resultSubtype:    { type: string, nullable: true, description: "The SDK result subtype (success, error_max_turns, …), or no_progress when LLM-IDE stopped the step because it was repeating itself (the same call again with no file changed) or 5 tool calls in a row failed" }
+                  noProgressReason: { type: string, description: Present only with resultSubtype no_progress — why the step was stopped }
                   denied:
                     type: array
                     items:
