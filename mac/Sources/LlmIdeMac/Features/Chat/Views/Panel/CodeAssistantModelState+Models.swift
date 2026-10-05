@@ -32,7 +32,11 @@ extension CodeAssistantModelState {
     /// fetched, otherwise the built-in static list (keeps the picker populated
     /// when no key is set or the fetch failed), plus any user-added ids.
     func models(for cli: AICliTool) -> [AIModel] {
-        let base = (liveModels[cli.provider]?.isEmpty == false) ? liveModels[cli.provider]! : cli.models
+        // Panel's own fetch, else the persisted list Settings also offers from
+        // (so a Settings pick is never filtered out as "not offered"), else built-ins.
+        let base = (liveModels[cli.provider]?.isEmpty == false)
+            ? liveModels[cli.provider]!
+            : (cli.pickerModels.isEmpty ? cli.models : cli.pickerModels)
         let baseIds = Set(base.map(\.id))
         let custom = customModelIds(for: cli.provider)
             .filter { !baseIds.contains($0) }
@@ -98,9 +102,10 @@ extension CodeAssistantModelState {
     func loadModels(for cli: AICliTool, api: LlmIdeAPIClient) async {
         guard let models = try? await api.listProviderModels(cli.provider), !models.isEmpty else { return }
         liveModels[cli.provider] = models
-        // Persist Claude's list so every other surface (menu-bar chat,
-        // Settings, the startup id migration) follows it — see LiveModelCache.
-        if cli == .claudeCode { LiveModelCache.store(models, for: cli.provider) }
+        // Persist every provider's list so every other surface (menu-bar chat,
+        // Settings pickers, the startup id migration) follows it — see
+        // LiveModelCache. Only Claude's list drives `models`/the default id.
+        LiveModelCache.store(models, for: cli.provider)
     }
 
     /// Switch the active model provider and reset the selected model.

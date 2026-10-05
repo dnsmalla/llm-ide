@@ -91,4 +91,33 @@ struct LiveModelCacheTests {
         #expect(QuickChatContext.effectiveModelId(explicit: "gpt-5.5", defaultModelId: "claude-opus-5[1m]",
                                                   models: live) == "claude-opus-5[1m]")
     }
+
+    @Test("Picker list: curated built-ins first, live extras sorted after, user ids last, no duplicates")
+    func pickerModelsMerge() {
+        let builtIn = [AIModel(id: "gpt-5.5", displayName: "GPT-5.5"),
+                       AIModel(id: "gpt-5.4-mini", displayName: "GPT-5.4 mini")]
+        let liveList = [AIModel(id: "o3", displayName: "o3"),
+                        AIModel(id: "gpt-5.5", displayName: "gpt-5.5"),
+                        AIModel(id: "codex-mini", displayName: "codex-mini")]
+        let merged = AICliTool.mergePickerModels(builtIn: builtIn, live: liveList, added: ["my-ft", "o3"])
+        // The first entry stays the built-in one: it is the provider's default id.
+        #expect(merged.map(\.id) == ["gpt-5.5", "gpt-5.4-mini", "codex-mini", "o3", "my-ft"])
+        // A built-in keeps its curated name over the live listing's raw id.
+        #expect(merged.first?.displayName == "GPT-5.5")
+        // Nothing live yet: the built-in list alone, as before.
+        #expect(AICliTool.mergePickerModels(builtIn: builtIn, live: [], added: []) == builtIn)
+        // Custom has no built-ins: the live list is the whole picker.
+        #expect(AICliTool.mergePickerModels(builtIn: [], live: liveList, added: []).map(\.id)
+                == ["codex-mini", "gpt-5.5", "o3"])
+    }
+
+    @Test("Storing a non-Claude live list does not change that provider's default model")
+    func liveListKeepsDefault() throws {
+        let defaults = try #require(UserDefaults(suiteName: "LiveModelCacheTests.\(UUID().uuidString)"))
+        LiveModelCache.resetMemoryForTesting()
+        defer { LiveModelCache.resetMemoryForTesting() }
+        let before = AICliTool.openai.defaultModelId
+        LiveModelCache.store([AIModel(id: "aaa-first", displayName: "aaa-first")], for: "openai", defaults: defaults)
+        #expect(AICliTool.openai.defaultModelId == before)
+    }
 }

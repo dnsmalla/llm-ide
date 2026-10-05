@@ -214,6 +214,35 @@ enum AICliTool: String, CaseIterable, Identifiable {
 }
 
 extension AICliTool {
+    /// Everything the Settings pickers (Default + per purpose) offer for this
+    /// provider: the curated built-ins, then whatever the provider's live
+    /// `/models` listing adds, then the user's "Add model…" ids.
+    ///
+    /// Separate from `models` on purpose: `models.first` is the provider's
+    /// default id, and a long, unordered live listing must not change it.
+    var pickerModels: [AIModel] {
+        let raw = UserDefaults.standard.string(forKey: "MEETNOTES_CUSTOM_MODELS") ?? "{}"
+        let added = (try? JSONDecoder().decode([String: [String]].self, from: Data(raw.utf8)))?[provider] ?? []
+        return Self.mergePickerModels(builtIn: models, live: LiveModelCache.models(for: provider) ?? [], added: added)
+    }
+
+    /// Pure merge behind `pickerModels`. Built-ins keep their order and curated
+    /// names (so index 0 stays the default); live extras follow sorted by id;
+    /// user-added ids come last; duplicates are dropped by id.
+    static func mergePickerModels(builtIn: [AIModel], live: [AIModel], added: [String]) -> [AIModel] {
+        var seen = Set<String>()
+        var out: [AIModel] = []
+        for model in builtIn where seen.insert(model.id).inserted { out.append(model) }
+        let extras = live.sorted { $0.id.localizedStandardCompare($1.id) == .orderedAscending }
+        for model in extras where seen.insert(model.id).inserted { out.append(model) }
+        for id in added where !id.isEmpty && seen.insert(id).inserted {
+            out.append(AIModel(id: id, displayName: id))
+        }
+        return out
+    }
+}
+
+extension AICliTool {
     /// The models a NON-panel surface (phone bridge, Auto Tasks, quick chat) can
     /// check a saved id against — the same set Settings offers: Claude's live
     /// list (else the static one) plus the user's "Add model…" ids.

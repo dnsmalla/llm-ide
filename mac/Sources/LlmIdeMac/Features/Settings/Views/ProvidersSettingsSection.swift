@@ -31,6 +31,9 @@ struct ProvidersSettingsSection: View {
     @State private var status: [String: (ok: Bool, msg: String)] = [:]
     @State private var configured: Set<String> = []
     @State private var busy: Set<String> = []
+    /// Bumped after a live model list lands in `LiveModelCache` (not
+    /// observable) so the pickers re-read it.
+    @State private var modelsVersion = 0
 
     var body: some View {
         SettingsSectionCard(icon: "key.horizontal", title: "Model Providers") {
@@ -52,7 +55,9 @@ struct ProvidersSettingsSection: View {
         .task {
             if baseURLDraft.isEmpty { baseURLDraft = savedBaseURL }
             await loadConfigured()
+            await refreshLiveModels()
         }
+        .onChange(of: config.activeCLI) { _, _ in Task { await refreshLiveModels() } }
         .onAppear(perform: normalizeActiveCLI)
     }
 
@@ -177,6 +182,9 @@ struct ProvidersSettingsSection: View {
                             .font(Typography.caption)
                             .foregroundStyle(theme.current.textMuted)
                         Picker("", selection: defaultModelBinding) {
+                            // Custom (and Claude before its first fetch) has no
+                            // default id; without this tag the picker is blank.
+                            if config.defaultModelId.isEmpty { Text("Provider default").tag("") }
                             ForEach(options) { Text($0.displayName).tag($0.id) }
                         }
                         .labelsHidden().pickerStyle(.menu).fixedSize()
@@ -210,14 +218,10 @@ struct ProvidersSettingsSection: View {
     /// It also gives the Custom provider a picker at all: `tool.models` is
     /// empty for it by design, but a user-added id is a real choice.
     private func modelOptions(for tool: AICliTool) -> [AIModel] {
-        var seen = Set<String>()
-        var out: [AIModel] = []
-        for m in tool.models where seen.insert(m.id).inserted { out.append(m) }
-        let added = (try? JSONDecoder().decode([String: [String]].self,
-                                               from: Data(customModelsRaw.utf8)))?[tool.provider] ?? []
-        for id in added where !id.isEmpty && seen.insert(id).inserted {
-            out.append(AIModel(id: id, displayName: id))
-        }
+        _ = modelsVersion   // re-read the live cache after a refresh
+        _ = customModelsRaw // re-read when "Add model…" changes
+        var out = tool.pickerModels
+        var seen = Set(out.map(\.id))
         let current = config.defaultModelId
         if !current.isEmpty && seen.insert(current).inserted {
             out.append(AIModel(id: current, displayName: AIModel.knownName(for: current, in: out) ?? current))
@@ -248,6 +252,16 @@ struct ProvidersSettingsSection: View {
     }
 
     // MARK: - Actions
+
+    /// Fetch the active provider's live model list so the Default and
+    /// per-purpose pickers offer everything the account can use. Best-effort:
+    /// on failure the built-in list stays.
+    private func refreshLiveModels() async {
+        guard let tool = AICliTool(rawValue: config.activeCLI),
+              let models = try? await api.listProviderModels(tool.provider), !models.isEmpty else { return }
+        LiveModelCache.store(models, for: tool.provider)
+        modelsVersion += 1
+    }
 
     private func loadConfigured() async {
         do {
@@ -285,6 +299,7 @@ struct ProvidersSettingsSection: View {
                 configured.insert("custom.baseUrl")
                 savedBaseURL = base
                 status[p.id] = (true, "Base URL saved (key unchanged — not re-verified).")
+                if isActive(p) { await refreshLiveModels() }
                 return
             }
             // Verify BEFORE saving (the server accepts the candidate key and
@@ -309,6 +324,9 @@ struct ProvidersSettingsSection: View {
                     status[p.id] = (false, "Key saved, but the base URL was not: \(error.localizedDescription)")
                 }
             }
+            // A new key (or endpoint) can unlock a different model list. After
+            // the base-URL write: the server lists from the STORED base URL.
+            if isActive(p) { await refreshLiveModels() }
         } catch {
             status[p.id] = (false, error.localizedDescription)
         }
