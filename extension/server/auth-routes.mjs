@@ -162,11 +162,28 @@ function redactEnvValues(env) {
 // are kept — the detail view lists them, never values.
 const redactHeaderValues = redactEnvValues;
 
-/** An MCP server record with env/header VALUES masked (names kept). */
+/**
+ * `url` with credentials masked: userinfo and query VALUES (`?api_key=…`) are
+ * where a hosted server's secret usually rides. Host and path stay readable;
+ * a token embedded in the path itself cannot be told apart from a real path.
+ */
+function redactUrlSecrets(value) {
+  if (typeof value !== 'string') return value;
+  try {
+    const u = new URL(value);
+    if (u.username) u.username = '••••';
+    if (u.password) u.password = '••••';
+    for (const key of [...u.searchParams.keys()]) u.searchParams.set(key, '••••');
+    return u.toString();
+  } catch { return value; }
+}
+
+/** An MCP server record with env/header/URL secrets masked (names kept). */
 function redactServerSecrets(server) {
   if (!server || typeof server !== 'object') return server;
   return {
     ...server,
+    ...(server.url ? { url: redactUrlSecrets(server.url) } : {}),
     ...(server.env ? { env: redactEnvValues(server.env) } : {}),
     ...(server.headers ? { headers: redactHeaderValues(server.headers) } : {}),
   };
@@ -1481,6 +1498,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         ...p,
         env: redactEnvValues(p.env),
         headers: redactHeaderValues(p.headers),
+        ...(p.url ? { url: redactUrlSecrets(p.url) } : {}),
         // Surfaced rather than silently dropping the server from the effective
         // config: a catalog entry whose vault key is empty still gets passed to
         // the CLI (which reports a real auth failure), and the client needs to
@@ -1535,7 +1553,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         return;
       }
       safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua, action: 'mcp-plugin.add', resource: result.plugin.id, outcome: 'success' });
-      send(res, 200, result);
+      send(res, 200, { ...result, plugin: redactServerSecrets(result.plugin) });
       return;
     }
     // Imports forward the scanned shape verbatim — including the hosted

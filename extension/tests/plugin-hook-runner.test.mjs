@@ -98,13 +98,20 @@ test('a hook that ignores SIGTERM is killed outright, not left running', async (
 });
 
 test('a hook does not inherit the server\'s own secrets (JWT / vault keys)', async () => {
+  const saved = { jwt: process.env.LLMIDE_JWT_SECRET, vault: process.env.LLMIDE_VAULT_KEY };
   process.env.LLMIDE_JWT_SECRET = 'must-not-reach-a-plugin-script';
   process.env.LLMIDE_VAULT_KEY = 'must-not-reach-a-plugin-script';
-  const result = await runHookCommand({
-    command: 'if [ -n "$LLMIDE_JWT_SECRET$LLMIDE_VAULT_KEY" ]; then echo leaked 1>&2; exit 2; fi; exit 0',
-    timeoutMs: 5_000,
-  }, { input: {} });
-  assert.equal(result.continue, true, result.stopReason);
+  try {
+    const result = await runHookCommand({
+      command: 'if [ -n "$LLMIDE_JWT_SECRET$LLMIDE_VAULT_KEY" ]; then echo leaked 1>&2; exit 2; fi; exit 0',
+      timeoutMs: 5_000,
+    }, { input: {} });
+    assert.equal(result.continue, true, result.stopReason);
+  } finally {
+    // Other tests in this process rely on the values the suite started with.
+    if (saved.jwt === undefined) delete process.env.LLMIDE_JWT_SECRET; else process.env.LLMIDE_JWT_SECRET = saved.jwt;
+    if (saved.vault === undefined) delete process.env.LLMIDE_VAULT_KEY; else process.env.LLMIDE_VAULT_KEY = saved.vault;
+  }
   // A caller-supplied env is still honoured as given.
   const own = await runHookCommand({
     command: 'if [ "$MARK" = ok ]; then exit 0; fi; echo missing 1>&2; exit 2', timeoutMs: 5_000,

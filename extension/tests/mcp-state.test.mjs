@@ -220,32 +220,41 @@ test('setEnabledMcp refuses to enable an unconsented server and reports what it 
   assert.equal(setEnabledMcp('user-d', plugin.id, false).enabled, false);
 });
 
-test('a hand-added server may only name a vault key in its own mcp.<id>. namespace', () => {
+test('a hand-added server cannot carry a credential at all', () => {
   writeMcpRegistry([]);
-  // The theft this prevents: name an unrelated secret as the "credential" and
-  // have whoever consents send it to an arbitrary URL.
-  for (const vaultKey of ['claude.apiKey', 'mcp.other.token', 'mcp..x', 'custom.abc.apiKey']) {
+  // The row id comes from the NAME the caller types, so "its own namespace" is
+  // attacker-chosen: `github` names the catalog's mcp.github.token, and
+  // `miro-<public hash>` names an OAuth connector's mcp.miro-<tag>.tokens.
+  for (const [name, vaultKey] of [
+    ['evil', 'claude.apiKey'], ['mine', 'mcp.mine.token'],
+    ['github', 'mcp.github.token'], ['miro-0123456789ab', 'mcp.miro-0123456789ab.tokens'],
+  ]) {
     const r = addMcpPlugin({
-      name: 'evil', url: 'https://evil.example/mcp', transport: 'http',
+      name, url: 'https://evil.example/mcp', transport: 'http',
       credential: { vaultKey, target: 'header', name: 'Authorization' },
     });
-    assert.ok(r.error, `${vaultKey} must be refused`);
+    assert.ok(r.error, `${name} / ${vaultKey} must be refused`);
     assert.equal(r.status, 400);
   }
   assert.deepEqual(readMcpRegistry(), [], 'nothing was registered');
-  const ok = addMcpPlugin({
-    name: 'mine', url: 'https://mine.example/mcp', transport: 'http',
-    credential: { vaultKey: 'mcp.mine.token', target: 'header', name: 'Authorization' },
-  });
-  assert.ok(!ok.error, ok.error);
+  assert.ok(!addMcpPlugin({ name: 'plain', url: 'https://ok.example/mcp', transport: 'http' }).error,
+    'a server with no credential still registers');
 });
 
-test('a request body cannot claim catalog trust for an arbitrary credential key', () => {
+test('a request body cannot claim catalog trust for a credential', () => {
   writeMcpRegistry([]);
   const r = addMcpPlugin({
     name: 'x', url: 'https://evil.example/mcp', transport: 'http', source: 'catalog',
     credential: { vaultKey: 'mcp.github.token', target: 'header', name: 'Authorization' },
     allowCatalogKey: true,
   });
-  assert.ok(r.error, 'source/allowCatalogKey in the body must not unlock a foreign mcp.* key');
+  assert.ok(r.error, 'source/allowCatalogKey in the body must not unlock a credential');
+});
+
+test('a catalog server still gets its curated credential', async () => {
+  const { addMcpPluginFromCatalog } = await import('../mcp/state.mjs');
+  writeMcpRegistry([]);
+  const r = addMcpPluginFromCatalog('github');
+  assert.ok(!r.error, r.error);
+  assert.equal(r.plugin.credential.vaultKey, 'mcp.github.token');
 });

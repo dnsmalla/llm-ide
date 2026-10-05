@@ -1089,6 +1089,18 @@ test('POST /auth/me/mcp-plugins/add never echoes env or header VALUES back', asy
   assert.equal(bad.statusCode, 400, 'a foreign vault key is refused over the wire too');
 });
 
+test('MCP responses mask a secret carried in the URL (query values, userinfo)', async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+    body: { url: 'https://user:pw-secret@hosted.example/mcp?api_key=URL-SECRET&v=1', transport: 'http', name: 'hosted-url' } });
+  assert.equal(added.statusCode, 200, added._body);
+  assert.ok(!added._body.includes('URL-SECRET') && !added._body.includes('pw-secret'), 'add response');
+  assert.match(added.json().plugin.url, /hosted\.example\/mcp/, 'host and path stay readable');
+  const list = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins', user: admin });
+  assert.ok(!list._body.includes('URL-SECRET') && !list._body.includes('pw-secret'), 'list response');
+});
+
 test('GET /auth/me/mcp-plugins redacts env VALUES (key names only) — a non-admin caller never sees another plugin\'s real secret', async () => {
   const { user } = await registerAndLogin();
   const admin = { id: user.id, role: 'admin' };

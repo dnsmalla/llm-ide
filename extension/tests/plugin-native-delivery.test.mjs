@@ -63,6 +63,12 @@ fs.mkdirSync(path.join(pluginDir, 'httphook', 'hooks'), { recursive: true });
 fs.writeFileSync(path.join(pluginDir, 'httphook', 'hooks', 'hooks.json'), JSON.stringify({
   hooks: { PreToolUse: [{ hooks: [{ type: 'http', url: 'http://127.0.0.1:1/x' }] }] },
 }), 'utf8');
+makePlugin('emptyhooks');
+fs.mkdirSync(path.join(pluginDir, 'emptyhooks', 'hooks'), { recursive: true });
+fs.writeFileSync(path.join(pluginDir, 'emptyhooks', 'hooks', 'hooks.json'), JSON.stringify({ hooks: {} }), 'utf8');
+makePlugin('emptyinline');
+fs.writeFileSync(path.join(pluginDir, 'emptyinline', '.claude-plugin', 'plugin.json'),
+  JSON.stringify({ name: 'emptyinline', version: '1.0.0', hooks: {} }), 'utf8');
 makePlugin('inlinehook');
 fs.writeFileSync(path.join(pluginDir, 'inlinehook', '.claude-plugin', 'plugin.json'), JSON.stringify({
   name: 'inlinehook', version: '1.0.0',
@@ -98,6 +104,14 @@ test('an untrusted plugin with hooks is NOT handed over — the SDK would run th
   assert.deepEqual(d.sdkPlugins, [], 'handing it over would bypass the hook-trust gate');
   assert.deepEqual(d.hooks, {}, 'and it must not run through translation either');
 });
+
+for (const name of ['emptyhooks', 'emptyinline']) {
+  test(`'${name}': a plugin that declares no handler is not stranded behind a trust grant`, () => {
+    enable(`u-${name}`, name);
+    const d = buildUserPluginDelivery(`u-${name}`, { nativeEnabled: true });
+    assert.deepEqual(d.native, [name], 'nothing to trust, so it goes native without it');
+  });
+}
 
 for (const name of ['unsupportedhook', 'httphook', 'inlinehook']) {
   test(`'${name}': hooks llm-ide cannot translate still need trust before going native`, () => {

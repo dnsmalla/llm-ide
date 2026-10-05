@@ -56,6 +56,15 @@ function detectPluginFormat(dir) {
  * is required by the vendor spec; version defaults. `defaultEnabled` is
  * parsed nowhere on purpose — LLM-IDE stays opt-in regardless of manifest.
  */
+/** A manifest `hooks` value that actually names something (not null/{}/[]/""). */
+function hasContent(value) {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value).length > 0;
+  return true;
+}
+
 function validateClaudeManifest(raw) {
   if (!raw || typeof raw !== 'object') return { error: 'manifest is not an object' };
   const { name, version } = raw;
@@ -88,7 +97,7 @@ function validateClaudeManifest(raw) {
     components,
     // The manifest can carry hooks inline or point at another file; the SDK
     // honours both, so their mere presence has to reach the trust gate.
-    declaresHooks: raw.hooks !== undefined && raw.hooks !== null,
+    declaresHooks: hasContent(raw.hooks),
   };
 }
 
@@ -408,17 +417,26 @@ const SUPPORTED_HOOK_EVENTS = new Set([
  */
 function parseHookDeclarations(path, pluginDir) {
   const notes = [];
+  // `declared`: how many handlers the file names, runnable or not. A file the
+  // loader cannot read still counts as declaring hooks (fail closed): the SDK
+  // may read what this could not.
   let raw;
   try { raw = readFileSync(path, 'utf8'); }
-  catch (err) { return { hooks: [], notes: [`hooks.json: read failed: ${err.message}`] }; }
+  catch (err) { return { hooks: [], declared: 1, notes: [`hooks.json: read failed: ${err.message}`] }; }
   if (Buffer.byteLength(raw, 'utf8') > MAX_HOOKS_JSON_BYTES) {
-    return { hooks: [], notes: [`hooks.json: exceeds ${MAX_HOOKS_JSON_BYTES} byte limit`] };
+    return { hooks: [], declared: 1, notes: [`hooks.json: exceeds ${MAX_HOOKS_JSON_BYTES} byte limit`] };
   }
   let parsed;
   try { parsed = JSON.parse(raw); }
-  catch (err) { return { hooks: [], notes: [`hooks.json: parse: ${err.message}`] }; }
+  catch (err) { return { hooks: [], declared: 1, notes: [`hooks.json: parse: ${err.message}`] }; }
   const events = parsed?.hooks;
-  if (!events || typeof events !== 'object' || Array.isArray(events)) return { hooks: [], notes };
+  if (!events || typeof events !== 'object' || Array.isArray(events)) return { hooks: [], declared: 0, notes };
+  let declared = 0;
+  for (const matchers of Object.values(events)) {
+    for (const entry of Array.isArray(matchers) ? matchers : []) {
+      declared += Array.isArray(entry?.hooks) ? entry.hooks.length : 0;
+    }
+  }
 
   const hooks = [];
   for (const [event, matchers] of Object.entries(events)) {
@@ -431,7 +449,7 @@ function parseHookDeclarations(path, pluginDir) {
       for (const handler of Array.isArray(entry?.hooks) ? entry.hooks : []) {
         if (hooks.length >= MAX_HOOKS) {
           notes.push(`more than ${MAX_HOOKS} hooks declared — extras ignored`);
-          return { hooks, notes };
+          return { hooks, declared, notes };
         }
         if (handler?.type !== 'command') {
           notes.push(`${event}: '${handler?.type || 'unknown'}' handlers are shown but not run`);
@@ -454,7 +472,7 @@ function parseHookDeclarations(path, pluginDir) {
       }
     }
   }
-  return { hooks, notes };
+  return { hooks, declared, notes };
 }
 
 /**
@@ -683,9 +701,11 @@ function loadOnePlugin(dir) {
       if (existsSync(join(dir, rel))) unsupportedComponents.push(rel);
     }
     if (existsSync(join(dir, 'hooks', 'hooks.json'))) {
-      declaresHooks = true;
       pendingComponents.push('hooks');
       const parsed = parseHookDeclarations(join(dir, 'hooks', 'hooks.json'), dir);
+      // An empty hooks.json declares nothing, so it must not demand a trust
+      // grant the UI could never collect.
+      if (parsed.declared > 0) declaresHooks = true;
       hooks.push(...parsed.hooks);
       hookNotes.push(...parsed.notes);
     }

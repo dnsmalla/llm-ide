@@ -99,10 +99,15 @@ const MCP_CREDENTIAL_KEY_RE = /^mcp\.[a-z][a-z0-9-]{1,40}\.[a-zA-Z]{1,32}$/;
 
 /**
  * `allowCatalogKey` is passed only by `addMcpPluginFromCatalog`, never from a
- * request body: a catalog entry's key is curated and need not match its row id.
- * Every other caller may name only a vault key in the row's OWN `mcp.<id>.`
- * namespace. Without that, a hand-added server could name `claude.apiKey` and
- * have whoever consents to it send their API key to an arbitrary URL.
+ * request body. A `credential` therefore exists only on catalog rows, whose
+ * vault key is curated.
+ *
+ * It cannot be offered to a hand-added server at all, not even "in its own
+ * namespace": the row id comes from the NAME the caller types, so a name that
+ * slugs to `miro-<issuerTag>` (the tag is a public hash) would name the OAuth
+ * connector's `mcp.miro-<tag>.tokens`, and a name of `github` would name the
+ * catalog's `mcp.github.token`. Whoever consents to that server would send
+ * those secrets to an arbitrary URL.
  */
 export function addMcpPlugin({ name, command, args, env, url, headers, transport, credential, source }, { allowCatalogKey = false } = {}) {
   const wantsHttp = transport === 'http' || transport === 'sse' || (!command && url);
@@ -125,11 +130,11 @@ export function addMcpPlugin({ name, command, args, env, url, headers, transport
   const list = readMcpRegistry();
   const id = slugifyMcp(name || resolved.command || resolved.url, new Set(list.map((s) => s.id)));
   if (credential && typeof credential === 'object') {
-    const key = credential.vaultKey;
-    const ownNamespace = typeof key === 'string' && key.startsWith(`mcp.${id}.`);
-    const curated = allowCatalogKey && typeof key === 'string';
-    if (typeof key !== 'string' || !MCP_CREDENTIAL_KEY_RE.test(key) || !(ownNamespace || curated)) {
-      return { error: `credential.vaultKey must be in this server's own namespace (mcp.${id}.<field>)`, status: 400 };
+    if (!allowCatalogKey) {
+      return { error: 'a credential can only be attached to a catalog server', status: 400 };
+    }
+    if (typeof credential.vaultKey !== 'string' || !MCP_CREDENTIAL_KEY_RE.test(credential.vaultKey)) {
+      return { error: 'credential.vaultKey must be an mcp.<id>.<field> vault key', status: 400 };
     }
   }
   const plugin = {
