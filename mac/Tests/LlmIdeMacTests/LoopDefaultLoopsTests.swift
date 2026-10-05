@@ -491,10 +491,10 @@ final class LoopDefaultLoopsTests: XCTestCase {
         ])
     }
 
-    /// Every default loop a throwaway repo gets. Self-Heal is deliberately absent: its verify
-    /// stage is gated on the app's own checkout (`isAppSourceRoot`), so no temp repo has it.
+    /// Every default loop a throwaway repo gets. Self-Heal and SDK Adoption are deliberately
+    /// absent: both are gated on the app's own checkout (`isAppSourceRoot`), so no temp repo has them.
     private var defaultLoopKeysInAnyRepo: [String] {
-        LoopDefaultLoopKey.all.filter { $0 != LoopDefaultLoopKey.selfHeal }
+        LoopDefaultLoopKey.all.filter { $0 != LoopDefaultLoopKey.selfHeal && $0 != LoopDefaultLoopKey.sdkAdoption }
     }
 
     func testLegacyAggregateLoopSplitsIntoTheDefaultLoops() throws {

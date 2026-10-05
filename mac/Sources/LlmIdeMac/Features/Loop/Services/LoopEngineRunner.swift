@@ -243,6 +243,11 @@ final class LoopEngineRunner: ObservableObject {
     /// Reset per run.
     private var selfHealBatch: [Incident]?
     private var selfHealSuppression: UUID?
+    /// SDK Adoption: the batch version the Diff stage found this run (nil = no
+    /// batch), and whether that stage ran at all — a run that diffed but found
+    /// nothing still owes its worktree a discard. Reset per run.
+    private var sdkAdoptVersion: String?
+    private var sdkAdoptDiffRan = false
 
     /// Accumulated journal state for the in-flight run. Instance state rather
     /// than a `run`-local `var` only because the per-stage helpers below append
@@ -569,6 +574,8 @@ final class LoopEngineRunner: ObservableObject {
         flakyStages = []
         artifactCheckFeedback = nil
         selfHealBatch = nil
+        sdkAdoptVersion = nil
+        sdkAdoptDiffRan = false
         // Must be reset per run, not only in the defer: a run that ended while
         // paused would otherwise leave `paused == true`, and the NEXT run
         // would hold at its first stage boundary forever with no visible
@@ -622,8 +629,9 @@ final class LoopEngineRunner: ObservableObject {
         let orderedStages = LoopStage.runOrder(config.stages.filter { $0.enabled && $0.kind != .unsupported })
         // Keyed on the stage list, not `loopId`: a duplicated Self-Heal loop
         // (new id) or a wizard-built loop that happens to include a Triage
-        // stage must still suppress its own errors from feeding back in.
-        if orderedStages.contains(where: { $0.kind == .incidentTriage }) {
+        // stage must still suppress its own errors from feeding back in. SDK
+        // adoption runs must not feed their own errors back either.
+        if config.isSelfHealRun {
             selfHealSuppression = IncidentRecorder.beginSuppression()
         }
         let disabledCount = config.stages.count - orderedStages.count
@@ -741,7 +749,7 @@ final class LoopEngineRunner: ObservableObject {
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
-            case .regressionSweep, .unsupported, .incidentTriage:
+            case .regressionSweep, .unsupported, .incidentTriage, .sdkSurfaceDiff:
                 break
             }
         }
@@ -835,6 +843,8 @@ final class LoopEngineRunner: ObservableObject {
                         stages: orderedStages, progress: &progress)
                 case .incidentTriage:
                     decision = runTriageStage(stage, gitRoot: runGitRoot)
+                case .sdkSurfaceDiff:
+                    decision = await runSdkDiffStage(stage, gitRoot: runGitRoot)
                 case .unsupported:
                     // Filtered out of `orderedStages` above; fail closed if one
                     // ever gets here — an unknown stage kind is never run.
@@ -1633,6 +1643,71 @@ final class LoopEngineRunner: ObservableObject {
         return .proceed
     }
 
+    /// SDK Adoption Diff: runs the fixed diff script in the worktree. Exit 3 means
+    /// every installed SDK item is already classified — end the run, no agent call.
+    /// A retried iteration keeps the first batch, as triage does: re-diffing after
+    /// the agent edited sdk-surface.json could report "nothing to adopt" and end
+    /// the run as a success over changes the Verify stage never passed.
+    private func runSdkDiffStage(_ stage: LoopStage, gitRoot: URL) async -> StageDecision {
+        let startedAt = Date()
+        guard currentWorktreeLease != nil else {
+            stageStates[stage.id] = .failed
+            let reason = "SDK adoption needs an isolated worktree; refusing to run in the main checkout"
+            record(stage, startedAt: startedAt, duration: 0, exitCode: nil, passed: false, output: reason, score: nil)
+            return .terminate(.blocked(reason: .worktreeRequired(reason: reason)))
+        }
+        if let version = sdkAdoptVersion {
+            stageStates[stage.id] = .passed
+            appendLog(.info, "  [\(stage.name)] keeping this run's SDK \(version) batch")
+            return .proceed
+        }
+        sdkAdoptDiffRan = true
+        let outcome: VerifyOutcome
+        do {
+            outcome = try await verifier.verify(command: LoopStageDetector.sdkAdoptDiffCommand,
+                                                repoRoot: gitRoot, timeout: 600)
+        } catch is CancellationError {
+            stageStates[stage.id] = .pending
+            return .terminate(.aborted)
+        } catch {
+            stageStates[stage.id] = .failed
+            record(stage, startedAt: startedAt, duration: Date().timeIntervalSince(startedAt), exitCode: nil,
+                   passed: false, output: error.localizedDescription, score: nil)
+            return .terminate(.error("SDK diff could not run: \(error.localizedDescription)"))
+        }
+        let duration = Date().timeIntervalSince(startedAt)
+        switch outcome.exitCode {
+        case 3:
+            stageStates[stage.id] = .passed
+            appendLog(.info, "  [\(stage.name)] every installed SDK item is classified — nothing to adopt")
+            record(stage, startedAt: startedAt, duration: duration, exitCode: 3, passed: true,
+                   output: "nothing to adopt", score: nil)
+            return .terminate(.success)
+        case 0:
+            let batch = (try? String(contentsOf: gitRoot.appendingPathComponent(SdkAdoption.relativePath),
+                                     encoding: .utf8)) ?? ""
+            guard let version = SdkAdoption.version(fromBatch: batch) else {
+                // No version means no incident to hang the outcome on; an agent
+                // run against an unreadable batch would be unaccountable.
+                stageStates[stage.id] = .failed
+                record(stage, startedAt: startedAt, duration: duration, exitCode: 0, passed: false,
+                       output: outcome.output, score: nil)
+                return .terminate(.error("SDK diff wrote no readable \(SdkAdoption.relativePath)"))
+            }
+            sdkAdoptVersion = version
+            stageStates[stage.id] = .passed
+            appendLog(.info, "  [\(stage.name)] SDK \(version) → \(SdkAdoption.relativePath)")
+            record(stage, startedAt: startedAt, duration: duration, exitCode: 0, passed: true,
+                   output: outcome.output, score: nil)
+            return .proceed
+        default:
+            stageStates[stage.id] = .failed
+            record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode, passed: false,
+                   output: outcome.output, score: nil)
+            return .terminate(.error("SDK diff failed (exit \(outcome.exitCode))"))
+        }
+    }
+
     private func runSkillStage(_ stage: LoopStage, config: LoopEngineConfig,
                               faultsRoot: URL, gitRoot: URL,
                               goal: String? = nil, acceptanceCriteria: String? = nil,
@@ -2245,6 +2320,12 @@ final class LoopEngineRunner: ObservableObject {
             selfHealBatch = nil
             await writeBackSelfHeal(batch: batch, terminal: terminal, gitRoot: gitRoot)
         }
+        if sdkAdoptDiffRan {
+            sdkAdoptDiffRan = false
+            let version = sdkAdoptVersion
+            sdkAdoptVersion = nil
+            await writeBackSdkAdoption(version: version, terminal: terminal, gitRoot: gitRoot)
+        }
         status = terminal
         appendLog(logLevel(for: terminal), "Loop finished · \(terminal.summary)")
 
@@ -2300,20 +2381,12 @@ final class LoopEngineRunner: ObservableObject {
         }
         let agentDown = errored && stageStates.values.contains(.errored)
         let aborted = terminal == .aborted
-        let leaseProposal = currentWorktreeLease.map {
-            IncidentProposal(mainRepo: $0.mainRepo.path, worktreePath: $0.worktreePath.path,
-                             branch: $0.branch, baseCommit: $0.baseCommit)
-        }
+        let leaseProposal = worktreeProposal()
         var proposal = leaseProposal
         // A "fixed" verdict with no actual change must not become an empty proposal.
-        if succeeded, let candidate = leaseProposal {
-            let hasChanges = await Task.detached {
-                !(((try? SelfHealProposalService.diff(candidate)) ?? "").isEmpty)
-            }.value
-            if !hasChanges {
-                proposal = nil
-                appendLog(.info, "Self-Heal · the run left no changes — nothing to propose")
-            }
+        if succeeded, let candidate = leaseProposal, !(await Self.proposalHasChanges(candidate)) {
+            proposal = nil
+            appendLog(.info, "Self-Heal · the run left no changes — nothing to propose")
         }
         let proposed = SelfHealOutcome.apply(batch: batch, results: SelfHealBatch.parseResults(markdown),
                                              runSucceeded: succeeded, agentDown: agentDown, runAborted: aborted,
@@ -2321,18 +2394,68 @@ final class LoopEngineRunner: ObservableObject {
         try? FileManager.default.removeItem(at: batchFile.deletingLastPathComponent())
         appendLog(.info, "Self-Heal · \(proposed) fix(es) proposed from \(batch.count) incident(s)")
         guard let leaseProposal else { return }
-        // Both branches touch a full checkout — seconds of disk work — so neither may block this @MainActor method.
-        if proposed == 0 {
+        await retainOrDiscard(leaseProposal, proposed: proposed > 0, label: "Self-Heal")
+    }
+
+    /// Records the SDK Adoption outcome on its `.sdk` incident (a run that found
+    /// nothing to adopt, or failed before a batch existed, records nothing),
+    /// removes the batch directory, and keeps the worktree only as a proposal.
+    private func writeBackSdkAdoption(version: String?, terminal: LoopEngineStatus, gitRoot: URL) async {
+        try? FileManager.default.removeItem(
+            at: gitRoot.appendingPathComponent(SdkAdoption.relativePath).deletingLastPathComponent())
+        let leaseProposal = worktreeProposal()
+        var proposed = false
+        if let version {
+            let succeeded = terminal == .success
+            var errored = false
+            if case .error = terminal { errored = true }
+            var proposal = leaseProposal
+            if succeeded, let candidate = leaseProposal, !(await Self.proposalHasChanges(candidate)) {
+                proposal = nil
+            }
+            SdkAdoption.applyOutcome(version: version, runSucceeded: succeeded,
+                                     agentDown: errored && stageStates.values.contains(.errored),
+                                     runAborted: terminal == .aborted, proposal: proposal, store: .shared)
+            proposed = succeeded && proposal != nil
+            appendLog(.info, proposed
+                ? "SDK Adoption · proposed"
+                : "SDK Adoption · not proposed — \(succeeded ? "the run left no changes" : terminal.summary)")
+        }
+        guard let leaseProposal else { return }
+        await retainOrDiscard(leaseProposal, proposed: proposed, label: "SDK Adoption")
+    }
+
+    /// The current run's worktree as a reviewable proposal, or nil when the run
+    /// was not in a worktree.
+    private func worktreeProposal() -> IncidentProposal? {
+        currentWorktreeLease.map {
+            IncidentProposal(mainRepo: $0.mainRepo.path, worktreePath: $0.worktreePath.path,
+                             branch: $0.branch, baseCommit: $0.baseCommit)
+        }
+    }
+
+    /// Whether the worktree differs from main in anything a proposal would carry.
+    private static func proposalHasChanges(_ candidate: IncidentProposal) async -> Bool {
+        await Task.detached {
+            !(((try? SelfHealProposalService.diff(candidate)) ?? "").isEmpty)
+        }.value
+    }
+
+    /// Shared Self-Heal-family tail: a proposed worktree is kept (minus its build
+    /// output), anything else is removed. Both branches touch a full checkout —
+    /// seconds of disk work — so neither may block this @MainActor method.
+    private func retainOrDiscard(_ lease: IncidentProposal, proposed: Bool, label: String) async {
+        if !proposed {
             // Borrowed symlinks keep a no-fix worktree "dirty"; remove it here so it is not retained.
             let failure = await Task.detached { () -> String? in
-                do { try SelfHealProposalService.discard(leaseProposal); return nil } catch { return error.localizedDescription }
+                do { try SelfHealProposalService.discard(lease); return nil } catch { return error.localizedDescription }
             }.value
             if let failure {
-                appendLog(.info, "Self-Heal · could not remove worktree \(leaseProposal.worktreePath): \(failure)")
+                appendLog(.info, "\(label) · could not remove worktree \(lease.worktreePath): \(failure)")
             }
         } else {
             // A retained proposal only needs its sources; the build output is gigabytes.
-            let root = URL(fileURLWithPath: leaseProposal.worktreePath)
+            let root = URL(fileURLWithPath: lease.worktreePath)
             await Task.detached {
                 for build in ["mac/.build", "mac/LocalPackages/graph-kit/.build"] {
                     let dir = root.appendingPathComponent(build)

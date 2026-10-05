@@ -43,6 +43,10 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         /// at the run's git root for the fix agent to answer. No shell, no
         /// agent call of its own.
         case incidentTriage
+        /// SDK Adoption: runs `mac/Scripts/sdk-adopt-diff.sh` (a fixed command
+        /// this build generates, never read from loop.json) to write
+        /// `SdkAdoption.relativePath`. Exit 3 ends the run as a success.
+        case sdkSurfaceDiff
         /// A kind this build does not know (written by a newer build). The
         /// stage is kept verbatim in `rawJSON`, written back unchanged on
         /// save, shown as unsupported, and NEVER run.

@@ -161,9 +161,13 @@ public enum LoopDefaultLoopKey {
     /// each, then verify in an isolated worktree. Created only on the LLM-IDE
     /// checkout itself (`LoopStageDetector.isAppSourceRoot`).
     public static let selfHeal = "self-heal"
+    /// The SDK Adoption loop: diff the installed Claude Agent SDK's surface
+    /// against `extension/llm_agent/sdk/sdk-surface.json`, classify and adopt
+    /// what is safe, verify in a worktree. LLM-IDE checkout only.
+    public static let sdkAdoption = "sdk-adoption"
 
     /// Creation/display order.
-    public static let all = [regression, test, systemCheck, plan, refactor, docs, selfHeal]
+    public static let all = [regression, test, systemCheck, plan, refactor, docs, selfHeal, sdkAdoption]
 
     /// Default loops that are never run by the scheduled `.loopEngineering`
     /// Auto Task, whatever their `runsOnSchedule` says. The Refactoring loop

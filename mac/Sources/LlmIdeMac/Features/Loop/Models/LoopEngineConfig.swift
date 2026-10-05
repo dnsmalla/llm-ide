@@ -77,11 +77,12 @@ public struct LoopEngineConfig: Codable, Equatable {
     /// An absent key decodes as true, so existing loops pick it up.
     public var openMergeRequest: Bool = true
 
-    /// Any enabled stage belongs to Self-Heal — keyed on the stages, not the
+    /// Any enabled stage belongs to Self-Heal or its SDK Adoption sibling — keyed on the stages, not the
     /// flag, so a hand-edited loop.json, a template or "Run this stage only"
     /// cannot drop the guarantees below.
     public var isSelfHealRun: Bool {
-        stages.contains { $0.enabled && ($0.kind == .incidentTriage || $0.defaultKey?.hasPrefix("self-heal-") == true) }
+        stages.contains { $0.enabled && ($0.kind == .incidentTriage || $0.kind == .sdkSurfaceDiff
+            || $0.defaultKey?.hasPrefix("self-heal-") == true || $0.defaultKey?.hasPrefix("sdk-adopt-") == true) }
     }
 
     /// Self-Heal must never edit the main checkout, whatever the flag says.

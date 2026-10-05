@@ -108,7 +108,8 @@ extension LoopEngineView {
             Text(stage.name)
                 .font(Typography.body)
                 .foregroundStyle(stage.id == selectedStageId ? t.accent : t.text)
-            badge(stage.kind == .skill ? "generate" : stage.kind == .incidentTriage ? "triage" : "verify",
+            badge(stage.kind == .skill ? "generate" : stage.kind == .incidentTriage ? "triage"
+                  : stage.kind == .sdkSurfaceDiff ? "diff" : "verify",
                   color: stage.kind == .skill ? t.accent2 : t.accent)
             if !stage.enabled {
                 badge("off", color: t.textMuted)
@@ -161,6 +162,8 @@ extension LoopEngineView {
             return stage.check?.summary(resolvedAgainst: stages.filter(\.enabled)) ?? "no checks configured"
         case .incidentTriage:
             return "picks up to \(SelfHealSettings.maxPerRun()) new incidents → \(SelfHealBatch.relativePath)"
+        case .sdkSurfaceDiff:
+            return "\(LoopStageDetector.sdkAdoptDiffCommand) → \(SdkAdoption.relativePath)"
         case .unsupported:
             return "unsupported stage kind — kept as-is, never run"
         }

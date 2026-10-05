@@ -255,6 +255,7 @@ struct NewLoopWizardView: View {
         case .skill: "New Skill Stage"
         case .artifactCheck: "Artifact Check"
         case .incidentTriage: "Triage"
+        case .sdkSurfaceDiff: "SDK Diff"
         case .unsupported: "Unsupported stage"
         }
         stages.append(LoopStage(name: name, kind: kind,
@@ -346,6 +347,10 @@ struct NewLoopWizardView: View {
                     .foregroundStyle(t.textMuted)
             case .incidentTriage:
                 Text("Self-Heal incident triage — picks up to \(SelfHealSettings.maxPerRun()) new incidents into \(SelfHealBatch.relativePath).")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
+            case .sdkSurfaceDiff:
+                Text("SDK Adoption diff — lists unclassified Claude Agent SDK surface into \(SdkAdoption.relativePath).")
                     .font(Typography.caption)
                     .foregroundStyle(t.textMuted)
             case .unsupported:
