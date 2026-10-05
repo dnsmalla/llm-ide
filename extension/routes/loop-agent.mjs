@@ -19,7 +19,7 @@ import {
   runLoopAgent, validateLoopRepoRoot, validateLoopExtraRoots, MAX_LOOP_MESSAGE_CHARS,
 } from '../llm_agent/sdk/loop-agent.mjs';
 import { AGENT_SDK_PROVIDER } from '../llm_agent/sdk/engine.mjs';
-import { recordUsage } from '../kb/usage.mjs';
+import { recordUsage, pickMainModelRow } from '../kb/usage.mjs';
 import { getDb } from '../kb/db.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
 
@@ -55,7 +55,10 @@ function meterRun(userId, out, requestedModel) {
     // Round trips belong to the RUN, not to a model: put them on the primary
     // model's row only, or a run that also used a helper model would count twice.
     const turns = Number(out.usage?.numTurns) > 0 ? Number(out.usage.numTurns) : null;
-    const primaryIndex = Math.max(0, rows.findIndex((row) => row.model === meteredModel));
+    // The same selection the chat meter uses: the init name and the SDK's per-model
+    // keys can differ by a suffix ("[1m]"), and an exact match alone would put the
+    // turns on whichever model happened to be listed first — often a small helper.
+    const primaryIndex = Math.max(0, rows.indexOf(pickMainModelRow(rows, meteredModel)));
     rows.forEach((row, index) => {
       recordUsage(db, {
         userId, provider: AGENT_SDK_PROVIDER, model: row.model, endpoint: '/kb/loop/agent-run',
@@ -118,7 +121,12 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       allowAmbientAuth: true,
     });
     // Metered first: a run cut off by the timeout or a disconnect still spent tokens.
-    meterRun(userId, out, model);
+    // A run whose stream just ENDS after an abort (no exception) has no result
+    // subtype either; name the cut-off so it is not recorded as "unknown".
+    meterRun(userId, {
+      ...out,
+      resultSubtype: out.resultSubtype ?? (timedOut ? 'timeout' : (ac.signal.aborted ? 'aborted' : null)),
+    }, model);
     if (ac.signal.aborted && !timedOut) return true; // client gone — nobody to answer
     if (timedOut) {
       sendJSON(res, 504, { error: { code: 'AGENT_RUN_TIMEOUT', message: `The agent run exceeded ${timeoutMs} ms` } });

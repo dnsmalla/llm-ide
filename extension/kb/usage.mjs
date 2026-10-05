@@ -278,6 +278,30 @@ export function getLimits(db, userId, { provider } = {}) {
 // Append one usage event. provider+model+userId required; everything else
 // optional. CLI/subscription callers pass no tokens (they can't report them) —
 // the row still counts as one run.
+/**
+ * The entry of a per-model usage list that is "the" model of a run — the one
+ * that carries the run, as opposed to a subagent or the CLI's internal helper.
+ *
+ * The name the run reports (`system/init`) and the keys of the SDK's per-model
+ * totals do not always agree: the SDK may add a suffix such as "[1m]" on either
+ * side. So: exact name, then a prefix match in either direction, then the entry
+ * that produced the most output. Shared by the chat and the Loop meters so both
+ * pick the same row (routes may not import each other).
+ *
+ * @param {Array<{model: string, outputTokens?: number}>} rows
+ * @param {string|null|undefined} meteredModel
+ * @returns {object|null} one of `rows`, or null when it is empty
+ */
+export function pickMainModelRow(rows, meteredModel) {
+  const list = Array.isArray(rows) ? rows.filter((m) => m && typeof m.model === 'string') : [];
+  if (!list.length) return null;
+  const name = typeof meteredModel === 'string' && meteredModel ? meteredModel : null;
+  return (name && list.find((m) => m.model === name))
+    || (name && list.find((m) => m.model.startsWith(name)))
+    || (name && list.find((m) => name.startsWith(m.model)))
+    || [...list].sort((a, b) => (b.outputTokens || 0) - (a.outputTokens || 0))[0];
+}
+
 export function recordUsage(db, {
   userId, provider, model, source = 'api', endpoint = null,
   inputTokens = null, outputTokens = null, runs = 1, requestId = null,

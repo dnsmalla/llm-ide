@@ -30,7 +30,7 @@ import {
   markAgentSessionUsed,
   deleteAgentSession,
 } from '../kb/agent-sessions.mjs';
-import { recordUsage } from '../kb/usage.mjs';
+import { recordUsage, pickMainModelRow } from '../kb/usage.mjs';
 import { randomUUID } from 'node:crypto';
 import { createToolAccounting } from '../llm_agent/sdk/tool-accounting.mjs';
 import { recordToolEvents } from '../kb/tool-events.mjs';
@@ -123,9 +123,7 @@ export function ledgerRowsForTurn(meteredModel, usageTotals) {
   if (!byModel.length) return [row(usageTotals, meteredModel, '/agent/v2/stream')];
   // The main entry: the metered model by name (the SDK may add a suffix such
   // as "[1m]"), else the entry that produced the most output.
-  const main = byModel.find((m) => m.model === meteredModel)
-    ?? byModel.find((m) => meteredModel && m.model.startsWith(meteredModel))
-    ?? [...byModel].sort((a, b) => b.outputTokens - a.outputTokens)[0];
+  const main = pickMainModelRow(byModel, meteredModel);
   return [
     row(main, meteredModel ?? main.model, '/agent/v2/stream'),
     ...byModel.filter((m) => m !== main).map((m) => row(m, m.model, '/agent/v2/stream:internal')),

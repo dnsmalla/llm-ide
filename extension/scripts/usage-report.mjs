@@ -5,8 +5,10 @@
 //
 //   node scripts/usage-report.mjs [--db kb/data.db] [--days 14]
 //
-// Read-only: the database is COPIED to a temp file first, so a running server's
-// WAL is never touched. Cost on the Agent engine is (context size) x (round
+// Read-only: a consistent SNAPSHOT is taken through SQLite's own backup API (a
+// file-by-file copy of the main file and its WAL, made while the server keeps
+// writing, can be torn), and the report runs against the snapshot. The default
+// path honours LLMIDE_DB_PATH like the server does. Cost on the Agent engine is (context size) x (round
 // trips), because every turn re-reads the context — so besides the token split
 // this prints the distribution of a step's size and, from migration 0039, how
 // many round trips it took and how many hit the turn cap.
@@ -69,13 +71,12 @@ async function main() {
   const { default: Database } = await import('better-sqlite3');
   const here = path.dirname(fileURLToPath(import.meta.url));
   const args = parseArgs(process.argv.slice(2));
-  const source = args.db || path.join(here, '..', '..', 'kb', 'data.db');
+  const source = args.db || process.env.LLMIDE_DB_PATH || path.join(here, '..', '..', 'kb', 'data.db');
   if (!fs.existsSync(source)) { console.error(`no database at ${source}`); process.exit(1); }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-report-'));
-  const copy = path.join(dir, 'copy.db');
-  for (const suffix of ['', '-wal', '-shm']) {
-    if (fs.existsSync(source + suffix)) fs.copyFileSync(source + suffix, copy + suffix);
-  }
+  const copy = path.join(dir, 'snapshot.db');
+  const live = new Database(source, { readonly: true, fileMustExist: true });
+  try { await live.backup(copy); } finally { live.close(); }
   const db = new Database(copy, { readonly: true });
   try {
     const hasTurns = db.prepare("SELECT 1 FROM pragma_table_info('usage_ledger') WHERE name = 'turns'").get();

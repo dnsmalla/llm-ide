@@ -607,6 +607,46 @@ test('route: a finished run records its turn count and why it stopped, once per 
   ], 'the 60 turns are on the PRIMARY model\'s row only — repeating them would double the run');
 });
 
+test('route: the turns land on the MAIN model even when its name differs by a suffix from the init name', async () => {
+  const db = getDb();
+  const u = newUser();
+  addUserRepo(u.id, REPO);
+  await withKey(() => handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: REPO }, user: u }), makeRes(), { userId: u.id },
+    { runAgent: (args) => runLoopAgent({ ...args, queryFactory: () => (async function* () {
+      // The init reports the 1M-context variant; the per-model totals are keyed without it,
+      // and the small helper is listed FIRST — exactly the case an exact match misses.
+      yield { type: 'system', subtype: 'init', model: 'main-model[1m]' };
+      yield { type: 'result', subtype: 'success', num_turns: 11, modelUsage: {
+        'helper-model': { inputTokens: 2, outputTokens: 1, cacheReadInputTokens: 5, cacheCreationInputTokens: 0 },
+        'main-model': { inputTokens: 9, outputTokens: 40, cacheReadInputTokens: 800, cacheCreationInputTokens: 20 },
+      } };
+    })() }, noSkill) },
+  ));
+  const rows = db.prepare('SELECT model, turns FROM usage_ledger WHERE user_id = ? ORDER BY model').all(u.id).map((r) => ({ ...r }));
+  assert.deepEqual(rows, [{ model: 'helper-model', turns: null }, { model: 'main-model', turns: 11 }],
+    'a run counted against its helper would be reported as a tiny, capped run');
+});
+
+test('route: a run whose stream simply ENDS after the timeout is still named a timeout', async () => {
+  const db = getDb();
+  const u = newUser();
+  addUserRepo(u.id, REPO);
+  const res = makeRes();
+  await withKey(() => handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: REPO, timeoutMs: 1_000 }, user: u }), res, { userId: u.id },
+    { runAgent: (args) => runLoopAgent({ ...args, queryFactory: (prompt, options) => (async function* () {
+      yield { type: 'system', subtype: 'init', model: 'quiet-model' };
+      yield { type: 'assistant', message: { id: 'q1', model: 'quiet-model', content: [{ type: 'text', text: 'w' }], usage: { input_tokens: 3, output_tokens: 1 } } };
+      // Ends quietly on abort instead of throwing.
+      await new Promise((resolve) => options.abortController.signal.addEventListener('abort', resolve));
+    })() }, noSkill) },
+  ));
+  assert.equal(res.statusCode, 504);
+  const rows = db.prepare('SELECT stop_reason FROM usage_ledger WHERE user_id = ?').all(u.id).map((r) => ({ ...r }));
+  assert.deepEqual(rows, [{ stop_reason: 'timeout' }]);
+});
+
 test('route: a run with no reported turn count leaves turns unknown, not zero', async () => {
   const db = getDb();
   const u = newUser();
