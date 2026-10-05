@@ -54,6 +54,7 @@ Enforcement:
 | SDK transcript disk layout (`CLAUDE_CONFIG_DIR`, `~/.claude/projects/…`) | `extension/llm_agent/sdk/transcripts.mjs` |
 | Provider id the SDK engine meters under | `AGENT_SDK_PROVIDER` in `engine.mjs` |
 | `claude` CLI argv (`-p`, `--output-format stream-json`, `--mcp-config`, …), stream-json parsing, model-id regex, 500k prompt cap | `extension/providers/providers.mjs` + `runtime.mjs` |
+| `claude plugin …` argv (marketplace update, list --available --json, update --json --accept-command) and its JSON parsing | `extension/providers/claude-plugin-cli.mjs` |
 | SDK pin | `extension/package.json` (`@anthropic-ai/claude-agent-sdk`) |
 | SDK surface ledger (adopted / ignored / needs-human per top-level item) | `extension/llm_agent/sdk/sdk-surface.json` (gate: `tests/sdk-surface-ledger.test.mjs`, tool: `scripts/sdk-surface.mjs`) |
 | Wire event decode (Mac) | `ClaudeLink/AgentV2Event.swift` |
