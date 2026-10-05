@@ -47,6 +47,20 @@ struct LoopRunAvailabilityTests {
         #expect(reason(laneRunLabel: "Scheduled run") == "Scheduled run — stop it before running from here.")
     }
 
+    @Test("the order of reasons is fixed: lane, running, queued, environment, stage, git")
+    func fullOrder() throws {
+        func text(_ run: Bool, _ queued: Bool, _ env: Bool, _ stage: Bool, _ git: Bool, lane: String? = nil) -> String {
+            reason(isRunning: run, isWaitingInQueue: queued, laneRunLabel: lane,
+                   isSettingUpEnvironment: env, hasEnabledStage: stage, hasGitRoot: git) ?? ""
+        }
+        #expect(text(true, true, true, false, false, lane: "Phone run").hasPrefix("Phone run"))
+        #expect(text(true, true, true, false, false).contains("already running"))
+        #expect(text(false, true, true, false, false).contains("queued"))
+        #expect(text(false, false, true, false, false).contains("environment"))
+        #expect(text(false, false, false, false, false).contains("No enabled stage"))
+        #expect(text(false, false, false, true, false).contains("git working tree"))
+    }
+
     @Test("the most actionable reason wins when several apply")
     func precedence() throws {
         let text = try #require(reason(isRunning: true, hasEnabledStage: false, hasGitRoot: false))

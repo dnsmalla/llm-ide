@@ -32,7 +32,7 @@ enum LoopRunAvailability {
         if isWaitingInQueue { return "This loop is queued behind another run." }
         if isSettingUpEnvironment { return "The project environment is being set up — wait for it to finish." }
         if !hasEnabledStage { return "No enabled stage. Add or enable at least one stage to run this loop." }
-        if !hasGitRoot { return "No git working tree. Set an active, cloned repository for this project." }
+        if !hasGitRoot { return "No git working tree. Open a project that is a git repo, or activate a cloned repo in Settings → GitLab / GitHub." }
         return nil
     }
 }
