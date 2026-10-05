@@ -15,6 +15,7 @@ struct PluginDetailView: View {
     @State private var loadError: String?
     @State private var togglePending = false
     @State private var trustPending = false
+    @State private var trustError: String?
 
     var body: some View {
         ScrollView {
@@ -208,6 +209,10 @@ struct PluginDetailView: View {
                         Text("Enable the plugin first — its hooks and scripts only run for an enabled plugin.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    if let trustError {
+                        Text(trustError).font(.caption).foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 if !plugin.nativeDelivery {
                     // These notes describe what LLM-IDE's own hook handling
@@ -236,10 +241,17 @@ struct PluginDetailView: View {
         trustPending = true
         defer { trustPending = false }
         do {
-            _ = try await api.setPluginHookTrust(name: pluginName, trusted: trusted)
+            trustError = nil
+            _ = try await api.setPluginHookTrust(
+                name: pluginName, trusted: trusted,
+                shownKinds: trusted ? plugin.map(PluginTrustPresentation.shownKinds) : nil)
             await load()
         } catch {
-            loadError = error.localizedDescription
+            // A refused grant (the plugin changed since it was shown) must not wipe
+            // the pane: reload so the new declaration is on screen, then say why.
+            let message = error.localizedDescription
+            await load()
+            trustError = message
         }
     }
 

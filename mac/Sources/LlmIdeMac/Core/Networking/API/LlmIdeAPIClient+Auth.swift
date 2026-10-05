@@ -85,11 +85,15 @@ extension LlmIdeAPIClient {
 
     /// Authorize (or revoke) shell execution for one plugin's hooks. Separate
     /// from `togglePlugin` on purpose — the server audits it as its own grant.
-    func setPluginHookTrust(name: String, trusted: Bool) async throws -> Bool {
-        struct Req: Encodable { let name: String; let trusted: Bool }
+    ///
+    /// `shownKinds` is what the detail view displayed when the user clicked. The
+    /// server refuses (409) a grant for a plugin that has since declared more, so
+    /// a grant is never larger than what the user saw.
+    func setPluginHookTrust(name: String, trusted: Bool, shownKinds: [String]? = nil) async throws -> Bool {
+        struct Req: Encodable { let name: String; let trusted: Bool; let kinds: [String]? }
         struct Ack: Decodable { let ok: Bool; let hooksTrusted: Bool }
         let ack: Ack = try await post("/auth/me/plugins/hook-trust",
-                                      body: Req(name: name, trusted: trusted),
+                                      body: Req(name: name, trusted: trusted, kinds: shownKinds),
                                       authenticated: true)
         return ack.hooksTrusted
     }
@@ -318,6 +322,10 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     /// executable components that grant did not cover (an update added monitors,
     /// a language server or bin/). Nil from an older server.
     let trustOutdated: Bool?
+    /// Only the kinds the earlier grant did not cover ("monitors", "sdk" for the
+    /// move to native loading, …), so the UI names what is NEW. Nil from an older
+    /// server.
+    let trustOutdatedKinds: [String]?
     /// Whether the Agent engine can ever load this plugin: the two facts that
     /// decide whether monitors / LSP / bin/ / JS hook modules can run at all.
     var agentEngineCanLoad: Bool { (sdkReadable ?? true) && (nativePluginsOn ?? true) }
@@ -382,7 +390,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
             && lhs.unsupportedComponents == rhs.unsupportedComponents
             && lhs.mcpServerCount == rhs.mcpServerCount && lhs.version == rhs.version
             && lhs.sdkReadable == rhs.sdkReadable && lhs.nativePluginsOn == rhs.nativePluginsOn
-            && lhs.trustOutdated == rhs.trustOutdated
+            && lhs.trustOutdated == rhs.trustOutdated && lhs.trustOutdatedKinds == rhs.trustOutdatedKinds
             // The rest of what PluginDetailView renders: a reinstall that only adds
             // a .mcp.json or a slash command must not leave the old rows showing.
             && lhs.displayName == rhs.displayName && lhs.description == rhs.description
@@ -402,7 +410,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         case name, version, displayName, description, author
         case enabled, skillCount, commands, subagents
         case format, unsupportedComponents, pendingComponents
-        case hookCount, declaresHooks, executableKinds, sdkReadable, nativePluginsOn, trustOutdated, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
+        case hookCount, declaresHooks, executableKinds, sdkReadable, nativePluginsOn, trustOutdated, trustOutdatedKinds, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -424,6 +432,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         self.sdkReadable     = try c.decodeIfPresent(Bool.self, forKey: .sdkReadable)
         self.nativePluginsOn = try c.decodeIfPresent(Bool.self, forKey: .nativePluginsOn)
         self.trustOutdated   = try c.decodeIfPresent(Bool.self, forKey: .trustOutdated)
+        self.trustOutdatedKinds = try c.decodeIfPresent([String].self, forKey: .trustOutdatedKinds)
         self.hookNotes      = try c.decodeIfPresent([String].self, forKey: .hookNotes) ?? []
         self.hooksTrusted   = try c.decodeIfPresent(Bool.self, forKey: .hooksTrusted) ?? false
         self.mcpServerCount = try c.decodeIfPresent(Int.self, forKey: .mcpServerCount) ?? 0

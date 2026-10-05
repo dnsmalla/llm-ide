@@ -47,6 +47,31 @@ enum PluginTrustPresentation {
             : "\(component) — will run once you enable this plugin (trusted)"
     }
 
+    /// Words for executable kinds, including the internal `sdk` marker (the
+    /// package is now loaded by the agent engine itself, which runs more handler
+    /// types than LLM-IDE's own hook handling).
+    static func describe(kinds: [String]) -> String {
+        let words = kinds.compactMap { kind -> String? in
+            switch kind {
+            case "hooks": return "hooks"
+            case "monitors": return "background monitors"
+            case "lsp": return "language servers"
+            case "bin": return "bin/ commands"
+            case "sdk": return "loading by the agent engine itself (more hook types than before)"
+            default: return nil
+            }
+        }
+        return words.isEmpty ? "more executable parts" : words.joined(separator: ", ")
+    }
+
+    /// The kinds the detail view shows, sent with a grant so the server can refuse
+    /// one that would be larger than what the user saw.
+    static func shownKinds(_ plugin: PluginInfo) -> [String] {
+        var kinds = Set(plugin.executableKinds)
+        if plugin.hookCount > 0 { kinds.insert("hooks") }
+        return kinds.sorted()
+    }
+
     /// "Hooks" unless the package also brings scripts the engine runs.
     static func hooksHeading(_ plugin: PluginInfo) -> String {
         plugin.executableKinds.contains { $0 != "hooks" } ? "Hooks & scripts" : "Hooks"
@@ -73,8 +98,13 @@ enum PluginTrustPresentation {
             // A grant exists but no longer covers what the plugin declares: say so,
             // or the toggle would look like it reset itself for no reason.
             if plugin.trustOutdated == true {
-                let what = plugin.executableSummary.isEmpty ? "more executable parts" : plugin.executableSummary
-                return "You trusted an earlier version of this plugin. It now declares \(what), which that trust did not cover, so it is off again. Turn it on to allow the current version."
+                // Name only what is NEW (older servers send no list: fall back to all),
+                // and keep the warnings the first-time prompt has — an update is
+                // exactly when an unsandboxed monitor can appear.
+                let newKinds = plugin.trustOutdatedKinds ?? plugin.executableKinds
+                let what = describe(kinds: newKinds)
+                let sandbox = newKinds.contains("monitors") ? " Background monitors run outside the sandbox." : ""
+                return "You trusted an earlier version of this plugin. It now also declares \(what), which that trust did not cover, so it is off again.\(sandbox) Leave it off unless you trust the author, or turn it on to allow the current version."
             }
             if beyondHooks && plugin.agentEngineCanLoad {
                 let sandbox = plugin.executableKinds.contains("monitors")

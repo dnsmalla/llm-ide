@@ -11,7 +11,7 @@ struct PluginTrustPresentationTests {
                         trusted: Bool = false, native: Bool = false, enabled: Bool = true,
                         sdkReadable: Bool? = true, nativeOn: Bool? = true,
                         commands: String = "[]", pending: String = "[]",
-                        outdated: Bool? = nil) throws -> PluginInfo {
+                        outdated: Bool? = nil, missing: [String]? = nil) throws -> PluginInfo {
         func flag(_ value: Bool?) -> String { value.map { "\($0)" } ?? "null" }
         let kindsJSON = "[" + kinds.map { "\"\($0)\"" }.joined(separator: ",") + "]"
         let json = """
@@ -21,7 +21,8 @@ struct PluginTrustPresentationTests {
          "hookCount":\(hookCount),"declaresHooks":\(declares ?? !kinds.isEmpty),
          "executableKinds":\(kindsJSON),"hooksTrusted":\(trusted),"nativeDelivery":\(native),
          "sdkReadable":\(flag(sdkReadable)),"nativePluginsOn":\(flag(nativeOn)),
-         "trustOutdated":\(flag(outdated))}
+         "trustOutdated":\(flag(outdated)),
+         "trustOutdatedKinds":\(missing.map { "[" + $0.map { "\"\($0)\"" }.joined(separator: ",") + "]" } ?? "null")}
         """
         return try JSONDecoder().decode(PluginInfo.self, from: Data(json.utf8))
     }
@@ -105,9 +106,23 @@ struct PluginTrustPresentationTests {
     @Test("a grant that no longer covers the plugin says why it is off")
     func outdatedTrust() throws {
         let text = PluginTrustPresentation.trustExplanation(
-            try plugin(kinds: ["hooks", "monitors"], hookCount: 1, trusted: false, outdated: true))
+            try plugin(kinds: ["hooks", "monitors"], hookCount: 1, trusted: false, outdated: true, missing: ["monitors"]))
         #expect(text.hasPrefix("You trusted an earlier version of this plugin"))
         #expect(text.contains("background monitors"))
+        // Only what is NEW is named: hooks were covered by the old grant.
+        #expect(!text.contains("hooks"), "hooks were already trusted")
+        // The risky update keeps the first-time warnings.
+        #expect(text.contains("outside the sandbox"))
+        #expect(text.contains("Leave it off unless you trust the author"))
+        // The move to native loading is named, without a sandbox claim it cannot make.
+        let sdk = PluginTrustPresentation.trustExplanation(
+            try plugin(kinds: ["hooks"], hookCount: 1, outdated: true, missing: ["sdk"]))
+        #expect(sdk.contains("loading by the agent engine itself"))
+        #expect(!sdk.contains("sandbox"))
+        // An older server sends no list: fall back to everything the plugin declares.
+        let older = PluginTrustPresentation.trustExplanation(
+            try plugin(kinds: ["monitors"], outdated: true, missing: nil))
+        #expect(older.contains("background monitors"))
         // Not outdated: the ordinary untrusted text.
         let plain = PluginTrustPresentation.trustExplanation(try plugin(kinds: ["hooks"], hookCount: 1, outdated: false))
         #expect(plain.hasPrefix("Turning this on lets"))
@@ -116,6 +131,13 @@ struct PluginTrustPresentationTests {
             try plugin(kinds: ["monitors"], nativeOn: false, outdated: true))
         #expect(off.hasPrefix("Nothing from this plugin runs right now"))
         #expect(try plugin(kinds: ["hooks"], outdated: true) != (try plugin(kinds: ["hooks"], outdated: false)))
+    }
+
+    @Test("what the client shows is what it sends with a grant")
+    func shownKinds() throws {
+        #expect(PluginTrustPresentation.shownKinds(try plugin(kinds: ["monitors", "lsp"])) == ["lsp", "monitors"])
+        #expect(PluginTrustPresentation.shownKinds(try plugin(kinds: ["monitors"], hookCount: 2)) == ["hooks", "monitors"])
+        #expect(PluginTrustPresentation.shownKinds(try plugin(kinds: [])).isEmpty)
     }
 
     @Test("an older server (no delivery facts) is treated as loadable, like before")
