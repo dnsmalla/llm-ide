@@ -1,0 +1,729 @@
+{
+  "sdkVersion": "0.3.289",
+  "items": {
+    "messages.SDKAPIRetryMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKAssistantMessage": {
+      "status": "adopted",
+      "where": "events.mjs"
+    },
+    "messages.SDKAuthStatusMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKBackgroundTasksChangedMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKCommandsChangedMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKCompactBoundaryMessage": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "messages.SDKControlRequestProgressMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKConversationResetMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKElicitationCompleteMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKFilesPersistedEvent": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKHookProgressMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKHookResponseMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKHookStartedMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKInformationalMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKLocalCommandOutputMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKMemoryRecallMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKMirrorErrorMessage": {
+      "status": "ignored",
+      "reason": "internal transport signal"
+    },
+    "messages.SDKModelRefusalFallbackMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKModelRefusalNoFallbackMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKNotificationMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKPartialAssistantMessage": {
+      "status": "adopted",
+      "where": "events.mjs"
+    },
+    "messages.SDKPermissionDeniedMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKPluginInstallMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKPromptSuggestionMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKRateLimitEvent": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKResultMessage": {
+      "status": "adopted",
+      "where": "events.mjs"
+    },
+    "messages.SDKSessionStateChangedMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKStatusMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKSystemMessage": {
+      "status": "adopted",
+      "where": "events.mjs"
+    },
+    "messages.SDKTaskNotificationMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKTaskProgressMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKTaskStartedMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKTaskUpdatedMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKThinkingTokensMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKToolProgressMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKToolUseSummaryMessage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "messages.SDKUserMessage": {
+      "status": "adopted",
+      "where": "events.mjs"
+    },
+    "messages.SDKUserMessageReplay": {
+      "status": "adopted",
+      "where": "events.mjs"
+    },
+    "messages.SDKWorkerShuttingDownMessage": {
+      "status": "ignored",
+      "reason": "internal transport signal"
+    },
+    "options.abortController": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.additionalDirectories": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.agent": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.agentProgressSummaries": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.agents": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.allowDangerouslySkipPermissions": {
+      "status": "ignored",
+      "reason": "security: canUseTool is our only permission path"
+    },
+    "options.allowedTools": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.betas": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.canUseTool": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.continue": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.cwd": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.debug": {
+      "status": "ignored",
+      "reason": "local debugging only"
+    },
+    "options.debugFile": {
+      "status": "ignored",
+      "reason": "local debugging only"
+    },
+    "options.disallowedTools": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.effort": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.enableFileCheckpointing": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.env": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.executable": {
+      "status": "ignored",
+      "reason": "SDK bundles its own binary; we never override it"
+    },
+    "options.executableArgs": {
+      "status": "ignored",
+      "reason": "SDK bundles its own binary; we never override it"
+    },
+    "options.extraArgs": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.fallbackModel": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.forkSession": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.forwardSubagentText": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.hooks": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.includeHookEvents": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.includePartialMessages": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.loadTimeoutMs": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.managedSettings": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.maxBudgetUsd": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.maxThinkingTokens": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.maxTurns": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.mcpServers": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.model": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.onElicitation": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.onUserDialog": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.outputFormat": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.pathToClaudeCodeExecutable": {
+      "status": "ignored",
+      "reason": "SDK bundles its own binary; we never override it"
+    },
+    "options.perTaskStopAffordance": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.permissionMode": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.permissionPromptToolName": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.permissionPrompts": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.persistSession": {
+      "status": "adopted",
+      "where": "loop-agent.mjs"
+    },
+    "options.planModeInstructions": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.pluginDelivery": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.plugins": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.projectConfigRoot": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.promptSuggestions": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.resume": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.resumeDropsTurn": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.resumeSessionAt": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.sandbox": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.sessionId": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.sessionStore": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.sessionStoreFlush": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.settingSources": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.settings": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.skills": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.spawnClaudeCodeProcess": {
+      "status": "ignored",
+      "reason": "SDK bundles its own binary; we never override it"
+    },
+    "options.stderr": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.strictMcpConfig": {
+      "status": "adopted",
+      "where": "loop-agent.mjs"
+    },
+    "options.supportedDialogKinds": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.systemPrompt": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.taskBudget": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.thinking": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.title": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.toolAliases": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.toolConfig": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "options.tools": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "options.verbatimPrompts": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.accountInfo": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.applyFlagSettings": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.backgroundTasks": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.close": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.getContextUsage": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.initializationResult": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.interrupt": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.mcpServerStatus": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.readFile": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.readMcpResource": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.reconnectMcpServer": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.reinitialize": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.reloadOutputStyles": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.reloadPlugins": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.reloadSkills": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.rewindFiles": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.seedReadState": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.setMaxThinkingTokens": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.setMcpPermissionModeOverride": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.setMcpServers": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.setModel": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.setPermissionMode": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.stopTask": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.streamInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.supportedAgents": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.supportedCommands": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.supportedModels": {
+      "status": "adopted",
+      "where": "models.mjs"
+    },
+    "query.toggleMcpServer": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.updateSettings": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.AgentInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.ArtifactInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.AskUserQuestionInput": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "tools.BashInput": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "tools.ClaudeDesignInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.CronCreateInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.CronDeleteInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.CronListInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.EnterPlanModeInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.EnterWorktreeInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.ExitPlanModeInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.ExitWorktreeInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.FileEditInput": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "tools.FileReadInput": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "tools.FileWriteInput": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "tools.GlobInput": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "tools.GrepInput": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "tools.ListMcpResourcesInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.McpInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.MonitorInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.NotebookEditInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.ProjectsInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.ProposeGoalInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.ProposeSkillsInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.PushNotificationInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.ReadMcpResourceDirInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.ReadMcpResourceInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.ReadNotificationsInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.RefreshMcpToolsInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.RemoteTriggerInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.ReportFindingsInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.ScheduleWakeupInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.SendFeedbackInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.ShowOnboardingRolePickerInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.TaskCreateInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.TaskGetInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.TaskListInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.TaskStopInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.TaskUpdateInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.TodoWriteInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    },
+    "tools.WebFetchInput": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "tools.WebSearchInput": {
+      "status": "adopted",
+      "where": "engine.mjs"
+    },
+    "tools.WorkflowInput": {
+      "status": "needs-human",
+      "reason": "seed: not yet reviewed"
+    }
+  }
+}
