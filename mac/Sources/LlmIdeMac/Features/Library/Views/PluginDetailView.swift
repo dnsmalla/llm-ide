@@ -19,6 +19,10 @@ struct PluginDetailView: View {
     @State private var trustError: String?
     /// Turning trust ON asks first; turning it off never does.
     @State private var confirmingTrust = false
+    /// The kinds the user was SHOWN when the dialog opened. Sent with the grant
+    /// instead of re-reading `plugin`, which a refresh may have changed since —
+    /// the grant must never be larger than what was on screen.
+    @State private var kindsShownForTrust: [String]?
     /// An enable / disable failure, kept apart from `loadError` so it does not
     /// replace the whole pane.
     @State private var actionError: String?
@@ -58,9 +62,12 @@ struct PluginDetailView: View {
             isPresented: $confirmingTrust, titleVisibility: .visible
         ) {
             Button(PluginTrustConfirmation.confirmLabel, role: .destructive) {
-                Task { await setHookTrust(true) }
+                // No captured kinds (nothing was on screen) means no grant: sending
+                // none would make the server skip its "never larger than shown" check.
+                guard let shown = kindsShownForTrust else { return }
+                Task { await setHookTrust(true, shownKinds: shown) }
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel) { kindsShownForTrust = nil }
         } message: {
             Text(plugin.map(PluginTrustConfirmation.message) ?? "")
         }
@@ -220,7 +227,12 @@ struct PluginDetailView: View {
                         // Granting runs the plugin's code with the app's access: ask
                         // first. Revoking is one click.
                         set: { newValue in
-                            if newValue { confirmingTrust = true } else { Task { await setHookTrust(false) } }
+                            if newValue {
+                                kindsShownForTrust = PluginTrustPresentation.shownKinds(plugin)
+                                confirmingTrust = true
+                            } else {
+                                Task { await setHookTrust(false) }
+                            }
                         }
                     )) {
                         Text(PluginTrustPresentation.trustLabel(plugin))
@@ -263,16 +275,17 @@ struct PluginDetailView: View {
 
     // MARK: - Data + actions
 
-    private func setHookTrust(_ trusted: Bool) async {
+    private func setHookTrust(_ trusted: Bool, shownKinds: [String]? = nil) async {
         trustPending = true
         defer { trustPending = false }
         do {
             trustError = nil
             _ = try await api.setPluginHookTrust(
                 name: pluginName, trusted: trusted,
-                shownKinds: trusted ? plugin.map(PluginTrustPresentation.shownKinds) : nil)
+                shownKinds: trusted ? shownKinds : nil)
+            // The token bump below reloads this pane through its own onChange; a second
+            // explicit refresh here only doubled the request.
             shell.markLibraryDirty()
-            await refresh()
         } catch {
             // A refused grant (the plugin changed since it was shown) must not wipe
             // the pane: reload so the new declaration is on screen, then say why.
@@ -308,7 +321,6 @@ struct PluginDetailView: View {
         do {
             try await api.togglePlugin(name: p.name, enabled: !p.enabled)
             shell.markLibraryDirty()
-            await refresh()
         } catch {
             actionError = error.localizedDescription
         }

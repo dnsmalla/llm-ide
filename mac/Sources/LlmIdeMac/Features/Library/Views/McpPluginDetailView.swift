@@ -185,8 +185,7 @@ struct McpPluginDetailView: View {
         actionError = nil
         do {
             _ = try await api.consentMcpPlugin(id: pluginId, consented: consented)
-            shell.markLibraryDirty()
-            await refresh()
+            shell.markLibraryDirty()   // reloads this pane through its own onChange
         } catch {
             actionError = error.localizedDescription
         }
@@ -199,7 +198,6 @@ struct McpPluginDetailView: View {
         do {
             _ = try await api.toggleMcpPlugin(id: pluginId, enabled: enabled)
             shell.markLibraryDirty()
-            await refresh()
         } catch {
             actionError = error.localizedDescription
         }
@@ -234,7 +232,6 @@ struct McpPluginDetailView: View {
             try await api.setSecret(key: key, value: value)
             credentialDraft = ""
             shell.markLibraryDirty()
-            await refresh()
         } catch {
             actionError = error.localizedDescription
         }

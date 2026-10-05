@@ -24,7 +24,11 @@ struct LibraryDetailView: View {
             }
 
         case .plugin(let name):
+            // `.id` for the same reason as the LLM source below, and with more at
+            // stake: a refresh still in flight for plugin A would otherwise land in
+            // B's pane, and a Trust click there would act on B with A's kinds.
             PluginDetailView(api: api, pluginName: name)
+                .id(name)
 
         case .llmSource(let id):
             // `.id` gives each source its own view state: without it SwiftUI
@@ -35,9 +39,11 @@ struct LibraryDetailView: View {
 
         case .mcpPlugin(let id):
             McpPluginDetailView(api: api, pluginId: id)
+                .id(id)
 
         case .connector(let id):
             ConnectorDetailView(api: api, connectorId: id)
+                .id(id)
 
         case nil:
             ContentUnavailableView {

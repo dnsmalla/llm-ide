@@ -997,7 +997,7 @@ struct LibraryView: View {
     private func perform(_ removal: LibraryRemoval) async {
         switch removal {
         case .plugin(let name, _):
-            if let plugin = plugins.first(where: { $0.name == name }) { await uninstall(plugin) }
+            await uninstall(name: name)
         case .mcpServer(let id, _): await removePlugin(id)
         case .connector(let id, _): await removeConnector(id)
         }
@@ -1148,10 +1148,13 @@ struct LibraryView: View {
         }
     }
 
-    private func uninstall(_ plugin: PluginInfo) async {
+    /// By NAME: the server needs nothing else, and a lookup in `plugins` made a
+    /// confirmed uninstall silently do nothing when the list had refreshed while
+    /// the dialog was open.
+    private func uninstall(name: String) async {
         do {
-            _ = try await api.uninstallPlugin(name: plugin.name)
-            if case .plugin(let selected) = shell.librarySelection, selected == plugin.name {
+            _ = try await api.uninstallPlugin(name: name)
+            if case .plugin(let selected) = shell.librarySelection, selected == name {
                 shell.librarySelection = nil
             }
             await refreshPlugins()
@@ -1523,7 +1526,7 @@ struct LibraryView: View {
         do {
             _ = try await api.consentMcpPlugin(id: id, consented: consented)
             await refreshMcpPlugins()
-            shell.markLibraryDirty()   // an open detail pane shows the old switch otherwise
+            notifyOpenMcpPane(id)
         } catch {
             mcpPluginMessage = error.localizedDescription
         }
@@ -1533,9 +1536,18 @@ struct LibraryView: View {
         do {
             _ = try await api.toggleMcpPlugin(id: id, enabled: enabled)
             await refreshMcpPlugins()
-            shell.markLibraryDirty()
+            notifyOpenMcpPane(id)
         } catch {
             mcpPluginMessage = error.localizedDescription
+        }
+    }
+
+    /// An open detail pane for THIS server would otherwise keep showing the old
+    /// switch. Bumping the token reloads every Library section, so it is done only
+    /// when that pane is actually open — not on every sidebar click.
+    private func notifyOpenMcpPane(_ id: String) {
+        if case .mcpPlugin(let selected) = shell.librarySelection, selected == id {
+            shell.markLibraryDirty()
         }
     }
 
