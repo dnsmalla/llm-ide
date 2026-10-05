@@ -2,6 +2,12 @@
 // Agent SDK must be classified in llm_agent/sdk/sdk-surface.json. A bump that
 // adds or removes one turns this red until someone (or the sdk-adoption loop)
 // decides adopted / ignored / needs-human.
+//
+// The ledger's `sdkVersion` is informational only (the last version the
+// ledger was reviewed against). It is deliberately NOT checked against the
+// installed SDK: a bump that adds no top-level surface would turn the gate red
+// with nothing to classify, and tests/dependency-pins.test.mjs already ties
+// the package.json pin to the installed version.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -17,10 +23,6 @@ test('every installed SDK surface item is classified, and none is stale', () => 
   const { added, removed } = diffSurface(surface.items, ledger);
   assert.deepEqual({ added, removed }, { added: [], removed: [] },
     'run the sdk-adoption loop, or classify by hand — docs/explanation/claude-linker.md "Adopt"');
-});
-
-test('ledger records the installed SDK version', () => {
-  assert.equal(ledger.sdkVersion, surface.version);
 });
 
 test('every entry has a valid status, and non-adopted entries say why', () => {

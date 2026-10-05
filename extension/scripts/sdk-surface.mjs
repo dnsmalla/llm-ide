@@ -37,6 +37,13 @@ export function extractSurface(sdkDir) {
   const items = [];
   for (const [category, names] of Object.entries(categories)) {
     if (names.length === 0) throw new Error(`sdk-surface: no ${category} found`);
+    // The union splits take whatever text sits between `|`s; a generic, an
+    // inline object or a comment there would land in the batch the agent
+    // reads, so anything that is not a bare identifier is refused outright.
+    if (category === 'messages' || category === 'tools') {
+      const bad = names.find((n) => !/^[A-Za-z_$][\w$]*$/.test(n));
+      if (bad !== undefined) throw new Error(`sdk-surface: unexpected ${category} entry "${bad}"`);
+    }
     for (const name of new Set(names)) items.push(`${category}.${name}`);
   }
   return { version, items: items.sort() };
@@ -90,9 +97,12 @@ export function pinSyncDecision({ headPkg, mainPkg, headLock, mainLock }) {
   return { copy: true, reason: 'SDK pin differs only' };
 }
 
-const EXTENSION_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SDK_DIR = path.join(EXTENSION_DIR, 'node_modules', ...PKG.split('/'));
-const LEDGER = path.join(EXTENSION_DIR, 'llm_agent', 'sdk', 'sdk-surface.json');
+// The env overrides exist for the CLI's own tests (hermetic fixture dirs);
+// unset, every path is the real extension's.
+const EXTENSION_DIR = process.env.SDK_SURFACE_EXTENSION_DIR
+  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SDK_DIR = process.env.SDK_SURFACE_SDK_DIR || path.join(EXTENSION_DIR, 'node_modules', ...PKG.split('/'));
+const LEDGER = process.env.SDK_SURFACE_LEDGER || path.join(EXTENSION_DIR, 'llm_agent', 'sdk', 'sdk-surface.json');
 const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
 
 function syncPin(mainRoot) {
@@ -106,28 +116,35 @@ function syncPin(mainRoot) {
   return decision;
 }
 
+// Exit codes: 0 batch written, 3 nothing to adopt, 4 the pin cannot be synced
+// (a human must act), 1 usage or error. The Mac runner maps each to an action.
 function main(argv) {
   const [cmd, ...rest] = argv;
   const flag = (name) => { const i = rest.indexOf(name); return i < 0 ? null : rest[i + 1]; };
+  if (cmd !== 'init' && (cmd !== 'diff' || !flag('--batch'))) {
+    throw new Error('usage: sdk-surface.mjs diff --batch <file> [--main <root>] | init');
+  }
   const surface = extractSurface(SDK_DIR);
   if (cmd === 'init') {
     const items = Object.fromEntries(surface.items.map((k) => [k, { status: 'needs-human', reason: 'seed: not yet reviewed' }]));
     fs.writeFileSync(LEDGER, `${JSON.stringify({ sdkVersion: surface.version, items }, null, 2)}\n`);
     return 0;
   }
-  if (cmd !== 'diff' || !flag('--batch')) throw new Error('usage: sdk-surface.mjs diff --batch <file> [--main <root>] | init');
   const batchFile = path.resolve(flag('--batch'));
-  fs.mkdirSync(path.dirname(batchFile), { recursive: true });
   if (flag('--main')) {
     const pin = syncPin(flag('--main'));
+    // No batch: an agent run against a tree whose pin is not the installed
+    // SDK would adopt against the wrong surface. Exit 4 tells the runner to
+    // park the version for a human instead.
     if (!pin.copy && pin.reason !== 'pin already matches') {
-      fs.writeFileSync(batchFile, `# SDK adoption batch — ${surface.version}\n\nneeds-human: ${pin.reason}. Change nothing.\n`);
-      return 0;
+      process.stderr.write(`sdk-surface: ${pin.reason}\n`);
+      return 4;
     }
   }
   const ledger = readJson(LEDGER);
   const diff = diffSurface(surface.items, ledger);
   if (!diff.added.length && !diff.removed.length) return 3;
+  fs.mkdirSync(path.dirname(batchFile), { recursive: true });
   fs.writeFileSync(batchFile, renderBatch(diff, surface.version, ledger));
   return 0;
 }
