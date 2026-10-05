@@ -100,10 +100,13 @@ function validateClaudeManifest(raw) {
   for (const key of ['skills', 'commands', 'agents']) {
     const rel = raw[key];
     if (rel === undefined) continue;
-    if (typeof rel !== 'string' || !/^\.\/[A-Za-z0-9._-]+$/.test(rel) || rel.includes('..')) {
+    // A trailing slash is the normal spelling in real manifests ("./skills/",
+    // Codex's own packages all use it); rejecting it left every such plugin
+    // installed but silently unloadable.
+    if (typeof rel !== 'string' || !/^\.\/[A-Za-z0-9._-]+\/?$/.test(rel) || rel.includes('..')) {
       return { error: `component path '${key}' must be a './'-prefixed relative path without traversal` };
     }
-    components[key] = rel.slice(2);
+    components[key] = rel.slice(2).replace(/\/$/, '');
   }
   return {
     manifest: {

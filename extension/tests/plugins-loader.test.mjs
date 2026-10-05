@@ -369,6 +369,38 @@ test('vendor: component path override relocates the skills dir', () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+test('vendor: a trailing slash on a component path ("./skills/") still loads', () => {
+  // Codex's own packages spell it this way; rejecting it left four installed
+  // plugins silently unloadable.
+  const root = newRoot();
+  const dir = join(root, 'example');
+  mkdirSync(join(dir, '.codex-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'skills', 'browser'), { recursive: true });
+  writeFileSync(join(dir, '.codex-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'example', version: '1.0.0', skills: './skills/' }), 'utf8');
+  writeFileSync(join(dir, 'skills', 'browser', 'SKILL.md'),
+    `---\nname: browser\ndescription: d\n---\nBody.`, 'utf8');
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(warnings.length, 0, warnings.join(', '));
+  assert.equal(plugins.get('example')?.skillFiles.length, 1);
+  assert.ok(plugins.get('example').skillsDir.endsWith('skills'), 'the slash is not part of the dir');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('vendor: a path with two slashes or a traversal is still refused', () => {
+  const root = newRoot();
+  for (const [name, value] of [['two', './skills//'], ['up', './../skills/'], ['abs', '/skills/']]) {
+    const dir = join(root, name);
+    mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name, version: '1.0.0', skills: value }), 'utf8');
+  }
+  const { plugins, warnings } = loadPlugins({ pluginDir: root });
+  assert.equal(plugins.size, 0, [...plugins.keys()].join(','));
+  assert.equal(warnings.filter((w) => w.includes('component path')).length, 3, warnings.join(' | '));
+  rmSync(root, { recursive: true, force: true });
+});
+
 test('vendor: nested skill exceeding the byte cap is skipped with a warning', () => {
   const root = newRoot();
   const dir = join(root, 'example');
