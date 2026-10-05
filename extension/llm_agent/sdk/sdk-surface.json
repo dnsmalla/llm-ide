@@ -446,8 +446,8 @@
       "reason": "seed: not yet reviewed"
     },
     "query.close": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "adopted",
+      "where": "models.mjs"
     },
     "query.getContextUsage": {
       "status": "needs-human",

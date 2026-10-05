@@ -29,3 +29,9 @@ test('every entry has a valid status, and non-adopted entries say why', () => {
     if (e.status !== 'adopted') assert.ok(e.reason?.trim(), `${key}: ${e.status} needs a reason`);
   }
 });
+
+test('every adopted entry names the file that uses it', () => {
+  for (const [key, e] of Object.entries(ledger.items)) {
+    if (e.status === 'adopted') assert.ok(e.where?.trim(), `${key}: adopted needs a where`);
+  }
+});
