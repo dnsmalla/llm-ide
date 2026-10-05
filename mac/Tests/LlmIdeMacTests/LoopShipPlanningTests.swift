@@ -68,6 +68,32 @@ struct LoopShipPlanningTests {
         #expect(LoopShipPlanning.shippablePaths(entries: [], among: ["a.py"]).isEmpty)
     }
 
+    @Test("a generated artifact a re-run rewrote is left out; a new source file is kept")
+    func artifactsStayOut() {
+        let entries = ShipPlanning.statusEntries(porcelainZ: " M a.py\0?? .coverage\0?? htmlcov/index.html\0?? new_module.py\0")
+        #expect(LoopShipPlanning.shippablePaths(entries: entries, among: ["a.py", ".coverage", "htmlcov/index.html", "new_module.py"])
+                == ["a.py", "new_module.py"])
+        // A TRACKED file that happens to match the artifact names is still shipped (it is in the repo on purpose).
+        let tracked = ShipPlanning.statusEntries(porcelainZ: " M docs/run.log\0")
+        #expect(LoopShipPlanning.shippablePaths(entries: tracked, among: ["docs/run.log"]) == ["docs/run.log"])
+    }
+
+    @Test("the clean-start rule: tracked changes block, untracked files (a .venv) do not")
+    func baselineRule() {
+        typealias P = LoopShipPlanning
+        let venv = Set((1...25).map { ".venv/bin/tool\($0)" } + [".venv/pyvenv.cfg", "CLAUDE.md"])
+        #expect(P.baselineProblem(LoopShipBaseline(tracked: [], untracked: venv), files: ["analyzer.py"]) == nil,
+                "27 untracked files (a venv and a notes file) must not stop a run from shipping")
+        let dirty = P.baselineProblem(LoopShipBaseline(tracked: ["iis_analyzer/analyzer.py"], untracked: venv), files: ["a.py"])
+        #expect(dirty?.contains("iis_analyzer/analyzer.py") == true && dirty?.contains("git restore") == true,
+                "the reason names the file and says what to do about an earlier request's leftovers")
+        let many = P.baselineProblem(LoopShipBaseline(tracked: ["a", "b", "c", "d", "e"], untracked: []), files: ["x.py"])
+        #expect(many?.contains("…") == true)
+        let mixed = P.baselineProblem(LoopShipBaseline(tracked: [], untracked: ["notes.py"]), files: ["a.py", "notes.py"])
+        #expect(mixed?.contains("notes.py") == true && mixed?.contains("untracked") == true, "the run changed a file that was the user's")
+        #expect(P.baselineProblem(nil, files: ["a.py"]) != nil, "an unreadable baseline never ships")
+    }
+
     @Test("a tracked change no repair accounts for is foreign; untracked ones do not block")
     func foreign() {
         let entries = ShipPlanning.statusEntries(porcelainZ: " M a.py\0 M users-edit.py\0?? .coverage\0R  renamed.py\0old.py\0")

@@ -203,7 +203,7 @@ final class LoopEngineRunner: ObservableObject {
     private let changeShipper: LoopChangeShipping?
     /// The paths that were already modified when this run began (the user's own work
     /// in progress), so a request is never made from files that mix it with a repair.
-    private var shipBaseline: Set<String>?
+    private var shipBaseline: LoopShipBaseline?
     private let summaryWriter: LoopRunSummaryWriting
     private let scopeGuard: RepairScopeGuarding
     private let trigger: LoopRunTrigger

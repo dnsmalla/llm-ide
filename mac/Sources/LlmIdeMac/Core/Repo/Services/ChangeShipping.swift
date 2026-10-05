@@ -182,6 +182,22 @@ enum ShipPlanning {
 
     static func secretPaths(in paths: [String]) -> [String] { paths.filter(isSecretPath) }
 
+    // MARK: generated artifacts
+
+    private static let artifactNames: Set<String> = [".coverage", "coverage.xml", ".DS_Store", "Thumbs.db", ".pytest_cache", "__pycache__", "htmlcov", "node_modules", ".mypy_cache", ".ruff_cache", ".tox", ".venv", "venv"]
+
+    /// True for a file a test run or an interpreter leaves behind (coverage data, byte-code,
+    /// caches, a virtual environment). A repair that re-runs the tests rewrites these, and
+    /// the scope guard attributes an untracked file it saw change — so they must be kept
+    /// out of a request explicitly. Name-based, deliberately short: anything else a
+    /// repair creates is shipped, because a new source file is a legitimate part of a fix.
+    static func isGeneratedArtifact(_ path: String) -> Bool {
+        let parts = path.split(separator: "/").map(String.init)
+        guard let name = parts.last else { return false }
+        if parts.contains(where: { artifactNames.contains($0) }) { return true }
+        return name.hasSuffix(".pyc") || name.hasSuffix(".pyo") || name.hasSuffix(".log")
+    }
+
     // MARK: remote
 
     /// `host/path` of a remote, lower-cased and without credentials, scheme, a
@@ -193,6 +209,8 @@ enum ShipPlanning {
         var host: String?
         var path: String
     }
+
+    private static let pageSegments: Set<String> = ["-", "tree", "blob", "issues", "merge_requests", "pulls", "pull", "commits", "wiki"]
 
     static func remoteKey(_ raw: String) -> RemoteKey? {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -214,10 +232,14 @@ enum ShipPlanning {
             text = String(text[text.index(after: colon)...])
         }
         if let current = host, let port = current.firstIndex(of: ":") { host = String(current[..<port]) }
-        for marker in ["/-/", "/tree/", "/blob/", "/issues", "/merge_requests", "/pulls", "/pull/"] {
-            if let cut = text.range(of: marker) { text = String(text[..<cut.lowerBound]) }
+        // A pasted web-page URL carries a page suffix (`/-/tree/main`, `/issues`, …). Cut it
+        // at the first marker SEGMENT after `group/project` — whole segments only, so a
+        // project named `issues-tracker` or `pulls-api` is not mistaken for a page.
+        var segments = text.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        if let cut = segments.indices.first(where: { $0 >= 2 && pageSegments.contains(segments[$0]) }) {
+            segments = Array(segments[..<cut])
         }
-        text = text.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        text = segments.joined(separator: "/")
         if text.hasSuffix(".git") { text = String(text.dropLast(4)) }
         // `owner/name` at least: a single word (a numeric project id) names no project here.
         guard text.contains("/") else { return nil }
@@ -350,7 +372,8 @@ final class GitChangeShipper: ChangeShipping {
         let branch = ShipPlanning.branchName(prefix: request.branchPrefix, at: now())
         do { try await git.pushCommit(sha: sha, toBranch: branch, at: root) }
         catch {
-            return .failed(step: .push, message: "\(error.localizedDescription). Your files and branches are untouched; nothing was created on the remote.")
+            // A timeout can fire after the remote already took the ref, so do not claim otherwise.
+            return .failed(step: .push, message: "\(error.localizedDescription). Your files and branches are untouched; a branch named \(branch) may exist on the remote.")
         }
 
         do {

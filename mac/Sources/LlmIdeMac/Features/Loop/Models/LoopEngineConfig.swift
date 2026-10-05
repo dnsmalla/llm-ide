@@ -71,8 +71,9 @@ public struct LoopEngineConfig: Codable, Equatable {
     /// (`ChangeShipping`). On by default; a loop that should only ever edit the
     /// working tree turns it off. The repo allow-list (branch, auto-commit, push,
     /// create MR) still has to permit it, and nothing is ever merged automatically.
-    /// Every successful run opens its OWN request, whether or not an earlier one
-    /// is still open.
+    /// The repair stays in the working tree (nothing is checked out or reset), so the
+    /// next run starts from a tree that is no longer clean and is skipped until the
+    /// user discards the shipped files — in practice one request per clean-up.
     /// An absent key decodes as true, so existing loops pick it up.
     public var openMergeRequest: Bool = true
 

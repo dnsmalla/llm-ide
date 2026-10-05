@@ -223,6 +223,33 @@ struct ChangeShippingTests {
         if case .skipped = await shipper(happyGit(), FakeBackend()).ship(none) {} else { Issue.record("no paths") }
     }
 
+    @Test("generated artifacts are recognised; source files are not")
+    func artifacts() {
+        for artifact in [".coverage", "htmlcov/index.html", "pkg/__pycache__/a.cpython-311.pyc", ".pytest_cache/v/cache", ".venv/bin/python", "node_modules/x/y.js", "logs/run.log", ".DS_Store"] {
+            #expect(ShipPlanning.isGeneratedArtifact(artifact), "\(artifact)")
+        }
+        for source in ["src/a.py", "tests/test_a.py", "results.csv", "docs/coverage.md", "app/venv_utils.py"] {
+            #expect(!ShipPlanning.isGeneratedArtifact(source), "\(source) may be a legitimate part of a fix")
+        }
+    }
+
+    @Test("the app's own environment can never be replaced by a caller's, and inherited repo variables are cleared")
+    func environmentMerge() {
+        let ours: [String: String] = ["PATH": "/usr/bin", "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_COUNT": "1",
+                                      "GIT_CONFIG_KEY_0": "http.extraheader", "GIT_CONFIG_VALUE_0": "Authorization: x",
+                                      "GIT_INDEX_FILE": "/inherited/real/index", "GIT_DIR": "/elsewhere/.git"]
+        let merged = RepoManager.mergedEnvironment(ours, extra: [
+            "GIT_INDEX_FILE": "/tmp/ship-1.index", "GIT_LITERAL_PATHSPECS": "1",
+            "GIT_TERMINAL_PROMPT": "1", "GIT_CONFIG_COUNT": "0", "GIT_CONFIG_KEY_0": "x", "GIT_CONFIG_VALUE_0": "y"])
+        #expect(merged["GIT_INDEX_FILE"] == "/tmp/ship-1.index", "the throwaway index wins over an inherited one")
+        #expect(merged["GIT_DIR"] == nil, "an inherited GIT_DIR would aim the plumbing at another repository")
+        #expect(merged["GIT_LITERAL_PATHSPECS"] == "1" && merged["PATH"] == "/usr/bin")
+        #expect(merged["GIT_TERMINAL_PROMPT"] == "0" && merged["GIT_CONFIG_COUNT"] == "1", "prompt suppression and the credential header stay ours")
+        #expect(merged["GIT_CONFIG_KEY_0"] == "http.extraheader" && merged["GIT_CONFIG_VALUE_0"] == "Authorization: x")
+        // No extra variables: nothing is touched (ordinary git calls behave as before).
+        #expect(RepoManager.mergedEnvironment(ours, extra: [:]) == ours)
+    }
+
     @Test("planning: status -z entries (renames, unicode, spaces), secrets, remotes, branch names")
     func planning() {
         let raw = " M a.py\0?? 日本語 file.txt\0R  new name.py\0old name.py\0?? \"quoted\".py\0"
@@ -248,6 +275,13 @@ struct ChangeShippingTests {
             #expect(ShipPlanning.remoteKey(saved) != nil, "\(saved) names a project")
         }
         #expect(ShipPlanning.sameRemote(saved: "https://gitlab.example/g/sub/p/-/issues", origin: "git@gitlab.example:g/sub/p.git"), "subgroups")
+        // A page suffix is cut at a whole SEGMENT, never at a prefix: these are project names.
+        #expect(ShipPlanning.remoteKey("https://gitlab.example/group/issues-tracker")?.path == "group/issues-tracker")
+        #expect(ShipPlanning.remoteKey("https://github.com/owner/pulls-api.git")?.path == "owner/pulls-api")
+        #expect(ShipPlanning.remoteKey("https://gitlab.example/group/issues")?.path == "group/issues", "a project named issues")
+        #expect(ShipPlanning.remoteKey("https://gitlab.example/group/issues/-/issues/5")?.path == "group/issues")
+        #expect(!ShipPlanning.sameRemote(saved: "https://gitlab.example/group/issues-tracker", origin: "https://gitlab.example/other/issues-tracker"),
+                "a project named issues-tracker must still be told apart from a fork")
         #expect(ShipPlanning.sameRemote(saved: "1234", origin: "https://gitlab.example/g/p.git"), "a numeric id cannot be compared and is accepted")
         #expect(ShipPlanning.branchPrefix(for: "Regression") == "loop/regression")
         #expect(ShipPlanning.branchPrefix(for: "日本語") == "loop/run")

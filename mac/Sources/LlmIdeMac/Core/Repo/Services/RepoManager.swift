@@ -226,10 +226,10 @@ final class RepoManager {
                     backend: Backend = .gitlab, remote: String = "origin") async throws {
         try await stripRemoteCredentials(at: repoURL, remote: remote)
         let url = try await remoteURL(at: repoURL, remote: remote)
-        // Bounded: the repo's own pre-push hook runs here and may take minutes; a hung
-        // hook must not hold the caller (and a Loop's queue slot) for ever.
+        // Bounded (5 minutes): the repo's own pre-push hook runs here and may be slow; a
+        // hung hook must not hold the caller (and a Loop's queue slot) for ever.
         _ = try await git(["push", remote, "\(sha):refs/heads/\(branch)"], cwd: repoURL,
-                          token: token, backend: backend, remoteURL: url, timeout: 900)
+                          token: token, backend: backend, remoteURL: url, timeout: 300)
         log.info("pushed commit to branch=\(branch, privacy: .public)")
     }
 
@@ -541,6 +541,33 @@ final class RepoManager {
         return env
     }
 
+    /// The variables `gitEnv` sets on purpose: prompt suppression, the credential
+    /// header and the transfer guard. A caller's extra environment can never replace them.
+    nonisolated static func isProtectedGitVariable(_ key: String) -> Bool {
+        key == "GIT_TERMINAL_PROMPT" || key == "GIT_CONFIG_COUNT"
+            || key.hasPrefix("GIT_CONFIG_KEY_") || key.hasPrefix("GIT_CONFIG_VALUE_")
+    }
+
+    /// `base` (the app's environment plus ours) with the caller's `extra` variables added.
+    ///
+    /// With extra variables the call is plumbing that names its own index (see
+    /// `ChangeShipping`), so the repo-selecting variables the app may have inherited —
+    /// from a hook, a terminal started inside a repo, a rebuild script — are removed
+    /// first: an inherited `GIT_INDEX_FILE` would otherwise make `read-tree` overwrite
+    /// the user's real index, and `GIT_DIR` / `GIT_WORK_TREE` would aim the command at
+    /// another repository. The caller then cannot override the variables in
+    /// `isProtectedGitVariable`.
+    nonisolated static func mergedEnvironment(_ base: [String: String], extra: [String: String]) -> [String: String] {
+        guard !extra.isEmpty else { return base }
+        var env = base
+        for key in ["GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
+                    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX"] {
+            env[key] = nil
+        }
+        for (key, value) in extra where !isProtectedGitVariable(key) { env[key] = value }
+        return env
+    }
+
     /// Redact a secret from text before it is surfaced in an error/log.
     /// `nonisolated` because it's pure string work and is called from the
     /// background git queue (outside the main actor).
@@ -627,11 +654,8 @@ final class RepoManager {
                 // suppression, the transfer-stall guard, and credentials when
                 // authenticating — see gitEnv. Detaching stdin closes the
                 // credential-prompt hole from the other side.
-                // Ours win: a caller may ADD variables (GIT_INDEX_FILE, …) but can never
-                // replace the prompt suppression, the credential header or the transfer guard.
-                var environment = Self.gitEnv(token: token, backend: backend, scope: headerScope)
-                for (key, value) in extraEnv where environment[key] == nil { environment[key] = value }
-                proc.environment = environment
+                proc.environment = Self.mergedEnvironment(
+                    Self.gitEnv(token: token, backend: backend, scope: headerScope), extra: extraEnv)
                 let stdinPipe = Pipe()
                 if stdin != nil {
                     proc.standardInput = stdinPipe

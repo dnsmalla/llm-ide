@@ -1,5 +1,13 @@
 import Foundation
 
+/// What was modified when the run began: the user's own work in progress.
+struct LoopShipBaseline: Equatable {
+    /// Tracked files git reports as modified, deleted, renamed or staged.
+    var tracked: Set<String>
+    /// Untracked, non-ignored files, each one listed (never a collapsed directory).
+    var untracked: Set<String>
+}
+
 /// What the runner asks for when a run ends. The concrete coordinator needs the
 /// app config (tokens, the repo allow-list), which the runner deliberately does
 /// not know — so the runner holds this seam and tests substitute a fake.
@@ -8,7 +16,7 @@ protocol LoopChangeShipping {
     /// The paths git reports as modified (tracked changes AND untracked files,
     /// every file listed, never a collapsed directory) BEFORE the run's first stage
     /// — the user's own work in progress. nil when git could not say.
-    func baseline(gitRoot: URL) async -> Set<String>?
+    func baseline(gitRoot: URL) async -> LoopShipBaseline?
 
     /// Preconditions: `record` is the finished run's record (not yet journaled),
     /// `gitRoot` its working tree, `baseline` what `baseline(gitRoot:)` returned
@@ -18,7 +26,7 @@ protocol LoopChangeShipping {
     /// what happened. Never throws; never touches the checkout (HEAD, index,
     /// working tree, local branches) or the default branch.
     func ship(record: LoopRunRecord, config: LoopEngineConfig, gitRoot: URL,
-              ranInWorktree: Bool, baseline: Set<String>?) async -> LoopShipment?
+              ranInWorktree: Bool, baseline: LoopShipBaseline?) async -> LoopShipment?
 }
 
 /// The decisions behind shipping a run, separated from the I/O so they can be
@@ -71,15 +79,41 @@ enum LoopShipPlanning {
     /// The paths to ship: those of `entries` (from `git status`) that this run
     /// changed — a rename contributes both names, so the old file's deletion is
     /// committed with the new file. A change already committed, or reverted since,
-    /// is not listed by git and so is not shipped. In `among`'s order, no duplicates.
+    /// is not listed by git and so is not shipped. A generated artifact (coverage
+    /// data, caches, byte-code) that a re-run of the tests rewrote is left out. In
+    /// `among`'s order, no duplicates.
     static func shippablePaths(entries: [ShipPlanning.StatusEntry], among changed: [String]) -> [String] {
         let wanted = Set(changed)
         var seen = Set<String>()
         var out: [String] = []
         for entry in entries where entry.allPaths.contains(where: wanted.contains) {
+            if entry.isUntracked && ShipPlanning.isGeneratedArtifact(entry.path) { continue }
             for path in entry.allPaths where seen.insert(path).inserted { out.append(path) }
         }
         return out
+    }
+
+    /// Why a run's changes cannot be shipped given what was modified before it began, or nil.
+    ///
+    /// Only TRACKED modifications block: a repair that edits a file the user was already
+    /// changing would ship half a fix (the run attributes only the files that became dirty),
+    /// and the user's own work must never ride along in a push. Untracked files do NOT
+    /// block — a virtual environment or a test artifact is untracked and owned by nobody —
+    /// unless the run changed one of them, because then the file's content is the user's
+    /// plus the repair's.
+    static func baselineProblem(_ baseline: LoopShipBaseline?, files: [String]) -> String? {
+        guard let baseline else {
+            return "git could not say what was modified before the run, so its changes were left for you to review"
+        }
+        if !baseline.tracked.isEmpty {
+            let shown = baseline.tracked.sorted().prefix(3).joined(separator: ", ")
+            return "your working tree had uncommitted changes when the run began (\(shown)\(baseline.tracked.count > 3 ? ", …" : "")), so its changes were left for you to review. If these are the changes from an earlier merge request, discard them with git restore once it is merged; otherwise commit or stash them. A request is only made from a clean start"
+        }
+        let mixed = files.filter(baseline.untracked.contains)
+        if !mixed.isEmpty {
+            return "\(mixed.prefix(3).joined(separator: ", ")) was an untracked file of yours before the run and the run changed it, so a request would publish your own content — review it by hand"
+        }
+        return nil
     }
 
     /// TRACKED files that are modified now but that no repair accounts for. Since a run
@@ -162,14 +196,17 @@ final class LoopShipCoordinator: LoopChangeShipping {
         self.repo = repo ?? RepoManager()
     }
 
-    func baseline(gitRoot: URL) async -> Set<String>? {
+    func baseline(gitRoot: URL) async -> LoopShipBaseline? {
         guard let raw = try? await repo.runGit(["status", "--porcelain", "-z", "--untracked-files=all"], at: gitRoot,
                                                environment: ["GIT_LITERAL_PATHSPECS": "1"]) else { return nil }
-        return Set(ShipPlanning.statusEntries(porcelainZ: raw).flatMap(\.allPaths))
+        let entries = ShipPlanning.statusEntries(porcelainZ: raw)
+        return LoopShipBaseline(
+            tracked: Set(entries.filter { !$0.isUntracked }.flatMap(\.allPaths)),
+            untracked: Set(entries.filter(\.isUntracked).map(\.path)))
     }
 
     func ship(record: LoopRunRecord, config loopConfig: LoopEngineConfig, gitRoot: URL,
-              ranInWorktree: Bool, baseline: Set<String>?) async -> LoopShipment? {
+              ranInWorktree: Bool, baseline: LoopShipBaseline?) async -> LoopShipment? {
         switch LoopShipPlanning.decide(
             statusCode: record.statusCode, openMergeRequest: loopConfig.openMergeRequest,
             ranInWorktree: ranInWorktree,
@@ -196,17 +233,9 @@ final class LoopShipCoordinator: LoopChangeShipping {
         let files = LoopShipPlanning.shippablePaths(entries: entries, among: changed)
         guard !files.isEmpty else { return nil }
 
-        // A request is only made from a tree that was CLEAN when the run began. The run
-        // can tell which files a repair touched, but not which of them the user was
-        // already editing (a half-attributed file would ship half a fix), and the user's
-        // own work must never ride along in a push.
-        guard let baseline else {
-            return LoopShipment(status: .skipped,
-                                summary: "No merge request: git could not say what was modified before the run, so its changes were left for you to review")
-        }
-        if !baseline.isEmpty {
-            let shown = baseline.sorted().prefix(3).joined(separator: ", ")
-            return LoopShipment(status: .skipped, summary: "No merge request: your working tree had uncommitted changes when the run began (\(shown)\(baseline.count > 3 ? ", …" : "")), so its changes were left for you to review. Commit or stash them to let loops open merge requests automatically")
+        // A request is only made from a tree whose TRACKED files were clean when the run began.
+        if let problem = LoopShipPlanning.baselineProblem(baseline, files: files) {
+            return LoopShipment(status: .skipped, summary: "No merge request: \(problem)")
         }
         // …and nothing else may have changed while it ran (a file the user edited meanwhile).
         let attributed = Set(changed).union(files)
