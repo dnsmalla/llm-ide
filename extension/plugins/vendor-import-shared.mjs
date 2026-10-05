@@ -8,6 +8,7 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, copyFileSync, lstatSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultPluginDir } from './loader.mjs';
+import { parseSemver, isNewer, versionsDiffer } from './plugin-version.mjs';
 
 // Plugin names are joined into filesystem paths, so they MUST be validated to
 // prevent path traversal (e.g. "../../etc").
@@ -70,19 +71,14 @@ export function copyPluginTree(src, dst) {
 
 /**
  * Semver-aware version comparison. Returns true if `a` is strictly newer
- * than `b`. Falls back to string inequality for non-semver strings. Treats
- * '0.0.0' as "unknown" (never considered newer).
+ * than `b`. Compares numerically for semver, falls back to SHA-prefix or
+ * string inequality for non-semver strings. Treats '0.0.0' as "unknown"
+ * (never considered newer).
  */
 export function semverNewer(a, b) {
   if (!a || a === '0.0.0') return false;
   if (!b || b === '0.0.0') return true;
-  const parse = (v) => String(v).split('.').map((n) => parseInt(n, 10) || 0);
-  const [aMaj, aMin, aPatch] = parse(a);
-  const [bMaj, bMin, bPatch] = parse(b);
-  if (aMaj !== bMaj) return aMaj > bMaj;
-  if (aMin !== bMin) return aMin > bMin;
-  if (aPatch !== bPatch) return aPatch > bPatch;
-  return false; // equal
+  return parseSemver(a) && parseSemver(b) ? isNewer(a, b) : versionsDiffer(a, b);
 }
 
 /**
