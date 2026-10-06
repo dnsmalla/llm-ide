@@ -25,7 +25,12 @@ extension CodeAssistantPanel {
                 exitCode: nil, command: nil, output: nil, url: result.webUrl, isFailure: false)
             // Sheet-driven, not the auto-chain path — .ifIdle matches the old
             // plain sendFollowup() (no-op if an autonomous turn is streaming).
-            await engine.acknowledge(ackPayload, followUp: .ifIdle)
+            // The follow-up is a model round trip (tens of seconds). Awaiting it
+            // here kept the sheet on its "Creating…" spinner after the action had
+            // already succeeded, and reported success even if the follow-up failed.
+            // Append the acknowledgement now; run the follow-up detached.
+            await engine.acknowledge(ackPayload, followUp: .none)
+            Task { await engine.sendFollowup() }
             return .success(iid: result.number, webUrl: result.webUrl)
         } catch {
             return .failure(error.localizedDescription)

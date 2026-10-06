@@ -169,14 +169,15 @@ extension CodeAssistantPanel {
             // acknowledgement immediately rather than only after
             // recentIssues finishes reloading.
             await engine.acknowledge(ackPayload, followUp: .none)
-            // Refresh recentIssues so the newly created issue's title
-            // resolves in follow-up comment/update sheets instead of
-            // showing blank until the next unrelated refresh.
-            await refreshRecentIssuesOnce()
-            // Sheet-driven, not the auto-chain path — sendFollowup no-ops if
-            // an autonomous turn is still streaming, same as every other
-            // sheet confirmer's .ifIdle.
-            await engine.sendFollowup()
+            // Refresh recentIssues so the newly created issue's title resolves
+            // in follow-up comment/update sheets, then follow up — both
+            // detached so the sheet closes as soon as the issue exists.
+            // sendFollowup no-ops if an autonomous turn is still streaming,
+            // same as every other sheet confirmer's .ifIdle.
+            Task {
+                await refreshRecentIssuesOnce()
+                await engine.sendFollowup()
+            }
             return .success(issue.number)
         } catch {
             return .failure(error.localizedDescription)

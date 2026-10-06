@@ -25,7 +25,12 @@ extension CodeAssistantPanel {
                 exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
             // Sheet-driven, not the auto-chain path — .ifIdle matches the old
             // plain sendFollowup() (no-op if an autonomous turn is streaming).
-            await engine.acknowledge(ackPayload, followUp: .ifIdle)
+            // The follow-up is a model round trip (tens of seconds). Awaiting it
+            // here kept the sheet on its "Creating…" spinner after the action had
+            // already succeeded, and reported success even if the follow-up failed.
+            // Append the acknowledgement now; run the follow-up detached.
+            await engine.acknowledge(ackPayload, followUp: .none)
+            Task { await engine.sendFollowup() }
             return .success(args.iid)
         } catch {
             return .failure(error.localizedDescription)
@@ -61,8 +66,12 @@ extension CodeAssistantPanel {
             // list refresh completes. The follow-up itself still waits for
             // the refresh, same as before.
             await engine.acknowledge(ackPayload, followUp: .none)
-            await refreshRecentIssuesOnce()
-            await engine.sendFollowup()
+            // Refresh + follow-up run detached so the sheet closes now (see the
+            // other confirmers): the follow-up still waits for the refresh.
+            Task {
+                await refreshRecentIssuesOnce()
+                await engine.sendFollowup()
+            }
             return .success(args.iid)
         } catch {
             return .failure(error.localizedDescription)
