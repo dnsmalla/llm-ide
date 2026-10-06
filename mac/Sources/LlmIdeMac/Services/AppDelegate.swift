@@ -62,9 +62,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
-    /// Set once the user has agreed to discard the unsaved editor text, so the
-    /// quit that follows does not ask a second time.
-    @MainActor private static var discardConfirmed = false
+    /// The drafts the user has agreed to discard, so the quit that follows does
+    /// not ask a second time. A SNAPSHOT, not a flag: if the quit never happens
+    /// (an install fails, the user cancels elsewhere) and they keep typing, the
+    /// drafts no longer equal it and the next quit asks again.
+    @MainActor private static var confirmedDiscardDrafts: [String: EditorDraftStore.Draft]?
 
     /// Ask before anything that ends the process, when any editor has unsaved
     /// text. Callers that start a helper which waits for this process to exit
@@ -75,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor static func confirmDiscardUnsavedDrafts() -> Bool {
         let names = EditorDraftStore.shared.drafts.keys
             .map { ($0 as NSString).lastPathComponent }.sorted()
-        guard !names.isEmpty, !discardConfirmed else { return true }
+        guard !names.isEmpty, EditorDraftStore.shared.drafts != confirmedDiscardDrafts else { return true }
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = names.count == 1
@@ -87,7 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Quit and Discard")
         guard alert.runModal() == .alertSecondButtonReturn else { return false }
-        discardConfirmed = true
+        confirmedDiscardDrafts = EditorDraftStore.shared.drafts
         return true
     }
 
