@@ -508,6 +508,15 @@ final class ProjectExporter {
         FilesystemSlug.make(from: title, maxLength: 40, fallback: "untitled", suffix: "-\(id.suffix(8))")
     }
 
+    /// The same zone as `dateParser` (GMT). With the default (local) calendar,
+    /// a date parsed to GMT midnight read back as the PREVIOUS day west of UTC,
+    /// so a meeting dated the 1st landed in last month's folder.
+    nonisolated private static let gmtCalendar: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        return cal
+    }()
+
     /// Parse an ISO-8601 date string and return ("YYYY", "MM").
     /// Uses the system ISO-8601 parser so invalid dates (e.g. month 13) are
     /// rejected and fall back to ("0000", "00"), preventing garbage directories.
@@ -515,7 +524,7 @@ final class ProjectExporter {
         guard let iso, let date = Self.dateParser.date(from: String(iso.prefix(10))) else {
             return ("0000", "00")
         }
-        let cal = Calendar(identifier: .gregorian)
+        let cal = Self.gmtCalendar
         let y = cal.component(.year,  from: date)
         let m = cal.component(.month, from: date)
         return (String(format: "%04d", y), String(format: "%02d", m))
@@ -526,7 +535,7 @@ final class ProjectExporter {
         guard let iso, let date = Self.dateParser.date(from: String(iso.prefix(10))) else {
             return "0000-00-00"
         }
-        let cal = Calendar(identifier: .gregorian)
+        let cal = Self.gmtCalendar
         let y = cal.component(.year,  from: date)
         let m = cal.component(.month, from: date)
         let d = cal.component(.day,   from: date)
