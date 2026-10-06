@@ -157,7 +157,8 @@ enum PluginGitInstaller {
         let cleanup: () -> Void
     }
 
-    static func cloneKeepingRepo(url rawURL: String, ref: String? = nil) async throws -> StagedRepo {
+    static func cloneKeepingRepo(url rawURL: String, ref: String? = nil,
+                                 timeoutSec: TimeInterval = 0) async throws -> StagedRepo {
         let normalizedURL = try normalize(rawURL)
         let stage = try makeTempDir(prefix: "llmide-marketplace-")
         let clonedDir = stage.appendingPathComponent("repo", isDirectory: true)
@@ -166,7 +167,7 @@ enum PluginGitInstaller {
         if let ref, !ref.isEmpty { args += ["--branch", ref] }
         args += ["--", normalizedURL, clonedDir.path]
 
-        let cloneRes = try await runProcess("/usr/bin/git", args: args)
+        let cloneRes = try await runProcess("/usr/bin/git", args: args, timeoutSec: timeoutSec)
         guard cloneRes.code == 0 else {
             try? FileManager.default.removeItem(at: stage)
             let stderr = cloneRes.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -181,6 +182,17 @@ enum PluginGitInstaller {
             throw error
         }
         return StagedRepo(repoRoot: clonedDir, commit: commit, normalizedURL: normalizedURL, cleanup: cleanup)
+    }
+
+    /// `git ls-remote -- <url> <patterns…>` through the hardened runner, killed
+    /// after `timeoutSec`. Returns stdout, or nil on any failure (bad URL,
+    /// network, timeout). Used by the update checker, which must never hang.
+    static func lsRemote(url rawURL: String, patterns: [String], timeoutSec: TimeInterval) async -> String? {
+        guard let url = try? normalize(rawURL) else { return nil }
+        guard let res = try? await runProcess(
+            "/usr/bin/git", args: ["ls-remote", "--", url] + patterns, timeoutSec: timeoutSec),
+              res.code == 0 else { return nil }
+        return res.stdout
     }
 
     /// Remove a staged clone's `.git` so nothing zipped out of it carries history.
