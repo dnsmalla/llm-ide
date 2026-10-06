@@ -63,7 +63,19 @@ if [ -d "$TARGET" ]; then
   mv "$TARGET" "$TARGET.bak" || abort "[swap] ERROR: failed to back up $TARGET to $TARGET.bak — aborting, staged app NOT installed"
   echo "[swap] previous app kept at $TARGET.bak"
 fi
-mv "$STAGED" "$TARGET" || abort "[swap] ERROR: failed to move staged app into $TARGET — target may now be absent (previous kept at $TARGET.bak if it existed); staged bundle remains at $STAGED"
+if ! mv "$STAGED" "$TARGET"; then
+  # Put the previous app back: a failed install (cross-volume copy that ran out
+  # of space, a permission error) otherwise leaves NO app at the install path.
+  # Remove whatever partial bundle the failed move left behind first.
+  if [ -d "$TARGET.bak" ]; then
+    rm -rf "$TARGET"
+    if mv "$TARGET.bak" "$TARGET"; then
+      abort "[swap] ERROR: failed to move staged app into $TARGET — previous app restored; staged bundle remains at $STAGED"
+    fi
+    abort "[swap] ERROR: failed to move staged app into $TARGET AND to restore the previous one — it is at $TARGET.bak; staged bundle remains at $STAGED"
+  fi
+  abort "[swap] ERROR: failed to move staged app into $TARGET — staged bundle remains at $STAGED"
+fi
 echo "[swap] installed; relaunching"
 rm -f "$ERROR_FILE" 2>/dev/null || true
 open "$TARGET"
