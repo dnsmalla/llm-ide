@@ -31,17 +31,27 @@ enum LaunchPathResolver {
                     .appendingPathComponent(name)
                     .appendingPathComponent("extension")
                     .appendingPathComponent("server.mjs")
-                if fm.fileExists(atPath: monorepo.path) {
+                if fm.fileExists(atPath: monorepo.path), looksLikeLlmIdeServer(monorepo.deletingLastPathComponent()) {
                     return monorepo.deletingLastPathComponent().path
                 }
                 // <root>/<name>/server.mjs  — flat layout
                 let flat = root.appendingPathComponent(name).appendingPathComponent("server.mjs")
-                if fm.fileExists(atPath: flat.path) {
+                if fm.fileExists(atPath: flat.path), looksLikeLlmIdeServer(flat.deletingLastPathComponent()) {
                     return flat.deletingLastPathComponent().path
                 }
             }
         }
         return nil
+    }
+
+    /// The result is persisted as the backend working dir and then EXECUTED
+    /// (`node server.mjs`) at launch, so a bare `server.mjs` is not enough: any
+    /// unrelated project on the Desktop with one would be run unprompted. Require
+    /// this server's own layout beside it.
+    private static func looksLikeLlmIdeServer(_ dir: URL) -> Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: dir.appendingPathComponent("kb/db.mjs").path)
+            && fm.fileExists(atPath: dir.appendingPathComponent("routes/router.mjs").path)
     }
 
     /// Skip dot-dirs, build output, and dependency trees during the shallow
