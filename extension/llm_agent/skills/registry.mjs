@@ -382,6 +382,8 @@ export function listInstalledPlugins(userId) {
       format: p.format || 'llmide',
       // 'claude' | 'codex' when a vendor bridge imported it, else null.
       origin: p.origin ?? null,
+      // The vendor version the import copied (the stamp), else null.
+      sourceVersion: p.sourceVersion ?? null,
       unsupportedComponents: p.unsupportedComponents || [],
       pendingComponents: p.pendingComponents || [],
       // Hooks: how many runnable handlers the plugin declares, what llm-ide

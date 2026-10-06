@@ -91,6 +91,8 @@ function binDeclares(dir) {
 
 // Which vendor bridge imported the plugin (its import stamp), so the Library
 // knows which update path applies. Anything else — a zip install — is null.
+// The stamp's sourceVersion rides along: `version` is normalized to semver
+// ('0.0.0' for a sha), the source version is what the user recognises.
 const importOrigin = (v) => (v === 'claude' || v === 'codex' ? v : null);
 
 function validateClaudeManifest(raw) {
@@ -125,6 +127,7 @@ function validateClaudeManifest(raw) {
       description: typeof raw.description === 'string' ? raw.description.slice(0, 400) : '',
       author,
       origin: importOrigin(raw.llmideOrigin),
+      sourceVersion: typeof raw.llmideSourceVersion === 'string' ? raw.llmideSourceVersion : null,
     },
     components,
     // The manifest can carry these inline or point at another file; the SDK
@@ -243,6 +246,7 @@ function validateManifest(raw) {
       description: typeof description === 'string' ? description.slice(0, 400) : '',
       author: typeof author === 'string' ? author.slice(0, 120) : '',
       origin: importOrigin(raw.origin),
+      sourceVersion: typeof raw.sourceVersion === 'string' ? raw.sourceVersion : null,
       // Skill / command lists are derived from disk, not the manifest,
       // so a plugin author can drop files in without editing the
       // manifest. The manifest is identity + metadata only.

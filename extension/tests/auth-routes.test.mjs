@@ -744,6 +744,7 @@ test('GET /auth/me/plugins reports the import origin', async () => {
   const list = await callAuth({ method: 'GET', url: '/auth/me/plugins', user: { id: user.id } });
   const row = list.json().plugins.find((p) => p.name === 'claude-bridge-origin-demo');
   assert.equal(row.origin, 'claude');
+  assert.equal(row.sourceVersion, '1.0.0', 'the stamp, not the normalized manifest version');
   assert.ok(list.json().plugins.every((p) => p.origin === null || p.origin === 'claude' || p.origin === 'codex'));
 });
 
