@@ -7,7 +7,7 @@
 //  │ CODE / DATA          │ Code: files+symbols    │ Force-laid graph  │
 //  │ (reused FileTreePanel│ Data: memory chunks    │ Pan/zoom/select   │
 //  │  — same data the     │                        │ Double-click →    │
-//  │  Library + Review    │                        │ open file         │
+//  │  Library + Review    │                        │ focus a node      │
 //  │  pages use)          │                        │                   │
 //  │ Run / Cancel + status│                        │                   │
 //  └──────────────────────┴────────────────────────┴───────────────────┘
@@ -964,8 +964,22 @@ struct UAGraphView: View {
     private func shouldRenderFileDetail(for node: CGNode) -> Bool {
         guard !GraphNodeDisplayPolicy.rendersOwnBodyInline(node.kind),
               let urlString = node.metadata["fileURL"],
-              let url = URL(string: urlString) else { return false }
+              let url = URL(string: urlString),
+              isContainedFile(url) else { return false }
         return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    /// Whether a node's file may be shown or revealed: under the selected code
+    /// folder, or a known library item. `metadata["fileURL"]` comes from the
+    /// graph engine — a plugin or a stale on-disk graph — so a node pointing at
+    /// `~/.ssh/config` must not render its contents in the inspector.
+    private func isContainedFile(_ fileURL: URL) -> Bool {
+        if let root = codeTargetFolder {
+            let rootPath = root.standardizedFileURL.resolvingSymlinksInPath().path
+            let filePath = fileURL.standardizedFileURL.resolvingSymlinksInPath().path
+            if filePath.hasPrefix(rootPath + "/") || filePath == rootPath { return true }
+        }
+        return library.items.contains(where: { $0.path == fileURL.path })
     }
 
     /// Bottom pane: details for the currently-selected node. For code
@@ -1773,18 +1787,8 @@ struct UAGraphView: View {
     private func openNode(_ node: CGNode) {
         guard let urlString = node.metadata["fileURL"],
               let fileURL = URL(string: urlString) else { return }
-        // Containment: only open files under the selected code folder, or
-        // any path matching a known library item.
-        if let root = codeTargetFolder {
-            let rootPath = root.standardizedFileURL.path
-            let filePath = fileURL.standardizedFileURL.path
-            if filePath.hasPrefix(rootPath + "/") || filePath == rootPath {
-                NSWorkspace.shared.activateFileViewerSelecting([fileURL]); return
-            }
-        }
-        if library.items.contains(where: { $0.path == fileURL.path }) {
-            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
-        }
+        guard isContainedFile(fileURL) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([fileURL])
     }
 
     // MARK: - Kind filter bar

@@ -207,6 +207,10 @@ public struct PluginGraphEngine: GraphEngine {
         // Run inside the plugin so a relative asset path in its own command
         // resolves the way the plugin author expects.
         process.currentDirectoryURL = root
+        // A plugin is third-party code: it must not inherit the app's whole
+        // environment (API keys, tokens a launcher exported). Same filter the
+        // model-run shell commands get.
+        process.environment = BashService.sanitizedEnvironment(ProcessInfo.processInfo.environment)
         let errorPipe = Pipe()
         process.standardOutput = FileHandle.nullDevice
         process.standardError = errorPipe
@@ -294,6 +298,14 @@ public struct PluginGraphEngine: GraphEngine {
                 try await Task.sleep(nanoseconds: UInt64(timeout) * 1_000_000_000)
                 guard process.isRunning else { return }
                 process.terminate()
+                // SIGTERM can be ignored; without an escalation the child (and the
+                // work directory removed under it) would outlive the timeout.
+                let pid = process.processIdentifier
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 3) {
+                    // `isRunning` turns false only once the child is reaped, so the
+                    // pid cannot have been recycled while this is still true.
+                    if process.isRunning { kill(pid, SIGKILL) }
+                }
                 finish(.failure(GraphEngineUnavailable.failed(
                     engine: identifier,
                     reason: "\(label) exceeded \(timeout)s and was terminated")))
