@@ -202,7 +202,9 @@ struct SearchView: View {
                       ? "Too many matches (limit \(SearchEngine.maxMatches)) — narrow the search to Replace All"
                       : "Replace all matches")
                 .confirmationDialog(
-                    "Replace all matches in \(results.files.count) files?",
+                    dismissed.isEmpty
+                        ? "Replace all matches in \(results.files.count) files?"
+                        : "Replace all matches except the \(dismissed.count) you dismissed?",
                     isPresented: $confirmReplaceAll, titleVisibility: .visible
                 ) {
                     Button("Replace All", role: .destructive) {
@@ -444,6 +446,31 @@ struct SearchView: View {
 
     private func replaceAllAction() {
         let files = results.files, q = query, opts = options, repl = replaceText, pc = preserveCase
+        // Matches the user dismissed (×) must survive Replace All. The
+        // whole-file path re-matches the entire file, so with any dismissal
+        // replace the remaining matches one by one instead — last match first
+        // within each file, so an earlier (line, range) is never shifted by a
+        // replacement made after it.
+        if !dismissed.isEmpty {
+            var targets: [(url: URL, line: Int, range: NSRange)] = []
+            for fm in files {
+                for lm in fm.lineMatches.sorted(by: { $0.line > $1.line }) {
+                    let live = lm.matches
+                        .filter { !dismissed.contains(key(fm, lm.line, $0.fileIndex)) }
+                        .sorted { $0.nsRange.location > $1.nsRange.location }
+                    for m in live { targets.append((fm.url, lm.line, lm.rangeInLine(m))) }
+                }
+            }
+            Task {
+                for target in targets {
+                    _ = await searchService.replaceOne(file: target.url, line: target.line, rangeInLine: target.range,
+                                                       query: q, options: opts, replacement: repl, preserveCase: pc)
+                }
+                dismissed.removeAll()
+                scheduleSearch(resetExpanded: false)
+            }
+            return
+        }
         Task {
             _ = await searchService.replaceAll(in: files, query: q, options: opts, replacement: repl, preserveCase: pc)
             scheduleSearch(resetExpanded: false)
