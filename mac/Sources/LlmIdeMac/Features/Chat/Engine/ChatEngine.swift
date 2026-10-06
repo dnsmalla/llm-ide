@@ -836,12 +836,14 @@ final class ChatEngine {
             // mutations. Engines with no panel attached (the mobile bridge)
             // rely on this call.
             flushPendingPersist()
-            // A backgrounded session's turn has no `.onChange` observer to
-            // have written anything, so the flush above found nothing
-            // pending. Write it out directly — otherwise the reply the user
-            // switched away from exists only in memory until they come back,
-            // and a quit in between loses it.
-            if persistsUnobserved { persistCurrentChat() }
+            // Persist the finished turn unconditionally. Persistence otherwise
+            // rides the panel's `.onChange(of: messages)`, but a turn can end
+            // while NO view observes the engine: AppShell rebuilds a section's
+            // view on every menu switch (and a sheet is destroyed on dismiss),
+            // while the engine lives on in the registry and the stream carries
+            // on. Writing only for a PARKED engine (`persistsUnobserved`) left
+            // the reply in memory only for those, and a quit lost it.
+            persistCurrentChat()
             // Clear the completed phone turn's handle HERE, not in
             // runExternalTurn's wrapper: the body reaches this idle branch
             // before the wrapper's await resumes, and by then a second
