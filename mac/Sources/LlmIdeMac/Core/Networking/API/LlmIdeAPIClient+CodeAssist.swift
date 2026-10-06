@@ -236,10 +236,6 @@ extension LlmIdeAPIClient {
         ClaudeToolPresentation.normalizedToolName(tool)
     }
 
-    static func toolVerb(_ tool: String?) -> String {
-        ClaudeToolPresentation.verb(tool)
-    }
-
     static func progressLabel(phase: String?, tool: String?, detail: String? = nil) -> String {
         ClaudeToolPresentation.progressLabel(phase: phase, tool: tool, detail: detail)
     }

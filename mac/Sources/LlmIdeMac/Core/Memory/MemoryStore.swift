@@ -5,8 +5,8 @@
 //     repo.md if it doesn't exist. Idempotent — user edits to
 //     repo.md are preserved on subsequent seeds.
 //   • loadRepoNotes / saveRepoNotes for the curated repo.md.
-//   • listFaults / listQA enumerate markdown files in the
-//     faults/ and q&a/ subdirs for the UI to display.
+//   • listFaults enumerates markdown files in the faults/ subdir
+//     for the UI to display.
 //
 // Write methods for faults (phase B) and Q&A (phase C) live in this
 // same type but are added in their respective plans.
@@ -83,7 +83,6 @@ public struct MemoryStore: Sendable {
     /// order chronologically). Only `.md` files are returned; non-markdown
     /// files in the dir are ignored.
     public func listFaults(at repo: URL) -> [URL] { listMarkdown(in: faultsDir(in: repo)) }
-    public func listQA(at repo: URL)   -> [URL] { listMarkdown(in: qaDir(in: repo)) }
 
     private func listMarkdown(in dir: URL) -> [URL] {
         let fm = FileManager.default

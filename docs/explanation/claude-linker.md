@@ -43,7 +43,7 @@ Claude Agent SDK / claude CLI
 Enforcement:
 
 - **Server**: ESLint (`extension/eslint.config.mjs`, `CLAUDE_SDK_IMPORT`) rejects any import of `@anthropic-ai/claude-agent-sdk` outside `llm_agent/sdk/` (tests exempt). Zero-violation ratchet, like the layer rules.
-- **Mac**: convention — `LlmIdeAPIClient.toolVerb`/`progressLabel`/`normalizedToolName` and `ToolApprovalCard.title`/`icon`/`alwaysAllowLabel` are one-line shims delegating into `ClaudeLink/`; keep new Claude knowledge (tool names, flags, model ids, error codes) inside `ClaudeLink/` files.
+- **Mac**: convention — `LlmIdeAPIClient.progressLabel`/`normalizedToolName` and `ToolApprovalCard.title`/`icon`/`alwaysAllowLabel` are one-line shims delegating into `ClaudeLink/`; keep new Claude knowledge (tool names, flags, model ids, error codes) inside `ClaudeLink/` files.
 
 ## What lives where
 

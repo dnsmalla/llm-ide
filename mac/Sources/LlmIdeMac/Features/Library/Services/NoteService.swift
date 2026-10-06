@@ -174,11 +174,6 @@ public final class NoteService: Sendable {
         repoRoot.appendingPathComponent("llm-doc", isDirectory: true)
     }
 
-    /// Directory for generated document notes: notesRoot/documents/
-    public var documentsDir: URL {
-        notesRoot.appendingPathComponent("documents", isDirectory: true)
-    }
-
     /// Filename of the unified note index — app metadata, not a note. The
     /// one spelling shared by `indexPath`, this class's directory scan, and
     /// LibraryItemStore's llm-doc scan, so the skip rules can't drift.

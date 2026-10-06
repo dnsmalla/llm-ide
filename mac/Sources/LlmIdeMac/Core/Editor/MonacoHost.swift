@@ -32,8 +32,7 @@ struct MonacoDiffRequest: Equatable {
 /// Hosts the vendored Monaco editor in a `WKWebView`, loaded ONCE via
 /// `loadFileURL` (Monaco is a multi-file asset tree — `loader.js` fetches
 /// sibling files by relative path, which `loadHTMLString`'s `baseURL: nil`
-/// cannot resolve; `HljsWebView`'s single-inlined-string approach doesn't
-/// apply here).
+/// cannot resolve, so a single inlined HTML string doesn't work here).
 ///
 /// Purely declarative from the caller's side, exactly like
 /// `SelfSizingMarkdownView(markdown:isDark:onHeight:)`: set `content`/

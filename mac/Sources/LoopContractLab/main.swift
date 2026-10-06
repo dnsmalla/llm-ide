@@ -72,19 +72,6 @@ func provenancedStage(command: String, defaultKey: String? = "test") -> LoopStag
               isDefault: true, defaultKey: defaultKey, detectedCommand: command)
 }
 
-/// A LEGACY stage — saved before `detectedCommand` existed, so it decodes
-/// with `detectedCommand == nil`. Eligible for update, but only with
-/// a mandatory log line (asserted separately at the `ensureDefaultLoops`
-/// level is out of scope for a pure-function lab; the log call itself lives
-/// in `LoopEngineConfigStore.loops`, which this lab does not exercise, since
-/// it needs a real project root file. `revalidatingTestStages` returning a
-/// `RevalidationChange` for the legacy-nil case, asserted below, IS what
-/// makes that caller-side log possible.)
-func legacyStage(command: String, defaultKey: String? = "test") -> LoopStage {
-    LoopStage(name: "Test", kind: .shellCommand, command: command, order: 0,
-              isDefault: true, defaultKey: defaultKey, detectedCommand: nil)
-}
-
 func testLoop(stages: [LoopStage], defaultKey: String? = LoopDefaultLoopKey.test) -> LoopDefinition {
     LoopDefinition(name: "Test", defaultKey: defaultKey, config: LoopEngineConfig(stages: stages))
 }

@@ -53,11 +53,6 @@ struct MeetingNoteWriter {
             rawFile: rawFile)
     }
 
-    /// Get the output directory for meeting notes.
-    func outputDirectory(for date: Date) -> URL {
-        noteService.getMonthDir(type: .meeting, date: date)
-    }
-
     /// Raw source paths (`source/meetings/…`) that already have a generated llm-doc note.
     func existingRawFiles() async throws -> Set<String> {
         await IngestNoteDedup.rawFiles(repoRoot: repoRoot, type: .meeting)

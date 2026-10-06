@@ -8,8 +8,8 @@ enum MarkdownRenderer {
     /// last block margins collapsed) vs. a full-page document preview.
     ///
     /// Code blocks are syntax-highlighted via the same vendored highlight.js
-    /// + Atom One theme used by `HljsWebView` (file/diff previews) — inlined
-    /// here too so this stays offline-safe, and get a copy button — but only
+    /// + Atom One theme (the `Hljs` asset cache) — inlined here so this
+    /// stays offline-safe, and get a copy button — but only
     /// when the text actually has a fence; see `needsHighlighting`.
     /// - Parameter enableMermaid: render ```mermaid fences as diagrams.
     ///   OFF by default and opt-in per call site, deliberately. mermaid renders

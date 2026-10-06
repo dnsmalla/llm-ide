@@ -112,16 +112,4 @@ public enum TemplateSurfaceMarker {
         }
         return lines.joined(separator: "\n")
     }
-
-    /// True when `markdown` carries this marker at all, in either form.
-    public static func hasMarker(in markdown: String, base: String) -> Bool {
-        let stem = base
-            .replacingOccurrences(of: "<!--", with: "")
-            .replacingOccurrences(of: "-->", with: "")
-            .trimmingCharacters(in: .whitespaces)
-        return markdown.components(separatedBy: .newlines).contains { line in
-            let t = line.trimmingCharacters(in: .whitespaces)
-            return t.hasPrefix("<!--") && t.contains(stem)
-        }
-    }
 }

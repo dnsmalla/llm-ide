@@ -16,7 +16,6 @@ public enum LoopWorktreeManager {
     }
 
     public enum Error: Swift.Error, Equatable {
-        case notAGitRepository
         case dirtyWorkingTree
         case worktreePathExists
         case gitFailed(String)

@@ -310,12 +310,6 @@ final class MobileExploreIndexStore {
         loadIndex(from: skillsIndexURL, label: "skills") { try AppJSON.iso8601Decoder.decode(MobileSkillsIndexFile.self, from: $0) }
     }
 
-    func saveWorkspaceIndex(_ file: MobileWorkspaceIndexFile) throws {
-        try fm.createDirectory(at: settingsDirectory, withIntermediateDirectories: true)
-        let data = try AppJSON.iso8601Encoder.encode(file)
-        try data.write(to: workspaceIndexURL, options: .atomic)
-    }
-
     func saveSkillsIndex(_ file: MobileSkillsIndexFile) throws {
         try fm.createDirectory(at: settingsDirectory, withIntermediateDirectories: true)
         let data = try AppJSON.iso8601Encoder.encode(file)
